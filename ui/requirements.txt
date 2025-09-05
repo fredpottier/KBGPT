@@ -1,0 +1,6 @@
+streamlit==1.48.1
+pandas
+requests
+qdrant-client==1.15.1
+python-dotenv
+sentence-transformers

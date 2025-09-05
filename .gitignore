@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+.env
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+.history/
+
+# Logs
+logs/
+*.log
+
+# Data & Outputs
+DOCS_DONE/
+DOCS_IN/
+models/
+public_files/
+status/
+data/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.pptx
+*.csv
+*.json
+
+# Qdrant local data (if any)
+qdrant_data/
+qdrant_storage/
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+
+# OneDrive temp files
+~$*
+
+# Misc

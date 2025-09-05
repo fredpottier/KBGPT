@@ -1,0 +1,7 @@
+version: "2"
+authtoken: 31YBoH4bf9iSu0n0Ohkv1ZOYPEF_2RG4LKsegas6XvK9qDeLb
+tunnels:
+  sapkb:
+    proto: http
+    addr: app:8000
+    domain: sapkb.ngrok.app
