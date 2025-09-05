@@ -17,6 +17,7 @@ build/
 # VS Code
 .vscode/
 .history/
+.continue
 
 # Logs
 logs/
