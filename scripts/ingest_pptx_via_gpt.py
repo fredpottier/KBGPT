@@ -402,12 +402,18 @@ def ask_gpt_slide_analysis(
         "       - For non-SAP solutions (e.g. Salesforce, Azure, Snowflake), use the commonly known brand or product name.\n"
         "   - 'contains_visuals': true if this slide includes diagrams, charts, tables, etc.\n"
         "   - 'language': 'fr' or 'en', based on content\n"
-        "   - 'section': if this slide belongs to a named section of the deck, include it\n\n"
+        "   - 'section': if this slide belongs to a named section of the deck, include it\n"
+        "   - 'applies_to': {\n"
+        "       'generic_categories': liste de catégories parentes (ex: ['SAP Cloud Services']),\n"
+        "       'scope': liste de tags de portée (ex: ['global','multi-product'] ou ['product-specific']),\n"
+        "       'is_all_sap_cloud': true/false,\n"
+        "       'statement': explication courte en langage naturel de la portée\n"
+        "   }\n"
         "Instructions:\n"
-        "- If the slide contains complex visuals (e.g. multi-step flows, charts), describe them clearly.\n"
-        "- Use professional, clear, and concise language.\n"
-        "- Do not make up information. Leave fields empty or null if unsure.\n"
-        "- Return **only the JSON array**, no extra text, no comments."
+        "- Si le slide concerne les SAP Cloud Services en général, ne liste pas tous les produits enfants, mais tague comme global/multi-product.\n"
+        "- Utilise un langage professionnel, clair et concis.\n"
+        "- Ne pas inventer d'information. Laisse vide ou null si tu n'es pas sûr.\n"
+        "- Retourne uniquement le tableau JSON, sans texte supplémentaire ni commentaire."
     )
     msg = [
         {
@@ -456,6 +462,8 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
     embs = embed_texts(texts)
     points = []
     for ch, emb in zip(valid, embs):
+        applies_to = validate_applies_to(ch.get("metadata", {}).get("applies_to", {}))
+        logger.info(f"Slide {slide_index}: applies_to = {applies_to}")
         payload = {
             "text": ch["full_explanation"].strip(),
             "language": get_language_iso2(ch["full_explanation"]),
@@ -471,6 +479,7 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
             "chunk_meta": ch.get("meta", {}),
             "tags": ch.get("meta", {}).get("tags", []),
             "claim_tag": "Valid",
+            "applies_to": applies_to,
         }
         points.append(PointStruct(id=str(uuid.uuid4()), vector=emb, payload=payload))
     qdrant.upsert(collection_name=QDRANT_COLLECTION, points=points)
@@ -554,6 +563,37 @@ def merge_metadata(meta_list):
     for k in ["supporting_solutions", "mentioned_solutions", "audience"]:
         merged[k] = list(set(merged[k]))
     return merged
+
+
+def validate_applies_to(applies_to):
+    # Validation simple du champ applies_to
+    if not isinstance(applies_to, dict):
+        return {
+            "generic_categories": [],
+            "scope": [],
+            "is_all_sap_cloud": None,
+            "statement": "",
+        }
+    out = {}
+    out["generic_categories"] = (
+        applies_to.get("generic_categories")
+        if isinstance(applies_to.get("generic_categories"), list)
+        else []
+    )
+    out["scope"] = (
+        applies_to.get("scope") if isinstance(applies_to.get("scope"), list) else []
+    )
+    out["is_all_sap_cloud"] = (
+        bool(applies_to.get("is_all_sap_cloud"))
+        if "is_all_sap_cloud" in applies_to
+        else None
+    )
+    out["statement"] = (
+        applies_to.get("statement")
+        if isinstance(applies_to.get("statement"), str)
+        else ""
+    )
+    return out
 
 
 def main():

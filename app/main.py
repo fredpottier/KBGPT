@@ -15,7 +15,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 from import_logging import setup_logging
 
 # === DEBUG (optionnel) ===
@@ -32,8 +32,8 @@ if os.getenv("DEBUG_MODE") == "true":
 QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333
 COLLECTION_NAME = "sap_kb"
-TOP_K = 10
-SCORE_THRESHOLD = 0.5
+TOP_K = int(os.getenv("TOP_K", "10"))
+SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.5"))
 
 ROOT = Path(__file__).parent.parent.resolve()
 DOCS_IN = ROOT / "docs_in"
@@ -50,6 +50,23 @@ qdrant_client = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
 # MODEL_NAME = "sentence-transformers/paraphrase-xlm-r-multilingual-v1"
 MODEL_NAME = os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-base")
 model = SentenceTransformer(MODEL_NAME)
+
+ENABLE_ENTAILMENT = os.getenv("ENABLE_ENTAILMENT", "false").lower() == "true"
+RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "10"))
+CROSS_ENCODER_MODEL = os.getenv(
+    "CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+)
+
+# Lazy-load cross-encoder
+cross_encoder = None
+
+
+def get_cross_encoder():
+    global cross_encoder
+    if cross_encoder is None:
+        cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
+    return cross_encoder
+
 
 app = FastAPI()
 router = APIRouter()
@@ -71,6 +88,33 @@ class SearchRequest(BaseModel):
     mime: Optional[str] = None
 
 
+def generalize_query(query: str) -> str:
+    # Remplace les noms de produits SAP spécifiques par "SAP Cloud Services"
+    # (regex simple, à améliorer si besoin)
+    import re
+
+    return re.sub(r"SAP\s\S+", "SAP Cloud Services", query)
+
+
+def filter_search_applies_to(top_k=TOP_K):
+    # Recherche Qdrant avec filtre sur applies_to.is_all_sap_cloud
+    return qdrant_client.search(
+        collection_name=COLLECTION_NAME,
+        query_vector=[0.0]
+        * model.get_sentence_embedding_dimension(),  # embedding neutre
+        limit=top_k,
+        with_payload=True,
+        filter={
+            "must": [
+                {
+                    "key": "applies_to.is_all_sap_cloud",
+                    "match": {"value": True},
+                }
+            ]
+        },
+    )
+
+
 @app.post("/search")
 async def search_qdrant(req: SearchRequest):
     try:
@@ -82,13 +126,35 @@ async def search_qdrant(req: SearchRequest):
             query_vector = query_vector.numpy().tolist()
         query_vector = [float(x) for x in query_vector]
 
-        results = qdrant_client.search(
+        # Q1 : recherche classique
+        results_q1 = qdrant_client.search(
             collection_name=COLLECTION_NAME,
             query_vector=query_vector,
             limit=TOP_K,
             with_payload=True,
         )
-        filtered = [r for r in results if r.score >= SCORE_THRESHOLD]
+        # Q2 : requête généralisée
+        gen_query = generalize_query(query)
+        gen_vector = model.encode(gen_query)
+        if hasattr(gen_vector, "tolist"):
+            gen_vector = gen_vector.tolist()
+        elif hasattr(gen_vector, "numpy"):
+            gen_vector = gen_vector.numpy().tolist()
+        gen_vector = [float(x) for x in gen_vector]
+        results_q2 = qdrant_client.search(
+            collection_name=COLLECTION_NAME,
+            query_vector=gen_vector,
+            limit=TOP_K,
+            with_payload=True,
+        )
+        # Q3 : filtre sur applies_to.is_all_sap_cloud
+        results_q3 = filter_search_applies_to(top_k=TOP_K)
+
+        # Fusion/déduplication par id
+        all_results = {}
+        for r in results_q1 + results_q2 + results_q3:
+            all_results[r.id] = r
+        filtered = [r for r in all_results.values() if r.score >= SCORE_THRESHOLD]
         if not filtered:
             return {
                 "status": "no_results",
@@ -96,9 +162,15 @@ async def search_qdrant(req: SearchRequest):
                 "message": "Aucune information pertinente n’a été trouvée dans la base de connaissance.",
             }
 
-        # On retourne à GPT uniquement les infos essentielles pour chaque chunk
+        # Reranking avec cross-encoder
+        reranked = rerank_with_cross_encoder(query, filtered, top_k=RERANK_TOP_K)
+        # Filtrage entailment si activé
+        if ENABLE_ENTAILMENT:
+            reranked = [
+                r for r in reranked if entails(query, r.payload.get("text", ""))
+            ]
         response_chunks = []
-        for r in filtered:
+        for r in reranked:
             payload = r.payload or {}
             response_chunks.append(
                 {
