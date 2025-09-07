@@ -63,6 +63,7 @@ app.mount("/static/slides", StaticFiles(directory=SLIDES_DIR), name="slides")
 app.mount(
     "/static/presentations", StaticFiles(directory=PPTX_DIR), name="presentations"
 )
+app.mount("/static", StaticFiles(directory=PUBLIC_DIR), name="static")
 
 
 class SearchRequest(BaseModel):
@@ -100,12 +101,16 @@ async def search_qdrant(req: SearchRequest):
         response_chunks = []
         for r in filtered:
             payload = r.payload or {}
+            slide_image_url = payload.get("slide_image_url", "")
+            if slide_image_url:
+                slide_image_url = f"https://sapkb.ngrok.app/static/thumbnails/{os.path.basename(slide_image_url)}"
             response_chunks.append(
                 {
                     "text": payload.get("text", ""),
                     "source_file": payload.get("source_file_url", ""),
                     "slide_index": payload.get("slide_index", ""),
                     "score": r.score,
+                    "slide_image_url": slide_image_url,  # <-- Ajout ici
                 }
             )
 
@@ -209,16 +214,16 @@ async def dispatch_action(
                     f"- [{title}]({meta['file_url']}) — {meta['type'].upper()}\n"
                 )
 
-            answer_markdown = f"{thumbnails_md}{text_md}{source_md}"
-            logger.debug(
-                f"[SEARCH] Markdown généré pour la réponse :\n{answer_markdown}"
-            )
+                answer_markdown = f"{thumbnails_md}{text_md}{source_md}"
+                logger.debug(
+                    f"[SEARCH] Markdown généré pour la réponse :\n{answer_markdown}"
+                )
 
-            return {
-                "action": "search",
-                "status": "success",
-                "answer_markdown": answer_markdown,
-            }
+                return {
+                    "action": "search",
+                    "status": "success",
+                    "answer_markdown": answer_markdown,
+                }
 
         except Exception as e:
             return {"action": "search", "status": "error", "error": str(e)}

@@ -10,7 +10,7 @@ INPUT_DIR = BASE_DIR / "public_files" / "slides"
 # Répertoire de sortie pour les thumbnails
 OUTPUT_DIR = BASE_DIR / "public_files" / "thumbnails"
 # Dimensions max
-MAX_SIZE = (300, 300)
+MAX_SIZE = (900, 900)
 
 # Extensions d’images acceptées
 IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"]

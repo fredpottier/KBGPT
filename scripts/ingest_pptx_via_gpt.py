@@ -26,6 +26,7 @@ from sentence_transformers import SentenceTransformer
 
 from import_logging import setup_logging
 from claims_utils import extract_claims_from_chunk, check_claim_conflicts
+from prompt_registry import load_prompts, select_prompt, render_prompt
 
 
 # Custom HTTP client to ignore system envs (e.g., proxies)
@@ -61,6 +62,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 logger = setup_logging(LOGS_DIR, "ingest_debug.log")
 DetectorFactory.seed = 0
 
+# Charge le registre de prompts une seule fois
+PROMPT_REGISTRY = load_prompts(str(PROJECT_ROOT / "config" / "prompts.yaml"))
+
 
 # Helpers
 def ensure_dirs():
@@ -90,13 +94,13 @@ def encode_image_base64(path: Path) -> str:
 
 
 def clean_gpt_response(raw: str) -> str:
+    import re
+
     s = (raw or "").strip()
-    for delim in ("```json", "```"):
-        if s.startswith(delim):
-            s = s[len(delim) :].strip()
-        if s.endswith(delim):
-            s = s[: -len(delim)].strip()
-    return s
+    # Retire tous les blocs Markdown ```json ... ```
+    s = re.sub(r"^```(?:json)?\s*", "", s)
+    s = re.sub(r"\s*```$", "", s)
+    return s.strip()
 
 
 def get_language_iso2(text: str) -> str:
@@ -232,27 +236,20 @@ def summarize_large_pptx(slides_data: List[Dict[str, Any]]) -> str:
     return final_summary
 
 
-def analyze_deck_summary(slides_data: List[Dict[str, Any]], source_name: str) -> dict:
+def analyze_deck_summary(
+    slides_data: List[Dict[str, Any]], source_name: str, document_type: str = "default"
+) -> dict:
     logger.info(f"🔍 GPT: analyse du deck via texte extrait — {source_name}")
 
     summary_text = summarize_large_pptx(slides_data)
 
-    prompt = (
-        "You are given a global text summary from a PowerPoint slide deck.\n\n"
-        "Return a single JSON object with two fields:\n"
-        '- "summary": a concise thematic summary (3-5 sentences) of the deck\'s main purpose and intended audience.\n'
-        '- "metadata": a JSON object with the following fields:\n'
-        "    - title\n    - objective\n    - main_solution\n    - supporting_solutions\n"
-        "    - mentioned_solutions\n    - document_type\n    - audience\n    - source_date\n    - language\n\n"
-        "IMPORTANT:\n"
-        "- For 'main_solution', always use the official SAP canonical solution name as published by SAP.\n"
-        "- For 'supporting_solutions', only consider SAP Solutions and always use the official SAP canonical solution name.\n"
-        "- Do not use acronyms, abbreviations, or local variants.\n"
-        "- If unsure, leave the field empty.\n"
-        "- Return only the JSON object — no explanation.\n\n"
-        f"Global summary text:\n{summary_text}"
+    print(PROMPT_REGISTRY["families"].keys())
+    deck_prompt_id, deck_template = select_prompt(
+        PROMPT_REGISTRY, document_type, "deck"
     )
-
+    prompt = render_prompt(
+        deck_template, summary_text=summary_text, source_name=source_name
+    )
     try:
         response = client.chat.completions.create(
             model=GPT_MODEL,
@@ -277,6 +274,12 @@ def analyze_deck_summary(slides_data: List[Dict[str, Any]], source_name: str) ->
         logger.debug(
             f"Deck summary + metadata keys: {list(result.keys()) if result else 'n/a'}"
         )
+        # Ajoute meta pour traçabilité
+        result["_prompt_meta"] = {
+            "document_type": document_type,
+            "deck_prompt_id": deck_prompt_id,
+            "prompts_version": PROMPT_REGISTRY.get("version", "unknown"),
+        }
         return result
     except Exception as e:
         logger.error(f"❌ GPT metadata error: {e}")
@@ -285,7 +288,7 @@ def analyze_deck_summary(slides_data: List[Dict[str, Any]], source_name: str) ->
 
 def generate_thumbnail(image_path: Path) -> Path:
     img = Image.open(image_path)
-    img.thumbnail((300, 300), Image.LANCZOS)
+    img.thumbnail((900, 900), Image.LANCZOS)
     thumb_path = THUMBNAILS_DIR / image_path.name
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(thumb_path, "PNG")
@@ -338,7 +341,7 @@ def convert_pptx_to_pdf(pptx_path: Path, output_dir: Path) -> Path:
             str(output_dir),
             str(pptx_path),
         ],
-        timeout=180,
+        timeout=600,  # <-- Mets ici une valeur plus grande, par exemple 600 pour 10 minutes
     )
     pdf_path = output_dir / (pptx_path.stem + ".pdf")
     if not ok or not pdf_path.exists():
@@ -380,34 +383,27 @@ def extract_notes_and_text(pptx_path: Path) -> List[Dict[str, Any]]:
 
 
 def ask_gpt_slide_analysis(
-    image_path, deck_summary, slide_index, source_name, text, notes, retries=2
+    image_path,
+    deck_summary,
+    slide_index,
+    source_name,
+    text,
+    notes,
+    document_type="default",
+    deck_prompt_id="unknown",
+    retries=2,
 ):
     img_b64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
-    prompt_text = (
-        f"Global deck summary:\n{deck_summary}\n\n"
-        f"Slide {slide_index} extracted text:\n{text}\n\n"
-        f"Slide {slide_index} notes:\n{notes}\n\n"
-        f"Analyze slide {slide_index} ('{source_name}').\n\n"
-        "You are analyzing a single PowerPoint slide. Your goal is to extract its meaning and value for use in a knowledge base.\n"
-        "Describe the **visual content** in detail — if there is a diagram, process flow, table, chart, or architecture, explain what it shows and what its key message is.\n\n"
-        "Return a JSON array where each item includes:\n"
-        "1. 'full_explanation' (string): a complete, detailed explanation of what this slide conveys, combining textual and visual content.\n"
-        "2. 'metadata' (object):\n"
-        "   - 'slide_title': extracted or inferred title of the slide\n"
-        "   - 'slide_type': one of ['title', 'agenda', 'content', 'summary', 'transition']\n"
-        "   - 'insight_level': one of ['descriptive', 'analytical', 'strategic'] depending on how deep the insight goes\n"
-        "   - 'topic': main topic covered by this slide (ex: SLA, SAP BTP, forecasting...)\n"
-        "   - 'mentioned_solutions': list of all software solutions or platforms mentioned, including both SAP and non-SAP.\n"
-        "       - For SAP solutions, use the official SAP canonical names (e.g. 'SAP S/4HANA Cloud', not 'S4').\n"
-        "       - For non-SAP solutions (e.g. Salesforce, Azure, Snowflake), use the commonly known brand or product name.\n"
-        "   - 'contains_visuals': true if this slide includes diagrams, charts, tables, etc.\n"
-        "   - 'language': 'fr' or 'en', based on content\n"
-        "   - 'section': if this slide belongs to a named section of the deck, include it\n\n"
-        "Instructions:\n"
-        "- If the slide contains complex visuals (e.g. multi-step flows, charts), describe them clearly.\n"
-        "- Use professional, clear, and concise language.\n"
-        "- Do not make up information. Leave fields empty or null if unsure.\n"
-        "- Return **only the JSON array**, no extra text, no comments."
+    slide_prompt_id, slide_template = select_prompt(
+        PROMPT_REGISTRY, document_type, "slide"
+    )
+    prompt_text = render_prompt(
+        slide_template,
+        deck_summary=deck_summary,
+        slide_index=slide_index,
+        source_name=source_name,
+        text=text,
+        notes=notes,
     )
     msg = [
         {
@@ -439,7 +435,20 @@ def ask_gpt_slide_analysis(
                 expl = it.get("full_explanation", "")
                 if expl:
                     for seg in recursive_chunk(expl, max_len=400, overlap_ratio=0.15):
-                        enriched.append({**it, "full_explanation": seg})
+                        enriched.append(
+                            {
+                                **it,
+                                "full_explanation": seg,
+                                "prompt_meta": {
+                                    "document_type": document_type,
+                                    "deck_prompt_id": deck_prompt_id,
+                                    "slide_prompt_id": slide_prompt_id,
+                                    "prompts_version": PROMPT_REGISTRY.get(
+                                        "version", "unknown"
+                                    ),
+                                },
+                            }
+                        )
             return enriched
         except Exception as e:
             logger.warning(f"Slide {slide_index} attempt {attempt} failed: {e}")
@@ -462,7 +471,7 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
             "ingested_at": datetime.now(timezone.utc).isoformat(),
             "gpt_chunked": True,
             "slide_index": slide_index,
-            "slide_image_url": f"{PUBLIC_URL}/static/slides/{file_uid}_slide_{slide_index}.png",
+            "slide_image_url": f"{PUBLIC_URL}/static/thumbnails/{file_uid}_slide_{slide_index}.png",
             "source_file_url": f"{PUBLIC_URL}/static/presentations/{file_uid}.pptx",
             "source_name": f"{file_uid}.pptx",
             "source_type": "pptx",
@@ -471,20 +480,24 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
             "chunk_meta": ch.get("meta", {}),
             "tags": ch.get("meta", {}).get("tags", []),
             "claim_tag": "Valid",
+            "prompt_meta": ch.get("prompt_meta", {}),
         }
         points.append(PointStruct(id=str(uuid.uuid4()), vector=emb, payload=payload))
     qdrant.upsert(collection_name=QDRANT_COLLECTION, points=points)
     logger.info(f"Slide {slide_index}: ingested {len(points)} chunks")
 
 
-def process_pptx(pptx_path: Path):
+def process_pptx(pptx_path: Path, document_type: str = "default"):
     logger.info(f"start ingestion for {pptx_path.name}")
     ensure_dirs()
     pdf_path = convert_pptx_to_pdf(pptx_path, SLIDES_PNG)
     slides_data = extract_notes_and_text(pptx_path)
-    deck_info = analyze_deck_summary(slides_data, pptx_path.name)
+    deck_info = analyze_deck_summary(
+        slides_data, pptx_path.name, document_type=document_type
+    )
     summary = deck_info.get("summary", "")
     metadata = deck_info.get("metadata", {})
+    deck_prompt_id = deck_info.get("_prompt_meta", {}).get("deck_prompt_id", "unknown")
     images = convert_from_path(str(pdf_path), output_folder=None)
     image_paths = {}
     for i, img in enumerate(images, start=1):
@@ -510,6 +523,8 @@ def process_pptx(pptx_path: Path):
                             pptx_path.name,
                             text,
                             notes,
+                            document_type,
+                            deck_prompt_id,
                         ),
                     )
                 )
@@ -558,14 +573,40 @@ def merge_metadata(meta_list):
 
 def main():
     ensure_dirs()
-    if len(sys.argv) > 1:
-        pptx_path = Path(sys.argv[1])
-        if pptx_path.exists():
-            process_pptx(pptx_path)
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("pptx_path", type=str, help="Chemin du fichier PPTX à ingérer")
+    parser.add_argument(
+        "--document-type",
+        type=str,
+        default=None,
+        help="Type de document pour le choix des prompts",
+    )
+    args = parser.parse_args()
+    pptx_path = Path(args.pptx_path)
+    document_type = args.document_type
+
+    # Si document_type n'est pas passé en CLI, tente de le lire depuis le fichier meta si présent
+    if document_type is None:
+        meta_path = pptx_path.with_suffix(".meta.json")
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                document_type = meta.get("document_type", "default")
+            except Exception as e:
+                logger.warning(
+                    f"Impossible de lire le document_type depuis {meta_path}: {e}"
+                )
+                document_type = "default"
         else:
-            logger.error(f"File not found: {pptx_path}")
+            document_type = "default"
+
+    if pptx_path.exists():
+        process_pptx(pptx_path, document_type=document_type)
     else:
-        logger.error("No file path provided as argument.")
+        logger.error(f"File not found: {pptx_path}")
 
 
 if __name__ == "__main__":

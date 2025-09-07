@@ -1,0 +1,248 @@
+version: "2024-09-06"
+families:
+  default:
+    deck:
+      id: "deck_default_v1"
+      template: |
+        You are given a global text summary from a PowerPoint slide deck.
+
+        Return a single JSON object with two fields:
+        - "summary": a concise thematic summary (3-5 sentences) of the deck's main purpose and intended audience.
+        - "metadata": a JSON object with the following fields:
+          - title
+          - objective
+          - main_solution
+          - supporting_solutions
+          - mentioned_solutions
+          - document_type
+          - audience
+          - source_date
+          - language
+
+        IMPORTANT:
+        - For 'main_solution', always use the official SAP canonical solution name as published by SAP.
+        - For 'supporting_solutions', only consider SAP Solutions and always use the official SAP canonical solution name.
+        - Do not use acronyms, abbreviations, or local variants.
+        - If unsure, leave the field empty.
+        - Return only the JSON object — no explanation.
+
+        Global summary text:
+        {{ summary_text }}
+
+    slide:
+      id: "slide_default_v1"
+      template: |
+        Global deck summary:
+        {{ deck_summary }}
+
+        Slide {{ slide_index }} extracted text:
+        {{ text }}
+
+        Slide {{ slide_index }} notes:
+        {{ notes }}
+
+        Analyze slide {{ slide_index }} ('{{ source_name }}').
+
+        You are analyzing a single PowerPoint slide. Your goal is to extract its meaning and value for use in a knowledge base.
+        Describe the **visual content** in detail — if there is a diagram, process flow, table, chart, or architecture, explain what it shows and what its key message is.
+
+        Return a JSON array where each item includes:
+        1. 'full_explanation' (string): a complete, detailed explanation of what this slide conveys, combining textual and visual content.
+        2. 'metadata' (object): [same fields as before]
+
+        Instructions:
+        - If the slide contains complex visuals (e.g. multi-step flows, charts), describe them clearly.
+        - Use professional, clear, and concise language.
+        - Do not make up information. Leave fields empty or null if unsure.
+        - Return **only the JSON array**, no extra text, no comments.
+
+  technical:
+    deck:
+      id: "deck_technical_v1"
+      template: |
+        You are given raw text extracted from a technical/architecture PowerPoint deck about a software solution.
+
+        Return ONE JSON object with exactly these keys:
+        {
+          "summary": "<3–6 sentences describing scope, main technical themes, intended audience, and what a reader will learn>",
+          "metadata": {
+            "title": null | "<string>",
+            "objective": null | "<string>",
+            "main_solution": null | "<official product name>",                 // SAP: use canonical SAP name only
+            "supporting_solutions": ["<SAP canonical name>", ...],             // [] if none
+            "mentioned_solutions": ["<brand or product name>", ...],           // SAP & non-SAP; [] if none
+            "document_type": "technical",
+            "audience": null | "<string>",                                     // e.g., "IT architects","DevOps"
+            "source_date": null | "<string as shown>",                         // keep original format (e.g., "H1 2025")
+            "language": null | "fr" | "en",
+
+            // OPTIONAL fields — fill ONLY if explicitly present in THIS deck:
+            "product_version": null | "<string>",                               // e.g., "2023 FPxx"
+            "document_subtype": null | "reference_architecture" | "deployment_guide" | "design_doc" | "operations_runbook" | "integration_guide" | "overview",
+            "architecture_focus": ["<short bullet>", ...],                      // 0–10 items; concise phrases
+            "architecture_domains": ["compute" | "network" | "storage" | "data" | "integration" | "security" | "identity" | "observability" | "operations" | "performance" | "availability" | "scalability", ...],
+            "key_patterns": ["client-server" | "event-driven" | "pub/sub" | "batch ETL" | "microservices" | "layered" | "cache-aside" | "<as written>", ...],
+            "tech_stack": ["<runtime/db/middleware/tool name>", ...],
+            "assumptions": ["<explicit assumption>", ...],
+            "constraints": ["<explicit constraint/limit>", ...],
+            "dependencies": ["<external system/service>", ...],
+            "non_goals": ["<explicit scope exclusion>", ...],
+            "quality_attributes": ["performance" | "reliability" | "maintainability" | "security" | "scalability" | "availability" | "<as written>", ...],
+            "standards_frameworks": ["<standard/framework explicitly named>", ...]   // e.g., "ISO 27001","SOC 2","NIST CSF"; [] if none
+          }
+        }
+
+        Extraction rules:
+        - **Explicit-only**: extract only what appears in THIS deck’s text; if absent → use null (scalars) or [] (lists).
+        - **Naming**: SAP → canonical SAP names; non-SAP → official brand/product names.
+        - **Limits**: keep lists concise (≤ 12 items), deduplicate exact duplicates, no invented content.
+        - **Output**: return ONLY the JSON object; no comments, no trailing text.
+
+        Raw deck text:
+        {{ summary_text }}
+
+    slide:
+      id: "slide_technical_v1"
+      template: |
+        Global deck summary:
+        {{ deck_summary }}
+
+        Slide {{ slide_index }} extracted text:
+        {{ text }}
+
+        Slide {{ slide_index }} notes:
+        {{ notes }}
+
+        Analyze slide {{ slide_index }} ('{{ source_name }}').
+
+        You are analyzing ONE technical slide to extract reusable knowledge. Combine textual and visual cues. 
+        If there is a diagram (component/deployment/sequence/flow/data model/table/chart), describe it precisely.
+
+        Return a JSON array. Each item MUST have exactly:
+        {
+          "full_explanation": "<clear, complete explanation merging textual + visual evidence from THIS slide only>",
+          "metadata": {
+            // ROLE & VISUAL
+            "slide_role": null | "title" | "agenda" | "content" | "summary" | "transition",
+            "visual_type": null | "component_diagram" | "deployment_diagram" | "sequence_diagram" | "flowchart" | "data_model" | "network_topology" | "table" | "chart" | "screenshot",
+
+            // GENERAL
+            "insight_level": "descriptive" | "analytical" | "strategic",
+            "topic": null | "<2–6 words main topic>",
+            "mentioned_solutions": ["<brand/product explicitly on slide>", ...],   // [] if none
+            "contains_visuals": null | true | false,
+            "language": null | "fr" | "en",
+            "section": null | "<string>",
+
+            // GENERIC TECHNICAL (ALL OPTIONAL; fill ONLY if explicitly present on THIS slide)
+            "components": ["<component/service/hardware name>", ...],
+            "interfaces": ["<API/protocol/standard>", ...],                        // e.g., "REST","OData","gRPC","SFTP","RFC","SOAP"
+            "data_entities": ["<table/object/stream name>", ...],
+            "data_flows": ["A → B: <short note>" | "A → B → C", ...],
+            "environments": ["<env/target>", ...],                                 // e.g., "dev","prod eu-west-1","on-prem"
+            "constraints": ["<explicit limit/prereq>", ...],
+            "assumptions": ["<explicit assumption>", ...],
+            "dependencies": ["<external system/service>", ...],
+            "patterns": ["client-server" | "event-driven" | "pub/sub" | "batch ETL" | "layered" | "cache-aside" | "<as written>", ...],
+            "quality_attributes": ["performance" | "availability" | "scalability" | "security" | "maintainability" | "<as written>", ...],
+            "risks_or_notes": ["<warning/disclaimer/note>", ...],
+
+            // CROSS-CUTTING MENTIONS (OPTIONAL; only if explicit)
+            "security_mentions": ["<control/standard named>", ...],                 // e.g., "TLS 1.3","WAF","MFA","KMS","ISO 27001"
+            "identity_mentions": ["<IdP/IAM or auth method>", ...],                 // e.g., "SAML 2.0","OIDC","Azure AD","SAP IAS/IPS"
+            "operations_mentions": ["<ops/monitoring/IR/backup topic>", ...],      // e.g., "SIEM","24/7 monitoring","runbook"
+            "performance_mentions": ["<metric/mechanism>", ...],                    // e.g., "p95 < 200ms","caching"
+            "availability_mentions": ["<HA/DR term or target>", ...]                // e.g., "Active-Passive","RTO 4h","RPO 30 min"
+          }
+        }
+
+        Extraction rules:
+        - **Explicit-only**: do NOT infer from other slides; if not on THIS slide → null or [].
+        - **Enums**: use only the allowed values for `slide_role`, `visual_type`, `insight_level`, `language`.
+        - **Lists**: concise (≤ 12), deduplicate exact duplicates.
+        - **Naming**: SAP → canonical names; non-SAP → official names.
+        - **Output**: return ONLY the JSON array; no comments, no extra text.
+  functional:
+    deck:
+      id: "deck_functional_v1"
+      template: |
+        You are given raw text extracted from a PowerPoint deck about an SAP solution.
+
+        Return a single JSON object with two fields:
+        - "summary": 3–6 sentences describing the deck’s purpose, target audience, and what a reader will learn.
+        - "metadata": object with:
+          - title
+          - objective
+          - main_solution              // SAP canonical name
+          - supporting_solutions       // SAP canonical names (array)
+          - mentioned_solutions        // both SAP & non-SAP (array)
+          - document_type              // e.g., "Business Scope", "Overview", "Release Highlights"
+          - audience                   // e.g., Line-of-Business leaders, IT architects, buyers
+          - source_date                // if present (string)
+          - language                   // "en" | "fr"
+          - product_version            // e.g., "SAP S/4HANA 2023 FPS03" if visible
+          - lob_coverage               // e.g., ["Finance","Supply Chain","Sales",...]
+          - industry_coverage          // e.g., ["Automotive","Utilities",...]
+          - capabilities_summary       // short bullets of key business capabilities
+          - innovations_summary        // bullets for “What’s new/Delta highlights”
+          - fiori_apps_present         // true|false if there is a page listing apps
+
+        IMPORTANT:
+        - Use official SAP canonical names. No acronyms.
+        - If a value is not clearly present, set it to null or [].
+        - Return only the JSON object, no extra text.
+
+        Raw deck text:
+        {{ summary_text }}
+
+    slide:
+      id: "slide_functional_v1"
+      template: |
+        Global deck summary:
+        {{ deck_summary }}
+
+        Slide {{ slide_index }} extracted text:
+        {{ text }}
+
+        Slide {{ slide_index }} notes:
+        {{ notes }}
+
+        Analyze slide {{ slide_index }} ('{{ source_name }}').
+
+        You are analyzing ONE PowerPoint slide to extract maximum value for a knowledge base.
+        Combine textual and visual cues. If there is a diagram/flow/table/chart, explain it precisely.
+
+        Return a JSON array where each item includes:
+        1. "full_explanation" (string): a clear, complete explanation of what the slide conveys (merge text + visuals). 
+        2. "metadata" (object) with:
+           - slide_title
+           - slide_type                   // one of ['title','agenda','content','summary','transition',
+                                          //           'capability_matrix','process_flow','fiori_apps_list',
+                                          //           'industry_scope','release_strategy','roadmap','value_story']
+           - insight_level                // one of ['descriptive','analytical','strategic']
+           - topic                        // main topic (e.g., “Sourcing & Procurement”, “EWM”, “ATP”)
+           - mentioned_solutions         // array, SAP canonical + non-SAP brand names if explicitly present
+           - contains_visuals            // true|false
+           - language                    // 'fr'|'en'
+           - section                     // if a named section exists
+
+           // Functional/Business extraction (optional but recommended):
+           - lob                         // e.g., ["Sourcing & Procurement","Supply Chain","Finance"]
+           - business_capabilities       // fine-grained capability list found on the slide
+                                         //   (e.g., ["Guided buying","Invoice Processing","EWM - Slotting by ML"])
+           - industry_tags               // e.g., ["Automotive","Utilities"] if explicitly present
+           - delta_status                // e.g., {"release":"2023 FPS03","label":"new|update|unchanged"} if the slide marks NEW/UP
+           - license_flags               // e.g., {"additional_license": true, "additional_installation": true}
+           - integrations                // e.g., [{"product":"SAP Ariba","type":"integration"},
+                                          //       {"product":"SAP Global Trade Services","type":"integration"}]
+           - fiori_apps                  // array of app names/codes/roles when the slide lists them
+           - key_kpis                    // KPIs or outcomes if shown (e.g., “On-time shipment in full”)
+           - visuals_type                // e.g., "matrix","portfolio map","flow","table","screenshot"
+           - visuals_key_elements        // salient nodes/lanes/axes if identifiable
+
+        Instructions:
+        - Prefer structured extraction of bullet lists/tables into arrays (don’t paraphrase long enumerations).
+        - Only extract industries, LoBs, Fiori apps, “NEW/UPDATE”, license flags, and integrations when explicitly signaled.
+        - Use SAP canonical names (e.g., “SAP S/4HANA Cloud, private edition”, “SAP Global Trade Services”, “SAP Business Network”).
+        - Do NOT invent content; leave fields null/[] if unsure.
+        - Return ONLY the JSON array, no extra text, no comments.

@@ -51,6 +51,32 @@ SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, struct
 - **`scripts/ingest_pptx_via_gpt.py`** : Ingestion de présentations PPTX avec GPT.
 - **`scripts/purge_Collection.py`** : Purge des données de la collection.
 
+## Gestion des prompts LLM paramétrables
+
+Les prompts utilisés pour l’analyse des decks et des slides sont définis dans `config/prompts.yaml`.
+Chaque famille (`default`, `technical`, `functional`, etc.) contient un template pour le deck et pour les slides.
+
+Pour forcer un type de prompt à l’ingestion :
+```bash
+python scripts/ingest_pptx_via_gpt.py chemin/vers/fichier.pptx --document-type functional
+```
+
+Pour ajouter ou modifier une famille de prompts :
+- Éditez `config/prompts.yaml` et ajoutez une nouvelle entrée sous `families`.
+- Chaque famille doit contenir un champ `deck` et un champ `slide` avec un `id` et un `template`.
+
+Les points ingérés dans Qdrant incluent un champ `prompt_meta` pour la traçabilité :
+```json
+{
+  "prompt_meta": {
+    "document_type": "functional",
+    "deck_prompt_id": "deck_functional_v1",
+    "slide_prompt_id": "slide_functional_v1",
+    "prompts_version": "2024-09-06"
+  }
+}
+```
+
 ## Badges & Esthétique
 
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue)](https://www.docker.com/)

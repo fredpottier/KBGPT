@@ -30,6 +30,8 @@ pdf2image==1.17.0
  pypdf
  unstructured
  layoutparser
+pyyaml
+jinja2
 
 # === Lang / NLP util ===
 langdetect
