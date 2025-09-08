@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 from import_logging import setup_logging
+from openai import OpenAI
 
 # === DEBUG (optionnel) ===
 import debugpy
@@ -45,11 +46,15 @@ logger = setup_logging(LOGS_DIR, "app_debug.log")
 PUBLIC_DIR = ROOT / "public_files"
 SLIDES_DIR = PUBLIC_DIR / "slides"
 PPTX_DIR = PUBLIC_DIR / "presentations"
+GPT_MODEL = "gpt-4o"
 
 qdrant_client = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
 # MODEL_NAME = "sentence-transformers/paraphrase-xlm-r-multilingual-v1"
 MODEL_NAME = os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-base")
 model = SentenceTransformer(MODEL_NAME)
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 app = FastAPI()
 router = APIRouter()
@@ -381,7 +386,7 @@ def get_canonical_solution_name(user_solution_name):
     )
     solution_names = set()
     for point in existing_solutions[0]:
-        if point.payload.get("type") == "rfp_qa_enriched":
+        if point.payload.get("type") == "rfp_qa":
             name = point.payload.get("main_solution")
             if name:
                 solution_names.add(name)

@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import httpx
 from pathlib import Path
 import pandas as pd
 from qdrant_client import QdrantClient
@@ -16,12 +17,24 @@ LOGS_DIR = ROOT / "logs"
 REJECT_LOG = LOGS_DIR / "rejected_chunks.log"
 NO_MATCH_LOG = LOGS_DIR / "questions_no_match.log"
 logger = setup_logging(LOGS_DIR, "fill_empty_excel_debug.log")
-MODEL_NAME = "sentence-transformers/paraphrase-xlm-r-multilingual-v1"
-COLLECTION_NAME = "sap_kb"
-GPT_MODEL = "gpt-4o"
+
+# Utilise la même logique que ingest_pptx_via_gpt.py pour choisir le modèle
+EMB_MODEL_NAME = os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-base")
+GPT_MODEL = os.getenv("GPT_MODEL", "gpt-4o")
+COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "sap_kb")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+
+# Custom HTTP client to ignore system envs (e.g., proxies)
+class CustomHTTPClient(httpx.Client):
+    def __init__(self, *args, **kwargs):
+        kwargs.pop("proxies", None)
+        super().__init__(*args, **kwargs, trust_env=False)
+
+
+model = SentenceTransformer(EMB_MODEL_NAME)
+openai_client = OpenAI(api_key=OPENAI_API_KEY, http_client=CustomHTTPClient())
 client = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
-model = SentenceTransformer(MODEL_NAME)
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 def load_meta(meta_path):
