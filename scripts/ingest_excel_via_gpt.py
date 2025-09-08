@@ -76,6 +76,7 @@ def enrich_and_ingest_chunks(input_text, answer, meta, xlsx_path):
     if not input_text or not answer or len(answer.split()) < 3 or len(input_text) < 5:
         return 0
 
+    content = ""  # <-- Ajout ici
     try:
         prompt = f"""
 You are an assistant specialized in SAP RFP document processing.
@@ -89,12 +90,13 @@ Your task is to:
    - A clear standalone question
    - A concise standalone answer, based solely on the original answer content.
 
-🛡️ Important:
+🛡️ Important rules:
 - If the question or answer contains the name of a company (e.g., "{meta.get("client", "")}"), replace it by a neutral placeholder:
    - In French: use "le client"
    - In English: use "the customer"
    - Choose based on the language of the text.
 - Do NOT add explanations or summaries.
+- ❌ If the answer is only a reference to another question/answer (e.g., "please refer to question XX", "vous reporter à la réponse YY", "see our answer to question XX", etc.), then IGNORE this input completely and return an **empty JSON array**.
 
 Return the result as a JSON array like:
 [
@@ -121,7 +123,7 @@ Original Answer:
             content = content.strip()
         chunks = json.loads(content)
     except Exception as e:
-        logger.warning(f"⚠️ GPT enrich error: {e}")
+        logger.warning(f"⚠️ GPT enrich error: {e} | content={content}")
         return 0
 
     success_count = 0
@@ -142,7 +144,7 @@ Original Answer:
                 "rfp_answer": a,
                 "text": f"Q: {q}\nA: {a}",
                 "language": detect(f"{q} {a}").lower()[:2],
-                "type": "rfp_qa_enriched",
+                "type": "rfp_qa",
                 "ingested_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "source": xlsx_path.name,
