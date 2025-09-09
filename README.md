@@ -77,6 +77,11 @@ Les points ingérés dans Qdrant incluent un champ `prompt_meta` pour la traçab
 }
 ```
 
+## Prochaines évolutions à prendre en compte
+ - centraliser l'instantiation du modèle afin qu'il ne soit chargé qu'une seule fois
+ - ajouter la gestion des claims pour le controle d'incohérence sur les informations uploadée (chunk : valid / pending : retired)
+ - mise en place d'un reranker type cross-encoder/ms-marco-MiniLM-L-6-v2
+
 ## Badges & Esthétique
 
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue)](https://www.docker.com/)

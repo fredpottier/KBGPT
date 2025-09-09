@@ -46,15 +46,18 @@ def search_qdrant(question, solution, top_k=5):
     emb = model.encode([f"passage: Q: {question}"], normalize_embeddings=True)[
         0
     ].tolist()
-    # search_filter = Filter(
-    #     must=[FieldCondition(key="main_solution", match=MatchValue(value=solution))]
-    # )
+    search_filter = Filter(
+        must=[
+            FieldCondition(key="main_solution", match=MatchValue(value=solution)),
+            FieldCondition(key="type", match=MatchValue(value="rfp_qa")),
+        ]
+    )
     try:
         results = client.search(
             collection_name=COLLECTION_NAME,
             query_vector=emb,
             limit=top_k,
-            # query_filter=search_filter,  # <-- filtre désactivé pour test
+            query_filter=search_filter,
         )
         logger.info(f"Recherche Qdrant pour '{question}' : {len(results)} résultats")
         return results
