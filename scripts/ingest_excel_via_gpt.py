@@ -24,19 +24,33 @@ DOCS_IN = ROOT / "docs_in"
 DOCS_DONE = ROOT / "docs_done"
 LOGS_DIR = ROOT / "logs"
 CACHE_MODELS = ROOT / "models"
-COLLECTION_NAME = "sap_kb"
-# EMB_MODEL_NAME = "intfloat/multilingual-e5-base"
-GPT_MODEL_CANONICALIZE = "gpt-3.5-turbo-1106"
-GPT_MODEL_ENRICH = "gpt-4o"
-
 os.environ["HF_HOME"] = str(CACHE_MODELS)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 logger = setup_logging(LOGS_DIR, "ingest_excel_enriched.log")
 
-# === QDRANT SETUP ===
+# Modèle d'embedding : utilise la même logique que ingest_pptx_via_gpt.py
+EMB_MODEL_NAME = os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-base")
+GPT_MODEL_CANONICALIZE = "gpt-3.5-turbo-1106"
+GPT_MODEL_ENRICH = "gpt-4o"
+COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "sap_kb")
+
+from sentence_transformers import SentenceTransformer
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams
+from openai import OpenAI
+import httpx
+
+
+# Custom HTTP client (optionnel, comme dans ingest_pptx_via_gpt.py)
+class CustomHTTPClient(httpx.Client):
+    def __init__(self, *args, **kwargs):
+        kwargs.pop("proxies", None)
+        super().__init__(*args, **kwargs, trust_env=False)
+
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=OPENAI_API_KEY, http_client=CustomHTTPClient())
 qdrant = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
-MODEL_NAME = "sentence-transformers/paraphrase-xlm-r-multilingual-v1"
-model = SentenceTransformer(MODEL_NAME, device="cpu")
+model = SentenceTransformer(EMB_MODEL_NAME, device="cpu")
 EMB_SIZE = model.get_sentence_embedding_dimension()
 if not qdrant.collection_exists(COLLECTION_NAME):
     qdrant.create_collection(
