@@ -37,4 +37,6 @@ if __name__ == "__main__":
     solution = "S/4HANA Private Cloud"
     results = search_qdrant(question, solution)
     for r in results:
-        print(r.payload.get("text", ""))
+        payload = r.payload or {}
+        text = payload.get("text") if isinstance(payload, dict) else ""
+        print(text or "")

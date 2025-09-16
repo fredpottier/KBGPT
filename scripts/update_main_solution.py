@@ -9,6 +9,7 @@ Usage :
 """
 
 from qdrant_client import QdrantClient
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 # === Variables à adapter si besoin ===
 QDRANT_HOST = "localhost"
@@ -22,14 +23,15 @@ def main():
     client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
     print(f"Recherche des chunks où main_solution contient '{OLD_VALUE}' ...")
+    scroll_filter = Filter(
+        must=[FieldCondition(key="main_solution", match=MatchValue(value=OLD_VALUE))]
+    )
     scroll_result = client.scroll(
         collection_name=COLLECTION_NAME,
-        scroll_filter={
-            "must": [{"key": "main_solution", "match": {"value": OLD_VALUE}}]
-        },
+        scroll_filter=scroll_filter,
         with_payload=True,
-        with_vectors=True,  # <-- ajoute ceci
-        limit=10000,  # augmente si besoin
+        with_vectors=True,
+        limit=10000,
     )
 
     points = scroll_result[0]
@@ -39,16 +41,10 @@ def main():
     for point in points:
         payload = point.payload or {}
         if payload.get("main_solution") == OLD_VALUE:
-            payload["main_solution"] = NEW_VALUE
-            client.upsert(
+            client.set_payload(
                 collection_name=COLLECTION_NAME,
-                points=[
-                    {
-                        "id": point.id,
-                        "vector": point.vector,
-                        "payload": payload,
-                    }
-                ],
+                payload={"main_solution": NEW_VALUE},
+                points=[point.id],
             )
             updated += 1
 

@@ -1,6 +1,5 @@
 import base64
 import json
-import logging
 import os
 import shutil
 import uuid
@@ -9,6 +8,11 @@ from pathlib import Path
 from import_logging import setup_logging
 
 from openai import OpenAI
+from openai.types.chat import (
+    ChatCompletionMessageParam,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
+)
 from pdf2image import convert_from_path
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -151,27 +155,27 @@ def extract_text_from_pdf(pdf_path: Path) -> str:
 def analyze_pdf_metadata(pdf_text: str, source_name: str) -> dict:
     logger.info(f"🔍 GPT: analyse des métadonnées — {source_name}")
     try:
+        system_message: ChatCompletionSystemMessageParam = {
+            "role": "system",
+            "content": "You are a metadata extraction assistant.",
+        }
+        user_message: ChatCompletionUserMessageParam = {
+            "role": "user",
+            "content": (
+                f"You're analyzing a PDF document: '{source_name}'.\n"
+                f"Below is the raw text extracted from it:\n\n{pdf_text[:8000]}\n\n"
+                "Extract the following high-level metadata and return a single JSON object with fields:\n"
+                "- title\n- objective\n- main_solution\n- supporting_solutions\n"
+                "- mentioned_solutions\n- document_type\n- audience\n- source_date\n- language\n\n"
+                "IMPORTANT: For the field 'main_solution', always use the official SAP canonical solution name as published on the SAP website or documentation. "
+                "Do not use acronyms, abbreviations, or local variants. If the document uses a non-canonical name, map it to the official SAP name. "
+                "If you are unsure, leave the field empty."
+            ),
+        }
+        messages: list[ChatCompletionMessageParam] = [system_message, user_message]
         response = client.chat.completions.create(
             model=GPT_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a metadata extraction assistant.",
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"You're analyzing a PDF document: '{source_name}'.\n"
-                        f"Below is the raw text extracted from it:\n\n{pdf_text[:8000]}\n\n"
-                        "Extract the following high-level metadata and return a single JSON object with fields:\n"
-                        "- title\n- objective\n- main_solution\n- supporting_solutions\n"
-                        "- mentioned_solutions\n- document_type\n- audience\n- source_date\n- language\n\n"
-                        "IMPORTANT: For the field 'main_solution', always use the official SAP canonical solution name as published on the SAP website or documentation. "
-                        "Do not use acronyms, abbreviations, or local variants. If the document uses a non-canonical name, map it to the official SAP name. "
-                        "If you are unsure, leave the field empty."
-                    ),
-                },
-            ],
+            messages=messages,
             temperature=0.2,
             max_tokens=1024,
         )
@@ -196,7 +200,7 @@ def ask_gpt_slide_analysis(
     logger.info(f"🧠 GPT: analyse page {slide_index}")
     try:
         image_b64 = encode_image_base64(image_path)
-        prompt = {
+        prompt: ChatCompletionUserMessageParam = {
             "role": "user",
             "content": [
                 {
@@ -205,23 +209,24 @@ def ask_gpt_slide_analysis(
                 },
                 {
                     "type": "text",
-                    "text": f"You are analyzing page {slide_index} from '{source_name}'.\n"
-                    f"Page content:\n{slide_text}\n\n"
-                    "Extract 1–5 standalone content blocks. For each, return:\n"
-                    "- `text`\n- `meta` with `type`, `level`, `topic`\n\n"
-                    "Return only a JSON array.",
+                    "text": (
+                        f"You are analyzing page {slide_index} from '{source_name}'.\n"
+                        f"Page content:\n{slide_text}\n\n"
+                        "Extract 1–5 standalone content blocks. For each, return:\n"
+                        "- `text`\n- `meta` with `type`, `level`, `topic`\n\n"
+                        "Return only a JSON array."
+                    ),
                 },
             ],
         }
+        system_message: ChatCompletionSystemMessageParam = {
+            "role": "system",
+            "content": "You are an expert assistant that analyzes PDF pages.",
+        }
+        messages: list[ChatCompletionMessageParam] = [system_message, prompt]
         response = client.chat.completions.create(
             model=GPT_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert assistant that analyzes PDF pages.",
-                },
-                prompt,
-            ],
+            messages=messages,
             temperature=0.3,
             max_tokens=1024,
         )
@@ -284,7 +289,7 @@ def process_pdf(pdf_path: Path):
         if meta_path.exists():
             try:
                 user_meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                logger.info(f"📎 Meta utilisateur détectée")
+                logger.info("📎 Meta utilisateur détectée")
             except Exception as e:
                 logger.warning(f"⚠️ Meta invalide: {e}")
 

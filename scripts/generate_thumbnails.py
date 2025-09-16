@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from PIL import Image
 
@@ -23,7 +22,7 @@ def is_image_file(path: Path) -> bool:
 def generate_thumbnail(image_path: Path, output_path: Path):
     try:
         with Image.open(image_path) as img:
-            img.thumbnail(MAX_SIZE, Image.LANCZOS)
+            img.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             img.save(output_path.with_suffix(".png"), "PNG")
             print(f"✅ Thumbnail créé : {output_path.name}")

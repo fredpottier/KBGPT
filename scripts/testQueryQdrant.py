@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from import_logging import setup_logging
@@ -5,7 +7,7 @@ from import_logging import setup_logging
 # Configuration
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 COLLECTION_NAME = "sap_kb"
-LOGS_DIR = "logs"
+LOGS_DIR = Path("logs")
 logger = setup_logging(LOGS_DIR, "test_search_qdrant.log")
 client = QdrantClient(host="localhost", port=6333)
 model = SentenceTransformer(MODEL_NAME)
@@ -30,4 +32,10 @@ if __name__ == "__main__":
     question = "How many environments are you recommend to implement your solution?"
     solution = "S/4HANA Private Cloud"
     results = search_qdrant(question, solution)
-    for r in
+    if not results:
+        print("Aucun résultat trouvé.")
+    for r in results:
+        payload = r.payload or {}
+        score = getattr(r, "score", None)
+        source = payload.get("source_file_url", "")
+        print(f"Score={score} | Source={source}")

@@ -10,6 +10,7 @@ Exemple :
 
 import sys
 from qdrant_client import QdrantClient
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 # === Variables à adapter si besoin ===
 QDRANT_HOST = "localhost"
@@ -28,15 +29,19 @@ def main():
 
     # Récupérer tous les points liés au fichier source
     print(f"Recherche des chunks pour source_file_url = {source_file_url} ...")
+    scroll_filter = Filter(
+        must=[
+            FieldCondition(
+                key="source_file_url", match=MatchValue(value=source_file_url)
+            )
+        ]
+    )
     scroll_result = client.scroll(
         collection_name=COLLECTION_NAME,
-        scroll_filter={
-            "must": [
-                {"key": "source_file_url", "match": {"value": source_file_url}}
-            ]
-        },
+        scroll_filter=scroll_filter,
         with_payload=True,
-        limit=10000  # augmente si besoin
+        with_vectors=False,
+        limit=10000,  # augmente si besoin
     )
 
     points = scroll_result[0]
@@ -50,18 +55,14 @@ def main():
             supporting.append(solution_to_add)
             payload["supporting_solutions"] = supporting
 
-            client.upsert(
+            client.set_payload(
                 collection_name=COLLECTION_NAME,
-                points=[
-                    {
-                        "id": point.id,
-                        "vector": point.vector,
-                        "payload": payload,
-                    }
-                ],
+                payload={"supporting_solutions": supporting},
+                points=[point.id],
             )
             updated += 1
 
     print(f"Chunks modifiés : {updated}")
 
 if __name__ == "__main__":
+    main()

@@ -1,21 +1,28 @@
 # Enrichissement des paires Q/A avant injection dans Qdrant
 
-import os
-import uuid
 import json
-import shutil
-import logging
+import os
 import re
-from pathlib import Path
+import shutil
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
 
+import httpx
+import openpyxl
 import pandas as pd
 from langdetect import detect
-from sentence_transformers import SentenceTransformer
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
 from openai import OpenAI
-import openpyxl
+from openai.types.chat import (
+    ChatCompletionMessageParam,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
+)
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, PointStruct, VectorParams
+from sentence_transformers import SentenceTransformer
+
 from import_logging import setup_logging
 
 # === CONFIGURATION ===
@@ -33,12 +40,6 @@ GPT_MODEL_CANONICALIZE = "gpt-3.5-turbo-1106"
 GPT_MODEL_ENRICH = "gpt-4o"
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "sap_kb")
 
-from sentence_transformers import SentenceTransformer
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams
-from openai import OpenAI
-import httpx
-
 
 # Custom HTTP client (optionnel, comme dans ingest_pptx_via_gpt.py)
 class CustomHTTPClient(httpx.Client):
@@ -51,7 +52,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY, http_client=CustomHTTPClient())
 qdrant = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
 model = SentenceTransformer(EMB_MODEL_NAME, device="cpu")
-EMB_SIZE = model.get_sentence_embedding_dimension()
+embedding_size = model.get_sentence_embedding_dimension()
+if embedding_size is None:
+    raise RuntimeError("SentenceTransformer returned no embedding dimension")
+EMB_SIZE = int(embedding_size)
 if not qdrant.collection_exists(COLLECTION_NAME):
     qdrant.create_collection(
         collection_name=COLLECTION_NAME,
@@ -63,30 +67,37 @@ if not qdrant.collection_exists(COLLECTION_NAME):
 
 def standardize_solution_name(raw_solution: str) -> str:
     try:
-        messages = [
-            {
-                "role": "system",
-                "content": "You are an expert in SAP product naming conventions. Only reply with the official SAP solution name, without quotes, explanations, or any extra text.",
-            },
-            {
-                "role": "user",
-                "content": f"Here is a solution name or abbreviation: {raw_solution}\nWhat is the official SAP product name? Only reply with the name itself.",
-            },
-        ]
+        system_message: ChatCompletionSystemMessageParam = {
+            "role": "system",
+            "content": "You are an expert in SAP product naming conventions. Only reply with the official SAP solution name, without quotes, explanations, or any extra text.",
+        }
+        user_message: ChatCompletionUserMessageParam = {
+            "role": "user",
+            "content": f"Here is a solution name or abbreviation: {raw_solution}\nWhat is the official SAP product name? Only reply with the name itself.",
+        }
+        messages: list[ChatCompletionMessageParam] = [system_message, user_message]
         response = client.chat.completions.create(
             model=GPT_MODEL_CANONICALIZE,
             messages=messages,
             temperature=0,
             max_tokens=20,
         )
-        name = response.choices[0].message.content.strip()
+        if not response.choices:
+            raise ValueError("Empty completion choices")
+        message = getattr(response.choices[0], "message", None)
+        content = getattr(message, "content", None) if message else None
+        if not isinstance(content, str):
+            raise ValueError("Missing completion content")
+        name = content.strip()
         return name.split("\n")[0].replace('"', "").replace("'", "").strip()
     except Exception as e:
         logger.warning(f"⚠️ GPT standardization error: {e}")
         return raw_solution.strip()
 
 
-def enrich_and_ingest_chunks(input_text, answer, meta, xlsx_path):
+def enrich_and_ingest_chunks(
+    input_text: str, answer: str, meta: dict[str, Any], xlsx_path: Path
+) -> int:
     if not input_text or not answer or len(answer.split()) < 3 or len(input_text) < 5:
         return 0
 
@@ -124,28 +135,51 @@ Original Input:
 Original Answer:
 {answer}
 """
+        enrich_message: ChatCompletionUserMessageParam = {
+            "role": "user",
+            "content": prompt,
+        }
+        enrich_messages: list[ChatCompletionMessageParam] = [enrich_message]
         response = client.chat.completions.create(
             model=GPT_MODEL_ENRICH,
-            messages=[{"role": "user", "content": prompt}],
+            messages=enrich_messages,
             temperature=0.3,
             max_tokens=1000,
         )
-        content = response.choices[0].message.content.strip()
+        if not response.choices:
+            return 0
+        message = getattr(response.choices[0], "message", None)
+        content_raw = getattr(message, "content", None) if message else None
+        if not isinstance(content_raw, str):
+            logger.warning("⚠️ GPT enrich returned no textual content")
+            return 0
+        content = content_raw.strip()
         if content.startswith("```"):
             content = re.sub(r"^```[a-zA-Z]*\n?", "", content)
             content = re.sub(r"```$", "", content)
             content = content.strip()
-        chunks = json.loads(content)
+        parsed = json.loads(content)
+        if not isinstance(parsed, list):
+            logger.warning("⚠️ GPT enrich result is not a list")
+            return 0
+        chunks: list[dict[str, Any]] = [
+            chunk for chunk in parsed if isinstance(chunk, dict)
+        ]
     except Exception as e:
         logger.warning(f"⚠️ GPT enrich error: {e} | content={content}")
         return 0
 
     success_count = 0
-    canonical_solution = meta.get("canonical_solution", "")
+    canonical_value = meta.get("canonical_solution")
+    canonical_solution = (
+        canonical_value if isinstance(canonical_value, str) else ""
+    )
 
     for chunk in chunks:
-        q = chunk.get("question", "").strip()
-        a = chunk.get("answer", "").strip()
+        raw_question = chunk.get("question")
+        raw_answer = chunk.get("answer")
+        q = raw_question.strip() if isinstance(raw_question, str) else ""
+        a = raw_answer.strip() if isinstance(raw_answer, str) else ""
         if len(q) < 5 or len(a.split()) < 3:
             continue
         try:
@@ -178,7 +212,7 @@ Original Answer:
     return success_count
 
 
-def get_visible_sheet_name(xlsx_path: Path) -> str:
+def get_visible_sheet_name(xlsx_path: Path) -> Optional[str]:
     wb = openpyxl.load_workbook(xlsx_path, read_only=True)
     for sheet in wb.worksheets:
         if sheet.sheet_state == "visible":
@@ -186,7 +220,7 @@ def get_visible_sheet_name(xlsx_path: Path) -> str:
     return None
 
 
-def excel_colname_to_index(colname):
+def excel_colname_to_index(colname: str) -> int:
     colname = colname.upper()
     index = 0
     for c in colname:
@@ -194,7 +228,7 @@ def excel_colname_to_index(colname):
     return index - 1
 
 
-def reformulate_as_question(text):
+def reformulate_as_question(text: str) -> str:
     prompt = f"""
 You are an assistant. Reformulate the following instruction or statement into a clear, standalone question in the same language. Only reply with the question, nothing else.
 
@@ -202,13 +236,26 @@ Instruction:
 {text}
 """
     try:
+        reformulate_message: ChatCompletionUserMessageParam = {
+            "role": "user",
+            "content": prompt,
+        }
+        reformulate_messages: list[ChatCompletionMessageParam] = [
+            reformulate_message
+        ]
         response = client.chat.completions.create(
             model=GPT_MODEL_CANONICALIZE,
-            messages=[{"role": "user", "content": prompt}],
+            messages=reformulate_messages,
             temperature=0,
             max_tokens=100,
         )
-        question = response.choices[0].message.content.strip()
+        if not response.choices:
+            raise ValueError("Empty reformulation response")
+        message = getattr(response.choices[0], "message", None)
+        content = getattr(message, "content", None) if message else None
+        if not isinstance(content, str):
+            raise ValueError("Missing reformulation content")
+        question = content.strip()
         return question
     except Exception as e:
         logger.warning(f"⚠️ GPT reformulation error: {e}")
@@ -218,7 +265,7 @@ Instruction:
 # === TRAITEMENT PRINCIPAL ===
 
 
-def process_excel_rfp(path: Path, meta: dict):
+def process_excel_rfp(path: Path, meta: dict[str, Any]) -> None:
     print(f"▶️ Fichier : {path.name}")
     meta_path = path.with_suffix(".meta.json")
     user_meta = {}
@@ -238,9 +285,21 @@ def process_excel_rfp(path: Path, meta: dict):
         print(f"❌ Fichier ignoré : meta manquante pour {', '.join(missing)}")
         return
 
-    meta["canonical_solution"] = standardize_solution_name(meta["solution"])
-    question_col = meta["question_col"]
-    answer_col = meta["answer_col"]
+    solution_value = meta.get("solution")
+    question_col_value = meta.get("question_col")
+    answer_col_value = meta.get("answer_col")
+    if not isinstance(solution_value, str):
+        logger.error(f"❌ Meta 'solution' invalide pour {path.name}")
+        return
+    if not isinstance(question_col_value, str) or not isinstance(
+        answer_col_value, str
+    ):
+        logger.error(f"❌ Colonnes question/réponse invalides pour {path.name}")
+        return
+
+    meta["canonical_solution"] = standardize_solution_name(solution_value)
+    question_col = question_col_value
+    answer_col = answer_col_value
     visible_sheet = get_visible_sheet_name(path)
     if not visible_sheet:
         logger.error(f"❌ Aucun onglet visible dans {path.name}")
@@ -259,8 +318,8 @@ def process_excel_rfp(path: Path, meta: dict):
 
     total = 0
     for i in df.index:
-        raw_input = df.iat[i, q_idx].strip()
-        answer = df.iat[i, a_idx].strip()
+        raw_input = str(df.iat[i, q_idx]).strip()
+        answer = str(df.iat[i, a_idx]).strip()
 
         # Nouveau contrôle pour ignorer les titres/entêtes
         skip_keywords = {
@@ -299,7 +358,7 @@ def process_excel_rfp(path: Path, meta: dict):
         print(f"⚠️ Déplacement échoué : {e}")
 
 
-def main():
+def main() -> None:
     for file in DOCS_IN.glob("*.xlsx"):
         meta_path = file.with_suffix(".meta.json")
         if not meta_path.exists():

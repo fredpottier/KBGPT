@@ -1,5 +1,4 @@
 import re
-import math
 from typing import List, Dict, Tuple
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
@@ -81,7 +80,6 @@ def check_claim_conflicts(
     """
     canonical_name = claim["canonical_name"]
     value = claim["value"]
-    unit = claim["unit"]
 
     # Recherche tous les chunks avec le même claim_tag = "Valid" et contenant le nom canonique
     filter_ = Filter(

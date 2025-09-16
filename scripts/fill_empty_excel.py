@@ -1,14 +1,17 @@
-import os
 import json
-import uuid
-import httpx
+import os
 from pathlib import Path
+from typing import Any, Iterable, Sequence
+
+import httpx
 import pandas as pd
-from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue
-from sentence_transformers import SentenceTransformer
 from openai import OpenAI
+from openai.types.chat import ChatCompletionUserMessageParam
 from openpyxl import load_workbook
+from qdrant_client import QdrantClient
+from qdrant_client.models import FieldCondition, Filter, MatchValue, ScoredPoint
+from sentence_transformers import SentenceTransformer
+
 from import_logging import setup_logging  # Ajout gestion des logs
 
 # === CONFIGURATION ===
@@ -37,12 +40,14 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY, http_client=CustomHTTPClient())
 client = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
 
 
-def load_meta(meta_path):
+def load_meta(meta_path: str | Path) -> dict[str, Any]:
     with open(meta_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def search_qdrant(question, solution, top_k=5):
+def search_qdrant(
+    question: str, solution: str, top_k: int = 5
+) -> Sequence[ScoredPoint]:
     emb = model.encode([f"passage: Q: {question}"], normalize_embeddings=True)[
         0
     ].tolist()
@@ -66,8 +71,13 @@ def search_qdrant(question, solution, top_k=5):
         return []
 
 
-def build_gpt_answer(question, context_chunks):
-    context = "\n\n".join([chunk.payload.get("text", "") for chunk in context_chunks])
+def build_gpt_answer(question: str, context_chunks: Iterable[ScoredPoint]) -> str:
+    context_parts: list[str] = []
+    for chunk in context_chunks:
+        payload = chunk.payload or {}
+        text = payload.get("text") if isinstance(payload, dict) else ""
+        context_parts.append(text if isinstance(text, str) else "")
+    context = "\n\n".join(context_parts)
     prompt = (
         f"Voici une question métier SAP :\n{question}\n\n"
         f"Voici des extraits de documents pouvant aider à répondre :\n{context}\n\n"
@@ -76,13 +86,23 @@ def build_gpt_answer(question, context_chunks):
         "Si aucune information pertinente n'est trouvée, réponds uniquement par 'Aucune réponse trouvée'."
     )
     try:
+        user_message: ChatCompletionUserMessageParam = {
+            "role": "user",
+            "content": prompt,
+        }
         response = openai_client.chat.completions.create(
             model=GPT_MODEL,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[user_message],
             temperature=0.2,
             max_tokens=512,
         )
-        answer = response.choices[0].message.content.strip()
+        if not response.choices:
+            raise ValueError("no completion choices returned")
+        message = getattr(response.choices[0], "message", None)
+        content = getattr(message, "content", None) if message else None
+        if not isinstance(content, str):
+            raise ValueError("completion has no textual content")
+        answer = content.strip()
         logger.info(f"Réponse GPT pour '{question}': {answer[:80]}...")
         return answer
     except Exception as e:
@@ -90,7 +110,7 @@ def build_gpt_answer(question, context_chunks):
         return "Aucune réponse trouvée"
 
 
-def excel_col_letter_to_index(col_letter):
+def excel_col_letter_to_index(col_letter: str) -> int:
     col_letter = col_letter.upper()
     col_idx = 0
     for i, c in enumerate(reversed(col_letter)):
@@ -98,15 +118,28 @@ def excel_col_letter_to_index(col_letter):
     return col_idx - 1
 
 
-def write_answers_to_excel(original_path, df, a_col_letter, a_col_idx):
+def write_answers_to_excel(
+    original_path: str | Path,
+    df: pd.DataFrame,
+    a_col_letter: str,
+    a_col_idx: int,
+) -> None:
     wb = load_workbook(original_path)
     ws = wb.active
+    if ws is None:
+        logger.error("Impossible d'accéder à la feuille active pour l'écriture.")
+        return
+    active_ws = ws
 
-    for idx, row in df.iterrows():
+    for row_position, row in enumerate(df.itertuples(index=False), start=1):
         answer = row[a_col_idx]
         if pd.notna(answer):
-            excel_row = idx + 2  # +2 pour header + 1-index Excel
-            ws.cell(row=excel_row, column=a_col_idx + 1, value=answer)  # index 1-based
+            excel_row = row_position + 1  # +1 pour header + 1-index Excel
+            active_ws.cell(
+                row=excel_row,
+                column=a_col_idx + 1,
+                value=str(answer),
+            )  # index 1-based
 
     output_path = (
         Path(original_path).parent / f"{Path(original_path).stem}_answered.xlsx"
@@ -116,7 +149,9 @@ def write_answers_to_excel(original_path, df, a_col_letter, a_col_idx):
     logger.info(f"✅ Fichier enrichi avec styles préservés : {output_path}")
 
 
-def filter_chunks_with_gpt(question, chunks):
+def filter_chunks_with_gpt(
+    question: str, chunks: Iterable[ScoredPoint]
+) -> list[ScoredPoint]:
     prompt_template = (
         "Question : {question}\n\n"
         "Voici un extrait de document :\n\n"
@@ -124,19 +159,32 @@ def filter_chunks_with_gpt(question, chunks):
         "Est-ce que cet extrait est pertinent pour répondre à cette question ? Réponds uniquement par : OUI ou NON."
     )
 
-    filtered = []
-    rejected = []
+    filtered: list[ScoredPoint] = []
+    rejected: list[str] = []
     for chunk in chunks:
-        chunk_text = chunk.payload.get("text", "")
+        payload = chunk.payload or {}
+        chunk_text_raw = (
+            payload.get("text") if isinstance(payload, dict) else ""
+        )
+        chunk_text = chunk_text_raw if isinstance(chunk_text_raw, str) else ""
         prompt = prompt_template.format(question=question, chunk=chunk_text)
         try:
+            user_message: ChatCompletionUserMessageParam = {
+                "role": "user",
+                "content": prompt,
+            }
             response = openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[user_message],
                 temperature=0,
                 max_tokens=5,
             )
-            if "oui" in response.choices[0].message.content.lower():
+            if not response.choices:
+                raise ValueError("no completion choices returned")
+            message = getattr(response.choices[0], "message", None)
+            content = getattr(message, "content", None) if message else None
+            content_lower = content.lower() if isinstance(content, str) else ""
+            if "oui" in content_lower:
                 filtered.append(chunk)
             else:
                 rejected.append(chunk_text)
@@ -153,7 +201,7 @@ def filter_chunks_with_gpt(question, chunks):
     return filtered
 
 
-def clarify_question_with_gpt(question):
+def clarify_question_with_gpt(question: str) -> str:
     prompt = (
         f"Voici une question métier posée dans un fichier Excel :\n\n"
         f"{question}\n\n"
@@ -161,24 +209,38 @@ def clarify_question_with_gpt(question):
         "Tu dois reformuler dans la même langue que la question d'origine."
     )
     try:
+        user_message: ChatCompletionUserMessageParam = {
+            "role": "user",
+            "content": prompt,
+        }
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[user_message],
             temperature=0,
             max_tokens=100,
         )
-        return response.choices[0].message.content.strip()
+        if not response.choices:
+            raise ValueError("no completion choices returned")
+        message = getattr(response.choices[0], "message", None)
+        content = getattr(message, "content", None) if message else None
+        if not isinstance(content, str):
+            raise ValueError("clarification has no textual content")
+        return content.strip()
     except Exception as e:
         logger.warning(f"Erreur clarification GPT : {e}")
         return question.strip()
 
 
-def main(xlsx_path, meta_path):
+def main(xlsx_path: str | Path, meta_path: str | Path) -> None:
     meta = load_meta(meta_path)
     df = pd.read_excel(
         xlsx_path, header=None
     )  # Pas de header pour éviter les problèmes de colonnes mergées
-    solution = meta["solution"]
+    solution_value = meta.get("solution")
+    if not isinstance(solution_value, str) or not solution_value.strip():
+        logger.error("Meta 'solution' manquante ou invalide.")
+        return
+    solution = solution_value.strip()
 
     logger.info(f"Traitement du fichier : {xlsx_path} ({len(df)} lignes)")
 
@@ -193,13 +255,23 @@ def main(xlsx_path, meta_path):
 
     df = pd.read_excel(xlsx_path, header=None, sheet_name=visible_sheets[0])
 
-    merged_cells = set()
+    merged_cells: set[str] = set()
     for rng in ws.merged_cells.ranges:
-        for cell in rng.cells:
-            merged_cells.add(ws.cell(row=cell[0], column=cell[1]).coordinate)
+        min_row, min_col, max_row, max_col = rng.min_row, rng.min_col, rng.max_row, rng.max_col
+        for row in range(min_row, max_row + 1):
+            for col in range(min_col, max_col + 1):
+                merged_cells.add(ws.cell(row=row, column=col).coordinate)
 
-    q_idx = excel_col_letter_to_index(meta["question_col"])
-    a_idx = excel_col_letter_to_index(meta["answer_col"])
+    question_col_value = meta.get("question_col")
+    answer_col_value = meta.get("answer_col")
+    if not isinstance(question_col_value, str) or not isinstance(
+        answer_col_value, str
+    ):
+        logger.error("Colonnes question/réponse invalides dans le meta.")
+        return
+
+    q_idx = excel_col_letter_to_index(question_col_value)
+    a_idx = excel_col_letter_to_index(answer_col_value)
 
     logger.debug(f"Colonnes du DataFrame : {df.columns}")
     logger.debug(f"q_idx calculé : {q_idx}")
@@ -207,14 +279,20 @@ def main(xlsx_path, meta_path):
     questions_analyzed = 0
     answers_inserted = 0
 
-    for idx in df.index:
+    for row_idx in range(len(df)):
         # Affiche le contenu brut de la ligne
-        logger.debug(f"Ligne {idx} brute : {df.iloc[idx].to_dict()}")
+        logger.debug(f"Ligne {row_idx} brute : {df.iloc[row_idx].to_dict()}")
         try:
-            question = str(df.iat[idx, q_idx]).strip()
+            raw_question = df.iat[row_idx, q_idx]
         except Exception as e:
-            logger.debug(f"⏭️ Ligne {idx} ignorée : erreur accès cellule ({e})")
+            logger.debug(f"⏭️ Ligne {row_idx} ignorée : erreur accès cellule ({e})")
             continue
+
+        if pd.isna(raw_question):
+            logger.debug(f"⏭️ Ligne ignorée : valeur NaN à l'index {row_idx}")
+            continue
+
+        question = str(raw_question).strip()
 
         if (
             pd.isna(question)
@@ -260,8 +338,12 @@ def main(xlsx_path, meta_path):
 
         wb = load_workbook(xlsx_path)
         ws = wb.active
-        excel_row = idx + 1  # +1 car pas de header
-        ws.cell(row=excel_row, column=a_idx + 1, value=gpt_answer)
+        if ws is None:
+            logger.error("Impossible d'accéder à la feuille active pour écrire la réponse.")
+            continue
+        active_ws = ws
+        excel_row = row_idx + 1  # +1 car pas de header
+        active_ws.cell(row=excel_row, column=a_idx + 1, value=gpt_answer)
         wb.save(xlsx_path)
         answers_inserted += 1
         logger.info(

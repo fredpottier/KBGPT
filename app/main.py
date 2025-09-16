@@ -1,26 +1,23 @@
 import json
-import logging
 import os
 import re
 import shutil
 import subprocess
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from urllib.parse import unquote, quote
-from collections import defaultdict
-
-from fastapi import FastAPI, File, Form, UploadFile, APIRouter, Request, Body
-from fastapi.responses import PlainTextResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from qdrant_client import QdrantClient
-from sentence_transformers import SentenceTransformer
-from import_logging import setup_logging
-from openai import OpenAI
+from typing import Any, DefaultDict, Optional, TypedDict
+from urllib.parse import quote, unquote
 
 # === DEBUG (optionnel) ===
 import debugpy
+from fastapi import APIRouter, FastAPI, File, Form, Request, UploadFile
+from fastapi.staticfiles import StaticFiles
+from import_logging import setup_logging
+from openai import OpenAI
+from pydantic import BaseModel
+from qdrant_client import QdrantClient
+from sentence_transformers import SentenceTransformer
 
 if os.getenv("DEBUG_MODE") == "true":
     print("🔧 Attaching debugpy on port 5678...")
@@ -77,6 +74,12 @@ class SearchRequest(BaseModel):
     mime: Optional[str] = None
 
 
+class SourceMetadata(TypedDict):
+    slides: list[str]
+    file_url: str
+    type: str
+
+
 @app.post("/search")
 async def search_qdrant(req: SearchRequest):
     try:
@@ -106,7 +109,7 @@ async def search_qdrant(req: SearchRequest):
         response_chunks = []
         for r in filtered:
             payload = r.payload or {}
-            slide_image_url = payload.get("slide_image_url", "")
+            slide_image_url = payload.get("slide_image_url", "") if payload else ""
             if slide_image_url:
                 slide_image_url = f"https://sapkb.ngrok.app/static/thumbnails/{os.path.basename(slide_image_url)}"
             response_chunks.append(
@@ -185,38 +188,47 @@ async def dispatch_action(
             thumbnails_md = "## 📸 Aperçus\n\n"
             for r in filtered_thumbs:
                 payload = r.payload
-                slide_image_url = payload.get("slide_image_url")
-                image_name = os.path.basename(slide_image_url)
-                slide_num = payload.get("slide_index", "?")
+                slide_image_url = payload.get("slide_image_url", "") if payload else ""
+                image_name = (
+                    os.path.basename(slide_image_url) if slide_image_url else ""
+                )
+                slide_num = payload.get("slide_index", "?") if payload else ""
                 # Utilise le numéro de slide comme texte alternatif
                 thumb_url = f"https://sapkb.ngrok.app/static/thumbnails/{urlify_image_url(image_name)}"
                 encoded_image_name = quote(image_name)
-                hd_url = slide_image_url.replace(image_name, encoded_image_name)
+                hd_url = (
+                    slide_image_url.replace(image_name, encoded_image_name)
+                    if slide_image_url and image_name
+                    else ""
+                )
                 thumbnails_md += f"[![Slide {slide_num}]({thumb_url})]({hd_url}) "
 
             thumbnails_md += "\n\n---\n\n"
 
             text_md = ""
             source_md = "**📎 Sources**\n\n"
-            sources_map = defaultdict(
-                lambda: {"slides": [], "file_url": "", "type": "pptx"}
+            sources_map: DefaultDict[str, SourceMetadata] = defaultdict(
+                lambda: SourceMetadata(slides=[], file_url="", type="pptx")
             )
 
             for r in filtered:
                 payload = r.payload or {}
-                file_url = f"https://sapkb.ngrok.app/static/presentations/{urlify_image_url(os.path.basename(payload.get('source_file_url', '')))}"
+                source_file_url = payload.get("source_file_url", "") if payload else ""
+                file_url = f"https://sapkb.ngrok.app/static/presentations/{urlify_image_url(os.path.basename(source_file_url))}"
                 filename = payload.get("source_file_url", "").split("/")[-1]
                 file_title = unquote(filename)
-                slide_num = payload.get("slide_index", "?")
-                caption = payload.get("text", "").strip().split("\n")[0][:80]
+                raw_slide_index = payload.get("slide_index")
+                slide_num = str(raw_slide_index) if raw_slide_index is not None else "?"
+                caption = (payload.get("text") or "").strip().split("\n")[0][:80]
 
                 text_md += f"- {caption}  \n*({file_title}, slide {slide_num})*\n\n"
-                sources_map[file_title]["file_url"] = file_url
-                sources_map[file_title]["slides"].append(slide_num)
+                source_entry = sources_map[file_title]
+                source_entry["file_url"] = file_url
+                source_entry["slides"].append(slide_num)
 
-            for title, meta in sources_map.items():
+            for title, source_meta in sources_map.items():
                 source_md += (
-                    f"- [{title}]({meta['file_url']}) — {meta['type'].upper()}\n"
+                    f"- [{title}]({source_meta['file_url']}) — {source_meta['type'].upper()}\n"
                 )
 
                 answer_markdown = f"{thumbnails_md}{text_md}{source_md}"
@@ -239,7 +251,7 @@ async def dispatch_action(
 
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
         # Normalise le nom du fichier
-        safe_filename = normalize_filename(file.filename)
+        safe_filename = normalize_filename(file.filename or "uploaded")
         base_name = Path(safe_filename).stem if safe_filename else "uploaded"
         uid = f"{base_name}__{now}"
 
@@ -309,7 +321,7 @@ async def dispatch_action(
         # Sauvegarde du fichier meta
         try:
             with open(meta_path, "w", encoding="utf-8") as f_meta:
-                meta_json = json.loads(meta)
+                meta_json = json.loads(meta) if meta else {}
                 # Contrôle du nom canonique de la solution
                 user_solution = meta_json.get("solution")
                 if user_solution:
@@ -375,7 +387,9 @@ async def get_status(uid: str):
         return {"action": "fill_excel", "status": "processing"}
 
 
-def get_canonical_solution_name(user_solution_name):
+def get_canonical_solution_name(
+    user_solution_name: str,
+) -> tuple[str, set[str]]:
     # Recherche des solutions existantes dans Qdrant
     # (extraction des valeurs distinctes du champ "main_solution")
     existing_solutions = qdrant_client.scroll(
@@ -384,11 +398,12 @@ def get_canonical_solution_name(user_solution_name):
         with_payload=["main_solution", "type"],  # récupère uniquement ces champs
         scroll_filter=None,
     )
-    solution_names = set()
+    solution_names: set[str] = set()
     for point in existing_solutions[0]:
-        if point.payload.get("type") == "rfp_qa":
-            name = point.payload.get("main_solution")
-            if name:
+        payload: dict[str, Any] = point.payload or {}
+        if payload.get("type") == "rfp_qa":
+            name = payload.get("main_solution")
+            if isinstance(name, str) and name:
                 solution_names.add(name)
 
     # Utilise GPT pour trouver le nom canonique le plus proche
@@ -403,7 +418,13 @@ def get_canonical_solution_name(user_solution_name):
         temperature=0,
         max_tokens=100,
     )
-    canonical_name = response.choices[0].message.content.strip()
+    canonical_name = user_solution_name
+    if response.choices:
+        first_choice = response.choices[0]
+        message = getattr(first_choice, "message", None)
+        content = getattr(message, "content", None) if message else None
+        if isinstance(content, str) and content.strip():
+            canonical_name = content.strip()
     return canonical_name, solution_names
 
 
