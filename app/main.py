@@ -17,6 +17,7 @@ from import_logging import setup_logging
 from openai import OpenAI
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 from sentence_transformers import SentenceTransformer
 
 if os.getenv("DEBUG_MODE") == "true":
@@ -91,11 +92,15 @@ async def search_qdrant(req: SearchRequest):
             query_vector = query_vector.numpy().tolist()
         query_vector = [float(x) for x in query_vector]
 
+        query_filter = Filter(
+            must_not=[FieldCondition(key="type", match=MatchValue(value="rfp_qa"))]
+        )
         results = qdrant_client.search(
             collection_name=COLLECTION_NAME,
             query_vector=query_vector,
             limit=TOP_K,
             with_payload=True,
+            query_filter=query_filter,
         )
         filtered = [r for r in results if r.score >= SCORE_THRESHOLD]
         if not filtered:
@@ -156,11 +161,17 @@ async def dispatch_action(
                 query_vector = query_vector.numpy().tolist()
             query_vector = [float(x) for x in query_vector]
 
+            query_filter = Filter(
+                must_not=[
+                    FieldCondition(key="type", match=MatchValue(value="rfp_qa"))
+                ]
+            )
             results = qdrant_client.search(
                 collection_name=COLLECTION_NAME,
                 query_vector=query_vector,
                 limit=TOP_K,
                 with_payload=True,
+                query_filter=query_filter,
             )
             filtered = [r for r in results if r.score >= SCORE_THRESHOLD]
             if not filtered:
