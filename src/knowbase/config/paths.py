@@ -1,10 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterable
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SRC_DIR = PROJECT_ROOT / "src"
 CONFIG_DIR = SRC_DIR / "knowbase" / "config"
 COMMON_DIR = SRC_DIR / "knowbase" / "common"
@@ -34,3 +34,4 @@ def ensure_directories(paths: Iterable[Path] | None = None) -> None:
     ]
     for directory in targets:
         directory.mkdir(parents=True, exist_ok=True)
+
