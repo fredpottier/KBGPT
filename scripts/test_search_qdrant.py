@@ -24,7 +24,7 @@ def search_qdrant(question: str, solution: str, top_k: int = 5):
             limit=top_k,
             filter=search_filter,
         )
-        logger.info("Recherche Qdrant pour %s : %d résultats", question, len(results))
+        logger.info("Recherche Qdrant pour %s : %d resultats", question, len(results))
         return results
     except Exception as exc:
         logger.warning("Erreur Qdrant pour %s: %s", question, exc)
