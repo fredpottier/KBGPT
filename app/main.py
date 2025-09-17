@@ -63,9 +63,12 @@ app = FastAPI()
 router = APIRouter()
 
 OPENAPI_PATH = Path(__file__).parent / "openapi.json"
-with open(OPENAPI_PATH, "r", encoding="utf-8") as f:
-    custom_openapi_spec = json.load(f)
-app.openapi = lambda: custom_openapi_spec
+if OPENAPI_PATH.exists():
+    with open(OPENAPI_PATH, "r", encoding="utf-8") as f:
+        custom_openapi_spec = json.load(f)
+    app.openapi = lambda: custom_openapi_spec
+else:
+    logger.warning("Custom openapi.json introuvable, utilisation du schema par defaut.")
 
 app.mount("/static/slides", StaticFiles(directory=SLIDES_DIR), name="slides")
 app.mount(
@@ -482,3 +485,4 @@ def urlify_image_url(url_or_name: str) -> str:
 # ... définition des routes sur router ...
 
 app.include_router(router)
+
