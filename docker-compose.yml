@@ -37,7 +37,7 @@ services:
     env_file:
       - .env
     environment:
-      PYTHONPATH: /app:/scripts
+      PYTHONPATH: /app:/scripts:/app/src
       HF_HOME: /models
       REDIS_URL: redis://redis:6379/0
     ports:
@@ -52,6 +52,7 @@ services:
       - ./docs_in:/docs_in
       - ./docs_out:/docs_out
       - ./logs:/logs
+      - ./src:/app/src
     networks:
       - sapkb_net
     working_dir: /app
@@ -68,7 +69,7 @@ services:
     env_file:
       - .env
     environment:
-      PYTHONPATH: /app:/scripts
+      PYTHONPATH: /app:/scripts:/app/src
       HF_HOME: /models
       REDIS_URL: redis://redis:6379/0
     volumes:
@@ -80,6 +81,7 @@ services:
       - ./docs_in:/docs_in
       - ./docs_out:/docs_out
       - ./logs:/logs
+      - ./src:/app/src
     networks:
       - sapkb_net
     working_dir: /app
@@ -112,6 +114,7 @@ services:
     volumes:
       - ./ngrok.yml:/etc/ngrok.yml
       - ./logs:/logs
+      - ./src:/app/src
     env_file:
       - .env
     command: start --config /etc/ngrok.yml --all
