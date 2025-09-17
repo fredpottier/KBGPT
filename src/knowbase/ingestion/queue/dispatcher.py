@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Optional
 
-from rq import Job
+from rq.job import Job
 from rq.exceptions import NoSuchJobError
 
 from knowbase.config.settings import get_settings
@@ -104,5 +104,6 @@ __all__ = [
     "fetch_job",
     "get_queue",
 ]
+
 
 
