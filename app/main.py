@@ -2,7 +2,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -14,11 +13,20 @@ import debugpy
 from fastapi import APIRouter, FastAPI, File, Form, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from import_logging import setup_logging
-from openai import OpenAI
 from pydantic import BaseModel
-from qdrant_client import QdrantClient
 from qdrant_client.models import FieldCondition, Filter, MatchValue
-from sentence_transformers import SentenceTransformer
+from ingestion.job_queue import (
+    enqueue_excel_ingestion,
+    enqueue_fill_excel,
+    enqueue_pdf_ingestion,
+    enqueue_pptx_ingestion,
+    fetch_job,
+)
+from utils.shared_clients import (
+    get_openai_client,
+    get_qdrant_client,
+    get_sentence_transformer,
+)
 
 if os.getenv("DEBUG_MODE") == "true":
     print("🔧 Attaching debugpy on port 5678...")
@@ -46,13 +54,10 @@ SLIDES_DIR = PUBLIC_DIR / "slides"
 PPTX_DIR = PUBLIC_DIR / "presentations"
 GPT_MODEL = "gpt-4o"
 
-qdrant_client = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
 # MODEL_NAME = "sentence-transformers/paraphrase-xlm-r-multilingual-v1"
-MODEL_NAME = os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-base")
-model = SentenceTransformer(MODEL_NAME)
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+qdrant_client = get_qdrant_client()
+model = get_sentence_transformer()
+openai_client = get_openai_client()
 
 app = FastAPI()
 router = APIRouter()
@@ -261,57 +266,61 @@ async def dispatch_action(
             return {"error": "Missing 'file' or 'document_type' for action_type=ingest"}
 
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Normalise le nom du fichier
         safe_filename = normalize_filename(file.filename or "uploaded")
         base_name = Path(safe_filename).stem if safe_filename else "uploaded"
         uid = f"{base_name}__{now}"
 
         DOCS_IN.mkdir(parents=True, exist_ok=True)
 
-        # Détermination du script et extension selon le type de document
-        if document_type.lower() == "pptx":
-            saved_path = DOCS_IN / f"{uid}.pptx"
-            script_to_run = "/scripts/ingest_pptx_via_gpt.py"
-        elif document_type.lower() == "pdf":
-            saved_path = DOCS_IN / f"{uid}.pdf"
-            script_to_run = "/scripts/ingest_pdf_via_gpt.py"
-        elif document_type.lower() == "xlsx":
-            saved_path = DOCS_IN / f"{uid}.xlsx"
-            script_to_run = "/scripts/ingest_excel_via_gpt.py"
-        else:
+        document_kind = document_type.lower()
+        if document_kind not in {"pptx", "pdf", "xlsx"}:
             return {"error": f"Unsupported document_type: {document_type}"}
 
+        saved_path = DOCS_IN / f"{uid}.{document_kind}"
         with open(saved_path, "wb") as f_out:
             shutil.copyfileobj(file.file, f_out)
 
+        meta_dict: dict[str, Any] = {}
+        meta_path: Optional[Path] = None
         if meta:
             try:
-                meta_path = DOCS_IN / f"{uid}.meta.json"
-                with open(meta_path, "w", encoding="utf-8") as f_meta:
-                    json.dump(json.loads(meta), f_meta, indent=2)
+                meta_dict = json.loads(meta)
             except Exception as e:
                 return {"error": f"Invalid meta JSON: {e}"}
+            meta_path = DOCS_IN / f"{uid}.meta.json"
+            with open(meta_path, "w", encoding="utf-8") as f_meta:
+                json.dump(meta_dict, f_meta, indent=2)
 
         try:
-            subprocess.Popen(
-                ["python", script_to_run, str(saved_path)],
-                cwd="/scripts",
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            if document_kind == "pptx":
+                job = enqueue_pptx_ingestion(
+                    job_id=uid,
+                    file_path=str(saved_path),
+                    document_type=meta_dict.get("document_type", "default"),
+                    meta_path=str(meta_path) if meta_path else None,
+                )
+            elif document_kind == "pdf":
+                job = enqueue_pdf_ingestion(job_id=uid, file_path=str(saved_path))
+            else:
+                job = enqueue_excel_ingestion(
+                    job_id=uid,
+                    file_path=str(saved_path),
+                    meta=meta_dict or None,
+                )
         except Exception as e:
             return {
                 "action": "ingest",
                 "status": "error",
-                "error": f"Launch error: {e}",
+                "error": f"Queue error: {e}",
             }
 
         return {
             "action": "ingest",
-            "status": "processing",
+            "status": "queued",
+            "job_id": job.id,
             "uid": uid,
             "filename": file.filename,
-            "message": f"File received and ingestion launched in background for {document_type}.",
+            "message": f"File received and queued for {document_kind} ingestion.",
         }
 
     elif action_type == "fill_excel":
@@ -325,15 +334,12 @@ async def dispatch_action(
         saved_path = DOCS_IN / f"{uid}.xlsx"
         meta_path = DOCS_IN / f"{uid}.meta.json"
 
-        # Sauvegarde du fichier Excel
         with open(saved_path, "wb") as f_out:
             shutil.copyfileobj(file.file, f_out)
 
-        # Sauvegarde du fichier meta
         try:
             with open(meta_path, "w", encoding="utf-8") as f_meta:
                 meta_json = json.loads(meta) if meta else {}
-                # Contrôle du nom canonique de la solution
                 user_solution = meta_json.get("solution")
                 if user_solution:
                     canonical_name, solution_names = get_canonical_solution_name(
@@ -348,33 +354,29 @@ async def dispatch_action(
                             "status": "error",
                             "message": f"Aucune correspondance parfaite pour '{user_solution}'. Suggestions : {canonical_name}",
                         }
-                    # Remplace le nom de solution par le nom canonique
                     meta_json["solution"] = canonical_name
                 json.dump(meta_json, f_meta, indent=2)
         except Exception as e:
             return {"error": f"Invalid meta JSON: {e}"}
 
-        # Lancement du script fillEmptyExcel.py en arrière-plan
         try:
-            subprocess.Popen(
-                ["python", "fill_empty_excel.py", str(saved_path), str(meta_path)],
-                cwd="/scripts",
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+            job = enqueue_fill_excel(
+                job_id=uid, file_path=str(saved_path), meta_path=str(meta_path)
             )
         except Exception as e:
             return {
                 "action": "fill_excel",
                 "status": "error",
-                "error": f"Launch error: {e}",
+                "error": f"Queue error: {e}",
             }
 
         return {
             "action": "fill_excel",
-            "status": "processing",
+            "status": "queued",
+            "job_id": job.id,
             "uid": uid,
             "filename": file.filename,
-            "message": "Fichier reçu et traitement lancé en arrière-plan.",
+            "message": "Fichier recu et traitement place dans la file.",
         }
 
     else:
@@ -385,17 +387,34 @@ async def dispatch_action(
 
 @router.get("/status/{uid}")
 async def get_status(uid: str):
-    # Chemin du fichier traité
-    filled_path = DOCS_DONE / f"{uid}_filled.xlsx"
-    if filled_path.exists():
-        return {
-            "action": "fill_excel",
-            "status": "done",
-            "download_url": f"https://sapkb.ngrok.app/static/presentations/{uid}_filled.xlsx",
-        }
-    else:
-        # Optionnel : vérifier si une erreur a été loguée
-        return {"action": "fill_excel", "status": "processing"}
+    job = fetch_job(uid)
+    if job is None:
+        return {"action": "unknown", "status": "not_found"}
+
+    job_type = str(job.meta.get("job_type", "unknown"))
+    status = job.get_status(refresh=True)
+
+    if job.is_failed:
+        return {"action": job_type, "status": "error", "message": job.exc_info}
+
+    if job.is_finished:
+        result = job.result if isinstance(job.result, dict) else {}
+        response = {"action": job_type, "status": "done"}
+        output_path = result.get("output_path")
+        if output_path:
+            filename = os.path.basename(output_path)
+            response["download_url"] = f"https://sapkb.ngrok.app/static/presentations/{filename}"
+        if result:
+            response["result"] = result
+        return response
+
+    if status in {"started", "queued", "deferred"}:
+        return {"action": job_type, "status": "processing"}
+
+    return {"action": job_type, "status": status}
+
+
+
 
 
 def get_canonical_solution_name(

@@ -7,9 +7,12 @@ import uuid
 from datetime import datetime, timezone
 
 from langdetect import detect
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
-from sentence_transformers import SentenceTransformer
+from qdrant_client.models import Distance, PointStruct
+from utils.shared_clients import (
+    ensure_qdrant_collection,
+    get_qdrant_client,
+    get_sentence_transformer,
+)
 
 from utils.parsers import parse_document
 
@@ -17,29 +20,14 @@ from utils.parsers import parse_document
 COLLECTION_NAME = "sap_kb"
 DOCS_IN = Path(r"C:\SAP_KB\docs_in")
 DOCS_DONE = Path(r"C:\SAP_KB\docs_done")
-CACHE_MODELS = Path(r"C:\SAP_KB\models")     # HF_HOME déjà pointé ici, on redonde pour clarté
-MODEL_NAME = "intfloat/multilingual-e5-base" # ⚡️ meilleur FR↔EN que MiniLM
+CACHE_MODELS = Path(r"C:\SAP_KB\models")  # HF_HOME already points here; repeated for clarity
+MODEL_NAME = "intfloat/multilingual-e5-base"  # better FR/EN coverage than MiniLM
 
 # === INITIALISATION ===
-client = QdrantClient(host="localhost", port=6333)
-model = SentenceTransformer(MODEL_NAME, cache_folder=str(CACHE_MODELS))
-
+qdrant_client = get_qdrant_client()
+model = get_sentence_transformer(MODEL_NAME, cache_folder=str(CACHE_MODELS))
 EMB_SIZE = model.get_sentence_embedding_dimension()
-
-# === CRÉER/MAJ LA COLLECTION ===
-if not client.collection_exists(COLLECTION_NAME):
-    client.create_collection(
-        collection_name=COLLECTION_NAME,
-        vectors_config=VectorParams(size=EMB_SIZE, distance=Distance.COSINE),
-    )
-else:
-    # vérifie et avertit si la taille ne correspond pas
-    info = client.get_collection(COLLECTION_NAME)
-    try:
-        existing = info.vectors_count  # ping collection
-    except Exception:
-        pass
-    # (Optionnel) on pourrait vérifier la dim en allant lire les params via HTTP API si nécessaire.
+ensure_qdrant_collection(COLLECTION_NAME, EMB_SIZE, distance=Distance.COSINE)
 
 def _chunk_text(text: str, max_chars: int = 500, overlap: int = 120):
     text = text.strip()
@@ -65,7 +53,7 @@ def ingest_file(file_path: Path):
         if len(raw_text) < 20:
             continue
 
-        # chunking sémantique simple par longueur
+        # chunking semantique simple par longueur
         for chunk in _chunk_text(raw_text, max_chars=500, overlap=120):
             if len(chunk) < 20:
                 continue
@@ -88,39 +76,37 @@ def ingest_file(file_path: Path):
                 # merge meta parsers
                 meta.update(rec.get("meta", {}))
 
-                points.append(PointStruct(
-                    id=str(uuid.uuid4()),
-                    vector=emb,
-                    payload=meta
-                ))
+                points.append(
+                    PointStruct(id=str(uuid.uuid4()), vector=emb, payload=meta)
+                )
             except Exception as e:
-                print(f"⚠️ Chunk ignoré (encode): {e}")
+                print(f"[warn] Chunk ignore (encode): {e}")
 
     if points:
-        client.upsert(collection_name=COLLECTION_NAME, points=points)
-        print(f"📄 {file_path.name} → {len(points)} chunks")
+        qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
+        print(f"[info] {file_path.name} -> {len(points)} chunks")
     else:
-        print(f"ℹ️ Aucun chunk indexé pour {file_path.name}")
+        print(f"[info] Aucun chunk indexe pour {file_path.name}")
 
-    # Déplacement du fichier traité
+    # Deplacement du fichier traite
     destination = DOCS_DONE / file_path.name
     try:
         shutil.move(str(file_path), str(destination))
-        print(f"📦 Déplacé vers : {destination}")
+        print(f"[info] Deplace vers : {destination}")
     except Exception as e:
-        print(f"⚠️ Impossible de déplacer {file_path} → {e}")
+        print(f"[warn] Impossible de deplacer {file_path} -> {e}")
 
 def main():
     DOCS_DONE.mkdir(parents=True, exist_ok=True)
     if not DOCS_IN.exists():
-        print(f"❌ Dossier introuvable: {DOCS_IN}")
+        print(f"[error] Dossier introuvable: {DOCS_IN}")
         return
     for file in DOCS_IN.iterdir():
         if file.is_file() and file.suffix.lower() in [".pdf", ".pptx", ".docx", ".xlsx"]:
             try:
                 ingest_file(file)
             except Exception as e:
-                print(f"❌ Erreur sur {file.name} : {e}")
+                print(f"[error] Erreur sur {file.name} : {e}")
 
 if __name__ == "__main__":
     main()

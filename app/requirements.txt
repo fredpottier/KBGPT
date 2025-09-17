@@ -38,3 +38,5 @@ langdetect
 
 # === Debug ===
 debugpy
+redis>=5.0
+rq>=1.15

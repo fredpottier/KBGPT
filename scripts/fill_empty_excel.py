@@ -3,16 +3,17 @@ import os
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-import httpx
 import pandas as pd
-from openai import OpenAI
 from openai.types.chat import ChatCompletionUserMessageParam
 from openpyxl import load_workbook
-from qdrant_client import QdrantClient
 from qdrant_client.models import FieldCondition, Filter, MatchValue, ScoredPoint
-from sentence_transformers import SentenceTransformer
 
 from import_logging import setup_logging  # Ajout gestion des logs
+from utils.shared_clients import (
+    get_openai_client,
+    get_qdrant_client,
+    get_sentence_transformer,
+)
 
 # === CONFIGURATION ===
 ROOT = Path(__file__).parent.parent.resolve()
@@ -25,19 +26,12 @@ logger = setup_logging(LOGS_DIR, "fill_empty_excel_debug.log")
 EMB_MODEL_NAME = os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-base")
 GPT_MODEL = os.getenv("GPT_MODEL", "gpt-4o")
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "sap_kb")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 
 # Custom HTTP client to ignore system envs (e.g., proxies)
-class CustomHTTPClient(httpx.Client):
-    def __init__(self, *args, **kwargs):
-        kwargs.pop("proxies", None)
-        super().__init__(*args, **kwargs, trust_env=False)
-
-
-model = SentenceTransformer(EMB_MODEL_NAME)
-openai_client = OpenAI(api_key=OPENAI_API_KEY, http_client=CustomHTTPClient())
-client = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
+model = get_sentence_transformer(EMB_MODEL_NAME)
+openai_client = get_openai_client()
+qdrant_client = get_qdrant_client()
 
 
 def load_meta(meta_path: str | Path) -> dict[str, Any]:
@@ -58,7 +52,7 @@ def search_qdrant(
         ]
     )
     try:
-        results = client.search(
+        results = qdrant_client.search(
             collection_name=COLLECTION_NAME,
             query_vector=emb,
             limit=top_k,

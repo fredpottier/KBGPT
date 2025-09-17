@@ -13,15 +13,17 @@ from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 from utils.solution_normalizer import normalize_solution_name
 
-import httpx
-from openai import OpenAI
 from langdetect import detect, DetectorFactory, LangDetectException
 from pdf2image import convert_from_path
 from pptx import Presentation
 from PIL import Image
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
-from sentence_transformers import SentenceTransformer
+from qdrant_client.models import PointStruct
+from utils.shared_clients import (
+    ensure_qdrant_collection,
+    get_openai_client,
+    get_qdrant_client,
+    get_sentence_transformer,
+)
 
 from import_logging import setup_logging
 from prompt_registry import load_prompts, select_prompt, render_prompt
@@ -47,7 +49,6 @@ QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "sap_kb")
 GPT_MODEL = os.getenv("GPT_MODEL", "gpt-4o")
 EMB_MODEL_NAME = os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-base")
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "2"))
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 logger = setup_logging(LOGS_DIR, "ingest_debug.log")
 DetectorFactory.seed = 0
@@ -55,13 +56,6 @@ DetectorFactory.seed = 0
 PROMPT_REGISTRY = load_prompts(str(PROJECT_ROOT / "config" / "prompts.yaml"))
 
 # --- Fonctions utilitaires ---
-
-
-# Ignore les proxies système pour le client HTTP
-class CustomHTTPClient(httpx.Client):
-    def __init__(self, *args, **kwargs):
-        kwargs.pop("proxies", None)
-        super().__init__(*args, **kwargs, trust_env=False)
 
 
 # Crée les dossiers nécessaires au projet
@@ -167,18 +161,14 @@ PUBLIC_URL = normalize_public_url(os.getenv("PUBLIC_URL", "sapkb.ngrok.app"))
 SOFFICE_PATH = resolve_soffice_path()
 
 # --- Initialisation des clients et modèles ---
-client = OpenAI(api_key=OPENAI_API_KEY, http_client=CustomHTTPClient())
-qdrant = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
-model = SentenceTransformer(EMB_MODEL_NAME)
+openai_client = get_openai_client()
+qdrant_client = get_qdrant_client()
+model = get_sentence_transformer(EMB_MODEL_NAME)
 embedding_size = model.get_sentence_embedding_dimension()
 if embedding_size is None:
     raise RuntimeError("SentenceTransformer returned no embedding dimension")
 EMB_SIZE = int(embedding_size)
-if not qdrant.collection_exists(QDRANT_COLLECTION):
-    qdrant.create_collection(
-        collection_name=QDRANT_COLLECTION,
-        vectors_config=VectorParams(size=EMB_SIZE, distance=Distance.COSINE),
-    )
+ensure_qdrant_collection(QDRANT_COLLECTION, EMB_SIZE)
 
 MAX_TOKENS_THRESHOLD = 40000
 MAX_PARTIAL_TOKENS = 8000
@@ -289,7 +279,7 @@ def summarize_large_pptx(slides_data: List[Dict[str, Any]]) -> str:
             deck_template, summary_text=batch_text[:40000], source_name="partial"
         )
         try:
-            response = client.chat.completions.create(
+            response = openai_client.chat.completions.create(
                 model=GPT_MODEL,
                 messages=[
                     {
@@ -315,7 +305,7 @@ def summarize_large_pptx(slides_data: List[Dict[str, Any]]) -> str:
             source_name="global",
         )
         try:
-            response = client.chat.completions.create(
+            response = openai_client.chat.completions.create(
                 model=GPT_MODEL,
                 messages=[
                     {
@@ -349,7 +339,7 @@ def analyze_deck_summary(
         deck_template, summary_text=summary_text, source_name=source_name
     )
     try:
-        response = client.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model=GPT_MODEL,
             messages=[
                 {
@@ -452,7 +442,7 @@ def ask_gpt_slide_analysis(
     ]
     for attempt in range(retries):
         try:
-            resp = client.chat.completions.create(
+            resp = openai_client.chat.completions.create(
                 model=GPT_MODEL, messages=msg, temperature=0.2, max_tokens=1024
             )
             logger.debug(
@@ -531,7 +521,7 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
             "prompt_meta": ch.get("prompt_meta", {}),
         }
         points.append(PointStruct(id=str(uuid.uuid4()), vector=emb, payload=payload))
-    qdrant.upsert(collection_name=QDRANT_COLLECTION, points=points)
+    qdrant_client.upsert(collection_name=QDRANT_COLLECTION, points=points)
     logger.info(f"Slide {slide_index}: ingested {len(points)} chunks")
 
 

@@ -7,16 +7,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from import_logging import setup_logging
 
-from openai import OpenAI
 from openai.types.chat import (
     ChatCompletionMessageParam,
     ChatCompletionSystemMessageParam,
     ChatCompletionUserMessageParam,
 )
 from pdf2image import convert_from_path
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
-from sentence_transformers import SentenceTransformer
+from qdrant_client.models import PointStruct
+from utils.shared_clients import (
+    ensure_qdrant_collection,
+    get_openai_client,
+    get_qdrant_client,
+    get_sentence_transformer,
+)
 
 
 # =========================
@@ -80,36 +83,11 @@ banner_paths()
 # ===================
 # Clients & Models
 # ===================
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-try:
-    qdrant = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
-    logger.info("✅ Qdrant client initialized")
-except Exception as e:
-    logger.error(f"❌ Qdrant init failed: {e}")
-    raise
-
-try:
-    model = SentenceTransformer(MODEL_NAME)
-    EMB_SIZE = model.get_sentence_embedding_dimension() or 768
-    logger.info(f"✅ Embedding model loaded: {MODEL_NAME} (dim={EMB_SIZE})")
-except Exception as e:
-    logger.error(f"❌ Embedding model load failed: {e}")
-    raise
-
-try:
-    if not qdrant.collection_exists(COLLECTION_NAME):
-        qdrant.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=int(EMB_SIZE), distance=Distance.COSINE),
-        )
-        logger.info(f"✅ Collection '{COLLECTION_NAME}' created")
-    else:
-        logger.info(f"ℹ️ Collection '{COLLECTION_NAME}' already exists")
-except Exception as e:
-    logger.error(f"❌ Qdrant collection check/create failed: {e}")
-    raise
-
+openai_client = get_openai_client()
+qdrant_client = get_qdrant_client()
+model = get_sentence_transformer(MODEL_NAME)
+EMB_SIZE = model.get_sentence_embedding_dimension() or 768
+ensure_qdrant_collection(COLLECTION_NAME, int(EMB_SIZE))
 
 # ==============
 # Utilities
@@ -173,7 +151,7 @@ def analyze_pdf_metadata(pdf_text: str, source_name: str) -> dict:
             ),
         }
         messages: list[ChatCompletionMessageParam] = [system_message, user_message]
-        response = client.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model=GPT_MODEL,
             messages=messages,
             temperature=0.2,
@@ -224,7 +202,7 @@ def ask_gpt_slide_analysis(
             "content": "You are an expert assistant that analyzes PDF pages.",
         }
         messages: list[ChatCompletionMessageParam] = [system_message, prompt]
-        response = client.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model=GPT_MODEL,
             messages=messages,
             temperature=0.3,
@@ -272,7 +250,7 @@ def ingest_chunks(chunks, doc_metadata, file_uid, page_index):
 
     if points:
         try:
-            qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
+            qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
             logger.info(f"✅ Page {page_index}: {len(points)} chunk(s) ingérés")
         except Exception as e:
             logger.error(f"❌ Qdrant upsert failed (page {page_index}): {e}")

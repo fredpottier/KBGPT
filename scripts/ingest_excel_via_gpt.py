@@ -9,19 +9,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import httpx
 import openpyxl
 import pandas as pd
 from langdetect import detect
-from openai import OpenAI
 from openai.types.chat import (
     ChatCompletionMessageParam,
     ChatCompletionSystemMessageParam,
     ChatCompletionUserMessageParam,
 )
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
-from sentence_transformers import SentenceTransformer
+from qdrant_client.models import PointStruct
+from utils.shared_clients import (
+    ensure_qdrant_collection,
+    get_openai_client,
+    get_qdrant_client,
+    get_sentence_transformer,
+)
 
 from import_logging import setup_logging
 
@@ -30,8 +32,6 @@ ROOT = Path(__file__).parent.parent.resolve()
 DOCS_IN = ROOT / "docs_in"
 DOCS_DONE = ROOT / "docs_done"
 LOGS_DIR = ROOT / "logs"
-CACHE_MODELS = ROOT / "models"
-os.environ["HF_HOME"] = str(CACHE_MODELS)
 logger = setup_logging(LOGS_DIR, "ingest_excel_enriched.log")
 
 # Modèle d'embedding : utilise la même logique que ingest_pptx_via_gpt.py
@@ -41,26 +41,14 @@ GPT_MODEL_ENRICH = "gpt-4o"
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "sap_kb")
 
 
-# Custom HTTP client (optionnel, comme dans ingest_pptx_via_gpt.py)
-class CustomHTTPClient(httpx.Client):
-    def __init__(self, *args, **kwargs):
-        kwargs.pop("proxies", None)
-        super().__init__(*args, **kwargs, trust_env=False)
-
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_API_KEY, http_client=CustomHTTPClient())
-qdrant = QdrantClient(url=os.getenv("QDRANT_URL", "http://qdrant:6333"))
-model = SentenceTransformer(EMB_MODEL_NAME, device="cpu")
+openai_client = get_openai_client()
+qdrant_client = get_qdrant_client()
+model = get_sentence_transformer(EMB_MODEL_NAME, device="cpu")
 embedding_size = model.get_sentence_embedding_dimension()
 if embedding_size is None:
     raise RuntimeError("SentenceTransformer returned no embedding dimension")
 EMB_SIZE = int(embedding_size)
-if not qdrant.collection_exists(COLLECTION_NAME):
-    qdrant.create_collection(
-        collection_name=COLLECTION_NAME,
-        vectors_config=VectorParams(size=EMB_SIZE, distance=Distance.COSINE),
-    )
+ensure_qdrant_collection(COLLECTION_NAME, EMB_SIZE)
 
 # === UTILITAIRES ===
 
@@ -76,7 +64,7 @@ def standardize_solution_name(raw_solution: str) -> str:
             "content": f"Here is a solution name or abbreviation: {raw_solution}\nWhat is the official SAP product name? Only reply with the name itself.",
         }
         messages: list[ChatCompletionMessageParam] = [system_message, user_message]
-        response = client.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model=GPT_MODEL_CANONICALIZE,
             messages=messages,
             temperature=0,
@@ -140,7 +128,7 @@ Original Answer:
             "content": prompt,
         }
         enrich_messages: list[ChatCompletionMessageParam] = [enrich_message]
-        response = client.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model=GPT_MODEL_ENRICH,
             messages=enrich_messages,
             temperature=0.3,
@@ -202,7 +190,7 @@ Original Answer:
             emb = model.encode([f"passage: Q: {q}\nA: {a}"], normalize_embeddings=True)[
                 0
             ].tolist()
-            qdrant.upsert(
+            qdrant_client.upsert(
                 collection_name=COLLECTION_NAME,
                 points=[PointStruct(id=str(uuid.uuid4()), vector=emb, payload=payload)],
             )
@@ -243,7 +231,7 @@ Instruction:
         reformulate_messages: list[ChatCompletionMessageParam] = [
             reformulate_message
         ]
-        response = client.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model=GPT_MODEL_CANONICALIZE,
             messages=reformulate_messages,
             temperature=0,

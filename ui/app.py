@@ -1,28 +1,29 @@
 import streamlit as st
 import pandas as pd
-from qdrant_client import QdrantClient
 from pathlib import Path
 import os
-from sentence_transformers import SentenceTransformer
+from utils.shared_clients import (
+    get_qdrant_client,
+    get_sentence_transformer,
+)
 
 # === CONFIGURATION ===
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 COLLECTION_NAME = "sap_kb"
 STATUS_PATH = Path("C:/SAP_KB/status")
 
 # === CONNEXION QDRANT ===
-client = QdrantClient(url=QDRANT_URL)
+qdrant_client = get_qdrant_client()
 
 # Ajoute le modèle d'embedding
 # MODEL_NAME = "sentence-transformers/paraphrase-xlm-r-multilingual-v1"
 MODEL_NAME = os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-base")
-model = SentenceTransformer(MODEL_NAME)
+model = get_sentence_transformer(MODEL_NAME)
 
 
 # === FONCTIONS ===
 def fetch_all_chunks():
     """Récupère tous les points de la collection avec leur payload."""
-    scroll = client.scroll(
+    scroll = qdrant_client.scroll(
         collection_name=COLLECTION_NAME, with_payload=True, limit=10000
     )
     payloads = [point.payload for point in scroll[0] if point.payload]
@@ -143,7 +144,7 @@ if user_question:
         0
     ].tolist()
     # Recherche dans Qdrant
-    results = client.search(
+    results = qdrant_client.search(
         collection_name=COLLECTION_NAME,
         query_vector=emb,
         limit=5,
