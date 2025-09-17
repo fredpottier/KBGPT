@@ -1,22 +1,21 @@
-from sentence_transformers import SentenceTransformer
-from qdrant_client import QdrantClient
-from import_logging import setup_logging
 from pathlib import Path
 
+from knowbase.common.clients import get_qdrant_client, get_sentence_transformer
+from knowbase.common.logging import setup_logging
+from knowbase.config.settings import get_settings
+
 # Configuration
-MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-COLLECTION_NAME = "sap_kb"
+settings = get_settings()
+COLLECTION_NAME = settings.qdrant_collection
 ROOT = Path(__file__).parent.parent.resolve()
 LOGS_DIR = ROOT / "logs"
 logger = setup_logging(LOGS_DIR, "test_search_qdrant.log")
-client = QdrantClient(host="localhost", port=6333)
-model = SentenceTransformer(MODEL_NAME)
+client = get_qdrant_client()
+model = get_sentence_transformer()
 
 
-def search_qdrant(question, solution, top_k=5):
-    emb = model.encode([f"passage: Q: {question}"], normalize_embeddings=True)[
-        0
-    ].tolist()
+def search_qdrant(question: str, solution: str, top_k: int = 5):
+    emb = model.encode([f"passage: Q: {question}"], normalize_embeddings=True)[0].tolist()
     search_filter = {"must": [{"key": "main_solution", "match": {"value": solution}}]}
     try:
         results = client.search(
@@ -25,10 +24,10 @@ def search_qdrant(question, solution, top_k=5):
             limit=top_k,
             filter=search_filter,
         )
-        logger.info(f"Recherche Qdrant pour '{question}' : {len(results)} rÃ©sultats")
+        logger.info("Recherche Qdrant pour %s : %d résultats", question, len(results))
         return results
-    except Exception as e:
-        logger.warning(f"Erreur Qdrant pour '{question}': {e}")
+    except Exception as exc:
+        logger.warning("Erreur Qdrant pour %s: %s", question, exc)
         return []
 
 
