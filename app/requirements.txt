@@ -40,3 +40,4 @@ langdetect
 debugpy
 redis>=5.0
 rq>=1.15
+pydantic-settings
