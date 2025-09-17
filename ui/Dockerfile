@@ -1,22 +1,17 @@
-FROM python:3.11-slim
+﻿FROM python:3.11-slim
 
-# Installer dépendances système minimales
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Définir le dossier de travail
 WORKDIR /app
 
-# Installer les dépendances
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copier tout le code de l’UI
 COPY . /app
 
-# Exposer le port Streamlit
+ENV PYTHONPATH="/app/src:$PYTHONPATH"
 EXPOSE 8501
 
-# Commande de lancement
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "src/knowbase/ui/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]

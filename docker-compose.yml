@@ -98,10 +98,17 @@ services:
       - .env
     environment:
       BACKEND_URL: ${BACKEND_URL}
+      PYTHONPATH: /app/src:$PYTHONPATH
     ports:
       - "${APP_UI_PORT}:8501"
     volumes:
       - ./ui:/app
+      - ./src:/app/src
+      - ./docs_in:/docs_in
+      - ./docs_out:/docs_out
+      - ./public_files:/public_files
+      - ./logs:/logs
+      - ./status:/status
     networks:
       - sapkb_net
 
