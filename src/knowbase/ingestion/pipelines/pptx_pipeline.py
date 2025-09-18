@@ -180,22 +180,53 @@ MAX_SUMMARY_TOKENS = 60000
 def convert_pptx_to_pdf(pptx_path: Path, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"📄 Conversion PPTX→PDF: {pptx_path.name}")
-    ok = run_cmd(
-        [
-            SOFFICE_PATH,
-            "--headless",
-            "--convert-to",
-            "pdf",
-            "--outdir",
-            str(output_dir),
-            str(pptx_path),
-        ],
-        timeout=600,
-    )
+
+    # Configuration environnement pour LibreOffice headless
+    env = os.environ.copy()
+    env.update({
+        'HOME': '/tmp',
+        'DISPLAY': '',
+        'SAL_USE_VCLPLUGIN': 'svp',
+    })
+
+    # Commande de conversion avec retry
+    command = [
+        SOFFICE_PATH,
+        "--headless",
+        "--invisible",
+        "--nodefault",
+        "--nolockcheck",
+        "--nologo",
+        "--norestore",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(output_dir),
+        str(pptx_path),
+    ]
+
+    logger.debug(f"🔧 Commande LibreOffice: {' '.join(command)}")
+
+    # Tentative de conversion avec environnement amélioré
+    ok = run_cmd(command, timeout=600, env=env)
+
     pdf_path = output_dir / (pptx_path.stem + ".pdf")
+
     if not ok or not pdf_path.exists():
+        # Log détaillé pour debugging
+        logger.error(f"❌ Échec conversion PPTX→PDF:")
+        logger.error(f"   - Fichier source: {pptx_path} (existe: {pptx_path.exists()})")
+        logger.error(f"   - Répertoire sortie: {output_dir} (existe: {output_dir.exists()})")
+        logger.error(f"   - PDF attendu: {pdf_path} (existe: {pdf_path.exists()})")
+        logger.error(f"   - SOFFICE_PATH: {SOFFICE_PATH}")
+
+        # Test direct du binaire
+        test_ok = run_cmd([SOFFICE_PATH, "--version"], timeout=10, env=env)
+        logger.error(f"   - Test binaire LibreOffice: {'OK' if test_ok else 'FAIL'}")
+
         raise RuntimeError("LibreOffice conversion failed or PDF missing")
-    logger.debug(f"PDF path: {pdf_path} (exists={pdf_path.exists()})")
+
+    logger.debug(f"✅ PDF path: {pdf_path} (exists={pdf_path.exists()})")
     return pdf_path
 
 

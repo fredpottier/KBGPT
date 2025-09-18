@@ -1,7 +1,9 @@
 ﻿from __future__ import annotations
 
 import logging
+import os
 
+import debugpy
 from rq import Worker
 
 from knowbase.common.clients import (
@@ -21,6 +23,12 @@ def warm_clients() -> None:
 
 
 def run_worker(*, queue_name: str | None = None, with_scheduler: bool = True) -> None:
+    if os.getenv("DEBUG_WORKER") == "true":
+        print("🐛 Attaching debugpy to worker on port 5679...")
+        debugpy.listen(("0.0.0.0", 5679))
+        debugpy.wait_for_client()
+        print("🐛 Worker debugger attached!")
+
     warm_clients()
     queue = get_queue(queue_name)
     worker = Worker([queue.name], connection=get_redis_connection())
