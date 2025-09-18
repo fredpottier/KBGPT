@@ -1,12 +1,7 @@
-from qdrant_client import QdrantClient
+"""Compatibility wrapper for the purge_collection CLI."""
 
-# Configuration
-client = QdrantClient(host="localhost", port=6333)
-collection_name = "sap_kb"  # ⚠️ adapte le nom si tu en utilises un autre
+from knowbase.ingestion.cli.purge_collection import main
 
-# Suppression
-if client.collection_exists(collection_name):
-    client.delete_collection(collection_name)
-    print(f"✅ Collection '{collection_name}' supprimée.")
-else:
-    print(f"ℹ️ Collection '{collection_name}' introuvable.")
+
+if __name__ == "__main__":
+    main()

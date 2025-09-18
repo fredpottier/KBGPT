@@ -22,7 +22,10 @@ SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, struct
 
 - **app/** : Contient les composants backend, y compris FastAPI.
 - **ui/** : Gère l'interface utilisateur avec Streamlit.
-- **scripts/** : Contient les scripts pour l'ingestion et la purge de données.
+- **src/knowbase/ingestion/cli/** : regroupe les utilitaires CLI (purge, tests,
+  maintenance) utilisés pendant l'ingestion.
+- **scripts/** : contient désormais uniquement des wrappers de compatibilité qui
+  redirigent vers les nouvelles commandes CLI.
 - **models/** : Emplacement des modèles de Hugging Face téléchargés.
 - **data/** : Dossier utilisé pour le stockage de documents et logs.
 - **docs_done/** & **docs_in/** : Répertoires pour gérer les documents traités et en attente.
@@ -46,10 +49,15 @@ SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, struct
 
 ## Scripts Disponibles
 
-- **`scripts/ingest_documents.py`** : Script pour ingérer des documents SAP dans Qdrant.
-- **`scripts/ingest_excel_via_gpt.py`** : Ingestion de fichiers Excel avec GPT.
-- **`scripts/ingest_pptx_via_gpt.py`** : Ingestion de présentations PPTX avec GPT.
-- **`scripts/purge_Collection.py`** : Purge des données de la collection.
+Les utilitaires historiques restent accessibles via le dossier `scripts/`, mais
+les implémentations principales se trouvent désormais dans
+`src/knowbase/ingestion/cli/`.  Chaque outil peut être exécuté directement via
+les wrappers existants ou via le module Python correspondant, par exemple :
+
+```bash
+python scripts/generate_thumbnails.py
+python -m knowbase.ingestion.cli.purge_collection --yes
+```
 
 ## Gestion des prompts LLM paramétrables
 
