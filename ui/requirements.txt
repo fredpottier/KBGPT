@@ -4,3 +4,5 @@ requests
 qdrant-client==1.15.1
 python-dotenv
 sentence-transformers
+openai==1.55.3
+pydantic-settings

@@ -1,0 +1,183 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SAP KB Search Tool",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://sapkb.ngrok.app"
+    }
+  ],
+  "paths": {
+    "/search": {
+      "post": {
+        "summary": "Recherche dans la base Qdrant",
+        "operationId": "search_qdrant",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "description": "Question a poser a la base de connaissance"
+                  },
+                  "language": {
+                    "type": "string",
+                    "description": "Langue (optionnel)"
+                  },
+                  "mime": {
+                    "type": "string",
+                    "description": "Type MIME (optionnel)"
+                  }
+                },
+                "required": [
+                  "question"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultat de la recherche",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "answer_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dispatch": {
+      "post": {
+        "summary": "Dispatch user intent to either search or ingestion",
+        "operationId": "dispatch_action",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action_type": {
+                    "type": "string",
+                    "enum": [
+                      "search",
+                      "ingest",
+                      "fill_excel"
+                    ],
+                    "description": "Action to perform"
+                  },
+                  "question": {
+                    "type": "string",
+                    "description": "Question to ask the knowledge base (if action_type = search)"
+                  },
+                  "document_type": {
+                    "type": "string",
+                    "description": "Type of document to ingest (pptx, pdf, excel)"
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Document to ingest"
+                  },
+                  "meta": {
+                    "type": "string",
+                    "description": "Optional metadata as stringified JSON"
+                  }
+                },
+                "required": [
+                  "action_type"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result of the dispatched action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "answer_markdown": {
+                      "type": "string"
+                    },
+                    "log": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/status/{uid}": {
+      "get": {
+        "summary": "Get status of a processed file",
+        "operationId": "get_status",
+        "parameters": [
+          {
+            "name": "uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Unique identifier of the processed file"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status of the file processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "download_url": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
