@@ -25,14 +25,16 @@ RUN pip config set global.disable-pip-version-check true \
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
+COPY app/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade --retries 5 --timeout 60 -r /app/requirements.txt
 
 RUN pip freeze
 
-COPY . /app
+COPY app/ /app/
+RUN mkdir -p /app/config
 
-ENV HF_HOME=/models
+ENV HF_HOME=/data/models
+ENV KNOWBASE_DATA_DIR=/data
 ENV PYTHONPATH="/app:$PYTHONPATH"
 
 EXPOSE 8000

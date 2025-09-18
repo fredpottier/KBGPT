@@ -29,7 +29,16 @@ DOCS_IN/
 models/
 public_files/
 status/
-data/
+data/**
+app/docs_in/
+app/docs_done/
+app/models/
+app/status/
+src/docs_in/
+src/docs_done/
+src/models/
+src/status/
+!data/**/.gitkeep
 *.pdf
 *.png
 *.jpg
@@ -37,6 +46,8 @@ data/
 *.pptx
 *.csv
 *.json
+# Keep openapi.json under src/knowbase/api
+!src/knowbase/api/openapi.json
 
 # Qdrant local data (if any)
 qdrant_data/
