@@ -46,6 +46,8 @@ src/status/
 *.pptx
 *.csv
 *.json
+# Keep openapi.json under src/knowbase/api
+!src/knowbase/api/openapi.json
 
 # Qdrant local data (if any)
 qdrant_data/
