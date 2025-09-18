@@ -75,7 +75,7 @@ services:
     networks:
       - knowbase_net
     working_dir: /app
-    command: python -m knowbase.ingestion.queue.worker
+    command: python -m knowbase.ingestion.queue
 
   ui:
     build:
