@@ -25,11 +25,11 @@ python-pptx
 pillow
 pdf2image==1.17.0
 # (optionnel si tu veux OCR via Python)
- pytesseract
- pdfminer.six
- pypdf
- unstructured
- layoutparser
+pytesseract
+pdfminer.six
+pypdf
+unstructured
+layoutparser
 pyyaml
 jinja2
 

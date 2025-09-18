@@ -59,7 +59,7 @@ ensure_dirs()
 COLLECTION_NAME = settings.qdrant_collection
 GPT_MODEL = settings.gpt_model
 MODEL_NAME = os.getenv("PDF_EMB_MODEL", settings.embeddings_model)
-PUBLIC_URL = os.getenv("PUBLIC_URL", "sapkb.ngrok.app")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "knowbase.ngrok.app")
 
 
 # ====================
