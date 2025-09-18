@@ -26,11 +26,6 @@ SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, struct
   maintenance) utilisés pendant l'ingestion.
 - **scripts/** : contient désormais uniquement des wrappers de compatibilité qui
   redirigent vers les nouvelles commandes CLI.
-- **data/** : Dossier racine pour toutes les données runtime. Il contient
-  notamment `docs_in/`, `docs_done/`, `logs/`, `models/`, `status/` ainsi que les
-  ressources publiques (`public/`).
-- 🔁 Des liens symboliques sont automatiquement créés vers les anciens chemins
-  (`docs_in/`, `docs_done/`, `logs/`, etc.) pour assurer une transition douce.
 - **openapi.json** : Description de l'API.
 
 ## Lancement du Projet
