@@ -117,7 +117,13 @@ def _ensure_legacy_redirect(legacy: Path, new_target: Path) -> None:
     try:
         legacy.parent.mkdir(parents=True, exist_ok=True)
         try:
-            legacy.symlink_to(new_target, target_is_directory=True)
+            # Use relative path for Docker compatibility
+            if str(new_target).startswith(str(DATA_DIR)):
+                # For paths under DATA_DIR, create relative symlinks from legacy location
+                relative_target = os.path.relpath(new_target, legacy.parent)
+                legacy.symlink_to(relative_target, target_is_directory=True)
+            else:
+                legacy.symlink_to(new_target, target_is_directory=True)
         except OSError as exc:
             if os.name == "nt":  # pragma: no cover - Windows fallback
                 try:
@@ -177,6 +183,8 @@ def ensure_directories(paths: Iterable[Path] | None = None) -> None:
     for directory in targets:
         directory.mkdir(parents=True, exist_ok=True)
 
-    for legacy_path, new_path in LEGACY_DIRECTORIES.items():
-        _ensure_legacy_redirect(legacy_path, new_path)
+    # Skip legacy migration in Docker environment
+    if not os.getenv("KNOWBASE_DATA_DIR"):
+        for legacy_path, new_path in LEGACY_DIRECTORIES.items():
+            _ensure_legacy_redirect(legacy_path, new_path)
 

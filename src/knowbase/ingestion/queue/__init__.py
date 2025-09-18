@@ -11,8 +11,6 @@ from .dispatcher import (
     enqueue_fill_excel,
     fetch_job,
 )
-from .worker import run_worker, main as worker_main
-
 __all__ = [
     "DEFAULT_JOB_TIMEOUT",
     "DEFAULT_QUEUE_NAME",
@@ -23,6 +21,4 @@ __all__ = [
     "enqueue_excel_ingestion",
     "enqueue_fill_excel",
     "fetch_job",
-    "run_worker",
-    "worker_main",
 ]
