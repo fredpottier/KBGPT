@@ -26,9 +26,6 @@ SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, struct
   maintenance) utilisés pendant l'ingestion.
 - **scripts/** : contient désormais uniquement des wrappers de compatibilité qui
   redirigent vers les nouvelles commandes CLI.
-- **models/** : Emplacement des modèles de Hugging Face téléchargés.
-- **data/** : Dossier utilisé pour le stockage de documents et logs.
-- **docs_done/** & **docs_in/** : Répertoires pour gérer les documents traités et en attente.
 - **openapi.json** : Description de l'API.
 
 ## Lancement du Projet
