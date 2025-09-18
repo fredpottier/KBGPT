@@ -71,9 +71,9 @@ def ensure_dirs():
 
 
 # Exécute une commande système avec timeout
-def run_cmd(cmd, timeout=120):
+def run_cmd(cmd, timeout=120, env=None):
     try:
-        subprocess.run(cmd, check=True, timeout=timeout)
+        subprocess.run(cmd, check=True, timeout=timeout, env=env)
         return True
     except Exception as e:
         logger.error(f"Command failed ({e}): {' '.join(cmd)}")

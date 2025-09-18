@@ -8,7 +8,7 @@ import yaml
 
 from knowbase.config.paths import PROJECT_ROOT
 
-DEFAULT_PROMPTS_PATH = PROJECT_ROOT / "configs" / "prompts.yaml"
+DEFAULT_PROMPTS_PATH = PROJECT_ROOT / "config" / "prompts.yaml"
 
 
 def load_prompts(path: Path | None = None) -> dict[str, Any]:
