@@ -22,15 +22,6 @@ SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, struct
 
 - **app/** : Contient les composants backend, y compris FastAPI.
 - **ui/** : Gère l'interface utilisateur avec Streamlit.
-- **src/knowbase/ingestion/cli/** : regroupe les utilitaires CLI (purge, tests,
-  maintenance) utilisés pendant l'ingestion.
-- **scripts/** : contient désormais uniquement des wrappers de compatibilité qui
-  redirigent vers les nouvelles commandes CLI.
-- **data/** : Dossier racine pour toutes les données runtime. Il contient
-  notamment `docs_in/`, `docs_done/`, `logs/`, `models/`, `status/` ainsi que les
-  ressources publiques (`public/`).
-- 🔁 Des liens symboliques sont automatiquement créés vers les anciens chemins
-  (`docs_in/`, `docs_done/`, `logs/`, etc.) pour assurer une transition douce.
 - **openapi.json** : Description de l'API.
 
 ## Lancement du Projet
@@ -49,36 +40,7 @@ SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, struct
    - **UI Streamlit** : Disponible à `http://localhost:8501`.
    - **URL Public ngrok** : Vérifiez les logs de ngrok pour l'URL attribuée.
 
-## Scripts Disponibles
 
-Les utilitaires historiques restent accessibles via le dossier `scripts/`, mais
-les implémentations principales se trouvent désormais dans
-`src/knowbase/ingestion/cli/`.  Chaque outil peut être exécuté directement via
-les wrappers existants ou via le module Python correspondant, par exemple :
-
-```bash
-python scripts/generate_thumbnails.py
-python -m knowbase.ingestion.cli.purge_collection --yes
-```
-
-## Tests
-
-Une base de tests `pytest` est fournie pour sécuriser les refactorings
-successifs. Après avoir installé les dépendances de développement :
-
-```bash
-pip install -r requirements.txt
-pytest
-```
-
-Les tests configurent automatiquement `KNOWBASE_DATA_DIR` vers un dossier
-temporaire ; l’exécution de `pytest` ne modifie donc pas vos données locales.
-Vous pouvez lancer un fichier ou un répertoire spécifique, par exemple :
-
-```bash
-pytest tests/config/test_paths.py
-pytest tests/ingestion -k thumbnail
-```
 
 ## Gestion des prompts LLM paramétrables
 
