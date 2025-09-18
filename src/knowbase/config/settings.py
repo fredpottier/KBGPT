@@ -27,7 +27,24 @@ class Settings(BaseSettings):
     """Configuration centralisee du projet Knowbase."""
 
     debug_mode: bool = Field(default=False, alias="DEBUG_MODE")
+
+    # === Modèles IA spécialisés ===
+    # Modèle par défaut (rétrocompatibilité)
     gpt_model: str = Field(default="gpt-4o", alias="GPT_MODEL")
+
+    # Modèles OpenAI spécialisés
+    model_vision: str = Field(default="gpt-4o", alias="MODEL_VISION")
+    model_metadata: str = Field(default="gpt-4o", alias="MODEL_METADATA")
+    model_fast: str = Field(default="gpt-4o-mini", alias="MODEL_FAST")
+
+    # Modèles Anthropic
+    model_long_text: str = Field(default="claude-3-5-sonnet-20241022", alias="MODEL_LONG_TEXT")
+    model_enrichment: str = Field(default="claude-3-5-haiku-20241022", alias="MODEL_ENRICHMENT")
+
+    # Configuration clients
+    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
+    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
+
     embeddings_model: str = Field(
         default="intfloat/multilingual-e5-base", alias="EMB_MODEL_NAME"
     )
@@ -35,7 +52,6 @@ class Settings(BaseSettings):
     qdrant_api_key: Optional[str] = Field(default=None, alias="QDRANT_API_KEY")
     qdrant_collection: str = Field(default="knowbase", alias="QDRANT_COLLECTION")
     hf_home: Path = Field(default=MODELS_DIR, alias="HF_HOME")
-    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
 
     data_dir: Path = Field(default=DATA_DIR, alias="DATA_DIR")
     docs_in_dir: Path = Field(default=DOCS_IN_DIR)

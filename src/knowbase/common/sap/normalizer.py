@@ -10,6 +10,14 @@ from rapidfuzz import fuzz, process
 from .solutions_dict import SAP_SOLUTIONS
 
 
+def _normalize_for_matching(text: str) -> str:
+    """
+    Normalise un texte pour le fuzzy matching en préservant
+    les caractères spéciaux importants comme les chiffres et "/".
+    """
+    return text.lower().strip()
+
+
 def normalize_solution_name(raw_name: str, threshold: int = 80) -> Tuple[str, str]:
     """
     Normalise un nom de solution trouve dans un document en le mappant
@@ -28,7 +36,12 @@ def normalize_solution_name(raw_name: str, threshold: int = 80) -> Tuple[str, st
     if not raw_name:
         return "UNMAPPED", ""
 
+    # Normaliser l'input pour le matching
+    normalized_raw = _normalize_for_matching(raw_name)
+
     candidates: dict[str, str] = {}
+    normalized_candidates: dict[str, str] = {}
+
     for sol_id, sol in SAP_SOLUTIONS.items():
         # On prend en compte le canonical_name et tous les alias
         candidate_names: list[str] = []
@@ -47,17 +60,22 @@ def normalize_solution_name(raw_name: str, threshold: int = 80) -> Tuple[str, st
 
         for name in candidate_names:
             candidates[name] = sol_id
+            # Créer une version normalisée pour le matching
+            normalized_name = _normalize_for_matching(name)
+            normalized_candidates[normalized_name] = name
 
-    # Recherche du meilleur match
+    # Recherche du meilleur match sur les versions normalisées
     best_match_tuple = process.extractOne(
-        raw_name, candidates.keys(), scorer=fuzz.token_sort_ratio
+        normalized_raw, normalized_candidates.keys(), scorer=fuzz.token_sort_ratio
     )
     if not best_match_tuple:
         return "UNMAPPED", raw_name
-    best_match, score, _ = best_match_tuple
+    best_normalized_match, score, _ = best_match_tuple
 
     if score >= threshold:
-        sol_id = candidates[best_match]
+        # Retrouver le nom original depuis la version normalisée
+        original_match = normalized_candidates[best_normalized_match]
+        sol_id = candidates[original_match]
         return sol_id, SAP_SOLUTIONS[sol_id]["canonical_name"]
 
     return "UNMAPPED", raw_name

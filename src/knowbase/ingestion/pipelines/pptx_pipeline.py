@@ -20,10 +20,10 @@ from PIL import Image
 from qdrant_client.models import PointStruct
 from knowbase.common.clients import (
     ensure_qdrant_collection,
-    get_openai_client,
     get_qdrant_client,
     get_sentence_transformer,
 )
+from knowbase.common.llm_router import LLMRouter, TaskType
 
 from knowbase.common.logging import setup_logging
 from knowbase.config.prompts_loader import load_prompts, select_prompt, render_prompt
@@ -159,7 +159,7 @@ PUBLIC_URL = normalize_public_url(os.getenv("PUBLIC_URL", "knowbase.ngrok.app"))
 SOFFICE_PATH = resolve_soffice_path()
 
 # --- Initialisation des clients et modèles ---
-openai_client = get_openai_client()
+llm_router = LLMRouter()
 qdrant_client = get_qdrant_client()
 model = get_sentence_transformer(EMB_MODEL_NAME)
 embedding_size = model.get_sentence_embedding_dimension()
@@ -308,19 +308,14 @@ def summarize_large_pptx(slides_data: List[Dict[str, Any]]) -> str:
             deck_template, summary_text=batch_text[:40000], source_name="partial"
         )
         try:
-            response = openai_client.chat.completions.create(
-                model=GPT_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a precise summarization assistant.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                max_tokens=MAX_PARTIAL_TOKENS,
-            )
-            raw = getattr(response.choices[0].message, "content", "") or ""
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a precise summarization assistant.",
+                },
+                {"role": "user", "content": prompt},
+            ]
+            raw = llm_router.complete(TaskType.LONG_TEXT_SUMMARY, messages)
             summary = clean_gpt_response(raw)
             partial_summaries.append(summary)
         except Exception as e:
@@ -334,19 +329,14 @@ def summarize_large_pptx(slides_data: List[Dict[str, Any]]) -> str:
             source_name="global",
         )
         try:
-            response = openai_client.chat.completions.create(
-                model=GPT_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a precise summarization assistant.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                max_tokens=MAX_SUMMARY_TOKENS,
-            )
-            raw = getattr(response.choices[0].message, "content", "") or ""
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a precise summarization assistant.",
+                },
+                {"role": "user", "content": prompt},
+            ]
+            raw = llm_router.complete(TaskType.LONG_TEXT_SUMMARY, messages)
             final_summary = clean_gpt_response(raw)
         except Exception as e:
             logger.error(f"❌ Global summary reduction error: {e}")
@@ -360,55 +350,52 @@ def analyze_deck_summary(
 ) -> dict:
     logger.info(f"🔍 GPT: analyse du deck via texte extrait — {source_name}")
     summary_text = summarize_large_pptx(slides_data)
-    doc_type = document_type or "generic"
+    doc_type = document_type or "default"
     deck_prompt_id, deck_template = select_prompt(
-        PROMPT_REGISTRY, "pptx", f"deck.{doc_type}"
+        PROMPT_REGISTRY, doc_type, "deck"
     )
     prompt = render_prompt(
         deck_template, summary_text=summary_text, source_name=source_name
     )
     try:
-        response = openai_client.chat.completions.create(
-            model=GPT_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a precise SAP document metadata extraction assistant.",
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            temperature=0.1,
-            max_tokens=2000,
-        )
-        raw = getattr(response.choices[0].message, "content", "") or ""
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a precise SAP document metadata extraction assistant.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ]
+        raw = llm_router.complete(TaskType.METADATA_EXTRACTION, messages)
         cleaned = clean_gpt_response(raw)
         result = json.loads(cleaned) if cleaned else {}
         if not isinstance(result, dict):
             result = {}
         summary = result.get("summary", "")
         metadata = result.get("metadata", {})
-        document_meta = metadata.get("document", {})
-        solution_meta = metadata.get("solution", {})
-        # --- Normalisation des solutions ---
-        raw_main = solution_meta.get("main", "") or solution_meta.get(
-            "main_solution", ""
-        )
-        sol_id, canon_name = normalize_solution_name(raw_main)
-        solution_meta["id"] = sol_id
-        solution_meta["main"] = canon_name or raw_main
+
+        # --- Normalisation des solutions directement sur metadata plat ---
+        raw_main = metadata.get("main_solution", "")
+        if raw_main:
+            sol_id, canon_name = normalize_solution_name(raw_main)
+            metadata["main_solution_id"] = sol_id
+            metadata["main_solution"] = canon_name or raw_main
+
+        # Normaliser supporting_solutions
         normalized_supporting = []
-        for supp in solution_meta.get("supporting", []):
+        for supp in metadata.get("supporting_solutions", []):
             sid, canon = normalize_solution_name(supp)
             normalized_supporting.append(canon or supp)
-        solution_meta["supporting"] = list(set(normalized_supporting))
+        metadata["supporting_solutions"] = list(set(normalized_supporting))
+
+        # Normaliser mentioned_solutions
         normalized_mentioned = []
-        for ment in solution_meta.get("mentioned", []):
+        for ment in metadata.get("mentioned_solutions", []):
             sid, canon = normalize_solution_name(ment)
             normalized_mentioned.append(canon or ment)
-        solution_meta["mentioned"] = list(set(normalized_mentioned))
+        metadata["mentioned_solutions"] = list(set(normalized_mentioned))
         logger.debug(
             f"Deck summary + metadata keys: {list(result.keys()) if result else 'n/a'}"
         )
@@ -419,8 +406,7 @@ def analyze_deck_summary(
         }
         return {
             "summary": summary,
-            "document": document_meta,
-            "solution": solution_meta,
+            "metadata": metadata,
             "_prompt_meta": result["_prompt_meta"],
         }
     except Exception as e:
@@ -441,9 +427,9 @@ def ask_gpt_slide_analysis(
     retries=2,
 ):
     img_b64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
-    doc_type = document_type or "generic"
+    doc_type = document_type or "default"
     slide_prompt_id, slide_template = select_prompt(
-        PROMPT_REGISTRY, "pptx", f"slide.{doc_type}"
+        PROMPT_REGISTRY, doc_type, "slide"
     )
     prompt_text = render_prompt(
         slide_template,
@@ -471,13 +457,10 @@ def ask_gpt_slide_analysis(
     ]
     for attempt in range(retries):
         try:
-            resp = openai_client.chat.completions.create(
-                model=GPT_MODEL, messages=msg, temperature=0.2, max_tokens=1024
-            )
+            raw_content = llm_router.complete(TaskType.VISION, msg)
             logger.debug(
-                f"GPT response for slide {slide_index}: {resp.choices[0].message.content!r}"
+                f"LLM response for slide {slide_index}: {raw_content!r}"
             )
-            raw_content = resp.choices[0].message.content
             cleaned_content = clean_gpt_response(raw_content or "")
             items = json.loads(cleaned_content)
             enriched = []
@@ -564,10 +547,10 @@ def process_pptx(pptx_path: Path, document_type: str = "default"):
         slides_data, pptx_path.name, document_type=document_type
     )
     summary = deck_info.get("summary", "")
-    doc_meta = deck_info.get("document", {})
-    solution_meta = deck_info.get("solution", {})
+    metadata = deck_info.get("metadata", {})
     deck_prompt_id = deck_info.get("_prompt_meta", {}).get("deck_prompt_id", "unknown")
-    images = convert_from_path(str(pdf_path), output_folder=str(SLIDES_PNG))
+    # Convertir PDF en images directement en mémoire (évite les fichiers PPM temporaires)
+    images = convert_from_path(str(pdf_path))
     image_paths = {}
     for i, img in enumerate(images, start=1):
         img_path = THUMBNAILS_DIR / f"{pptx_path.stem}_slide_{i}.png"
@@ -600,8 +583,7 @@ def process_pptx(pptx_path: Path, document_type: str = "default"):
     total = 0
     for idx, future in tasks:
         chunks = future.result() or []
-        merged_meta = {**doc_meta, **solution_meta}
-        ingest_chunks(chunks, merged_meta, pptx_path.stem, idx, summary)
+        ingest_chunks(chunks, metadata, pptx_path.stem, idx, summary)
         total += len(chunks)
     shutil.move(str(pptx_path), DOCS_DONE / f"{pptx_path.stem}.pptx")
     logger.info(f"Done {pptx_path.name} — total chunks: {total}")

@@ -16,10 +16,10 @@ from pdf2image import convert_from_path
 from qdrant_client.models import PointStruct
 from knowbase.common.clients import (
     ensure_qdrant_collection,
-    get_openai_client,
     get_qdrant_client,
     get_sentence_transformer,
 )
+from knowbase.common.llm_router import LLMRouter, TaskType
 
 
 from knowbase.config.paths import ensure_directories
@@ -88,7 +88,7 @@ banner_paths()
 # ===================
 # Clients & Models
 # ===================
-openai_client = get_openai_client()
+llm_router = LLMRouter()
 qdrant_client = get_qdrant_client()
 model = get_sentence_transformer(MODEL_NAME)
 EMB_SIZE = model.get_sentence_embedding_dimension() or 768
@@ -156,13 +156,7 @@ def analyze_pdf_metadata(pdf_text: str, source_name: str) -> dict:
             ),
         }
         messages: list[ChatCompletionMessageParam] = [system_message, user_message]
-        response = openai_client.chat.completions.create(
-            model=GPT_MODEL,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=1024,
-        )
-        raw = getattr(response.choices[0].message, "content", "") or ""
+        raw = llm_router.complete(TaskType.METADATA_EXTRACTION, messages)
         cleaned = clean_gpt_response(raw)
         meta = json.loads(cleaned) if cleaned else {}
         logger.debug(
@@ -207,13 +201,7 @@ def ask_gpt_slide_analysis(
             "content": "You are an expert assistant that analyzes PDF pages.",
         }
         messages: list[ChatCompletionMessageParam] = [system_message, prompt]
-        response = openai_client.chat.completions.create(
-            model=GPT_MODEL,
-            messages=messages,
-            temperature=0.3,
-            max_tokens=1024,
-        )
-        raw = getattr(response.choices[0].message, "content", "") or ""
+        raw = llm_router.complete(TaskType.VISION, messages)
         cleaned = clean_gpt_response(raw)
         data = json.loads(cleaned) if cleaned else []
         if not isinstance(data, list):

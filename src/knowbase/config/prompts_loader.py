@@ -8,11 +8,31 @@ import yaml
 
 from knowbase.config.paths import PROJECT_ROOT
 
-DEFAULT_PROMPTS_PATH = PROJECT_ROOT / "config" / "prompts.yaml"
+# Dans un conteneur Docker, PROJECT_ROOT peut ne pas être calculé correctement
+# Donc on vérifie si on est dans un environnement Docker
+def _get_prompts_path() -> Path:
+    # Chemin calculé normalement
+    calculated_path = PROJECT_ROOT.resolve() / "config" / "prompts.yaml"
+
+    # Si on est dans un conteneur Docker (/app est le workdir)
+    docker_path = Path("/app/config/prompts.yaml")
+
+    # Utiliser le chemin Docker s'il existe, sinon le chemin calculé
+    if docker_path.exists():
+        return docker_path
+    elif calculated_path.exists():
+        return calculated_path
+    else:
+        # Fallback vers le chemin calculé même s'il n'existe pas (pour le logging d'erreur)
+        return calculated_path
+
+DEFAULT_PROMPTS_PATH = _get_prompts_path()
 
 
 def load_prompts(path: Path | None = None) -> dict[str, Any]:
     target = Path(path) if path else DEFAULT_PROMPTS_PATH
+    logging.debug(f"[PROMPT_REGISTRY] Tentative de chargement depuis : {target.absolute()}")
+    logging.debug(f"[PROMPT_REGISTRY] Fichier existe : {target.exists()}")
     try:
         with target.open("r", encoding="utf-8") as handler:
             data = yaml.safe_load(handler)

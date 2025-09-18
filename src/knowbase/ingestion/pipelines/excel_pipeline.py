@@ -20,10 +20,10 @@ from openai.types.chat import (
 from qdrant_client.models import PointStruct
 from knowbase.common.clients import (
     ensure_qdrant_collection,
-    get_openai_client,
     get_qdrant_client,
     get_sentence_transformer,
 )
+from knowbase.common.llm_router import LLMRouter, TaskType
 
 from knowbase.common.logging import setup_logging
 from knowbase.config.paths import ensure_directories
@@ -45,7 +45,7 @@ GPT_MODEL_ENRICH = "gpt-4o"
 COLLECTION_NAME = settings.qdrant_collection
 
 
-openai_client = get_openai_client()
+llm_router = LLMRouter()
 qdrant_client = get_qdrant_client()
 model = get_sentence_transformer(EMB_MODEL_NAME, device="cpu")
 embedding_size = model.get_sentence_embedding_dimension()
@@ -68,16 +68,7 @@ def standardize_solution_name(raw_solution: str) -> str:
             "content": f"Here is a solution name or abbreviation: {raw_solution}\nWhat is the official SAP product name? Only reply with the name itself.",
         }
         messages: list[ChatCompletionMessageParam] = [system_message, user_message]
-        response = openai_client.chat.completions.create(
-            model=GPT_MODEL_CANONICALIZE,
-            messages=messages,
-            temperature=0,
-            max_tokens=20,
-        )
-        if not response.choices:
-            raise ValueError("Empty completion choices")
-        message = getattr(response.choices[0], "message", None)
-        content = getattr(message, "content", None) if message else None
+        content = llm_router.complete(TaskType.CANONICALIZATION, messages)
         if not isinstance(content, str):
             raise ValueError("Missing completion content")
         name = content.strip()
@@ -132,18 +123,9 @@ Original Answer:
             "content": prompt,
         }
         enrich_messages: list[ChatCompletionMessageParam] = [enrich_message]
-        response = openai_client.chat.completions.create(
-            model=GPT_MODEL_ENRICH,
-            messages=enrich_messages,
-            temperature=0.3,
-            max_tokens=1000,
-        )
-        if not response.choices:
-            return 0
-        message = getattr(response.choices[0], "message", None)
-        content_raw = getattr(message, "content", None) if message else None
+        content_raw = llm_router.complete(TaskType.SHORT_ENRICHMENT, enrich_messages)
         if not isinstance(content_raw, str):
-            logger.warning("⚠️ GPT enrich returned no textual content")
+            logger.warning("⚠️ LLM enrich returned no textual content")
             return 0
         content = content_raw.strip()
         if content.startswith("```"):
@@ -235,16 +217,7 @@ Instruction:
         reformulate_messages: list[ChatCompletionMessageParam] = [
             reformulate_message
         ]
-        response = openai_client.chat.completions.create(
-            model=GPT_MODEL_CANONICALIZE,
-            messages=reformulate_messages,
-            temperature=0,
-            max_tokens=100,
-        )
-        if not response.choices:
-            raise ValueError("Empty reformulation response")
-        message = getattr(response.choices[0], "message", None)
-        content = getattr(message, "content", None) if message else None
+        content = llm_router.complete(TaskType.CANONICALIZATION, reformulate_messages)
         if not isinstance(content, str):
             raise ValueError("Missing reformulation content")
         question = content.strip()
