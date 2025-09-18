@@ -7,7 +7,7 @@ from typing import Any
 from knowbase.config.settings import get_settings
 from knowbase.ingestion.queue import fetch_job
 
-PUBLIC_URL = os.getenv("PUBLIC_URL", "sapkb.ngrok.app")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "knowbase.ngrok.app")
 
 
 def job_status(uid: str) -> dict[str, Any]:

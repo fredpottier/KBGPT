@@ -155,7 +155,7 @@ def resolve_soffice_path() -> str:
     return found or "/usr/bin/soffice"
 
 
-PUBLIC_URL = normalize_public_url(os.getenv("PUBLIC_URL", "sapkb.ngrok.app"))
+PUBLIC_URL = normalize_public_url(os.getenv("PUBLIC_URL", "knowbase.ngrok.app"))
 SOFFICE_PATH = resolve_soffice_path()
 
 # --- Initialisation des clients et modèles ---

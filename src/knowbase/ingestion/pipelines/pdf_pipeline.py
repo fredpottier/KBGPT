@@ -22,7 +22,7 @@ from knowbase.common.clients import (
 )
 
 
-from knowbase.config.paths import ensure_directories, PRESENTATIONS_DIR
+from knowbase.config.paths import ensure_directories
 from knowbase.config.settings import get_settings
 
 
@@ -31,10 +31,10 @@ from knowbase.config.settings import get_settings
 # =========================
 settings = get_settings()
 
-PROJECT_ROOT = Path(settings.docs_in_dir).parent.parent
+DATA_ROOT = settings.data_dir
 DOCS_IN = settings.docs_in_dir
-DOCS_DONE = PRESENTATIONS_DIR.parent / "pdfs"
-SLIDES_PNG = PRESENTATIONS_DIR.parent / "pdf_slides"
+DOCS_DONE = settings.docs_done_dir
+SLIDES_PNG = settings.slides_dir / "pdf"
 STATUS_DIR = settings.status_dir
 LOGS_DIR = settings.logs_dir
 MODELS_DIR = settings.models_dir
@@ -59,7 +59,7 @@ ensure_dirs()
 COLLECTION_NAME = settings.qdrant_collection
 GPT_MODEL = settings.gpt_model
 MODEL_NAME = os.getenv("PDF_EMB_MODEL", settings.embeddings_model)
-PUBLIC_URL = os.getenv("PUBLIC_URL", "sapkb.ngrok.app")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "knowbase.ngrok.app")
 
 
 # ====================
@@ -73,7 +73,7 @@ def banner_paths():
         return f"{p}  (exists={p.exists()}, is_dir={p.is_dir()})"
 
     logger.info("=== PDF INGEST START ===")
-    logger.info(f"PROJECT_ROOT: {exists_dir(PROJECT_ROOT)}")
+    logger.info(f"DATA_ROOT:    {exists_dir(DATA_ROOT)}")
     logger.info(f"DOCS_IN:      {exists_dir(DOCS_IN)}")
     logger.info(f"DOCS_DONE:    {exists_dir(DOCS_DONE)}")
     logger.info(f"SLIDES_PNG:   {exists_dir(SLIDES_PNG)}")
