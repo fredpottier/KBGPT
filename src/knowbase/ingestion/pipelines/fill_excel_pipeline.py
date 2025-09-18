@@ -10,10 +10,10 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue, ScoredPoint
 
 from knowbase.common.logging import setup_logging
 from knowbase.common.clients import (
-    get_openai_client,
     get_qdrant_client,
     get_sentence_transformer,
 )
+from knowbase.common.llm_router import LLMRouter, TaskType
 
 from knowbase.config.settings import get_settings
 from knowbase.config.paths import ensure_directories
@@ -35,7 +35,7 @@ COLLECTION_NAME = settings.qdrant_collection
 
 # Custom HTTP client to ignore system envs (e.g., proxies)
 model = get_sentence_transformer(EMB_MODEL_NAME)
-openai_client = get_openai_client()
+llm_router = LLMRouter()
 qdrant_client = get_qdrant_client()
 
 
@@ -89,16 +89,7 @@ def build_gpt_answer(question: str, context_chunks: Iterable[ScoredPoint]) -> st
             "role": "user",
             "content": prompt,
         }
-        response = openai_client.chat.completions.create(
-            model=GPT_MODEL,
-            messages=[user_message],
-            temperature=0.2,
-            max_tokens=512,
-        )
-        if not response.choices:
-            raise ValueError("no completion choices returned")
-        message = getattr(response.choices[0], "message", None)
-        content = getattr(message, "content", None) if message else None
+        content = llm_router.complete(TaskType.SHORT_ENRICHMENT, [user_message])
         if not isinstance(content, str):
             raise ValueError("completion has no textual content")
         answer = content.strip()
@@ -172,16 +163,7 @@ def filter_chunks_with_gpt(
                 "role": "user",
                 "content": prompt,
             }
-            response = openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[user_message],
-                temperature=0,
-                max_tokens=5,
-            )
-            if not response.choices:
-                raise ValueError("no completion choices returned")
-            message = getattr(response.choices[0], "message", None)
-            content = getattr(message, "content", None) if message else None
+            content = llm_router.complete(TaskType.FAST_CLASSIFICATION, [user_message])
             content_lower = content.lower() if isinstance(content, str) else ""
             if "oui" in content_lower:
                 filtered.append(chunk)
@@ -212,16 +194,7 @@ def clarify_question_with_gpt(question: str) -> str:
             "role": "user",
             "content": prompt,
         }
-        response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[user_message],
-            temperature=0,
-            max_tokens=100,
-        )
-        if not response.choices:
-            raise ValueError("no completion choices returned")
-        message = getattr(response.choices[0], "message", None)
-        content = getattr(message, "content", None) if message else None
+        content = llm_router.complete(TaskType.FAST_CLASSIFICATION, [user_message])
         if not isinstance(content, str):
             raise ValueError("clarification has no textual content")
         return content.strip()

@@ -1,0 +1,41 @@
+# Ignore les fichiers de données qui sont maintenant dans /data
+data/
+public_files/
+app/public_files/
+docs_in/
+docs_out/
+docs_done/
+logs/
+models/
+status/
+utils/
+ingestion/
+scripts/
+
+# Ignore les fichiers de développement
+.git/
+.gitignore
+.vscode/
+.continue/
+.devcontainer/
+.ruff_cache/
+*.pyc
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.env
+.env.*
+README.md
+test.md
+pytest.ini
+debug-helper.md
+
+# Ignore les volumes Docker
+qdrant_data/
+
+# Ignore les dépendances Node.js si présentes
+node_modules/
+npm-debug.log*
+
+# Ignore l'autre interface
+ui/

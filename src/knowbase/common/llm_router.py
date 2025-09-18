@@ -1,0 +1,323 @@
+"""
+Système de routage automatique pour optimiser l'usage des modèles LLM
+selon le type de tâche (vision, résumé long, métadonnées, enrichissement, etc.)
+Configuration flexible via config/llm_models.yaml
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+import yaml
+
+from knowbase.config.settings import get_settings
+from knowbase.common.clients import get_openai_client, get_anthropic_client, is_anthropic_available
+
+logger = logging.getLogger(__name__)
+
+
+class TaskType(Enum):
+    """Types de tâches LLM avec leurs modèles optimaux."""
+    VISION = "vision"                    # Analyse d'images + texte
+    METADATA_EXTRACTION = "metadata"     # Extraction de métadonnées JSON
+    LONG_TEXT_SUMMARY = "long_summary"   # Résumés de textes volumineux
+    SHORT_ENRICHMENT = "enrichment"      # Enrichissement de contenu court
+    FAST_CLASSIFICATION = "classification" # Classification simple/rapide
+    CANONICALIZATION = "canonicalization" # Normalisation de noms
+
+
+class LLMRouter:
+    """Routeur intelligent pour les appels LLM selon le type de tâche."""
+
+    def __init__(self, config_path: Optional[Path] = None):
+        self.settings = get_settings()
+        self._openai_client = None
+        self._anthropic_client = None
+
+        # Configuration dynamique
+        self._config = self._load_config(config_path)
+        self._available_providers = self._detect_available_providers()
+
+    def _load_config(self, config_path: Optional[Path] = None) -> Dict[str, Any]:
+        """Charge la configuration des modèles depuis le fichier YAML."""
+        if config_path is None:
+            # Utilise le chemin par défaut
+            from knowbase.config.paths import PROJECT_ROOT
+            config_path = PROJECT_ROOT / "config" / "llm_models.yaml"
+
+        try:
+            with config_path.open("r", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+            logger.info(f"✓ Configuration LLM chargée depuis {config_path}")
+            return config
+        except Exception as e:
+            logger.warning(f"⚠ Impossible de charger {config_path}: {e}")
+            # Configuration par défaut si le fichier n'existe pas
+            return {
+                "task_models": {
+                    "vision": "gpt-4o",
+                    "metadata": "gpt-4o",
+                    "long_summary": "gpt-4o",
+                    "enrichment": "gpt-4o-mini",
+                    "classification": "gpt-4o-mini",
+                    "canonicalization": "gpt-4o-mini"
+                },
+                "default_model": "gpt-4o"
+            }
+
+    def _detect_available_providers(self) -> Dict[str, bool]:
+        """Détecte quels providers LLM sont disponibles."""
+        providers = {}
+
+        # Test OpenAI
+        try:
+            get_openai_client()
+            providers["openai"] = True
+            logger.debug("✓ OpenAI provider disponible")
+        except Exception as e:
+            providers["openai"] = False
+            logger.debug(f"✗ OpenAI provider indisponible: {e}")
+
+        # Test Anthropic
+        try:
+            providers["anthropic"] = is_anthropic_available()
+            if providers["anthropic"]:
+                logger.debug("✓ Anthropic provider disponible")
+            else:
+                logger.debug("✗ Anthropic provider indisponible")
+        except Exception as e:
+            providers["anthropic"] = False
+            logger.debug(f"✗ Anthropic provider indisponible: {e}")
+
+        return providers
+
+    @property
+    def openai_client(self):
+        """Client OpenAI paresseux."""
+        if self._openai_client is None:
+            self._openai_client = get_openai_client()
+        return self._openai_client
+
+    @property
+    def anthropic_client(self):
+        """Client Anthropic paresseux."""
+        if self._anthropic_client is None:
+            self._anthropic_client = get_anthropic_client()
+        return self._anthropic_client
+
+    def _get_provider_for_model(self, model: str) -> str:
+        """Détecte automatiquement le provider d'un modèle."""
+        # Vérification dans la config d'abord
+        providers = self._config.get("providers", {})
+        for provider_name, provider_config in providers.items():
+            models = provider_config.get("models", [])
+            if model in models:
+                return provider_name
+
+        # Détection par nom si pas dans la config
+        if model.startswith(("gpt-", "o1-")):
+            return "openai"
+        elif model.startswith("claude-"):
+            return "anthropic"
+        else:
+            # Fallback vers OpenAI par défaut
+            return "openai"
+
+    def _get_model_for_task(self, task_type: TaskType) -> str:
+        """Détermine le modèle selon la configuration."""
+        task_name = task_type.value
+        task_models = self._config.get("task_models", {})
+
+        # Modèle configuré pour cette tâche
+        model = task_models.get(task_name)
+
+        if model and self._is_model_available(model):
+            return model
+
+        # Essayer les fallbacks
+        fallbacks = self._config.get("fallback_strategy", {}).get(task_name, [])
+        for fallback_model in fallbacks:
+            if self._is_model_available(fallback_model):
+                logger.info(f"🔄 Fallback {task_name}: {model} → {fallback_model}")
+                return fallback_model
+
+        # Dernier recours : modèle par défaut
+        default = self._config.get("default_model", "gpt-4o")
+        logger.warning(f"⚠ Utilisation du modèle par défaut pour {task_name}: {default}")
+        return default
+
+    def _is_model_available(self, model: str) -> bool:
+        """Vérifie si un modèle est disponible."""
+        provider = self._get_provider_for_model(model)
+        return self._available_providers.get(provider, False)
+
+    def complete(
+        self,
+        task_type: TaskType,
+        messages: List[Dict[str, Any]],
+        temperature: float = None,
+        max_tokens: int = None,
+        **kwargs
+    ) -> str:
+        """
+        Effectue un appel LLM en routant vers le modèle optimal.
+
+        Args:
+            task_type: Type de tâche pour choisir le modèle
+            messages: Messages au format standard
+            temperature: Température (0.0 à 1.0). Si None, utilise les paramètres du YAML
+            max_tokens: Limite de tokens de réponse. Si None, utilise les paramètres du YAML
+            **kwargs: Arguments supplémentaires
+
+        Returns:
+            Contenu de la réponse du modèle
+        """
+        model = self._get_model_for_task(task_type)
+        provider = self._get_provider_for_model(model)
+
+        # Utilise les paramètres du YAML si non spécifiés
+        task_name = task_type.value
+        task_params = self._config.get("task_parameters", {}).get(task_name, {})
+
+        if temperature is None:
+            temperature = task_params.get("temperature", 0.2)
+        if max_tokens is None:
+            max_tokens = task_params.get("max_tokens", 1024)
+
+        logger.debug(f"[LLM_ROUTER] Task: {task_type.value}, Model: {model}, Provider: {provider}, Temp: {temperature}, Tokens: {max_tokens}")
+
+        try:
+            if provider == "openai":
+                return self._call_openai(model, messages, temperature, max_tokens, **kwargs)
+            elif provider == "anthropic":
+                return self._call_anthropic(model, messages, temperature, max_tokens, **kwargs)
+            else:
+                raise ValueError(f"Provider {provider} non supporté")
+
+        except Exception as e:
+            logger.error(f"[LLM_ROUTER] Error with {model} ({provider}): {e}")
+            # Fallback d'urgence vers le modèle par défaut
+            default_model = self._config.get("default_model", "gpt-4o")
+            if model != default_model:
+                logger.info(f"[LLM_ROUTER] Fallback emergency to {default_model}")
+                return self._call_openai(default_model, messages, temperature, max_tokens, **kwargs)
+            raise
+
+    def _call_openai(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        **kwargs
+    ) -> str:
+        """Appel vers OpenAI."""
+        response = self.openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+        return response.choices[0].message.content or ""
+
+    def _call_anthropic(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        **kwargs
+    ) -> str:
+        """Appel vers Anthropic Claude."""
+        # Conversion du format OpenAI vers Anthropic
+        system_message = ""
+        user_messages = []
+
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_message = msg.get("content", "")
+            else:
+                user_messages.append(msg)
+
+        # Appel Anthropic
+        response = self.anthropic_client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system_message,
+            messages=user_messages
+        )
+
+        return response.content[0].text if response.content else ""
+
+
+# Instance globale du routeur
+_router_instance: Optional[LLMRouter] = None
+
+
+def get_llm_router() -> LLMRouter:
+    """Obtient l'instance singleton du routeur LLM."""
+    global _router_instance
+    if _router_instance is None:
+        _router_instance = LLMRouter()
+    return _router_instance
+
+
+# Fonctions de convenance pour chaque type de tâche
+def complete_vision_task(
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.2,
+    max_tokens: int = 1024
+) -> str:
+    """Effectue une tâche d'analyse visuelle."""
+    return get_llm_router().complete(TaskType.VISION, messages, temperature, max_tokens)
+
+
+def complete_metadata_extraction(
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.1,
+    max_tokens: int = 2000
+) -> str:
+    """Effectue une extraction de métadonnées."""
+    return get_llm_router().complete(TaskType.METADATA_EXTRACTION, messages, temperature, max_tokens)
+
+
+def complete_long_summary(
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.1,
+    max_tokens: int = 8000
+) -> str:
+    """Effectue un résumé de texte long."""
+    return get_llm_router().complete(TaskType.LONG_TEXT_SUMMARY, messages, temperature, max_tokens)
+
+
+def complete_enrichment(
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.3,
+    max_tokens: int = 1000
+) -> str:
+    """Effectue un enrichissement de contenu court."""
+    return get_llm_router().complete(TaskType.SHORT_ENRICHMENT, messages, temperature, max_tokens)
+
+
+def complete_fast_classification(
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.0,
+    max_tokens: int = 100
+) -> str:
+    """Effectue une classification rapide."""
+    return get_llm_router().complete(TaskType.FAST_CLASSIFICATION, messages, temperature, max_tokens)
+
+
+def complete_canonicalization(
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.0,
+    max_tokens: int = 50
+) -> str:
+    """Effectue une canonicalisation de nom."""
+    return get_llm_router().complete(TaskType.CANONICALIZATION, messages, temperature, max_tokens)

@@ -28,8 +28,8 @@ services:
 
   app:
     build:
-      context: ./app
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./app/Dockerfile
     container_name: knowbase-app
     depends_on:
       - qdrant
@@ -48,6 +48,8 @@ services:
       - ./app:/app
       - ./data:/data
       - ./src:/app/src
+      - ./config:/app/config
+      - ./tests:/app/tests
     networks:
       - knowbase_net
     working_dir: /app
@@ -55,8 +57,8 @@ services:
 
   ingestion-worker:
     build:
-      context: ./app
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./app/Dockerfile
     container_name: knowbase-worker
     depends_on:
       - redis
@@ -74,6 +76,8 @@ services:
       - ./app:/app
       - ./data:/data
       - ./src:/app/src
+      - ./config:/app/config
+      - ./tests:/app/tests
     networks:
       - knowbase_net
     working_dir: /app
@@ -90,7 +94,7 @@ services:
       - .env
     environment:
       BACKEND_URL: ${BACKEND_URL}
-      PYTHONPATH: /app/src:$PYTHONPATH
+      PYTHONPATH: /app/src
       KNOWBASE_DATA_DIR: /data
     ports:
       - "${APP_UI_PORT}:8501"

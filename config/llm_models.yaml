@@ -1,0 +1,111 @@
+# Configuration des modèles LLM par type de tâche
+# Modifiez ce fichier pour changer dynamiquement les modèles utilisés
+
+version: "1.0"
+
+# Mapping tâche -> modèle
+# Changez ces valeurs pour utiliser d'autres modèles sans modifier le code
+task_models:
+  # Analyse d'images + texte (multimodal)
+  vision: "gpt-4o"
+
+  # Extraction de métadonnées JSON structurées
+  metadata: "gpt-4o"
+
+  # Résumés de textes longs (>10k tokens)
+  long_summary: "claude-3-5-sonnet-20241022"
+
+  # Enrichissement de contenu court
+  enrichment: "claude-3-5-haiku-20241022"
+
+  # Classification binaire rapide (oui/non, etc.)
+  classification: "gpt-4o-mini"
+
+  # Canonicalisation de noms SAP
+  canonicalization: "gpt-4o-mini"
+
+# Paramètres par type de tâche (basés sur les valeurs historiques du code)
+task_parameters:
+  # Analyse d'images (ex: slides PowerPoint)
+  vision:
+    temperature: 0.2
+    max_tokens: 1024
+
+  # Extraction de métadonnées JSON structurées
+  metadata:
+    temperature: 0.1  # Plus déterministe pour JSON structuré
+    max_tokens: 2000  # Assez pour métadonnées complètes
+
+  # Résumés de textes longs
+  long_summary:
+    temperature: 0.1  # Cohérence dans les résumés
+    max_tokens: 1500  # Résumés substantiels (MAX_PARTIAL_TOKENS et MAX_SUMMARY_TOKENS)
+
+  # Enrichissement de contenu court
+  enrichment:
+    temperature: 0.3  # Plus de créativité pour l'enrichissement
+    max_tokens: 1000  # Suffisant pour enrichir
+
+  # Classification binaire rapide (oui/non)
+  classification:
+    temperature: 0    # Déterministe pour classification
+    max_tokens: 5     # Réponses très courtes (oui/non)
+
+  # Canonicalisation de noms SAP
+  canonicalization:
+    temperature: 0    # Déterministe pour normalisation
+    max_tokens: 100   # Noms courts mais peut inclure reformulation
+
+# Configuration des providers LLM
+providers:
+  openai:
+    api_key_env: "OPENAI_API_KEY"
+    base_url: null  # Utilise l'URL par défaut d'OpenAI
+    models:
+      - "gpt-4o"
+      - "gpt-4o-mini"
+      - "o1-preview"
+      - "o1-mini"
+
+  anthropic:
+    api_key_env: "ANTHROPIC_API_KEY"
+    base_url: null  # Utilise l'URL par défaut d'Anthropic
+    models:
+      - "claude-3-5-sonnet-20241022"
+      - "claude-3-5-haiku-20241022"
+      - "claude-3-opus-20240229"
+
+# Fallbacks en cas d'indisponibilité
+fallback_strategy:
+  # Si le modèle configuré n'est pas disponible, essayer ces alternatives
+  vision:
+    - "gpt-4o"
+    - "claude-3-5-sonnet-20241022"
+
+  metadata:
+    - "gpt-4o"
+    - "gpt-4o-mini"
+
+  long_summary:
+    - "claude-3-5-sonnet-20241022"
+    - "gpt-4o"
+    - "gpt-4o-mini"
+
+  enrichment:
+    - "claude-3-5-haiku-20241022"
+    - "gpt-4o-mini"
+    - "gpt-4o"
+
+  classification:
+    - "gpt-4o-mini"
+    - "claude-3-5-haiku-20241022"
+
+  canonicalization:
+    - "gpt-4o-mini"
+    - "claude-3-5-haiku-20241022"
+
+# Configuration par défaut si aucune tâche ne correspond
+default_model: "gpt-4o"
+default_fallbacks:
+  - "gpt-4o"
+  - "gpt-4o-mini"
