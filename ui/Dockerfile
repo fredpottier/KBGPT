@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY . /app
 
+ENV KNOWBASE_DATA_DIR=/data
 ENV PYTHONPATH="/app/src:$PYTHONPATH"
 EXPOSE 8501
 

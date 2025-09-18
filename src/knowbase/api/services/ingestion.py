@@ -26,7 +26,7 @@ from knowbase.ingestion.queue import (
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 
-PUBLIC_URL = os.getenv("PUBLIC_URL", "sapkb.ngrok.app")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "knowbase.ngrok.app")
 TOP_K = 10
 SCORE_THRESHOLD = 0.5
 

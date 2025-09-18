@@ -11,7 +11,7 @@ from knowbase.config.settings import Settings
 
 TOP_K = 10
 SCORE_THRESHOLD = 0.5
-PUBLIC_URL = os.getenv("PUBLIC_URL", "sapkb.ngrok.app")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "knowbase.ngrok.app")
 
 
 def build_response_payload(result, public_url: str) -> dict[str, Any]:
