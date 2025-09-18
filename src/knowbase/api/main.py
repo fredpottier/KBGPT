@@ -32,12 +32,19 @@ def create_app() -> FastAPI:
     else:
         logger.warning("Custom openapi.json introuvable, utilisation du schéma par défaut.")
 
-    public_root = settings.presentations_dir.parent
-    slides_dir = public_root / "slides"
     presentations_dir = settings.presentations_dir
+    slides_dir = settings.slides_dir
+    thumbnails_dir = settings.thumbnails_dir
+    public_root = slides_dir.parent
 
     if slides_dir.exists():
         app.mount("/static/slides", StaticFiles(directory=slides_dir), name="slides")
+    if thumbnails_dir.exists():
+        app.mount(
+            "/static/thumbnails",
+            StaticFiles(directory=thumbnails_dir),
+            name="thumbnails",
+        )
     if presentations_dir.exists():
         app.mount(
             "/static/presentations",
