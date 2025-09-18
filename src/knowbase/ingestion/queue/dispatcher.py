@@ -27,7 +27,7 @@ def enqueue_pptx_ingestion(
     queue_name: Optional[str] = None,
 ) -> Job:
     job = get_queue(queue_name).enqueue_call(
-        func="ingestion.jobs.ingest_pptx_job",
+        func="knowbase.ingestion.queue.jobs.ingest_pptx_job",
         kwargs={
             "pptx_path": file_path,
             "document_type": document_type,
@@ -43,7 +43,7 @@ def enqueue_pptx_ingestion(
 
 def enqueue_pdf_ingestion(*, job_id: str, file_path: str, queue_name: Optional[str] = None) -> Job:
     job = get_queue(queue_name).enqueue_call(
-        func="ingestion.jobs.ingest_pdf_job",
+        func="knowbase.ingestion.queue.jobs.ingest_pdf_job",
         kwargs={"pdf_path": file_path},
         job_id=job_id,
         result_ttl=DEFAULT_JOB_TIMEOUT,
@@ -61,7 +61,7 @@ def enqueue_excel_ingestion(
     queue_name: Optional[str] = None,
 ) -> Job:
     job = get_queue(queue_name).enqueue_call(
-        func="ingestion.jobs.ingest_excel_job",
+        func="knowbase.ingestion.queue.jobs.ingest_excel_job",
         kwargs={"xlsx_path": file_path, "meta": meta or {}},
         job_id=job_id,
         result_ttl=DEFAULT_JOB_TIMEOUT,
@@ -79,7 +79,7 @@ def enqueue_fill_excel(
     queue_name: Optional[str] = None,
 ) -> Job:
     job = get_queue(queue_name).enqueue_call(
-        func="ingestion.jobs.fill_excel_job",
+        func="knowbase.ingestion.queue.jobs.fill_excel_job",
         kwargs={"xlsx_path": file_path, "meta_path": meta_path},
         job_id=job_id,
         result_ttl=DEFAULT_JOB_TIMEOUT,

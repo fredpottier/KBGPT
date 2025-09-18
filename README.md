@@ -1,6 +1,6 @@
-# SAP_KB Project
+# Knowbase Project
 
-SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, structurer et interroger une base de connaissance SAP. Cette base peut comprendre des documents aux formats PDF, PPTX, DOCX et Excel.
+Knowbase est un projet local, entièrement dockerisé, destiné à indexer, structurer et interroger une base de connaissance SAP. Cette base peut comprendre des documents aux formats PDF, PPTX, DOCX et Excel.
 
 ## Contexte Fonctionnel
 
@@ -12,7 +12,7 @@ SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, struct
 - **API Backend** :
   - Expose une API FastAPI via `app/main.py` permettant d’interroger la base de données.
 - **Interface Utilisateur** :
-  - Une interface Streamlit (située dans `ui/app.py`) permet de visualiser les chunks indexés, de rechercher par mot-clé, de filtrer et de suivre le statut des fichiers.
+  - Une interface Streamlit (située dans `src/knowbase/ui/streamlit_app.py`) permet de visualiser les chunks indexés, de rechercher par mot-clé, de filtrer et de suivre le statut des fichiers.
 - **Exposition Publique** :
   - Un tunnel ngrok expose l’API localement sous une URL fixe pour connecter un GPT personnalisé via OpenAPI.
 - **Modèles Machine Learning** :
@@ -22,6 +22,13 @@ SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, struct
 
 - **app/** : Contient les composants backend, y compris FastAPI.
 - **ui/** : Gère l'interface utilisateur avec Streamlit.
+- **src/knowbase/ingestion/cli/** : regroupe les utilitaires CLI (purge, tests,
+  maintenance) utilisés pendant l'ingestion.
+- **data/** : Dossier racine pour toutes les données runtime. Il contient
+  notamment `docs_in/`, `docs_done/`, `logs/`, `models/`, `status/` ainsi que les
+  ressources publiques (`public/`).
+- 🔁 Des liens symboliques sont automatiquement créés vers les anciens chemins
+  (`docs_in/`, `docs_done/`, `logs/`, etc.) pour assurer une transition douce.
 - **openapi.json** : Description de l'API.
 
 ## Lancement du Projet
@@ -40,7 +47,36 @@ SAP_KB est un projet local, entièrement dockerisé, destiné à indexer, struct
    - **UI Streamlit** : Disponible à `http://localhost:8501`.
    - **URL Public ngrok** : Vérifiez les logs de ngrok pour l'URL attribuée.
 
+## Outils en ligne de commande
 
+Les utilitaires d'ingestion et de maintenance sont disponibles directement via
+les modules Python situés dans `src/knowbase/ingestion/cli/`. Quelques exemples
+:
+
+```bash
+python -m knowbase.ingestion.cli.generate_thumbnails --docs-in ./data/docs_in
+python -m knowbase.ingestion.cli.purge_collection --yes
+python -m knowbase.ingestion.cli.test_search_qdrant --query "Ma recherche"
+```
+
+## Tests
+
+Une base de tests `pytest` est fournie pour sécuriser les refactorings
+successifs. Après avoir installé les dépendances de développement :
+
+```bash
+pip install -r requirements.txt
+pytest
+```
+
+Les tests configurent automatiquement `KNOWBASE_DATA_DIR` vers un dossier
+temporaire ; l’exécution de `pytest` ne modifie donc pas vos données locales.
+Vous pouvez lancer un fichier ou un répertoire spécifique, par exemple :
+
+```bash
+pytest tests/config/test_paths.py
+pytest tests/ingestion -k thumbnail
+```
 
 ## Gestion des prompts LLM paramétrables
 
@@ -49,7 +85,7 @@ Chaque famille (`default`, `technical`, `functional`, etc.) contient un template
 
 Pour forcer un type de prompt à l’ingestion :
 ```bash
-python scripts/ingest_pptx_via_gpt.py chemin/vers/fichier.pptx --document-type functional
+python -m knowbase.ingestion.pipelines.pptx_pipeline chemin/vers/fichier.pptx --document-type functional
 ```
 
 Pour ajouter ou modifier une famille de prompts :

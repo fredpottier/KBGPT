@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     )
     qdrant_url: str = Field(default="http://qdrant:6333", alias="QDRANT_URL")
     qdrant_api_key: Optional[str] = Field(default=None, alias="QDRANT_API_KEY")
-    qdrant_collection: str = Field(default="sap_kb", alias="QDRANT_COLLECTION")
+    qdrant_collection: str = Field(default="knowbase", alias="QDRANT_COLLECTION")
     hf_home: Path = Field(default=MODELS_DIR, alias="HF_HOME")
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
 

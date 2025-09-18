@@ -1,12 +1,19 @@
-﻿# -*- coding: utf-8 -*-
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any, Optional
 
 from knowbase.config.settings import get_settings
-from knowbase.ingestion.pipelines import excel_pipeline, pdf_pipeline, pptx_pipeline, fill_excel_pipeline
+from knowbase.ingestion.pipelines import (
+    excel_pipeline,
+    fill_excel_pipeline,
+    pdf_pipeline,
+    pptx_pipeline,
+)
 
-settings = get_settings()
-PRESENTATIONS_DIR = settings.presentations_dir
+
+SETTINGS = get_settings()
+PRESENTATIONS_DIR = SETTINGS.presentations_dir
 
 
 def _ensure_exists(path: Path) -> Path:
@@ -64,3 +71,10 @@ def fill_excel_job(*, xlsx_path: str, meta_path: str) -> dict[str, Any]:
         meta_file.unlink()
     return {"status": "completed", "output_path": str(destination)}
 
+
+__all__ = [
+    "ingest_pptx_job",
+    "ingest_pdf_job",
+    "ingest_excel_job",
+    "fill_excel_job",
+]
