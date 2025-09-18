@@ -38,7 +38,8 @@ services:
       - .env
     environment:
       PYTHONPATH: /app:/scripts:/app/src
-      HF_HOME: /models
+      HF_HOME: /data/models
+      KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://redis:6379/0
     ports:
       - "${APP_PORT}:8000"
@@ -48,10 +49,7 @@ services:
       - ./scripts:/app/scripts
       - ./ingestion:/app/ingestion
       - ./utils:/app/utils
-      - ./public_files:/public_files
-      - ./docs_in:/docs_in
-      - ./docs_out:/docs_out
-      - ./logs:/logs
+      - ./data:/data
       - ./src:/app/src
     networks:
       - sapkb_net
@@ -70,17 +68,15 @@ services:
       - .env
     environment:
       PYTHONPATH: /app:/scripts:/app/src
-      HF_HOME: /models
+      HF_HOME: /data/models
+      KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://redis:6379/0
     volumes:
       - ./app:/app
       - ./scripts:/app/scripts
       - ./ingestion:/app/ingestion
       - ./utils:/app/utils
-      - ./public_files:/public_files
-      - ./docs_in:/docs_in
-      - ./docs_out:/docs_out
-      - ./logs:/logs
+      - ./data:/data
       - ./src:/app/src
     networks:
       - sapkb_net
@@ -99,16 +95,13 @@ services:
     environment:
       BACKEND_URL: ${BACKEND_URL}
       PYTHONPATH: /app/src:$PYTHONPATH
+      KNOWBASE_DATA_DIR: /data
     ports:
       - "${APP_UI_PORT}:8501"
     volumes:
       - ./ui:/app
       - ./src:/app/src
-      - ./docs_in:/docs_in
-      - ./docs_out:/docs_out
-      - ./public_files:/public_files
-      - ./logs:/logs
-      - ./status:/status
+      - ./data:/data
     networks:
       - sapkb_net
 
@@ -120,7 +113,7 @@ services:
       - app
     volumes:
       - ./ngrok.yml:/etc/ngrok.yml
-      - ./logs:/logs
+      - ./data/logs:/logs
       - ./src:/app/src
     env_file:
       - .env
