@@ -32,7 +32,8 @@ RUN pip freeze
 
 COPY . /app
 
-ENV HF_HOME=/models
+ENV HF_HOME=/data/models
+ENV KNOWBASE_DATA_DIR=/data
 ENV PYTHONPATH="/app:$PYTHONPATH"
 
 EXPOSE 8000
