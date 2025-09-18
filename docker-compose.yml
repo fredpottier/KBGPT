@@ -68,6 +68,8 @@ services:
       HF_HOME: /data/models
       KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://redis:6379/0
+    ports:
+      - "5679:5679"  # Debug port for worker
     volumes:
       - ./app:/app
       - ./data:/data

@@ -17,11 +17,11 @@ def create_app() -> FastAPI:
     logger = configure_logging()
     warm_clients()
 
-    if os.getenv("DEBUG_MODE") == "true":
-        logger.info("Attaching debugpy on port 5678...")
+    if os.getenv("DEBUG_APP") == "true":
+        logger.info("🐛 Attaching debugpy to FastAPI app on port 5678...")
         debugpy.listen(("0.0.0.0", 5678))
         debugpy.wait_for_client()
-        logger.info("Debugger attached!")
+        logger.info("🐛 FastAPI debugger attached!")
 
     app = FastAPI()
 

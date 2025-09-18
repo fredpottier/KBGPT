@@ -318,6 +318,139 @@ docker-compose exec app ruff format src/
 docker-compose exec app mypy src/
 ```
 
+## 🐛 Debug et Développement
+
+### Debug Sélectif des Services
+
+Le projet supporte le debugging ciblé de chaque service indépendamment via VS Code et debugpy.
+
+#### Configuration des Variables Debug
+
+**Variables d'environnement dans `.env` :**
+```bash
+# Debug sélectif (recommandé)
+DEBUG_APP=false      # Debug FastAPI sur port 5678
+DEBUG_WORKER=false   # Debug Worker sur port 5679
+```
+
+#### Modes de Debug Disponibles
+
+**🚀 Mode Production (par défaut)**
+```bash
+DEBUG_APP=false
+DEBUG_WORKER=false
+```
+- Les deux services démarrent normalement
+- Aucun blocage d'attente de debugger
+
+**🔍 Debug FastAPI seulement**
+```bash
+DEBUG_APP=true
+DEBUG_WORKER=false
+```
+- Worker démarre normalement
+- FastAPI attend connexion debugger sur port 5678
+
+**⚙️ Debug Worker seulement**
+```bash
+DEBUG_APP=false
+DEBUG_WORKER=true
+```
+- FastAPI démarre normalement
+- Worker attend connexion debugger sur port 5679
+
+**🔧 Debug des deux services**
+```bash
+DEBUG_APP=true
+DEBUG_WORKER=true
+```
+- Les deux services attendent connexion debugger
+- Nécessite deux sessions de debug séparées
+
+#### Configuration VS Code
+
+**Ajouter dans `.vscode/launch.json` :**
+```json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "🚀 Attach to FastAPI App",
+            "type": "python",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/src",
+                    "remoteRoot": "/app/src"
+                },
+                {
+                    "localRoot": "${workspaceFolder}/app",
+                    "remoteRoot": "/app"
+                }
+            ],
+            "justMyCode": false
+        },
+        {
+            "name": "🔧 Attach to Worker",
+            "type": "python",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5679
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/src",
+                    "remoteRoot": "/app/src"
+                },
+                {
+                    "localRoot": "${workspaceFolder}/app",
+                    "remoteRoot": "/app"
+                }
+            ],
+            "justMyCode": false
+        }
+    ]
+}
+```
+
+#### Workflow de Debug
+
+**Debug d'un endpoint API :**
+1. Modifier `.env` : `DEBUG_APP=true`, `DEBUG_WORKER=false`
+2. `docker-compose up app`
+3. VS Code → Run & Debug → "🚀 Attach to FastAPI App"
+4. Placer breakpoints dans `src/knowbase/api/`
+5. Tester l'endpoint via Swagger ou client
+
+**Debug d'un pipeline d'ingestion :**
+1. Modifier `.env` : `DEBUG_APP=false`, `DEBUG_WORKER=true`
+2. `docker-compose up ingestion-worker`
+3. VS Code → Run & Debug → "🔧 Attach to Worker"
+4. Placer breakpoints dans `src/knowbase/ingestion/pipelines/`
+5. Déclencher un job d'ingestion
+
+**Debug d'un flow complet :**
+1. Débugger l'endpoint API (voir ci-dessus)
+2. Stopper le debug, modifier `.env` pour activer debug worker
+3. Relancer avec debug worker pour suivre le traitement
+4. Analyser le flow end-to-end
+
+#### Ports de Debug
+- **FastAPI App** : `localhost:5678`
+- **Worker RQ** : `localhost:5679`
+
+#### Bonnes Pratiques Debug
+- ✅ Utiliser le debug sélectif pour éviter les blocages
+- ✅ Placer des breakpoints avant de démarrer les services
+- ✅ Utiliser `justMyCode: false` pour débuguer les dépendances
+- ✅ Vérifier les path mappings VS Code pour la résolution de fichiers
+- ⚠️ Éviter `DEBUG_APP=true` et `DEBUG_WORKER=true` simultanément sauf besoin spécifique
+
 ## ⚙️ Prompts LLM Configurables
 
 Le système utilise des prompts paramétrables définis dans `config/prompts.yaml` :
