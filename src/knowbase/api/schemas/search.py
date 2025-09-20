@@ -7,6 +7,7 @@ class SearchRequest(BaseModel):
     question: str
     language: str | None = None
     mime: str | None = None
+    solution: str | None = None
 
 
 __all__ = ["SearchRequest"]

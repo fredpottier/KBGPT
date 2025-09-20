@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status
+from knowbase.api.routers import ingest, search, status, imports
 
 
 def create_app() -> FastAPI:
@@ -57,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(search.router)
     app.include_router(ingest.router)
     app.include_router(status.router)
+    app.include_router(imports.router)
 
     return app
 

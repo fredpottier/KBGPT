@@ -262,10 +262,22 @@ def extract_notes_and_text(pptx_path: Path) -> List[Dict[str, Any]]:
 # Génère une miniature pour une image de slide
 def generate_thumbnail(image_path: Path) -> Path:
     img = Image.open(image_path)
-    img.thumbnail((900, 900), Image.Resampling.LANCZOS)
-    thumb_path = THUMBNAILS_DIR / image_path.name
+    img.thumbnail((1800, 1800), Image.Resampling.LANCZOS)
+
+    # Changer l'extension vers .jpg pour compression
+    thumb_name = image_path.stem + ".jpg"
+    thumb_path = THUMBNAILS_DIR / thumb_name
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(thumb_path, "PNG")
+
+    # Sauvegarder en JPEG avec qualité réduite pour compenser la taille plus grande
+    if img.mode == "RGBA":
+        # Convertir RGBA en RGB pour JPEG
+        rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+        rgb_img.paste(img, mask=img.split()[-1])
+        rgb_img.save(thumb_path, "JPEG", quality=60, optimize=True)
+    else:
+        img.save(thumb_path, "JPEG", quality=60, optimize=True)
+
     return thumb_path
 
 
@@ -491,9 +503,26 @@ def ask_gpt_slide_analysis(
 
 # Ingestion des chunks dans Qdrant avec schéma canonique
 def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
-    valid = [ch for ch in chunks if ch.get("full_explanation", "").strip()]
+    # Filtrer les slides non informatifs
+    excluded_roles = {"title", "transition", "agenda"}
+
+    valid = []
+    for ch in chunks:
+        if not ch.get("full_explanation", "").strip():
+            continue
+
+        meta = ch.get("meta", {})
+        slide_role = meta.get("slide_role", "")
+
+        # Exclure les slides de type title, transition, agenda
+        if slide_role in excluded_roles:
+            logger.info(f"Slide {slide_index}: skipping chunk with slide_role '{slide_role}'")
+            continue
+
+        valid.append(ch)
+
     if not valid:
-        logger.info(f"Slide {slide_index}: no valid chunks")
+        logger.info(f"Slide {slide_index}: no valid chunks after filtering")
         return
     texts = [ch["full_explanation"] for ch in valid]
     embs = embed_texts(texts)
@@ -508,7 +537,7 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
                 "source_name": f"{file_uid}.pptx",
                 "source_type": "pptx",
                 "source_file_url": f"{PUBLIC_URL}/static/presentations/{file_uid}.pptx",
-                "slide_image_url": f"{PUBLIC_URL}/static/thumbnails/{file_uid}_slide_{slide_index}.png",
+                "slide_image_url": f"{PUBLIC_URL}/static/thumbnails/{file_uid}_slide_{slide_index}.jpg",
                 "title": doc_meta.get("title", ""),
                 "objective": doc_meta.get("objective", ""),
                 "audience": doc_meta.get("audience", []),
@@ -538,25 +567,46 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
 
 
 # Fonction principale pour traiter un fichier PPTX
-def process_pptx(pptx_path: Path, document_type: str = "default"):
+def process_pptx(pptx_path: Path, document_type: str = "default", progress_callback=None):
     logger.info(f"start ingestion for {pptx_path.name}")
+
+    if progress_callback:
+        progress_callback("Conversion PDF", 3, 6, "Conversion du PowerPoint en PDF")
+
     ensure_dirs()
     pdf_path = convert_pptx_to_pdf(pptx_path, SLIDES_PNG)
     slides_data = extract_notes_and_text(pptx_path)
+
+    if progress_callback:
+        progress_callback("Analyse du contenu", 3, 6, "Analyse du contenu et génération du résumé")
+
     deck_info = analyze_deck_summary(
         slides_data, pptx_path.name, document_type=document_type
     )
     summary = deck_info.get("summary", "")
     metadata = deck_info.get("metadata", {})
     deck_prompt_id = deck_info.get("_prompt_meta", {}).get("deck_prompt_id", "unknown")
+
+    if progress_callback:
+        progress_callback("Génération des miniatures", 4, 6, f"Création de {len(slides_data)} miniatures")
+
     # Convertir PDF en images directement en mémoire (évite les fichiers PPM temporaires)
     images = convert_from_path(str(pdf_path))
     image_paths = {}
     for i, img in enumerate(images, start=1):
-        img_path = THUMBNAILS_DIR / f"{pptx_path.stem}_slide_{i}.png"
-        img.save(img_path, "PNG")
+        img_path = THUMBNAILS_DIR / f"{pptx_path.stem}_slide_{i}.jpg"
+        if img.mode == "RGBA":
+            # Convertir RGBA en RGB pour JPEG
+            rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+            rgb_img.paste(img, mask=img.split()[-1])
+            rgb_img.save(img_path, "JPEG", quality=60, optimize=True)
+        else:
+            img.save(img_path, "JPEG", quality=60, optimize=True)
         image_paths[i] = img_path
         generate_thumbnail(img_path)
+    if progress_callback:
+        progress_callback("Analyse des slides", 5, 6, f"Analyse IA de {len(slides_data)} slides")
+
     tasks = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         for slide in slides_data:
@@ -580,13 +630,20 @@ def process_pptx(pptx_path: Path, document_type: str = "default"):
                         ),
                     )
                 )
+
+    if progress_callback:
+        progress_callback("Ingestion dans Qdrant", 5, 6, "Insertion des chunks dans la base vectorielle")
+
     total = 0
     for idx, future in tasks:
         chunks = future.result() or []
         ingest_chunks(chunks, metadata, pptx_path.stem, idx, summary)
         total += len(chunks)
+
     shutil.move(str(pptx_path), DOCS_DONE / f"{pptx_path.stem}.pptx")
     logger.info(f"Done {pptx_path.name} — total chunks: {total}")
+
+    return {"chunks_inserted": total}
 
 
 # Fusionne plusieurs dictionnaires de métadonnées et normalise les solutions

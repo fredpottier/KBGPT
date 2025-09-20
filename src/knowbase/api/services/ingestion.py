@@ -23,6 +23,7 @@ from knowbase.ingestion.queue import (
     enqueue_pdf_ingestion,
     enqueue_pptx_ingestion,
 )
+from knowbase.api.services.import_history_redis import get_redis_import_history_service
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 
@@ -212,6 +213,18 @@ def handle_dispatch(
             meta_path = docs_in / f"{uid}.meta.json"
             with open(meta_path, "w", encoding="utf-8") as f_meta:
                 json.dump(meta_dict, f_meta, indent=2)
+
+        # Enregistrer dans l'historique Redis
+        history_service = get_redis_import_history_service()
+        history_service.add_import_record(
+            uid=uid,
+            filename=file.filename or safe_filename,
+            client=meta_dict.get("client"),
+            topic=meta_dict.get("topic"),
+            document_type=meta_dict.get("document_type"),
+            language=meta_dict.get("language"),
+            source_date=meta_dict.get("source_date")
+        )
 
         if document_kind == "pptx":
             job = enqueue_pptx_ingestion(
