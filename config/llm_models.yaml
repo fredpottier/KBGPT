@@ -13,10 +13,10 @@ task_models:
   metadata: "gpt-4o"
 
   # Résumés de textes longs (>10k tokens)
-  long_summary: "claude-3-5-sonnet-20241022"
+  long_summary: "gpt-4o-mini"
 
   # Enrichissement de contenu court
-  enrichment: "claude-3-5-haiku-20241022"
+  enrichment: "claude-3-haiku-20240307"
 
   # Classification binaire rapide (oui/non, etc.)
   classification: "gpt-4o-mini"
@@ -71,8 +71,8 @@ providers:
     api_key_env: "ANTHROPIC_API_KEY"
     base_url: null  # Utilise l'URL par défaut d'Anthropic
     models:
-      - "claude-3-5-sonnet-20241022"
-      - "claude-3-5-haiku-20241022"
+      - "claude-3-5-sonnet-20240620"
+      - "claude-3-haiku-20240307"
       - "claude-3-opus-20240229"
 
 # Fallbacks en cas d'indisponibilité
@@ -87,22 +87,22 @@ fallback_strategy:
     - "gpt-4o-mini"
 
   long_summary:
-    - "claude-3-5-sonnet-20241022"
+    - "claude-3-5-sonnet-20240620"
     - "gpt-4o"
     - "gpt-4o-mini"
 
   enrichment:
-    - "claude-3-5-haiku-20241022"
+    - "claude-3-haiku-20240307"
     - "gpt-4o-mini"
     - "gpt-4o"
 
   classification:
     - "gpt-4o-mini"
-    - "claude-3-5-haiku-20241022"
+    - "claude-3-haiku-20240307"
 
   canonicalization:
     - "gpt-4o-mini"
-    - "claude-3-5-haiku-20241022"
+    - "claude-3-haiku-20240307"
 
 # Configuration par défaut si aucune tâche ne correspond
 default_model: "gpt-4o"

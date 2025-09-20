@@ -1,0 +1,302 @@
+'use client'
+
+import {
+  Box,
+  Button,
+  FormControl,
+  FormLabel,
+  Heading,
+  HStack,
+  Input,
+  Select,
+  Text,
+  Textarea,
+  VStack,
+  useToast,
+  Card,
+  CardBody,
+  Divider,
+} from '@chakra-ui/react'
+import { useState, useCallback } from 'react'
+import { useDropzone } from 'react-dropzone'
+import { AttachmentIcon, CheckIcon, WarningIcon } from '@chakra-ui/icons'
+import { useMutation } from '@tanstack/react-query'
+import { useRouter } from 'next/navigation'
+import axios from 'axios'
+
+interface FileUploadProps {
+  onFileSelect: (file: File) => void
+  selectedFile: File | null
+}
+
+const FileDropzone = ({ onFileSelect, selectedFile }: FileUploadProps) => {
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      onFileSelect(acceptedFiles[0])
+    }
+  }, [onFileSelect])
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'application/pdf': ['.pdf'],
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+      'application/vnd.ms-powerpoint': ['.ppt'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls'],
+    },
+    multiple: false,
+    maxSize: 50 * 1024 * 1024, // 50MB
+  })
+
+  return (
+    <Box
+      {...getRootProps()}
+      p={8}
+      border="2px dashed"
+      borderColor={isDragActive ? 'blue.400' : selectedFile ? 'green.400' : 'gray.300'}
+      borderRadius="lg"
+      bg={isDragActive ? 'blue.50' : selectedFile ? 'green.50' : 'gray.50'}
+      cursor="pointer"
+      transition="all 0.2s"
+      _hover={{
+        borderColor: 'blue.400',
+        bg: 'blue.50',
+      }}
+    >
+      <input {...getInputProps()} />
+      <VStack spacing={4}>
+        {selectedFile ? (
+          <>
+            <CheckIcon boxSize={8} color="green.500" />
+            <Text fontWeight="semibold" color="green.700">
+              Fichier sélectionné
+            </Text>
+            <Text fontSize="sm" color="green.600">
+              {selectedFile.name} ({(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)
+            </Text>
+          </>
+        ) : (
+          <>
+            <AttachmentIcon boxSize={8} color={isDragActive ? 'blue.500' : 'gray.400'} />
+            <Text fontWeight="semibold" color={isDragActive ? 'blue.700' : 'gray.700'}>
+              {isDragActive ? 'Déposez votre fichier ici' : 'Glissez-déposez votre fichier ou cliquez pour sélectionner'}
+            </Text>
+            <Text fontSize="sm" color="gray.500">
+              Formats acceptés : PDF, PPTX, PPT, XLSX, XLS (max 50 MB)
+            </Text>
+          </>
+        )}
+      </VStack>
+    </Box>
+  )
+}
+
+
+export default function ImportPage() {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [client, setClient] = useState('')
+  const [sourceDate, setSourceDate] = useState('')
+  const [language, setLanguage] = useState('fr')
+  const [documentType, setDocumentType] = useState('')
+  const [topic, setTopic] = useState('')
+
+  const toast = useToast()
+  const router = useRouter()
+
+  // Fonction pour déterminer le type de document basé sur l'extension
+  const getFileType = (file: File): 'pptx' | 'pdf' | 'xlsx' => {
+    const extension = file.name.split('.').pop()?.toLowerCase()
+    if (extension === 'pdf') return 'pdf'
+    if (extension === 'pptx' || extension === 'ppt') return 'pptx'
+    return 'xlsx'
+  }
+
+
+  const uploadMutation = useMutation({
+    mutationFn: async (formData: FormData) => {
+      const response = await axios.post('/api/dispatch', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      })
+      return response.data
+    },
+    onSuccess: (data) => {
+      console.log('Réponse du serveur:', data)
+
+      toast({
+        title: 'Fichier envoyé !',
+        description: 'Redirection vers le suivi des imports...',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      })
+
+      // Rediriger vers la page de suivi après un court délai
+      setTimeout(() => {
+        router.push('/documents/status')
+      }, 1500)
+    },
+    onError: (error: any) => {
+      console.error('Erreur d\'upload:', error)
+      toast({
+        title: 'Erreur d\'envoi',
+        description: error.response?.data?.message || 'Échec de l\'envoi du fichier',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    },
+  })
+
+  const handleSubmit = () => {
+    if (!selectedFile) {
+      toast({
+        title: 'Aucun fichier sélectionné',
+        description: 'Veuillez sélectionner un fichier avant de continuer',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    if (!topic.trim()) {
+      toast({
+        title: 'Sujet manquant',
+        description: 'Veuillez renseigner le sujet du document',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    if (!documentType) {
+      toast({
+        title: 'Type de document manquant',
+        description: 'Veuillez sélectionner un type de document',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('action_type', 'ingest')
+    formData.append('document_type', getFileType(selectedFile))
+
+    const metadata = {
+      client: client.trim(),
+      source_date: sourceDate.trim(),
+      language,
+      document_type: documentType,
+      topic: topic.trim(),
+    }
+
+    formData.append('meta', JSON.stringify(metadata))
+    formData.append('file', selectedFile)
+
+    uploadMutation.mutate(formData)
+  }
+
+
+  return (
+    <VStack spacing={6} align="stretch" maxW="800px" mx="auto">
+      <Box>
+        <Heading size="lg" mb={2}>
+          Import de fichiers
+        </Heading>
+        <Text color="gray.600">
+          Importez vos documents SAP dans la base de connaissances
+        </Text>
+      </Box>
+
+
+      <Card>
+        <CardBody>
+          <VStack spacing={6} align="stretch">
+            {/* Zone de dépôt de fichier */}
+            <FileDropzone onFileSelect={setSelectedFile} selectedFile={selectedFile} />
+
+            <Divider />
+
+            {/* Formulaire de métadonnées */}
+            <VStack spacing={4} align="stretch">
+              <Heading size="md">Métadonnées du document</Heading>
+
+              <HStack spacing={4}>
+                <FormControl>
+                  <FormLabel>Client (optionnel)</FormLabel>
+                  <Input
+                    value={client}
+                    onChange={(e) => setClient(e.target.value)}
+                    placeholder="ex: Entreprise ABC"
+                  />
+                </FormControl>
+
+                <FormControl>
+                  <FormLabel>Date source (YYYY-MM)</FormLabel>
+                  <Input
+                    value={sourceDate}
+                    onChange={(e) => setSourceDate(e.target.value)}
+                    placeholder="ex: 2025-07"
+                    pattern="\\d{4}-\\d{2}"
+                  />
+                </FormControl>
+              </HStack>
+
+              <HStack spacing={4}>
+                <FormControl>
+                  <FormLabel>Langue</FormLabel>
+                  <Select value={language} onChange={(e) => setLanguage(e.target.value)}>
+                    <option value="fr">Français</option>
+                    <option value="en">Anglais</option>
+                    <option value="de">Allemand</option>
+                    <option value="es">Espagnol</option>
+                    <option value="it">Italien</option>
+                  </Select>
+                </FormControl>
+
+                <FormControl isRequired>
+                  <FormLabel>Type de document</FormLabel>
+                  <Select value={documentType} onChange={(e) => setDocumentType(e.target.value)} placeholder="Sélectionnez un type">
+                    <option value="technical">Technique</option>
+                    <option value="functional">Fonctionnel</option>
+                    <option value="marketing">Marketing</option>
+                  </Select>
+                </FormControl>
+              </HStack>
+
+              <FormControl isRequired>
+                <FormLabel>Sujet du document</FormLabel>
+                <Textarea
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  placeholder="ex: Rise S/4HANA Private Cloud - Security and Compliance"
+                  rows={3}
+                />
+              </FormControl>
+            </VStack>
+
+            <Divider />
+
+            {/* Bouton d'envoi */}
+            <Button
+              colorScheme="blue"
+              size="lg"
+              onClick={handleSubmit}
+              isLoading={uploadMutation.isPending}
+              loadingText="Envoi en cours..."
+              isDisabled={!selectedFile || !topic.trim() || !documentType}
+            >
+              Envoyer le document
+            </Button>
+          </VStack>
+        </CardBody>
+      </Card>
+    </VStack>
+  )
+}

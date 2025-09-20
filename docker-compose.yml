@@ -23,6 +23,9 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
     networks:
       - knowbase_net
 
@@ -105,6 +108,30 @@ services:
     networks:
       - knowbase_net
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: knowbase-frontend
+    depends_on:
+      - app
+    env_file:
+      - .env
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://app:8000
+      - NODE_ENV=production
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - knowbase_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   ngrok:
     image: ngrok/ngrok:latest
     container_name: knowbase-ngrok
@@ -127,4 +154,5 @@ networks:
 
 volumes:
   qdrant_data: # volume Docker local (resout l'erreur Qdrant)
+  redis_data: # volume Docker pour la persistance Redis
 
