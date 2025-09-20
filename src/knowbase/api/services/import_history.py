@@ -50,7 +50,9 @@ class ImportHistoryService:
         topic: str = None,
         document_type: str = None,
         language: str = None,
-        source_date: str = None
+        source_date: str = None,
+        solution: str = None,
+        import_type: str = None
     ) -> None:
         """Ajoute un nouvel enregistrement d'import."""
         history = self._load_history()
@@ -64,7 +66,9 @@ class ImportHistoryService:
             "topic": topic,
             "document_type": document_type,
             "language": language,
-            "source_date": source_date
+            "source_date": source_date,
+            "solution": solution,
+            "import_type": import_type
         }
 
         # Ajouter au début de la liste (plus récent en premier)

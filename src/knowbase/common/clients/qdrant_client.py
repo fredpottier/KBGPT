@@ -28,3 +28,13 @@ def ensure_qdrant_collection(
         collection_name=collection_name,
         vectors_config=VectorParams(size=vector_size, distance=distance),
     )
+
+
+def ensure_qa_collection(vector_size: int) -> None:
+    """Initialise la collection dédiée aux Q/A RFP."""
+    settings = get_settings()
+    ensure_qdrant_collection(
+        collection_name=settings.qdrant_qa_collection,
+        vector_size=vector_size,
+        distance=Distance.COSINE,
+    )

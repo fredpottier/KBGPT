@@ -4,7 +4,8 @@ const BACKEND_URL = 'http://app:8000'
 
 export async function GET(request: NextRequest) {
   try {
-    const response = await fetch(`${BACKEND_URL}/imports/active`, {
+    console.log('🔍 Calling backend:', `${BACKEND_URL}/api/imports/active`)
+    const response = await fetch(`${BACKEND_URL}/api/imports/active`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

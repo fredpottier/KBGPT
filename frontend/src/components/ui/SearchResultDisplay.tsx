@@ -5,8 +5,16 @@ import {
   Box,
   Text,
   Divider,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalBody,
+  ModalCloseButton,
+  Image,
+  useDisclosure,
 } from '@chakra-ui/react'
-import { SearchResponse } from '@/types/api'
+import { SearchResponse, SearchChunk } from '@/types/api'
+import { useState } from 'react'
 import ThumbnailCarousel from './ThumbnailCarousel'
 import SynthesizedAnswer from './SynthesizedAnswer'
 import SourcesSection from './SourcesSection'
@@ -16,6 +24,18 @@ interface SearchResultDisplayProps {
 }
 
 export default function SearchResultDisplay({ searchResult }: SearchResultDisplayProps) {
+  const { isOpen, onOpen, onClose } = useDisclosure()
+  const [selectedImage, setSelectedImage] = useState<SearchChunk | null>(null)
+
+  const handleSlideClick = (chunk: SearchChunk) => {
+    setSelectedImage(chunk)
+    onOpen()
+  }
+
+  const getDocumentName = (sourceFile: string) => {
+    return sourceFile.split('/').pop() || sourceFile
+  }
+
   if (searchResult.status === 'no_results') {
     return (
       <Box
@@ -52,7 +72,11 @@ export default function SearchResultDisplay({ searchResult }: SearchResultDispla
       {/* Synthesized Answer */}
       {searchResult.synthesis && (
         <>
-          <SynthesizedAnswer synthesis={searchResult.synthesis} />
+          <SynthesizedAnswer
+            synthesis={searchResult.synthesis}
+            chunks={searchResult.results}
+            onSlideClick={handleSlideClick}
+          />
           <Divider />
         </>
       )}
@@ -94,6 +118,36 @@ export default function SearchResultDisplay({ searchResult }: SearchResultDispla
           </VStack>
         </Box>
       )}
+
+      {/* Modal for enlarged image when slide number is clicked */}
+      <Modal isOpen={isOpen} onClose={onClose} size="6xl">
+        <ModalOverlay />
+        <ModalContent maxW="80vw" maxH="80vh">
+          <ModalCloseButton />
+          <ModalBody p={4}>
+            {selectedImage && (
+              <VStack spacing={4} align="center">
+                <Image
+                  src={selectedImage.slide_image_url}
+                  alt={`Slide ${selectedImage.slide_index}`}
+                  maxW="100%"
+                  maxH="70vh"
+                  objectFit="contain"
+                  borderRadius="md"
+                />
+                <VStack spacing={1} align="center">
+                  <Text fontSize="lg" fontWeight="semibold" color="gray.700">
+                    Slide {selectedImage.slide_index}
+                  </Text>
+                  <Text fontSize="sm" color="gray.600" textAlign="center">
+                    {getDocumentName(selectedImage.source_file)}
+                  </Text>
+                </VStack>
+              </VStack>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </VStack>
   )
 }

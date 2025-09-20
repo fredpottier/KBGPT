@@ -1,0 +1,279 @@
+categories:
+  analytics: Analytics & Reporting
+  customer_experience: Customer Experience
+  erp: ERP & Core Business
+  finance: Finance & Planning
+  governance: Governance, Risk & Compliance
+  hr: Human Resources
+  procurement: Procurement & Supply Chain
+metadata:
+  last_updated: '2025-01-20'
+  total_solutions: 41
+  version: '1.0'
+solutions:
+  ACCESS_CTRL:
+    aliases:
+    - GRC Access Control
+    - SAP GRC AC
+    canonical_name: SAP Access Control
+    category: governance
+  AUDIT_MGMT:
+    aliases:
+    - GRC Audit Management
+    - Audit Mgmt
+    canonical_name: SAP Audit Management
+    category: governance
+  BUSINESS_ONE:
+    aliases:
+    - SAP B1
+    - Business One
+    canonical_name: SAP Business One
+    category: erp
+  BYDESIGN:
+    aliases:
+    - SAP ByD
+    - ByDesign
+    canonical_name: SAP Business ByDesign
+    category: erp
+  LEANIX_APM:
+    aliases:
+    - LeanIX APM
+    - Application Portfolio Mgmt
+    canonical_name: SAP LeanIX Application Portfolio Management
+    category: analytics
+  LEANIX_ARP:
+    aliases:
+    - LeanIX Roadmap Planning
+    - Architecture & Roadmap
+    canonical_name: SAP LeanIX Architecture & Road Map Planning
+    category: analytics
+  LEANIX_TRC:
+    aliases:
+    - LeanIX TRC
+    - Technology Risk & Compliance
+    canonical_name: SAP LeanIX Technology Risk and Compliance
+    category: analytics
+  PROCESS_CTRL:
+    aliases:
+    - GRC Process Control
+    - SAP GRC PC
+    canonical_name: SAP Process Control
+    category: governance
+  RISK_MGMT:
+    aliases:
+    - GRC Risk Management
+    - SAP GRC RM
+    canonical_name: SAP Risk Management
+    category: governance
+  S4HANA_ONPREM:
+    aliases:
+    - S/4HANA On-Premise
+    - S/4 on-prem
+    - On-Prem ERP
+    canonical_name: SAP S/4HANA (On-Premise)
+    category: erp
+  S4HANA_PCE:
+    aliases:
+    - S/4HANA PCE
+    - Private Cloud Edition
+    - RISE Private Cloud
+    - ERP Cloud Private Edition
+    - Private ERP Cloud
+    - S4 PCE
+    canonical_name: SAP S/4HANA Cloud, Private Edition
+    category: erp
+  S4HANA_PUBLIC:
+    aliases:
+    - S/4HANA Public Cloud
+    - S4 Public
+    - Essentials Edition
+    - ERP Cloud Public Edition
+    canonical_name: SAP S/4HANA Cloud, Public Edition
+    category: erp
+  SAP_ARIBA:
+    aliases:
+    - Ariba
+    - Ariba Network
+    canonical_name: SAP Ariba
+    category: procurement
+  SAP_BO:
+    aliases:
+    - SAP BO
+    - BOBJ
+    - BusinessObjects
+    canonical_name: SAP BusinessObjects BI Platform
+    category: analytics
+  SAP_BPC:
+    aliases:
+    - SAP BPC
+    - BPC
+    canonical_name: SAP Business Planning and Consolidation
+    category: finance
+  SAP_BTP:
+    aliases:
+    - SAP BTP
+    - BTP
+    - Business Technology Platform
+    - SAP Business Technology Platform
+    canonical_name: SAP Business Technology Platform
+    category: analytics
+  SAP_BW:
+    aliases:
+    - SAP BW
+    - Business Warehouse
+    canonical_name: SAP Business Warehouse
+    category: analytics
+  SAP_BW4HANA:
+    aliases:
+    - BW/4HANA
+    - BW4
+    canonical_name: SAP BW/4HANA
+    category: analytics
+  SAP_CDC:
+    aliases:
+    - Customer Data Cloud
+    - Gigya
+    canonical_name: SAP Customer Data Cloud
+    category: customer_experience
+  SAP_COMMERCE_CLOUD:
+    aliases:
+    - Commerce Cloud
+    - SAP Hybris
+    - Hybris Commerce
+    canonical_name: SAP Commerce Cloud
+    category: customer_experience
+  SAP_CONCUR:
+    aliases:
+    - Concur
+    - Concur Travel
+    - Concur Expense
+    canonical_name: SAP Concur
+    category: finance
+  SAP_CRM:
+    aliases:
+    - SAP CRM
+    - SAP Customer Management
+    canonical_name: SAP Customer Relationship Management
+    category: customer_experience
+  SAP_CX_SUITE:
+    aliases:
+    - SAP CX
+    - SAP C/4HANA
+    - Customer Experience
+    canonical_name: SAP Customer Experience Suite
+    category: customer_experience
+  SAP_DATASPHERE:
+    aliases:
+    - Datasphere
+    - SAP Data Warehouse Cloud
+    - SAP DWC
+    canonical_name: SAP Datasphere
+    category: analytics
+  SAP_DRC:
+    aliases:
+    - SAP DRC
+    - Document & Reporting Compliance
+    - ACR
+    - Advanced Compliance Reporting
+    canonical_name: SAP Document and Reporting Compliance
+    category: governance
+  SAP_ECC6:
+    aliases:
+    - SAP ECC
+    - ERP Central Component
+    - ECC6
+    - SAP ERP
+    canonical_name: SAP ERP 6.0 (SAP ECC 6.0)
+    category: erp
+  SAP_FIELDGLASS:
+    aliases:
+    - Fieldglass
+    - SAP Fieldglass Network
+    canonical_name: SAP Fieldglass
+    category: hr
+  SAP_GRC:
+    aliases:
+    - SAP GRC
+    - Governance Risk & Compliance
+    canonical_name: SAP Governance, Risk and Compliance
+    category: governance
+  SAP_GROUPRPT:
+    aliases:
+    - Group Reporting
+    - Financial Consolidation
+    canonical_name: SAP S/4HANA for Group Reporting
+    category: finance
+  SAP_GROUP_REPORTING:
+    aliases: []
+    canonical_name: SAP Group Reporting
+    category: custom
+  SAP_GTS:
+    aliases:
+    - SAP GTS
+    - Global Trade Services
+    canonical_name: SAP Global Trade Services
+    category: governance
+  SAP_HCM:
+    aliases:
+    - SAP HCM
+    - SAP HR
+    - SAP ECC HR
+    canonical_name: SAP ERP Human Capital Management
+    category: hr
+  SAP_MARKETING_CLOUD:
+    aliases:
+    - Marketing Cloud
+    canonical_name: SAP Marketing Cloud
+    category: customer_experience
+  SAP_R3:
+    aliases:
+    - R/3
+    - SAP R/3 4.x
+    - SAP ERP (R/3)
+    canonical_name: SAP R/3 (Enterprise)
+    category: erp
+  SAP_SAC:
+    aliases:
+    - SAC
+    - Analytics Cloud
+    - SAP BusinessObjects Cloud
+    canonical_name: SAP Analytics Cloud
+    category: analytics
+  SAP_SALES_CLOUD:
+    aliases:
+    - Sales Cloud
+    - Cloud for Customer Sales
+    - C4C Sales
+    canonical_name: SAP Sales Cloud
+    category: customer_experience
+  SAP_SERVICE_CLOUD:
+    aliases:
+    - Service Cloud
+    - Cloud for Customer Service
+    - C4C Service
+    canonical_name: SAP Service Cloud
+    category: customer_experience
+  SAP_SLC:
+    aliases:
+    - SAP SLC
+    - Supplier Lifecycle Collaboration
+    canonical_name: SAP Business Network (Supplier Lifecycle Collaboration)
+    category: procurement
+  SAP_SRM:
+    aliases:
+    - SAP SRM
+    - Supplier Relationship Mgmt
+    canonical_name: SAP Supplier Relationship Management
+    category: procurement
+  SAP_TEST_SOLUTION:
+    aliases:
+    - Test Solution
+    canonical_name: SAP Test Solution
+    category: custom
+  SUCCESSFACTORS:
+    aliases:
+    - SuccessFactors
+    - SAP SF
+    - HXM Suite
+    canonical_name: SAP SuccessFactors HXM Suite
+    category: hr

@@ -4,7 +4,7 @@ const BACKEND_URL = 'http://app:8000'
 
 export async function GET(request: NextRequest) {
   try {
-    const response = await fetch(`${BACKEND_URL}/imports/history`, {
+    const response = await fetch(`${BACKEND_URL}/api/imports/history`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

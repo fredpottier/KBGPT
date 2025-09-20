@@ -48,7 +48,18 @@ export default function TopNavigation() {
   const pathname = usePathname()
 
   return (
-    <Box bg="white" px={4} shadow="sm" borderBottom="1px" borderColor="gray.200">
+    <Box
+      bg="white"
+      px={4}
+      shadow="sm"
+      borderBottom="1px"
+      borderColor="gray.200"
+      position="fixed"
+      top={0}
+      left={0}
+      right={0}
+      zIndex={1000}
+    >
       <Flex h={16} alignItems="center" justifyContent="space-between">
         {/* Logo */}
         <Flex alignItems="center">
