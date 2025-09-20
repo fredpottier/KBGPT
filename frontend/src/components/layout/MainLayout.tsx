@@ -16,6 +16,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const getCurrentSection = (): 'chat' | 'documents' | 'admin' => {
     if (pathname?.startsWith('/chat')) return 'chat'
     if (pathname?.startsWith('/documents')) return 'documents'
+    if (pathname?.startsWith('/rfp-excel')) return 'documents' // RFP Excel fait partie de documents
     if (pathname?.startsWith('/admin')) return 'admin'
     return 'chat' // par défaut
   }
@@ -28,10 +29,10 @@ export default function MainLayout({ children }: MainLayoutProps) {
 
   return (
     <Box minH="100vh">
-      {/* Navigation horizontale en haut */}
+      {/* Navigation horizontale en haut - maintenant sticky */}
       <TopNavigation />
 
-      <Flex>
+      <Flex pt="64px"> {/* Padding top pour le menu sticky */}
         {/* Menu latéral contextuel */}
         <ContextualSidebar section={currentSection} />
 
@@ -39,7 +40,6 @@ export default function MainLayout({ children }: MainLayoutProps) {
         <Box
           flex="1"
           ml={showSidebar && currentSection === 'documents' ? '256px' : '0'} // 64 * 4 = 256px
-          pt="64px" // Hauteur de la TopNavigation
           minH="calc(100vh - 64px)"
           bg="gray.50"
         >

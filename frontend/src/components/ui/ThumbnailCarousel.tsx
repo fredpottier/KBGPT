@@ -228,24 +228,24 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
       {/* Modal for enlarged image */}
       <Modal isOpen={isOpen} onClose={onClose} size="6xl">
         <ModalOverlay />
-        <ModalContent maxW="1900px">
+        <ModalContent maxW="80vw" maxH="80vh">
           <ModalCloseButton />
-          <ModalBody p={6}>
+          <ModalBody p={4}>
             {selectedImage && (
               <VStack spacing={4} align="center">
                 <Image
                   src={selectedImage.slide_image_url}
                   alt={`Slide ${selectedImage.slide_index}`}
-                  maxW="1800px"
-                  maxH="1400px"
+                  maxW="100%"
+                  maxH="70vh"
                   objectFit="contain"
                   borderRadius="md"
                 />
-                <VStack spacing={2} align="center">
+                <VStack spacing={1} align="center">
                   <Text fontSize="lg" fontWeight="semibold" color="gray.700">
                     Slide {selectedImage.slide_index}
                   </Text>
-                  <Text fontSize="md" color="gray.600" textAlign="center">
+                  <Text fontSize="sm" color="gray.600" textAlign="center">
                     {getDocumentName(selectedImage.source_file)}
                   </Text>
                 </VStack>

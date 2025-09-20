@@ -38,6 +38,20 @@ def update_job_progress(step: str, progress: int = 0, total_steps: int = 0, mess
         job.save()
 
 
+def mark_job_as_processing():
+    """Marque le job comme en cours de traitement dans l'historique Redis."""
+    from knowbase.api.services.import_history_redis import get_redis_import_history_service
+    from rq import get_current_job
+
+    job = get_current_job()
+    if job:
+        history_service = get_redis_import_history_service()
+        history_service.update_import_status(
+            uid=job.id,
+            status="processing"
+        )
+
+
 def ingest_pptx_job(
     *,
     pptx_path: str,
@@ -45,6 +59,8 @@ def ingest_pptx_job(
     meta_path: Optional[str] = None,
 ) -> dict[str, Any]:
     try:
+        # Marquer comme en cours de traitement
+        mark_job_as_processing()
         update_job_progress("Initialisation", 0, 6, "Vérification du fichier PowerPoint")
         path = _ensure_exists(Path(pptx_path))
 
@@ -84,12 +100,22 @@ def ingest_pptx_job(
     except Exception as e:
         update_job_progress("Erreur", 0, 6, f"Erreur pendant le traitement: {str(e)}")
 
-        # Notifier l'historique Redis de l'échec
+        # Rollback automatique : supprimer les chunks déjà insérés
+        from knowbase.api.services.import_deletion import delete_import_completely
         from knowbase.api.services.import_history_redis import get_redis_import_history_service
         from rq import get_current_job
 
         job = get_current_job()
         if job:
+            try:
+                # Tentative de rollback des chunks Qdrant
+                update_job_progress("Rollback", 0, 6, "Suppression des chunks partiels...")
+                delete_import_completely(job.id)
+                update_job_progress("Rollback", 0, 6, "Rollback terminé")
+            except Exception as rollback_error:
+                update_job_progress("Rollback échoué", 0, 6, f"Erreur rollback: {rollback_error}")
+
+            # Notifier l'historique Redis de l'échec
             history_service = get_redis_import_history_service()
             history_service.update_import_status(
                 uid=job.id,
@@ -101,6 +127,8 @@ def ingest_pptx_job(
 
 
 def ingest_pdf_job(*, pdf_path: str) -> dict[str, Any]:
+    # Marquer comme en cours de traitement
+    mark_job_as_processing()
     path = _ensure_exists(Path(pdf_path))
     pdf_pipeline.process_pdf(path)
     destination = pdf_pipeline.DOCS_DONE / f"{path.stem}.pdf"
@@ -112,24 +140,99 @@ def ingest_excel_job(
     xlsx_path: str,
     meta: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    path = _ensure_exists(Path(xlsx_path))
-    meta_dict = meta or {}
-    excel_pipeline.process_excel_rfp(path, meta_dict)
-    destination = excel_pipeline.DOCS_DONE / path.name
-    return {"status": "completed", "output_path": str(destination)}
+    try:
+        # Marquer comme en cours de traitement
+        mark_job_as_processing()
+        update_job_progress("Initialisation", 0, 4, "Vérification du fichier Excel")
+        path = _ensure_exists(Path(xlsx_path))
+        meta_dict = meta or {}
+
+        update_job_progress("Traitement", 1, 4, "Traitement du fichier Excel")
+        result = excel_pipeline.process_excel_rfp(path, meta_dict)
+
+        update_job_progress("Finalisation", 3, 4, "Déplacement du fichier")
+        destination = excel_pipeline.DOCS_DONE / path.name
+
+        update_job_progress("Terminé", 4, 4, "Import Excel terminé avec succès")
+        return {
+            "status": "completed",
+            "output_path": str(destination),
+            "chunks_inserted": result.get("chunks_inserted", 0) if isinstance(result, dict) else 0
+        }
+    except Exception as e:
+        update_job_progress("Erreur", 0, 4, f"Erreur pendant le traitement Excel: {str(e)}")
+
+        # Rollback automatique : supprimer les chunks déjà insérés
+        from knowbase.api.services.import_deletion import delete_import_completely
+        from knowbase.api.services.import_history_redis import get_redis_import_history_service
+        from rq import get_current_job
+
+        job = get_current_job()
+        if job:
+            try:
+                # Tentative de rollback des chunks Qdrant
+                update_job_progress("Rollback", 0, 4, "Suppression des chunks partiels...")
+                delete_import_completely(job.id)
+                update_job_progress("Rollback", 0, 4, "Rollback terminé")
+            except Exception as rollback_error:
+                update_job_progress("Rollback échoué", 0, 4, f"Erreur rollback: {rollback_error}")
+
+            # Notifier l'historique Redis de l'échec
+            history_service = get_redis_import_history_service()
+            history_service.update_import_status(
+                uid=job.id,
+                status="failed",
+                error_message=str(e)
+            )
+
+        raise
 
 
 def fill_excel_job(*, xlsx_path: str, meta_path: str) -> dict[str, Any]:
-    path = _ensure_exists(Path(xlsx_path))
-    meta_file = Path(meta_path)
-    fill_excel_pipeline.main(path, meta_file)
-    output_dir = PRESENTATIONS_DIR
-    output_dir.mkdir(parents=True, exist_ok=True)
-    destination = output_dir / f"{path.stem}_filled.xlsx"
-    path.replace(destination)
-    if meta_file.exists():
-        meta_file.unlink()
-    return {"status": "completed", "output_path": str(destination)}
+    try:
+        # Marquer comme en cours de traitement
+        mark_job_as_processing()
+        update_job_progress("Initialisation", 0, 5, "Vérification des fichiers")
+        path = _ensure_exists(Path(xlsx_path))
+        meta_file = Path(meta_path)
+
+        update_job_progress("Traitement", 1, 5, "Remplissage RFP Excel")
+        result = fill_excel_pipeline.main(path, meta_file)
+
+        update_job_progress("Finalisation", 3, 5, "Création du fichier de sortie")
+        output_dir = PRESENTATIONS_DIR
+        output_dir.mkdir(parents=True, exist_ok=True)
+        destination = output_dir / f"{path.stem}_filled.xlsx"
+        path.replace(destination)
+
+        update_job_progress("Nettoyage", 4, 5, "Suppression des fichiers temporaires")
+        if meta_file.exists():
+            meta_file.unlink()
+
+        update_job_progress("Terminé", 5, 5, "Remplissage RFP terminé avec succès")
+        return {
+            "status": "completed",
+            "output_path": str(destination),
+            "chunks_filled": result.get("chunks_filled", 0) if isinstance(result, dict) else 0
+        }
+    except Exception as e:
+        update_job_progress("Erreur", 0, 5, f"Erreur pendant le remplissage RFP: {str(e)}")
+
+        # Rollback : pas de chunks insérés pour ce type de job (lecture seule)
+        from knowbase.api.services.import_history_redis import get_redis_import_history_service
+        from rq import get_current_job
+
+        job = get_current_job()
+        if job:
+            # Notifier l'historique Redis de l'échec
+            history_service = get_redis_import_history_service()
+            history_service.update_import_status(
+                uid=job.id,
+                status="failed",
+                error_message=str(e)
+            )
+
+        raise
 
 
 __all__ = [

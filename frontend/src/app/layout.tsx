@@ -9,6 +9,9 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'SAP Knowledge Base',
   description: 'Intelligent document search and chat interface for SAP knowledge base',
+  icons: {
+    icon: '/favicon.ico',
+  },
 }
 
 export default function RootLayout({

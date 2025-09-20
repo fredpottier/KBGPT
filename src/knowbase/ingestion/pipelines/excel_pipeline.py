@@ -20,6 +20,7 @@ from openai.types.chat import (
 from qdrant_client.models import PointStruct
 from knowbase.common.clients import (
     ensure_qdrant_collection,
+    ensure_qa_collection,
     get_qdrant_client,
     get_sentence_transformer,
 )
@@ -28,6 +29,7 @@ from knowbase.common.llm_router import LLMRouter, TaskType
 from knowbase.common.logging import setup_logging
 from knowbase.config.paths import ensure_directories
 from knowbase.config.settings import get_settings
+from knowbase.api.services.sap_solutions import sap_solutions_manager
 
 # === CONFIGURATION ===
 settings = get_settings()
@@ -42,7 +44,7 @@ logger = setup_logging(LOGS_DIR, "ingest_excel_enriched.log")
 EMB_MODEL_NAME = settings.embeddings_model
 GPT_MODEL_CANONICALIZE = "gpt-3.5-turbo-1106"
 GPT_MODEL_ENRICH = "gpt-4o"
-COLLECTION_NAME = settings.qdrant_collection
+QA_COLLECTION_NAME = settings.qdrant_qa_collection
 
 
 llm_router = LLMRouter()
@@ -52,29 +54,22 @@ embedding_size = model.get_sentence_embedding_dimension()
 if embedding_size is None:
     raise RuntimeError("SentenceTransformer returned no embedding dimension")
 EMB_SIZE = int(embedding_size)
-ensure_qdrant_collection(COLLECTION_NAME, EMB_SIZE)
+ensure_qa_collection(EMB_SIZE)
 
 # === UTILITAIRES ===
 
 
 def standardize_solution_name(raw_solution: str) -> str:
+    """
+    Standardise le nom d'une solution SAP en utilisant le nouveau gestionnaire de solutions.
+    Remplace l'ancienne logique LLM par une approche basée sur le dictionnaire YAML.
+    """
     try:
-        system_message: ChatCompletionSystemMessageParam = {
-            "role": "system",
-            "content": "You are an expert in SAP product naming conventions. Only reply with the official SAP solution name, without quotes, explanations, or any extra text.",
-        }
-        user_message: ChatCompletionUserMessageParam = {
-            "role": "user",
-            "content": f"Here is a solution name or abbreviation: {raw_solution}\nWhat is the official SAP product name? Only reply with the name itself.",
-        }
-        messages: list[ChatCompletionMessageParam] = [system_message, user_message]
-        content = llm_router.complete(TaskType.CANONICALIZATION, messages)
-        if not isinstance(content, str):
-            raise ValueError("Missing completion content")
-        name = content.strip()
-        return name.split("\n")[0].replace('"', "").replace("'", "").strip()
+        canonical_name, solution_id = sap_solutions_manager.resolve_solution(raw_solution)
+        logger.info(f"📋 Solution standardisée: '{raw_solution}' → '{canonical_name}' (ID: {solution_id})")
+        return canonical_name
     except Exception as e:
-        logger.warning(f"⚠️ GPT standardization error: {e}")
+        logger.warning(f"⚠️ Erreur standardisation solution: {e}")
         return raw_solution.strip()
 
 
@@ -132,7 +127,32 @@ Original Answer:
             content = re.sub(r"^```[a-zA-Z]*\n?", "", content)
             content = re.sub(r"```$", "", content)
             content = content.strip()
-        parsed = json.loads(content)
+
+        # Nettoyer le contenu JSON pour éviter les erreurs de parsing
+        import json as json_module
+
+        def clean_json_content(content: str) -> str:
+            """Nettoie le contenu JSON en supprimant/échappant les caractères de contrôle."""
+            # Supprimer tous les caractères de contrôle sauf \n, \r, \t qui seront échappés
+            content = ''.join(char for char in content if ord(char) >= 32 or char in '\n\r\t')
+
+            # Échapper les caractères de contrôle restants dans les valeurs JSON
+            content = re.sub(r'(?<!\\)\n', '\\n', content)
+            content = re.sub(r'(?<!\\)\r', '\\r', content)
+            content = re.sub(r'(?<!\\)\t', '\\t', content)
+            return content
+
+        try:
+            parsed = json_module.loads(content)
+        except json_module.JSONDecodeError:
+            # Tentative de correction automatique pour les caractères de contrôle
+            content_cleaned = clean_json_content(content)
+            try:
+                parsed = json_module.loads(content_cleaned)
+            except json_module.JSONDecodeError as e:
+                logger.warning(f"⚠️ JSON parsing failed even after cleaning: {e}")
+                logger.warning(f"⚠️ Problematic content (first 200 chars): {content_cleaned[:200]!r}")
+                return 0
         if not isinstance(parsed, list):
             logger.warning("⚠️ GPT enrich result is not a list")
             return 0
@@ -166,7 +186,6 @@ Original Answer:
                 "rfp_answer": a,
                 "text": f"Q: {q}\nA: {a}",
                 "language": detect(f"{q} {a}").lower()[:2],
-                "type": "rfp_qa",
                 "ingested_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "source": xlsx_path.name,
@@ -177,7 +196,7 @@ Original Answer:
                 0
             ].tolist()
             qdrant_client.upsert(
-                collection_name=COLLECTION_NAME,
+                collection_name=QA_COLLECTION_NAME,
                 points=[PointStruct(id=str(uuid.uuid4()), vector=emb, payload=payload)],
             )
             success_count += 1
@@ -187,11 +206,33 @@ Original Answer:
 
 
 def get_visible_sheet_name(xlsx_path: Path) -> Optional[str]:
+    """Fonction legacy pour retrouver le premier onglet visible."""
     wb = openpyxl.load_workbook(xlsx_path, read_only=True)
     for sheet in wb.worksheets:
         if sheet.sheet_state == "visible":
             return sheet.title
     return None
+
+
+def get_target_sheet_name(xlsx_path: Path, meta: dict[str, Any]) -> Optional[str]:
+    """Détermine l'onglet cible : soit celui spécifié dans les meta, soit le premier visible."""
+    # Si l'utilisateur a spécifié un onglet via la nouvelle interface
+    if "sheet_name" in meta and isinstance(meta["sheet_name"], str):
+        specified_sheet = meta["sheet_name"].strip()
+        if specified_sheet:
+            # Vérifier que l'onglet existe et est visible
+            wb = openpyxl.load_workbook(xlsx_path, read_only=True)
+            for sheet in wb.worksheets:
+                if sheet.title == specified_sheet and sheet.sheet_state == "visible":
+                    logger.info(f"📋 Utilisation de l'onglet spécifié : {specified_sheet}")
+                    return specified_sheet
+            logger.warning(f"⚠️ Onglet spécifié '{specified_sheet}' non trouvé ou invisible, fallback automatique")
+
+    # Fallback : utiliser le premier onglet visible (comportement legacy)
+    fallback_sheet = get_visible_sheet_name(xlsx_path)
+    if fallback_sheet:
+        logger.info(f"📋 Utilisation de l'onglet par défaut : {fallback_sheet}")
+    return fallback_sheet
 
 
 def excel_colname_to_index(colname: str) -> int:
@@ -230,7 +271,7 @@ Instruction:
 # === TRAITEMENT PRINCIPAL ===
 
 
-def process_excel_rfp(path: Path, meta: dict[str, Any]) -> None:
+def process_excel_rfp(path: Path, meta: dict[str, Any]) -> dict[str, Any]:
     print(f"▶️ Fichier : {path.name}")
     meta_path = path.with_suffix(".meta.json")
     user_meta = {}
@@ -248,38 +289,40 @@ def process_excel_rfp(path: Path, meta: dict[str, Any]) -> None:
             f"❌ Fichier {path.name} ignoré : meta manquante pour {', '.join(missing)}"
         )
         print(f"❌ Fichier ignoré : meta manquante pour {', '.join(missing)}")
-        return
+        return {"status": "failed", "chunks_inserted": 0, "error": f"Meta manquante pour {', '.join(missing)}"}
 
     solution_value = meta.get("solution")
     question_col_value = meta.get("question_col")
     answer_col_value = meta.get("answer_col")
     if not isinstance(solution_value, str):
         logger.error(f"❌ Meta 'solution' invalide pour {path.name}")
-        return
+        return {"status": "failed", "chunks_inserted": 0, "error": "Meta 'solution' invalide"}
     if not isinstance(question_col_value, str) or not isinstance(
         answer_col_value, str
     ):
         logger.error(f"❌ Colonnes question/réponse invalides pour {path.name}")
-        return
+        return {"status": "failed", "chunks_inserted": 0, "error": "Colonnes question/réponse invalides"}
 
     meta["canonical_solution"] = standardize_solution_name(solution_value)
     question_col = question_col_value
     answer_col = answer_col_value
-    visible_sheet = get_visible_sheet_name(path)
-    if not visible_sheet:
-        logger.error(f"❌ Aucun onglet visible dans {path.name}")
-        print(f"❌ Aucun onglet visible dans {path.name}")
-        return
+
+    # Utiliser la nouvelle logique de sélection d'onglet
+    target_sheet = get_target_sheet_name(path, meta)
+    if not target_sheet:
+        logger.error(f"❌ Aucun onglet approprié trouvé dans {path.name}")
+        print(f"❌ Aucun onglet approprié trouvé dans {path.name}")
+        return {"status": "failed", "chunks_inserted": 0, "error": "Aucun onglet approprié trouvé"}
 
     try:
-        df = pd.read_excel(path, sheet_name=visible_sheet, header=None)
+        df = pd.read_excel(path, sheet_name=target_sheet, header=None)
         df = df.fillna("").astype(str)
         q_idx = excel_colname_to_index(question_col)
         a_idx = excel_colname_to_index(answer_col)
         logger.info(f"q_idx={q_idx}, a_idx={a_idx}")
     except Exception as e:
         logger.error(f"❌ Erreur lecture Excel : {e}")
-        return
+        return {"status": "failed", "chunks_inserted": 0, "error": f"Erreur lecture Excel : {e}"}
 
     total = 0
     for i in df.index:
@@ -321,6 +364,8 @@ def process_excel_rfp(path: Path, meta: dict[str, Any]) -> None:
         print(f"📦 Déplacé dans docs_done : {path.name}")
     except Exception as e:
         print(f"⚠️ Déplacement échoué : {e}")
+
+    return {"status": "completed", "chunks_inserted": total}
 
 
 def main() -> None:

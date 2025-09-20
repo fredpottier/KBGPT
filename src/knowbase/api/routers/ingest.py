@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 
-from knowbase.api.services.ingestion import handle_dispatch
+from knowbase.api.services.ingestion import handle_dispatch, handle_excel_qa_upload, handle_excel_rfp_fill, analyze_excel_file
 from knowbase.config.settings import get_settings
 
 router = APIRouter()
@@ -32,6 +32,49 @@ async def dispatch_action(
         settings=settings,
         logger=logger,
     )
+
+
+@router.post("/documents/upload-excel-qa")
+async def upload_excel_qa(
+    file: UploadFile = File(...),
+    meta_file: Optional[UploadFile] = File(None),
+):
+    settings = get_settings()
+    return await handle_excel_qa_upload(
+        file=file,
+        meta_file=meta_file,
+        settings=settings,
+        logger=logger,
+    )
+
+
+@router.post("/documents/fill-excel-rfp")
+async def fill_excel_rfp(
+    file: UploadFile = File(...),
+    meta_file: Optional[UploadFile] = File(None),
+):
+    settings = get_settings()
+    return await handle_excel_rfp_fill(
+        file=file,
+        meta_file=meta_file,
+        settings=settings,
+        logger=logger,
+    )
+
+
+@router.post("/documents/analyze-excel")
+async def analyze_excel(
+    file: UploadFile = File(...),
+):
+    """Analyse un fichier Excel pour identifier les onglets et colonnes disponibles."""
+    settings = get_settings()
+    return await analyze_excel_file(
+        file=file,
+        settings=settings,
+        logger=logger,
+    )
+
+
 
 
 __all__ = ["router"]

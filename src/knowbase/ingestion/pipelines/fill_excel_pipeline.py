@@ -29,7 +29,12 @@ logger = setup_logging(LOGS_DIR, "fill_empty_excel_debug.log")
 # Utilise la même logique que ingest_pptx_via_gpt.py pour choisir le modèle
 EMB_MODEL_NAME = settings.embeddings_model
 GPT_MODEL = settings.gpt_model
-COLLECTION_NAME = settings.qdrant_collection
+QA_COLLECTION_NAME = settings.qdrant_qa_collection
+MAIN_COLLECTION_NAME = settings.qdrant_collection
+
+# Seuils de confiance pour la recherche en cascade
+QA_CONFIDENCE_THRESHOLD = 0.85
+KB_CONFIDENCE_THRESHOLD = 0.70
 
 
 
@@ -44,30 +49,113 @@ def load_meta(meta_path: str | Path) -> dict[str, Any]:
         return json.load(f)
 
 
-def search_qdrant(
+def search_qa_collection(
     question: str, solution: str, top_k: int = 5
 ) -> Sequence[ScoredPoint]:
+    """Recherche dans la collection Q/A dédiée."""
     emb = model.encode([f"passage: Q: {question}"], normalize_embeddings=True)[
         0
     ].tolist()
     search_filter = Filter(
         must=[
             FieldCondition(key="main_solution", match=MatchValue(value=solution)),
-            FieldCondition(key="type", match=MatchValue(value="rfp_qa")),
         ]
     )
     try:
         results = qdrant_client.search(
-            collection_name=COLLECTION_NAME,
+            collection_name=QA_COLLECTION_NAME,
             query_vector=emb,
             limit=top_k,
             query_filter=search_filter,
         )
-        logger.info(f"Recherche Qdrant pour '{question}' : {len(results)} résultats")
+        logger.info(f"Recherche Q/A pour '{question}' : {len(results)} résultats")
         return results
     except Exception as e:
-        logger.warning(f"Erreur Qdrant pour '{question}': {e}")
+        logger.warning(f"Erreur recherche Q/A pour '{question}': {e}")
         return []
+
+
+def search_knowledge_base(
+    question: str, solution: str, top_k: int = 10
+) -> Sequence[ScoredPoint]:
+    """Recherche dans la base de connaissances générale."""
+    emb = model.encode([f"passage: {question}"], normalize_embeddings=True)[
+        0
+    ].tolist()
+
+    # Recherche avec filtres sur la solution
+    search_filter = Filter(
+        should=[
+            # Recherche par solution principale
+            FieldCondition(key="solution.main", match=MatchValue(value=solution)),
+            # Recherche dans les solutions supportées
+            FieldCondition(key="solution.supporting", match=MatchValue(value=solution)),
+            # Recherche dans les solutions mentionnées
+            FieldCondition(key="solution.mentioned", match=MatchValue(value=solution)),
+        ]
+    )
+
+    try:
+        results = qdrant_client.search(
+            collection_name=MAIN_COLLECTION_NAME,
+            query_vector=emb,
+            limit=top_k,
+            query_filter=search_filter,
+        )
+        logger.info(f"Recherche KB pour '{question}' : {len(results)} résultats")
+        return results
+    except Exception as e:
+        logger.warning(f"Erreur recherche KB pour '{question}': {e}")
+        return []
+
+
+def search_hybrid(
+    question: str, solution: str, top_k: int = 5
+) -> tuple[Sequence[ScoredPoint], str]:
+    """
+    Recherche en cascade : Q/A puis KB si nécessaire.
+
+    Returns:
+        (results, source) où source est "qa", "kb" ou "hybrid"
+    """
+    # 1. Recherche primaire dans les Q/A
+    qa_results = search_qa_collection(question, solution, top_k)
+
+    # Si on a des résultats Q/A avec un bon score, on les utilise
+    if qa_results and qa_results[0].score >= QA_CONFIDENCE_THRESHOLD:
+        logger.info(f"Réponse trouvée dans Q/A (score: {qa_results[0].score:.3f})")
+        return qa_results, "qa"
+
+    # 2. Recherche dans la KB générale
+    kb_results = search_knowledge_base(question, solution, top_k * 2)
+
+    # 3. Décision sur la source à utiliser
+    if qa_results and kb_results:
+        # Comparer les meilleurs scores
+        best_qa_score = qa_results[0].score if qa_results else 0
+        best_kb_score = kb_results[0].score if kb_results else 0
+
+        if best_qa_score >= QA_CONFIDENCE_THRESHOLD * 0.9:  # Seuil Q/A légèrement réduit
+            logger.info(f"Utilisation Q/A malgré KB disponible (QA: {best_qa_score:.3f} vs KB: {best_kb_score:.3f})")
+            return qa_results, "qa"
+        elif best_kb_score >= KB_CONFIDENCE_THRESHOLD:
+            logger.info(f"Utilisation KB (score: {best_kb_score:.3f})")
+            return kb_results[:top_k], "kb"
+        else:
+            # Fusion des résultats
+            logger.info(f"Fusion Q/A + KB (QA: {best_qa_score:.3f}, KB: {best_kb_score:.3f})")
+            combined = list(qa_results) + list(kb_results[:top_k-len(qa_results)])
+            return combined[:top_k], "hybrid"
+
+    elif qa_results:
+        logger.info(f"Utilisation Q/A seule (score: {qa_results[0].score:.3f})")
+        return qa_results, "qa"
+    elif kb_results:
+        logger.info(f"Utilisation KB seule (score: {kb_results[0].score:.3f})")
+        return kb_results[:top_k], "kb"
+    else:
+        logger.warning(f"Aucun résultat pour '{question}'")
+        return [], "none"
 
 
 def build_gpt_answer(question: str, context_chunks: Iterable[ScoredPoint]) -> str:
@@ -205,27 +293,41 @@ def clarify_question_with_gpt(question: str) -> str:
 
 def main(xlsx_path: str | Path, meta_path: str | Path) -> None:
     meta = load_meta(meta_path)
-    df = pd.read_excel(
-        xlsx_path, header=None
-    )  # Pas de header pour éviter les problèmes de colonnes mergées
     solution_value = meta.get("solution")
     if not isinstance(solution_value, str) or not solution_value.strip():
         logger.error("Meta 'solution' manquante ou invalide.")
         return
     solution = solution_value.strip()
 
-    logger.info(f"Traitement du fichier : {xlsx_path} ({len(df)} lignes)")
-
     wb = load_workbook(xlsx_path)
-    visible_sheets = [
-        sheet for sheet in wb.sheetnames if wb[sheet].sheet_state == "visible"
-    ]
-    if not visible_sheets:
-        logger.error("Aucun onglet visible dans le fichier Excel.")
-        return
-    ws = wb[visible_sheets[0]]
 
-    df = pd.read_excel(xlsx_path, header=None, sheet_name=visible_sheets[0])
+    # Déterminer l'onglet cible : spécifié par l'utilisateur ou premier visible
+    target_sheet = None
+    if "sheet_name" in meta and isinstance(meta["sheet_name"], str):
+        specified_sheet = meta["sheet_name"].strip()
+        if specified_sheet and specified_sheet in wb.sheetnames:
+            if wb[specified_sheet].sheet_state == "visible":
+                target_sheet = specified_sheet
+                logger.info(f"📋 Utilisation de l'onglet spécifié pour RFP : {specified_sheet}")
+            else:
+                logger.warning(f"⚠️ Onglet spécifié '{specified_sheet}' n'est pas visible")
+
+    # Fallback : utiliser le premier onglet visible
+    if not target_sheet:
+        visible_sheets = [
+            sheet for sheet in wb.sheetnames if wb[sheet].sheet_state == "visible"
+        ]
+        if not visible_sheets:
+            logger.error("Aucun onglet visible dans le fichier Excel.")
+            return
+        target_sheet = visible_sheets[0]
+        logger.info(f"📋 Utilisation de l'onglet par défaut pour RFP : {target_sheet}")
+
+    # Lire le fichier Excel avec l'onglet sélectionné
+    df = pd.read_excel(xlsx_path, header=None, sheet_name=target_sheet)
+    ws = wb[target_sheet]
+
+    logger.info(f"Traitement du fichier : {xlsx_path} onglet '{target_sheet}' ({len(df)} lignes)")
 
     merged_cells: set[str] = set()
     for rng in ws.merged_cells.ranges:
@@ -283,12 +385,14 @@ def main(xlsx_path: str | Path, meta_path: str | Path) -> None:
         clarified_question = clarify_question_with_gpt(question)
         logger.info(f"Question clarifiée : {clarified_question}")
 
-        results = search_qdrant(clarified_question, solution)
+        results, source = search_hybrid(clarified_question, solution)
         if not results:
             logger.info(f"Aucun chunk trouvé pour la question : {clarified_question}")
             with open(NO_MATCH_LOG, "a", encoding="utf-8") as nomatch_log:
                 nomatch_log.write(f"{clarified_question}\n")
             continue
+
+        logger.info(f"Source utilisée pour la réponse : {source}")
 
         filtered_chunks = filter_chunks_with_gpt(clarified_question, results)
         if not filtered_chunks:

@@ -89,7 +89,7 @@ export default function ContextualSidebar({ section }: ContextualSidebarProps) {
           {
             icon: EditIcon,
             label: 'RFP Excel',
-            href: '/documents/rfp',
+            href: '/rfp-excel',
           },
         ]
       case 'admin':

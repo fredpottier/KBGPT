@@ -35,19 +35,23 @@ class RedisImportHistoryService:
         topic: str = None,
         document_type: str = None,
         language: str = None,
-        source_date: str = None
+        source_date: str = None,
+        solution: str = None,
+        import_type: str = None
     ) -> None:
         """Ajoute un nouvel enregistrement d'import."""
         import_data = {
             "uid": uid,
             "filename": filename,
-            "status": "processing",
+            "status": "pending",
             "started_at": datetime.now().isoformat(),
             "client": client or "",
             "topic": topic or "",
             "document_type": document_type or "",
             "language": language or "",
-            "source_date": source_date or ""
+            "source_date": source_date or "",
+            "solution": solution or "",
+            "import_type": import_type or ""
         }
 
         # Stocker les détails de l'import

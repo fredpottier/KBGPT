@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any, DefaultDict
 from urllib.parse import quote, unquote
 
-from fastapi import UploadFile
+from fastapi import UploadFile, HTTPException
+import openpyxl
+import pandas as pd
+import tempfile
 from knowbase.common.clients import (
     get_openai_client,
     get_qdrant_client,
@@ -223,7 +226,9 @@ def handle_dispatch(
             topic=meta_dict.get("topic"),
             document_type=meta_dict.get("document_type"),
             language=meta_dict.get("language"),
-            source_date=meta_dict.get("source_date")
+            source_date=meta_dict.get("source_date"),
+            solution=meta_dict.get("client"),  # Pour les documents PPTX/PDF, utiliser client comme solution
+            import_type="document"
         )
 
         if document_kind == "pptx":
@@ -297,7 +302,252 @@ def handle_dispatch(
     return {"error": f"Unknown action_type: {action_type}. Expected 'search' or 'ingest'."}
 
 
-__all__ = ["handle_dispatch"]
+async def handle_excel_qa_upload(
+    *,
+    file: UploadFile,
+    meta_file: UploadFile | None,
+    settings: Settings,
+    logger,
+) -> dict[str, Any]:
+    """Handle Excel Q/A upload for RFP collection."""
+
+    if not file.filename or not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Fichier Excel (.xlsx/.xls) requis")
+
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_filename = normalize_filename(file.filename)
+    base_name = Path(safe_filename).stem
+    uid = f"{base_name}_qa_{now}"
+
+    docs_in = settings.docs_in_dir
+    docs_in.mkdir(parents=True, exist_ok=True)
+
+    # Sauvegarder le fichier Excel
+    saved_path = docs_in / f"{uid}.xlsx"
+    with open(saved_path, "wb") as f_out:
+        shutil.copyfileobj(file.file, f_out)
+
+    # Sauvegarder le fichier meta si fourni
+    meta_path = None
+    if meta_file:
+        meta_path = docs_in / f"{uid}.meta.json"
+        with open(meta_path, "wb") as f_meta:
+            shutil.copyfileobj(meta_file.file, f_meta)
+
+    # Enregistrer dans l'historique Redis
+    meta_dict = {}
+    if meta_path and meta_path.exists():
+        try:
+            meta_dict = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"Erreur lecture meta: {e}")
+
+    history_service = get_redis_import_history_service()
+    history_service.add_import_record(
+        uid=uid,
+        filename=file.filename,
+        client=meta_dict.get("client"),
+        topic="RFP Q/A",
+        document_type="Excel Q/A",
+        language=meta_dict.get("language"),
+        source_date=meta_dict.get("source_date"),
+        solution=meta_dict.get("solution"),  # Pour les Excel Q/A, utiliser solution des métadonnées
+        import_type="excel_qa"
+    )
+
+    # Lancer le job d'import Q/A
+    job = enqueue_excel_ingestion(
+        job_id=uid,
+        file_path=str(saved_path),
+        meta=meta_dict or None,
+    )
+
+    return {
+        "action": "excel_qa_upload",
+        "status": "queued",
+        "job_id": job.id,
+        "uid": uid,
+        "filename": file.filename,
+        "message": "Fichier Excel Q/A reçu et mis en file pour traitement.",
+    }
+
+
+async def handle_excel_rfp_fill(
+    *,
+    file: UploadFile,
+    meta_file: UploadFile | None,
+    settings: Settings,
+    logger,
+) -> dict[str, Any]:
+    """Handle Excel RFP fill request."""
+
+    if not file.filename or not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Fichier Excel (.xlsx/.xls) requis")
+
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_filename = normalize_filename(file.filename)
+    base_name = Path(safe_filename).stem
+    uid = f"{base_name}_rfp_{now}"
+
+    docs_in = settings.docs_in_dir
+    docs_in.mkdir(parents=True, exist_ok=True)
+
+    # Sauvegarder le fichier Excel
+    saved_path = docs_in / f"{uid}.xlsx"
+    with open(saved_path, "wb") as f_out:
+        shutil.copyfileobj(file.file, f_out)
+
+    # Sauvegarder le fichier meta si fourni
+    meta_path = docs_in / f"{uid}.meta.json"
+    if meta_file:
+        with open(meta_path, "wb") as f_meta:
+            shutil.copyfileobj(meta_file.file, f_meta)
+    else:
+        # Créer un meta par défaut
+        default_meta = {
+            "solution": "",
+            "client": "",
+            "source_date": datetime.now().isoformat().split('T')[0]
+        }
+        with open(meta_path, "w", encoding="utf-8") as f_meta:
+            json.dump(default_meta, f_meta, indent=2)
+
+    # Lire les métadonnées pour validation
+    meta_dict = {}
+    try:
+        meta_dict = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"Erreur lecture meta: {e}")
+
+    # Enregistrer dans l'historique Redis
+    history_service = get_redis_import_history_service()
+    history_service.add_import_record(
+        uid=uid,
+        filename=file.filename,
+        client=meta_dict.get("client"),
+        topic="RFP Fill",
+        document_type="Excel RFP",
+        language=meta_dict.get("language"),
+        source_date=meta_dict.get("source_date"),
+        solution=meta_dict.get("solution"),  # Pour les Excel RFP, utiliser solution des métadonnées
+        import_type="excel_rfp"
+    )
+
+    # Lancer le job de remplissage RFP
+    job = enqueue_fill_excel(
+        job_id=uid,
+        file_path=str(saved_path),
+        meta_path=str(meta_path)
+    )
+
+    return {
+        "action": "excel_rfp_fill",
+        "status": "queued",
+        "job_id": job.id,
+        "uid": uid,
+        "filename": file.filename,
+        "message": "Fichier RFP reçu et mis en file pour remplissage automatique.",
+    }
+
+
+async def analyze_excel_file(
+    *,
+    file: UploadFile,
+    settings: Settings,
+    logger,
+) -> dict[str, Any]:
+    """Analyse un fichier Excel pour identifier les onglets et colonnes disponibles."""
+
+    if not file.filename or not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Fichier Excel (.xlsx/.xls) requis")
+
+    try:
+        # Sauvegarder temporairement le fichier
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as temp_file:
+            contents = await file.read()
+            temp_file.write(contents)
+            temp_path = temp_file.name
+
+        # Analyser les onglets avec openpyxl
+        workbook = openpyxl.load_workbook(temp_path, read_only=True)
+        sheets_info = []
+
+        for sheet_name in workbook.sheetnames:
+            sheet = workbook[sheet_name]
+
+            # Vérifier si l'onglet est visible
+            if sheet.sheet_state == 'visible':
+                # Analyser les colonnes avec contenu en utilisant pandas
+                try:
+                    df = pd.read_excel(temp_path, sheet_name=sheet_name, header=None, nrows=50)
+                    df = df.fillna('')
+
+                    # Identifier les colonnes avec contenu (au moins 3 cellules non vides)
+                    available_columns = []
+                    sample_data = []
+
+                    for col_idx in range(min(24, len(df.columns))):  # Limiter à 24 colonnes (A-X)
+                        col_letter = chr(ord('A') + col_idx)
+                        non_empty_count = (df.iloc[:, col_idx].astype(str).str.strip() != '').sum()
+
+                        if non_empty_count >= 3:  # Au moins 3 cellules avec contenu
+                            available_columns.append({
+                                'letter': col_letter,
+                                'index': col_idx,
+                                'non_empty_count': int(non_empty_count)
+                            })
+
+                    # Extraire les 50 premières lignes pour prévisualisation
+                    for row_idx in range(min(50, len(df))):
+                        row_data = []
+                        for col_idx in range(min(24, len(df.columns))):
+                            cell_value = str(df.iloc[row_idx, col_idx]).strip()
+                            row_data.append(cell_value if cell_value != 'nan' else '')
+                        sample_data.append(row_data)
+
+                    sheets_info.append({
+                        'name': sheet_name,
+                        'available_columns': available_columns,
+                        'sample_data': sample_data,
+                        'total_rows': len(df),
+                        'total_columns': min(24, len(df.columns))
+                    })
+
+                except Exception as e:
+                    logger.warning(f"Erreur analyse onglet {sheet_name}: {e}")
+                    continue
+
+        # Nettoyer le fichier temporaire
+        Path(temp_path).unlink()
+
+        if not sheets_info:
+            return {
+                'error': 'Aucun onglet analysable trouvé dans le fichier Excel',
+                'sheets': []
+            }
+
+        return {
+            'success': True,
+            'filename': file.filename,
+            'sheets': sheets_info,
+            'column_headers': [chr(ord('A') + i) for i in range(24)]  # A-X
+        }
+
+    except Exception as e:
+        logger.error(f"Erreur analyse Excel: {e}")
+        # Nettoyer le fichier temporaire en cas d'erreur
+        try:
+            Path(temp_path).unlink()
+        except:
+            pass
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erreur lors de l'analyse du fichier Excel: {str(e)}"
+        )
+
+
+__all__ = ["handle_dispatch", "handle_excel_qa_upload", "handle_excel_rfp_fill", "analyze_excel_file"]
 
 
 

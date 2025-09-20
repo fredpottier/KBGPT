@@ -19,6 +19,7 @@ COPY . .
 # Set build environment variables
 ENV NEXT_PUBLIC_API_BASE_URL=http://app:8000
 ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build the application
 RUN npm run build
@@ -52,6 +53,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # Switch to non-root user
 USER nextjs

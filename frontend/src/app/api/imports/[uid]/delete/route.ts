@@ -7,7 +7,7 @@ export async function DELETE(
   { params }: { params: { uid: string } }
 ) {
   try {
-    const response = await fetch(`${BACKEND_URL}/imports/${params.uid}/delete`, {
+    const response = await fetch(`${BACKEND_URL}/api/imports/${params.uid}/delete`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',

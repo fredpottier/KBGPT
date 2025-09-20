@@ -15,7 +15,9 @@ Knowbase est une plateforme dockerisée de gestion et recherche intelligente de 
 
 #### 🗄️ **Stockage & Base de Données**
 - **Base Vectorielle** : **Qdrant v1.15.1** - Base de données vectorielle haute performance pour la recherche de similarité
-- **Queue de Tâches** : **Redis 7.2** - Système de files d'attente pour l'orchestration asynchrone des pipelines d'ingestion
+- **Collections Spécialisées** : **Collections dédiées Q/A RFP** - Séparation logique des données avec recherche cascade
+- **Queue de Tâches** : **Redis 7.2** - Système de files d'attente avec persistance AOF pour l'orchestration asynchrone
+- **Historique d'Imports** : **Redis + Persistance** - Suivi complet des imports avec gestion de l'état en temps réel
 - **Stockage Fichiers** : Système de fichiers local avec organisation hiérarchique dans `/data`
 
 #### 🚀 **Backend & API**
@@ -25,9 +27,10 @@ Knowbase est une plateforme dockerisée de gestion et recherche intelligente de 
 - **Validation** : **Pydantic 2.8+** - Validation des données et sérialisation avec type hints
 
 #### 🖥️ **Interface Utilisateur**
-- **Dashboard** : **Streamlit 1.48+** - Interface web interactive pour la visualisation et recherche
+- **Frontend Moderne** : **Next.js 14 + TypeScript** - Interface web réactive avec Chakra UI
+- **Dashboard Legacy** : **Streamlit 1.48+** - Interface web interactive pour la visualisation et recherche
 - **Visualisation** : **Pandas + Streamlit** - Tableaux de bord et graphiques pour l'analyse des données
-- **UI Components** : Widgets Streamlit personnalisés pour l'upload et la recherche
+- **UI Components** : Composants React modernes avec gestion d'état avancée
 
 #### 🌐 **Exposition & Tunneling**
 - **Tunnel Public** : **Ngrok** - Exposition sécurisée de l'API locale via tunnel HTTPS
@@ -66,6 +69,8 @@ Knowbase est une plateforme dockerisée de gestion et recherche intelligente de 
 
 ### Capacités de Recherche Avancées
 - **Recherche Sémantique** : Basée sur la similarité cosinus des embeddings vectoriels avec Qdrant
+- **Recherche Cascade Intelligente** : Q/A RFP prioritaire (seuil 0.85) puis base de connaissances générale (seuil 0.70)
+- **Collections Spécialisées** : Séparation Q/A RFP et base de connaissances pour une pertinence optimisée
 - **Filtrage Multi-Critères** : Par solution SAP, type de document, dates, auteurs, métadonnées personnalisées
 - **ReRanking Intelligent** : Optimisation de la pertinence avec modèles cross-encoder
 - **API RESTful** : Interface programmatique complète avec documentation Swagger automatique
@@ -82,7 +87,25 @@ knowbase/
 │   ├── Dockerfile                   # Configuration conteneur backend
 │   └── requirements.txt             # Dépendances Python
 │
-├── 📁 ui/                           # Interface utilisateur Streamlit
+├── 📁 frontend/                     # Interface Next.js moderne
+│   ├── 📁 src/                      # Code source React/TypeScript
+│   │   ├── 📁 app/                  # App Router Next.js 14
+│   │   │   ├── chat/page.tsx        # Interface de chat intelligent
+│   │   │   ├── documents/           # Gestion des documents
+│   │   │   │   ├── import/page.tsx  # Import de documents
+│   │   │   │   ├── status/page.tsx  # Suivi des imports
+│   │   │   │   └── rfp/page.tsx     # Workflows RFP spécialisés
+│   │   │   ├── rfp-excel/page.tsx   # Page dédiée RFP Excel
+│   │   │   └── admin/page.tsx       # Interface d'administration
+│   │   ├── 📁 components/           # Composants React réutilisables
+│   │   │   ├── 📁 layout/           # Composants de mise en page
+│   │   │   └── 📁 ui/               # Composants d'interface
+│   │   └── 📁 lib/                  # Utilitaires et configuration
+│   ├── Dockerfile                   # Configuration conteneur frontend
+│   ├── package.json                 # Dépendances Node.js
+│   └── next.config.js               # Configuration Next.js
+│
+├── 📁 ui/                           # Interface utilisateur Streamlit (legacy)
 │   ├── Dockerfile                   # Configuration conteneur UI
 │   ├── requirements.txt             # Dépendances UI
 │   └── src/                         # Sources interface
@@ -92,22 +115,27 @@ knowbase/
 │   │   ├── main.py                  # Configuration FastAPI
 │   │   ├── dependencies.py          # Injection de dépendances
 │   │   ├── 📁 routers/              # Endpoints API
-│   │   │   ├── search.py            # Recherche de documents
-│   │   │   ├── ingest.py            # Ingestion de contenu
-│   │   │   └── status.py            # Statut système
+│   │   │   ├── search.py            # Recherche de documents avec cascade
+│   │   │   ├── ingest.py            # Ingestion de contenu multi-format
+│   │   │   ├── status.py            # Statut système et monitoring
+│   │   │   └── imports.py           # Gestion historique des imports
 │   │   ├── 📁 services/             # Logique métier
-│   │   │   ├── search.py            # Service de recherche
-│   │   │   ├── ingestion.py         # Service d'ingestion
-│   │   │   └── status.py            # Service de monitoring
+│   │   │   ├── search.py            # Service de recherche avec cascade
+│   │   │   ├── ingestion.py         # Service d'ingestion étendu
+│   │   │   ├── status.py            # Service de monitoring avancé
+│   │   │   ├── synthesis.py         # Synthèse de réponses intelligente
+│   │   │   ├── import_history.py    # Historique des imports
+│   │   │   ├── import_history_redis.py # Persistance Redis des imports
+│   │   │   └── import_deletion.py   # Suppression complète d'imports
 │   │   └── 📁 schemas/              # Modèles de données Pydantic
 │   │       └── search.py            # Schémas de requête/réponse
 │   │
 │   ├── 📁 ingestion/                # Pipeline d'ingestion modulaire
 │   │   ├── 📁 pipelines/            # Pipelines de traitement par format
-│   │   │   ├── pptx_pipeline.py     # Traitement PowerPoint
+│   │   │   ├── pptx_pipeline.py     # Traitement PowerPoint (filtrage slides amélioré)
 │   │   │   ├── pdf_pipeline.py      # Traitement PDF
-│   │   │   ├── excel_pipeline.py    # Traitement Excel
-│   │   │   └── fill_excel_pipeline.py # Traitement spécialisé Excel
+│   │   │   ├── excel_pipeline.py    # Traitement Excel Q/A pour collection RFP
+│   │   │   └── fill_excel_pipeline.py # Remplissage RFP avec recherche cascade
 │   │   ├── 📁 processors/           # Processeurs de contenu
 │   │   ├── 📁 queue/                # Orchestration RQ (Redis Queue)
 │   │   │   ├── dispatcher.py        # Distribution des tâches
@@ -120,10 +148,11 @@ knowbase/
 │   │
 │   ├── 📁 common/                   # Composants partagés
 │   │   ├── 📁 clients/              # Clients externes
-│   │   │   ├── qdrant_client.py     # Client base vectorielle
+│   │   │   ├── qdrant_client.py     # Client base vectorielle avec collections Q/A
 │   │   │   ├── openai_client.py     # Client OpenAI
 │   │   │   ├── anthropic_client.py  # Client Anthropic (Claude)
 │   │   │   ├── embeddings.py        # Modèles d'embeddings
+│   │   │   ├── reranker.py          # Cross-encoder pour reranking
 │   │   │   └── shared_clients.py    # Factory des clients
 │   │   ├── llm_router.py            # Routeur intelligent multi-provider
 │   │   ├── 📁 sap/                  # Logique métier SAP
@@ -187,6 +216,7 @@ knowbase/
 - **API principale** : Endpoints de recherche, ingestion et monitoring
 - **Port** : 8000 (configurable via `APP_PORT`)
 - **Features** : Auto-documentation Swagger, CORS, gestion d'erreurs
+- **Nouvelles API** : Historique d'imports, suppression complète, endpoints RFP Excel
 - **Volumes** : Code source, données runtime (`/data`)
 
 #### 👨‍💻 **knowbase-worker** (Processeur d'ingestion)
@@ -194,8 +224,14 @@ knowbase/
 - **Queue** : Basé sur RQ (Redis Queue)
 - **Formats** : PPTX, PDF, Excel, DOCX avec OCR et extraction
 
-#### 🖥️ **knowbase-ui** (Interface Streamlit)
-- **Dashboard** : Visualisation des données indexées
+#### 🖥️ **knowbase-frontend** (Interface Next.js)
+- **Frontend Moderne** : Interface React avec TypeScript et Chakra UI
+- **Port** : 3000 (configurable via `FRONTEND_PORT`)
+- **Features** : Chat intelligent, gestion imports, workflows RFP Excel, interface admin
+- **Architecture** : App Router Next.js 14, composants modulaires, API routes
+
+#### 🖥️ **knowbase-ui** (Interface Streamlit - Legacy)
+- **Dashboard** : Visualisation des données indexées (mode hérité)
 - **Port** : 8501 (configurable via `APP_UI_PORT`)
 - **Features** : Recherche interactive, filtrage, statistiques
 
@@ -244,8 +280,9 @@ docker-compose logs -f
 ### Accès aux Services
 Une fois démarrés, les services sont accessibles via :
 
+- **🌐 Frontend Moderne** : `http://localhost:3000` (Interface Next.js recommandée)
 - **📚 API Documentation** : `http://localhost:8000/docs` (Swagger UI)
-- **🖥️ Interface Streamlit** : `http://localhost:8501`
+- **🖥️ Interface Streamlit** : `http://localhost:8501` (Interface legacy)
 - **🔍 Base Qdrant** : `http://localhost:6333/dashboard`
 - **🌐 Tunnel Ngrok** : Vérifiez les logs pour l'URL publique
 
@@ -253,7 +290,19 @@ Une fois démarrés, les services sont accessibles via :
 
 ### Ingestion de Documents
 
-#### Via Interface Streamlit
+#### Via Interface Next.js (Recommandée)
+1. Accédez à `http://localhost:3000`
+2. Naviguez vers "Documents" → "Import fichier"
+3. Utilisez le drag-and-drop pour déposer vos documents
+4. Suivez le statut de traitement en temps réel dans "Suivi imports"
+5. Gérez les imports avec possibilité de suppression complète
+
+#### Via Workflows RFP Excel Spécialisés
+1. Accédez à "RFP Excel" dans la navigation
+2. **Import Questions/Réponses** : Uploadez des fichiers Excel Q/A avec configuration des colonnes
+3. **Remplir RFP vide** : Uploadez des RFP vides pour remplissage automatique via recherche cascade
+
+#### Via Interface Streamlit (Legacy)
 1. Accédez à `http://localhost:8501`
 2. Utilisez la section "Upload" pour déposer vos documents
 3. Suivez le statut de traitement dans l'interface
@@ -614,9 +663,12 @@ docker-compose exec qdrant cp -r /qdrant/storage /qdrant/backup
 ## 🎯 Roadmap et Évolutions
 
 ### À Court Terme
+- [x] **Interface web moderne (Next.js + TypeScript)** - ✅ Implémentée avec Chakra UI
+- [x] **Gestion avancée des imports** - ✅ Historique, tracking, suppression complète
+- [x] **Workflows RFP Excel spécialisés** - ✅ Import Q/A et remplissage automatique
+- [x] **Collections dédiées Q/A** - ✅ Recherche cascade intelligente
 - [ ] Centralisation complète du chargement des modèles ML
 - [ ] Système de claims pour la gestion d'incohérences
-- [ ] Interface web moderne (Next.js + TypeScript)
 
 ### À Moyen Terme
 - [ ] Support multi-tenant avec isolation des données
@@ -632,6 +684,9 @@ docker-compose exec qdrant cp -r /qdrant/storage /qdrant/backup
 
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Next.js-14+-000000?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Chakra UI](https://img.shields.io/badge/Chakra_UI-2.8+-319795?logo=chakraui&logoColor=white)](https://chakra-ui.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.48+-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org/)
 [![Qdrant](https://img.shields.io/badge/Qdrant-1.15+-DC382D?logo=qdrant&logoColor=white)](https://qdrant.tech/)
@@ -647,5 +702,7 @@ Ce projet suit une architecture modulaire permettant l'extensibilité et la main
 - Étendre l'API avec de nouveaux endpoints dans `src/knowbase/api/routers/`
 - Créer des processeurs personnalisés dans `src/knowbase/ingestion/processors/`
 - Implémenter des clients pour de nouveaux services externes
+- Développer des composants React personnalisés dans `frontend/src/components/`
+- Ajouter des pages Next.js dans `frontend/src/app/`
 
 **Développé avec ❤️ pour optimiser la gestion des connaissances SAP**

@@ -571,14 +571,14 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
     logger.info(f"start ingestion for {pptx_path.name}")
 
     if progress_callback:
-        progress_callback("Conversion PDF", 3, 6, "Conversion du PowerPoint en PDF")
+        progress_callback("Conversion PDF", 5, 100, "Conversion du PowerPoint en PDF")
 
     ensure_dirs()
     pdf_path = convert_pptx_to_pdf(pptx_path, SLIDES_PNG)
     slides_data = extract_notes_and_text(pptx_path)
 
     if progress_callback:
-        progress_callback("Analyse du contenu", 3, 6, "Analyse du contenu et génération du résumé")
+        progress_callback("Analyse du contenu", 10, 100, "Analyse du contenu et génération du résumé")
 
     deck_info = analyze_deck_summary(
         slides_data, pptx_path.name, document_type=document_type
@@ -588,7 +588,7 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
     deck_prompt_id = deck_info.get("_prompt_meta", {}).get("deck_prompt_id", "unknown")
 
     if progress_callback:
-        progress_callback("Génération des miniatures", 4, 6, f"Création de {len(slides_data)} miniatures")
+        progress_callback("Génération des miniatures", 15, 100, f"Création de {len(slides_data)} miniatures")
 
     # Convertir PDF en images directement en mémoire (évite les fichiers PPM temporaires)
     images = convert_from_path(str(pdf_path))
@@ -605,7 +605,7 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
         image_paths[i] = img_path
         generate_thumbnail(img_path)
     if progress_callback:
-        progress_callback("Analyse des slides", 5, 6, f"Analyse IA de {len(slides_data)} slides")
+        progress_callback("Analyse des slides", 20, 100, f"Analyse IA de {len(slides_data)} slides")
 
     tasks = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
@@ -631,16 +631,27 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
                     )
                 )
 
-    if progress_callback:
-        progress_callback("Ingestion dans Qdrant", 5, 6, "Insertion des chunks dans la base vectorielle")
-
     total = 0
-    for idx, future in tasks:
+    total_slides = len(tasks)
+
+    for i, (idx, future) in enumerate(tasks):
+        # Progression de 20% à 90% pendant l'analyse des slides
+        slide_progress = 20 + int((i / total_slides) * 70)
+        if progress_callback:
+            progress_callback("Analyse des slides", slide_progress, 100, f"Analyse slide {i+1}/{total_slides}")
+
         chunks = future.result() or []
         ingest_chunks(chunks, metadata, pptx_path.stem, idx, summary)
         total += len(chunks)
 
+    if progress_callback:
+        progress_callback("Ingestion dans Qdrant", 95, 100, "Insertion des chunks dans la base vectorielle")
+
     shutil.move(str(pptx_path), DOCS_DONE / f"{pptx_path.stem}.pptx")
+
+    if progress_callback:
+        progress_callback("Terminé", 100, 100, f"Import terminé - {total} chunks insérés")
+
     logger.info(f"Done {pptx_path.name} — total chunks: {total}")
 
     return {"chunks_inserted": total}
