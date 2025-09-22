@@ -5,7 +5,7 @@ Router API pour la gestion des solutions SAP.
 from fastapi import APIRouter, HTTPException
 from typing import List, Dict, Any
 from pydantic import BaseModel
-from knowbase.api.services.sap_solutions import sap_solutions_manager
+from knowbase.api.services.sap_solutions import get_sap_solutions_manager
 from knowbase.common.logging import setup_logging
 from pathlib import Path
 
@@ -47,7 +47,7 @@ async def get_solutions():
         SolutionsListResponse: Liste des solutions avec ID et nom canonique
     """
     try:
-        solutions_list = sap_solutions_manager.get_solutions_list()
+        solutions_list = get_sap_solutions_manager().get_solutions_list()
 
         solutions = [
             SolutionResponse(id=solution_id, name=canonical_name)
@@ -83,7 +83,7 @@ async def resolve_solution(request: SolutionResolveRequest):
 
         logger.info(f"🔍 Résolution solution pour: '{request.solution_input}'")
 
-        canonical_name, solution_id = sap_solutions_manager.resolve_solution(request.solution_input)
+        canonical_name, solution_id = get_sap_solutions_manager().resolve_solution(request.solution_input)
 
         logger.info(f"✅ Solution résolue: '{request.solution_input}' → '{canonical_name}' (ID: {solution_id})")
 
@@ -110,7 +110,7 @@ async def search_solutions(query: str):
         Liste des solutions correspondantes
     """
     try:
-        solutions_list = sap_solutions_manager.get_solutions_list()
+        solutions_list = get_sap_solutions_manager().get_solutions_list()
         query_lower = query.lower()
 
         # Filtrer les solutions qui contiennent le terme de recherche

@@ -214,5 +214,6 @@ class SAPSolutionsManager:
             logger.warning(f"⚠️ Erreur ajout alias: {e}")
 
 
-# Instance globale
-sap_solutions_manager = SAPSolutionsManager()
+def get_sap_solutions_manager() -> SAPSolutionsManager:
+    """Retourne une nouvelle instance du gestionnaire de solutions SAP."""
+    return SAPSolutionsManager()

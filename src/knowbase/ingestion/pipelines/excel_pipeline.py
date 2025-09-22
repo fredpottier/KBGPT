@@ -29,7 +29,7 @@ from knowbase.common.llm_router import LLMRouter, TaskType
 from knowbase.common.logging import setup_logging
 from knowbase.config.paths import ensure_directories
 from knowbase.config.settings import get_settings
-from knowbase.api.services.sap_solutions import sap_solutions_manager
+from knowbase.api.services.sap_solutions import get_sap_solutions_manager
 
 # === CONFIGURATION ===
 settings = get_settings()
@@ -65,7 +65,7 @@ def standardize_solution_name(raw_solution: str) -> str:
     Remplace l'ancienne logique LLM par une approche basée sur le dictionnaire YAML.
     """
     try:
-        canonical_name, solution_id = sap_solutions_manager.resolve_solution(raw_solution)
+        canonical_name, solution_id = get_sap_solutions_manager().resolve_solution(raw_solution)
         logger.info(f"📋 Solution standardisée: '{raw_solution}' → '{canonical_name}' (ID: {solution_id})")
         return canonical_name
     except Exception as e:
