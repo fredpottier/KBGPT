@@ -288,6 +288,14 @@ def process_pdf(pdf_path: Path):
             ingest_chunks(chunks, doc_meta, pdf_path.stem, page_index)
             total_chunks += len(chunks)
 
+            # Envoyer heartbeat toutes les 3 pages (pour documents longs)
+            if page_index % 3 == 0:
+                try:
+                    from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+                    send_worker_heartbeat()
+                except Exception:
+                    pass  # Ignorer si pas dans un contexte RQ
+
         try:
             DOCS_DONE.mkdir(parents=True, exist_ok=True)
             shutil.move(str(pdf_path), str(DOCS_DONE / f"{pdf_path.stem}.pdf"))
