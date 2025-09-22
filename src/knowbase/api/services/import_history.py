@@ -175,13 +175,9 @@ class ImportHistoryService:
         return initial_count - len(filtered_history)
 
 
-# Instance globale du service
-import_history_service = ImportHistoryService()
-
-
 def get_import_history_service() -> ImportHistoryService:
-    """Retourne l'instance du service d'historique."""
-    return import_history_service
+    """Retourne une nouvelle instance du service d'historique."""
+    return ImportHistoryService()
 
 
-__all__ = ["ImportHistoryService", "get_import_history_service", "import_history_service"]
+__all__ = ["ImportHistoryService", "get_import_history_service"]
