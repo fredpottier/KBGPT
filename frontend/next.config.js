@@ -9,19 +9,19 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${apiUrl}/:path*`,
+        destination: `${apiUrl}/api/:path*`,
       },
     ]
   },
-  // API health check endpoint
+  // Disable caching for all API calls
   async headers() {
     return [
       {
-        source: '/api/health',
+        source: '/api/:path*',
         headers: [
           {
             key: 'Cache-Control',
-            value: 'no-store',
+            value: 'no-store, no-cache, must-revalidate',
           },
         ],
       },
