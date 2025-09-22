@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import socket
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -24,27 +27,46 @@ def _ensure_exists(path: Path) -> Path:
     return path
 
 
-def update_job_progress(step: str, progress: int = 0, total_steps: int = 0, message: str = ""):
-    """Met à jour la progression du job actuel."""
+def send_worker_heartbeat():
+    """Envoie un heartbeat pour signaler que le worker est toujours actif."""
     job = get_current_job()
     if job:
+        worker_id = f"{socket.gethostname()}:{os.getpid()}"
+        job.meta.update({
+            "last_heartbeat": datetime.now().timestamp(),
+            "worker_id": worker_id
+        })
+        job.save()
+
+
+def update_job_progress(step: str, progress: int = 0, total_steps: int = 0, message: str = ""):
+    """Met à jour la progression du job actuel et envoie un heartbeat."""
+    job = get_current_job()
+    if job:
+        worker_id = f"{socket.gethostname()}:{os.getpid()}"
         job.meta.update({
             "current_step": step,
             "progress": progress,
             "total_steps": total_steps,
             "step_message": message,
-            "detailed_status": "processing"
+            "detailed_status": "processing",
+            "last_heartbeat": datetime.now().timestamp(),
+            "worker_id": worker_id
         })
         job.save()
 
 
 def mark_job_as_processing():
-    """Marque le job comme en cours de traitement dans l'historique Redis."""
+    """Marque le job comme en cours de traitement dans l'historique Redis et initialise le heartbeat."""
     from knowbase.api.services.import_history_redis import get_redis_import_history_service
     from rq import get_current_job
 
     job = get_current_job()
     if job:
+        # Initialiser le heartbeat et worker_id
+        send_worker_heartbeat()
+
+        # Mettre à jour l'historique
         history_service = get_redis_import_history_service()
         history_service.update_import_status(
             uid=job.id,
@@ -127,12 +149,54 @@ def ingest_pptx_job(
 
 
 def ingest_pdf_job(*, pdf_path: str) -> dict[str, Any]:
-    # Marquer comme en cours de traitement
-    mark_job_as_processing()
-    path = _ensure_exists(Path(pdf_path))
-    pdf_pipeline.process_pdf(path)
-    destination = pdf_pipeline.DOCS_DONE / f"{path.stem}.pdf"
-    return {"status": "completed", "output_path": str(destination)}
+    try:
+        # Marquer comme en cours de traitement
+        mark_job_as_processing()
+        update_job_progress("Initialisation", 0, 3, "Vérification du fichier PDF")
+        path = _ensure_exists(Path(pdf_path))
+
+        update_job_progress("Traitement", 1, 3, "Traitement du document PDF")
+        result = pdf_pipeline.process_pdf(path)
+        destination = pdf_pipeline.DOCS_DONE / f"{path.stem}.pdf"
+
+        update_job_progress("Terminé", 3, 3, "Import PDF terminé avec succès")
+
+        # Notifier l'historique Redis de la completion
+        from knowbase.api.services.import_history_redis import get_redis_import_history_service
+        from rq import get_current_job
+
+        job = get_current_job()
+        if job:
+            history_service = get_redis_import_history_service()
+            chunks_inserted = result.get("chunks_inserted", 0) if isinstance(result, dict) else 0
+            history_service.update_import_status(
+                uid=job.id,
+                status="completed",
+                chunks_inserted=chunks_inserted
+            )
+
+        return {
+            "status": "completed",
+            "output_path": str(destination),
+            "chunks_inserted": result.get("chunks_inserted", 0) if isinstance(result, dict) else 0
+        }
+    except Exception as e:
+        update_job_progress("Erreur", 0, 3, f"Erreur pendant le traitement PDF: {str(e)}")
+
+        # Notifier l'historique Redis de l'échec
+        from knowbase.api.services.import_history_redis import get_redis_import_history_service
+        from rq import get_current_job
+
+        job = get_current_job()
+        if job:
+            history_service = get_redis_import_history_service()
+            history_service.update_import_status(
+                uid=job.id,
+                status="failed",
+                error_message=str(e)
+            )
+
+        raise
 
 
 def ingest_excel_job(
@@ -154,6 +218,21 @@ def ingest_excel_job(
         destination = excel_pipeline.DOCS_DONE / path.name
 
         update_job_progress("Terminé", 4, 4, "Import Excel terminé avec succès")
+
+        # Notifier l'historique Redis de la completion
+        from knowbase.api.services.import_history_redis import get_redis_import_history_service
+        from rq import get_current_job
+
+        job = get_current_job()
+        if job:
+            history_service = get_redis_import_history_service()
+            chunks_inserted = result.get("chunks_inserted", 0) if isinstance(result, dict) else 0
+            history_service.update_import_status(
+                uid=job.id,
+                status="completed",
+                chunks_inserted=chunks_inserted
+            )
+
         return {
             "status": "completed",
             "output_path": str(destination),
@@ -210,6 +289,21 @@ def fill_excel_job(*, xlsx_path: str, meta_path: str) -> dict[str, Any]:
             meta_file.unlink()
 
         update_job_progress("Terminé", 5, 5, "Remplissage RFP terminé avec succès")
+
+        # Notifier l'historique Redis de la completion
+        from knowbase.api.services.import_history_redis import get_redis_import_history_service
+        from rq import get_current_job
+
+        job = get_current_job()
+        if job:
+            history_service = get_redis_import_history_service()
+            chunks_filled = result.get("chunks_filled", 0) if isinstance(result, dict) else 0
+            history_service.update_import_status(
+                uid=job.id,
+                status="completed",
+                chunks_inserted=chunks_filled  # Pour RFP, on compte les questions remplies
+            )
+
         return {
             "status": "completed",
             "output_path": str(destination),
