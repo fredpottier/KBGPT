@@ -22,6 +22,17 @@ def get_active_imports() -> List[Dict[str, Any]]:
     return service.get_active_imports()
 
 
+@router.post("/imports/sync")
+def sync_orphaned_jobs() -> Dict[str, Any]:
+    """Synchronise les jobs RQ terminés avec l'historique Redis."""
+    service = get_redis_import_history_service()
+    synced_count = service.sync_orphaned_jobs()
+    return {
+        "message": f"{synced_count} jobs synchronisés",
+        "synced_count": synced_count
+    }
+
+
 @router.post("/imports/cleanup")
 def cleanup_old_imports(days: int = 30) -> Dict[str, Any]:
     """Nettoie les anciens enregistrements d'imports."""
