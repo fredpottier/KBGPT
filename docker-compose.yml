@@ -111,7 +111,7 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: knowbase-frontend
     depends_on:
       - app
@@ -119,9 +119,16 @@ services:
       - .env
     environment:
       - NEXT_PUBLIC_API_BASE_URL=http://app:8000
-      - NODE_ENV=production
+      - NODE_ENV=development
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/next.config.js:/app/next.config.js
+      - ./frontend/package.json:/app/package.json
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+      - ./frontend/tailwind.config.js:/app/tailwind.config.js
     networks:
       - knowbase_net
     restart: unless-stopped
