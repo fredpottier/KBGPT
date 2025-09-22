@@ -181,6 +181,14 @@ def convert_pptx_to_pdf(pptx_path: Path, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"📄 Conversion PPTX→PDF: {pptx_path.name}")
 
+    # Envoyer heartbeat avant la conversion PDF (peut prendre plusieurs minutes)
+    try:
+        from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+        send_worker_heartbeat()
+        logger.debug("Heartbeat envoyé avant conversion PDF")
+    except Exception:
+        pass  # Ignorer si pas dans un contexte RQ
+
     # Configuration environnement pour LibreOffice headless
     env = os.environ.copy()
     env.update({
@@ -438,6 +446,9 @@ def ask_gpt_slide_analysis(
     deck_prompt_id="unknown",
     retries=2,
 ):
+    # Note: Heartbeat géré au niveau de la boucle principale (toutes les 3 slides)
+    # pour éviter trop d'overhead sur chaque slide
+
     img_b64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
     doc_type = document_type or "default"
     slide_prompt_id, slide_template = select_prompt(
@@ -643,6 +654,16 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
         chunks = future.result() or []
         ingest_chunks(chunks, metadata, pptx_path.stem, idx, summary)
         total += len(chunks)
+
+        # Envoyer heartbeat toutes les 3 slides (pour documents longs) + plus fréquent pour très longs imports
+        if i % 3 == 0 or (total_slides > 50 and i % 2 == 0):
+            try:
+                from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+                send_worker_heartbeat()
+                logger.debug(f"Heartbeat envoyé pour slide {i+1}/{total_slides}")
+            except Exception as e:
+                logger.warning(f"Erreur envoi heartbeat: {e}")
+                pass  # Ignorer si pas dans un contexte RQ
 
     if progress_callback:
         progress_callback("Ingestion dans Qdrant", 95, 100, "Insertion des chunks dans la base vectorielle")

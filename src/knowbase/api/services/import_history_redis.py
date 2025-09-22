@@ -166,10 +166,46 @@ class RedisImportHistoryService:
                 job = fetch_job(uid)
                 if job:
                     job_status = job.get_status(refresh=True)
+
+                    # Vérifier le heartbeat du worker pour les jobs en cours
+                    if job_status in ["started"] and hasattr(job, 'meta') and job.meta:
+                        last_heartbeat = job.meta.get("last_heartbeat")
+                        if last_heartbeat:
+                            try:
+                                # Vérifier si le heartbeat est trop ancien (10 minutes pour couvrir conversion PDF + analyse slides)
+                                heartbeat_age = datetime.now().timestamp() - float(last_heartbeat)
+                                if heartbeat_age > 600:  # 10 minutes : conversion PDF (plusieurs min) + analyse slides (45s entre heartbeats)
+                                    worker_id = job.meta.get("worker_id", "unknown")
+                                    self.update_import_status(
+                                        uid,
+                                        "failed",
+                                        error_message=f"Worker timeout - pas de heartbeat depuis {int(heartbeat_age/60)}min (worker: {worker_id})"
+                                    )
+                                    continue  # Ne pas ajouter aux imports actifs
+                            except (ValueError, TypeError) as e:
+                                # Si impossible de parser le heartbeat, considérer comme potentiellement orphelin
+                                job_start_time = getattr(job, 'started_at', None)
+                                if job_start_time:
+                                    job_age = datetime.now().timestamp() - job_start_time.timestamp()
+                                    if job_age > 1800:  # 30 minutes sans heartbeat valide (raisonnable pour imports longs)
+                                        self.update_import_status(
+                                            uid,
+                                            "failed",
+                                            error_message=f"Job orphelin détecté - heartbeat invalide après {int(job_age/60)}min"
+                                        )
+                                        continue
+
                     if job.is_finished:
                         # Mettre à jour le statut si le job est terminé
                         result = job.result if isinstance(job.result, dict) else {}
                         chunks = result.get("chunks_inserted", 0) if result else 0
+
+                        # Récupération automatique : si pas de chunks dans result, essayer les autres clés
+                        if chunks == 0 and result:
+                            chunks = (result.get("chunks_filled", 0) or
+                                    result.get("total_chunks", 0) or
+                                    0)
+
                         self.update_import_status(
                             uid,
                             "completed",
@@ -239,6 +275,47 @@ class RedisImportHistoryService:
 
         return deleted_count
 
+    def sync_orphaned_jobs(self) -> int:
+        """Synchronise les jobs RQ terminés qui n'ont pas été mis à jour dans l'historique."""
+        from knowbase.ingestion.queue import fetch_job
+
+        # Récupérer tous les imports avec status processing/pending des dernières 48h
+        history_key = self._get_history_key()
+        cutoff_timestamp = datetime.now().timestamp() - (48 * 60 * 60)  # 48h
+        recent_uids = self.redis_client.zrangebyscore(
+            history_key,
+            cutoff_timestamp,
+            "+inf"
+        )
+
+        synced_count = 0
+        active_statuses = ["processing", "in_progress", "pending", "queued"]
+
+        for uid in recent_uids:
+            import_key = self._get_import_key(uid)
+            import_data = self.redis_client.hgetall(import_key)
+
+            if import_data and import_data.get("status") in active_statuses:
+                # Vérifier le job RQ correspondant
+                job = fetch_job(uid)
+                if job:
+                    if job.is_finished and not job.is_failed:
+                        # Job terminé avec succès mais pas synchronisé
+                        result = job.result if isinstance(job.result, dict) else {}
+                        chunks = (result.get("chunks_inserted", 0) or
+                                result.get("chunks_filled", 0) or
+                                result.get("total_chunks", 0) or
+                                0)
+                        self.update_import_status(uid, "completed", chunks_inserted=chunks)
+                        synced_count += 1
+                    elif job.is_failed:
+                        # Job échoué mais pas synchronisé
+                        error_msg = str(job.exc_info) if job.exc_info else "Erreur inconnue"
+                        self.update_import_status(uid, "failed", error_message=error_msg)
+                        synced_count += 1
+
+        return synced_count
+
     def get_import_by_uid(self, uid: str) -> Optional[Dict[str, Any]]:
         """Récupère un import spécifique par son UID."""
         import_key = self._get_import_key(uid)
@@ -264,13 +341,9 @@ class RedisImportHistoryService:
         return processed_data
 
 
-# Instance globale du service
-redis_import_history_service = RedisImportHistoryService()
-
-
 def get_redis_import_history_service() -> RedisImportHistoryService:
-    """Retourne l'instance du service d'historique Redis."""
-    return redis_import_history_service
+    """Retourne une nouvelle instance du service d'historique Redis."""
+    return RedisImportHistoryService()
 
 
-__all__ = ["RedisImportHistoryService", "get_redis_import_history_service", "redis_import_history_service"]
+__all__ = ["RedisImportHistoryService", "get_redis_import_history_service"]
