@@ -112,7 +112,7 @@ sequenceDiagram
 ## Structure Qdrant
 
 ### Collections
-- **`sap_kb`** : Documents PPTX/PDF (364 chunks)
+- **`knowbase`** : Documents PPTX/PDF (364 chunks)
 - **`rfp_qa`** : Fichiers Excel Q/A (473 chunks)
 
 ### Types de Chunks
@@ -294,7 +294,7 @@ curl -X DELETE http://localhost:3000/api/imports/{uid}/delete
 
 ### Synchronisation Redis ↔ Qdrant
 Le système maintient la cohérence entre l'historique Redis et les chunks réels dans Qdrant :
-- **Collection principale** (`sap_kb`) : Documents PPTX/PDF
+- **Collection principale** (`knowbase`) : Documents PPTX/PDF
 - **Collection Excel Q/A** (`rfp_qa`) : Fichiers Excel avec questions/réponses
 - **Surveillance automatique** : Détection des désynchronisations via `/api/imports/sync`
 

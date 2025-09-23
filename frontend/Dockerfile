@@ -49,6 +49,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
+# Copy warmup script
+COPY --chown=nextjs:nodejs warmup.js ./
+
 # Set environment variables
 ENV NODE_ENV=production
 ENV PORT=3000

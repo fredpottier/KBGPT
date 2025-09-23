@@ -322,7 +322,7 @@ docker-compose exec app bash
 
 # Utiliser les utilitaires CLI
 python -m knowbase.ingestion.cli.test_search_qdrant --query "S/4HANA implementation"
-python -m knowbase.ingestion.cli.purge_collection --collection sap_kb
+python -m knowbase.ingestion.cli.purge_collection --collection knowbase
 python -m knowbase.ingestion.cli.generate_thumbnails --docs-in /data/docs_in
 ```
 
@@ -645,7 +645,7 @@ curl http://localhost:8000/status
 ### Nettoyage
 ```bash
 # Purge d'une collection Qdrant
-python -m knowbase.ingestion.cli.purge_collection --collection sap_kb --yes
+python -m knowbase.ingestion.cli.purge_collection --collection knowbase --yes
 
 # Nettoyage des logs
 docker-compose exec app find /data/logs -name "*.log" -mtime +7 -delete

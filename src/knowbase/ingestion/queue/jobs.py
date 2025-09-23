@@ -11,7 +11,6 @@ from rq import get_current_job
 from knowbase.config.settings import get_settings
 from knowbase.ingestion.pipelines import (
     excel_pipeline,
-    fill_excel_pipeline,
     pdf_pipeline,
     pptx_pipeline,
 )
@@ -275,13 +274,40 @@ def fill_excel_job(*, xlsx_path: str, meta_path: str) -> dict[str, Any]:
         path = _ensure_exists(Path(xlsx_path))
         meta_file = Path(meta_path)
 
-        update_job_progress("Traitement", 1, 5, "Remplissage RFP Excel")
-        result = fill_excel_pipeline.main(path, meta_file)
+        # Créer une fonction de callback pour transmettre la progression du pipeline
+        def pipeline_progress_callback(step: str, progress: int, total: int, message: str):
+            # Convertir la progression du pipeline (0-100%) en progression globale (1-3 sur 5 étapes = 20%-60%)
+            global_progress = 1 + int((progress / 100) * 2)  # 1 à 3
+            update_job_progress(step, global_progress, 5, message)
+
+        # Utiliser le nouveau pipeline intelligent
+        from knowbase.ingestion.pipelines import smart_fill_excel_pipeline
+        result = smart_fill_excel_pipeline.main(path, meta_file, progress_callback=pipeline_progress_callback)
 
         update_job_progress("Finalisation", 3, 5, "Création du fichier de sortie")
         output_dir = PRESENTATIONS_DIR
         output_dir.mkdir(parents=True, exist_ok=True)
-        destination = output_dir / f"{path.stem}_filled.xlsx"
+
+        # Récupérer le nom original du fichier et construire un UID court
+        from rq import get_current_job
+        job = get_current_job()
+        if job:
+            # Extraire seulement la partie date/time de l'UID (après rfp_) au format YYYYMMJJHHMMSS
+            uid_parts = job.id.split('_')
+            if len(uid_parts) >= 3 and uid_parts[-3:-1] == ['rfp']:
+                date_part = uid_parts[-2]  # YYYYMMJJ
+                time_part = uid_parts[-1]  # HHMMSS
+                short_uid = f"{date_part}{time_part}"  # YYYYMMJJHHMMSS
+            else:
+                short_uid = job.id
+
+            # Extraire le nom original du fichier (avant le premier _)
+            original_stem = path.stem.split('_')[0]  # "CriteoToFill" de "CriteoToFill_rfp_..."
+        else:
+            short_uid = "unknown"
+            original_stem = path.stem
+
+        destination = output_dir / f"{original_stem}_{short_uid}_filled.xlsx"
         path.replace(destination)
 
         update_job_progress("Nettoyage", 4, 5, "Suppression des fichiers temporaires")

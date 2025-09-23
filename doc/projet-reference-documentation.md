@@ -156,8 +156,8 @@ fill_excel_pipeline.py # Remplissage RFP automatique
 
 ### Collections Qdrant
 ```
-sap_kb_qa_rfp        # Questions/Réponses RFP (seuil 0.85)
-sap_kb               # Base connaissances générale (seuil 0.70)
+rfp_qa               # Questions/Réponses RFP (seuil 0.85)
+knowbase             # Base connaissances générale (seuil 0.70)
 ```
 
 ## 🧠 Intelligence Artificielle
@@ -170,8 +170,8 @@ sap_kb               # Base connaissances générale (seuil 0.70)
 
 ### Recherche Cascade
 ```
-1. Recherche prioritaire dans sap_kb_qa_rfp (seuil 0.85)
-2. Fallback sur sap_kb général (seuil 0.70)
+1. Recherche prioritaire dans rfp_qa (seuil 0.85)
+2. Fallback sur knowbase général (seuil 0.70)
 3. ReRanking intelligent des résultats
 ```
 
@@ -198,7 +198,7 @@ sap_kb               # Base connaissances générale (seuil 0.70)
 # Import Q/A
 1. Upload Excel Q/A → /rfp-excel
 2. Configuration colonnes → excel_pipeline.py
-3. Indexation dans collection sap_kb_qa_rfp
+3. Indexation dans collection rfp_qa
 
 # Remplissage RFP
 1. Upload RFP vide → /rfp-excel

@@ -38,9 +38,11 @@ import {
   List,
   ListItem,
   ListIcon,
+  Icon,
 } from '@chakra-ui/react'
 import { useState, useEffect, useCallback } from 'react'
 import { RepeatIcon, DeleteIcon, WarningIcon } from '@chakra-ui/icons'
+import { FiDownload } from 'react-icons/fi'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 
@@ -59,7 +61,7 @@ interface ImportRecord {
   language?: string
   source_date?: string
   solution?: string
-  import_type?: 'document' | 'excel_qa' // Pour distinguer les types d'imports
+  import_type?: 'document' | 'excel_qa' | 'fill_rfp' // Pour distinguer les types d'imports
 }
 
 interface ActiveImport {
@@ -381,6 +383,7 @@ export default function ImportStatusPage() {
   // Fonction pour déterminer le type d'import
   const getImportTypeLabel = (record: ImportRecord) => {
     if (record.import_type === 'excel_qa') return 'Excel Q/R'
+    if (record.import_type === 'fill_rfp') return 'RFP Complété'
     if (record.filename?.toLowerCase().endsWith('.xlsx')) return 'Excel Q/R'
     if (record.filename?.toLowerCase().endsWith('.pptx')) return 'PPTX'
     if (record.filename?.toLowerCase().endsWith('.pdf')) return 'PDF'
@@ -430,9 +433,6 @@ export default function ImportStatusPage() {
                   </Text>
                 </VStack>
                 <VStack align="end" spacing={1}>
-                  <Badge colorScheme={getStatusColor(currentImport.status)}>
-                    {getStatusLabel(currentImport.status)}
-                  </Badge>
                   <HStack>
                     <Spinner size="sm" color="blue.500" />
                     <Text fontSize="sm" color="blue.600">En cours...</Text>
@@ -651,7 +651,25 @@ export default function ImportStatusPage() {
                     <Tr key={record.uid}>
                       <Td>
                         <VStack align="start" spacing={1}>
-                          <Text fontWeight="medium">{record.filename}</Text>
+                          {record.import_type === 'fill_rfp' && record.status === 'completed' ? (
+                            <Button
+                              as="a"
+                              href={`/api/downloads/filled-rfp/${record.uid}`}
+                              download
+                              variant="link"
+                              colorScheme="blue"
+                              fontWeight="medium"
+                              size="sm"
+                              p={0}
+                              h="auto"
+                              minH="auto"
+                              leftIcon={<Icon as={FiDownload} />}
+                            >
+                              {record.filename}
+                            </Button>
+                          ) : (
+                            <Text fontWeight="medium">{record.filename}</Text>
+                          )}
                           <Text fontSize="xs" color="gray.500">
                             {record.uid}
                           </Text>
@@ -659,7 +677,10 @@ export default function ImportStatusPage() {
                       </Td>
                       <Td>
                         <Badge
-                          colorScheme={getImportTypeLabel(record) === 'Excel Q/R' ? 'green' : 'blue'}
+                          colorScheme={
+                            getImportTypeLabel(record) === 'Excel Q/R' ? 'green' :
+                            getImportTypeLabel(record) === 'RFP Complété' ? 'purple' : 'blue'
+                          }
                           variant="subtle"
                           fontSize="xs"
                         >

@@ -34,7 +34,7 @@ interface ExcelPreviewTableProps {
   sheetData: {
     name: string;
     sample_data: string[][];
-    available_columns: { letter: string; index: number; non_empty_count: number }[];
+    available_columns: { letter: string; index: number; non_empty_count: number; is_mostly_empty?: boolean }[];
     total_rows: number;
     total_columns: number;
   };
@@ -121,7 +121,8 @@ export default function ExcelPreviewTable({ sheetData, onColumnSelect }: ExcelPr
           <AlertDescription>
             Cliquez sur une colonne pour la sélectionner :
             <br />• <Badge colorScheme="blue">1er clic</Badge> = Colonne Questions
-            <br />• <Badge colorScheme="yellow">2ème clic</Badge> = Colonne Réponses
+            <br />• <Badge colorScheme="yellow">2ème clic</Badge> = Colonne Réponses (peut être vide)
+            <br />• <Badge colorScheme="orange" variant="outline">Colonnes vides</Badge> = Disponibles pour les réponses RFP
             <br />• Re-cliquer pour désélectionner
           </AlertDescription>
         </Box>
@@ -248,7 +249,10 @@ export default function ExcelPreviewTable({ sheetData, onColumnSelect }: ExcelPr
                 </Th>
                 {Array.from({ length: Math.min(COLUMNS_TO_DISPLAY, sheetData.total_columns - startColumn) }, (_, i) => {
                   const index = startColumn + i;
-                  const isAvailable = sheetData.available_columns.some(col => col.index === index);
+                  const columnInfo = sheetData.available_columns.find(col => col.index === index);
+                  const isAvailable = !!columnInfo;
+                  const isMostlyEmpty = columnInfo?.is_mostly_empty || false;
+
                   return (
                     <Th
                       key={index}
@@ -262,9 +266,16 @@ export default function ExcelPreviewTable({ sheetData, onColumnSelect }: ExcelPr
                       minWidth="120px"
                       maxWidth="150px"
                     >
-                      <Text fontSize="sm" fontWeight="bold">
-                        {getColumnLetter(index)}
-                      </Text>
+                      <VStack spacing={1}>
+                        <Text fontSize="sm" fontWeight="bold">
+                          {getColumnLetter(index)}
+                        </Text>
+                        {isAvailable && isMostlyEmpty && (
+                          <Text fontSize="xs" color="orange.500" fontWeight="medium">
+                            (vide)
+                          </Text>
+                        )}
+                      </VStack>
                     </Th>
                   );
                 })}
@@ -287,8 +298,8 @@ export default function ExcelPreviewTable({ sheetData, onColumnSelect }: ExcelPr
                           key={actualColumnIndex}
                           {...getColumnStyle(actualColumnIndex)}
                           onClick={() => {
-                            const isAvailable = sheetData.available_columns.some(col => col.index === actualColumnIndex);
-                            if (isAvailable) handleColumnClick(actualColumnIndex);
+                            const columnInfo = sheetData.available_columns.find(col => col.index === actualColumnIndex);
+                            if (columnInfo) handleColumnClick(actualColumnIndex);
                           }}
                           maxWidth="150px"
                           overflow="hidden"
