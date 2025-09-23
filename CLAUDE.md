@@ -16,6 +16,7 @@
 - **NE JAMAIS rebuilder automatiquement les containers Docker**
 - **NE JAMAIS exécuter `docker-compose up --build` sans demande explicite**
 - **NE JAMAIS arrêter/redémarrer les services Docker sans autorisation**
+- **NE JAMAIS purger un élément ou une queue entière Redis sans autorisation**
 
 ### ✅ AUTORISATIONS
 ```bash
@@ -30,6 +31,8 @@ docker-compose build          # Rebuild manuel si explicitement demandé
 ```
 
 ### 🚨 Processus en Cours
+
+- **Instruction** :Ne jamais purger toute la queue sans une autorisation claire
 Avant toute action Docker, TOUJOURS :
 1. Vérifier `docker-compose ps` pour voir les services actifs
 2. Demander confirmation utilisateur pour rebuild/restart
@@ -188,8 +191,8 @@ docker-compose logs redis    # Queue tâches
 - Synthèse LLM : 1-3s selon modèle
 
 ### Collections Qdrant
-- `sap_kb_qa_rfp` : Questions/Réponses RFP prioritaires
-- `sap_kb` : Base de connaissances générale
+- `rfp_qa` : Questions/Réponses RFP prioritaires
+- `knowbase` : Base de connaissances générale
 
 ## 🚀 Extensions et Développement
 

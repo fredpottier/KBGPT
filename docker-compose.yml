@@ -120,15 +120,21 @@ services:
     environment:
       - NEXT_PUBLIC_API_BASE_URL=http://app:8000
       - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     volumes:
       - ./frontend/src:/app/src
+      - ./frontend/.next:/app/.next
       - ./frontend/public:/app/public
       - ./frontend/next.config.js:/app/next.config.js
       - ./frontend/package.json:/app/package.json
       - ./frontend/tsconfig.json:/app/tsconfig.json
       - ./frontend/tailwind.config.js:/app/tailwind.config.js
+      - ./frontend/warmup.js:/app/warmup.js
+      - /app/node_modules
+    command: >
+      sh -c "npm run dev & sleep 10 && npm run warmup || true && wait"
     networks:
       - knowbase_net
     restart: unless-stopped

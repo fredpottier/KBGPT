@@ -23,10 +23,11 @@ QDRANT_COLLECTION = settings.qdrant_collection
 
 def delete_import_completely(uid: str) -> Dict[str, Any]:
     """
-    Supprime complètement un import :
-    - Chunks dans Qdrant
-    - Fichiers PPTX, PDF, slides, thumbnails
-    - Enregistrement historique Redis
+    Supprime complètement un import selon son type :
+
+    - Documents (PPTX/PDF): Chunks Qdrant + fichiers traités + slides + historique Redis
+    - Excel Q/A: Chunks Qdrant collection rfp_qa + historique Redis
+    - RFP Complété: Fichier Excel de docs_done + historique Redis uniquement
 
     Args:
         uid: UID de l'import à supprimer
@@ -47,87 +48,145 @@ def delete_import_completely(uid: str) -> Dict[str, Any]:
         raise FileNotFoundError(f"Import avec UID {uid} non trouvé dans l'historique")
 
     filename = import_data.get('filename', '')
-    logger.info(f"🗑️ Suppression complète de l'import {uid} ({filename})")
+    import_type = import_data.get('import_type', 'document')
+    logger.info(f"🗑️ Suppression complète de l'import {uid} ({filename}) - Type: {import_type}")
 
     deleted_items = {
         "chunks": 0,
         "files": [],
         "directories_cleaned": [],
-        "redis_records": 0
+        "redis_records": 0,
+        "import_type": import_type
     }
 
-    # 1. Supprimer les chunks de Qdrant
-    try:
-        # Rechercher tous les chunks de cet import
-        search_result = qdrant_client.scroll(
-            collection_name=QDRANT_COLLECTION,
-            scroll_filter={
-                "must": [
-                    {
-                        "key": "document.source_name",
-                        "match": {"value": f"{uid}.pptx"}
-                    }
-                ]
-            },
-            limit=10000  # Récupérer tous les chunks
-        )
+    # 1. Traitement selon le type d'import
+    if import_type == 'fill_rfp':
+        # RFP Complété : seulement le fichier Excel et Redis
+        logger.info("🔄 Type RFP Complété - Suppression fichier Excel uniquement")
 
-        chunk_ids = [point.id for point in search_result[0]]
+        # Supprimer le fichier Excel de docs_done
+        docs_done_dir = settings.presentations_dir.parent / "docs_done"
+        excel_file_path = docs_done_dir / filename
 
-        if chunk_ids:
-            qdrant_client.delete(
-                collection_name=QDRANT_COLLECTION,
-                points_selector=chunk_ids
-            )
-            deleted_items["chunks"] = len(chunk_ids)
-            logger.info(f"✅ Supprimé {len(chunk_ids)} chunks de Qdrant")
-        else:
-            logger.info("ℹ️ Aucun chunk trouvé dans Qdrant")
-
-    except Exception as e:
-        logger.error(f"❌ Erreur suppression chunks Qdrant: {e}")
-        raise Exception(f"Erreur suppression chunks Qdrant: {e}")
-
-    # 2. Supprimer les fichiers physiques
-    file_patterns = [
-        (PRESENTATIONS_DIR / f"{uid}.pptx", "PPTX traité"),
-        (SLIDES_DIR / f"{uid}.pdf", "PDF généré"),
-    ]
-
-    # Ajouter les slides et thumbnails (pattern avec numéro de slide)
-    slides_pattern = SLIDES_DIR.glob(f"{uid}_slide_*.jpg")
-    thumbnails_pattern = THUMBNAILS_DIR.glob(f"{uid}_slide_*.jpg")
-
-    for slide_file in slides_pattern:
-        file_patterns.append((slide_file, f"Slide {slide_file.name}"))
-
-    for thumb_file in thumbnails_pattern:
-        file_patterns.append((thumb_file, f"Thumbnail {thumb_file.name}"))
-
-    # Supprimer tous les fichiers
-    for file_path, description in file_patterns:
         try:
-            if file_path.exists():
-                file_path.unlink()
-                deleted_items["files"].append(str(file_path))
-                logger.info(f"✅ Supprimé: {description}")
+            if excel_file_path.exists():
+                excel_file_path.unlink()
+                deleted_items["files"].append(str(excel_file_path))
+                logger.info(f"✅ Supprimé fichier Excel: {filename}")
             else:
-                logger.info(f"ℹ️ Fichier déjà absent: {description}")
+                logger.info(f"ℹ️ Fichier Excel déjà absent: {filename}")
         except Exception as e:
-            logger.warning(f"⚠️ Erreur suppression {description}: {e}")
+            logger.warning(f"⚠️ Erreur suppression fichier Excel: {e}")
 
-    # 3. Nettoyer les répertoires vides si nécessaire
-    for directory in [PRESENTATIONS_DIR, SLIDES_DIR, THUMBNAILS_DIR]:
+    elif import_type == 'excel_qa':
+        # Excel Q/A : chunks dans collection rfp_qa + Redis
+        logger.info("🔄 Type Excel Q/A - Suppression chunks collection rfp_qa")
+
         try:
-            if directory.exists() and not any(directory.iterdir()):
-                logger.info(f"ℹ️ Répertoire {directory} vide (normal)")
-                deleted_items["directories_cleaned"].append(str(directory))
-        except Exception as e:
-            logger.warning(f"⚠️ Erreur vérification répertoire {directory}: {e}")
+            # Supprimer chunks de la collection rfp_qa
+            search_result = qdrant_client.scroll(
+                collection_name="rfp_qa",
+                scroll_filter={
+                    "must": [
+                        {
+                            "key": "document.source_name",
+                            "match": {"value": filename}
+                        }
+                    ]
+                },
+                limit=10000
+            )
 
-    # 4. Supprimer l'enregistrement Redis
+            chunk_ids = [point.id for point in search_result[0]]
+
+            if chunk_ids:
+                qdrant_client.delete(
+                    collection_name="rfp_qa",
+                    points_selector=chunk_ids
+                )
+                deleted_items["chunks"] = len(chunk_ids)
+                logger.info(f"✅ Supprimé {len(chunk_ids)} chunks de la collection rfp_qa")
+            else:
+                logger.info("ℹ️ Aucun chunk trouvé dans rfp_qa")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur suppression chunks rfp_qa: {e}")
+            raise Exception(f"Erreur suppression chunks rfp_qa: {e}")
+
+    else:
+        # Documents (PPTX/PDF) : chunks + fichiers traités + slides + thumbnails
+        logger.info("🔄 Type Document - Suppression complète chunks et fichiers")
+
+        # Supprimer les chunks de Qdrant (collection principale)
+        try:
+            search_result = qdrant_client.scroll(
+                collection_name=QDRANT_COLLECTION,
+                scroll_filter={
+                    "must": [
+                        {
+                            "key": "document.source_name",
+                            "match": {"value": f"{uid}.pptx"}
+                        }
+                    ]
+                },
+                limit=10000
+            )
+
+            chunk_ids = [point.id for point in search_result[0]]
+
+            if chunk_ids:
+                qdrant_client.delete(
+                    collection_name=QDRANT_COLLECTION,
+                    points_selector=chunk_ids
+                )
+                deleted_items["chunks"] = len(chunk_ids)
+                logger.info(f"✅ Supprimé {len(chunk_ids)} chunks de Qdrant")
+            else:
+                logger.info("ℹ️ Aucun chunk trouvé dans Qdrant")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur suppression chunks Qdrant: {e}")
+            raise Exception(f"Erreur suppression chunks Qdrant: {e}")
+
+        # Supprimer les fichiers physiques
+        file_patterns = [
+            (PRESENTATIONS_DIR / f"{uid}.pptx", "PPTX traité"),
+            (SLIDES_DIR / f"{uid}.pdf", "PDF généré"),
+        ]
+
+        # Ajouter les slides et thumbnails (pattern avec numéro de slide)
+        slides_pattern = SLIDES_DIR.glob(f"{uid}_slide_*.jpg")
+        thumbnails_pattern = THUMBNAILS_DIR.glob(f"{uid}_slide_*.jpg")
+
+        for slide_file in slides_pattern:
+            file_patterns.append((slide_file, f"Slide {slide_file.name}"))
+
+        for thumb_file in thumbnails_pattern:
+            file_patterns.append((thumb_file, f"Thumbnail {thumb_file.name}"))
+
+        # Supprimer tous les fichiers
+        for file_path, description in file_patterns:
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+                    deleted_items["files"].append(str(file_path))
+                    logger.info(f"✅ Supprimé: {description}")
+                else:
+                    logger.info(f"ℹ️ Fichier déjà absent: {description}")
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur suppression {description}: {e}")
+
+        # Nettoyer les répertoires vides si nécessaire
+        for directory in [PRESENTATIONS_DIR, SLIDES_DIR, THUMBNAILS_DIR]:
+            try:
+                if directory.exists() and not any(directory.iterdir()):
+                    logger.info(f"ℹ️ Répertoire {directory} vide (normal)")
+                    deleted_items["directories_cleaned"].append(str(directory))
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur vérification répertoire {directory}: {e}")
+
+    # 2. Supprimer l'enregistrement Redis (commun à tous les types)
     try:
-        # Supprimer de la liste d'historique
         history_key = history_service._get_history_key()
         import_key = history_service._get_import_key(uid)
 
@@ -143,7 +202,7 @@ def delete_import_completely(uid: str) -> Dict[str, Any]:
         logger.error(f"❌ Erreur suppression Redis: {e}")
         raise Exception(f"Erreur suppression Redis: {e}")
 
-    logger.info(f"🎉 Suppression complète de {uid} terminée avec succès")
+    logger.info(f"🎉 Suppression de {uid} ({import_type}) terminée avec succès")
 
     return deleted_items
 

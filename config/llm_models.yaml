@@ -24,6 +24,12 @@ task_models:
   # Canonicalisation de noms SAP
   canonicalization: "gpt-4o-mini"
 
+  # Analyse intelligente de questions RFP Excel (filtrage + reformulation + fusion)
+  rfp_question_analysis: "gpt-4o"
+
+  # Traduction de langue (tâche simple et peu coûteuse)
+  translation: "gpt-4o-mini"
+
 # Paramètres par type de tâche (basés sur les valeurs historiques du code)
 task_parameters:
   # Analyse d'images (ex: slides PowerPoint)
@@ -56,6 +62,16 @@ task_parameters:
     temperature: 0    # Déterministe pour normalisation
     max_tokens: 100   # Noms courts mais peut inclure reformulation
 
+  # Analyse intelligente de questions RFP Excel
+  rfp_question_analysis:
+    temperature: 0.1  # Consistance dans l'analyse
+    max_tokens: 16000  # Traitement batch de nombreuses questions (augmenté pour éviter troncature)
+
+  # Traduction de langue
+  translation:
+    temperature: 0.1  # Traduction consistante
+    max_tokens: 1000  # Suffisant pour traduire une réponse RFP
+
 # Configuration des providers LLM
 providers:
   openai:
@@ -71,23 +87,23 @@ providers:
     api_key_env: "ANTHROPIC_API_KEY"
     base_url: null  # Utilise l'URL par défaut d'Anthropic
     models:
-      - "claude-3-5-sonnet-20240620"
+      - "claude-sonnet-4-20250514"
+      - "claude-opus-4-20250514"
       - "claude-3-haiku-20240307"
-      - "claude-3-opus-20240229"
 
 # Fallbacks en cas d'indisponibilité
 fallback_strategy:
   # Si le modèle configuré n'est pas disponible, essayer ces alternatives
   vision:
     - "gpt-4o"
-    - "claude-3-5-sonnet-20241022"
+    - "claude-sonnet-4-20250514"
 
   metadata:
     - "gpt-4o"
     - "gpt-4o-mini"
 
   long_summary:
-    - "claude-3-5-sonnet-20240620"
+    - "claude-sonnet-4-20250514"
     - "gpt-4o"
     - "gpt-4o-mini"
 
@@ -101,6 +117,15 @@ fallback_strategy:
     - "claude-3-haiku-20240307"
 
   canonicalization:
+    - "gpt-4o-mini"
+    - "claude-3-haiku-20240307"
+
+  rfp_question_analysis:
+    - "claude-sonnet-4-20250514"
+    - "gpt-4o"
+    - "gpt-4o-mini"
+
+  translation:
     - "gpt-4o-mini"
     - "claude-3-haiku-20240307"
 

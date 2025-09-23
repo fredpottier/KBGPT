@@ -7,6 +7,8 @@ from typing import List, Dict, Any
 from pydantic import BaseModel
 from knowbase.api.services.sap_solutions import get_sap_solutions_manager
 from knowbase.common.logging import setup_logging
+from knowbase.common.clients import get_qdrant_client
+from knowbase.config.settings import get_settings
 from pathlib import Path
 
 logger = setup_logging(Path(__file__).parent.parent.parent.parent.parent / "data" / "logs", "api_sap_solutions.log")
@@ -130,3 +132,79 @@ async def search_solutions(query: str):
     except Exception as e:
         logger.error(f"❌ Erreur recherche solutions '{query}': {e}")
         raise HTTPException(status_code=500, detail=f"Erreur de recherche: {str(e)}")
+
+
+@router.get("/with-chunks", response_model=SolutionsListResponse)
+async def get_solutions_with_chunks(extend_search: bool = False):
+    """
+    Récupère uniquement les solutions SAP qui ont des chunks dans les collections Qdrant.
+
+    Args:
+        extend_search: Si False, ne cherche que dans Q/A RFP. Si True, inclut aussi la collection principale.
+
+    Returns:
+        SolutionsListResponse: Liste des solutions ayant des chunks en base
+    """
+    try:
+        settings = get_settings()
+        qdrant_client = get_qdrant_client()
+
+        # Déterminer les collections à vérifier selon le paramètre extend_search
+        if extend_search:
+            collections_to_check = [settings.qdrant_collection, settings.qdrant_qa_collection]
+            logger.info("🔍 Recherche étendue : Q/A RFP + Base de connaissances principale")
+        else:
+            collections_to_check = [settings.qdrant_qa_collection]
+            logger.info("🔍 Recherche limitée : Q/A RFP uniquement")
+
+        solutions_with_chunks = set()
+
+        for collection_name in collections_to_check:
+            try:
+                # Récupérer un échantillon de points pour voir quelles solutions existent
+                scroll_result = qdrant_client.scroll(
+                    collection_name=collection_name,
+                    limit=1000,  # Limiter pour performance
+                    with_payload=["main_solution", "solution"]
+                )
+
+                # Extraire les solutions uniques selon la collection
+                for point in scroll_result[0]:
+                    if point.payload:
+                        # Collection Q/A RFP : utilise main_solution
+                        if collection_name == settings.qdrant_qa_collection:
+                            if "main_solution" in point.payload:
+                                solution_name = point.payload["main_solution"]
+                                if isinstance(solution_name, str) and solution_name.strip():
+                                    solutions_with_chunks.add(solution_name.strip())
+
+                        # Collection principale : utilise solution.main
+                        elif collection_name == settings.qdrant_collection:
+                            if "solution" in point.payload and isinstance(point.payload["solution"], dict):
+                                solution_main = point.payload["solution"].get("main")
+                                if isinstance(solution_main, str) and solution_main.strip():
+                                    solutions_with_chunks.add(solution_main.strip())
+
+            except Exception as collection_error:
+                logger.warning(f"⚠️ Impossible d'accéder à la collection {collection_name}: {collection_error}")
+                continue
+
+        # Filtrer la liste complète des solutions pour ne garder que celles avec chunks
+        all_solutions = get_sap_solutions_manager().get_solutions_list()
+        filtered_solutions = [
+            SolutionResponse(id=solution_id, name=canonical_name)
+            for canonical_name, solution_id in all_solutions
+            if canonical_name in solutions_with_chunks
+        ]
+
+        logger.info(f"📋 Solutions avec chunks: {len(filtered_solutions)}/{len(all_solutions)} solutions disponibles")
+        logger.info(f"🔍 Solutions trouvées: {[s.name for s in filtered_solutions]}")
+
+        return SolutionsListResponse(
+            solutions=filtered_solutions,
+            total=len(filtered_solutions)
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erreur récupération solutions avec chunks: {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")

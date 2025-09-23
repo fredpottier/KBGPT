@@ -39,6 +39,8 @@ interface SAPSolutionSelectorProps {
   label?: string;
   placeholder?: string;
   isRequired?: boolean;
+  onlyWithChunks?: boolean; // Nouveau prop pour filtrer les solutions avec chunks
+  extendSearchToKb?: boolean; // Nouveau prop pour la recherche étendue
 }
 
 export default function SAPSolutionSelector({
@@ -46,7 +48,9 @@ export default function SAPSolutionSelector({
   onChange,
   label = "Solution SAP",
   placeholder = "Sélectionner une solution...",
-  isRequired = false
+  isRequired = false,
+  onlyWithChunks = false,
+  extendSearchToKb = false
 }: SAPSolutionSelectorProps) {
   const [solutions, setSolutions] = useState<SAPSolution[]>([]);
   const [isLoadingSolutions, setIsLoadingSolutions] = useState(true);
@@ -63,7 +67,13 @@ export default function SAPSolutionSelector({
 
   const loadSolutions = useCallback(async () => {
     try {
-      const response = await fetch('/api/sap-solutions');
+      let endpoint = '/api/sap-solutions';
+
+      if (onlyWithChunks) {
+        endpoint = `/api/sap-solutions/with-chunks?extend_search=${extendSearchToKb}`;
+      }
+
+      const response = await fetch(endpoint);
       if (!response.ok) {
         throw new Error('Erreur lors du chargement des solutions');
       }
@@ -81,7 +91,7 @@ export default function SAPSolutionSelector({
     } finally {
       setIsLoadingSolutions(false);
     }
-  }, [toast]);
+  }, [toast, onlyWithChunks, extendSearchToKb]);
 
   // Charger les solutions au montage
   useEffect(() => {

@@ -28,6 +28,8 @@ class TaskType(Enum):
     SHORT_ENRICHMENT = "enrichment"      # Enrichissement de contenu court
     FAST_CLASSIFICATION = "classification" # Classification simple/rapide
     CANONICALIZATION = "canonicalization" # Normalisation de noms
+    RFP_QUESTION_ANALYSIS = "rfp_question_analysis" # Analyse intelligente questions RFP
+    TRANSLATION = "translation"           # Traduction de langues (tâche simple)
 
 
 class LLMRouter:

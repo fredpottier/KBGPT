@@ -58,13 +58,19 @@ def get_canonical_solution_name(
     existing_solutions = qdrant_client.scroll(
         collection_name=settings.qdrant_collection,
         limit=1000,
-        with_payload=["main_solution", "type"],
-        scroll_filter=None,
+        with_payload=["main_solution", "solution", "type"]
     )
     solution_names: set[str] = set()
     for point in existing_solutions[0]:
         payload: dict[str, Any] = point.payload or {}
         if payload.get("type") == "rfp_qa":
+            # Nouveau format: solution.main
+            if "solution" in payload and isinstance(payload["solution"], dict):
+                solution_main = payload["solution"].get("main")
+                if isinstance(solution_main, str) and solution_main.strip():
+                    solution_names.add(solution_main.strip())
+
+            # Ancien format: main_solution (pour rétrocompatibilité)
             name = payload.get("main_solution")
             if isinstance(name, str) and name:
                 solution_names.add(name)
@@ -430,7 +436,7 @@ async def handle_excel_rfp_fill(
         language=meta_dict.get("language"),
         source_date=meta_dict.get("source_date"),
         solution=meta_dict.get("solution"),  # Pour les Excel RFP, utiliser solution des métadonnées
-        import_type="excel_rfp"
+        import_type="fill_rfp"
     )
 
     # Lancer le job de remplissage RFP
@@ -482,7 +488,7 @@ async def analyze_excel_file(
                     df = pd.read_excel(temp_path, sheet_name=sheet_name, header=None, nrows=50)
                     df = df.fillna('')
 
-                    # Identifier les colonnes avec contenu (au moins 3 cellules non vides)
+                    # Identifier les colonnes avec contenu (au moins 1 cellule non vide pour permettre sélection colonnes vides pour RFP)
                     available_columns = []
                     sample_data = []
 
@@ -490,11 +496,14 @@ async def analyze_excel_file(
                         col_letter = chr(ord('A') + col_idx)
                         non_empty_count = (df.iloc[:, col_idx].astype(str).str.strip() != '').sum()
 
-                        if non_empty_count >= 3:  # Au moins 3 cellules avec contenu
+                        # Inclure toutes les colonnes qui ne sont pas complètement vides OU qui font partie des premières colonnes
+                        # Cela permet de sélectionner des colonnes vides pour les réponses RFP
+                        if non_empty_count >= 1 or col_idx < 10:  # Au moins 1 cellule avec contenu OU dans les 10 premières colonnes
                             available_columns.append({
                                 'letter': col_letter,
                                 'index': col_idx,
-                                'non_empty_count': int(non_empty_count)
+                                'non_empty_count': int(non_empty_count),
+                                'is_mostly_empty': bool(non_empty_count < 3)  # Convertir en booléen Python natif
                             })
 
                     # Extraire les 50 premières lignes pour prévisualisation

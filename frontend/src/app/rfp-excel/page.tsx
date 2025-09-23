@@ -39,6 +39,7 @@ import {
   useSteps,
   Spinner,
   Center,
+  Checkbox,
 } from '@chakra-ui/react';
 import { FiUpload, FiFileText, FiDownload, FiInfo, FiEye, FiCheck } from 'react-icons/fi';
 import { useState, useCallback } from 'react';
@@ -106,6 +107,9 @@ export default function RfpExcelPageImproved() {
     }
   });
 
+  const [extendSearchToKb, setExtendSearchToKb] = useState<boolean>(false);
+  const [solutionSelectorKey, setSolutionSelectorKey] = useState<number>(0);
+
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -118,9 +122,20 @@ export default function RfpExcelPageImproved() {
     { title: 'Finalisation', description: 'Confirmer import' },
   ];
 
+  const rfpSteps = [
+    { title: 'Upload', description: 'Analyser le RFP vide' },
+    { title: 'Configuration', description: 'Paramétrer recherche' },
+    { title: 'Finalisation', description: 'Lancer remplissage' },
+  ];
+
   const { activeStep: qaActiveStep } = useSteps({
     index: qaWorkflow.step === 'upload' ? 0 : qaWorkflow.step === 'configure' ? 1 : 2,
     count: qaSteps.length,
+  });
+
+  const { activeStep: rfpActiveStep } = useSteps({
+    index: rfpWorkflow.step === 'upload' ? 0 : rfpWorkflow.step === 'configure' ? 1 : 2,
+    count: rfpSteps.length,
   });
 
   // Analyse du fichier Excel
@@ -282,6 +297,7 @@ export default function RfpExcelPageImproved() {
         question_col: workflow.questionColumn,
         answer_col: workflow.answerColumn,
         sheet_name: workflow.selectedSheet?.name,
+        ...(workflowType === 'rfp' && { extend_search_to_kb: extendSearchToKb })
       };
 
       formData.append('metadata', JSON.stringify(metadata));
@@ -540,23 +556,191 @@ export default function RfpExcelPageImproved() {
               </VStack>
             </TabPanel>
 
-            {/* Fill RFP Tab - Structure similaire */}
+            {/* Fill RFP Tab */}
             <TabPanel p={0} pt={6}>
               <VStack spacing={6} align="stretch">
-                <Alert status="info">
-                  <AlertIcon />
-                  <Box>
-                    <AlertTitle>Remplissage automatique de RFP</AlertTitle>
-                    <AlertDescription>
-                      Interface similaire pour le remplissage automatique des RFP avec recherche cascade.
-                      Après traitement, vous serez redirigé vers le suivi des imports pour suivre le processus.
-                    </AlertDescription>
-                  </Box>
-                </Alert>
+                {/* Stepper RFP */}
+                <Stepper index={rfpActiveStep} colorScheme="purple">
+                  {rfpSteps.map((step, index) => (
+                    <Step key={index}>
+                      <StepIndicator>
+                        <StepStatus
+                          complete={<StepIcon />}
+                          incomplete={<StepNumber />}
+                          active={<StepNumber />}
+                        />
+                      </StepIndicator>
+                      <Box flexShrink="0">
+                        <StepTitle>{step.title}</StepTitle>
+                        <StepDescription>{step.description}</StepDescription>
+                      </Box>
+                      <StepSeparator />
+                    </Step>
+                  ))}
+                </Stepper>
 
-                <Text color="gray.500" fontStyle="italic">
-                  Interface RFP en cours de développement avec la même logique d'analyse et prévisualisation...
-                </Text>
+                {/* Étape 1: Upload RFP */}
+                {rfpWorkflow.step === 'upload' && (
+                  <Card>
+                    <CardBody>
+                      <VStack spacing={4}>
+                        <Alert status="info">
+                          <AlertIcon />
+                          <Box>
+                            <AlertTitle>Remplissage automatique de RFP</AlertTitle>
+                            <AlertDescription>
+                              Uploadez un fichier Excel RFP vide avec des questions. Le système recherchera automatiquement les réponses dans votre base de connaissances.
+                            </AlertDescription>
+                          </Box>
+                        </Alert>
+
+                        <Box
+                          {...rfpDropzone.getRootProps()}
+                          border="2px dashed"
+                          borderColor={rfpDropzone.isDragActive ? "purple.400" : "gray.300"}
+                          borderRadius="lg"
+                          p={8}
+                          textAlign="center"
+                          cursor="pointer"
+                          bg={rfpDropzone.isDragActive ? "purple.50" : "gray.50"}
+                          transition="all 0.2s"
+                          _hover={{ borderColor: "purple.400", bg: "purple.50" }}
+                        >
+                          <input {...rfpDropzone.getInputProps()} />
+                          <VStack spacing={3}>
+                            {isAnalyzing ? (
+                              <>
+                                <Spinner size="lg" color="purple.400" />
+                                <Text fontWeight="medium">Analyse en cours...</Text>
+                              </>
+                            ) : (
+                              <>
+                                <Icon as={FiFileText} boxSize={8} color="purple.400" />
+                                <Text fontWeight="medium">
+                                  {rfpDropzone.isDragActive
+                                    ? "Déposez le fichier RFP Excel ici"
+                                    : "Glissez-déposez un RFP Excel vide ou cliquez pour parcourir"}
+                                </Text>
+                              </>
+                            )}
+                            <Text fontSize="sm" color="gray.500">
+                              Formats acceptés: .xlsx, .xls
+                            </Text>
+                          </VStack>
+                        </Box>
+                      </VStack>
+                    </CardBody>
+                  </Card>
+                )}
+
+                {/* Étape 2: Configuration RFP */}
+                {rfpWorkflow.step === 'configure' && rfpWorkflow.analysisResult && (
+                  <Card>
+                    <CardBody>
+                      <VStack spacing={6}>
+                        {/* Sélection d'onglet */}
+                        <FormControl>
+                          <FormLabel>Onglet à traiter</FormLabel>
+                          <Select
+                            value={rfpWorkflow.selectedSheet?.name || ''}
+                            onChange={(e) => handleSheetSelection(e.target.value, 'rfp')}
+                          >
+                            {rfpWorkflow.analysisResult.sheets.map((sheet) => (
+                              <option key={sheet.name} value={sheet.name}>
+                                {sheet.name} ({sheet.available_columns.length} colonnes disponibles, {sheet.total_rows} lignes)
+                              </option>
+                            ))}
+                          </Select>
+                        </FormControl>
+
+                        {/* Métadonnées avec SolutionSelector filtré */}
+                        <VStack spacing={4} align="stretch" width="full">
+                          <HStack spacing={4} align="start" width="full">
+                            <FormControl>
+                              <FormLabel>Client</FormLabel>
+                              <Input
+                                placeholder="Nom du client"
+                                value={rfpWorkflow.metadata.client}
+                                onChange={(e) => updateMetadata('client', e.target.value, 'rfp')}
+                              />
+                            </FormControl>
+                            <FormControl>
+                              <FormLabel>Date de création du RFP</FormLabel>
+                              <Input
+                                type="date"
+                                value={rfpWorkflow.metadata.source_date}
+                                onChange={(e) => updateMetadata('source_date', e.target.value, 'rfp')}
+                              />
+                            </FormControl>
+                          </HStack>
+
+                          <SAPSolutionSelector
+                            key={solutionSelectorKey}
+                            value={rfpWorkflow.metadata.solution}
+                            onChange={(value) => updateMetadata('solution', value, 'rfp')}
+                            label="Solution SAP (avec base de connaissances)"
+                            placeholder="Sélectionner une solution SAP..."
+                            isRequired={true}
+                            onlyWithChunks={true}
+                            extendSearchToKb={extendSearchToKb}
+                          />
+
+                          {/* Option de recherche étendue */}
+                          <Card bg="purple.50" borderColor="purple.200">
+                            <CardBody>
+                              <VStack spacing={3} align="stretch">
+                                <Text fontWeight="medium" color="purple.700">Options de recherche</Text>
+                                <Checkbox
+                                  isChecked={extendSearchToKb}
+                                  onChange={(e) => {
+                                    setExtendSearchToKb(e.target.checked);
+                                    setSolutionSelectorKey(prev => prev + 1); // Force le rechargement du SolutionSelector
+                                  }}
+                                  colorScheme="purple"
+                                >
+                                  <VStack align="start" spacing={1}>
+                                    <Text fontSize="sm" fontWeight="medium">
+                                      Étendre la recherche à la base de connaissances générale
+                                    </Text>
+                                    <Text fontSize="xs" color="gray.600">
+                                      Par défaut, seules les Q/A RFP sont utilisées. Cochez pour inclure tous les documents.
+                                    </Text>
+                                  </VStack>
+                                </Checkbox>
+                              </VStack>
+                            </CardBody>
+                          </Card>
+                        </VStack>
+
+                        {/* Prévisualisation et sélection des colonnes */}
+                        {rfpWorkflow.selectedSheet && (
+                          <ExcelPreviewTable
+                            sheetData={rfpWorkflow.selectedSheet}
+                            onColumnSelect={(questionCol, answerCol) =>
+                              handleColumnSelection(questionCol, answerCol, 'rfp')
+                            }
+                          />
+                        )}
+
+                        {/* Actions */}
+                        <HStack justify="space-between" width="full">
+                          <Button variant="outline" onClick={() => resetWorkflow('rfp')}>
+                            Recommencer
+                          </Button>
+                          <Button
+                            colorScheme="purple"
+                            onClick={() => finalizeImport('rfp')}
+                            isDisabled={!rfpWorkflow.questionColumn || !rfpWorkflow.answerColumn || !rfpWorkflow.metadata.solution || !rfpWorkflow.metadata.client || isRedirecting}
+                            isLoading={isUploading || isRedirecting}
+                            loadingText={isRedirecting ? "Redirection vers le suivi..." : "Lancement du remplissage..."}
+                          >
+                            Lancer le remplissage RFP
+                          </Button>
+                        </HStack>
+                      </VStack>
+                    </CardBody>
+                  </Card>
+                )}
               </VStack>
             </TabPanel>
           </TabPanels>
