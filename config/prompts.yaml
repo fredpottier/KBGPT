@@ -1,4 +1,4 @@
-version: "2024-09-06"
+version: "2024-09-23-megaparse"
 families:
   default:
     deck:
@@ -30,31 +30,76 @@ families:
         {{ summary_text }}
 
     slide:
-      id: "slide_default_v1"
+      id: "slide_default_v2_megaparse"
       template: |
         Global deck summary:
         {{ deck_summary }}
 
-        Slide {{ slide_index }} extracted text:
+        Section {{ slide_index }} content (extracted via MegaParse):
+        {{ megaparse_content | default(text) }}
+
+        Original text (legacy):
         {{ text }}
 
-        Slide {{ slide_index }} notes:
+        Notes:
         {{ notes }}
 
-        Analyze slide {{ slide_index }} ('{{ source_name }}').
+        Analyze section {{ slide_index }} from '{{ source_name }}' (PowerPoint document).
 
-        You are analyzing a single PowerPoint slide. Your goal is to extract its meaning and value for use in a knowledge base.
-        Describe the **visual content** in detail — if there is a diagram, process flow, table, chart, or architecture, explain what it shows and what its key message is.
+        **CRITICAL DUAL-SOURCE ANALYSIS**: You have TWO complementary information sources:
+        1. **MegaParse content**: Structured text preserving tables, lists, formatting, and textual hierarchy
+        2. **Visual image**: The actual slide with diagrams, charts, visual layouts, colors, and spatial relationships
 
-        Return a JSON array where each item includes:
-        1. 'full_explanation' (string): a complete, detailed explanation of what this slide conveys, combining textual and visual content.
-        2. 'metadata' (object): [same fields as before]
+        **Your mission**: SYNTHESIZE both sources to extract ALL GENUINE DISTINCT CONCEPTS (if any). Each concept should combine:
+        - Textual details from MegaParse (precise data, lists, technical specs)
+        - Visual context from the image (diagrams, flows, spatial relationships, visual emphasis)
 
-        Instructions:
-        - If the slide contains complex visuals (e.g. multi-step flows, charts), describe them clearly.
-        - Use professional, clear, and concise language.
-        - Do not make up information. Leave fields empty or null if unsure.
-        - Return **only the JSON array**, no extra text, no comments.
+        **Multi-concept extraction**: Extract ONLY genuine, distinct concepts present in the content. This could be:
+        - 0 concepts (if title/transition/agenda slide with no substantial content)
+        - 1 concept (if slide focuses on one topic)
+        - Multiple concepts (if slide genuinely covers several distinct topics)
+
+        **Quality over quantity**: Better one accurate concept than multiple fabricated ones.
+
+        **Return a JSON array** where EACH ITEM represents ONE DISTINCT CONCEPT/TOPIC found in this section:
+
+        ```json
+        [
+          {
+            "full_explanation": "Complete explanation synthesizing MegaParse text + visual analysis. Describe what you see AND what you read, showing how they complement each other.",
+            "meta": {
+              "scope": "solution-specific" | "general" | "industry-specific",
+              "type": "capability" | "architecture" | "process" | "feature" | "benefit" | "use-case" | "integration",
+              "level": "strategic" | "tactical" | "operational",
+              "tags": ["tag1", "tag2"],
+              "slide_role": "title" | "content" | "summary" | "transition" | "agenda",
+              "concept_confidence": 0.1-1.0,
+              "has_visuals": true | false,
+              "visual_type": "table" | "diagram" | "chart" | "screenshot" | "flow" | null
+            }
+          }
+        ]
+        ```
+
+        **Concept Separation Guidelines (Text + Visual synthesis)**:
+        - Each distinct business capability (text) + its visual representation (diagram/icon) = separate chunk
+        - Each architectural component (MegaParse structure) + its position/connections in diagram = separate chunk
+        - Each process step (textual detail) + its visual flow/arrow/sequence = separate chunk
+        - Each table row (MegaParse data) + its visual formatting/emphasis = potential separate chunk
+        - Each diagram component (visual) + its textual description (MegaParse) = separate chunk
+        - Visual clusters/sections + their corresponding text blocks = separate chunks
+
+        **Quality Requirements**:
+        - Minimum 50 words per concept explanation (or return empty array [] if no substantial content)
+        - Maximum 500 words per concept explanation
+        - Focus on actionable, searchable knowledge
+        - Preserve technical details and visual descriptions
+        - Use professional, clear language
+        - **NEVER make up information or force concepts where none exist**
+
+        **For slides with minimal content**: If slide contains only titles, transitions, or agenda items without substantive information, return an empty array: []
+
+        Return **only the JSON array**, no extra text.
 
   technical:
     deck:
@@ -102,66 +147,91 @@ families:
         {{ summary_text }}
 
     slide:
-      id: "slide_technical_v1"
+      id: "slide_technical_v2_megaparse"
       template: |
         Global deck summary:
         {{ deck_summary }}
 
-        Slide {{ slide_index }} extracted text:
+        Section {{ slide_index }} content (extracted via MegaParse):
+        {{ megaparse_content | default(text) }}
+
+        Original text (legacy):
         {{ text }}
 
-        Slide {{ slide_index }} notes:
+        Notes:
         {{ notes }}
 
-        Analyze slide {{ slide_index }} ('{{ source_name }}').
+        Analyze technical section {{ slide_index }} from '{{ source_name }}' (PowerPoint document).
 
-        You are analyzing ONE technical slide to extract reusable knowledge. Combine textual and visual cues. 
-        If there is a diagram (component/deployment/sequence/flow/data model/table/chart), describe it precisely.
+        **CRITICAL DUAL-SOURCE TECHNICAL ANALYSIS**: You have TWO complementary technical information sources:
+        1. **MegaParse content**: Structured technical text with preserved tables, code blocks, configurations, and hierarchical data
+        2. **Visual image**: Technical diagrams, architecture schemas, network topologies, component relationships, and visual technical flows
 
-        Return a JSON array. Each item MUST have exactly:
-        {
-          "full_explanation": "<clear, complete explanation merging textual + visual evidence from THIS slide only>",
-          "metadata": {
-            // ROLE & VISUAL
-            "slide_role": null | "title" | "agenda" | "content" | "summary" | "transition",
-            "visual_type": null | "component_diagram" | "deployment_diagram" | "sequence_diagram" | "flowchart" | "data_model" | "network_topology" | "table" | "chart" | "screenshot",
+        **Your mission**: SYNTHESIZE both sources to extract ALL GENUINE DISTINCT TECHNICAL CONCEPTS (if any). Combine:
+        - Technical specifications from MegaParse (configs, APIs, data structures)
+        - Visual architecture from the image (component connections, data flows, deployment patterns)
 
-            // GENERAL
-            "insight_level": "descriptive" | "analytical" | "strategic",
-            "topic": null | "<2–6 words main topic>",
-            "mentioned_solutions": ["<brand/product explicitly on slide>", ...],   // [] if none
-            "contains_visuals": null | true | false,
-            "language": null | "fr" | "en",
-            "section": null | "<string>",
+        **Return a JSON array** where each item represents ONE TECHNICAL CONCEPT:
 
-            // GENERIC TECHNICAL (ALL OPTIONAL; fill ONLY if explicitly present on THIS slide)
-            "components": ["<component/service/hardware name>", ...],
-            "interfaces": ["<API/protocol/standard>", ...],                        // e.g., "REST","OData","gRPC","SFTP","RFC","SOAP"
-            "data_entities": ["<table/object/stream name>", ...],
-            "data_flows": ["A → B: <short note>" | "A → B → C", ...],
-            "environments": ["<env/target>", ...],                                 // e.g., "dev","prod eu-west-1","on-prem"
-            "constraints": ["<explicit limit/prereq>", ...],
-            "assumptions": ["<explicit assumption>", ...],
-            "dependencies": ["<external system/service>", ...],
-            "patterns": ["client-server" | "event-driven" | "pub/sub" | "batch ETL" | "layered" | "cache-aside" | "<as written>", ...],
-            "quality_attributes": ["performance" | "availability" | "scalability" | "security" | "maintainability" | "<as written>", ...],
-            "risks_or_notes": ["<warning/disclaimer/note>", ...],
+        ```json
+        [
+          {
+            "full_explanation": "Detailed technical explanation synthesizing MegaParse technical data + visual architecture analysis. Combine textual specs with visual component relationships.",
+            "meta": {
+              "slide_role": "title" | "agenda" | "content" | "summary" | "transition",
+              "visual_type": "component_diagram" | "deployment_diagram" | "sequence_diagram" | "flowchart" | "data_model" | "network_topology" | "table" | "chart" | "screenshot" | null,
+              "insight_level": "descriptive" | "analytical" | "strategic",
+              "topic": "<2–6 words describing this specific concept>",
+              "concept_scope": "component" | "integration" | "process" | "architecture" | "data_flow" | "configuration" | "deployment",
+              "technical_complexity": "low" | "medium" | "high",
+              "mentioned_solutions": ["<brand/product explicitly mentioned>"],
+              "contains_visuals": true | false,
+              "language": "fr" | "en",
+              "section": "<string if applicable>",
 
-            // CROSS-CUTTING MENTIONS (OPTIONAL; only if explicit)
-            "security_mentions": ["<control/standard named>", ...],                 // e.g., "TLS 1.3","WAF","MFA","KMS","ISO 27001"
-            "identity_mentions": ["<IdP/IAM or auth method>", ...],                 // e.g., "SAML 2.0","OIDC","Azure AD","SAP IAS/IPS"
-            "operations_mentions": ["<ops/monitoring/IR/backup topic>", ...],      // e.g., "SIEM","24/7 monitoring","runbook"
-            "performance_mentions": ["<metric/mechanism>", ...],                    // e.g., "p95 < 200ms","caching"
-            "availability_mentions": ["<HA/DR term or target>", ...]                // e.g., "Active-Passive","RTO 4h","RPO 30 min"
+              // TECHNICAL DETAILS (only if explicitly present)
+              "components": ["<specific component/service/hardware>"],
+              "interfaces": ["<API/protocol/standard>"],
+              "data_entities": ["<table/object/stream>"],
+              "data_flows": ["<source> → <target>: <description>"],
+              "environments": ["<environment name>"],
+              "constraints": ["<specific technical constraint>"],
+              "assumptions": ["<technical assumption>"],
+              "dependencies": ["<external system/service>"],
+              "patterns": ["<architectural pattern>"],
+              "quality_attributes": ["<quality attribute>"],
+              "risks_or_notes": ["<technical risk/note>"],
+
+              // SPECIALIZED MENTIONS
+              "security_mentions": ["<security control/standard>"],
+              "identity_mentions": ["<IdP/IAM/auth method>"],
+              "operations_mentions": ["<ops/monitoring topic>"],
+              "performance_mentions": ["<performance metric/mechanism>"],
+              "availability_mentions": ["<HA/DR term or target>"]
+            }
           }
-        }
+        ]
+        ```
 
-        Extraction rules:
-        - **Explicit-only**: do NOT infer from other slides; if not on THIS slide → null or [].
-        - **Enums**: use only the allowed values for `slide_role`, `visual_type`, `insight_level`, `language`.
-        - **Lists**: concise (≤ 12), deduplicate exact duplicates.
-        - **Naming**: SAP → canonical names; non-SAP → official names.
-        - **Output**: return ONLY the JSON array; no comments, no extra text.
+        **Technical Concept Extraction Strategy (Text + Visual synthesis)**:
+        - Each architectural component (visual box/service) + its technical specs (MegaParse data) = separate chunk
+        - Each integration point (visual connection) + its protocol/config details (text) = separate chunk
+        - Each data flow (visual arrow/path) + its transformation logic (textual description) = separate chunk
+        - Each deployment scenario (visual topology) + its configuration parameters (structured text) = separate chunk
+        - Technical table rows (MegaParse) + their visual context/grouping = separate chunks
+        - Diagram components (visual elements) + their technical documentation (text) = separate chunks
+
+        **Quality Standards**:
+        - 75-600 words per technical concept (or return empty array [] if no substantial technical content)
+        - Preserve exact technical terminology
+        - Include quantitative metrics when present
+        - Describe visual elements technically
+        - Focus on implementable knowledge
+        - **NEVER make up technical details or force concepts where none exist**
+
+        **For slides with minimal technical content**: If slide contains only titles, transitions, or agenda items without substantive technical information, return an empty array: []
+
+        Return **only the JSON array**.
   functional:
     deck:
       id: "deck_functional_v1"
@@ -196,53 +266,88 @@ families:
         {{ summary_text }}
 
     slide:
-      id: "slide_functional_v1"
+      id: "slide_functional_v2_megaparse"
       template: |
         Global deck summary:
         {{ deck_summary }}
 
-        Slide {{ slide_index }} extracted text:
+        Section {{ slide_index }} content (extracted via MegaParse):
+        {{ megaparse_content | default(text) }}
+
+        Original text (legacy):
         {{ text }}
 
-        Slide {{ slide_index }} notes:
+        Notes:
         {{ notes }}
 
-        Analyze slide {{ slide_index }} ('{{ source_name }}').
+        Analyze functional section {{ slide_index }} from '{{ source_name }}' (PowerPoint document).
 
-        You are analyzing ONE PowerPoint slide to extract maximum value for a knowledge base.
-        Combine textual and visual cues. If there is a diagram/flow/table/chart, explain it precisely.
+        **CRITICAL DUAL-SOURCE BUSINESS ANALYSIS**: You have TWO complementary business information sources:
+        1. **MegaParse content**: Structured business text with preserved capability matrices, process lists, feature tables, and hierarchical business data
+        2. **Visual image**: Business process flows, capability maps, organizational charts, user journey diagrams, and visual business relationships
 
-        Return a JSON array where each item includes:
-        1. "full_explanation" (string): a clear, complete explanation of what the slide conveys (merge text + visuals). 
-        2. "metadata" (object) with:
-           - slide_title
-           - slide_type                   // one of ['title','agenda','content','summary','transition',
-                                          //           'capability_matrix','process_flow','fiori_apps_list',
-                                          //           'industry_scope','release_strategy','roadmap','value_story']
-           - insight_level                // one of ['descriptive','analytical','strategic']
-           - topic                        // main topic (e.g., “Sourcing & Procurement”, “EWM”, “ATP”)
-           - mentioned_solutions         // array, SAP canonical + non-SAP brand names if explicitly present
-           - contains_visuals            // true|false
-           - language                    // 'fr'|'en'
-           - section                     // if a named section exists
+        **Your mission**: SYNTHESIZE both sources to extract ALL GENUINE DISTINCT BUSINESS CONCEPTS (if any). Combine:
+        - Business specifications from MegaParse (capabilities, features, processes, KPIs)
+        - Visual business context from the image (process flows, user interactions, business relationships)
 
-           // Functional/Business extraction (optional but recommended):
-           - lob                         // e.g., ["Sourcing & Procurement","Supply Chain","Finance"]
-           - business_capabilities       // fine-grained capability list found on the slide
-                                         //   (e.g., ["Guided buying","Invoice Processing","EWM - Slotting by ML"])
-           - industry_tags               // e.g., ["Automotive","Utilities"] if explicitly present
-           - delta_status                // e.g., {"release":"2023 FPS03","label":"new|update|unchanged"} if the slide marks NEW/UP
-           - license_flags               // e.g., {"additional_license": true, "additional_installation": true}
-           - integrations                // e.g., [{"product":"SAP Ariba","type":"integration"},
-                                          //       {"product":"SAP Global Trade Services","type":"integration"}]
-           - fiori_apps                  // array of app names/codes/roles when the slide lists them
-           - key_kpis                    // KPIs or outcomes if shown (e.g., “On-time shipment in full”)
-           - visuals_type                // e.g., "matrix","portfolio map","flow","table","screenshot"
-           - visuals_key_elements        // salient nodes/lanes/axes if identifiable
+        **Return a JSON array** where each item represents ONE BUSINESS/FUNCTIONAL CONCEPT:
 
-        Instructions:
-        - Prefer structured extraction of bullet lists/tables into arrays (don’t paraphrase long enumerations).
-        - Only extract industries, LoBs, Fiori apps, “NEW/UPDATE”, license flags, and integrations when explicitly signaled.
-        - Use SAP canonical names (e.g., “SAP S/4HANA Cloud, private edition”, “SAP Global Trade Services”, “SAP Business Network”).
-        - Do NOT invent content; leave fields null/[] if unsure.
-        - Return ONLY the JSON array, no extra text, no comments.
+        ```json
+        [
+          {
+            "full_explanation": "Complete business explanation synthesizing MegaParse business data + visual process/capability analysis. Combine textual capabilities with visual business flows.",
+            "meta": {
+              "slide_title": "<title if identifiable>",
+              "slide_type": "title" | "agenda" | "content" | "summary" | "transition" | "capability_matrix" | "process_flow" | "fiori_apps_list" | "industry_scope" | "release_strategy" | "roadmap" | "value_story",
+              "insight_level": "descriptive" | "analytical" | "strategic",
+              "topic": "<main functional topic>",
+              "concept_type": "capability" | "process" | "feature" | "benefit" | "use_case" | "integration" | "app" | "kpi",
+              "business_complexity": "low" | "medium" | "high",
+              "mentioned_solutions": ["<SAP canonical + non-SAP names>"],
+              "contains_visuals": true | false,
+              "language": "fr" | "en",
+              "section": "<named section if exists>",
+
+              // BUSINESS/FUNCTIONAL DETAILS (only if explicitly present)
+              "lob": ["<line of business>"],
+              "business_capabilities": ["<specific capability>"],
+              "industry_tags": ["<industry>"],
+              "delta_status": {"release": "<version>", "label": "new|update|unchanged"},
+              "license_flags": {"additional_license": true | false, "additional_installation": true | false},
+              "integrations": [{"product": "<name>", "type": "integration|connector|api"}],
+              "fiori_apps": ["<app name/code>"],
+              "key_kpis": ["<KPI or business outcome>"],
+              "visuals_type": "matrix" | "portfolio_map" | "flow" | "table" | "screenshot" | "chart",
+              "visuals_key_elements": ["<element>"],
+
+              // VALUE & BUSINESS IMPACT
+              "business_value": ["<value proposition>"],
+              "target_personas": ["<user role/persona>"],
+              "process_steps": ["<process step>"],
+              "prerequisites": ["<business prerequisite>"],
+              "success_metrics": ["<measurable outcome>"]
+            }
+          }
+        ]
+        ```
+
+        **Business Concept Extraction Strategy (Text + Visual synthesis)**:
+        - Each business capability (textual description) + its visual representation (process box/icon) = separate chunk
+        - Each Fiori app (MegaParse details) + its visual context (screenshot/flow position) = separate chunk
+        - Each process step (textual description) + its visual flow position (arrows/sequence) = separate chunk
+        - Each industry use case (text) + its visual business scenario (diagram/illustration) = separate chunk
+        - Capability matrix rows (MegaParse) + their visual grouping/color coding = separate chunks
+        - Business integration points (text) + their visual business flow connections = separate chunks
+
+        **Business Focus Requirements**:
+        - 50-500 words per business concept (or return empty array [] if no substantial business content)
+        - Emphasize business value and outcomes
+        - Preserve capability hierarchies and relationships
+        - Include user personas and roles when mentioned
+        - Focus on actionable business knowledge
+        - Extract structured lists (apps, capabilities, KPIs) accurately
+        - **NEVER make up business capabilities or force concepts where none exist**
+
+        **For slides with minimal business content**: If slide contains only titles, transitions, or agenda items without substantive business information, return an empty array: []
+
+        Return **only the JSON array**.

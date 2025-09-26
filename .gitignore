@@ -61,3 +61,10 @@ Thumbs.db
 ~$*
 
 # Misc
+credentials
+
+# Temporary files and build artifacts
+temp-files/
+*.zip
+*.tar.gz
+aws-resources-created.json

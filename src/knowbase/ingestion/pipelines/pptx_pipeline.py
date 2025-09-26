@@ -15,7 +15,6 @@ from knowbase.common.sap.normalizer import normalize_solution_name
 
 from langdetect import detect, DetectorFactory, LangDetectException
 from pdf2image import convert_from_path
-from pptx import Presentation
 from PIL import Image
 from qdrant_client.models import PointStruct
 from knowbase.common.clients import (
@@ -52,6 +51,42 @@ MAX_WORKERS = int(os.getenv("MAX_WORKERS", "2"))
 logger = setup_logging(LOGS_DIR, "ingest_debug.log")
 DetectorFactory.seed = 0
 
+# Patch unstructured pour éviter HTTP 403 avant l'import MegaParse
+try:
+    exec(open('/app/patch_unstructured.py').read())
+except Exception as e:
+    logger.warning(f"Could not apply unstructured patch: {e}")
+
+# Import conditionnel de MegaParse avec fallback (après définition du logger)
+PPTX_FALLBACK = False  # Initialiser par défaut
+
+try:
+    from megaparse import MegaParse
+    MEGAPARSE_AVAILABLE = True
+    logger.info("✅ MegaParse disponible")
+
+    # Même si MegaParse est disponible, vérifier python-pptx pour le fallback
+    try:
+        from pptx import Presentation
+        PPTX_FALLBACK = True
+        logger.info("✅ python-pptx disponible comme fallback")
+    except ImportError:
+        PPTX_FALLBACK = False
+        logger.warning("⚠️ python-pptx non disponible pour fallback")
+
+except ImportError as e:
+    MEGAPARSE_AVAILABLE = False
+    logger.warning(f"⚠️ MegaParse non disponible, fallback vers python-pptx: {e}")
+
+    # Fallback vers python-pptx si disponible
+    try:
+        from pptx import Presentation
+        PPTX_FALLBACK = True
+        logger.info("✅ python-pptx disponible comme fallback")
+    except ImportError:
+        PPTX_FALLBACK = False
+        logger.error("❌ Ni MegaParse ni python-pptx disponibles!")
+
 PROMPT_REGISTRY = load_prompts()
 
 # --- Fonctions utilitaires ---
@@ -85,14 +120,55 @@ def encode_image_base64(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("utf-8")
 
 
-# Nettoie la réponse GPT (retire les balises Markdown)
+# Nettoie la réponse GPT (retire les balises Markdown) et valide le JSON
 def clean_gpt_response(raw: str) -> str:
     import re
+    import json
 
     s = (raw or "").strip()
     s = re.sub(r"^```(?:json)?\s*", "", s)
     s = re.sub(r"\s*```$", "", s)
-    return s.strip()
+    s = s.strip()
+
+    # Validation et réparation basique du JSON tronqué
+    if s:
+        try:
+            # Test si le JSON est valide
+            json.loads(s)
+            return s
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON invalide détecté, tentative de réparation: {str(e)[:100]}")
+
+            # Tentative de réparation simple pour JSON tronqué
+            if s.endswith('"'):
+                # JSON tronqué au milieu d'une string
+                s = s + '}'
+                if s.count('[') > s.count(']'):
+                    s = s + ']'
+            elif s.endswith(','):
+                # JSON tronqué après une virgule
+                s = s[:-1]  # Retirer la virgule
+                if s.count('[') > s.count(']'):
+                    s = s + ']'
+                if s.count('{') > s.count('}'):
+                    s = s + '}'
+            elif not s.endswith((']', '}')):
+                # JSON clairement tronqué
+                if s.count('[') > s.count(']'):
+                    s = s + ']'
+                if s.count('{') > s.count('}'):
+                    s = s + '}'
+
+            # Test final de la réparation
+            try:
+                json.loads(s)
+                logger.info("JSON réparé avec succès")
+                return s
+            except json.JSONDecodeError:
+                logger.error("Impossible de réparer le JSON, retour d'un array vide")
+                return "[]"
+
+    return s
 
 
 # Détecte la langue d'un texte (ISO2)
@@ -238,33 +314,198 @@ def convert_pptx_to_pdf(pptx_path: Path, output_dir: Path) -> Path:
     return pdf_path
 
 
-# Extrait le texte et les notes de chaque slide du PPTX
+# Extrait le contenu du PPTX avec MegaParse ou fallback python-pptx
 def extract_notes_and_text(pptx_path: Path) -> List[Dict[str, Any]]:
-    logger.info(f"📊 Extraction texte+notes du PPTX: {pptx_path.name}")
-    prs = Presentation(str(pptx_path))
-    slides_data = []
-    for i, slide in enumerate(prs.slides, start=1):
-        notes = ""
-        if getattr(slide, "has_notes_slide", False):
-            notes_slide = getattr(slide, "notes_slide", None)
-            if notes_slide and hasattr(notes_slide, "notes_text_frame"):
-                tf = notes_slide.notes_text_frame
-                if tf and hasattr(tf, "text"):
-                    notes = (tf.text or "").strip()
-        texts = []
-        for shape in slide.shapes:
-            txt = getattr(shape, "text", None)
-            if isinstance(txt, str) and txt.strip():
-                texts.append(txt.strip())
-        slides_data.append(
-            {
+    if MEGAPARSE_AVAILABLE:
+        return extract_with_megaparse(pptx_path)
+    elif PPTX_FALLBACK:
+        return extract_with_python_pptx(pptx_path)
+    else:
+        logger.error(f"Aucun parser PPTX disponible pour {pptx_path.name}")
+        return [{
+            "slide_index": 1,
+            "text": "Erreur: aucun parser PPTX disponible",
+            "notes": "",
+            "megaparse_content": "",
+            "content_type": "error"
+        }]
+
+
+def extract_with_megaparse(pptx_path: Path) -> List[Dict[str, Any]]:
+    """Extraction via MegaParse avec segmentation intelligente"""
+    global PPTX_FALLBACK
+    logger.info(f"📊 Extraction contenu PPTX via MegaParse: {pptx_path.name}")
+
+    try:
+        megaparse = MegaParse()
+        parsed_content = megaparse.load(str(pptx_path))
+
+        # MegaParse retourne le contenu structuré complet
+        content_str = str(parsed_content) if not isinstance(parsed_content, str) else parsed_content
+
+        # Tentative de segmentation intelligente du contenu
+        slides_data = segment_megaparse_content(content_str, pptx_path.name)
+
+        logger.debug(f"Slides segmentées via MegaParse: {len(slides_data)}")
+        return slides_data
+
+    except Exception as e:
+        logger.error(f"❌ Erreur MegaParse pour {pptx_path.name}: {e}")
+        # Fallback vers python-pptx si disponible
+        if PPTX_FALLBACK:
+            logger.info(f"Fallback vers python-pptx pour {pptx_path.name}")
+            return extract_with_python_pptx(pptx_path)
+        else:
+            return [{
+                "slide_index": 1,
+                "text": f"Erreur d'extraction: {str(e)}",
+                "notes": "",
+                "megaparse_content": "",
+                "content_type": "error"
+            }]
+
+
+def extract_with_python_pptx(pptx_path: Path) -> List[Dict[str, Any]]:
+    """Extraction legacy via python-pptx"""
+    logger.info(f"📊 Extraction contenu PPTX via python-pptx (legacy): {pptx_path.name}")
+
+    try:
+        prs = Presentation(str(pptx_path))
+        slides_data = []
+        for i, slide in enumerate(prs.slides, start=1):
+            notes = ""
+            if getattr(slide, "has_notes_slide", False):
+                notes_slide = getattr(slide, "notes_slide", None)
+                if notes_slide and hasattr(notes_slide, "notes_text_frame"):
+                    tf = notes_slide.notes_text_frame
+                    if tf and hasattr(tf, "text"):
+                        notes = (tf.text or "").strip()
+            texts = []
+            for shape in slide.shapes:
+                txt = getattr(shape, "text", None)
+                if isinstance(txt, str) and txt.strip():
+                    texts.append(txt.strip())
+            text_content = "\n".join(texts)
+            slides_data.append({
                 "slide_index": i,
-                "text": "\n".join(texts),
+                "text": text_content,
                 "notes": notes,
-            }
-        )
-    logger.debug(f"Slides parsed: {len(slides_data)}")
-    return slides_data
+                "megaparse_content": text_content,  # Utiliser le texte comme fallback
+                "content_type": "python_pptx_fallback"
+            })
+        logger.debug(f"Slides extraites via python-pptx: {len(slides_data)}")
+        return slides_data
+    except Exception as e:
+        logger.error(f"❌ Erreur python-pptx pour {pptx_path.name}: {e}")
+        return [{
+            "slide_index": 1,
+            "text": f"Erreur d'extraction python-pptx: {str(e)}",
+            "notes": "",
+            "megaparse_content": "",
+            "content_type": "error"
+        }]
+
+
+# Segmente le contenu MegaParse en sections logiques
+def segment_megaparse_content(content: str, source_name: str) -> List[Dict[str, Any]]:
+    """
+    Segmente le contenu MegaParse en sections logiques pour simulation de slides.
+    Essaie de détecter les séparateurs de slides/sections dans le contenu.
+    """
+
+    # Indicateurs de séparation de slides (patterns communs dans MegaParse)
+    slide_separators = [
+        "---",           # Séparateur horizontal
+        "Page ",         # Numérotation de page
+        "Slide ",        # Slide explicite
+        "\n\n\n",        # Triple saut de ligne
+        "## ",           # Titre de section niveau 2
+        "# ",            # Titre de section niveau 1
+    ]
+
+    segments = []
+    current_segment = ""
+    slide_index = 1
+
+    lines = content.split('\n')
+
+    for line in lines:
+        # Vérifier si la ligne contient un séparateur de slide
+        is_separator = any(sep in line for sep in slide_separators if sep != "\n\n\n")
+
+        if is_separator and current_segment.strip():
+            # Finaliser le segment actuel
+            segments.append({
+                "slide_index": slide_index,
+                "text": current_segment.strip(),
+                "notes": "",
+                "megaparse_content": current_segment.strip(),
+                "content_type": "segmented",
+                "separator_found": True
+            })
+            slide_index += 1
+            current_segment = line + "\n"
+        else:
+            current_segment += line + "\n"
+
+    # Ajouter le dernier segment s'il existe
+    if current_segment.strip():
+        segments.append({
+            "slide_index": slide_index,
+            "text": current_segment.strip(),
+            "notes": "",
+            "megaparse_content": current_segment.strip(),
+            "content_type": "segmented",
+            "separator_found": False
+        })
+
+    # Si aucune segmentation n'a été trouvée, traiter comme un seul bloc
+    if not segments or len(segments) == 1:
+        # Découpage par taille pour éviter des chunks trop longs
+        max_chars_per_segment = 4000
+
+        if len(content) > max_chars_per_segment:
+            # Découpage par paragraphes
+            paragraphs = content.split('\n\n')
+            current_chunk = ""
+            slide_index = 1
+            segments = []
+
+            for para in paragraphs:
+                if len(current_chunk + para) > max_chars_per_segment and current_chunk:
+                    segments.append({
+                        "slide_index": slide_index,
+                        "text": current_chunk.strip(),
+                        "notes": "",
+                        "megaparse_content": current_chunk.strip(),
+                        "content_type": "chunked_by_size"
+                    })
+                    slide_index += 1
+                    current_chunk = para + "\n\n"
+                else:
+                    current_chunk += para + "\n\n"
+
+            # Dernier chunk
+            if current_chunk.strip():
+                segments.append({
+                    "slide_index": slide_index,
+                    "text": current_chunk.strip(),
+                    "notes": "",
+                    "megaparse_content": current_chunk.strip(),
+                    "content_type": "chunked_by_size"
+                })
+        else:
+            # Contenu court, un seul segment
+            segments = [{
+                "slide_index": 1,
+                "text": content,
+                "notes": "",
+                "megaparse_content": content,
+                "content_type": "single_block"
+            }]
+
+    logger.debug(f"Segmentation MegaParse: {len(segments)} segments pour {source_name}")
+    return segments
 
 
 # Génère une miniature pour une image de slide
@@ -442,6 +683,7 @@ def ask_gpt_slide_analysis(
     source_name,
     text,
     notes,
+    megaparse_content="",
     document_type="default",
     deck_prompt_id="unknown",
     retries=2,
@@ -461,6 +703,7 @@ def ask_gpt_slide_analysis(
         source_name=source_name,
         text=text,
         notes=notes,
+        megaparse_content=megaparse_content,
     )
     msg = [
         {
@@ -624,6 +867,16 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
             idx = slide["slide_index"]
             text = slide["text"]
             notes = slide["notes"]
+            megaparse_content = slide.get("megaparse_content", text)
+
+            # Log debug du contenu MegaParse envoyé au LLM
+            content_type = slide.get("content_type", "unknown")
+            preview = (megaparse_content or text)[:200]
+            if content_type.startswith("python_pptx"):
+                logger.debug(f"[SLIDE {idx}] python-pptx fallback content (truncated): {preview}...")
+            else:
+                logger.debug(f"[SLIDE {idx}] MegaParse content (truncated): {preview}...")
+
             if idx in image_paths:
                 tasks.append(
                     (
@@ -636,6 +889,7 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
                             pptx_path.name,
                             text,
                             notes,
+                            megaparse_content,
                             document_type,
                             deck_prompt_id,
                         ),
@@ -652,6 +906,8 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
             progress_callback("Analyse des slides", slide_progress, 100, f"Analyse slide {i+1}/{total_slides}")
 
         chunks = future.result() or []
+        if not chunks:
+            logger.info(f"Slide {idx}: No concepts extracted (empty/title/transition slide)")
         ingest_chunks(chunks, metadata, pptx_path.stem, idx, summary)
         total += len(chunks)
 

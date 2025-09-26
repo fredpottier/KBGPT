@@ -12,6 +12,18 @@ COPY package*.json ./
 # Install all dependencies (including devDependencies)
 RUN npm install --silent
 
+# Copy source code
+COPY . .
+
+# Create .next directory with proper permissions
+RUN mkdir -p /app/.next && chown -R node:node /app/.next
+
+# Set proper permissions for the entire app directory
+RUN chown -R node:node /app
+
+# Switch to node user
+USER node
+
 # Set environment variables for development
 ENV NODE_ENV=development
 ENV NEXT_TELEMETRY_DISABLED=1

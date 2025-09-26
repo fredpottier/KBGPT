@@ -5,9 +5,12 @@ uvicorn==0.30.3
 # === Vector DB ===
 qdrant-client==1.15.1
 
-# === Embeddings et Reranking ===
+# === Embeddings et Reranking (CPU SEULEMENT) ===
+# Forcer versions CPU pour éviter les 4GB NVIDIA
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.0+cpu
+torchvision==0.18.0+cpu
 sentence-transformers
-torch
 transformers
 scikit-learn
 numpy
@@ -16,23 +19,43 @@ numpy
 pandas
 openai==1.55.3
 anthropic>=0.40.0
+boto3>=1.28.0
+botocore>=1.31.0
 httpx==0.27.2
 python-dotenv
 python-multipart
 openpyxl
 
-# === Analyse PPTX / PDF ===
+# === Analyse PPTX / PDF (VERSION ALLÉGÉE) ===
+# MegaParse minimal (pas la version complète avec onnxtr/playwright)
+megaparse
 python-pptx
 pillow
 pdf2image==1.17.0
-# (optionnel si tu veux OCR via Python)
-pytesseract
-pdfminer.six
+pdfplumber>=0.11.0
 pypdf
-unstructured
-layoutparser
+pycryptodome>=3.21.0
+pdfminer.six==20231228
 pyyaml
 jinja2
+
+# LangChain minimal (pas toute la suite)
+langchain-core>=0.3,<0.4
+langchain-anthropic>=0.1.23
+langchain_openai>=0.1.21
+
+# Unstructured MINIMAL (pas [all-docs] qui est énorme !)
+unstructured==0.15.0
+
+# OCR simple (pas ONNX qui est lourd)
+pytesseract
+
+# Optionnel si vraiment besoin plus tard:
+# llama-parse>=0.4.0  # API externe, pas besoin localement
+# playwright>=1.47.0  # 200MB+ de navigateurs
+# onnxtr>=0.6.0       # Modèles OCR lourds
+# layoutparser         # Modèles computer vision
+# unstructured[all-docs] # Support tous formats (très lourd)
 
 # === Lang / NLP util ===
 langdetect

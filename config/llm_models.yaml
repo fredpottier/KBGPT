@@ -91,6 +91,15 @@ providers:
       - "claude-opus-4-20250514"
       - "claude-3-haiku-20240307"
 
+  sagemaker:
+    aws_region: "us-east-1"  # Région AWS par défaut
+    models:
+      - "llama3.1:70b"
+      - "qwen2.5:32b"
+      - "qwen2.5:7b"
+      - "llava:34b"
+      - "phi3:3.8b"
+
 # Fallbacks en cas d'indisponibilité
 fallback_strategy:
   # Si le modèle configuré n'est pas disponible, essayer ces alternatives
@@ -128,6 +137,42 @@ fallback_strategy:
   translation:
     - "gpt-4o-mini"
     - "claude-3-haiku-20240307"
+
+# Configuration SageMaker Endpoints
+# À configurer selon vos déploiements AWS
+sagemaker_endpoints:
+  "llama3.1:70b": "llama-3-1-70b-instruct-endpoint"
+  "qwen2.5:32b": "qwen2-5-32b-instruct-endpoint"
+  "qwen2.5:7b": "qwen2-5-7b-instruct-endpoint"
+  "llava:34b": "llava-34b-vision-endpoint"
+  "phi3:3.8b": "phi3-mini-instruct-endpoint"
+
+# Configuration alternative optimisée pour SageMaker
+# Décommentez cette section pour utiliser les modèles SageMaker
+alternative_task_models:
+  # Analyse d'images + texte (multimodal)
+  vision: "llava:34b"
+
+  # Extraction de métadonnées JSON structurées
+  metadata: "qwen2.5:32b"
+
+  # Résumés de textes longs (>10k tokens)
+  long_summary: "llama3.1:70b"
+
+  # Enrichissement de contenu court
+  enrichment: "qwen2.5:32b"
+
+  # Classification binaire rapide (oui/non, etc.)
+  classification: "phi3:3.8b"
+
+  # Canonicalisation de noms SAP
+  canonicalization: "qwen2.5:7b"
+
+  # Analyse intelligente de questions RFP Excel
+  rfp_question_analysis: "llama3.1:70b"
+
+  # Traduction de langue (tâche simple et peu coûteuse)
+  translation: "qwen2.5:7b"
 
 # Configuration par défaut si aucune tâche ne correspond
 default_model: "gpt-4o"
