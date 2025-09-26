@@ -68,3 +68,10 @@ temp-files/
 *.zip
 *.tar.gz
 aws-resources-created.json
+
+# Next.js build files (générés automatiquement)
+frontend/.next/
+frontend/out/
+
+# Docker generated files
+app/patch_unstructured.py

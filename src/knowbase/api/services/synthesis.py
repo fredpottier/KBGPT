@@ -10,24 +10,24 @@ SYNTHESIS_PROMPT = """Tu es un assistant expert en SAP qui aide les utilisateurs
 Voici la question de l'utilisateur :
 {question}
 
-Voici les informations pertinentes trouvées dans les présentations SAP (classées par ordre de pertinence) :
+Voici les extraits pertinents (classés par ordre de pertinence). Chaque bloc indique obligatoirement le document et le numéro de slide disponibles :
 
 {chunks_content}
 
-Instructions :
-1. Analyse les informations fournies et synthétise une réponse cohérente qui répond directement à la question de l'utilisateur
-2. Utilise uniquement les informations contenues dans les slides fournis
-3. Structure ta réponse de manière claire et organisée avec des sections numérotées ou à puces si approprié
-4. Pour chaque point important, indique PRÉCISÉMENT la référence :
-   - Si UN SEUL document : utilise "slide 71" ou "slides 113-115"
-   - Si PLUSIEURS documents : utilise "slide 36 du document ABC" ou "slides 71-73 du document XYZ"
-5. Ne jamais mentionner "Extrait X" - utilise toujours des références de slides
-6. Si des informations contradictoires existent, mentionne-le explicitement
-7. Si les slides ne contiennent pas suffisamment d'informations pour répondre complètement, indique-le clairement
-8. Reste concis mais informatif
-9. Réponds en français
+Règles STRICTES :
+1. Analyse uniquement ces extraits et synthétise une réponse cohérente qui répond directement à la question de l'utilisateur.
+2. Tu ne peux référencer que les slides explicitement listés dans les blocs ci-dessus. Ignore toute mention textuelle qui ferait référence à d'autres slides.
+3. Structure ta réponse de manière claire et organisée avec des sections numérotées ou à puces si approprié.
+4. Pour chaque point important, indique précisément la référence slide en respectant ces formats :
+   - Si un seul document : « slide 71 » ou « slides 113-115 » (en restant dans les indices fournis).
+   - Si plusieurs documents sont utilisés : « slide 36 du document ABC » ou « slides 71-73 du document XYZ ».
+5. Ne mentionne jamais « Extrait X » – utilise toujours des références de slides autorisées.
+6. Si des informations contradictoires existent, mentionne-le explicitement.
+7. Si les slides ne contiennent pas assez d'informations pour répondre complètement, indique-le clairement.
+8. Reste concis mais informatif.
+9. Réponds en français.
 
-IMPORTANT: Assure-toi que chaque affirmation soit accompagnée de sa référence slide spécifique avec le nom du document si nécessaire pour permettre au lecteur de retrouver facilement l'information source.
+IMPORTANT : Toute référence à un slide non listé dans les extraits est interdite. Ne reformule pas en inventant d'autres numéros de slides.
 
 Réponse :"""
 
@@ -58,27 +58,40 @@ def format_chunks_for_synthesis(chunks: List[Dict[str, Any]]) -> str:
         formatted_chunks.append(f"DOCUMENTS DISPONIBLES : {docs_list}")
         formatted_chunks.append("=" * 50)
 
-    for i, chunk in enumerate(chunks, 1):
-        text = chunk.get('text', '').strip()
+    for idx, chunk in enumerate(chunks, 1):
+        chunk_text = chunk.get('text', '').strip()
         source_file = chunk.get('source_file', 'Source inconnue')
-        slide_index = chunk.get('slide_index', '')
+        slide_index = chunk.get('slide_index')
+        score = chunk.get('score')
+        rerank = chunk.get('rerank_score')
 
-        # Informations sur le slide
-        if slide_index:
+        if slide_index not in (None, ''):
             slide_ref = f"Slide {slide_index}"
         else:
             slide_ref = "Slide non spécifié"
 
-        # Nom de document court
         if source_file and source_file != 'Source inconnue':
             document_name = source_file.split('/')[-1].replace('.pptx', '').replace('.pdf', '')
         else:
             document_name = 'Document inconnu'
 
-        chunk_text = f"""
-{text}
-"""
-        formatted_chunks.append(chunk_text.strip())
+        meta_lines = [
+            f"[Bloc #{idx}] Document : {document_name}",
+            f"Slide disponible : {slide_ref}"
+        ]
+        if score is not None:
+            try:
+                meta_lines.append(f"Score Qdrant : {float(score):.3f}")
+            except (TypeError, ValueError):
+                pass
+        if rerank is not None:
+            try:
+                meta_lines.append(f"Score rerank : {float(rerank):.3f}")
+            except (TypeError, ValueError):
+                pass
+
+        block_lines = meta_lines + ['Contenu :', chunk_text]
+        formatted_chunks.append("\n".join(block_lines))
 
     return "\n\n".join(formatted_chunks)
 

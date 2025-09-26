@@ -66,15 +66,19 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
   }
 
   // Filter chunks that have thumbnail images
-  let chunksWithImages = chunks.filter(chunk => chunk.slide_image_url)
+  const allChunksWithImages = chunks.filter(chunk => chunk.slide_image_url)
+  let chunksWithImages = allChunksWithImages
 
   // Si on a une réponse synthétisée, filtrer selon les slides mentionnés
   if (synthesizedAnswer) {
     const mentionedSlides = extractMentionedSlides(synthesizedAnswer)
     if (mentionedSlides.size > 0) {
-      chunksWithImages = chunksWithImages.filter(chunk =>
+      const filtered = allChunksWithImages.filter(chunk =>
         chunk.slide_index && mentionedSlides.has(chunk.slide_index.toString())
       )
+      if (filtered.length > 0) {
+        chunksWithImages = filtered
+      }
     }
   }
 
