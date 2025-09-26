@@ -97,9 +97,7 @@ export default function ImportPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [client, setClient] = useState('')
   const [sourceDate, setSourceDate] = useState('')
-  const [language, setLanguage] = useState('fr')
   const [documentType, setDocumentType] = useState('')
-  const [topic, setTopic] = useState('')
 
   const toast = useToast()
   const router = useRouter()
@@ -162,16 +160,6 @@ export default function ImportPage() {
       return
     }
 
-    if (!topic.trim()) {
-      toast({
-        title: 'Sujet manquant',
-        description: 'Veuillez renseigner le sujet du document',
-        status: 'warning',
-        duration: 3000,
-        isClosable: true,
-      })
-      return
-    }
 
     if (!documentType) {
       toast({
@@ -191,9 +179,7 @@ export default function ImportPage() {
     const metadata = {
       client: client.trim(),
       source_date: sourceDate.trim(),
-      language,
       document_type: documentType,
-      topic: topic.trim(),
     }
 
     formData.append('meta', JSON.stringify(metadata))
@@ -238,46 +224,23 @@ export default function ImportPage() {
                 </FormControl>
 
                 <FormControl>
-                  <FormLabel>Date source (YYYY-MM)</FormLabel>
+                  <FormLabel>Date source (MM/YYYY)</FormLabel>
                   <Input
                     value={sourceDate}
                     onChange={(e) => setSourceDate(e.target.value)}
-                    placeholder="ex: 2025-07"
-                    pattern="\\d{4}-\\d{2}"
+                    placeholder="ex: 07/2025"
+                    pattern="\\d{2}/\\d{4}"
                   />
                 </FormControl>
               </HStack>
 
-              <HStack spacing={4}>
-                <FormControl>
-                  <FormLabel>Langue</FormLabel>
-                  <Select value={language} onChange={(e) => setLanguage(e.target.value)}>
-                    <option value="fr">Français</option>
-                    <option value="en">Anglais</option>
-                    <option value="de">Allemand</option>
-                    <option value="es">Espagnol</option>
-                    <option value="it">Italien</option>
-                  </Select>
-                </FormControl>
-
-                <FormControl isRequired>
-                  <FormLabel>Type de document</FormLabel>
-                  <Select value={documentType} onChange={(e) => setDocumentType(e.target.value)} placeholder="Sélectionnez un type">
-                    <option value="technical">Technique</option>
-                    <option value="functional">Fonctionnel</option>
-                    <option value="marketing">Marketing</option>
-                  </Select>
-                </FormControl>
-              </HStack>
-
               <FormControl isRequired>
-                <FormLabel>Sujet du document</FormLabel>
-                <Textarea
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  placeholder="ex: Rise S/4HANA Private Cloud - Security and Compliance"
-                  rows={3}
-                />
+                <FormLabel>Type de document</FormLabel>
+                <Select value={documentType} onChange={(e) => setDocumentType(e.target.value)} placeholder="Sélectionnez un type">
+                  <option value="technical">Technique</option>
+                  <option value="functional">Fonctionnel</option>
+                  <option value="marketing">Marketing</option>
+                </Select>
               </FormControl>
             </VStack>
 
@@ -290,7 +253,7 @@ export default function ImportPage() {
               onClick={handleSubmit}
               isLoading={uploadMutation.isPending}
               loadingText="Envoi en cours..."
-              isDisabled={!selectedFile || !topic.trim() || !documentType}
+              isDisabled={!selectedFile || !documentType}
             >
               Envoyer le document
             </Button>

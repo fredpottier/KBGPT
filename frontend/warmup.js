@@ -9,6 +9,45 @@ const https = require('http');
 
 const BASE_URL = 'http://localhost:3000';
 
+// Fonction pour attendre que le serveur soit prêt
+async function waitForServer(maxAttempts = 30, interval = 2000) {
+  console.log('⏳ Attente que le serveur Next.js soit prêt...');
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await new Promise((resolve) => {
+        const req = https.get(`${BASE_URL}/api/health`, (res) => {
+          console.log(`✅ Serveur prêt (tentative ${attempt})`);
+          res.on('data', () => {});
+          res.on('end', () => resolve());
+        });
+
+        req.on('error', () => {
+          if (attempt === maxAttempts) {
+            console.log(`❌ Serveur non disponible après ${maxAttempts} tentatives`);
+          }
+          resolve();
+        });
+
+        req.setTimeout(3000, () => {
+          req.destroy();
+          resolve();
+        });
+      });
+
+      // Si on arrive ici sans erreur, le serveur est prêt
+      return true;
+    } catch (error) {
+      if (attempt < maxAttempts) {
+        console.log(`⏳ Tentative ${attempt}/${maxAttempts} - Retry dans ${interval/1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, interval));
+      }
+    }
+  }
+
+  return false;
+}
+
 // Liste des pages principales à précompiler
 const ROUTES_TO_WARMUP = [
   '/',                              // Accueil
@@ -51,6 +90,13 @@ async function warmupAll() {
   console.log(`📍 Base URL: ${BASE_URL}`);
   console.log(`📝 Routes à précompiler: ${ROUTES_TO_WARMUP.length}`);
 
+  // Attendre que le serveur soit prêt
+  const serverReady = await waitForServer();
+  if (!serverReady) {
+    console.log('❌ Impossible de se connecter au serveur - Abandon du warmup');
+    return;
+  }
+
   const startTime = Date.now();
 
   // Warmup séquentiel pour éviter la surcharge
@@ -62,5 +108,5 @@ async function warmupAll() {
   console.log(`🎯 Warmup terminé en ${totalDuration}ms`);
 }
 
-// Attendre quelques secondes pour que le serveur soit prêt
-setTimeout(warmupAll, 5000);
+// Démarrage immédiat mais avec attente serveur intégrée
+warmupAll();

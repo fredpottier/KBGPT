@@ -16,6 +16,15 @@ import yaml
 
 from knowbase.config.settings import get_settings
 from knowbase.common.clients import get_openai_client, get_anthropic_client, is_anthropic_available
+from knowbase.common.token_tracker import track_tokens
+
+# Import conditionnel pour SageMaker
+try:
+    import boto3
+    from botocore.exceptions import ClientError, NoCredentialsError
+    SAGEMAKER_AVAILABLE = True
+except ImportError:
+    SAGEMAKER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +48,7 @@ class LLMRouter:
         self.settings = get_settings()
         self._openai_client = None
         self._anthropic_client = None
+        self._sagemaker_client = None
 
         # Configuration dynamique
         self._config = self._load_config(config_path)
@@ -95,6 +105,20 @@ class LLMRouter:
             providers["anthropic"] = False
             logger.debug(f"✗ Anthropic provider indisponible: {e}")
 
+        # Test SageMaker
+        try:
+            if SAGEMAKER_AVAILABLE:
+                # Test basique de disponibilité AWS credentials
+                boto3.Session().get_credentials()
+                providers["sagemaker"] = True
+                logger.debug("✓ SageMaker provider disponible")
+            else:
+                providers["sagemaker"] = False
+                logger.debug("✗ SageMaker provider indisponible (boto3 non installé)")
+        except (NoCredentialsError, Exception) as e:
+            providers["sagemaker"] = False
+            logger.debug(f"✗ SageMaker provider indisponible: {e}")
+
         return providers
 
     @property
@@ -111,6 +135,13 @@ class LLMRouter:
             self._anthropic_client = get_anthropic_client()
         return self._anthropic_client
 
+    @property
+    def sagemaker_client(self):
+        """Client SageMaker paresseux."""
+        if self._sagemaker_client is None and SAGEMAKER_AVAILABLE:
+            self._sagemaker_client = boto3.client('sagemaker-runtime')
+        return self._sagemaker_client
+
     def _get_provider_for_model(self, model: str) -> str:
         """Détecte automatiquement le provider d'un modèle."""
         # Vérification dans la config d'abord
@@ -125,6 +156,8 @@ class LLMRouter:
             return "openai"
         elif model.startswith("claude-"):
             return "anthropic"
+        elif model in ["llama3.1:70b", "qwen2.5:32b", "qwen2.5:7b", "llava:34b", "phi3:3.8b"]:
+            return "sagemaker"
         else:
             # Fallback vers OpenAI par défaut
             return "openai"
@@ -194,9 +227,11 @@ class LLMRouter:
 
         try:
             if provider == "openai":
-                return self._call_openai(model, messages, temperature, max_tokens, **kwargs)
+                return self._call_openai(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "anthropic":
-                return self._call_anthropic(model, messages, temperature, max_tokens, **kwargs)
+                return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "sagemaker":
+                return self._call_sagemaker(model, messages, temperature, max_tokens, task_type, **kwargs)
             else:
                 raise ValueError(f"Provider {provider} non supporté")
 
@@ -206,7 +241,7 @@ class LLMRouter:
             default_model = self._config.get("default_model", "gpt-4o")
             if model != default_model:
                 logger.info(f"[LLM_ROUTER] Fallback emergency to {default_model}")
-                return self._call_openai(default_model, messages, temperature, max_tokens, **kwargs)
+                return self._call_openai(default_model, messages, temperature, max_tokens, task_type, **kwargs)
             raise
 
     def _call_openai(
@@ -215,6 +250,7 @@ class LLMRouter:
         messages: List[Dict[str, Any]],
         temperature: float,
         max_tokens: int,
+        task_type: TaskType,
         **kwargs
     ) -> str:
         """Appel vers OpenAI."""
@@ -225,6 +261,17 @@ class LLMRouter:
             max_tokens=max_tokens,
             **kwargs
         )
+
+        # Log et tracking des métriques de tokens
+        if response.usage:
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
+            total_tokens = response.usage.total_tokens
+            logger.info(f"[TOKENS] {model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
+
+            # Tracking pour analyse des coûts
+            track_tokens(model, task_type.value, prompt_tokens, completion_tokens)
+
         return response.choices[0].message.content or ""
 
     def _call_anthropic(
@@ -233,6 +280,7 @@ class LLMRouter:
         messages: List[Dict[str, Any]],
         temperature: float,
         max_tokens: int,
+        task_type: TaskType,
         **kwargs
     ) -> str:
         """Appel vers Anthropic Claude."""
@@ -255,7 +303,165 @@ class LLMRouter:
             messages=user_messages
         )
 
+        # Log et tracking des métriques de tokens
+        if response.usage:
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            total_tokens = input_tokens + output_tokens
+            logger.info(f"[TOKENS] {model} - Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens}")
+
+            # Tracking pour analyse des coûts
+            track_tokens(model, task_type.value, input_tokens, output_tokens)
+
         return response.content[0].text if response.content else ""
+
+    def _call_sagemaker(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        task_type: TaskType,
+        **kwargs
+    ) -> str:
+        """Appel vers SageMaker Endpoint."""
+        if not SAGEMAKER_AVAILABLE:
+            raise ValueError("Boto3 non disponible pour SageMaker")
+
+        # Mapping modèle -> endpoint name (à configurer selon vos déploiements)
+        endpoint_mapping = self._config.get("sagemaker_endpoints", {})
+        endpoint_name = endpoint_mapping.get(model)
+
+        if not endpoint_name:
+            raise ValueError(f"Endpoint SageMaker non configuré pour {model}")
+
+        # Formatage des messages selon le modèle
+        if model.startswith("llama"):
+            # Format Llama
+            prompt = self._format_llama_prompt(messages)
+        elif model.startswith("qwen"):
+            # Format Qwen
+            prompt = self._format_qwen_prompt(messages)
+        elif model.startswith("llava"):
+            # Format LLaVA (vision)
+            prompt = self._format_llava_prompt(messages)
+        else:
+            # Format générique
+            prompt = self._format_generic_prompt(messages)
+
+        # Payload SageMaker
+        payload = {
+            "inputs": prompt,
+            "parameters": {
+                "temperature": temperature,
+                "max_new_tokens": max_tokens,
+                "do_sample": True if temperature > 0 else False,
+            }
+        }
+
+        try:
+            # Appel SageMaker
+            response = self.sagemaker_client.invoke_endpoint(
+                EndpointName=endpoint_name,
+                ContentType="application/json",
+                Body=json.dumps(payload)
+            )
+
+            # Parse response
+            result = json.loads(response['Body'].read().decode())
+
+            # Extraction du texte généré (format dépend du modèle)
+            generated_text = self._extract_sagemaker_response(result, model)
+
+            # Estimation des tokens (SageMaker ne fournit pas toujours les métriques)
+            input_tokens = self._estimate_tokens(prompt)
+            output_tokens = self._estimate_tokens(generated_text)
+
+            logger.info(f"[TOKENS] {model} - Input: {input_tokens}, Output: {output_tokens}, Total: {input_tokens + output_tokens}")
+
+            # Tracking pour analyse des coûts
+            track_tokens(model, task_type.value, input_tokens, output_tokens)
+
+            return generated_text
+
+        except Exception as e:
+            logger.error(f"[SAGEMAKER] Error calling {endpoint_name}: {e}")
+            raise
+
+    def _format_llama_prompt(self, messages: List[Dict[str, Any]]) -> str:
+        """Format les messages pour Llama."""
+        prompt_parts = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            if role == "system":
+                prompt_parts.append(f"<<SYS>>\n{content}\n<</SYS>>")
+            elif role == "user":
+                prompt_parts.append(f"[INST] {content} [/INST]")
+            elif role == "assistant":
+                prompt_parts.append(content)
+
+        return "\n".join(prompt_parts)
+
+    def _format_qwen_prompt(self, messages: List[Dict[str, Any]]) -> str:
+        """Format les messages pour Qwen."""
+        prompt_parts = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            if role == "system":
+                prompt_parts.append(f"<|im_start|>system\n{content}<|im_end|>")
+            elif role == "user":
+                prompt_parts.append(f"<|im_start|>user\n{content}<|im_end|>")
+            elif role == "assistant":
+                prompt_parts.append(f"<|im_start|>assistant\n{content}<|im_end|>")
+
+        prompt_parts.append("<|im_start|>assistant\n")
+        return "\n".join(prompt_parts)
+
+    def _format_llava_prompt(self, messages: List[Dict[str, Any]]) -> str:
+        """Format les messages pour LLaVA (vision)."""
+        # LLaVA gère les images dans le contenu
+        prompt_parts = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            if role == "user":
+                prompt_parts.append(f"USER: {content}")
+            elif role == "assistant":
+                prompt_parts.append(f"ASSISTANT: {content}")
+
+        prompt_parts.append("ASSISTANT:")
+        return "\n".join(prompt_parts)
+
+    def _format_generic_prompt(self, messages: List[Dict[str, Any]]) -> str:
+        """Format générique pour autres modèles."""
+        prompt_parts = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            prompt_parts.append(f"{role.upper()}: {content}")
+
+        return "\n".join(prompt_parts)
+
+    def _extract_sagemaker_response(self, result: Dict[str, Any], model: str) -> str:
+        """Extrait la réponse du format SageMaker selon le modèle."""
+        if "generated_text" in result:
+            return result["generated_text"]
+        elif "outputs" in result:
+            return result["outputs"]
+        elif isinstance(result, list) and len(result) > 0:
+            return result[0].get("generated_text", "")
+        else:
+            logger.warning(f"Format de réponse SageMaker inattendu pour {model}: {result}")
+            return str(result)
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimation grossière des tokens (~ 4 chars = 1 token)."""
+        return max(1, len(text) // 4)
 
 
 # Instance globale du routeur
@@ -274,9 +480,9 @@ def get_llm_router() -> LLMRouter:
 def complete_vision_task(
     messages: List[Dict[str, Any]],
     temperature: float = 0.2,
-    max_tokens: int = 1024
+    max_tokens: int = 4000
 ) -> str:
-    """Effectue une tâche d'analyse visuelle."""
+    """Effectue une tâche d'analyse visuelle avec limite étendue pour multi-concepts."""
     return get_llm_router().complete(TaskType.VISION, messages, temperature, max_tokens)
 
 

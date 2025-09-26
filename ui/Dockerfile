@@ -15,5 +15,5 @@ ENV KNOWBASE_DATA_DIR=/data
 ENV PYTHONPATH="/app/src:$PYTHONPATH"
 EXPOSE 8501
 
-CMD ["streamlit", "run", "src/knowbase/ui/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
 

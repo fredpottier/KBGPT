@@ -1,0 +1,26 @@
+services:
+
+  app:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    image: sap-kb-app:latest
+
+  ingestion-worker:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    image: sap-kb-worker:latest
+
+  ui:
+    build:
+      context: .
+      dockerfile: ./ui/Dockerfile
+    image: sap-kb-ui:latest
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: sap-kb-frontend:latest
+

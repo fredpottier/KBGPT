@@ -1,0 +1,80 @@
+version: 0.2
+
+# Configuration CodeBuild pour build Docker SAP KB
+# Build distant sur instances AWS puissantes
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: eu-west-1
+    AWS_ACCOUNT_ID: "715927975014"  # Account ID SAP KB
+    IMAGE_REPO_NAME_APP: sap-kb-app
+    IMAGE_REPO_NAME_FRONTEND: sap-kb-frontend
+    IMAGE_REPO_NAME_WORKER: sap-kb-worker
+    IMAGE_REPO_NAME_UI: sap-kb-ui
+    IMAGE_TAG: latest
+
+phases:
+  pre_build:
+    commands:
+      - echo "🚀 Début du build distant SAP KB"
+      - echo "Connexion à Amazon ECR..."
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+
+      # Créer les repositories ECR s'ils n'existent pas
+      - |
+        for repo in $IMAGE_REPO_NAME_APP $IMAGE_REPO_NAME_FRONTEND $IMAGE_REPO_NAME_WORKER $IMAGE_REPO_NAME_UI; do
+          aws ecr describe-repositories --repository-names $repo --region $AWS_DEFAULT_REGION || \
+          aws ecr create-repository --repository-name $repo --region $AWS_DEFAULT_REGION
+        done
+
+  build:
+    commands:
+      - echo "🔨 Build des images Docker..."
+      - echo "Build démarré le `date`"
+      - echo "Répertoire de travail actuel:"
+      - pwd
+      - echo "Contenu répertoire courant :"
+      - ls -la
+      - echo "Vérification structure dossiers :"
+      - ls -la frontend/ || echo "Dossier frontend introuvable"
+      - ls -la app/ || echo "Dossier app introuvable"
+      - echo "Contenu docker-compose.build.yml :"
+      - cat docker-compose.build.yml
+
+      # Build avec tags ECR - utiliser fichier build spécifique
+      - docker-compose -f docker-compose.build.yml build --no-cache
+
+      # Tag des images pour ECR (toutes les images optimisées)
+      - docker tag sap-kb-app:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_APP:$IMAGE_TAG
+      - docker tag sap-kb-worker:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_WORKER:$IMAGE_TAG
+      - docker tag sap-kb-ui:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_UI:$IMAGE_TAG
+      - docker tag sap-kb-frontend:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_FRONTEND:$IMAGE_TAG
+
+  post_build:
+    commands:
+      - echo "📦 Push des images vers ECR..."
+
+      # Push vers ECR (toutes les images optimisées)
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_APP:$IMAGE_TAG
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_WORKER:$IMAGE_TAG
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_UI:$IMAGE_TAG
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_FRONTEND:$IMAGE_TAG
+
+      - echo "✅ Build terminé avec succès le `date`"
+      - echo "Images disponibles dans ECR:"
+      - echo "  - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_APP:$IMAGE_TAG"
+      - echo "  - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_WORKER:$IMAGE_TAG"
+      - echo "  - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_UI:$IMAGE_TAG"
+      - echo "  - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_FRONTEND:$IMAGE_TAG"
+
+artifacts:
+  files:
+    - '**/*'
+  name: sap-kb-build-$(date +%Y-%m-%d-%H-%M-%S)
+
+# Configuration cache pour accélérer les builds suivants
+cache:
+  paths:
+    - '/root/.cache/pip/**/*'
+    - '/root/.npm/**/*'
+    - '/var/lib/docker/**/*'
