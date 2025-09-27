@@ -1,61 +1,62 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "SAP KB Search Tool",
-    "version": "1.0.0"
+    "title": "FastAPI",
+    "version": "0.1.0"
   },
-  "servers": [
-    {
-      "url": "https://sapkb.ngrok.app"
-    }
-  ],
   "paths": {
     "/search": {
       "post": {
-        "summary": "Recherche dans la base Qdrant",
-        "operationId": "search_qdrant",
+        "summary": "Search",
+        "operationId": "search_search_post",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "question": {
-                    "type": "string",
-                    "description": "Question a poser a la base de connaissance"
-                  },
-                  "language": {
-                    "type": "string",
-                    "description": "Langue (optionnel)"
-                  },
-                  "mime": {
-                    "type": "string",
-                    "description": "Type MIME (optionnel)"
-                  }
-                },
-                "required": [
-                  "question"
-                ]
+                "$ref": "#/components/schemas/SearchRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
-            "description": "Resultat de la recherche",
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "status": {
-                      "type": "string"
-                    },
-                    "answer_markdown": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/solutions": {
+      "get": {
+        "summary": "Get Solutions",
+        "description": "Récupère la liste des solutions disponibles dans la base Qdrant.",
+        "operationId": "get_solutions_solutions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response Get Solutions Solutions Get"
                 }
               }
             }
@@ -65,73 +66,32 @@
     },
     "/dispatch": {
       "post": {
-        "summary": "Dispatch user intent to either search or ingestion",
-        "operationId": "dispatch_action",
+        "summary": "Dispatch Action",
+        "operationId": "dispatch_action_dispatch_post",
         "requestBody": {
-          "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "action_type": {
-                    "type": "string",
-                    "enum": [
-                      "search",
-                      "ingest",
-                      "fill_excel"
-                    ],
-                    "description": "Action to perform"
-                  },
-                  "question": {
-                    "type": "string",
-                    "description": "Question to ask the knowledge base (if action_type = search)"
-                  },
-                  "document_type": {
-                    "type": "string",
-                    "description": "Type of document to ingest (pptx, pdf, excel)"
-                  },
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "Document to ingest"
-                  },
-                  "meta": {
-                    "type": "string",
-                    "description": "Optional metadata as stringified JSON"
-                  }
-                },
-                "required": [
-                  "action_type"
-                ]
+                "$ref": "#/components/schemas/Body_dispatch_action_dispatch_post"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Result of the dispatched action",
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "action": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "answer_markdown": {
-                      "type": "string"
-                    },
-                    "log": {
-                      "type": "string"
-                    },
-                    "error": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -139,44 +99,1607 @@
         }
       }
     },
-    "/status/{uid}": {
+    "/documents/upload-excel-qa": {
+      "post": {
+        "summary": "Upload Excel Qa",
+        "operationId": "upload_excel_qa_documents_upload_excel_qa_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_excel_qa_documents_upload_excel_qa_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/fill-excel-rfp": {
+      "post": {
+        "summary": "Fill Excel Rfp",
+        "operationId": "fill_excel_rfp_documents_fill_excel_rfp_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_fill_excel_rfp_documents_fill_excel_rfp_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/analyze-excel": {
+      "post": {
+        "summary": "Analyze Excel",
+        "description": "Analyse un fichier Excel pour identifier les onglets et colonnes disponibles.",
+        "operationId": "analyze_excel_documents_analyze_excel_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_excel_documents_analyze_excel_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/status/{uid}": {
       "get": {
-        "summary": "Get status of a processed file",
-        "operationId": "get_status",
+        "summary": "Get Status",
+        "operationId": "get_status_api_status__uid__get",
         "parameters": [
           {
             "name": "uid",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
-            },
-            "description": "Unique identifier of the processed file"
+              "type": "string",
+              "title": "Uid"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Status of the file processing",
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "action": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "download_url": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
           }
         }
+      }
+    },
+    "/api/imports/history": {
+      "get": {
+        "summary": "Get Import History",
+        "description": "Récupère l'historique des imports.",
+        "operationId": "get_import_history_api_imports_history_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response Get Import History Api Imports History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/imports/active": {
+      "get": {
+        "summary": "Get Active Imports",
+        "description": "Récupère les imports actifs (en cours).",
+        "operationId": "get_active_imports_api_imports_active_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Get Active Imports Api Imports Active Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/imports/sync": {
+      "post": {
+        "summary": "Sync Orphaned Jobs",
+        "description": "Synchronise les jobs RQ terminés avec l'historique Redis.",
+        "operationId": "sync_orphaned_jobs_api_imports_sync_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Sync Orphaned Jobs Api Imports Sync Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/imports/cleanup": {
+      "post": {
+        "summary": "Cleanup Old Imports",
+        "description": "Nettoie les anciens enregistrements d'imports.",
+        "operationId": "cleanup_old_imports_api_imports_cleanup_post",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Cleanup Old Imports Api Imports Cleanup Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/imports/{uid}/delete": {
+      "delete": {
+        "summary": "Delete Import Completely",
+        "description": "Supprime complètement un import : chunks, fichiers, historique.",
+        "operationId": "delete_import_completely_api_imports__uid__delete_delete",
+        "parameters": [
+          {
+            "name": "uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Import Completely Api Imports  Uid  Delete Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sap-solutions/": {
+      "get": {
+        "tags": [
+          "SAP Solutions"
+        ],
+        "summary": "Get Solutions",
+        "description": "Récupère la liste de toutes les solutions SAP disponibles.\n\nReturns:\n    SolutionsListResponse: Liste des solutions avec ID et nom canonique",
+        "operationId": "get_solutions_api_sap_solutions__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolutionsListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sap-solutions/resolve": {
+      "post": {
+        "tags": [
+          "SAP Solutions"
+        ],
+        "summary": "Resolve Solution",
+        "description": "Résout une solution SAP depuis l'input utilisateur en utilisant l'IA.\n\nArgs:\n    request: Requête contenant l'input utilisateur\n\nReturns:\n    SolutionResolveResponse: Solution résolue avec nom canonique et ID",
+        "operationId": "resolve_solution_api_sap_solutions_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SolutionResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolutionResolveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sap-solutions/search/{query}": {
+      "get": {
+        "tags": [
+          "SAP Solutions"
+        ],
+        "summary": "Search Solutions",
+        "description": "Recherche des solutions SAP par nom ou alias.\n\nArgs:\n    query: Terme de recherche\n\nReturns:\n    Liste des solutions correspondantes",
+        "operationId": "search_solutions_api_sap_solutions_search__query__get",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Query"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sap-solutions/with-chunks": {
+      "get": {
+        "tags": [
+          "SAP Solutions"
+        ],
+        "summary": "Get Solutions With Chunks",
+        "description": "Récupère uniquement les solutions SAP qui ont des chunks dans les collections Qdrant.\n\nArgs:\n    extend_search: Si False, ne cherche que dans Q/A RFP. Si True, inclut aussi la collection principale.\n\nReturns:\n    SolutionsListResponse: Liste des solutions ayant des chunks en base",
+        "operationId": "get_solutions_with_chunks_api_sap_solutions_with_chunks_get",
+        "parameters": [
+          {
+            "name": "extend_search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Extend Search"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolutionsListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/downloads/filled-rfp/{uid}": {
+      "get": {
+        "tags": [
+          "Downloads"
+        ],
+        "summary": "Download Filled Rfp",
+        "description": "Télécharge un fichier Excel RFP complété par UID.\n\nArgs:\n    uid: Identifiant unique de l'import RFP\n\nReturns:\n    FileResponse: Le fichier Excel complété",
+        "operationId": "download_filled_rfp_api_downloads_filled_rfp__uid__get",
+        "parameters": [
+          {
+            "name": "uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/downloads/import-files/{uid}": {
+      "get": {
+        "tags": [
+          "Downloads"
+        ],
+        "summary": "Download Import File",
+        "description": "Télécharge le fichier original d'un import par UID.\n\nArgs:\n    uid: Identifiant unique de l'import\n\nReturns:\n    FileResponse: Le fichier original de l'import",
+        "operationId": "download_import_file_api_downloads_import_files__uid__get",
+        "parameters": [
+          {
+            "name": "uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/stats": {
+      "get": {
+        "tags": [
+          "Token Analysis"
+        ],
+        "summary": "Get Token Stats",
+        "description": "Obtient les statistiques globales des tokens.",
+        "operationId": "get_token_stats_api_tokens_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/estimate-deck": {
+      "get": {
+        "tags": [
+          "Token Analysis"
+        ],
+        "summary": "Estimate Deck Cost",
+        "description": "Estime le coût d'traitement d'un deck complet.",
+        "operationId": "estimate_deck_cost_api_tokens_estimate_deck_get",
+        "parameters": [
+          {
+            "name": "num_slides",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "Nombre de slides dans le deck",
+              "title": "Num Slides"
+            },
+            "description": "Nombre de slides dans le deck"
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Modèle LLM à utiliser",
+              "default": "gpt-4o",
+              "title": "Model"
+            },
+            "description": "Modèle LLM à utiliser"
+          },
+          {
+            "name": "avg_input_tokens",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Tokens d'input moyen par slide",
+              "default": 2000,
+              "title": "Avg Input Tokens"
+            },
+            "description": "Tokens d'input moyen par slide"
+          },
+          {
+            "name": "avg_output_tokens",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Tokens d'output moyen par slide",
+              "default": 1500,
+              "title": "Avg Output Tokens"
+            },
+            "description": "Tokens d'output moyen par slide"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeckCostEstimate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/compare-providers": {
+      "get": {
+        "tags": [
+          "Token Analysis"
+        ],
+        "summary": "Compare Providers Cost",
+        "description": "Compare les coûts entre différents providers.",
+        "operationId": "compare_providers_cost_api_tokens_compare_providers_get",
+        "parameters": [
+          {
+            "name": "input_tokens",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "Tokens d'input",
+              "title": "Input Tokens"
+            },
+            "description": "Tokens d'input"
+          },
+          {
+            "name": "output_tokens",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "Tokens d'output",
+              "title": "Output Tokens"
+            },
+            "description": "Tokens d'output"
+          },
+          {
+            "name": "base_model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Modèle de base pour comparaison",
+              "default": "gpt-4o",
+              "title": "Base Model"
+            },
+            "description": "Modèle de base pour comparaison"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/cost-by-task": {
+      "get": {
+        "tags": [
+          "Token Analysis"
+        ],
+        "summary": "Get Cost By Task Type",
+        "description": "Analyse des coûts par type de tâche.",
+        "operationId": "get_cost_by_task_type_api_tokens_cost_by_task_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/pricing": {
+      "get": {
+        "tags": [
+          "Token Analysis"
+        ],
+        "summary": "Get Model Pricing",
+        "description": "Retourne les tarifs actuels des modèles.",
+        "operationId": "get_model_pricing_api_tokens_pricing_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/reset": {
+      "post": {
+        "tags": [
+          "Token Analysis"
+        ],
+        "summary": "Reset Token Tracking",
+        "description": "Reset les données de tracking (pour tests).",
+        "operationId": "reset_token_tracking_api_tokens_reset_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/sagemaker-savings": {
+      "get": {
+        "tags": [
+          "Token Analysis"
+        ],
+        "summary": "Estimate Sagemaker Savings",
+        "description": "Compare les coûts actuels vs migration SageMaker pour un deck.",
+        "operationId": "estimate_sagemaker_savings_api_tokens_sagemaker_savings_get",
+        "parameters": [
+          {
+            "name": "num_slides",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "Nombre de slides dans le deck",
+              "title": "Num Slides"
+            },
+            "description": "Nombre de slides dans le deck"
+          },
+          {
+            "name": "current_model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Modèle actuellement utilisé",
+              "default": "gpt-4o",
+              "title": "Current Model"
+            },
+            "description": "Modèle actuellement utilisé"
+          },
+          {
+            "name": "avg_input_tokens",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Tokens d'input moyen par slide",
+              "default": 2000,
+              "title": "Avg Input Tokens"
+            },
+            "description": "Tokens d'input moyen par slide"
+          },
+          {
+            "name": "avg_output_tokens",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Tokens d'output moyen par slide",
+              "default": 1500,
+              "title": "Avg Output Tokens"
+            },
+            "description": "Tokens d'output moyen par slide"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "List Users",
+        "description": "Récupère la liste de tous les utilisateurs.",
+        "operationId": "list_users_api_users_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Create User",
+        "description": "Crée un nouveau utilisateur.",
+        "operationId": "create_user_api_users_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{user_id}": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Get User",
+        "description": "Récupère un utilisateur par son ID.",
+        "operationId": "get_user_api_users__user_id__get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Update User",
+        "description": "Met à jour un utilisateur existant.",
+        "operationId": "update_user_api_users__user_id__put",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Delete User",
+        "description": "Supprime un utilisateur.",
+        "operationId": "delete_user_api_users__user_id__delete",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{user_id}/activity": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Update User Activity",
+        "description": "Met à jour la dernière activité d'un utilisateur.",
+        "operationId": "update_user_activity_api_users__user_id__activity_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_analyze_excel_documents_analyze_excel_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_analyze_excel_documents_analyze_excel_post"
+      },
+      "Body_dispatch_action_dispatch_post": {
+        "properties": {
+          "action_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Type"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Type"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "binary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "title": "Body_dispatch_action_dispatch_post"
+      },
+      "Body_fill_excel_rfp_documents_fill_excel_rfp_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          },
+          "meta_file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "binary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_fill_excel_rfp_documents_fill_excel_rfp_post"
+      },
+      "Body_upload_excel_qa_documents_upload_excel_qa_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          },
+          "meta_file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "binary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_excel_qa_documents_upload_excel_qa_post"
+      },
+      "DeckCostEstimate": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "num_slides": {
+            "type": "integer",
+            "title": "Num Slides"
+          },
+          "deck_summary_cost": {
+            "type": "number",
+            "title": "Deck Summary Cost"
+          },
+          "slides_analysis_cost": {
+            "type": "number",
+            "title": "Slides Analysis Cost"
+          },
+          "total_cost": {
+            "type": "number",
+            "title": "Total Cost"
+          },
+          "cost_per_slide": {
+            "type": "number",
+            "title": "Cost Per Slide"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "num_slides",
+          "deck_summary_cost",
+          "slides_analysis_cost",
+          "total_cost",
+          "cost_per_slide",
+          "total_tokens"
+        ],
+        "title": "DeckCostEstimate",
+        "description": "Estimation du coût d'un deck."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "SearchRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          },
+          "solution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "SearchRequest"
+      },
+      "SolutionResolveRequest": {
+        "properties": {
+          "solution_input": {
+            "type": "string",
+            "title": "Solution Input"
+          }
+        },
+        "type": "object",
+        "required": [
+          "solution_input"
+        ],
+        "title": "SolutionResolveRequest",
+        "description": "Modèle de requête pour résoudre une solution."
+      },
+      "SolutionResolveResponse": {
+        "properties": {
+          "canonical_name": {
+            "type": "string",
+            "title": "Canonical Name"
+          },
+          "solution_id": {
+            "type": "string",
+            "title": "Solution Id"
+          },
+          "original_input": {
+            "type": "string",
+            "title": "Original Input"
+          }
+        },
+        "type": "object",
+        "required": [
+          "canonical_name",
+          "solution_id",
+          "original_input"
+        ],
+        "title": "SolutionResolveResponse",
+        "description": "Modèle de réponse pour la résolution d'une solution."
+      },
+      "SolutionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "SolutionResponse",
+        "description": "Modèle de réponse pour une solution SAP."
+      },
+      "SolutionsListResponse": {
+        "properties": {
+          "solutions": {
+            "items": {
+              "$ref": "#/components/schemas/SolutionResponse"
+            },
+            "type": "array",
+            "title": "Solutions"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "solutions",
+          "total"
+        ],
+        "title": "SolutionsListResponse",
+        "description": "Modèle de réponse pour la liste des solutions."
+      },
+      "User": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "description": "Nom de l'utilisateur"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Email optionnel de l'utilisateur"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole",
+            "description": "Rôle de l'utilisateur",
+            "default": "user"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identifiant unique de l'utilisateur"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Date de création"
+          },
+          "last_active": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Active",
+            "description": "Dernière activité"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "id",
+          "created_at",
+          "last_active"
+        ],
+        "title": "User",
+        "description": "Schéma complet d'un utilisateur."
+      },
+      "UserCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "description": "Nom de l'utilisateur"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Email optionnel de l'utilisateur"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole",
+            "description": "Rôle de l'utilisateur",
+            "default": "user"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "UserCreate",
+        "description": "Schéma pour la création d'un utilisateur."
+      },
+      "UserListResponse": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/User"
+            },
+            "type": "array",
+            "title": "Users"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "users",
+          "total"
+        ],
+        "title": "UserListResponse",
+        "description": "Réponse pour la liste des utilisateurs."
+      },
+      "UserRole": {
+        "type": "string",
+        "enum": [
+          "admin",
+          "expert",
+          "user"
+        ],
+        "title": "UserRole",
+        "description": "Rôles utilisateur disponibles."
+      },
+      "UserUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "UserUpdate",
+        "description": "Schéma pour la mise à jour d'un utilisateur."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
       }
     }
   }

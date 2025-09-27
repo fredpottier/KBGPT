@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { useState } from 'react'
 import theme from '@/lib/theme'
+import { UserProvider } from '@/contexts/UserContext'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -31,8 +32,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ChakraProvider theme={theme}>
-        {children}
-        <ReactQueryDevtools initialIsOpen={false} />
+        <UserProvider>
+          {children}
+          <ReactQueryDevtools initialIsOpen={false} />
+        </UserProvider>
       </ChakraProvider>
     </QueryClientProvider>
   )

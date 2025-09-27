@@ -1,4 +1,4 @@
-# === Backend API ===
+﻿# === Backend API ===
 fastapi==0.116.1
 uvicorn==0.30.3
 
@@ -6,7 +6,7 @@ uvicorn==0.30.3
 qdrant-client==1.15.1
 
 # === Embeddings et Reranking (CPU SEULEMENT) ===
-# Forcer versions CPU pour éviter les 4GB NVIDIA
+# Forcer versions CPU pour Ã©viter les 4GB NVIDIA
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.3.0+cpu
 torchvision==0.18.0+cpu
@@ -26,12 +26,17 @@ python-dotenv
 python-multipart
 openpyxl
 
-# === Analyse PPTX / PDF (VERSION ALLÉGÉE) ===
-# MegaParse minimal (pas la version complète avec onnxtr/playwright)
+# === Dépendances tests (à retirer pour prod) ===
+pytest>=7.4.0
+pytest-mock>=3.11.0
+respx>=0.20.2
+
+# === Analyse PPTX / PDF (VERSION ALLÃ‰GÃ‰E) ===
+# MegaParse minimal (pas la version complÃ¨te avec onnxtr/playwright)
 megaparse
 python-pptx
 pillow
-pdf2image==1.17.0
+PyMuPDF>=1.23.0
 pdfplumber>=0.11.0
 pypdf
 pycryptodome>=3.21.0
@@ -44,7 +49,7 @@ langchain-core>=0.3,<0.4
 langchain-anthropic>=0.1.23
 langchain_openai>=0.1.21
 
-# Unstructured MINIMAL (pas [all-docs] qui est énorme !)
+# Unstructured MINIMAL (pas [all-docs] qui est Ã©norme !)
 unstructured==0.15.0
 
 # OCR simple (pas ONNX qui est lourd)
@@ -53,9 +58,9 @@ pytesseract
 # Optionnel si vraiment besoin plus tard:
 # llama-parse>=0.4.0  # API externe, pas besoin localement
 # playwright>=1.47.0  # 200MB+ de navigateurs
-# onnxtr>=0.6.0       # Modèles OCR lourds
-# layoutparser         # Modèles computer vision
-# unstructured[all-docs] # Support tous formats (très lourd)
+# onnxtr>=0.6.0       # ModÃ¨les OCR lourds
+# layoutparser         # ModÃ¨les computer vision
+# unstructured[all-docs] # Support tous formats (trÃ¨s lourd)
 
 # === Lang / NLP util ===
 langdetect

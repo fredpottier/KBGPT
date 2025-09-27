@@ -11,6 +11,7 @@ import {
 } from '@chakra-ui/react'
 import { usePathname } from 'next/navigation'
 import NextLink from 'next/link'
+import UserSelector from '@/components/user/UserSelector'
 
 interface NavLinkProps {
   href: string
@@ -86,8 +87,8 @@ export default function TopNavigation() {
           </NavLink>
         </HStack>
 
-        {/* Right side - could add user menu, settings, etc. */}
-        <Box />
+        {/* User selector */}
+        <UserSelector />
       </Flex>
     </Box>
   )

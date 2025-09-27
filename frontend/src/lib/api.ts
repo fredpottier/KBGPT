@@ -28,6 +28,22 @@ class ApiClient {
         if (token) {
           config.headers.Authorization = `Bearer ${token}`
         }
+
+        // Add current user ID header if available
+        if (typeof window !== 'undefined') {
+          const currentUserData = localStorage.getItem('sap-kb-current-user')
+          if (currentUserData) {
+            try {
+              const user = JSON.parse(currentUserData)
+              if (user && user.id) {
+                config.headers['X-User-ID'] = user.id
+              }
+            } catch (error) {
+              console.warn('Erreur lors du parsing des données utilisateur:', error)
+            }
+          }
+        }
+
         return config
       },
       (error) => {
@@ -157,6 +173,18 @@ export const api = {
   // Status endpoint
   status: {
     get: (uid: string) => apiClient.get(`/status/${uid}`),
+  },
+
+  // Users
+  users: {
+    list: () => apiClient.get('/users'),
+    get: (id: string) => apiClient.get(`/users/${id}`),
+    create: (user: any) => apiClient.post('/users', user),
+    update: (id: string, user: any) => apiClient.put(`/users/${id}`, user),
+    delete: (id: string) => apiClient.delete(`/users/${id}`),
+    updateActivity: (id: string) => apiClient.post(`/users/${id}/activity`),
+    getDefault: () => apiClient.get('/users/default'),
+    setDefault: (id: string) => apiClient.post(`/users/${id}/set-default`),
   },
 
   // Admin

@@ -35,7 +35,7 @@ task_parameters:
   # Analyse d'images (ex: slides PowerPoint)
   vision:
     temperature: 0.2
-    max_tokens: 1024
+    max_tokens: 4000
 
   # Extraction de métadonnées JSON structurées
   metadata:

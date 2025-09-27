@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis
+from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, users
 
 
 def create_app() -> FastAPI:
@@ -71,6 +71,7 @@ def create_app() -> FastAPI:
     app.include_router(sap_solutions.router)  # Déjà avec préfixe /api/sap-solutions
     app.include_router(downloads.router)  # Déjà avec préfixe /api/downloads
     app.include_router(token_analysis.router, prefix="/api")  # Analyse des tokens et coûts
+    app.include_router(users.router, prefix="/api")  # Gestion des utilisateurs
 
     return app
 

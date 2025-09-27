@@ -75,11 +75,19 @@ families:
               "slide_role": "title" | "content" | "summary" | "transition" | "agenda",
               "concept_confidence": 0.1-1.0,
               "has_visuals": true | false,
-              "visual_type": "table" | "diagram" | "chart" | "screenshot" | "flow" | null
+              "visual_type": "table" | "diagram" | "chart" | "screenshot" | "flow" | null,
+              "mentioned_solutions": ["SAP Solution Name 1", "SAP Solution Name 2"]
             }
           }
         ]
         ```
+
+        **SAP Solution Detection**: For the "mentioned_solutions" field:
+        - Extract ONLY SAP solutions explicitly mentioned in THIS SPECIFIC SLIDE
+        - Use official SAP canonical solution names (e.g., "SAP S/4HANA Cloud, Private Edition")
+        - Do NOT include solutions from other slides or general deck context
+        - Leave empty array [] if no SAP solutions are mentioned in this slide
+        - Focus on solutions that are directly relevant to the slide content
 
         **Concept Separation Guidelines (Text + Visual synthesis)**:
         - Each distinct business capability (text) + its visual representation (diagram/icon) = separate chunk
@@ -351,3 +359,107 @@ families:
         **For slides with minimal business content**: If slide contains only titles, transitions, or agenda items without substantive business information, return an empty array: []
 
         Return **only the JSON array**.
+  marketing:
+    deck:
+      id: "deck_marketing_v1"
+      template: |
+        You are given raw text extracted from a marketing / go-to-market PowerPoint deck about SAP offerings.
+
+        Return ONE JSON object with two fields:
+        - "summary": 3-6 sentences that capture the campaign narrative, target audience, and key promises.
+        - "metadata": object with the following keys (use null or [] when information is absent):
+          - title
+          - objective
+          - main_solution
+          - supporting_solutions
+          - mentioned_solutions
+          - document_type               // set to "marketing" if not specified
+          - audience                    // general audience wording straight from the deck
+          - target_personas             // list of roles (e.g., CIO, CFO, Line-of-Business leader)
+          - buying_stage                // awareness | consideration | decision | adoption | expansion
+          - industry_focus              // list of industries explicitly addressed
+          - business_challenges         // pains/problems highlighted
+          - value_proposition           // one or two sentences summarising promised value
+          - key_messages                // bullet list of slogans / differentiators / pillars
+          - offer_components            // bundles, packages, programs, accelerators
+          - proof_points                // metrics, customer outcomes, testimonials
+          - call_to_action              // e.g., workshop, assessment, contact sales, event registration
+          - assets_referenced           // brochures, demos, webinars, videos, campaigns
+          - customer_references         // customer names and/or industries mentioned
+          - partner_programs            // partner ecosystems, incentives, alliances
+          - competitive_positioning     // differentiators or competitor mentions
+          - market_segment              // SMB | Midmarket | Enterprise | Public Sector etc.
+          - geography                   // regions explicitly targeted
+          - language
+          - source_date
+
+        IMPORTANT:
+        - Use canonical SAP names for solutions when possible (same rule as other families).
+        - Extract only what is explicit in the text; do not invent values.
+        - Keep lists concise (≤ 10 items) and deduplicate identical strings.
+        - Return only the JSON object, no additional commentary.
+
+        Raw deck text:
+        {{ summary_text }}
+
+    slide:
+      id: "slide_marketing_v1_megaparse"
+      template: |
+        Global deck summary:
+        {{ deck_summary }}
+
+        Section {{ slide_index }} content (extracted via MegaParse):
+        {{ megaparse_content | default(text) }}
+
+        Original text (legacy):
+        {{ text }}
+
+        Notes:
+        {{ notes }}
+
+        Analyze marketing section {{ slide_index }} from '{{ source_name }}'.
+
+        **DUAL-SOURCE MARKETING ANALYSIS**
+        1. MegaParse content → precise wording (value statements, personas, offers, metrics).
+        2. Visual image → hero visuals, diagrams, metrics cards, testimonials, CTA banners.
+
+        **Goal**: extract every genuine marketing insight. Each insight combines textual information + visual cues.
+
+        Return a JSON array of objects:
+
+        `json
+        [
+          {
+            "full_explanation": "Marketing narrative that fuses textual copy with visual context (what is promised, to whom, and how it is supported).",
+            "meta": {
+              "slide_role": "title" | "agenda" | "content" | "transition" | "cta" | "customer_story" | "metrics" | "offer_overview" | "roadmap" | "event" | "program",
+              "marketing_focus": "value_story" | "pain_relief" | "benefit" | "persona_insight" | "proof_point" | "customer_story" | "competitive" | "offer_component" | "call_to_action" | "partner_program" | "event_promotion",
+              "target_personas": ["<persona role>", ...],
+              "industries": ["<industry>", ...],
+              "buying_stage": "awareness" | "consideration" | "decision" | "adoption" | "expansion" | null,
+              "pain_points": ["<pain>", ...],
+              "benefits": ["<benefit>", ...],
+              "proof_points": ["<metric/quote/testimonial>", ...],
+              "metrics": ["<numeric KPI or claim>", ...],
+              "call_to_action": "<CTA text>" | null,
+              "customer_references": ["<customer name>", ...],
+              "assets_links": ["<URL or asset name>", ...],
+              "differentiators": ["<unique differentiator>", ...],
+              "mentioned_solutions": ["<solution>", ...],
+              "contains_visuals": true | false,
+              "visual_type": "hero_image" | "infographic" | "matrix" | "roadmap" | "testimonials" | "metrics_card" | "cta_panel" | "flow" | "table" | "screenshot" | null,
+              "language": "fr" | "en",
+              "concept_confidence": 0.1-1.0
+            }
+          }
+        ]
+        `
+
+        **Extraction rules**:
+        - Each persona-focus, value pillar, proof-point, CTA, or offer component should be its own array item.
+        - Link numeric metrics or testimonials to the explanation (quote who said it, if visible).
+        - Include explicit competitor mentions or differentiators when present.
+        - If the slide is purely decorative or empty, return []
+        - Never infer personas/benefits not explicitly supported by text or visuals.
+
+        Return only the JSON array.

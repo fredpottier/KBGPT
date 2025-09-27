@@ -94,7 +94,7 @@ export default function UploadPage() {
       'text/plain': ['.txt'],
       'text/markdown': ['.md'],
     },
-    maxSize: 50 * 1024 * 1024, // 50MB
+    maxSize: 200 * 1024 * 1024, // 200MB - Supporte les gros documents SAP
   })
 
   const handleUpload = async () => {
@@ -168,7 +168,7 @@ export default function UploadPage() {
             Upload Documents
           </Text>
           <Text fontSize="sm" color="gray.600">
-            Supported formats: PDF, DOC, DOCX, TXT, MD (Max: 50MB)
+            Supported formats: PDF, DOC, DOCX, TXT, MD (Max: 200MB)
           </Text>
         </CardHeader>
         <CardBody>

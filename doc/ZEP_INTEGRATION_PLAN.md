@@ -7,6 +7,8 @@ Ce document présente l'analyse et le plan d'intégration de **Zep** (self-hoste
 - **Knowledge Graph (KG)** : Relations entre entités SAP et concepts
 - **Mémoire conversationnelle** : Sessions utilisateurs enrichies
 
+**⚠️ PRÉREQUIS IDENTIFIÉ** : Implémentation d'un système multi-utilisateurs simple avant l'intégration Zep.
+
 ## 🏗️ Architecture Conceptuelle
 
 ### Rôle de Zep dans l'écosystème existant
@@ -207,6 +209,62 @@ Question: "Quelle est la rétention pour BTP ?"
 
 ## 📊 Plan d'action en phases
 
+### Phase 0 : Infrastructure Multi-Utilisateurs (2-3 semaines) 🆕
+
+**Objectifs** :
+- Implémenter un système multi-utilisateurs simple sans authentification complexe
+- Préparer l'infrastructure backend et frontend pour la contextualisation par utilisateur
+- Créer les fondations nécessaires aux sessions Zep individualisées
+
+**Rationale** :
+L'intégration Zep nécessite une gestion des sessions par utilisateur. Plutôt que d'implémenter un système d'authentification complet (qui peut évoluer vers SAP BTP), nous créons un sélecteur d'utilisateur simple permettant de basculer facilement entre différents contextes utilisateurs pour les tests et le développement.
+
+**Livrables** :
+- Modèle utilisateur simple (id, nom, rôle, dates)
+- API backend CRUD utilisateurs (/api/users)
+- Context React UserProvider avec localStorage persistence
+- Composant UserSelector dans TopNavigation
+- Migration des APIs existantes pour accepter le contexte utilisateur optionnel
+
+**Architecture proposée** :
+```typescript
+interface User {
+  id: string
+  name: string
+  email?: string
+  role: 'admin' | 'expert' | 'user'
+  created_at: string
+  last_active: string
+}
+
+interface UserContext {
+  currentUser: User | null
+  availableUsers: User[]
+  switchUser: (userId: string) => void
+  createUser: (userData: Partial<User>) => Promise<User>
+}
+```
+
+**Composants modifiés** :
+- `TopNavigation.tsx` : Ajout UserSelector à droite
+- `ChatPage.tsx` : Préparation persistence messages par utilisateur
+- `api.ts` : Header `X-User-ID` automatique si utilisateur sélectionné
+- Backend : Nouveaux endpoints + logging user context
+
+**Gates de validation** :
+- ✅ Tests manuels de changement d'utilisateur (fluidité UX)
+- ✅ Vérification non-régression chat/ingestion existants
+- ✅ Audit instrumentation : toutes les APIs propagent `X-User-ID`
+- ✅ Preparation mapping utilisateur ↔ session Zep documentée
+- ✅ Tests unitaires du CRUD utilisateurs
+
+**Critères de succès** :
+- ✅ Sélection et changement d'utilisateur fluide dans l'interface
+- ✅ Persistence du choix utilisateur dans localStorage
+- ✅ APIs prêtes pour contextualisation future (Zep sessions)
+- ✅ Aucune régression sur fonctionnalités existantes
+- ✅ Interface simple : dropdown + "Nouvel utilisateur" + suppression
+
 ### Phase 1 : Analyse & Design (3-4 semaines)
 
 **Objectifs** :
@@ -215,17 +273,23 @@ Question: "Quelle est la rétention pour BTP ?"
 - Spécifier les algorithmes de détection de conflits
 
 **Livrables** :
-- Schémas de données Zep (Facts, Relations, Memory)
+- Schémas de données Zep (Facts, Relations, Memory) avec modélisation JSON détaillée
+- Matrice source → attribut : Mapping systématique documents SAP vers facts extraits
 - Spécifications API backend pour gestion conflits
 - Maquettes interface "Conflits documentaires"
 - Documentation algorithmes détection conflits
+- Plan de tests unitaires/fonctionnels pour les implémentations futures
+- Backlog technique priorisé par risque/complexité
 
 **Activités détaillées** :
 1. **Audit de l'existant** : Analyser métadonnées actuelles (solution.main, tags, etc.)
-2. **Modélisation Facts** : Définir structure facts documentaires avec source/timestamp
-3. **Modélisation Relations** : Typer les relations entre entités SAP
-4. **Design API** : Endpoints pour CRUD facts, détection conflits, sessions
-5. **Spécification algorithmes** : Règles de détection de contradictions
+2. **Inventaire sources SAP** : Catalogue des types documents et leur structure
+3. **Modélisation Facts** : Définir structure facts documentaires avec source/timestamp
+4. **Matrice extraction** : Document type → Entités → Attributs → Facts (mapping complet)
+5. **Modélisation Relations** : Typer les relations entre entités SAP
+6. **Design API** : Endpoints pour CRUD facts, détection conflits, sessions
+7. **Spécification algorithmes** : Règles de détection de contradictions avec seuils
+8. **Stratégie tests** : Plan tests automatisés pour chaque composant Zep
 
 ### Phase 2 : Déploiement Zep self-hosted (2-3 semaines)
 
@@ -235,10 +299,11 @@ Question: "Quelle est la rétention pour BTP ?"
 - Tester la connectivité et les APIs de base
 
 **Livrables** :
-- Docker Compose avec Zep + Postgres configuré
-- Scripts d'initialisation base de données
-- Tests de connectivité et performance
-- Documentation configuration production
+- Docker Compose avec Zep + Postgres configuré pour environnement dev
+- Scripts d'initialisation base de données avec données de test
+- Tests de connectivité et performance de base
+- Documentation configuration POC (non production-ready)
+- Plan de monitoring basique (logs, métriques essentielles)
 
 **Configuration Docker** :
 ```yaml
@@ -271,10 +336,12 @@ services:
 - Implémenter extraction d'entités et relations
 
 **Livrables** :
-- Pipeline enrichi : Document → Qdrant + Zep
-- Service d'extraction d'entités SAP
+- Pipeline enrichi : Document → Qdrant + Zep avec jobs asynchrones
+- Service d'extraction d'entités SAP (regex, NER, règles métier)
 - API de création Facts/Relations automatique
-- Tests pipeline complet avec documents réels
+- Système de backfill pour traitement documents historiques existants
+- Tests pipeline complet avec documents réels + gestion d'erreurs/retry
+- Observabilité pipeline (logs détaillés, métriques de succès)
 
 **Architecture pipeline** :
 ```
@@ -320,8 +387,9 @@ GET /api/conflicts/stats → Métriques conflits
 **Livrables** :
 - Service d'expansion de requêtes via KG
 - Assemblage contexte intelligent Facts + Chunks
+- Tests A/B simples pour mesurer impact sur pertinence des réponses
 - Optimisations performances (cache, indexation)
-- Métriques qualité recherche améliorée
+- Métriques qualité recherche améliorée avec baseline de référence
 
 **Processus hybride** :
 1. Question utilisateur → Extraction entités
@@ -333,15 +401,16 @@ GET /api/conflicts/stats → Métriques conflits
 ### Phase 6 : Mémoire conversationnelle (3-4 semaines)
 
 **Objectifs** :
-- Implémenter sessions utilisateurs Zep
-- Intégrer mémoire dans chat existant
-- Gérer contexte multi-tours et entités
+- Implémenter sessions utilisateurs Zep (requiert Phase 0 complétée)
+- Intégrer mémoire dans chat existant avec contexte utilisateur
+- Gérer contexte multi-tours et entités par utilisateur individuel
 
 **Livrables** :
-- Service de gestion sessions Zep
-- Chat enrichi avec mémoire conversationnelle
-- Résolution questions implicites
-- Interface historique conversations
+- Service de gestion sessions Zep avec mapping utilisateur (Phase 0)
+- Chat enrichi avec mémoire conversationnelle par utilisateur
+- Résolution questions implicites basée sur contexte utilisateur
+- Interface historique conversations segmentée par utilisateur
+- Règles de purge/rétention configurables par type d'utilisateur
 
 **Enrichissement chat** :
 - Contexte session automatique
@@ -357,17 +426,19 @@ GET /api/conflicts/stats → Métriques conflits
 - Alertes et maintenance automatisée
 
 **Livrables** :
-- Dashboard métriques Zep (facts, conflits, sessions)
-- Alertes conflits critiques
-- Rapports gouvernance données
-- Procédures maintenance et sauvegarde
+- Dashboard métriques Zep basique (facts, conflits, sessions)
+- Alertes essentielles (conflits critiques, erreurs pipeline)
+- KPIs POC mesurables avec baseline avant/après
+- Procédures maintenance minimales pour environnement dev
+- Logs structurés pour analyse et debug
 
-**Métriques clés** :
-- Nombre facts confirmés vs en conflit
-- Taux résolution conflits
-- Qualité relations extraites
-- Performance assemblage contexte
-- Utilisation mémoire conversationnelle
+**Métriques POC** :
+- Nombre facts confirmés vs en conflit (ratio qualité)
+- Taux résolution conflits dans délais raisonnables
+- Précision extraction entités/relations (échantillon manuel)
+- Latence assemblage contexte (< 200ms objectif)
+- Taux utilisation mémoire conversationnelle par utilisateur
+- Amélioration satisfaction utilisateur (avant/après questionnaire simple)
 
 ## 🏗️ Schéma d'architecture intégrée
 
@@ -496,6 +567,13 @@ GET /api/conflicts/stats → Métriques conflits
    - **Mitigation** : Workflows automatisés, escalation
 
 ## ✅ Critères de succès
+
+### Phase 0 (Multi-utilisateurs) ✅
+- ✅ Sélecteur utilisateur fonctionnel dans TopNavigation
+- ✅ CRUD utilisateurs via API backend
+- ✅ Persistence choix utilisateur dans localStorage
+- ✅ Headers `X-User-ID` automatiques dans requêtes API
+- ✅ Aucune régression sur fonctionnalités existantes
 
 ### Phase pilote (après Phase 4)
 - ✅ 100% des documents ingérés génèrent des Facts Zep
