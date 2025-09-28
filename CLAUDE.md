@@ -10,13 +10,49 @@
 - Commentaires de code en français si ajoutés
 - Messages de commit en français
 
+## 🤖 MODE AUTONOMIE - PHASE 2 ZEP
+
+### ✅ AUTORISATIONS AUTONOMES ACCORDÉES
+Pendant l'implémentation de la Phase 2 Zep, Claude Code est autorisé à :
+
+**Infrastructure Docker :**
+- ✅ Créer nouveaux services (zep, postgres) dans docker-compose.yml
+- ✅ Rebuilder containers automatiquement si nécessaire
+- ✅ Arrêter/redémarrer services pour intégration Zep
+- ✅ Modifier configurations réseau Docker
+- ✅ Gérer volumes persistants Postgres/Zep
+
+**Développement Code :**
+- ✅ Créer nouveaux fichiers Python pour intégration Zep
+- ✅ Modifier APIs existantes pour ajout endpoints Facts/Memory
+- ✅ Installer nouvelles dépendances Python (zep-python, etc.)
+- ✅ Exécuter tests automatiquement après modifications
+- ✅ Corriger erreurs et bugs détectés automatiquement
+
+**Base de Données :**
+- ✅ Créer schémas Postgres pour Facts/Relations/Conflicts
+- ✅ Exécuter migrations de base de données
+- ✅ Configurer connexions Zep ↔ Postgres ↔ FastAPI
+- ✅ Tester intégrité données entre Qdrant et Zep
+
+**Git et Versioning :**
+- ✅ Commits automatiques avec messages descriptifs
+- ✅ Push des changements vers repository
+- ✅ Création branches feat/zep-* si nécessaire
+
+### 🎯 OBJECTIF AUTONOMIE
+Implémenter complètement la Phase 2 sans interruption :
+1. Setup Zep + Postgres (3 jours)
+2. Client Zep intégration (2 jours)
+3. Facts CRUD API (5 jours)
+
 ## 🐳 Gestion Docker - RÈGLES STRICTES
 
-### ❌ INTERDICTIONS
-- **NE JAMAIS rebuilder automatiquement les containers Docker**
-- **NE JAMAIS exécuter `docker-compose up --build` sans demande explicite**
-- **NE JAMAIS arrêter/redémarrer les services Docker sans autorisation**
-- **NE JAMAIS purger un élément ou une queue entière Redis sans autorisation**
+### ❌ INTERDICTIONS (SUSPENDUES EN MODE AUTONOMIE ZEP)
+- ~~NE JAMAIS rebuilder automatiquement les containers Docker~~ ✅ **AUTORISÉ Phase 2**
+- ~~NE JAMAIS exécuter `docker-compose up --build` sans demande explicite~~ ✅ **AUTORISÉ Phase 2**
+- ~~NE JAMAIS arrêter/redémarrer les services Docker sans autorisation~~ ✅ **AUTORISÉ Phase 2**
+- **NE JAMAIS purger un élément ou une queue entière Redis sans autorisation** ⚠️ **TOUJOURS INTERDIT**
 
 ### ✅ AUTORISATIONS
 ```bash
@@ -32,7 +68,7 @@ docker-compose build          # Rebuild manuel si explicitement demandé
 
 ### 🚨 Processus en Cours
 
-- **Instruction** :Ne jamais purger toute la queue sans une autorisation claire
+- **Instruction** : Ne jamais purger toute la queue sans une autorisation claire
 Avant toute action Docker, TOUJOURS :
 1. Vérifier `docker-compose ps` pour voir les services actifs
 2. Demander confirmation utilisateur pour rebuild/restart
@@ -239,4 +275,4 @@ docs: mettre à jour documentation API
 
 **💡 Principe Claude Code** : Utiliser cette documentation comme référence pour éviter l'exploration extensive du projet à chaque session. Toujours consulter ces instructions avant toute action Docker ou modification majeure.
 
-*Dernière mise à jour : 2025-09-22*
+*Dernière mise à jour : 2025-09-28 - Mode Autonomie Phase 2 ZEP activé*
