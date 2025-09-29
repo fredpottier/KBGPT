@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from pydantic import BaseModel, Field
 
@@ -34,12 +34,56 @@ class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     is_default: Optional[bool] = None
 
+    # Extensions Knowledge Graph Phase 2
+    graphiti_group_id: Optional[str] = Field(
+        None,
+        description="Identifiant groupe Graphiti (auto-généré: user_{user_id})"
+    )
+    kg_initialized: Optional[bool] = Field(
+        None,
+        description="Statut initialisation Knowledge Graph personnel"
+    )
+    kg_preferences: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Préférences Knowledge Graph utilisateur"
+    )
+    kg_created_at: Optional[str] = Field(
+        None,
+        description="Date création Knowledge Graph personnel (ISO format)"
+    )
+    kg_stats: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Statistiques Knowledge Graph personnel"
+    )
+
 
 class User(UserBase):
     """Schéma complet d'un utilisateur."""
     id: str = Field(..., description="Identifiant unique de l'utilisateur")
     created_at: datetime = Field(..., description="Date de création")
     last_active: datetime = Field(..., description="Dernière activité")
+
+    # Extensions Knowledge Graph Phase 2 (optionnelles)
+    graphiti_group_id: Optional[str] = Field(
+        None,
+        description="Identifiant groupe Graphiti personnel"
+    )
+    kg_initialized: Optional[bool] = Field(
+        False,
+        description="Statut initialisation Knowledge Graph personnel"
+    )
+    kg_preferences: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Préférences Knowledge Graph utilisateur"
+    )
+    kg_created_at: Optional[str] = Field(
+        None,
+        description="Date création Knowledge Graph personnel"
+    )
+    kg_stats: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Statistiques Knowledge Graph personnel"
+    )
 
     class Config:
         from_attributes = True

@@ -21,6 +21,7 @@ class GraphitiStore(GraphStore):
     """
 
     def __init__(self,
+                 config: Optional['GraphitiConfig'] = None,
                  neo4j_uri: Optional[str] = None,
                  neo4j_user: Optional[str] = None,
                  neo4j_password: Optional[str] = None,
@@ -29,15 +30,22 @@ class GraphitiStore(GraphStore):
         Initialise le client Graphiti
 
         Args:
+            config: Configuration Graphiti (si fournie)
             neo4j_uri: URI de connexion Neo4j (utilise config si non spécifié)
             neo4j_user: Utilisateur Neo4j (utilise config si non spécifié)
             neo4j_password: Mot de passe Neo4j (utilise config si non spécifié)
             anthropic_api_key: Clé API Anthropic pour LLM
         """
-        self.neo4j_uri = neo4j_uri or graphiti_config.neo4j_uri
-        self.neo4j_user = neo4j_user or graphiti_config.neo4j_user
-        self.neo4j_password = neo4j_password or graphiti_config.neo4j_password
-        self.anthropic_api_key = anthropic_api_key
+        if config:
+            self.neo4j_uri = neo4j_uri or config.neo4j_uri
+            self.neo4j_user = neo4j_user or config.neo4j_user
+            self.neo4j_password = neo4j_password or config.neo4j_password
+            self.anthropic_api_key = anthropic_api_key or config.anthropic_api_key
+        else:
+            self.neo4j_uri = neo4j_uri or "bolt://localhost:7687"
+            self.neo4j_user = neo4j_user or "neo4j"
+            self.neo4j_password = neo4j_password or "password"
+            self.anthropic_api_key = anthropic_api_key
         self._client: Optional[Graphiti] = None
 
     async def initialize(self) -> None:
@@ -345,7 +353,7 @@ class GraphitiStore(GraphStore):
 
         try:
             episodes = await client.search(
-                query="",  # Recherche large
+                query=group_id,  # Recherche par group_id dans le contenu
                 group_ids=[group_id],
                 num_results=limit
             )
@@ -439,22 +447,85 @@ class GraphitiStore(GraphStore):
 
         return await self.create_episode(group_id, content, "entity", metadata)
 
-    async def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
-        """Récupérer une entité"""
-        group_id = getattr(self, '_current_group_id', None)
+    async def get_entity(self, entity_uuid: str) -> Optional[Dict[str, Any]]:
+        """Récupérer une entité par son UUID"""
+        group_id = getattr(self, '_current_group_id', None) or 'enterprise'
 
         try:
-            facts = await self.search_facts(f"entity_id:{entity_id}", group_id, 1)
-            if facts:
-                fact = facts[0]
-                return {
-                    "entity_id": entity_id,
-                    "properties": fact.get("metadata", {}).get("properties", {}),
-                    "created_at": fact.get("created_at")
-                }
+            # Nouvelle approche : utiliser search_facts() car les entités sont converties en facts
+            # Rechercher par UUID dans les facts
+            facts = await self.search_facts(query=entity_uuid, group_id=group_id, limit=20)
+
+            for fact in facts:
+                # Vérifier si ce fact correspond à notre entité
+                fact_uuid = fact.get("uuid")
+                content = fact.get("content", "")
+
+                # L'UUID peut être dans le content ou le fact peut contenir notre UUID
+                if entity_uuid in content or fact_uuid == entity_uuid:
+                    # Extraire le nom de l'entité du contenu
+                    # Format attendu: "Entité {type}_{name} is {name}"
+                    name = "Unknown"
+                    entity_type = "unknown"
+                    description = ""
+
+                    if " is " in content:
+                        parts = content.split(" is ")
+                        if len(parts) >= 2:
+                            name = parts[1]
+                            # Extraire le type depuis la première partie
+                            first_part = parts[0]
+                            if "Entité " in first_part:
+                                type_name_part = first_part.replace("Entité ", "")
+                                if "_" in type_name_part:
+                                    entity_type = type_name_part.split("_")[0]
+
+                    return {
+                        "uuid": entity_uuid,  # Garder l'UUID original pour cohérence API
+                        "name": name,
+                        "entity_type": entity_type,
+                        "description": description,
+                        "attributes": {},
+                        "created_at": fact.get("created_at"),
+                        "group_id": fact.get("group_id", group_id)
+                    }
+
+            # Si pas trouvé, chercher dans le contenu avec plus de flexibilité
+            facts = await self.search_facts(query="Entité", group_id=group_id, limit=50)
+
+            for fact in facts:
+                content = fact.get("content", "")
+                # Vérifier si l'UUID est mentionné quelque part dans le contenu
+                if entity_uuid in content:
+                    # Parsing du contenu pour extraire les infos
+                    name = "Unknown"
+                    entity_type = "unknown"
+
+                    if " is " in content:
+                        parts = content.split(" is ")
+                        if len(parts) >= 2:
+                            name = parts[1]
+                            first_part = parts[0]
+                            if "Entité " in first_part:
+                                type_name_part = first_part.replace("Entité ", "")
+                                if "_" in type_name_part:
+                                    entity_type = type_name_part.split("_")[0]
+
+                    return {
+                        "uuid": entity_uuid,
+                        "name": name,
+                        "entity_type": entity_type,
+                        "description": "",
+                        "attributes": {},
+                        "created_at": fact.get("created_at"),
+                        "group_id": fact.get("group_id", group_id)
+                    }
+
+            logger.warning(f"Entité {entity_uuid} non trouvée dans les facts du groupe {group_id}")
             return None
+
         except Exception as e:
-            logger.error(f"Erreur récupération entité {entity_id}: {e}")
+            logger.error(f"Erreur récupération entité {entity_uuid}: {e}")
             return None
 
     async def list_relations(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -485,6 +556,19 @@ class GraphitiStore(GraphStore):
 
     async def delete_relation(self, relation_id: str) -> bool:
         """Supprimer une relation"""
+        # Vérification d'isolement: n'autoriser la suppression que si la relation
+        # est visible dans le groupe courant
+        try:
+            current_group = getattr(self, '_current_group_id', None)
+            if current_group:
+                rels = await self.list_relations()
+                if not any(r.get("uuid") == relation_id for r in rels):
+                    logger.warning(
+                        f"Suppression relation refusée: {relation_id} non visible dans le groupe {current_group}"
+                    )
+                    return False
+        except Exception as _e:
+            logger.warning(f"Vérification groupe suppression relation échouée: {_e}")
         # Graphiti ne supporte pas la suppression directe
         # On marque comme supprimé via metadata
         logger.warning(f"Suppression relation {relation_id}: marquage comme supprimée")
