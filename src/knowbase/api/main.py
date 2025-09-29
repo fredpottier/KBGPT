@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
 from knowbase.api.middleware.user_context import UserContextMiddleware
-from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, tenants, health, graphiti, knowledge_graph, users
+from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, tenants, health, graphiti, knowledge_graph, users, facts_governance
 
 
 def create_app() -> FastAPI:
@@ -80,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api")  # Health checks complets
     app.include_router(graphiti.router, prefix="/api")  # Intégration Graphiti ✅ ACTIVÉ
     app.include_router(knowledge_graph.router, prefix="/api")  # Knowledge Graph Enterprise ✅ ACTIVÉ
+    app.include_router(facts_governance.router)  # Facts Gouvernées Phase 3 ✅ ACTIVÉ
 
     return app
 
