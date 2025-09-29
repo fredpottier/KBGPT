@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Script d'analyse des métadonnées PPTX pour extraire les dates
 ANALYSE DE FAISABILITÉ UNIQUEMENT - PAS D'INTÉGRATION
@@ -9,6 +10,10 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 import sys
+import io
+
+# Fix encoding pour Windows
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 def analyze_pptx_metadata(pptx_path: Path):
     """Analyse les métadonnées d'un fichier PPTX pour identifier les dates disponibles"""
