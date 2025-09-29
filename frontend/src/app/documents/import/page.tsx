@@ -6,11 +6,9 @@ import {
   FormControl,
   FormLabel,
   Heading,
-  HStack,
   Input,
   Select,
   Text,
-  Textarea,
   VStack,
   useToast,
   Card,
@@ -19,7 +17,7 @@ import {
 } from '@chakra-ui/react'
 import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { AttachmentIcon, CheckIcon, WarningIcon } from '@chakra-ui/icons'
+import { AttachmentIcon, CheckIcon } from '@chakra-ui/icons'
 import { useMutation } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
@@ -46,7 +44,7 @@ const FileDropzone = ({ onFileSelect, selectedFile }: FileUploadProps) => {
       'application/vnd.ms-excel': ['.xls'],
     },
     multiple: false,
-    maxSize: 50 * 1024 * 1024, // 50MB
+    maxSize: 200 * 1024 * 1024, // 200MB - Supporte les gros documents SAP
   })
 
   return (
@@ -83,7 +81,7 @@ const FileDropzone = ({ onFileSelect, selectedFile }: FileUploadProps) => {
               {isDragActive ? 'Déposez votre fichier ici' : 'Glissez-déposez votre fichier ou cliquez pour sélectionner'}
             </Text>
             <Text fontSize="sm" color="gray.500">
-              Formats acceptés : PDF, PPTX, PPT, XLSX, XLS (max 50 MB)
+              Formats acceptés : PDF, PPTX, PPT, XLSX, XLS (max 200 MB)
             </Text>
           </>
         )}
@@ -96,7 +94,6 @@ const FileDropzone = ({ onFileSelect, selectedFile }: FileUploadProps) => {
 export default function ImportPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [client, setClient] = useState('')
-  const [sourceDate, setSourceDate] = useState('')
   const [documentType, setDocumentType] = useState('')
 
   const toast = useToast()
@@ -178,7 +175,6 @@ export default function ImportPage() {
 
     const metadata = {
       client: client.trim(),
-      source_date: sourceDate.trim(),
       document_type: documentType,
     }
 
@@ -210,29 +206,18 @@ export default function ImportPage() {
             <Divider />
 
             {/* Formulaire de métadonnées */}
+            {/* Note: La date source est maintenant automatiquement extraite des métadonnées PPTX */}
             <VStack spacing={4} align="stretch">
               <Heading size="md">Métadonnées du document</Heading>
 
-              <HStack spacing={4}>
-                <FormControl>
-                  <FormLabel>Client (optionnel)</FormLabel>
-                  <Input
-                    value={client}
-                    onChange={(e) => setClient(e.target.value)}
-                    placeholder="ex: Entreprise ABC"
-                  />
-                </FormControl>
-
-                <FormControl>
-                  <FormLabel>Date source (MM/YYYY)</FormLabel>
-                  <Input
-                    value={sourceDate}
-                    onChange={(e) => setSourceDate(e.target.value)}
-                    placeholder="ex: 07/2025"
-                    pattern="\\d{2}/\\d{4}"
-                  />
-                </FormControl>
-              </HStack>
+              <FormControl>
+                <FormLabel>Client (optionnel)</FormLabel>
+                <Input
+                  value={client}
+                  onChange={(e) => setClient(e.target.value)}
+                  placeholder="ex: Entreprise ABC"
+                />
+              </FormControl>
 
               <FormControl isRequired>
                 <FormLabel>Type de document</FormLabel>

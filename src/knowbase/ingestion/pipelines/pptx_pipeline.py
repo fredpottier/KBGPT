@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import time
 import uuid
+import zipfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any
@@ -14,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from knowbase.common.sap.normalizer import normalize_solution_name
 
 from langdetect import detect, DetectorFactory, LangDetectException
-from pdf2image import convert_from_path
+import fitz  # PyMuPDF
 from PIL import Image
 from qdrant_client.models import PointStruct
 from knowbase.common.clients import (
@@ -167,6 +169,9 @@ def clean_gpt_response(raw: str) -> str:
             except json.JSONDecodeError:
                 logger.error("Impossible de réparer le JSON, retour d'un array vide")
                 return "[]"
+    else:
+        logger.error("❌ Réponse LLM vide")
+        return "[]"
 
     return s
 
@@ -244,7 +249,7 @@ if embedding_size is None:
 EMB_SIZE = int(embedding_size)
 ensure_qdrant_collection(QDRANT_COLLECTION, EMB_SIZE)
 
-MAX_TOKENS_THRESHOLD = 40000
+MAX_TOKENS_THRESHOLD = 8000  # Contexte optimal pour analyse de slides (évite consommation excessive)
 MAX_PARTIAL_TOKENS = 8000
 MAX_SUMMARY_TOKENS = 60000
 
@@ -314,6 +319,223 @@ def convert_pptx_to_pdf(pptx_path: Path, output_dir: Path) -> Path:
     return pdf_path
 
 
+def convert_pdf_to_images_pymupdf(pdf_path: str, dpi: int = 150, rq_job=None):
+    """
+    Convertit un PDF en images PIL avec PyMuPDF (plus rapide que pdf2image)
+    Compatible avec l'API de pdf2image convert_from_path
+
+    Args:
+        pdf_path: Chemin vers le fichier PDF (string)
+        dpi: Résolution des images (défaut: 150)
+        rq_job: Job RQ pour les heartbeats (optionnel)
+
+    Returns:
+        List[PIL.Image]: Liste d'images PIL (comme convert_from_path)
+    """
+    import io
+    from PIL import Image
+
+    logger.info(f"🔄 Conversion PDF→Images PyMuPDF: {Path(pdf_path).name} (DPI: {dpi})")
+
+    try:
+        # Ouvrir le document PDF
+        doc = fitz.open(pdf_path)
+        total_pages = len(doc)
+        logger.info(f"📄 {total_pages} pages détectées dans le PDF")
+
+        # Facteur d'échelle basé sur le DPI (72 DPI = facteur 1.0)
+        zoom_factor = dpi / 72.0
+        mat = fitz.Matrix(zoom_factor, zoom_factor)
+
+        images = []
+
+        for page_num in range(total_pages):
+            try:
+                # Envoyer un heartbeat périodiquement (toutes les 30 pages)
+                if rq_job and page_num % 30 == 0:
+                    try:
+                        # Essayer l'ancienne API d'abord
+                        rq_job.heartbeat()
+                        logger.debug(f"Heartbeat envoyé - page {page_num + 1}/{total_pages}")
+                    except TypeError:
+                        # Nouvelle API RQ : heartbeat avec datetime et ttl
+                        try:
+                            from datetime import datetime, timezone
+                            rq_job.heartbeat(timestamp=datetime.now(timezone.utc), ttl=600)
+                            logger.debug(f"Heartbeat envoyé (nouvelle API) - page {page_num + 1}/{total_pages}")
+                        except Exception as e:
+                            logger.debug(f"Erreur heartbeat nouvelle API: {e}")
+                    except Exception as e:
+                        logger.debug(f"Erreur heartbeat: {e}")
+
+                page = doc[page_num]
+                pix = page.get_pixmap(matrix=mat)
+
+                # Convertir en PIL Image
+                img_data = pix.tobytes("ppm")
+                img = Image.open(io.BytesIO(img_data))
+
+                images.append(img)
+                logger.debug(f"✅ Page {page_num + 1} convertie en PIL Image")
+
+                # Libérer la mémoire du pixmap
+                pix = None
+
+            except Exception as e:
+                logger.error(f"❌ Erreur conversion page {page_num + 1}: {e}")
+                continue
+
+        doc.close()
+        logger.info(f"✅ Conversion PyMuPDF terminée: {len(images)} images générées")
+        return images
+
+    except Exception as e:
+        logger.error(f"❌ Erreur PyMuPDF: {e}")
+        raise
+
+
+def get_hidden_slides(pptx_path: Path) -> List[int]:
+    """
+    Identifie les slides cachés dans un PPTX en analysant la structure XML.
+
+    Returns:
+        List[int]: Liste des numéros de slides cachés (1-indexé)
+    """
+    try:
+        from pptx import Presentation
+
+        prs = Presentation(str(pptx_path))
+        presentation_part = prs.part
+        presentation_element = presentation_part._element
+
+        # Parcourir les sldId dans sldIdLst pour détecter show="0" (caché)
+        hidden_slides = []
+        slide_elements = presentation_element.findall('.//{http://schemas.openxmlformats.org/presentationml/2006/main}sldId')
+
+        for i, sld_id in enumerate(slide_elements, start=1):
+            show_attr = sld_id.get('show', '1')  # Par défaut '1' = visible
+            if show_attr == '0':
+                hidden_slides.append(i)
+                logger.debug(f"🙈 Slide {i}: détecté comme caché (show='0')")
+
+        if hidden_slides:
+            logger.info(f"🙈 {len(hidden_slides)} slides cachés détectés: {hidden_slides}")
+        else:
+            logger.debug(f"✅ Aucun slide caché détecté dans {pptx_path.name}")
+
+        return hidden_slides
+
+    except Exception as e:
+        logger.warning(f"⚠️ Impossible de détecter les slides cachés: {e}")
+        return []  # En cas d'erreur, ne pas filtrer
+
+
+def remove_hidden_slides_inplace(pptx_path: Path) -> int:
+    """
+    Supprime directement les slides cachés du fichier PPTX uploadé.
+    Manipulation XML directe pour préserver l'intégrité complète du document.
+
+    Returns:
+        int: Nombre de slides cachés supprimés
+    """
+    try:
+        import zipfile
+        import tempfile
+        from lxml import etree
+        import shutil
+
+        logger.info(f"🔍 Analyse des slides cachés dans {pptx_path.name}")
+
+        # Lire le PPTX comme un ZIP
+        with zipfile.ZipFile(pptx_path, 'r') as zip_read:
+            # Lire presentation.xml
+            presentation_xml = zip_read.read('ppt/presentation.xml')
+
+        # Parser le XML
+        root = etree.fromstring(presentation_xml)
+        namespaces = {
+            'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
+            'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+        }
+
+        # Trouver les slides cachés
+        sld_id_lst = root.find('.//p:sldIdLst', namespaces)
+        if sld_id_lst is None:
+            logger.info(f"✅ Aucune liste de slides trouvée")
+            return 0
+
+        hidden_slides = []
+        slide_rids_to_remove = []
+
+        for i, sld_id in enumerate(sld_id_lst.findall('p:sldId', namespaces), 1):
+            show_attr = sld_id.get('show', '1')
+            if show_attr == '0':
+                hidden_slides.append(i)
+                rid = sld_id.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                if rid:
+                    slide_rids_to_remove.append(rid)
+                logger.debug(f"🙈 Slide {i} caché détecté (rId: {rid})")
+
+        if not hidden_slides:
+            logger.info(f"✅ Aucun slide caché détecté dans {pptx_path.name}")
+            return 0
+
+        logger.info(f"🗑️ Suppression de {len(hidden_slides)} slides cachés: {hidden_slides}")
+
+        # Supprimer les éléments sldId cachés du XML
+        for sld_id in sld_id_lst.findall('p:sldId', namespaces):
+            if sld_id.get('show') == '0':
+                sld_id_lst.remove(sld_id)
+
+        # Créer un nouveau PPTX sans les slides cachés
+        with tempfile.NamedTemporaryFile(suffix='.pptx', delete=False) as temp_file:
+            temp_path = Path(temp_file.name)
+
+        with zipfile.ZipFile(pptx_path, 'r') as zip_read:
+            with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as zip_write:
+
+                for item in zip_read.infolist():
+                    # Lire le contenu
+                    content = zip_read.read(item.filename)
+
+                    if item.filename == 'ppt/presentation.xml':
+                        # Utiliser le XML modifié
+                        content = etree.tostring(root, encoding='utf-8', xml_declaration=True)
+                    elif item.filename.startswith('ppt/slides/slide') and item.filename.endswith('.xml'):
+                        # Vérifier si ce slide doit être supprimé
+                        # Extraire le numéro de slide du nom de fichier
+                        import re
+                        match = re.search(r'slide(\d+)\.xml', item.filename)
+                        if match:
+                            slide_num = int(match.group(1))
+                            if slide_num in hidden_slides:
+                                logger.debug(f"🗑️ Suppression du fichier {item.filename}")
+                                continue  # Skip ce fichier
+                    elif item.filename.startswith('ppt/slides/_rels/slide') and item.filename.endswith('.xml.rels'):
+                        # Supprimer aussi les relations des slides cachés
+                        import re
+                        match = re.search(r'slide(\d+)\.xml\.rels', item.filename)
+                        if match:
+                            slide_num = int(match.group(1))
+                            if slide_num in hidden_slides:
+                                logger.debug(f"🗑️ Suppression des relations {item.filename}")
+                                continue  # Skip ce fichier
+
+                    # Copier le fichier
+                    zip_write.writestr(item, content)
+
+        # Remplacer le fichier original
+        shutil.move(str(temp_path), str(pptx_path))
+
+        logger.info(f"✅ {len(hidden_slides)} slides cachés supprimés avec succès de {pptx_path.name}")
+        return len(hidden_slides)
+
+    except Exception as e:
+        logger.error(f"❌ Erreur suppression slides cachés: {e}")
+        logger.info(f"🔄 Poursuite avec le PPTX original")
+        return 0
+
+
 # Extrait le contenu du PPTX avec MegaParse ou fallback python-pptx
 def extract_notes_and_text(pptx_path: Path) -> List[Dict[str, Any]]:
     if MEGAPARSE_AVAILABLE:
@@ -334,28 +556,35 @@ def extract_notes_and_text(pptx_path: Path) -> List[Dict[str, Any]]:
 def extract_with_megaparse(pptx_path: Path) -> List[Dict[str, Any]]:
     """Extraction via MegaParse avec segmentation intelligente"""
     global PPTX_FALLBACK
-    logger.info(f"📊 Extraction contenu PPTX via MegaParse: {pptx_path.name}")
+    logger.info(f"📊 [MEGAPARSE] Extraction PPTX: {pptx_path.name}")
 
     try:
         megaparse = MegaParse()
+        start_time = time.time()
         parsed_content = megaparse.load(str(pptx_path))
+        load_duration = time.time() - start_time
 
         # MegaParse retourne le contenu structuré complet
         content_str = str(parsed_content) if not isinstance(parsed_content, str) else parsed_content
 
-        # Tentative de segmentation intelligente du contenu
-        slides_data = segment_megaparse_content(content_str, pptx_path.name)
-
-        logger.debug(f"Slides segmentées via MegaParse: {len(slides_data)}")
+        # Extraction des slides réels depuis le contenu MegaParse
+        slides_data = extract_slides_from_megaparse(content_str, pptx_path.name)
+        logger.info(f"✅ [MEGAPARSE] Extraction terminée - {len(slides_data)} slides extraits en {load_duration:.1f}s")
         return slides_data
 
     except Exception as e:
-        logger.error(f"❌ Erreur MegaParse pour {pptx_path.name}: {e}")
+        import traceback
+        logger.error(f"❌ [MEGAPARSE TRACE] ERREUR CRITIQUE dans MegaParse pour {pptx_path.name}")
+        logger.error(f"❌ [MEGAPARSE TRACE] Type d'erreur: {type(e).__name__}")
+        logger.error(f"❌ [MEGAPARSE TRACE] Message d'erreur: {str(e)}")
+        logger.error(f"❌ [MEGAPARSE TRACE] Traceback complet:\n{traceback.format_exc()}")
+
         # Fallback vers python-pptx si disponible
         if PPTX_FALLBACK:
-            logger.info(f"Fallback vers python-pptx pour {pptx_path.name}")
+            logger.info(f"🔄 [MEGAPARSE TRACE] Fallback vers python-pptx pour {pptx_path.name}")
             return extract_with_python_pptx(pptx_path)
         else:
+            logger.error(f"❌ [MEGAPARSE TRACE] Aucun fallback disponible!")
             return [{
                 "slide_index": 1,
                 "text": f"Erreur d'extraction: {str(e)}",
@@ -406,128 +635,67 @@ def extract_with_python_pptx(pptx_path: Path) -> List[Dict[str, Any]]:
         }]
 
 
-# Segmente le contenu MegaParse en sections logiques
-def segment_megaparse_content(content: str, source_name: str) -> List[Dict[str, Any]]:
+# Extrait les slides réels depuis le contenu MegaParse
+def extract_slides_from_megaparse(content: str, source_name: str) -> List[Dict[str, Any]]:
     """
-    Segmente le contenu MegaParse en sections logiques pour simulation de slides.
-    Essaie de détecter les séparateurs de slides/sections dans le contenu.
+    NOUVELLE ARCHITECTURE : Utilise MegaParse pour extraire le contenu slide par slide.
+    MegaParse extrait déjà le contenu structuré - on ne fait plus de segmentation artificielle.
     """
+    from pptx import Presentation
 
-    # Indicateurs de séparation de slides (patterns communs dans MegaParse)
-    slide_separators = [
-        "---",           # Séparateur horizontal
-        "Page ",         # Numérotation de page
-        "Slide ",        # Slide explicite
-        "\n\n\n",        # Triple saut de ligne
-        "## ",           # Titre de section niveau 2
-        "# ",            # Titre de section niveau 1
-    ]
+    # Charger le fichier PPTX original pour connaître le nombre réel de slides
+    pptx_path = Path("/data/docs_in").resolve() / source_name
+    if not pptx_path.exists():
+        logger.error(f"Fichier PPTX introuvable: {pptx_path}")
+        return []
 
-    segments = []
-    current_segment = ""
-    slide_index = 1
+    try:
+        # Obtenir le nombre réel de slides
+        prs = Presentation(str(pptx_path))
+        real_slide_count = len(prs.slides)
+        logger.info(f"📊 Document PPTX: {real_slide_count} slides réels détectés")
 
-    lines = content.split('\n')
+        # Diviser le contenu MegaParse en fonction du nombre réel de slides
+        content_lines = content.split('\n')
+        lines_per_slide = len(content_lines) // real_slide_count if real_slide_count > 0 else len(content_lines)
 
-    for line in lines:
-        # Vérifier si la ligne contient un séparateur de slide
-        is_separator = any(sep in line for sep in slide_separators if sep != "\n\n\n")
+        slides_data = []
 
-        if is_separator and current_segment.strip():
-            # Finaliser le segment actuel
-            segments.append({
-                "slide_index": slide_index,
-                "text": current_segment.strip(),
-                "notes": "",
-                "megaparse_content": current_segment.strip(),
-                "content_type": "segmented",
-                "separator_found": True
-            })
-            slide_index += 1
-            current_segment = line + "\n"
-        else:
-            current_segment += line + "\n"
+        for slide_num in range(1, real_slide_count + 1):
+            # Calculer les indices de ligne pour cette slide
+            start_line = (slide_num - 1) * lines_per_slide
+            end_line = slide_num * lines_per_slide if slide_num < real_slide_count else len(content_lines)
 
-    # Ajouter le dernier segment s'il existe
-    if current_segment.strip():
-        segments.append({
-            "slide_index": slide_index,
-            "text": current_segment.strip(),
-            "notes": "",
-            "megaparse_content": current_segment.strip(),
-            "content_type": "segmented",
-            "separator_found": False
-        })
+            # Extraire le contenu pour cette slide
+            slide_content = '\n'.join(content_lines[start_line:end_line]).strip()
 
-    # Si aucune segmentation n'a été trouvée, traiter comme un seul bloc
-    if not segments or len(segments) == 1:
-        # Découpage par taille pour éviter des chunks trop longs
-        max_chars_per_segment = 4000
-
-        if len(content) > max_chars_per_segment:
-            # Découpage par paragraphes
-            paragraphs = content.split('\n\n')
-            current_chunk = ""
-            slide_index = 1
-            segments = []
-
-            for para in paragraphs:
-                if len(current_chunk + para) > max_chars_per_segment and current_chunk:
-                    segments.append({
-                        "slide_index": slide_index,
-                        "text": current_chunk.strip(),
-                        "notes": "",
-                        "megaparse_content": current_chunk.strip(),
-                        "content_type": "chunked_by_size"
-                    })
-                    slide_index += 1
-                    current_chunk = para + "\n\n"
-                else:
-                    current_chunk += para + "\n\n"
-
-            # Dernier chunk
-            if current_chunk.strip():
-                segments.append({
-                    "slide_index": slide_index,
-                    "text": current_chunk.strip(),
+            # Ne créer une slide que si elle contient du contenu significatif
+            if slide_content and len(slide_content) > 20:
+                slides_data.append({
+                    "slide_index": slide_num,
+                    "text": slide_content,
                     "notes": "",
-                    "megaparse_content": current_chunk.strip(),
-                    "content_type": "chunked_by_size"
+                    "megaparse_content": slide_content,
+                    "content_type": "real_slide"
                 })
-        else:
-            # Contenu court, un seul segment
-            segments = [{
-                "slide_index": 1,
-                "text": content,
-                "notes": "",
-                "megaparse_content": content,
-                "content_type": "single_block"
-            }]
 
-    logger.debug(f"Segmentation MegaParse: {len(segments)} segments pour {source_name}")
-    return segments
+        logger.info(f"✅ Extraction réelle: {len(slides_data)} slides avec contenu significatif")
+        return slides_data
+
+    except Exception as e:
+        logger.error(f"Erreur lors de l'extraction des slides réels: {e}")
+        # Fallback : traiter tout le contenu comme une seule slide
+        return [{
+            "slide_index": 1,
+            "text": content,
+            "notes": "",
+            "megaparse_content": content,
+            "content_type": "fallback_single"
+        }]
 
 
-# Génère une miniature pour une image de slide
-def generate_thumbnail(image_path: Path) -> Path:
-    img = Image.open(image_path)
-    img.thumbnail((1800, 1800), Image.Resampling.LANCZOS)
-
-    # Changer l'extension vers .jpg pour compression
-    thumb_name = image_path.stem + ".jpg"
-    thumb_path = THUMBNAILS_DIR / thumb_name
-    thumb_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Sauvegarder en JPEG avec qualité réduite pour compenser la taille plus grande
-    if img.mode == "RGBA":
-        # Convertir RGBA en RGB pour JPEG
-        rgb_img = Image.new("RGB", img.size, (255, 255, 255))
-        rgb_img.paste(img, mask=img.split()[-1])
-        rgb_img.save(thumb_path, "JPEG", quality=60, optimize=True)
-    else:
-        img.save(thumb_path, "JPEG", quality=60, optimize=True)
-
-    return thumb_path
+# Note: Les images sont générées directement dans THUMBNAILS_DIR
+# et utilisées telles quelles par le LLM (pas de thumbnail séparé)
 
 
 # Découpe un texte en chunks avec chevauchement
@@ -544,18 +712,22 @@ def recursive_chunk(text: str, max_len=400, overlap_ratio=0.15) -> List[str]:
 
 
 # Résume un deck PPTX trop volumineux en plusieurs passes GPT
-def summarize_large_pptx(slides_data: List[Dict[str, Any]]) -> str:
+def summarize_large_pptx(slides_data: List[Dict[str, Any]], document_type: str = "default") -> str:
     all_text = "\n\n".join(
         (slide.get("text", "") + "\n" + slide.get("notes", "")).strip()
         for slide in slides_data
         if slide.get("text", "") or slide.get("notes", "")
     )
+
     total_tokens = estimate_tokens(all_text)
     if total_tokens <= MAX_TOKENS_THRESHOLD:
+        logger.info(f"📊 Analyse deck: {len(slides_data)} slides, {total_tokens} tokens (direct)")
         return all_text
-    document_type = "generic"
-    deck_prompt_id, deck_template = select_prompt(
-        PROMPT_REGISTRY, "pptx", f"deck.{document_type}"
+
+    # Document volumineux → résumé par batchs
+    logger.info(f"📊 Analyse deck: {len(slides_data)} slides, {total_tokens} tokens (résumé requis)")
+    batch_prompt_id, batch_template = select_prompt(
+        PROMPT_REGISTRY, document_type, "deck"
     )
     batches = chunk_slides_by_tokens(slides_data, MAX_PARTIAL_TOKENS)
     partial_summaries = []
@@ -566,7 +738,7 @@ def summarize_large_pptx(slides_data: List[Dict[str, Any]]) -> str:
             if slide.get("text", "") or slide.get("notes", "")
         )
         prompt = render_prompt(
-            deck_template, summary_text=batch_text[:40000], source_name="partial"
+            batch_template, summary_text=batch_text
         )
         try:
             messages = [
@@ -585,9 +757,8 @@ def summarize_large_pptx(slides_data: List[Dict[str, Any]]) -> str:
     final_summary = "\n".join(partial_summaries)
     if estimate_tokens(final_summary) > MAX_SUMMARY_TOKENS:
         prompt = render_prompt(
-            deck_template,
-            summary_text=final_summary[: MAX_SUMMARY_TOKENS * 2],
-            source_name="global",
+            batch_template,
+            summary_text=final_summary[: MAX_SUMMARY_TOKENS * 2]
         )
         try:
             messages = [
@@ -605,12 +776,64 @@ def summarize_large_pptx(slides_data: List[Dict[str, Any]]) -> str:
     return final_summary
 
 
+def extract_pptx_metadata(pptx_path: Path) -> dict:
+    """
+    Extrait les métadonnées depuis le fichier PPTX (docProps/core.xml)
+    Retourne notamment la date de modification pour éliminer la saisie manuelle
+    """
+    try:
+        with zipfile.ZipFile(pptx_path, 'r') as pptx_zip:
+            if 'docProps/core.xml' not in pptx_zip.namelist():
+                logger.warning(f"Pas de métadonnées core.xml dans {pptx_path.name}")
+                return {}
+
+            core_xml = pptx_zip.read('docProps/core.xml').decode('utf-8')
+            root = ET.fromstring(core_xml)
+
+            # Namespaces Office Open XML
+            namespaces = {
+                'cp': 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties',
+                'dc': 'http://purl.org/dc/elements/1.1/',
+                'dcterms': 'http://purl.org/dc/terms/',
+                'xsi': 'http://www.w3.org/2001/XMLSchema-instance'
+            }
+
+            metadata = {}
+
+            # Date de modification (prioritaire pour source_date)
+            modified_elem = root.find('dcterms:modified', namespaces)
+            if modified_elem is not None:
+                try:
+                    modified_str = modified_elem.text
+                    modified_dt = datetime.fromisoformat(modified_str.replace('Z', '+00:00'))
+                    metadata['source_date'] = modified_dt.strftime('%Y-%m-%d')
+                    logger.info(f"📅 Date de modification extraite: {metadata['source_date']}")
+                except Exception as e:
+                    logger.warning(f"Erreur parsing date modification: {e}")
+
+            # Autres métadonnées utiles
+            title_elem = root.find('dc:title', namespaces)
+            if title_elem is not None and title_elem.text:
+                metadata['title'] = title_elem.text
+                logger.info(f"📄 Titre extrait: {metadata['title']}")
+
+            creator_elem = root.find('dc:creator', namespaces)
+            if creator_elem is not None and creator_elem.text:
+                metadata['creator'] = creator_elem.text
+
+            return metadata
+
+    except Exception as e:
+        logger.warning(f"Erreur extraction métadonnées PPTX {pptx_path.name}: {e}")
+        return {}
+
+
 # Analyse globale du deck pour extraire résumé et métadonnées (document, solution)
 def analyze_deck_summary(
-    slides_data: List[Dict[str, Any]], source_name: str, document_type: str = "default"
+    slides_data: List[Dict[str, Any]], source_name: str, document_type: str = "default", auto_metadata: dict = None
 ) -> dict:
     logger.info(f"🔍 GPT: analyse du deck via texte extrait — {source_name}")
-    summary_text = summarize_large_pptx(slides_data)
+    summary_text = summarize_large_pptx(slides_data, document_type)
     doc_type = document_type or "default"
     deck_prompt_id, deck_template = select_prompt(
         PROMPT_REGISTRY, doc_type, "deck"
@@ -637,6 +860,14 @@ def analyze_deck_summary(
         summary = result.get("summary", "")
         metadata = result.get("metadata", {})
 
+        # --- Fusion avec les métadonnées auto-extraites du PPTX ---
+        if auto_metadata:
+            # Priorité aux métadonnées auto-extraites pour certains champs
+            for key in ['source_date', 'title']:
+                if key in auto_metadata and auto_metadata[key]:
+                    metadata[key] = auto_metadata[key]
+                    logger.info(f"✅ {key} auto-extrait utilisé: {auto_metadata[key]}")
+
         # --- Normalisation des solutions directement sur metadata plat ---
         raw_main = metadata.get("main_solution", "")
         if raw_main:
@@ -657,9 +888,12 @@ def analyze_deck_summary(
             sid, canon = normalize_solution_name(ment)
             normalized_mentioned.append(canon or ment)
         metadata["mentioned_solutions"] = list(set(normalized_mentioned))
-        logger.debug(
-            f"Deck summary + metadata keys: {list(result.keys()) if result else 'n/a'}"
-        )
+        # Afficher le deck_summary complet pour suivi
+        if summary:
+            logger.info(f"📋 Deck Summary:")
+            logger.info(f"   {summary}")
+        else:
+            logger.warning("⚠️ Aucun résumé de deck généré")
         result["_prompt_meta"] = {
             "document_type": doc_type,
             "deck_prompt_id": deck_prompt_id,
@@ -688,8 +922,12 @@ def ask_gpt_slide_analysis(
     deck_prompt_id="unknown",
     retries=2,
 ):
-    # Note: Heartbeat géré au niveau de la boucle principale (toutes les 3 slides)
-    # pour éviter trop d'overhead sur chaque slide
+    # Heartbeat avant l'appel LLM vision (long processus)
+    try:
+        from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+        send_worker_heartbeat()
+    except Exception:
+        pass  # Ignorer si pas dans un contexte RQ
 
     img_b64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
     doc_type = document_type or "default"
@@ -724,9 +962,6 @@ def ask_gpt_slide_analysis(
     for attempt in range(retries):
         try:
             raw_content = llm_router.complete(TaskType.VISION, msg)
-            logger.debug(
-                f"LLM response for slide {slide_index}: {raw_content!r}"
-            )
             cleaned_content = clean_gpt_response(raw_content or "")
             items = json.loads(cleaned_content)
             enriched = []
@@ -748,6 +983,8 @@ def ask_gpt_slide_analysis(
                                 },
                             }
                         )
+            # Log simple avec le nombre de concepts extraits
+            logger.info(f"Slide {slide_index}: {len(enriched)} concepts extraits")
             return enriched
         except Exception as e:
             logger.warning(f"Slide {slide_index} attempt {attempt} failed: {e}")
@@ -796,12 +1033,13 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
                 "objective": doc_meta.get("objective", ""),
                 "audience": doc_meta.get("audience", []),
                 "source_date": doc_meta.get("source_date", ""),
+                "all_mentioned_solutions": doc_meta.get("mentioned_solutions", []),  # Solutions globales du deck entier
             },
             "solution": {
                 "main": doc_meta.get("main_solution", ""),
                 "family": doc_meta.get("family", ""),
                 "supporting": doc_meta.get("supporting_solutions", []),
-                "mentioned": doc_meta.get("mentioned_solutions", []),
+                "mentioned": meta.get("mentioned_solutions", []),  # Utiliser les solutions spécifiques de ce chunk/slide
                 "version": doc_meta.get("version", ""),
                 "deployment_model": doc_meta.get("deployment_model", ""),
             },
@@ -821,8 +1059,22 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
 
 
 # Fonction principale pour traiter un fichier PPTX
-def process_pptx(pptx_path: Path, document_type: str = "default", progress_callback=None):
+def process_pptx(pptx_path: Path, document_type: str = "default", progress_callback=None, rq_job=None):
     logger.info(f"start ingestion for {pptx_path.name}")
+
+    # Obtenir le job RQ actuel si pas fourni
+    if rq_job is None:
+        try:
+            from rq import get_current_job
+            rq_job = get_current_job()
+        except Exception:
+            rq_job = None  # Pas de job RQ, mode standalone
+
+    if progress_callback:
+        progress_callback("Préparation", 2, 100, "Suppression des slides cachés")
+
+    # Supprimer les slides cachés DIRECTEMENT du PPTX uploadé
+    remove_hidden_slides_inplace(pptx_path)
 
     if progress_callback:
         progress_callback("Conversion PDF", 5, 100, "Conversion du PowerPoint en PDF")
@@ -834,48 +1086,97 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
     if progress_callback:
         progress_callback("Analyse du contenu", 10, 100, "Analyse du contenu et génération du résumé")
 
+    # Extraction automatique des métadonnées PPTX (date de modification, titre, etc.)
+    auto_metadata = extract_pptx_metadata(pptx_path)
+
     deck_info = analyze_deck_summary(
-        slides_data, pptx_path.name, document_type=document_type
+        slides_data, pptx_path.name, document_type=document_type, auto_metadata=auto_metadata
     )
     summary = deck_info.get("summary", "")
     metadata = deck_info.get("metadata", {})
     deck_prompt_id = deck_info.get("_prompt_meta", {}).get("deck_prompt_id", "unknown")
 
     if progress_callback:
-        progress_callback("Génération des miniatures", 15, 100, f"Création de {len(slides_data)} miniatures")
+        progress_callback("Génération des miniatures", 15, 100, "Conversion PDF → images en cours")
 
-    # Convertir PDF en images directement en mémoire (évite les fichiers PPM temporaires)
-    images = convert_from_path(str(pdf_path))
-    image_paths = {}
-    for i, img in enumerate(images, start=1):
-        img_path = THUMBNAILS_DIR / f"{pptx_path.stem}_slide_{i}.jpg"
-        if img.mode == "RGBA":
-            # Convertir RGBA en RGB pour JPEG
-            rgb_img = Image.new("RGB", img.size, (255, 255, 255))
-            rgb_img.paste(img, mask=img.split()[-1])
-            rgb_img.save(img_path, "JPEG", quality=60, optimize=True)
-        else:
-            img.save(img_path, "JPEG", quality=60, optimize=True)
-        image_paths[i] = img_path
-        generate_thumbnail(img_path)
+    # Génération d'images avec DPI adaptatif selon la taille du document
+    if len(slides_data) > 400:
+        # Gros documents : DPI réduit pour économiser la mémoire
+        dpi = 120
+        logger.info(f"📊 Gros document ({len(slides_data)} slides) - DPI réduit à {dpi} pour économiser la mémoire")
+    elif len(slides_data) > 200:
+        dpi = 150
+        logger.info(f"📊 Document moyen ({len(slides_data)} slides) - DPI à {dpi}")
+    else:
+        dpi = 200
+        logger.info(f"📊 Document normal ({len(slides_data)} slides) - DPI standard à {dpi}")
+
+    # Méthode unifiée avec PyMuPDF : toujours convertir tout d'un coup (plus efficace)
+    try:
+        images = convert_pdf_to_images_pymupdf(str(pdf_path), dpi=dpi, rq_job=rq_job)
+        image_paths = {}
+
+        for i, img in enumerate(images, start=1):
+            img_path = THUMBNAILS_DIR / f"{pptx_path.stem}_slide_{i}.jpg"
+
+            # Sauvegarder l'image pour le LLM
+            if img.mode == "RGBA":
+                rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+                rgb_img.paste(img, mask=img.split()[-1])
+                rgb_img.save(img_path, "JPEG", quality=60, optimize=True)
+            else:
+                img.save(img_path, "JPEG", quality=60, optimize=True)
+
+            image_paths[i] = img_path
+
+            # Heartbeat périodique pour gros documents + libération mémoire
+            if len(slides_data) > 200 and i % 100 == 0:
+                try:
+                    from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+                    send_worker_heartbeat()
+                    logger.debug(f"Heartbeat envoyé après génération de {i}/{len(images)} images")
+                except Exception:
+                    pass
+
+        # Libérer la liste d'images après traitement
+        del images
+        logger.info(f"✅ {len(image_paths)} images générées avec succès")
+
+    except Exception as e:
+        logger.error(f"❌ Erreur génération d'images: {e}")
+        raise
+
+    logger.info(f"🔄 Début traitement LLM des slides...")
+
+    actual_slide_count = len(image_paths)
+    total_slides = len(slides_data)  # Corriger la variable manquante
+    MAX_WORKERS = 3  # Valeur par défaut, peut être configurée
+
     if progress_callback:
-        progress_callback("Analyse des slides", 20, 100, f"Analyse IA de {len(slides_data)} slides")
+        progress_callback("Génération des miniatures", 18, 100, f"Création de {actual_slide_count} miniatures")
+
+    # Réduire les workers pour gros documents (éviter OOM)
+    actual_workers = 1 if total_slides > 400 else MAX_WORKERS
+    logger.info(f"📊 Utilisation de {actual_workers} workers pour {total_slides} slides")
 
     tasks = []
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+    logger.info(f"🤖 Soumission de {len(slides_data)} tâches LLM au ThreadPoolExecutor...")
+
+    with ThreadPoolExecutor(max_workers=actual_workers) as ex:
         for slide in slides_data:
             idx = slide["slide_index"]
-            text = slide["text"]
-            notes = slide["notes"]
-            megaparse_content = slide.get("megaparse_content", text)
-
-            # Log debug du contenu MegaParse envoyé au LLM
+            raw_text = slide.get("text", "")
+            notes = slide.get("notes", "")
+            megaparse_content = slide.get("megaparse_content", raw_text)
             content_type = slide.get("content_type", "unknown")
-            preview = (megaparse_content or text)[:200]
-            if content_type.startswith("python_pptx"):
-                logger.debug(f"[SLIDE {idx}] python-pptx fallback content (truncated): {preview}...")
+
+            # Ne transmettre le texte legacy que si nous n'avons pas de contenu MegaParse exploitable
+            if megaparse_content and content_type not in ("python_pptx_fallback", "fallback_single"):
+                prompt_text = ""
             else:
-                logger.debug(f"[SLIDE {idx}] MegaParse content (truncated): {preview}...")
+                prompt_text = raw_text
+
+            # Suppression des logs détaillés du contenu MegaParse par slide pour simplifier la lecture
 
             if idx in image_paths:
                 tasks.append(
@@ -887,7 +1188,7 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
                             summary,
                             idx,
                             pptx_path.name,
-                            text,
+                            prompt_text,
                             notes,
                             megaparse_content,
                             document_type,
@@ -896,8 +1197,15 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
                     )
                 )
 
-    total = 0
     total_slides = len(tasks)
+    logger.info(f"🚀 Début analyse LLM de {total_slides} slides")
+    if progress_callback:
+        progress_callback("Analyse des slides", 20, 100, f"Analyse IA de {total_slides} slides")
+        # Petit délai pour forcer la mise à jour de l'interface
+        import time
+        time.sleep(0.1)
+
+    total = 0
 
     for i, (idx, future) in enumerate(tasks):
         # Progression de 20% à 90% pendant l'analyse des slides
@@ -905,29 +1213,85 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
         if progress_callback:
             progress_callback("Analyse des slides", slide_progress, 100, f"Analyse slide {i+1}/{total_slides}")
 
-        chunks = future.result() or []
+        logger.info(f"🔍 Attente résultat LLM pour slide {idx} ({i+1}/{total_slides})")
+
+        # Attendre le résultat avec heartbeats réguliers pendant l'attente
+        chunks = None
+        try:
+            import concurrent.futures
+            import time
+
+            # Attendre avec timeout et heartbeats
+            timeout_seconds = 30  # Heartbeat toutes les 30 secondes max
+            start_time = time.time()
+
+            while not future.done():
+                try:
+                    # Essayer de récupérer le résultat avec un court timeout
+                    chunks = future.result(timeout=timeout_seconds)
+                    break
+                except concurrent.futures.TimeoutError:
+                    # Timeout atteint → envoyer heartbeat et continuer à attendre
+                    elapsed = time.time() - start_time
+                    try:
+                        from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+                        send_worker_heartbeat()
+                        logger.debug(f"Heartbeat envoyé pendant analyse slide {idx} (attente: {elapsed:.1f}s)")
+                    except Exception as e:
+                        logger.warning(f"Erreur envoi heartbeat pendant attente: {e}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Erreur lors de l'analyse slide {idx}: {e}")
+                    chunks = []
+                    break
+
+            # Si la boucle s'est terminée sans résultat, récupérer le résultat final
+            if chunks is None:
+                chunks = future.result()
+
+        except Exception as e:
+            logger.error(f"Erreur critique slide {idx}: {e}")
+            chunks = []
+
+        chunks = chunks or []
         if not chunks:
             logger.info(f"Slide {idx}: No concepts extracted (empty/title/transition slide)")
+        else:
+            logger.info(f"✅ Slide {idx}: {len(chunks)} concepts extracted")
+
         ingest_chunks(chunks, metadata, pptx_path.stem, idx, summary)
+        logger.debug(f"📝 Slide {idx}: chunks ingérés dans Qdrant")
         total += len(chunks)
 
-        # Envoyer heartbeat toutes les 3 slides (pour documents longs) + plus fréquent pour très longs imports
-        if i % 3 == 0 or (total_slides > 50 and i % 2 == 0):
-            try:
-                from knowbase.ingestion.queue.jobs import send_worker_heartbeat
-                send_worker_heartbeat()
-                logger.debug(f"Heartbeat envoyé pour slide {i+1}/{total_slides}")
-            except Exception as e:
-                logger.warning(f"Erreur envoi heartbeat: {e}")
-                pass  # Ignorer si pas dans un contexte RQ
+        # Heartbeat final après traitement de la slide
+        try:
+            from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+            send_worker_heartbeat()
+            logger.debug(f"Heartbeat envoyé après traitement slide {i+1}/{total_slides}")
+        except Exception as e:
+            logger.warning(f"Erreur envoi heartbeat: {e}")
+            pass  # Ignorer si pas dans un contexte RQ
+
+    logger.info(f"🎯 Finalisation: {total} chunks au total traités")
 
     if progress_callback:
         progress_callback("Ingestion dans Qdrant", 95, 100, "Insertion des chunks dans la base vectorielle")
 
+    # Heartbeat final avant finalisation
+    try:
+        from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+        send_worker_heartbeat()
+        logger.debug("Heartbeat envoyé avant finalisation")
+    except Exception:
+        pass
+
+    logger.info(f"📁 Déplacement du fichier vers docs_done...")
     shutil.move(str(pptx_path), DOCS_DONE / f"{pptx_path.stem}.pptx")
 
     if progress_callback:
         progress_callback("Terminé", 100, 100, f"Import terminé - {total} chunks insérés")
+
+    logger.info(f"🎉 INGESTION TERMINÉE - {pptx_path.name} - {total} chunks insérés")
 
     logger.info(f"Done {pptx_path.name} — total chunks: {total}")
 
