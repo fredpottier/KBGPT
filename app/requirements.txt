@@ -74,3 +74,6 @@ pydantic-settings
 # === Zep Integration ===
 zep-python>=2.0.2
 asyncpg>=0.29.0
+
+# === Graphiti SDK ===
+graphiti-core[anthropic]>=0.3.0

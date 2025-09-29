@@ -57,9 +57,19 @@ Adaptations necessaires pour Graphiti:
 
 ## 6. Plan de Mise en Place (phases tracables)
 
-IMPORTANT: Ajouter et executer la Phase 0-bis (POC Graphiti) avant la Phase 1 - voir `doc/GRAPHITI_POC_ADDENDUM.md` (objectifs, interfaces GraphStore/FactsRepository/MemoryRepository, endpoints minimaux, GO/NO-GO).
+### Phase 0-bis (POC Graphiti) - **EN COURS** 🔧
 
-### Phase 0 - Preparation & Validation de base
+**STATUT ACTUEL**: Phase 0-bis en cours d'exécution - voir `doc/GRAPHITI_POC_TRACKING.md` pour le suivi détaillé.
+
+Cette phase POC détaillée valide la faisabilité technique avant le déploiement complet:
+- Infrastructures Docker Graphiti ✅ VALIDÉ
+- SDK graphiti-core et interfaces d'abstraction ⚠️ BLOQUÉ (problème installation container)
+- Endpoints wrapper `/api/graphiti/*` 🔧 CRÉÉS mais désactivés
+- Multi-tenant et health checks ✅ VALIDÉ
+
+**📋 SUIVI**: Consulter `doc/GRAPHITI_POC_TRACKING.md` pour l'état exact des 5 critères de la Phase 0.
+
+### Phase 0 - Preparation & Validation de base (APRÈS POC)
 - Choix deploiement Graphiti (librairie + Postgres ou service Docker dedie).
 - Variables d'environnement et secrets (`GRAPHITI_URL`, `GRAPHITI_API_KEY`, timeouts, retries).
 - Ajout des champs `graphiti_group_id` dans schemas utilisateurs + migration des donnees `users.json`.
