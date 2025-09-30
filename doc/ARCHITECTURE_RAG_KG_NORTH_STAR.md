@@ -6,13 +6,14 @@ Ce document décrit la vision cible, les principes d’architecture, et un plan 
 - Ingérer des documents hétérogènes (PPTX/PDF/Excel) avec **extraction unifiée** : un seul appel LLM Vision par slide produit simultanément chunks textuels (Qdrant) + entités/relations structurées (KG) depuis les sources complètes (texte brut + images + notes) avant toute condensation, garantissant contexte maximal et zéro coût additionnel.
 - Soumettre entités/relations à une gouvernance (proposed → approved/rejected/merged) et alimenter le KG (Graphiti/Neo4j) avec identifiants canoniques stables.
 - Relier les chunks Qdrant aux nœuds du KG (`related_node_ids`) pour un RAG hybride "graph-aware".
-- Répondre en priorité avec des facts approuvés, puis compléter par des chunks candidats avec transparence (traçabilité sources).
-- Multi‑domaine, traçable, time‑to‑value court pour tout onboarding.
+- **Préserver la mémoire conversationnelle** : chaque conversation utilisateur enrichit son contexte long-terme (sessions, entités trending, patterns d'usage), permettant des réponses personnalisées et contextuellement pertinentes.
+- Répondre en priorité avec des facts approuvés + contexte conversationnel utilisateur, puis compléter par des chunks candidats avec transparence (traçabilité sources).
+- Multi‑domaine, multi-utilisateur, traçable, time‑to‑value court pour tout onboarding.
 
 ## 2) Principes d'Architecture (non négociables)
 - Séparation nette des responsabilités:
   - Qdrant = mémoire textuelle universelle (schéma core minimal stable), extensible via `custom_metadata`, infos techniques sous `sys`.
-  - Graphiti/Neo4j = sémantique métier (entités, relations, temporalité) + gouvernance des facts structurés.
+  - Graphiti/Neo4j = sémantique métier (entités, relations, temporalité) + gouvernance des facts structurés + **mémoire conversationnelle** (episodes, sessions utilisateur).
 - **Dualité Entities vs Facts** (distinction critique):
   - **Entities** : Concepts/objets du domaine métier (ex: "SAP S/4HANA Cloud", "SAP Fiori", "Two-Tier ERP") → besoin de **canonicalisation** (normalisation noms variantes).
   - **Facts** : Assertions quantifiables avec valeur mesurable (ex: "SLA SAP S/4HANA PCE = 99.7%", "Rétention logs = 10 ans", "Limite quotas utilisateurs = 50k") → besoin de **détection conflits** (contradictions, obsolescence).
@@ -92,7 +93,7 @@ Ce document décrit la vision cible, les principes d’architecture, et un plan 
   - Tenancy: Tests isolement inter-tenants (KG + Qdrant) 100% OK.
   - Déterminisme: Replay canonicalisation → scores identiques (hash features matching).
 - Documentation détaillée
-  - Voir `doc/OPENAI_FEEDBACK_EVALUATION.md` pour justifications et code complet.
+  - Voir `doc/architecture/OPENAI_FEEDBACK_EVALUATION.md` pour justifications et code complet.
 
 ---
 
@@ -174,8 +175,8 @@ Ce document décrit la vision cible, les principes d’architecture, et un plan 
     - Dashboard gouvernance → métriques correctes (proposed: 2, approved: 15, rejected: 3, conflicts: 1)
   - **Test isolation multi-tenant Facts** : User1 ne voit pas facts créés par User2 (via group_id).
 - Documentation détaillée
-  - Voir `doc/UNIFIED_LLM_EXTRACTION_STRATEGY.md` pour architecture extraction unifiée complète.
-  - Voir `doc/GRAPHITI_POC_TRACKING.md` Phase 3 pour implémentation complète Facts Gouvernance (schémas, services, API, tests).
+  - Voir `doc/architecture/UNIFIED_LLM_EXTRACTION_STRATEGY.md` pour architecture extraction unifiée complète.
+  - Voir `doc/implementation/graphiti/GRAPHITI_POC_TRACKING.md` Phase 3 pour implémentation complète Facts Gouvernance (schémas, services, API, tests).
 
 ## Phase 4 — Gouvernance & Canonicalisation Probabiliste (UI + KG Update)
 - Objectif
@@ -216,22 +217,86 @@ Ce document décrit la vision cible, les principes d’architecture, et un plan 
   - Benchmark canonicalisation: Top-1 ≥70%, Top-3 ≥90%, ERR ≥0.75.
   - Active learning: précision s'améliore après 500 validations (+10% min vs baseline).
 - Documentation détaillée
-  - Voir `doc/CANONICALIZATION_PROBABILISTIC_STRATEGY.md` pour architecture technique complète, algorithmes, UI, migration, et comparaison dictionnaire statique vs ontologie émergente.
-  - Voir `doc/OPENAI_FEEDBACK_EVALUATION.md` pour justifications production-readiness (idempotence, undo, backfill, multi-lingue).
+  - Voir `doc/architecture/CANONICALIZATION_PROBABILISTIC_STRATEGY.md` pour architecture technique complète, algorithmes, UI, migration, et comparaison dictionnaire statique vs ontologie émergente.
+  - Voir `doc/architecture/OPENAI_FEEDBACK_EVALUATION.md` pour justifications production-readiness (idempotence, undo, backfill, multi-lingue).
 
-## Phase 5 — RAG Graph‑Aware v1 (Ranking & Génération “Facts‑First”)
+## Phase 5 — Mémoire Conversationnelle Multi-Utilisateur (Sessions & Context Intelligence)
 - Objectif
-  - Combiner score vectoriel et proximité graphe; générer des réponses priorisant facts `APPROVED` + transparence.
-- Critères d’achèvement
-  - Formule de ranking: `final = α*vector + β*graph_proximity + γ*metadata_boost` tunée sur banc d’essai.
-  - ≥80% des requêtes factuelles répondent uniquement avec facts approuvés (sur jeu interne).
-- Impacts sur l’existant
-  - Module ranking hybride; adaptation synthèse pour injection “facts‑first”.
+  - Implémenter un système de **mémoire conversationnelle multi-utilisateur** permettant de maintenir le contexte des conversations, lier les échanges aux entités du Knowledge Graph et optimiser les réponses basées sur l'historique.
+  - **Fonctionnalité fondatrice du projet** : première intention au démarrage, préservation contexte long-terme utilisateur.
+  - Isolation complète par utilisateur (group_id), intégration native Graphiti episodes, entity linking automatique.
+- Critères d'achèvement
+  - **Sessions & Turns Management** :
+    - Schéma `ConversationSession` avec métadonnées utilisateur (user_id, group_id, created_at, metadata)
+    - Schéma `ConversationTurn` (role: user/assistant, content, entities_mentioned, timestamp)
+    - Persistance Graphiti avec isolation par group_id utilisateur
+    - Gestion cycle de vie : create/append/get/summarize/archive
+    - Linking automatique vers entités Knowledge Graph (détection mentions entities dans messages)
+    - Context window management : limite tokens (8k/16k), résumé intelligent sessions longues (>50 turns)
+    - Tests multi-utilisateur : isolation complète sessions (user1 ne voit pas sessions user2)
+  - **API REST complète (7 endpoints)** :
+    - `POST /api/memory/sessions` : Création session avec contexte utilisateur
+    - `POST /api/memory/sessions/{id}/turns` : Ajout message dans session avec entity linking
+    - `GET /api/memory/sessions/{id}` : Récupération session complète
+    - `GET /api/memory/sessions/{id}/context` : Context résumé optimisé pour injection LLM
+    - `GET /api/memory/sessions/{id}/entities` : Entités liées à la session (trending entities)
+    - `PUT /api/memory/sessions/{id}/summarize` : Résumé intelligent avec LLM (préservation infos clés)
+    - `DELETE /api/memory/sessions/{id}` : Archivage session (soft-delete)
+  - **Intégration Chat & Intelligence IA** :
+    - Integration mémoire dans chat existant (`frontend/src/app/chat/`)
+    - Context injection automatique dans requêtes LLM (historique pertinent)
+    - Résumés intelligents sessions longues (>50 turns) avec LLM
+    - Suggestions basées historique utilisateur (entités fréquentes, patterns d'usage)
+    - Entités trending par utilisateur (fréquence mentions, relations découvertes)
+    - Export/import conversations pour analyse
+    - Tests E2E : workflow chat complet avec mémoire persistante
+  - **Performance & Scalabilité** :
+    - Création session : <100ms avec contexte utilisateur
+    - Ajout turn : <150ms avec linking entités automatique
+    - Context retrieval : <200ms pour résumé session (50+ turns)
+    - Résumé intelligent : <2s pour session complète avec LLM
+    - Support 500+ sessions actives simultanées
+- Impacts sur l'existant
+  - Nouveaux modules :
+    - `src/knowbase/api/schemas/memory.py` : Schémas ConversationSession, ConversationTurn, SessionContext, EntityMention
+    - `src/knowbase/api/services/memory_service.py` : MemoryService avec entity linking, summarization, context management
+    - `src/knowbase/api/routers/memory.py` : 7 endpoints REST API
+  - Storage sessions : Graphiti episodes avec group_id isolation (réutilise infrastructure multi-tenant Phase 2)
+  - Frontend : Extension `frontend/src/app/chat/` avec API memory, historique sessions, export/import
+  - Intelligence conversationnelle :
+    - Entity Linking : Détection automatique entités Knowledge Graph dans messages
+    - Context Relevance Scoring : Pertinence context historique pour requête courante
+    - Smart Summarization : Résumés préservant informations clés (facts, entités, décisions)
+    - Trend Analysis : Patterns d'usage utilisateur (sujets fréquents, évolution intérêts)
 - Tests de validation
-  - NDCG@10 amélioration mesurée vs baseline vector‑only.
-  - Vérification citations/sources.
+  - **Test isolation multi-utilisateur** : User1 crée 5 sessions → User2 ne les voit pas (0 sessions retournées)
+  - **Test entity linking** : Message "Quel est le SLA de S/4HANA ?" → entité "SAP S/4HANA Cloud PCE" détectée et liée
+  - **Test context injection** : Session 10 tours → requête LLM inclut contexte résumé pertinent (<2000 tokens)
+  - **Test résumé intelligent** : Session 50+ turns → résumé LLM préserve facts clés + entités principales + décisions
+  - **Test trending entities** : Utilisateur mentionne "SAP Fiori" 15× sur 20 sessions → trending entity #1
+  - **Test performance** : 100 sessions simultanées créées en <10s, aucune dégradation performance
+  - **Test E2E chat** : Nouvelle session → 10 messages → context preserved → résumé intelligent → archivage
+- Documentation détaillée
+  - Voir `doc/implementation/graphiti/GRAPHITI_POC_TRACKING.md` Phase 4 pour spécifications complètes Mémoire Conversationnelle
+  - Architecture réutilise episodes Graphiti, UserService multi-tenant, interface Chat existante
 
-## Phase 6 — Industrialisation (Multi‑agent, Probabiliste, Events, Observabilité)
+## Phase 6 — RAG Graph‑Aware v1 (Ranking & Génération "Facts‑First + Memory-Aware")
+- Objectif
+  - Combiner score vectoriel, proximité graphe, **mémoire conversationnelle** ; générer des réponses priorisant facts `APPROVED` + contexte utilisateur + transparence.
+  - Intégration mémoire conversationnelle : historique utilisateur influence ranking (entités fréquentes boostées).
+- Critères d'achèvement
+  - Formule de ranking étendue : `final = α*vector + β*graph_proximity + γ*metadata_boost + δ*user_context` tunée sur banc d'essai.
+  - ≥80% des requêtes factuelles répondent uniquement avec facts approuvés (sur jeu interne).
+  - Contexte conversationnel injecté automatiquement : entités trending utilisateur + sessions récentes pertinentes.
+- Impacts sur l'existant
+  - Module ranking hybride étendu avec MemoryService pour scoring user_context.
+  - Adaptation synthèse pour injection "facts‑first + memory-aware".
+- Tests de validation
+  - NDCG@10 amélioration mesurée vs baseline vector‑only ET vs graph-aware sans mémoire.
+  - Vérification citations/sources + contexte utilisateur préservé.
+  - Test memory-aware : Utilisateur ayant discuté 10× "SAP Fiori" → résultats Fiori boostés automatiquement.
+
+## Phase 7 — Industrialisation (Multi‑agent, Probabiliste, Events, Observabilité)
 - Objectif
   - Réduire le bruit, accélérer la revue, scaler.
 - Critères d’achèvement
@@ -272,6 +337,9 @@ Ce document décrit la vision cible, les principes d’architecture, et un plan 
 - **Tenancy**: Tests isolement inter-tenants (KG + Qdrant) 100% passés, aucune fuite croisée.
 - **Audit trail**: 100% actions sensibles loggées (merge/undo/delete) avec user_id + timestamp + raison.
 - **Production readiness**: Cold start bootstrap <5min, idempotence 100% testée, undo transactionnel validé.
+- **Mémoire conversationnelle** : Création session <100ms, ajout turn <150ms, context retrieval <200ms, résumé <2s, support 500+ sessions simultanées.
+- **Entity linking conversationnel** : ≥80% entités mentionnées détectées automatiquement, trending entities top-5 accuracy ≥90%.
+- **Context relevance** : ≥70% requêtes bénéficient du contexte historique (réponses personnalisées), amélioration NDCG@10 ≥+15% vs sans mémoire.
 
 ## 7) Annexes (référence rapide)
 
@@ -316,23 +384,28 @@ Ce document décrit la vision cible, les principes d’architecture, et un plan 
 - `fact.approved {fact_id, conflict_resolved: bool}`
 - `kg.updated {node_ids:[...]}`
 - `qdrant.reindexed {chunk_ids:[...]}`
+- `session.created {session_id, user_id, group_id}`
+- `turn.added {session_id, turn_id, entities_mentioned:[...]}`
+- `session.summarized {session_id, summary_tokens}`
 
-### Ranking hybride (démarrage): `α=0.6, β=0.3, γ=0.1` (à tuner).
+### Ranking hybride (démarrage):
+- **Phase 5 (sans mémoire)** : `final = α*vector + β*graph_proximity + γ*metadata_boost` avec `α=0.6, β=0.3, γ=0.1` (à tuner)
+- **Phase 6 (avec mémoire)** : `final = α*vector + β*graph_proximity + γ*metadata_boost + δ*user_context` avec `δ=0.15` (boost entités trending utilisateur)
 
 ### **Extraction unifiée LLM** (référence détaillée):
-- Document technique : `doc/UNIFIED_LLM_EXTRACTION_STRATEGY.md`
-- Analyse coûts/bénéfices : `doc/ANALYSE_LLM_PIPELINE_OPTIMISATION.md`
+- Document technique : `doc/architecture/UNIFIED_LLM_EXTRACTION_STRATEGY.md`
+- Analyse coûts/bénéfices : `doc/analysis/ANALYSE_LLM_PIPELINE_OPTIMISATION.md`
 - Principe : UN appel Vision par slide → `{concepts, entities, relations, facts}`
 - Économie : 0€ additionnel, 0s latence additionnelle, qualité +30% vs post-chunking
 - **Dualité Entities/Facts préservée** : LLM extrait simultanément concepts sémantiques ET assertions quantifiables
 ### **Canonicalisation Probabiliste** (référence détaillée):
-- Document technique complet : `doc/CANONICALIZATION_PROBABILISTIC_STRATEGY.md`
+- Document technique complet : `doc/architecture/CANONICALIZATION_PROBABILISTIC_STRATEGY.md`
 - Algorithme similarité : string (30%) + semantic (50%) + graph (20%)
 - Ontologie émergente : élimination dictionnaires hardcodés, multi-domaine sans recoder
 - Active learning : amélioration continue via feedback humain
 
 ### **Facts Gouvernance** (référence détaillée):
-- Documentation tracking complet : `doc/GRAPHITI_POC_TRACKING.md` (Phase 3)
+- Documentation tracking complet : `doc/implementation/graphiti/GRAPHITI_POC_TRACKING.md` (Phase 3)
 - Implémentation complète backend :
   - Schémas : `src/knowbase/api/schemas/facts_governance.py` (12 classes Pydantic)
   - Service : `src/knowbase/api/services/facts_governance_service.py` (10 méthodes)
@@ -342,8 +415,30 @@ Ce document décrit la vision cible, les principes d’architecture, et un plan 
 - UI Admin : `frontend/src/app/governance/*` (dashboard, pending, conflicts, facts)
 - Status : ✅ Code 100% implémenté (tests nécessitent infrastructure Neo4j active)
 
+### **Mémoire Conversationnelle** (référence détaillée):
+- Documentation tracking complet : `doc/implementation/graphiti/GRAPHITI_POC_TRACKING.md` (Phase 4)
+- **Fonctionnalité fondatrice** : Première intention au démarrage du projet (il y a quelques mois)
+- Architecture cible :
+  - Schémas : `ConversationSession`, `ConversationTurn`, `SessionContext`, `EntityMention`
+  - Service : `MemoryService` avec entity linking automatique, summarization intelligente, context management
+  - API : 7 endpoints REST (`/api/memory/sessions/*`)
+  - Storage : Graphiti episodes avec isolation multi-tenant (group_id)
+- Fonctionnalités clés :
+  - Isolation complète par utilisateur (multi-tenant natif)
+  - Entity linking automatique (détection entités KG dans messages)
+  - Context window management (limite tokens, résumé intelligent >50 turns)
+  - Trending entities par utilisateur (fréquence mentions)
+  - Context injection LLM (historique pertinent pour requête courante)
+  - Export/import conversations pour analyse
+- Integration :
+  - Chat existant : `frontend/src/app/chat/`
+  - RAG memory-aware : ranking boosté par entités trending utilisateur
+  - Intelligence IA : patterns d'usage, suggestions personnalisées
+- Performance : <100ms création session, <150ms ajout turn, <200ms context retrieval, 500+ sessions simultanées
+- Status : ⏳ Spécifications complètes documentées (Phase 4), implémentation en attente validation Phases 1-4
+
 ### **Production Readiness (Feedback OpenAI)** (référence détaillée):
-- Évaluation complète : `doc/OPENAI_FEEDBACK_EVALUATION.md`
+- Évaluation complète : `doc/architecture/OPENAI_FEEDBACK_EVALUATION.md`
 - 6 prérequis critiques P0 : cold start, idempotence, undo, backfill, fallback, tenancy
 - Solutions techniques implémentables : code Python complet pour chaque point
 - Effort estimé : ~15 jours Phase 0 (critiques) + ~8 jours Phase 1-2 (importants)
