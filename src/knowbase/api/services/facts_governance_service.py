@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any
 from collections import defaultdict
 
 from knowbase.common.graphiti.graphiti_store import GraphitiStore
+from knowbase.common.graphiti.config import GraphitiConfig
 from knowbase.common.interfaces.graph_store import FactStatus as StoreFactStatus
 from knowbase.api.schemas.facts_governance import (
     FactCreate, FactResponse, FactUpdate, FactFilters,
@@ -38,7 +39,8 @@ class FactsGovernanceService:
 
     def __init__(self):
         """Initialise le service avec le store Graphiti"""
-        self.store = GraphitiStore()
+        config = GraphitiConfig.from_env()
+        self.store = GraphitiStore(config=config)
         self._initialized = False
         self._current_group_id = CORPORATE_GROUP_ID
 
@@ -340,12 +342,51 @@ class FactsGovernanceService:
         await self._ensure_initialized()
 
         try:
-            # Pour l'instant, retourner une liste vide
-            # L'implémentation complète nécessite un index dédié
+            # Récupérer tous les facts proposed/conflicted
+            filters_proposed = FactFilters(status=FactStatus.PROPOSED, limit=1000)
+            filters_conflicted = FactFilters(status=FactStatus.CONFLICTED, limit=1000)
+
+            facts_proposed = await self.list_facts(filters_proposed)
+            facts_conflicted = await self.list_facts(filters_conflicted)
+
+            all_facts = facts_proposed.facts + facts_conflicted.facts
+
+            # Détecter les conflits entre tous ces facts
+            conflicts_detected = []
+            for fact in all_facts[:100]:  # Limiter pour performance
+                fact_create = FactCreate(
+                    subject=fact.subject,
+                    predicate=fact.predicate,
+                    object=fact.object,
+                    confidence=fact.confidence,
+                    source=fact.source,
+                    tags=fact.tags,
+                    metadata=fact.metadata
+                )
+                conflicts = await self.detect_conflicts(fact_create)
+                if conflicts:
+                    conflicts_detected.extend(conflicts)
+
+            # Dédupliquer par description
+            unique_conflicts = []
+            seen_descriptions = set()
+            for conflict in conflicts_detected:
+                if conflict.description not in seen_descriptions:
+                    unique_conflicts.append(conflict)
+                    seen_descriptions.add(conflict.description)
+
+            # Calculer statistiques
+            by_type = {}
+            by_severity = {}
+            for conflict in unique_conflicts:
+                by_type[conflict.conflict_type.value] = by_type.get(conflict.conflict_type.value, 0) + 1
+                by_severity[conflict.severity] = by_severity.get(conflict.severity, 0) + 1
+
             return ConflictsListResponse(
-                conflicts=[],
-                total=0,
-                unresolved_count=0
+                conflicts=unique_conflicts[:50],  # Top 50
+                total_conflicts=len(unique_conflicts),
+                by_type=by_type,
+                by_severity=by_severity
             )
 
         except Exception as e:
@@ -421,13 +462,44 @@ class FactsGovernanceService:
                 if status == "proposed":
                     pending_approval += 1
 
+            # Compter les conflits (simplified - comptage conflicts_count simple)
+            conflicts_count = by_status.get("conflicted", 0)
+
+            # Calculer temps moyen d'approbation (approximation basée sur les données disponibles)
+            approved_facts = [f for f in all_facts if f.get("status") == "approved" and f.get("approved_at") and f.get("created_at")]
+            if approved_facts:
+                approval_times = []
+                for f in approved_facts:
+                    try:
+                        created = datetime.fromisoformat(f["created_at"].replace('Z', '+00:00'))
+                        approved = datetime.fromisoformat(f["approved_at"].replace('Z', '+00:00'))
+                        hours_diff = (approved - created).total_seconds() / 3600
+                        approval_times.append(hours_diff)
+                    except:
+                        pass
+                avg_approval_time = sum(approval_times) / len(approval_times) if approval_times else None
+            else:
+                avg_approval_time = None
+
+            # Top contributeurs
+            contributors = {}
+            for f in all_facts:
+                creator = f.get("created_by")
+                if creator:
+                    contributors[creator] = contributors.get(creator, 0) + 1
+
+            top_contributors = [
+                {"user_id": user, "count": count}
+                for user, count in sorted(contributors.items(), key=lambda x: x[1], reverse=True)[:10]
+            ]
+
             return FactStats(
                 total_facts=total_facts,
                 by_status=dict(by_status),
                 pending_approval=pending_approval,
-                conflicts_count=0,  # À implémenter
-                avg_approval_time_hours=None,  # À implémenter
-                top_contributors=[],  # À implémenter
+                conflicts_count=conflicts_count,
+                avg_approval_time_hours=avg_approval_time,
+                top_contributors=top_contributors,
                 group_id=self._current_group_id
             )
 

@@ -480,31 +480,63 @@ class KnowledgeGraphService:
         await self._ensure_initialized()
 
         try:
-            # Compter les relations (via search_facts)
-            all_relations = await self.list_relations(limit=10000)
-
-            # Statistiques de base
-            total_relations = len(all_relations)
-            relation_types_count = {}
-
-            # Compter par type de relation
-            for relation in all_relations:
-                rel_type = relation.relation_type.value
-                relation_types_count[rel_type] = relation_types_count.get(rel_type, 0) + 1
-
-            # Estimer les entités uniques (approximation)
-            unique_entities = set()
-            for relation in all_relations:
-                unique_entities.add(relation.source_entity_id)
-                unique_entities.add(relation.target_entity_id)
-
-            total_entities = len(unique_entities)
-
-            # Types d'entités (approximation - pourrait être amélioré avec un index dédié)
-            entity_types_count = {"estimated": total_entities}
-
-            # ✅ PHASE 2: Utiliser le groupe courant pour cohérence
+            # ✅ Utiliser le groupe courant
             current_group = getattr(self, '_current_group_id', CORPORATE_GROUP_ID)
+
+            # Compter directement dans Neo4j pour avoir des stats exactes
+            from neo4j import GraphDatabase
+            from knowbase.common.graphiti.config import GraphitiConfig
+
+            config = GraphitiConfig.from_env()
+            driver = GraphDatabase.driver(
+                config.neo4j_uri,
+                auth=(config.neo4j_user, config.neo4j_password)
+            )
+
+            with driver.session() as session:
+                # Compter entités par groupe
+                result = session.run(
+                    "MATCH (n:Entity) WHERE n.group_id = $group_id RETURN count(n) as total",
+                    group_id=current_group
+                )
+                total_entities = result.single()["total"]
+
+                # Compter relations par groupe (via entités source)
+                result = session.run(
+                    """
+                    MATCH (source:Entity)-[r]->(target:Entity)
+                    WHERE source.group_id = $group_id
+                    RETURN count(r) as total, type(r) as rel_type
+                    """,
+                    group_id=current_group
+                )
+
+                total_relations = 0
+                relation_types_count = {}
+                for record in result:
+                    count = record["total"]
+                    rel_type = record["rel_type"]
+                    total_relations += count
+                    relation_types_count[rel_type] = count
+
+                # Compter types d'entités
+                result = session.run(
+                    """
+                    MATCH (n:Entity)
+                    WHERE n.group_id = $group_id
+                    RETURN n.entity_type as type, count(*) as count
+                    """,
+                    group_id=current_group
+                )
+
+                entity_types_count = {}
+                for record in result:
+                    entity_type = record["type"]
+                    count = record["count"]
+                    if entity_type:
+                        entity_types_count[entity_type] = count
+
+            driver.close()
 
             logger.info(f"Stats KG: {total_entities} entités, {total_relations} relations (groupe: {current_group})")
 
@@ -513,7 +545,7 @@ class KnowledgeGraphService:
                 total_relations=total_relations,
                 entity_types_count=entity_types_count,
                 relation_types_count=relation_types_count,
-                group_id=current_group  # ✅ Utilise le groupe courant
+                group_id=current_group
             )
 
         except Exception as e:

@@ -22,7 +22,8 @@ import {
   ChatIcon,
   ViewIcon,
   SettingsIcon,
-  ExternalLinkIcon
+  ExternalLinkIcon,
+  CheckCircleIcon
 } from '@chakra-ui/icons'
 
 interface SidebarProps {
@@ -115,6 +116,14 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           onClick={isMobile ? onClose : undefined}
         >
           Documents
+        </NavItem>
+        <NavItem
+          icon={CheckCircleIcon}
+          href="/governance"
+          isActive={pathname?.startsWith('/governance')}
+          onClick={isMobile ? onClose : undefined}
+        >
+          Gouvernance
         </NavItem>
         <NavItem
           icon={SettingsIcon}

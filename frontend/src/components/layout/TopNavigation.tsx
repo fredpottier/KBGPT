@@ -81,6 +81,9 @@ export default function TopNavigation() {
           <NavLink href="/documents" isActive={pathname?.startsWith('/documents')}>
             Documents
           </NavLink>
+          <NavLink href="/governance" isActive={pathname?.startsWith('/governance')}>
+            Gouvernance
+          </NavLink>
           <NavLink href="/admin" isActive={pathname?.startsWith('/admin')}>
             Administration
           </NavLink>

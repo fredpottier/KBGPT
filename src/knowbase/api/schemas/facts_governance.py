@@ -151,8 +151,9 @@ class FactsListResponse(BaseModel):
 class ConflictsListResponse(BaseModel):
     """Réponse listage de conflits"""
     conflicts: List[ConflictDetail] = Field(..., description="Liste des conflits")
-    total: int = Field(..., description="Nombre total de conflits")
-    unresolved_count: int = Field(..., description="Nombre de conflits non résolus")
+    total_conflicts: int = Field(..., description="Nombre total de conflits")
+    by_type: Dict[str, int] = Field(default_factory=dict, description="Répartition par type")
+    by_severity: Dict[str, int] = Field(default_factory=dict, description="Répartition par sévérité")
 
 
 class FactStats(BaseModel):
