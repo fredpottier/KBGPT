@@ -25,6 +25,9 @@ SAP_SOLUTIONS = {
             "S4 Public",
             "Essentials Edition",
             "ERP Cloud Public Edition",
+            "SAP Cloud ERP",
+            "SAP S/4HANA Cloud",
+            "S/4HANA Cloud",
         ],
     },
     "S4HANA_ONPREM": {
