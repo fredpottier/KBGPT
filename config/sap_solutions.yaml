@@ -88,6 +88,9 @@ solutions:
     - S4 Public
     - Essentials Edition
     - ERP Cloud Public Edition
+    - SAP Cloud ERP
+    - SAP S/4HANA Cloud
+    - S/4HANA Cloud
     canonical_name: SAP S/4HANA Cloud, Public Edition
     category: erp
   SAP_ARIBA:
