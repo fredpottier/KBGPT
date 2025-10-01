@@ -114,6 +114,12 @@ class CircuitBreaker:
         self.state = CircuitState.HALF_OPEN
         self.success_count = 0
         logger.info(f"🔄 Circuit '{self.name}': OPEN → HALF_OPEN (testing recovery)")
+        # Métrique Prometheus
+        try:
+            from knowbase.common.metrics import update_circuit_breaker_metric
+            update_circuit_breaker_metric(self.name, "half_open")
+        except ImportError:
+            pass
 
     def _on_success(self):
         """Gérer succès fonction"""
@@ -149,6 +155,12 @@ class CircuitBreaker:
             f"⚡ Circuit '{self.name}': CLOSED → OPEN "
             f"(failures={self.failure_count} ≥ {self.failure_threshold})"
         )
+        # Métrique Prometheus
+        try:
+            from knowbase.common.metrics import update_circuit_breaker_metric
+            update_circuit_breaker_metric(self.name, "open")
+        except ImportError:
+            pass
 
     def _transition_to_closed(self):
         """Fermer circuit après recovery réussie"""
@@ -156,6 +168,12 @@ class CircuitBreaker:
         self.failure_count = 0
         self.success_count = 0
         logger.info(f"✅ Circuit '{self.name}': HALF_OPEN → CLOSED (recovered)")
+        # Métrique Prometheus
+        try:
+            from knowbase.common.metrics import update_circuit_breaker_metric
+            update_circuit_breaker_metric(self.name, "closed")
+        except ImportError:
+            pass
 
     def get_state(self) -> dict:
         """Récupérer état actuel du circuit"""

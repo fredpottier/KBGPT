@@ -315,3 +315,20 @@ async def readiness_check() -> Dict[str, Any]:
         "status": "ready" if all_ok else "not_ready",
         "checks": checks
     }
+
+
+@router.get("/metrics")
+async def metrics_endpoint():
+    """
+    Endpoint métriques Prometheus - Phase 0.5 P2.11
+
+    Format: Prometheus text exposition
+    Usage: Scraping par Prometheus toutes les 15s
+    """
+    from fastapi.responses import PlainTextResponse
+    from knowbase.common.metrics import get_metrics
+
+    return PlainTextResponse(
+        content=get_metrics().decode('utf-8'),
+        media_type="text/plain; version=0.0.4"
+    )

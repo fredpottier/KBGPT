@@ -71,6 +71,9 @@ redis>=5.0
 rq>=1.15
 pydantic-settings
 
+# === Monitoring (Phase 0.5 P2.11) ===
+prometheus-client>=0.20.0
+
 # === Zep Integration ===
 zep-python>=2.0.2
 asyncpg>=0.29.0
