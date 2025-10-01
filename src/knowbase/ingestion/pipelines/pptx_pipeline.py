@@ -910,6 +910,72 @@ def analyze_deck_summary(
 
 
 # Analyse d'un slide via GPT + image, retourne les chunks enrichis
+def create_fallback_chunks(
+    text: str,
+    notes: str,
+    megaparse_content: str,
+    slide_index: int,
+    document_type: str = "default",
+    slide_prompt_id: str = "unknown"
+) -> List[Dict[str, Any]]:
+    """
+    Créer chunks de base depuis texte brut (fallback si LLM échoue)
+
+    Critère 6 Phase 0: Garantir ingestion chunks même si extraction LLM échoue
+
+    Args:
+        text: Texte slide python-pptx
+        notes: Notes speaker
+        megaparse_content: Contenu MegaParse
+        slide_index: Index slide
+        document_type: Type document
+        slide_prompt_id: ID prompt utilisé
+
+    Returns:
+        Liste chunks de base (au moins 1 chunk si contenu présent)
+    """
+    # Priorité: MegaParse > text > notes
+    content_sources = []
+    if megaparse_content and megaparse_content.strip():
+        content_sources.append(("megaparse", megaparse_content.strip()))
+    if text and text.strip():
+        content_sources.append(("text", text.strip()))
+    if notes and notes.strip():
+        content_sources.append(("notes", notes.strip()))
+
+    if not content_sources:
+        logger.warning(f"Slide {slide_index}: Aucun contenu pour fallback chunks")
+        return []
+
+    # Combiner contenus disponibles
+    combined_content = "\n\n".join([f"[{source}] {content}" for source, content in content_sources])
+
+    # Chunking simple (400 caractères, overlap 15%)
+    chunks = []
+    for seg in recursive_chunk(combined_content, max_len=400, overlap_ratio=0.15):
+        chunks.append({
+            "full_explanation": seg,
+            "meta": {
+                "scope": "slide-fallback",
+                "type": "fallback_chunk",
+                "level": "basic"
+            },
+            "prompt_meta": {
+                "document_type": document_type,
+                "slide_prompt_id": slide_prompt_id,
+                "prompts_version": PROMPT_REGISTRY.get("version", "unknown"),
+                "extraction_status": "chunks_only_fallback"
+            }
+        })
+
+    logger.info(
+        f"Slide {slide_index}: {len(chunks)} fallback chunks créés "
+        f"(sources: {', '.join([s for s, _ in content_sources])})"
+    )
+
+    return chunks
+
+
 def ask_gpt_slide_analysis(
     image_path,
     deck_summary,
@@ -922,6 +988,16 @@ def ask_gpt_slide_analysis(
     deck_prompt_id="unknown",
     retries=2,
 ):
+    """
+    Analyse slide via LLM vision avec fallback automatique
+
+    Critère 6 Phase 0: Extraction découplée
+    - Bloc best-effort: Extraction enrichie LLM vision (peut échouer)
+    - Bloc critique: Fallback chunks-only (doit toujours réussir)
+
+    Returns:
+        Liste chunks (enrichis si LLM OK, fallback sinon - jamais vide si contenu présent)
+    """
     # Heartbeat avant l'appel LLM vision (long processus)
     try:
         from knowbase.ingestion.queue.jobs import send_worker_heartbeat
@@ -929,67 +1005,105 @@ def ask_gpt_slide_analysis(
     except Exception:
         pass  # Ignorer si pas dans un contexte RQ
 
-    img_b64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
     doc_type = document_type or "default"
     slide_prompt_id, slide_template = select_prompt(
         PROMPT_REGISTRY, doc_type, "slide"
     )
-    prompt_text = render_prompt(
-        slide_template,
-        deck_summary=deck_summary,
-        slide_index=slide_index,
-        source_name=source_name,
+
+    # BLOC BEST-EFFORT: Extraction enrichie LLM vision
+    try:
+        img_b64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
+        prompt_text = render_prompt(
+            slide_template,
+            deck_summary=deck_summary,
+            slide_index=slide_index,
+            source_name=source_name,
+            text=text,
+            notes=notes,
+            megaparse_content=megaparse_content,
+        )
+        msg = [
+            {
+                "role": "system",
+                "content": "You analyze slides with visuals deeply and coherently.",
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt_text},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+                    },
+                ],
+            },
+        ]
+
+        for attempt in range(retries):
+            try:
+                raw_content = llm_router.complete(TaskType.VISION, msg)
+                cleaned_content = clean_gpt_response(raw_content or "")
+                items = json.loads(cleaned_content)
+                enriched = []
+                for it in items:
+                    expl = it.get("full_explanation", "")
+                    meta = it.get("meta", {})
+                    if expl:
+                        for seg in recursive_chunk(expl, max_len=400, overlap_ratio=0.15):
+                            enriched.append(
+                                {
+                                    "full_explanation": seg,
+                                    "meta": meta,
+                                    "prompt_meta": {
+                                        "document_type": doc_type,
+                                        "slide_prompt_id": slide_prompt_id,
+                                        "prompts_version": PROMPT_REGISTRY.get(
+                                            "version", "unknown"
+                                        ),
+                                        "extraction_status": "unified_success"
+                                    },
+                                }
+                            )
+
+                if enriched:
+                    logger.info(
+                        f"Slide {slide_index}: {len(enriched)} concepts extraits (LLM success)"
+                    )
+                    return enriched
+                else:
+                    logger.warning(
+                        f"Slide {slide_index}: LLM retourné vide, tentative {attempt + 1}/{retries}"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"Slide {slide_index} LLM attempt {attempt + 1}/{retries} failed: {e}"
+                )
+                if attempt < retries - 1:
+                    time.sleep(2 * (attempt + 1))
+
+    except Exception as e:
+        logger.error(
+            f"Slide {slide_index}: Erreur critique LLM vision: {e}. "
+            f"Basculement fallback chunks-only"
+        )
+
+    # BLOC CRITIQUE: Fallback chunks-only (doit toujours réussir)
+    logger.warning(
+        f"Slide {slide_index}: LLM échoué après {retries} tentatives. "
+        f"Fallback chunks-only activé"
+    )
+
+    fallback_chunks = create_fallback_chunks(
         text=text,
         notes=notes,
         megaparse_content=megaparse_content,
+        slide_index=slide_index,
+        document_type=doc_type,
+        slide_prompt_id=slide_prompt_id
     )
-    msg = [
-        {
-            "role": "system",
-            "content": "You analyze slides with visuals deeply and coherently.",
-        },
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt_text},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{img_b64}"},
-                },
-            ],
-        },
-    ]
-    for attempt in range(retries):
-        try:
-            raw_content = llm_router.complete(TaskType.VISION, msg)
-            cleaned_content = clean_gpt_response(raw_content or "")
-            items = json.loads(cleaned_content)
-            enriched = []
-            for it in items:
-                expl = it.get("full_explanation", "")
-                meta = it.get("meta", {})
-                if expl:
-                    for seg in recursive_chunk(expl, max_len=400, overlap_ratio=0.15):
-                        enriched.append(
-                            {
-                                "full_explanation": seg,
-                                "meta": meta,
-                                "prompt_meta": {
-                                    "document_type": doc_type,
-                                    "slide_prompt_id": slide_prompt_id,
-                                    "prompts_version": PROMPT_REGISTRY.get(
-                                        "version", "unknown"
-                                    ),
-                                },
-                            }
-                        )
-            # Log simple avec le nombre de concepts extraits
-            logger.info(f"Slide {slide_index}: {len(enriched)} concepts extraits")
-            return enriched
-        except Exception as e:
-            logger.warning(f"Slide {slide_index} attempt {attempt} failed: {e}")
-            time.sleep(2 * (attempt + 1))
-    return []
+
+    return fallback_chunks
 
 
 # Ingestion des chunks dans Qdrant avec schéma canonique
