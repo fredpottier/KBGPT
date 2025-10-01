@@ -9,11 +9,9 @@ from typing import Any, Optional
 from rq import get_current_job
 
 from knowbase.config.settings import get_settings
-from knowbase.ingestion.pipelines import (
-    excel_pipeline,
-    pdf_pipeline,
-    pptx_pipeline,
-)
+
+# NOTE: N'importer les pipelines QUE dans les fonctions qui les utilisent
+# pour éviter de déclencher leurs loggers au chargement du module
 
 
 SETTINGS = get_settings()
@@ -80,6 +78,9 @@ def ingest_pptx_job(
     meta_path: Optional[str] = None,
 ) -> dict[str, Any]:
     try:
+        # Import local pour éviter de charger le logger au niveau module
+        from knowbase.ingestion.pipelines import pptx_pipeline
+
         # Marquer comme en cours de traitement
         mark_job_as_processing()
         update_job_progress("Initialisation", 0, 6, "Vérification du fichier PowerPoint")
@@ -149,6 +150,9 @@ def ingest_pptx_job(
 
 def ingest_pdf_job(*, pdf_path: str) -> dict[str, Any]:
     try:
+        # Import local pour éviter de charger le logger au niveau module
+        from knowbase.ingestion.pipelines import pdf_pipeline
+
         # Marquer comme en cours de traitement
         mark_job_as_processing()
         update_job_progress("Initialisation", 0, 3, "Vérification du fichier PDF")
@@ -204,6 +208,9 @@ def ingest_excel_job(
     meta: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     try:
+        # Import local pour éviter de charger le logger au niveau module
+        from knowbase.ingestion.pipelines import excel_pipeline
+
         # Marquer comme en cours de traitement
         mark_job_as_processing()
         update_job_progress("Initialisation", 0, 4, "Vérification du fichier Excel")

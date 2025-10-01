@@ -3,6 +3,9 @@ version: '3.8'
 networks:
   graphiti_net:
     driver: bridge
+  knowbase_net:
+    external: true
+    name: sap_kb_knowbase_net
 
 volumes:
   neo4j_data:
@@ -97,6 +100,7 @@ services:
       start_period: 60s
     networks:
       - graphiti_net
+      - knowbase_net  # Permet communication avec app/worker
 
 # Service de monitoring optionnel pour debug
   graphiti-admin:
