@@ -80,6 +80,62 @@ class CanonicalizationService:
             f"candidates={len(candidate_ids)} [key={idempotency_key[:12]}...]"
         )
 
+        # P0.1 VALIDATION STRICTE INPUTS (Phase 0.5 Durcissement)
+        # Bloquer cas limites critiques
+
+        # Validation 1: Merge avec 0 candidates
+        if not candidate_ids or len(candidate_ids) == 0:
+            logger.error(
+                f"Merge refusé: 0 candidates fournis "
+                f"(canonical={canonical_entity_id[:8]}...)"
+            )
+            raise ValueError(
+                "Merge impossible: liste candidates vide. "
+                "Au moins 1 candidate requis."
+            )
+
+        # Validation 2: Self-reference (canonical_id dans candidate_ids)
+        if canonical_entity_id in candidate_ids:
+            logger.error(
+                f"Merge refusé: self-reference détecté "
+                f"(canonical={canonical_entity_id[:8]}... présent dans candidates)"
+            )
+            raise ValueError(
+                f"Merge impossible: self-reference détecté. "
+                f"canonical_entity_id {canonical_entity_id[:8]}... "
+                f"ne peut pas être dans candidate_ids."
+            )
+
+        # Validation 3: Duplicates dans candidate_ids
+        unique_candidates = set(candidate_ids)
+        if len(unique_candidates) != len(candidate_ids):
+            duplicates = [cid for cid in candidate_ids if candidate_ids.count(cid) > 1]
+            logger.error(
+                f"Merge refusé: duplicates détectés dans candidates "
+                f"(duplicates={duplicates[:3]}...)"
+            )
+            raise ValueError(
+                f"Merge impossible: duplicates dans candidate_ids. "
+                f"Chaque candidate doit être unique. "
+                f"Duplicates: {duplicates[:3]}"
+            )
+
+        # Validation 4: Candidate IDs non vides
+        empty_candidates = [cid for cid in candidate_ids if not cid or not cid.strip()]
+        if empty_candidates:
+            logger.error(
+                f"Merge refusé: candidate IDs vides détectés "
+                f"(count={len(empty_candidates)})"
+            )
+            raise ValueError(
+                f"Merge impossible: {len(empty_candidates)} candidate IDs vides/invalides."
+            )
+
+        logger.info(
+            f"✅ Validation inputs OK: {len(unique_candidates)} candidates uniques, "
+            f"no self-reference"
+        )
+
         # Créer metadata versioning
         version_metadata = create_version_metadata(
             operation="merge",

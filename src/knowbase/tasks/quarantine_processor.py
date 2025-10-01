@@ -9,6 +9,7 @@ from typing import List, Dict, Any
 
 from knowbase.audit.audit_logger import AuditLogger, MergeAuditEntry
 from knowbase.tasks.backfill import QdrantBackfillService
+from knowbase.common.redis_lock import create_lock
 
 logger = logging.getLogger(__name__)
 
@@ -35,73 +36,92 @@ class QuarantineProcessor:
         """
         Traite tous les merges prêts à sortir de quarantine
 
+        P0.2 PROTECTION: Lock distribué Redis prévient traitement concurrent
+
         Returns:
             Statistiques traitement (processed, approved, failed)
+
+        Raises:
+            TimeoutError: Si lock non acquis (processor déjà en cours ailleurs)
         """
         logger.info("🔄 Démarrage traitement quarantine merges")
 
-        try:
-            # Récupérer merges prêts
-            ready_merges = self.audit_logger.get_quarantine_ready_merges()
+        # P0.2: Acquérir lock distribué pour éviter processing concurrent
+        # TTL 30min (processing peut prendre plusieurs minutes si 100+ merges)
+        lock = create_lock(
+            redis_url="redis://redis:6379/5",
+            lock_key="quarantine:processor:global",
+            ttl_seconds=1800  # 30min
+        )
 
-            if not ready_merges:
-                logger.info("✅ Aucun merge en quarantine ready (quarantine vide)")
-                return {
+        with lock.context(timeout=30):
+            logger.info("🔒 Lock quarantine processor acquis - début traitement")
+
+            try:
+                # Récupérer merges prêts
+                ready_merges = self.audit_logger.get_quarantine_ready_merges()
+
+                if not ready_merges:
+                    logger.info("✅ Aucun merge en quarantine ready (quarantine vide)")
+                    logger.info("🔓 Lock quarantine processor libéré")
+                    return {
+                        "status": "completed",
+                        "processed": 0,
+                        "approved": 0,
+                        "failed": 0,
+                        "duration_seconds": 0
+                    }
+
+                logger.info(f"📋 {len(ready_merges)} merges prêts pour backfill Qdrant")
+
+                # Traiter chaque merge
+                approved_count = 0
+                failed_count = 0
+
+                start_time = datetime.utcnow()
+
+                for merge in ready_merges:
+                    try:
+                        await self._process_single_merge(merge)
+                        approved_count += 1
+
+                    except Exception as e:
+                        logger.error(
+                            f"Erreur traitement merge {merge.merge_id[:12]}...: {e}",
+                            exc_info=True
+                        )
+                        failed_count += 1
+
+                end_time = datetime.utcnow()
+                duration = (end_time - start_time).total_seconds()
+
+                result = {
                     "status": "completed",
-                    "processed": 0,
-                    "approved": 0,
-                    "failed": 0,
-                    "duration_seconds": 0
+                    "processed": len(ready_merges),
+                    "approved": approved_count,
+                    "failed": failed_count,
+                    "duration_seconds": round(duration, 2)
                 }
 
-            logger.info(f"📋 {len(ready_merges)} merges prêts pour backfill Qdrant")
+                logger.info(
+                    f"✅ Quarantine processing terminé: "
+                    f"{approved_count} approved, {failed_count} failed "
+                    f"(durée {duration:.2f}s)"
+                )
+                logger.info("🔓 Lock quarantine processor libéré automatiquement")
 
-            # Traiter chaque merge
-            approved_count = 0
-            failed_count = 0
+                return result
 
-            start_time = datetime.utcnow()
-
-            for merge in ready_merges:
-                try:
-                    await self._process_single_merge(merge)
-                    approved_count += 1
-
-                except Exception as e:
-                    logger.error(
-                        f"Erreur traitement merge {merge.merge_id[:12]}...: {e}",
-                        exc_info=True
-                    )
-                    failed_count += 1
-
-            end_time = datetime.utcnow()
-            duration = (end_time - start_time).total_seconds()
-
-            result = {
-                "status": "completed",
-                "processed": len(ready_merges),
-                "approved": approved_count,
-                "failed": failed_count,
-                "duration_seconds": round(duration, 2)
-            }
-
-            logger.info(
-                f"✅ Quarantine processing terminé: "
-                f"{approved_count} approved, {failed_count} failed "
-                f"(durée {duration:.2f}s)"
-            )
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Erreur critique quarantine processor: {e}", exc_info=True)
-            return {
-                "status": "failed",
-                "error": str(e),
-                "processed": 0,
-                "approved": 0,
-                "failed": 0
-            }
+            except Exception as e:
+                logger.error(f"Erreur critique quarantine processor: {e}", exc_info=True)
+                logger.info("🔓 Lock quarantine processor libéré automatiquement (après erreur)")
+                return {
+                    "status": "failed",
+                    "error": str(e),
+                    "processed": 0,
+                    "approved": 0,
+                    "failed": 0
+                }
 
     async def _process_single_merge(self, merge: MergeAuditEntry) -> None:
         """

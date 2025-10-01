@@ -16,6 +16,7 @@ from knowbase.canonicalization.schemas import (
     BootstrapResult,
     BootstrapProgress
 )
+from knowbase.common.redis_lock import create_lock
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,8 @@ class KGBootstrapService:
             - Promeut les entités qualifiées en status=SEED
             - Crée les entités canoniques correspondantes dans le KG
 
+        P0.2 PROTECTION: Lock distribué Redis prévient double bootstrap concurrent
+
         Args:
             config: Configuration bootstrap (seuils, filtres, dry_run)
 
@@ -87,12 +90,21 @@ class KGBootstrapService:
         Raises:
             ValueError: Si configuration invalide
             RuntimeError: Si erreur durant le bootstrap
+            TimeoutError: Si lock non acquis (bootstrap déjà en cours ailleurs)
         """
         start_time = datetime.utcnow()
 
         logger.info(
             f"Démarrage bootstrap: min_occ={config.min_occurrences}, "
             f"min_conf={config.min_confidence}, dry_run={config.dry_run}"
+        )
+
+        # P0.2: Acquérir lock distribué pour éviter bootstrap concurrent
+        # TTL 10min (bootstrap peut prendre plusieurs minutes si 10k+ candidates)
+        lock = create_lock(
+            redis_url="redis://redis:6379/5",
+            lock_key="bootstrap:global",
+            ttl_seconds=600  # 10min
         )
 
         # Initialiser la progression
@@ -104,91 +116,97 @@ class KGBootstrapService:
             started_at=start_time
         )
 
-        try:
-            # 1. Récupérer les candidates
-            candidates = await self.get_candidates(
-                group_id=config.group_id,
-                entity_types=config.entity_types,
-                status=EntityCandidateStatus.CANDIDATE
-            )
+        # Utiliser context manager pour auto-release même si exception
+        with lock.context(timeout=30):
+            logger.info("🔒 Lock bootstrap acquis - début traitement")
 
-            self._progress.total = len(candidates)
-            logger.info(f"Candidates récupérées: {len(candidates)}")
+            try:
+                # 1. Récupérer les candidates
+                candidates = await self.get_candidates(
+                    group_id=config.group_id,
+                    entity_types=config.entity_types,
+                    status=EntityCandidateStatus.CANDIDATE
+                )
 
-            # 2. Filtrer les candidates qualifiées
-            qualified = [
-                c for c in candidates
-                if c.occurrences >= config.min_occurrences
-                and c.confidence >= config.min_confidence
-            ]
+                self._progress.total = len(candidates)
+                logger.info(f"Candidates récupérées: {len(candidates)}")
 
-            logger.info(
-                f"Candidates qualifiées pour promotion: {len(qualified)} "
-                f"(sur {len(candidates)} analysées)"
-            )
+                # 2. Filtrer les candidates qualifiées
+                qualified = [
+                    c for c in candidates
+                    if c.occurrences >= config.min_occurrences
+                    and c.confidence >= config.min_confidence
+                ]
 
-            # 3. Promouvoir les candidates en seeds
-            promoted_ids = []
-            by_type: Dict[str, int] = defaultdict(int)
+                logger.info(
+                    f"Candidates qualifiées pour promotion: {len(qualified)} "
+                    f"(sur {len(candidates)} analysées)"
+                )
 
-            for idx, candidate in enumerate(qualified):
-                self._progress.processed = idx + 1
-                self._progress.current_entity = candidate.name
+                # 3. Promouvoir les candidates en seeds
+                promoted_ids = []
+                by_type: Dict[str, int] = defaultdict(int)
 
-                try:
-                    if not config.dry_run:
-                        # Créer l'entité canonique dans le KG
-                        seed_id = await self._promote_to_seed(candidate)
-                        promoted_ids.append(seed_id)
-                        by_type[candidate.entity_type] += 1
-                        self._progress.promoted += 1
+                for idx, candidate in enumerate(qualified):
+                    self._progress.processed = idx + 1
+                    self._progress.current_entity = candidate.name
 
-                        logger.info(
-                            f"Seed promue: {candidate.name} ({candidate.entity_type}) "
-                            f"[occ={candidate.occurrences}, conf={candidate.confidence:.2f}]"
+                    try:
+                        if not config.dry_run:
+                            # Créer l'entité canonique dans le KG
+                            seed_id = await self._promote_to_seed(candidate)
+                            promoted_ids.append(seed_id)
+                            by_type[candidate.entity_type] += 1
+                            self._progress.promoted += 1
+
+                            logger.info(
+                                f"Seed promue: {candidate.name} ({candidate.entity_type}) "
+                                f"[occ={candidate.occurrences}, conf={candidate.confidence:.2f}]"
+                            )
+                        else:
+                            # Mode dry-run: simuler seulement
+                            promoted_ids.append(f"dry_run_{candidate.name}")
+                            by_type[candidate.entity_type] += 1
+                            self._progress.promoted += 1
+
+                            logger.info(
+                                f"[DRY RUN] Seed promue: {candidate.name} ({candidate.entity_type})"
+                            )
+
+                    except Exception as e:
+                        logger.error(
+                            f"Erreur promotion candidate {candidate.name}: {e}",
+                            exc_info=True
                         )
-                    else:
-                        # Mode dry-run: simuler seulement
-                        promoted_ids.append(f"dry_run_{candidate.name}")
-                        by_type[candidate.entity_type] += 1
-                        self._progress.promoted += 1
+                        # Continue avec les autres candidates
 
-                        logger.info(
-                            f"[DRY RUN] Seed promue: {candidate.name} ({candidate.entity_type})"
-                        )
+                # 4. Finaliser
+                duration = (datetime.utcnow() - start_time).total_seconds()
 
-                except Exception as e:
-                    logger.error(
-                        f"Erreur promotion candidate {candidate.name}: {e}",
-                        exc_info=True
-                    )
-                    # Continue avec les autres candidates
+                self._progress.status = "completed"
 
-            # 4. Finaliser
-            duration = (datetime.utcnow() - start_time).total_seconds()
+                result = BootstrapResult(
+                    total_candidates=len(candidates),
+                    promoted_seeds=len(promoted_ids),
+                    seed_ids=promoted_ids,
+                    duration_seconds=duration,
+                    dry_run=config.dry_run,
+                    by_entity_type=dict(by_type)
+                )
 
-            self._progress.status = "completed"
+                logger.info(
+                    f"✅ Bootstrap terminé: {len(promoted_ids)} seeds promues "
+                    f"en {duration:.2f}s (dry_run={config.dry_run})"
+                )
+                logger.info("🔓 Lock bootstrap libéré automatiquement")
 
-            result = BootstrapResult(
-                total_candidates=len(candidates),
-                promoted_seeds=len(promoted_ids),
-                seed_ids=promoted_ids,
-                duration_seconds=duration,
-                dry_run=config.dry_run,
-                by_entity_type=dict(by_type)
-            )
+                return result
 
-            logger.info(
-                f"Bootstrap terminé: {len(promoted_ids)} seeds promues "
-                f"en {duration:.2f}s (dry_run={config.dry_run})"
-            )
-
-            return result
-
-        except Exception as e:
-            self._progress.status = "failed"
-            logger.error(f"Erreur durant bootstrap: {e}", exc_info=True)
-            raise RuntimeError(f"Bootstrap échoué: {e}") from e
+            except Exception as e:
+                self._progress.status = "failed"
+                logger.error(f"Erreur durant bootstrap: {e}", exc_info=True)
+                logger.info("🔓 Lock bootstrap libéré automatiquement (après erreur)")
+                raise RuntimeError(f"Bootstrap échoué: {e}") from e
 
     async def _promote_to_seed(self, candidate: EntityCandidate) -> str:
         """
