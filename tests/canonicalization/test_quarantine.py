@@ -73,9 +73,10 @@ class TestQuarantineWorkflow:
 
         print(f"✅ Merge en quarantine: {data['merge_id'][:12]}... jusqu'à {data['quarantine_until']}")
 
-    def test_quarantine_processor_finds_no_ready_merges_initially(self, processor):
+    @pytest.mark.asyncio
+    async def test_quarantine_processor_finds_no_ready_merges_initially(self, processor):
         """Test processor ne trouve aucun merge ready initialement (tous <24h)"""
-        result = processor.process_quarantine_merges()
+        result = await processor.process_quarantine_merges()
 
         assert result["status"] == "completed"
         assert result["processed"] == 0
@@ -152,9 +153,10 @@ class TestQuarantineProcessorLogic:
 
         print(f"✅ QuarantineProcessor structure valide")
 
-    def test_processor_returns_stats(self, processor):
+    @pytest.mark.asyncio
+    async def test_processor_returns_stats(self, processor):
         """Test processor retourne statistiques complètes"""
-        result = processor.process_quarantine_merges()
+        result = await processor.process_quarantine_merges()
 
         required_fields = ["status", "processed", "approved", "failed"]
         for field in required_fields:

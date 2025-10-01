@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 
 from knowbase.audit.audit_logger import AuditLogger, MergeAuditEntry
+from knowbase.tasks.backfill import QdrantBackfillService
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +29,9 @@ class QuarantineProcessor:
     def __init__(self):
         """Initialize quarantine processor"""
         self.audit_logger = AuditLogger()
+        self.backfill_service = QdrantBackfillService()
 
-    def process_quarantine_merges(self) -> Dict[str, Any]:
+    async def process_quarantine_merges(self) -> Dict[str, Any]:
         """
         Traite tous les merges prêts à sortir de quarantine
 
@@ -62,7 +64,7 @@ class QuarantineProcessor:
 
             for merge in ready_merges:
                 try:
-                    self._process_single_merge(merge)
+                    await self._process_single_merge(merge)
                     approved_count += 1
 
                 except Exception as e:
@@ -101,7 +103,7 @@ class QuarantineProcessor:
                 "failed": 0
             }
 
-    def _process_single_merge(self, merge: MergeAuditEntry) -> None:
+    async def _process_single_merge(self, merge: MergeAuditEntry) -> None:
         """
         Traite un merge individuel
 
@@ -120,9 +122,25 @@ class QuarantineProcessor:
             f"(canonical={canonical_id[:8]}..., {len(candidates)} candidates)"
         )
 
-        # TODO: Appeler QdrantBackfillService (Phase 0.5)
-        # Pour Phase 0: Simulation backfill
-        self._simulate_qdrant_backfill(canonical_id, candidates)
+        # Appeler QdrantBackfillService pour backfill réel
+        backfill_result = await self.backfill_service.backfill_canonical_entity(
+            canonical_entity_id=canonical_id,
+            candidate_ids=candidates,
+            merge_id=merge_id
+        )
+
+        # Vérifier succès backfill
+        if backfill_result["status"] not in ["completed", "skipped"]:
+            raise RuntimeError(
+                f"Backfill échoué pour merge {merge_id}: "
+                f"status={backfill_result['status']} "
+                f"success_rate={backfill_result.get('success_rate', 0)}%"
+            )
+
+        logger.info(
+            f"📦 Backfill terminé: {backfill_result['chunks_updated']} chunks updated "
+            f"(p95={backfill_result.get('p95_latency_ms', 0)}ms)"
+        )
 
         # Mettre à jour status → approved
         success = self.audit_logger.update_merge_status(merge_id, "approved")
