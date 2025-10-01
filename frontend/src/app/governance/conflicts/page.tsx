@@ -209,14 +209,14 @@ export default function ConflictsPage() {
                   Facts en Conflit:
                 </h4>
                 {conflict.conflicting_facts.map((fact, factIdx) => (
-                  <Alert key={fact.uuid} className="border-l-4 border-orange-500">
-                    <WarningIcon className="h-4 w-4" />
-                    <AlertTitle className="flex items-center gap-2">
-                      Fact #{factIdx + 1}
-                      <Badge variant="secondary" className="text-xs">
+                  <Alert key={fact.uuid}>
+                    <WarningIcon />
+                    <AlertTitle>
+                      <span>Fact #{factIdx + 1}</span>
+                      <Badge variant="secondary">
                         {fact.status}
                       </Badge>
-                      <span className="text-xs text-gray-500">
+                      <span>
                         Confiance: {(fact.confidence * 100).toFixed(0)}%
                       </span>
                     </AlertTitle>
