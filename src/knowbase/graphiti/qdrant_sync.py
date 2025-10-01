@@ -185,7 +185,7 @@ class QdrantGraphitiSyncService:
             f"✅ Linked {len(chunk_ids)} chunks to episode {episode_id}"
         )
 
-    async def enrich_chunks_with_entities(
+    def enrich_chunks_with_entities(
         self,
         chunk_ids: List[str],
         episode_id: str
@@ -200,9 +200,9 @@ class QdrantGraphitiSyncService:
         Returns:
             Nombre chunks enrichis
         """
-        # Récupérer episode + facts
-        episode = await self.graphiti_client.get_episode(
-            episode_id=episode_id
+        # Récupérer episode + facts (synchrone)
+        episode = self.graphiti_client.get_episode(
+            episode_uuid=episode_id
         )
 
         if not episode:

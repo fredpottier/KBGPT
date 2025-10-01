@@ -195,18 +195,22 @@ class GraphitiClient:
             logger.error(f"[GraphitiClient] ❌ Search failed: {e}")
             raise
 
-    def get_episodes(self, group_id: str) -> List[Dict[str, Any]]:
+    def get_episodes(self, group_id: str, last_n: int = 100) -> List[Dict[str, Any]]:
         """
-        Récupérer tous les épisodes d'un groupe
+        Récupérer les N derniers épisodes d'un groupe
 
         Args:
             group_id: ID du groupe/tenant
+            last_n: Nombre d'épisodes à récupérer (défaut: 100)
 
         Returns:
             Liste d'épisodes avec métadonnées
         """
         try:
-            response = self.client.get(f"{self.base_url}/episodes/{group_id}")
+            response = self.client.get(
+                f"{self.base_url}/episodes/{group_id}",
+                params={"last_n": last_n}
+            )
             response.raise_for_status()
             episodes = response.json()
 
@@ -217,23 +221,32 @@ class GraphitiClient:
             logger.error(f"[GraphitiClient] ❌ Get episodes failed: {e}")
             raise
 
-    def get_episode(self, episode_uuid: str) -> Dict[str, Any]:
+    def get_episode(self, episode_uuid: str, group_id: str) -> Optional[Dict[str, Any]]:
         """
         Récupérer un épisode par UUID
 
+        Note: L'API Graphiti ne fournit pas d'endpoint GET /episode/{uuid}.
+        On récupère tous les episodes du groupe et on filtre par name.
+
         Args:
-            episode_uuid: UUID de l'épisode
+            episode_uuid: UUID de l'épisode (utilisé comme name dans Graphiti)
+            group_id: ID du groupe/tenant
 
         Returns:
-            Métadonnées de l'épisode
+            Métadonnées de l'épisode ou None si non trouvé
         """
         try:
-            response = self.client.get(f"{self.base_url}/episode/{episode_uuid}")
-            response.raise_for_status()
-            episode = response.json()
+            # Récupérer tous les episodes du groupe
+            all_episodes = self.get_episodes(group_id=group_id)
 
-            logger.debug(f"[GraphitiClient] ✅ Episode récupéré: {episode_uuid}")
-            return episode
+            # Filtrer par name (qui correspond à notre episode_uuid)
+            for episode in all_episodes:
+                if episode.get('name') == episode_uuid:
+                    logger.debug(f"[GraphitiClient] ✅ Episode trouvé: {episode_uuid}")
+                    return episode
+
+            logger.warning(f"[GraphitiClient] ⚠️ Episode non trouvé: {episode_uuid}")
+            return None
 
         except httpx.HTTPError as e:
             logger.error(f"[GraphitiClient] ❌ Get episode failed: {e}")
