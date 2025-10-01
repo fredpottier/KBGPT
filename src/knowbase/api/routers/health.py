@@ -273,3 +273,45 @@ async def health_check_quick() -> Dict[str, Any]:
         "service": "SAP Knowledge Base",
         "uptime": "OK"
     }
+
+
+@router.get("/ready")
+async def readiness_check() -> Dict[str, Any]:
+    """
+    Readiness probe Kubernetes - Phase 0.5 P1.7
+
+    Vérifie dépendances critiques:
+    - Redis accessible
+    - Qdrant accessible
+
+    Returns:
+        200 OK si app prête
+        503 Service Unavailable si dépendance down
+    """
+    import redis as redis_client
+    from fastapi import status, Response
+
+    checks = {}
+
+    # Check Redis
+    try:
+        r = redis_client.Redis(host="redis", port=6379, db=0, socket_connect_timeout=2)
+        r.ping()
+        checks["redis"] = True
+    except Exception:
+        checks["redis"] = False
+
+    # Check Qdrant via HTTP (plus rapide que client Python)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get("http://qdrant:6333/health", timeout=2.0)
+            checks["qdrant"] = response.status_code == 200
+    except Exception:
+        checks["qdrant"] = False
+
+    all_ok = all(checks.values())
+
+    return {
+        "status": "ready" if all_ok else "not_ready",
+        "checks": checks
+    }
