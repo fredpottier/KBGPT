@@ -129,10 +129,20 @@ class CanonicalizationService:
         )
         merge_result["merge_id"] = merge_id
 
+        # Récupérer infos quarantine depuis audit trail
+        merge_entry = self.audit_logger.get_merge_entry(merge_id)
+        if merge_entry:
+            merge_result["merge_status"] = merge_entry.merge_status
+            merge_result["quarantine_until"] = merge_entry.quarantine_until
+        else:
+            merge_result["merge_status"] = "quarantine"
+            merge_result["quarantine_until"] = None
+
         logger.info(
             f"Merge terminé: merge_id={merge_id[:12]}... "
             f"canonical={canonical_entity_id[:8]}... "
             f"merged={len(candidate_ids)} hash={result_hash[:12]}... "
+            f"status={merge_result['merge_status']} "
             f"[key={idempotency_key[:12]}...]"
         )
 

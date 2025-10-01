@@ -16,6 +16,13 @@ class EntityCandidateStatus(str, Enum):
     REJECTED = "rejected"      # Entité rejetée
 
 
+class MergeStatus(str, Enum):
+    """Statuts des opérations merge"""
+    QUARANTINE = "quarantine"  # Nouveau merge, attente délai (défaut 24h)
+    APPROVED = "approved"      # Backfill Qdrant appliqué, merge finalisé
+    UNDONE = "undone"          # Merge annulé via undo
+
+
 class EntityCandidate(BaseModel):
     """Entité candidate extraite automatiquement"""
     name: str = Field(..., description="Nom de l'entité candidate")
@@ -81,6 +88,8 @@ class MergeEntitiesResponse(BaseModel):
     executed_at: str = Field(..., description="Timestamp exécution")
     status: str = Field(..., description="Statut (completed, failed)")
     result_hash: str = Field(..., description="Hash déterministe résultat")
+    merge_status: str = Field(default="quarantine", description="Statut merge (quarantine, approved, undone)")
+    quarantine_until: Optional[str] = Field(None, description="Timestamp fin quarantine (ISO format)")
 
 
 class CreateNewCanonicalRequest(BaseModel):

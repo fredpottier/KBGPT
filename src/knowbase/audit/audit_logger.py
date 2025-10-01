@@ -26,6 +26,8 @@ class MergeAuditEntry:
     reason: Optional[str] = None  # Pour undo
     idempotency_key: Optional[str] = None
     version_metadata: Optional[Dict[str, Any]] = None
+    merge_status: str = "quarantine"  # quarantine, approved, undone
+    quarantine_until: Optional[str] = None  # Timestamp fin quarantine
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dict for JSON serialization"""
@@ -96,6 +98,10 @@ class AuditLogger:
         timestamp = datetime.utcnow().isoformat()
         merge_id = self.generate_merge_id(canonical_entity_id, timestamp)
 
+        # Calculer quarantine_until (24h par défaut)
+        quarantine_hours = 24
+        quarantine_until = (datetime.utcnow() + timedelta(hours=quarantine_hours)).isoformat()
+
         entry = MergeAuditEntry(
             merge_id=merge_id,
             canonical_entity_id=canonical_entity_id,
@@ -104,7 +110,9 @@ class AuditLogger:
             executed_at=timestamp,
             operation="merge",
             idempotency_key=idempotency_key,
-            version_metadata=version_metadata
+            version_metadata=version_metadata,
+            merge_status="quarantine",
+            quarantine_until=quarantine_until
         )
 
         try:
@@ -268,3 +276,69 @@ class AuditLogger:
         except Exception as e:
             logger.error(f"Erreur récupération historique: {e}", exc_info=True)
             return []
+
+    def get_quarantine_ready_merges(self) -> List[MergeAuditEntry]:
+        """
+        Récupère merges prêts à sortir de quarantine (quarantine_until dépassé)
+
+        Returns:
+            Liste MergeAuditEntry avec merge_status=quarantine et quarantine_until < now
+        """
+        try:
+            pattern = "audit:merge:*"
+            ready_merges = []
+            now = datetime.utcnow()
+
+            for key in self.redis_client.scan_iter(match=pattern, count=100):
+                data = self.redis_client.get(key)
+                if data:
+                    entry_dict = json.loads(data)
+                    entry = MergeAuditEntry.from_dict(entry_dict)
+
+                    # Filtrer: status quarantine + quarantine_until dépassé
+                    if entry.merge_status == "quarantine" and entry.quarantine_until:
+                        quarantine_until = datetime.fromisoformat(entry.quarantine_until)
+                        if now >= quarantine_until:
+                            ready_merges.append(entry)
+
+            logger.info(f"Quarantine ready: {len(ready_merges)} merges prêts pour backfill")
+            return ready_merges
+
+        except Exception as e:
+            logger.error(f"Erreur récupération quarantine ready: {e}", exc_info=True)
+            return []
+
+    def update_merge_status(self, merge_id: str, new_status: str) -> bool:
+        """
+        Met à jour le status d'un merge
+
+        Args:
+            merge_id: ID du merge
+            new_status: Nouveau status (approved, undone, etc.)
+
+        Returns:
+            True si succès, False sinon
+        """
+        try:
+            entry = self.get_merge_entry(merge_id)
+            if not entry:
+                logger.warning(f"Cannot update status: merge {merge_id} introuvable")
+                return False
+
+            # Mettre à jour status
+            entry.merge_status = new_status
+
+            # Sauvegarder
+            key = f"audit:merge:{merge_id}"
+            self.redis_client.setex(
+                key,
+                self.ttl_seconds,
+                json.dumps(entry.to_dict())
+            )
+
+            logger.info(f"Merge {merge_id[:12]}... status mis à jour: {new_status}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Erreur mise à jour status merge: {e}", exc_info=True)
+            return False
