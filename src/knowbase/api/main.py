@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
 from knowbase.api.middleware.user_context import UserContextMiddleware
+from knowbase.api.middleware.idempotency import IdempotencyMiddleware
 from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, tenants, health, graphiti, knowledge_graph, users, facts_governance, facts_intelligence, canonicalization
 
 
@@ -35,6 +36,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Middleware idempotence Phase 0 (enregistrement avant routes)
+    app.add_middleware(IdempotencyMiddleware)
 
     # Middleware contexte utilisateur Phase 2 (enregistrement standard)
     app.add_middleware(UserContextMiddleware)

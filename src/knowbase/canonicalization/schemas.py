@@ -59,3 +59,50 @@ class BootstrapProgress(BaseModel):
     current_entity: Optional[str] = Field(None, description="Entité en cours")
     started_at: datetime = Field(..., description="Début d'exécution")
     estimated_completion: Optional[datetime] = Field(None, description="Fin estimée")
+
+
+class MergeEntitiesRequest(BaseModel):
+    """Requête merge candidates vers entité canonique"""
+    canonical_entity_id: str = Field(..., description="UUID entité canonique cible")
+    candidate_ids: List[str] = Field(..., min_length=1, description="Liste UUIDs candidates à merger")
+    user_id: Optional[str] = Field(None, description="Utilisateur effectuant merge")
+
+
+class MergeEntitiesResponse(BaseModel):
+    """Réponse merge entities"""
+    canonical_entity_id: str = Field(..., description="UUID entité canonique")
+    merged_candidates: List[str] = Field(..., description="Candidates mergées")
+    merge_count: int = Field(..., description="Nombre candidates mergées")
+    operation: str = Field(..., description="Type opération (merge)")
+    idempotency_key: str = Field(..., description="Clé idempotence")
+    user_id: Optional[str] = Field(None, description="Utilisateur")
+    version_metadata: Dict[str, Any] = Field(..., description="Metadata versioning")
+    executed_at: str = Field(..., description="Timestamp exécution")
+    status: str = Field(..., description="Statut (completed, failed)")
+    result_hash: str = Field(..., description="Hash déterministe résultat")
+
+
+class CreateNewCanonicalRequest(BaseModel):
+    """Requête création nouvelle entité canonique"""
+    candidate_ids: List[str] = Field(..., min_length=1, description="Liste UUIDs candidates sources")
+    canonical_name: str = Field(..., min_length=1, description="Nom entité canonique à créer")
+    entity_type: str = Field(..., description="Type entité (solution, product, concept, etc.)")
+    description: Optional[str] = Field(None, description="Description optionnelle")
+    user_id: Optional[str] = Field(None, description="Utilisateur effectuant création")
+
+
+class CreateNewCanonicalResponse(BaseModel):
+    """Réponse création nouvelle entité canonique"""
+    canonical_entity_id: str = Field(..., description="UUID entité canonique créée")
+    canonical_name: str = Field(..., description="Nom entité")
+    entity_type: str = Field(..., description="Type entité")
+    description: Optional[str] = Field(None, description="Description")
+    source_candidates: List[str] = Field(..., description="Candidates sources")
+    candidate_count: int = Field(..., description="Nombre candidates")
+    operation: str = Field(..., description="Type opération (create_new)")
+    idempotency_key: Optional[str] = Field(None, description="Clé idempotence")
+    user_id: Optional[str] = Field(None, description="Utilisateur")
+    version_metadata: Dict[str, Any] = Field(..., description="Metadata versioning")
+    executed_at: str = Field(..., description="Timestamp exécution")
+    status: str = Field(..., description="Statut (created, failed)")
+    result_hash: str = Field(..., description="Hash déterministe résultat")
