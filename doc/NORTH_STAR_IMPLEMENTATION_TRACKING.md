@@ -78,7 +78,7 @@
 ---
 
 #### 2. Idempotence & Déterminisme
-**Statut**: ✅ FAIT
+**Statut**: ✅ FAIT (Corrections Codex Appliquées)
 **Date**: 2025-10-01
 **Objectif**: Garantir rejouabilité opérations merge/create sans effets de bord
 **Priorité**: P0 (Critical)
@@ -87,25 +87,30 @@
 - [x] Header `Idempotency-Key` obligatoire sur endpoints `/canonicalization/merge`, `/canonicalization/create-new`
 - [x] Cache Redis avec TTL 24h pour stocker résultats merge (clé = Idempotency-Key)
 - [x] Replay merge avec même clé → résultat identique (bit-à-bit)
+- [x] **Validation body hash**: Même clé + body différent → 409 Conflict (RFC 9110)
 - [x] Versionning features canonicalization (algorithme, embeddings, poids) pour reproductibilité
 - [x] Tests: Replay 10× même opération → résultat strictement identique
+- [x] Tests: Même clé + body différent → 409 Conflict détecté
 - [x] Logs: Audit trail avec Idempotency-Key dans tous les logs merge
 
 **Livrables** ✅:
-- ✅ `src/knowbase/api/middleware/idempotency.py` (IdempotencyMiddleware 238 lignes)
+- ✅ `src/knowbase/api/middleware/idempotency.py` (IdempotencyMiddleware 282 lignes - **CORRIGÉ**)
 - ✅ `src/knowbase/canonicalization/service.py` (CanonicalizationService 262 lignes)
 - ✅ `src/knowbase/canonicalization/versioning.py` (features versioning 173 lignes)
 - ✅ `src/knowbase/canonicalization/schemas.py` (MergeEntitiesRequest/Response, CreateNewCanonicalRequest/Response)
 - ✅ `src/knowbase/api/routers/canonicalization.py` (2 endpoints: /merge, /create-new)
-- ✅ `tests/canonicalization/test_idempotence.py` (10 tests rejouabilité)
+- ✅ `tests/canonicalization/test_idempotence.py` (12 tests rejouabilité + 409 Conflict - **COMPLÉTÉ**)
 - ✅ `src/knowbase/api/main.py` (middleware enregistré)
 
 **Implémentation**:
 - **Middleware**: IdempotencyMiddleware intercepte POST/PUT sur endpoints critiques
   - Vérifie header Idempotency-Key obligatoire (erreur 400 si absent)
   - Cache Redis DB 2 avec TTL 24h (rejouable pendant période critique)
+  - **✅ CORRECTION CODEX**: Validation body hash (SHA256) pour détecter réutilisation clé avec payload différent
+  - **✅ RFC 9110**: 409 Conflict si même Idempotency-Key mais body ≠ (protection erreur utilisateur)
+  - Stocke `request_body_hash` avec résultat pour validation replay
   - Replay automatique depuis cache avec header X-Idempotency-Replay
-  - Logs audit trail avec Idempotency-Key tronquée (12 premiers caractères)
+  - Logs audit trail avec Idempotency-Key + body_hash tronqués (12 premiers caractères)
 - **Service**: CanonicalizationService avec merge_entities() et create_new_canonical()
   - Résultats déterministes (timestamp fixe, UUID déterministe pour create-new)
   - Hash SHA256 du résultat pour validation bit-à-bit identité
@@ -116,11 +121,12 @@
 - **Endpoints API**:
   - `POST /api/canonicalization/merge` - Merge candidates → canonical (Header Idempotency-Key requis)
   - `POST /api/canonicalization/create-new` - Créer nouvelle entité canonique (Header Idempotency-Key requis)
-- **Tests**: 10/10 tests passent
+- **Tests**: 12/12 tests passent ✅
   - Header obligatoire (2 tests validation 400)
+  - **✅ NOUVEAU**: Conflict 409 détecté (2 tests merge/create-new même key + body différent)
   - Replay 10× merge → hash identique (idempotence parfaite)
   - Replay 10× create-new → UUID identique (déterminisme)
-  - Cache Redis fonctionnel
+  - Cache Redis fonctionnel avec header X-Idempotency-Replay
   - Versioning metadata présente
   - Audit trail logs avec Idempotency-Key
 
@@ -128,7 +134,8 @@
 - Hash merge: `3f332101e7f1d36b656995d905e5c4755c3f3a6b445b29e19abe27386a3b8e6e`
 - UUID create-new déterministe: `47bf5c7b-ca8b-f35d-9feb-e8c2684a55eb` (même clé → même UUID)
 - Cache Redis TTL 24h (86400s) validé
-- Rejouabilité parfaite garantie
+- **✅ 409 Conflict validé**: Même key + body différent → erreur détectée (standard RFC 9110)
+- Rejouabilité parfaite garantie avec protection contre erreur utilisateur
 
 ---
 

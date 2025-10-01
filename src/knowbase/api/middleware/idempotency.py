@@ -81,6 +81,10 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 }
             )
 
+        # Lire body de la requête pour validation
+        body_bytes = await request.body()
+        request_body_hash = self._compute_body_hash(body_bytes)
+
         # Générer clé Redis unique
         cache_key = self._generate_cache_key(request, idempotency_key)
 
@@ -88,9 +92,29 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         cached_response = self._get_cached_response(cache_key)
 
         if cached_response:
+            # Vérifier que le body est identique (standard RFC 9110)
+            cached_body_hash = cached_response.get("request_body_hash")
+
+            if cached_body_hash and cached_body_hash != request_body_hash:
+                logger.warning(
+                    f"Idempotence CONFLICT: {request.url.path} "
+                    f"[key={idempotency_key[:12]}...] "
+                    f"Même Idempotency-Key mais body différent "
+                    f"(cached_hash={cached_body_hash[:12]}... vs current_hash={request_body_hash[:12]}...)"
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "IdempotencyKeyConflict",
+                        "detail": "Idempotency-Key déjà utilisée avec un payload différent",
+                        "idempotency_key": idempotency_key[:12] + "...",
+                        "suggestion": "Utilisez une nouvelle Idempotency-Key ou vérifiez votre payload"
+                    }
+                )
+
             logger.info(
                 f"Idempotence HIT: {request.url.path} "
-                f"[key={idempotency_key[:12]}...] (replay détecté)"
+                f"[key={idempotency_key[:12]}...] (replay détecté, body identique)"
             )
             return JSONResponse(
                 status_code=cached_response["status_code"],
@@ -111,7 +135,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
 
         # Stocker résultat en cache (uniquement si succès 2xx)
         if 200 <= response.status_code < 300:
-            await self._cache_response(cache_key, response, idempotency_key, request)
+            await self._cache_response(cache_key, response, idempotency_key, request, request_body_hash)
 
         return response
 
@@ -133,11 +157,29 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         path = str(request.url.path)
         return any(path.startswith(endpoint) for endpoint in IDEMPOTENT_ENDPOINTS)
 
+    def _compute_body_hash(self, body_bytes: bytes) -> str:
+        """
+        Calcule hash SHA256 du body de la requête
+
+        Args:
+            body_bytes: Body bytes de la requête
+
+        Returns:
+            Hash SHA256 (hex string)
+        """
+        if not body_bytes:
+            return "empty"
+        return hashlib.sha256(body_bytes).hexdigest()
+
     def _generate_cache_key(self, request: Request, idempotency_key: str) -> str:
         """
         Génère clé Redis unique pour cette requête
 
-        Format: idempotence:{endpoint}:{idempotency_key}:{request_hash}
+        Format: idempotence:{endpoint}:{idempotency_key}
+
+        Note: Le hash du body n'est PAS inclus dans la clé cache.
+        Au lieu de cela, le hash est stocké avec la réponse et validé
+        lors du replay pour détecter les conflits (409 Conflict).
 
         Args:
             request: FastAPI request
@@ -146,10 +188,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         Returns:
             Clé Redis unique
         """
-        # Hash du contenu de la requête pour détecter modifications
-        # (même Idempotency-Key mais body différent = nouvelle requête)
         endpoint = str(request.url.path).replace("/", "_")
-
         return f"idempotence:{endpoint}:{idempotency_key}"
 
     def _get_cached_response(self, cache_key: str) -> dict | None:
@@ -179,7 +218,8 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         cache_key: str,
         response: Response,
         idempotency_key: str,
-        request: Request
+        request: Request,
+        request_body_hash: str
     ) -> None:
         """
         Stocke réponse en cache Redis avec TTL 24h
@@ -189,6 +229,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             response: Response à mettre en cache
             idempotency_key: Header Idempotency-Key value
             request: Request originale
+            request_body_hash: Hash SHA256 du body de la requête
         """
         try:
             # Lire body de la response
@@ -202,7 +243,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             except json.JSONDecodeError:
                 body_json = {"raw": body_bytes.decode()}
 
-            # Préparer données cache
+            # Préparer données cache (inclure hash du request body pour validation)
             cache_data = {
                 "status_code": response.status_code,
                 "body": body_json,
@@ -210,7 +251,8 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 "cached_at": json.dumps({"timestamp": "now"}),  # Simplifié
                 "idempotency_key": idempotency_key,
                 "endpoint": str(request.url.path),
-                "method": request.method
+                "method": request.method,
+                "request_body_hash": request_body_hash  # ✅ AJOUTÉ: Stocké pour validation 409
             }
 
             # Stocker en Redis avec TTL 24h
@@ -222,7 +264,8 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
 
             logger.info(
                 f"Idempotence CACHE: {request.url.path} "
-                f"[key={idempotency_key[:12]}...] (TTL {self.ttl_seconds}s)"
+                f"[key={idempotency_key[:12]}...] [body_hash={request_body_hash[:12]}...] "
+                f"(TTL {self.ttl_seconds}s)"
             )
 
             # Recréer body iterator pour response

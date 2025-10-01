@@ -54,6 +54,57 @@ class TestIdempotenceHeader:
 class TestIdempotenceMerge:
     """Tests idempotence opération merge"""
 
+    def test_merge_same_key_different_body_returns_409(self, client):
+        """
+        Test merge avec même Idempotency-Key mais body différent → 409 Conflict
+
+        Critère validation: Détection réutilisation accidentelle de clé
+        Standard RFC 9110: Idempotency-Key = identifiant intention unique
+        """
+        idempotency_key = "conflict-test-550e8400-e29b-41d4-a716-446655440099"
+
+        # Première requête avec body1
+        merge_request_1 = {
+            "canonical_entity_id": "canonical_AAA",
+            "candidate_ids": ["cand001", "cand002"],
+            "user_id": "user_test_123"
+        }
+
+        response1 = client.post(
+            "/api/canonicalization/merge",
+            json=merge_request_1,
+            headers={"Idempotency-Key": idempotency_key}
+        )
+
+        assert response1.status_code == 200
+        hash1 = response1.json()["result_hash"]
+
+        # Deuxième requête avec MÊME KEY mais body DIFFÉRENT
+        merge_request_2 = {
+            "canonical_entity_id": "canonical_BBB",  # ≠ AAA
+            "candidate_ids": ["cand999", "cand888"],  # ≠ 001, 002
+            "user_id": "user_test_456"  # ≠ 123
+        }
+
+        response2 = client.post(
+            "/api/canonicalization/merge",
+            json=merge_request_2,
+            headers={"Idempotency-Key": idempotency_key}  # MÊME KEY
+        )
+
+        # Doit retourner 409 Conflict
+        assert response2.status_code == 409, (
+            f"Expected 409 Conflict mais reçu {response2.status_code}. "
+            f"Middleware doit détecter réutilisation de clé avec payload différent."
+        )
+
+        data = response2.json()
+        assert data["error"] == "IdempotencyKeyConflict"
+        assert "payload différent" in data["detail"]
+        assert "Idempotency-Key" in data["detail"]
+
+        print(f"✅ Conflict 409 détecté: même key '{idempotency_key[:12]}...' avec bodies différents")
+
     def test_merge_replay_10x_identical_results(self, client):
         """
         Test replay 10× merge avec même Idempotency-Key → résultats identiques
@@ -142,14 +193,16 @@ class TestIdempotenceMerge:
 
     def test_merge_replay_from_cache(self, client):
         """Test replay merge retourne résultat mis en cache (header X-Idempotency-Replay)"""
-        idempotency_key = "cache-test-550e8400-e29b-41d4-a716-446655440003"
+        import uuid
+        # Générer clé unique pour éviter collision avec autres tests
+        idempotency_key = f"cache-replay-test-{uuid.uuid4()}"
 
         merge_request = {
-            "canonical_entity_id": "abc123",
-            "candidate_ids": ["cand001"]
+            "canonical_entity_id": "abc123xyz",
+            "candidate_ids": ["cand_replay_001"]
         }
 
-        # Première requête (cache MISS)
+        # Première requête (devrait être cache MISS ou cache HIT selon état Redis)
         response1 = client.post(
             "/api/canonicalization/merge",
             json=merge_request,
@@ -157,9 +210,9 @@ class TestIdempotenceMerge:
         )
 
         assert response1.status_code == 200
-        assert response1.headers.get("X-Idempotency-Replay") != "true"
+        hash1 = response1.json()["result_hash"]
 
-        # Deuxième requête (cache HIT)
+        # Deuxième requête avec MÊME KEY et MÊME BODY (cache HIT garanti)
         response2 = client.post(
             "/api/canonicalization/merge",
             json=merge_request,
@@ -167,15 +220,72 @@ class TestIdempotenceMerge:
         )
 
         assert response2.status_code == 200
-        # Header X-Idempotency-Replay devrait être "true" si middleware fonctionne
-        # Note: Dans tests avec TestClient, middleware peut se comporter différemment
+        hash2 = response2.json()["result_hash"]
 
-        # Résultats identiques
-        assert response1.json()["result_hash"] == response2.json()["result_hash"]
+        # Résultats identiques (hash doit matcher)
+        assert hash1 == hash2, "Idempotence échouée: hashs différents entre replay"
+
+        # Header X-Idempotency-Replay présent sur replay
+        # Note: Peut être "true" dès response1 si cache déjà présent
+        replay_header = response2.headers.get("X-Idempotency-Replay")
+        assert replay_header == "true", f"Expected X-Idempotency-Replay: true, got {replay_header}"
 
 
 class TestIdempotenceCreateNew:
     """Tests idempotence opération create-new"""
+
+    def test_create_new_same_key_different_body_returns_409(self, client):
+        """
+        Test create-new avec même Idempotency-Key mais body différent → 409 Conflict
+
+        Critère validation: Détection réutilisation accidentelle de clé
+        """
+        idempotency_key = "conflict-create-550e8400-e29b-41d4-a716-446655440098"
+
+        # Première requête avec body1
+        create_request_1 = {
+            "candidate_ids": ["cand010", "cand011"],
+            "canonical_name": "SAP S/4HANA Cloud",
+            "entity_type": "solution",
+            "description": "Cloud ERP solution",
+            "user_id": "user_test_456"
+        }
+
+        response1 = client.post(
+            "/api/canonicalization/create-new",
+            json=create_request_1,
+            headers={"Idempotency-Key": idempotency_key}
+        )
+
+        assert response1.status_code == 200
+        uuid1 = response1.json()["canonical_entity_id"]
+
+        # Deuxième requête avec MÊME KEY mais nom DIFFÉRENT
+        create_request_2 = {
+            "candidate_ids": ["cand999"],  # ≠ 010, 011
+            "canonical_name": "SAP Fiori",  # ≠ S/4HANA Cloud
+            "entity_type": "technology",  # ≠ solution
+            "description": "UX framework",  # ≠ Cloud ERP
+            "user_id": "user_test_789"  # ≠ 456
+        }
+
+        response2 = client.post(
+            "/api/canonicalization/create-new",
+            json=create_request_2,
+            headers={"Idempotency-Key": idempotency_key}  # MÊME KEY
+        )
+
+        # Doit retourner 409 Conflict
+        assert response2.status_code == 409, (
+            f"Expected 409 Conflict mais reçu {response2.status_code}. "
+            f"Middleware doit détecter réutilisation de clé avec payload différent."
+        )
+
+        data = response2.json()
+        assert data["error"] == "IdempotencyKeyConflict"
+        assert "payload différent" in data["detail"]
+
+        print(f"✅ Conflict 409 détecté sur create-new: key '{idempotency_key[:12]}...' réutilisée")
 
     def test_create_new_replay_10x_identical_results(self, client):
         """
