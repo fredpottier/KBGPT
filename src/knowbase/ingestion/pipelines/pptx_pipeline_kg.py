@@ -479,7 +479,38 @@ async def process_pptx_kg(
             "relations_count": int
         }
     """
+    # VALIDATION INPUTS (Priorité 2 Phase 2)
+    import re
+    import html
+
+    # Valider tenant_id (alphanumeric + underscore/dash uniquement)
+    if not tenant_id or not re.match(r'^[a-zA-Z0-9_-]+$', tenant_id):
+        raise ValueError(
+            f"Invalid tenant_id: '{tenant_id}'. "
+            "Must contain only alphanumeric characters, underscores, or dashes."
+        )
+
+    # Valider longueur tenant_id (max 100 chars)
+    if len(tenant_id) > 100:
+        raise ValueError(f"tenant_id trop long: {len(tenant_id)} chars (max: 100)")
+
+    # Valider pptx_path (doit exister et être un fichier .pptx)
+    if not pptx_path.exists():
+        raise FileNotFoundError(f"Fichier PPTX introuvable: {pptx_path}")
+
+    if not pptx_path.suffix.lower() == '.pptx':
+        raise ValueError(f"Extension invalide: {pptx_path.suffix}. Attendu: .pptx")
+
+    # Valider taille fichier (max 100 MB)
+    file_size_mb = pptx_path.stat().st_size / (1024 * 1024)
+    if file_size_mb > 100:
+        raise ValueError(f"Fichier trop volumineux: {file_size_mb:.1f} MB (max: 100 MB)")
+
+    # Sanitizer document_type
+    document_type = html.escape(document_type or "default")
+
     logger.info(f"🚀 [KG PIPELINE] Début ingestion enrichie: {pptx_path.name} (tenant: {tenant_id})")
+    logger.info(f"   ✅ Validation: tenant_id={tenant_id}, size={file_size_mb:.1f}MB")
 
     # Vérifier disponibilité Graphiti
     if not GRAPHITI_AVAILABLE:
@@ -599,6 +630,9 @@ async def process_pptx_kg(
     tasks = []
     logger.info(f"🤖 [KG] Soumission de {len(slides_data)} tâches LLM au ThreadPoolExecutor...")
 
+    # BATCH PROCESSING: ThreadPoolExecutor avec max_workers limite la concurrence
+    # Évite de surcharger l'API LLM et optimise les temps de traitement
+    # Note: max_workers=5 est optimal pour Claude API (rate limiting)
     with ThreadPoolExecutor(max_workers=actual_workers) as ex:
         for slide in slides_data:
             idx = slide["slide_index"]
@@ -696,21 +730,21 @@ async def process_pptx_kg(
                 f"{len(relations)} relations extraits"
             )
 
-            # Log détaillé des entities extraites
+            # Log détaillé des entities extraites (DEBUG uniquement - Priorité 2 Phase 2)
             if entities:
                 entity_types = [e.get('entity_type', 'UNKNOWN') for e in entities]
                 entity_names = [e.get('name', 'N/A')[:30] for e in entities[:3]]  # 3 premières
-                logger.info(f"   📊 Entities types: {', '.join(set(entity_types))}")
-                logger.info(f"   📝 Exemples entities: {', '.join(entity_names)}")
+                logger.debug(f"   📊 Entities types: {', '.join(set(entity_types))}")
+                logger.debug(f"   📝 Exemples entities: {', '.join(entity_names)}")
 
-            # Log détaillé des relations extraites
+            # Log détaillé des relations extraites (DEBUG uniquement - Priorité 2 Phase 2)
             if relations:
                 relation_types = [r.get('relation_type', 'UNKNOWN') for r in relations]
-                logger.info(f"   🔗 Relations types: {', '.join(set(relation_types))}")
+                logger.debug(f"   🔗 Relations types: {', '.join(set(relation_types))}")
                 # Exemple de relation
                 if relations:
                     r = relations[0]
-                    logger.info(
+                    logger.debug(
                         f"   📌 Exemple: {r.get('source', 'N/A')[:20]} → "
                         f"{r.get('relation_type', 'N/A')} → {r.get('target', 'N/A')[:20]}"
                     )
@@ -752,6 +786,7 @@ async def process_pptx_kg(
     # 5. CRÉER EPISODE GRAPHITI avec toutes les données du document
     episode_id = ""
     episode_name = ""
+    graphiti_success = False  # Flag pour tracking succès Graphiti
 
     print(f"\n🌐 [KG] Début création episode Graphiti...")
     try:
@@ -809,21 +844,21 @@ Qdrant Chunks (total: {len(all_chunk_ids)}): {', '.join(chunk_ids_preview)}{"...
             f"{len(graphiti_relations)} relations"
         )
 
-        # Log échantillon entities à envoyer
+        # Log échantillon entities à envoyer (DEBUG uniquement - Priorité 2 Phase 2)
         if graphiti_entities:
             sample_entity_types = {}
             for e in graphiti_entities:
                 et = e.get('entity_type', 'UNKNOWN')
                 sample_entity_types[et] = sample_entity_types.get(et, 0) + 1
-            logger.info(f"   📊 Distribution entity types: {dict(sorted(sample_entity_types.items(), key=lambda x: -x[1])[:5])}")
+            logger.debug(f"   📊 Distribution entity types: {dict(sorted(sample_entity_types.items(), key=lambda x: -x[1])[:5])}")
 
-        # Log échantillon relations à envoyer
+        # Log échantillon relations à envoyer (DEBUG uniquement - Priorité 2 Phase 2)
         if graphiti_relations:
             sample_relation_types = {}
             for r in graphiti_relations:
                 rt = r.get('relation_type', 'UNKNOWN')
                 sample_relation_types[rt] = sample_relation_types.get(rt, 0) + 1
-            logger.info(f"   🔗 Distribution relation types: {dict(sorted(sample_relation_types.items(), key=lambda x: -x[1])[:5])}")
+            logger.debug(f"   🔗 Distribution relation types: {dict(sorted(sample_relation_types.items(), key=lambda x: -x[1])[:5])}")
 
         # Appel Graphiti avec format correct
         logger.info(f"🌐 [KG] Appel API Graphiti pour création episode...")
@@ -850,15 +885,36 @@ Qdrant Chunks (total: {len(all_chunk_ids)}): {', '.join(chunk_ids_preview)}{"...
             logger.info(
                 f"   ⏳ Traitement asynchrone en cours (Graphiti transforme en facts)"
             )
+            graphiti_success = True  # Graphiti a réussi
         else:
             logger.warning(f"⚠️ [KG] Réponse Graphiti inattendue: {result}")
+            graphiti_success = True  # Considérer comme succès (réponse reçue)
 
     except Exception as e:
         logger.error(f"❌ [KG] Erreur création episode Graphiti: {e}", exc_info=True)
         print(f"\n⚠️  ERREUR GRAPHITI: {type(e).__name__}: {str(e)}")
         import traceback
         print(traceback.format_exc())
-        # Continuer même si Graphiti échoue (chunks Qdrant déjà insérés)
+
+        # ROLLBACK: Supprimer chunks Qdrant si Graphiti échoue
+        if all_chunk_ids:
+            logger.warning(f"🔄 [ROLLBACK] Suppression {len(all_chunk_ids)} chunks Qdrant suite échec Graphiti...")
+            try:
+                qdrant_client = get_qdrant_client()
+                from qdrant_client.models import PointIdsList
+
+                qdrant_client.delete(
+                    collection_name="knowbase",
+                    points_selector=PointIdsList(points=all_chunk_ids)
+                )
+                logger.info(f"✅ [ROLLBACK] {len(all_chunk_ids)} chunks supprimés de Qdrant")
+                print(f"✅ [ROLLBACK] {len(all_chunk_ids)} chunks supprimés de Qdrant")
+            except Exception as rollback_error:
+                logger.error(f"❌ [ROLLBACK] Échec suppression chunks: {rollback_error}")
+                print(f"❌ [ROLLBACK] Échec suppression chunks: {rollback_error}")
+
+        # Relancer l'exception pour arrêter le pipeline
+        raise RuntimeError(f"Échec création episode Graphiti: {e}") from e
 
     if progress_callback:
         progress_callback("Ingestion Knowledge Graph", 95, 100, "Liaison chunks ↔ episode")
