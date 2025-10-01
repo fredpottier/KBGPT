@@ -173,11 +173,12 @@ class QdrantGraphitiSyncService:
             "has_knowledge_graph": True
         }
 
-        # Update metadata Qdrant
-        await self.qdrant_client.update_metadata(
+        # Update metadata Qdrant avec set_payload
+        # Note: Qdrant utilise set_payload pour enrichir metadata existante
+        self.qdrant_client.set_payload(
             collection_name=self.collection_name,
-            point_ids=chunk_ids,
-            metadata=episode_metadata
+            payload=episode_metadata,
+            points=chunk_ids
         )
 
         logger.info(
@@ -221,10 +222,10 @@ class QdrantGraphitiSyncService:
             "facts_count": len(episode.facts)
         }
 
-        await self.qdrant_client.update_metadata(
+        self.qdrant_client.set_payload(
             collection_name=self.collection_name,
-            point_ids=chunk_ids,
-            metadata=entity_metadata
+            payload=entity_metadata,
+            points=chunk_ids
         )
 
         logger.info(

@@ -763,13 +763,16 @@ async def process_pptx_kg(
         if metadata.get("main_solution"):
             episode_name = f"{metadata['main_solution']} - {pptx_path.name}"
 
-        # Construire message principal avec résumé du document
+        # Construire message principal avec résumé du document + chunk_ids
+        chunk_ids_preview = all_chunk_ids[:5] if len(all_chunk_ids) > 5 else all_chunk_ids
         episode_content = f"""Document: {pptx_path.name}
 Title: {metadata.get('title', 'N/A')}
 Date: {metadata.get('source_date', 'N/A')}
 Summary: {summary}
 
-This document contains {len(all_entities)} entities and {len(all_relations)} relations extracted from {total_chunks} content chunks across the presentation."""
+This document contains {len(all_entities)} entities and {len(all_relations)} relations extracted from {total_chunks} content chunks across the presentation.
+
+Qdrant Chunks (total: {len(all_chunk_ids)}): {', '.join(chunk_ids_preview)}{"..." if len(all_chunk_ids) > 5 else ""}"""
 
         # Transformer entities au format Graphiti (description → summary)
         graphiti_entities = []
