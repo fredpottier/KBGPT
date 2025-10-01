@@ -17,7 +17,9 @@ from knowbase.canonicalization.schemas import (
     MergeEntitiesRequest,
     MergeEntitiesResponse,
     CreateNewCanonicalRequest,
-    CreateNewCanonicalResponse
+    CreateNewCanonicalResponse,
+    UndoMergeRequest,
+    UndoMergeResponse
 )
 
 logger = logging.getLogger(__name__)
@@ -362,3 +364,92 @@ async def create_new_canonical(
     except Exception as e:
         logger.error(f"Erreur create-new: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Erreur interne create-new")
+
+
+@router.post("/undo-merge", response_model=UndoMergeResponse)
+async def undo_merge(
+    request: UndoMergeRequest,
+    service: CanonicalizationService = Depends(get_canonicalization_service)
+) -> UndoMergeResponse:
+    """
+    Annuler merge avec restauration état initial
+
+    **Logique transactionnelle**:
+    - Récupère merge original depuis audit trail
+    - Valide undo autorisé (délai <7j configurable)
+    - Restaure candidates dans KG (status CANDIDATE)
+    - Rollback Qdrant si nécessaire
+    - Logger audit trail undo
+
+    **Paramètres**:
+    - `merge_id`: ID du merge à annuler
+    - `reason`: Raison annulation (min 10 caractères, obligatoire)
+    - `user_id`: Utilisateur effectuant undo (optionnel)
+
+    **Exemple requête**:
+    ```bash
+    curl -X POST /api/canonicalization/undo-merge \
+      -H "Content-Type: application/json" \
+      -d '{
+        "merge_id": "merge_abc123...",
+        "reason": "Erreur merge mauvaise entité canonique",
+        "user_id": "admin_123"
+      }'
+    ```
+
+    **Exemple réponse**:
+    ```json
+    {
+      "merge_id": "merge_abc123...",
+      "operation": "undo_merge",
+      "restored_candidates": ["cand1", "cand2"],
+      "previous_canonical_id": "canonical_xyz...",
+      "reason": "Erreur merge mauvaise entité canonique",
+      "executed_by": "admin_123",
+      "executed_at": "2025-10-01T08:45:00.123456Z",
+      "status": "undone",
+      "audit_entry_id": "undo_merge_abc123_a1b2c3d4"
+    }
+    ```
+
+    **Erreurs**:
+    - `404`: Merge introuvable dans audit trail
+    - `403`: Undo non autorisé (merge trop ancien >7j)
+    - `400`: Raison manquante ou trop courte (<10 caractères)
+    """
+    try:
+        logger.info(
+            f"Undo merge demandé: merge_id={request.merge_id[:12]}... "
+            f"reason='{request.reason[:50]}...' user={request.user_id}"
+        )
+
+        result = await service.undo_merge(
+            merge_id=request.merge_id,
+            reason=request.reason,
+            user_id=request.user_id or "anonymous"
+        )
+
+        logger.info(
+            f"Undo merge terminé: merge_id={request.merge_id[:12]}... "
+            f"restored={len(result['restored_candidates'])} candidates"
+        )
+
+        return UndoMergeResponse(**result)
+
+    except ValueError as e:
+        error_msg = str(e)
+
+        # Distinguer 404 (not found) vs 403 (forbidden)
+        if "introuvable" in error_msg.lower():
+            logger.error(f"Merge introuvable: {e}")
+            raise HTTPException(status_code=404, detail=error_msg)
+        elif "trop ancien" in error_msg.lower() or "non autorisé" in error_msg.lower():
+            logger.error(f"Undo non autorisé: {e}")
+            raise HTTPException(status_code=403, detail=error_msg)
+        else:
+            logger.error(f"Erreur validation undo: {e}")
+            raise HTTPException(status_code=400, detail=error_msg)
+
+    except Exception as e:
+        logger.error(f"Erreur undo merge: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Erreur interne undo merge")

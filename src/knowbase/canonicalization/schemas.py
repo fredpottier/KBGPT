@@ -70,6 +70,7 @@ class MergeEntitiesRequest(BaseModel):
 
 class MergeEntitiesResponse(BaseModel):
     """Réponse merge entities"""
+    merge_id: str = Field(..., description="ID unique du merge (audit trail)")
     canonical_entity_id: str = Field(..., description="UUID entité canonique")
     merged_candidates: List[str] = Field(..., description="Candidates mergées")
     merge_count: int = Field(..., description="Nombre candidates mergées")
@@ -106,3 +107,23 @@ class CreateNewCanonicalResponse(BaseModel):
     executed_at: str = Field(..., description="Timestamp exécution")
     status: str = Field(..., description="Statut (created, failed)")
     result_hash: str = Field(..., description="Hash déterministe résultat")
+
+
+class UndoMergeRequest(BaseModel):
+    """Requête annulation merge"""
+    merge_id: str = Field(..., description="ID du merge à annuler")
+    reason: str = Field(..., min_length=10, description="Raison annulation (min 10 caractères)")
+    user_id: Optional[str] = Field(None, description="Utilisateur effectuant undo")
+
+
+class UndoMergeResponse(BaseModel):
+    """Réponse annulation merge"""
+    merge_id: str = Field(..., description="ID du merge annulé")
+    operation: str = Field(default="undo_merge", description="Type opération")
+    restored_candidates: List[str] = Field(..., description="Candidates restaurées")
+    previous_canonical_id: str = Field(..., description="ID entité canonique avant merge")
+    reason: str = Field(..., description="Raison annulation")
+    executed_by: str = Field(..., description="Utilisateur ayant effectué undo")
+    executed_at: str = Field(..., description="Timestamp exécution undo")
+    status: str = Field(..., description="Statut (undone, failed)")
+    audit_entry_id: Optional[str] = Field(None, description="ID entrée audit trail")
