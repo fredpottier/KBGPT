@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
 from knowbase.api.middleware.user_context import UserContextMiddleware
 from knowbase.api.middleware.idempotency import IdempotencyMiddleware
-from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, tenants, health, graphiti, knowledge_graph, users, facts_governance, facts_intelligence, canonicalization
+from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, tenants, health, graphiti, knowledge_graph, users, facts_governance, facts_intelligence, canonicalization, admin
 
 
 def create_app() -> FastAPI:
@@ -87,6 +87,7 @@ def create_app() -> FastAPI:
     app.include_router(facts_governance.router)  # Facts Gouvernées Phase 3 ✅ ACTIVÉ
     app.include_router(facts_intelligence.router)  # Intelligence IA Facts Phase 3 ✅ ACTIVÉ
     app.include_router(canonicalization.router)  # Canonicalisation Entités Phase 0 ✅ ACTIVÉ
+    app.include_router(admin.router, prefix="/api")  # Administration (migration, etc.) Phase 1 Critère 1.5 ✅ ACTIVÉ
 
     return app
 
