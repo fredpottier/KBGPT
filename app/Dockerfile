@@ -53,6 +53,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Pr??-t??l??chargement des packages NLTK pour ??viter les erreurs r??seau (unstructured dependencies)
 RUN python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True); nltk.download('averaged_perceptron_tagger', quiet=True); nltk.download('averaged_perceptron_tagger_eng', quiet=True)" || echo "NLTK download failed, will try at runtime"
 
+# Pré-téléchargement modèles OnnxTR (MegaParse OCR) pour éviter download au runtime
+# Note: MegaParse télécharge ces modèles même si on utilise uniquement LLM Vision
+RUN python -c "from megaparse import MegaParse; print('✅ Modèles OnnxTR pré-téléchargés')" || echo "OnnxTR models download failed, will try at runtime"
+
 # Code application (?? la fin pour optimiser cache Docker)
 COPY app/ /app/
 RUN mkdir -p /app/config

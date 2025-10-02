@@ -7,40 +7,41 @@ https://github.com/fredpottier/KBGPT/issues/18
 Fonctionnalités ajoutées:
 1. add_episode() retourne episode_uuid (pas juste {success: true})
 2. get_episode(episode_id) pour récupérer episode par UUID ou custom_id
-3. Cache persistant custom_id ↔ episode_uuid
+3. Cache persistant custom_id ↔ episode_uuid (PostgreSQL ou JSON)
 
 ATTENTION: Code temporaire - À SUPPRIMER si API Graphiti corrigée upstream
+
+Backends disponibles:
+- PostgreSQLBackend (production - enterprise-grade) ✅
+- JSONBackend (dev/test uniquement)
+
+Références:
+- migrations/001_graphiti_cache.sql
+- src/knowbase/graphiti/cache_backend.py
+- doc/GRAPHITI_CACHE_POSTGRESQL_MIGRATION.md
 """
 
 import logging
-import json
+import os
 import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pathlib import Path
-from dataclasses import dataclass, asdict
+
+# Import backends
+from .cache_backend import (
+    CacheBackend,
+    PostgreSQLBackend,
+    JSONBackend,
+    EpisodeCacheEntry
+)
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class EpisodeCacheEntry:
-    """Entrée cache pour episode"""
-    custom_id: str
-    episode_uuid: str
-    group_id: str
-    created_at: str
-    cached_at: str
-    metadata: Dict[str, Any]
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convertir en dict pour serialization"""
-        return asdict(self)
-
-
 class GraphitiProxy:
     """
-    Proxy enrichi pour API Graphiti
+    Proxy enrichi pour API Graphiti avec backend de cache configurable
 
     Workaround pour limitations API Graphiti (GitHub #18):
     - POST /messages ne retourne pas episode_uuid
@@ -52,8 +53,20 @@ class GraphitiProxy:
     - Maintient cache persistant custom_id ↔ episode_uuid
     - Fournit get_episode() par UUID ou custom_id
 
+    Backends:
+    - PostgreSQL (production) via GRAPHITI_CACHE_BACKEND=postgresql
+    - JSON (dev/test) via GRAPHITI_CACHE_BACKEND=json
+
     Usage:
+        # Auto-configuration depuis .env
         proxy = GraphitiProxy(graphiti_client)
+
+        # Configuration manuelle
+        proxy = GraphitiProxy(
+            graphiti_client,
+            cache_backend="postgresql",
+            postgres_dsn="postgresql://user:pass@host/db"
+        )
 
         # add_episode retourne episode_uuid
         result = proxy.add_episode(
@@ -71,31 +84,74 @@ class GraphitiProxy:
     def __init__(
         self,
         graphiti_client,
+        cache_backend: Optional[str] = None,
         cache_dir: Optional[Path] = None,
+        postgres_dsn: Optional[str] = None,
         enable_cache: bool = True
     ):
         """
-        Initialiser proxy Graphiti
+        Initialiser proxy Graphiti avec backend configurable
 
         Args:
             graphiti_client: Client Graphiti standard (GraphitiClient instance)
-            cache_dir: Dossier cache (défaut: /data/graphiti_cache)
+            cache_backend: Type backend ("postgresql" ou "json", défaut: depuis env)
+            cache_dir: Dossier cache JSON (si backend=json)
+            postgres_dsn: DSN PostgreSQL (si backend=postgresql, défaut: depuis env)
             enable_cache: Activer cache persistant (défaut: True)
         """
         self.client = graphiti_client
         self.enable_cache = enable_cache
 
-        # Cache directory
-        self.cache_dir = cache_dir or Path("/data/graphiti_cache")
-        if self.enable_cache:
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        if not self.enable_cache:
+            logger.warning("[GraphitiProxy] Cache désactivé - fonctionnalités limitées")
+            self._backend = None
+            return
 
-        # Cache en mémoire (custom_id → EpisodeCacheEntry)
+        # Déterminer backend depuis config ou env
+        backend_type = cache_backend or os.getenv("GRAPHITI_CACHE_BACKEND", "json")
+
+        # Initialiser backend
+        if backend_type == "postgresql":
+            # PostgreSQL backend (production)
+            dsn = postgres_dsn or os.getenv(
+                "GRAPHITI_CACHE_POSTGRES_DSN",
+                os.getenv("ZEP_STORE_POSTGRES_DSN", "")
+            )
+
+            if not dsn:
+                logger.error(
+                    "[GraphitiProxy] PostgreSQL backend requis mais DSN non configuré. "
+                    "Définir GRAPHITI_CACHE_POSTGRES_DSN ou ZEP_STORE_POSTGRES_DSN. "
+                    "Fallback vers JSON backend."
+                )
+                backend_type = "json"
+            else:
+                try:
+                    self._backend = PostgreSQLBackend(postgres_dsn=dsn)
+                    logger.info(
+                        "[GraphitiProxy] PostgreSQL backend initialisé (enterprise-grade)"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"[GraphitiProxy] Échec initialisation PostgreSQL: {e}. "
+                        "Fallback vers JSON backend."
+                    )
+                    backend_type = "json"
+
+        if backend_type == "json":
+            # JSON backend (dev/test uniquement)
+            json_dir = cache_dir or Path(os.getenv("GRAPHITI_CACHE_DIR", "/data/graphiti_cache"))
+            self._backend = JSONBackend(cache_dir=json_dir)
+            logger.warning(
+                "[GraphitiProxy] JSON backend actif - NON recommandé pour production. "
+                "Utiliser GRAPHITI_CACHE_BACKEND=postgresql."
+            )
+
+        # Charger cache en mémoire (pour performance)
         self._cache: Dict[str, EpisodeCacheEntry] = {}
-
-        # Charger cache depuis disque
-        if self.enable_cache:
-            self._load_cache()
+        if self._backend:
+            self._cache = self._backend.load_all()
+            logger.info(f"[GraphitiProxy] Cache chargé: {len(self._cache)} entrées")
 
         # Log avertissement
         logger.warning(
@@ -107,10 +163,7 @@ class GraphitiProxy:
         self,
         group_id: str,
         messages: List[Dict[str, Any]],
-        custom_id: Optional[str] = None,
-        name: Optional[str] = None,
-        reference_time: Optional[str] = None,
-        **kwargs
+        custom_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Créer episode Graphiti avec retour enrichi
@@ -121,9 +174,6 @@ class GraphitiProxy:
             group_id: ID groupe/tenant
             messages: Liste messages (format Graphiti)
             custom_id: ID custom pour mapping (optionnel, auto-généré si absent)
-            name: Nom episode (optionnel)
-            reference_time: Timestamp référence (optionnel)
-            **kwargs: Autres paramètres Graphiti
 
         Returns:
             {
@@ -132,7 +182,6 @@ class GraphitiProxy:
                 "custom_id": "my_custom_id",
                 "group_id": "tenant_1",
                 "created_at": "2025-10-02T...",
-                "name": "Episode name",
                 "content_preview": "First 200 chars..."
             }
 
@@ -147,14 +196,11 @@ class GraphitiProxy:
 
         logger.debug(f"[GraphitiProxy] Creating episode custom_id={custom_id}, group_id={group_id}")
 
-        # 2. Appel API Graphiti standard
+        # 2. Appel API Graphiti standard (signature: group_id, messages uniquement)
         try:
             result = self.client.add_episode(
                 group_id=group_id,
-                name=name,
-                episode_body=messages,
-                reference_time=reference_time,
-                **kwargs
+                messages=messages
             )
         except Exception as e:
             logger.error(f"[GraphitiProxy] Failed to create episode: {e}")
@@ -178,7 +224,7 @@ class GraphitiProxy:
                 "custom_id": custom_id,
                 "group_id": group_id,
                 "created_at": episode_data.get("created_at"),
-                "name": episode_data.get("name", name),
+                "name": episode_data.get("name", ""),
                 "content_preview": self._truncate_content(episode_data.get("content", "")),
                 "entity_edges_count": len(episode_data.get("entity_edges", [])),
                 "source_description": episode_data.get("source_description"),
@@ -369,7 +415,7 @@ class GraphitiProxy:
         episode_data: Dict[str, Any]
     ):
         """
-        Sauvegarder mapping custom_id ↔ episode dans cache
+        Sauvegarder mapping custom_id ↔ episode dans cache (backend-agnostic)
 
         Args:
             custom_id: ID custom
@@ -377,39 +423,33 @@ class GraphitiProxy:
             group_id: ID groupe
             episode_data: Données episode depuis API
         """
-        if not self.enable_cache:
+        if not self.enable_cache or not self._backend:
             return
 
         try:
-            cache_entry = EpisodeCacheEntry(
+            # Sauvegarder via backend
+            success = self._backend.save(
                 custom_id=custom_id,
                 episode_uuid=episode_uuid,
                 group_id=group_id,
-                created_at=episode_data.get("created_at", datetime.now().isoformat()),
-                cached_at=datetime.now().isoformat(),
-                metadata={
-                    "name": episode_data.get("name", ""),
-                    "source_description": episode_data.get("source_description", ""),
-                    "content_length": len(episode_data.get("content", "")),
-                    "entity_edges_count": len(episode_data.get("entity_edges", []))
-                }
+                episode_data=episode_data
             )
 
-            # Cache mémoire
-            self._cache[custom_id] = cache_entry
-
-            # Cache disque (JSON)
-            cache_file = self.cache_dir / f"{custom_id}.json"
-            cache_file.write_text(json.dumps(cache_entry.to_dict(), indent=2))
-
-            logger.debug(f"[GraphitiProxy] Cached episode: {custom_id} → {episode_uuid}")
+            if success:
+                # Mettre à jour cache mémoire
+                entry = self._backend.get(custom_id)
+                if entry:
+                    self._cache[custom_id] = entry
+                    logger.debug(f"[GraphitiProxy] Cached episode: {custom_id} → {episode_uuid}")
+            else:
+                logger.warning(f"[GraphitiProxy] Failed to cache episode: {custom_id}")
 
         except Exception as e:
             logger.error(f"[GraphitiProxy] Failed to cache episode: {e}")
 
     def _get_from_cache(self, custom_id: str) -> Optional[EpisodeCacheEntry]:
         """
-        Récupérer depuis cache mémoire ou disque
+        Récupérer depuis cache mémoire ou backend
 
         Args:
             custom_id: ID custom
@@ -417,66 +457,65 @@ class GraphitiProxy:
         Returns:
             EpisodeCacheEntry OU None si non trouvé
         """
-        if not self.enable_cache:
+        if not self.enable_cache or not self._backend:
             return None
 
-        # Cache mémoire
+        # Cache mémoire (performance)
         if custom_id in self._cache:
             return self._cache[custom_id]
 
-        # Cache disque
-        cache_file = self.cache_dir / f"{custom_id}.json"
-        if cache_file.exists():
-            try:
-                data = json.loads(cache_file.read_text())
-                entry = EpisodeCacheEntry(**data)
+        # Backend (PostgreSQL ou JSON)
+        try:
+            entry = self._backend.get(custom_id)
+            if entry:
+                # Mettre à jour cache mémoire
                 self._cache[custom_id] = entry
-                return entry
-            except Exception as e:
-                logger.warning(f"[GraphitiProxy] Failed to load cache file {cache_file}: {e}")
-
-        return None
-
-    def _load_cache(self):
-        """Charger tous les fichiers cache depuis disque au démarrage"""
-        if not self.enable_cache or not self.cache_dir.exists():
-            return
-
-        loaded_count = 0
-        for cache_file in self.cache_dir.glob("*.json"):
-            try:
-                data = json.loads(cache_file.read_text())
-                entry = EpisodeCacheEntry(**data)
-                self._cache[entry.custom_id] = entry
-                loaded_count += 1
-            except Exception as e:
-                logger.warning(f"[GraphitiProxy] Failed to load cache {cache_file}: {e}")
-
-        logger.info(f"[GraphitiProxy] Loaded {loaded_count} episodes from cache")
+            return entry
+        except Exception as e:
+            logger.warning(f"[GraphitiProxy] Failed to get from cache: {e}")
+            return None
 
     def clear_cache(self, custom_id: Optional[str] = None):
         """
-        Nettoyer cache (mémoire + disque)
+        Nettoyer cache (mémoire + backend)
 
         Args:
             custom_id: ID custom à supprimer (None = tout supprimer)
         """
-        if not self.enable_cache:
+        if not self.enable_cache or not self._backend:
             return
 
-        if custom_id:
-            # Supprimer entry spécifique
-            self._cache.pop(custom_id, None)
-            cache_file = self.cache_dir / f"{custom_id}.json"
-            if cache_file.exists():
-                cache_file.unlink()
-            logger.info(f"[GraphitiProxy] Cleared cache for {custom_id}")
-        else:
-            # Supprimer tout le cache
-            self._cache.clear()
-            for cache_file in self.cache_dir.glob("*.json"):
-                cache_file.unlink()
-            logger.info(f"[GraphitiProxy] Cleared all cache")
+        try:
+            if custom_id:
+                # Supprimer entry spécifique
+                self._cache.pop(custom_id, None)
+                self._backend.delete(custom_id)
+                logger.info(f"[GraphitiProxy] Cleared cache for {custom_id}")
+            else:
+                # Supprimer tout le cache
+                self._cache.clear()
+                count = self._backend.clear()
+                logger.info(f"[GraphitiProxy] Cleared all cache ({count} entries)")
+        except Exception as e:
+            logger.error(f"[GraphitiProxy] Failed to clear cache: {e}")
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """
+        Statistiques du cache
+
+        Returns:
+            Dict avec stats (backend, total_entries, by_group, etc.)
+        """
+        if not self.enable_cache or not self._backend:
+            return {"enabled": False}
+
+        try:
+            stats = self._backend.get_stats()
+            stats["memory_cache_entries"] = len(self._cache)
+            return stats
+        except Exception as e:
+            logger.error(f"[GraphitiProxy] Failed to get cache stats: {e}")
+            return {"enabled": True, "error": str(e)}
 
     @staticmethod
     def _is_uuid(value: str) -> bool:

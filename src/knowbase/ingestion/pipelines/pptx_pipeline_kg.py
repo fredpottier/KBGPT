@@ -28,7 +28,7 @@ from knowbase.ingestion.pipelines.pptx_pipeline import (
     SLIDES_PNG,
     THUMBNAILS_DIR,
     DOCS_DONE,
-    logger,
+    LOGS_DIR,
 )
 
 # Import des helpers pour LLM
@@ -47,6 +47,7 @@ from knowbase.ingestion.pipelines.pptx_pipeline import (
 from knowbase.config.prompts_loader import render_prompt
 from knowbase.config.document_type_registry import get_document_type_registry
 from knowbase.common.llm_router import TaskType
+from knowbase.common.logging import setup_logging
 from qdrant_client.models import PointStruct
 from datetime import datetime, timezone
 import base64
@@ -56,6 +57,17 @@ import uuid
 
 from knowbase.graphiti.qdrant_sync import get_sync_service
 from knowbase.common.clients import get_qdrant_client
+from knowbase.ingestion.deduplication import (
+    compute_file_hash,
+    compute_content_hash,
+    check_duplicate,
+    DuplicateStatus
+)
+
+from PIL import Image
+
+# Logger au niveau module (DOIT être défini AVANT tout usage)
+logger = logging.getLogger(__name__)
 
 # Import Graphiti service (proxy ou client standard selon config)
 try:
@@ -65,16 +77,25 @@ except ImportError:
     GRAPHITI_AVAILABLE = False
     logger.warning("⚠️ Graphiti non disponible - mode Qdrant-only")
 
-from PIL import Image
 
-
-def ingest_chunks_kg(chunks, doc_meta, file_uid, slide_index, deck_summary) -> List[str]:
+def ingest_chunks_kg(
+    chunks,
+    doc_meta,
+    file_uid,
+    slide_index,
+    deck_summary,
+    import_id: str = None,
+    file_hash: str = None,
+    content_hash: str = None,
+    tenant_id: str = None
+) -> List[str]:
     """
-    Ingestion chunks dans Qdrant avec retour des IDs (Phase 1 Critère 1.3)
+    Ingestion chunks dans Qdrant avec retour des IDs (Phase 1 Critère 1.3 + 1.5)
 
     Différence avec ingest_chunks() standard:
     - RETOURNE la liste des chunk IDs insérés
     - Permet de lier chunks ↔ episode Graphiti
+    - Ajoute hashes pour déduplication (Phase 1 Critère 1.5)
 
     Args:
         chunks: Liste chunks à insérer
@@ -82,6 +103,9 @@ def ingest_chunks_kg(chunks, doc_meta, file_uid, slide_index, deck_summary) -> L
         file_uid: UID fichier
         slide_index: Index slide
         deck_summary: Résumé deck
+        import_id: UUID import unique (Phase 1.5)
+        file_hash: SHA256 fichier brut (Phase 1.5)
+        content_hash: SHA256 contenu normalisé (Phase 1.5)
 
     Returns:
         List[str]: Liste des chunk IDs insérés dans Qdrant
@@ -131,12 +155,16 @@ def ingest_chunks_kg(chunks, doc_meta, file_uid, slide_index, deck_summary) -> L
             "ingested_at": datetime.now(timezone.utc).isoformat(),
             "title": meta.get("title", f"Slide {slide_index}"),
 
-            # Document (source info)
+            # Document (source info + déduplication Phase 1.5)
             "document": {
                 "source_name": f"{file_uid}.pptx",
                 "source_type": "pptx",
                 "source_date_iso": doc_meta.get("source_date", ""),  # Format ISO
                 "source_date_raw": doc_meta.get("source_date", ""),  # Format brut
+                "source_file_hash": file_hash,  # SHA256 fichier brut (Phase 1.5)
+                "content_hash": content_hash,  # SHA256 contenu normalisé (Phase 1.5)
+                "import_id": import_id,  # UUID import unique (Phase 1.5)
+                "imported_at": datetime.now(timezone.utc).isoformat(),  # Timestamp import (Phase 1.5)
                 "links": {
                     "source_file_url": f"{PUBLIC_URL}/static/presentations/{file_uid}.pptx",
                     "slide_image_url": f"{PUBLIC_URL}/static/thumbnails/{file_uid}_slide_{slide_index}.jpg"
@@ -155,7 +183,8 @@ def ingest_chunks_kg(chunks, doc_meta, file_uid, slide_index, deck_summary) -> L
                     "id": "",  # À enrichir via canonicalisation KG (Phase 4)
                     "name": doc_meta.get("main_solution", "")  # Temporaire, sera remplacé par liaison KG
                 },
-                "audience": doc_meta.get("audience", [])  # Métadonnée éditoriale (reste dans Qdrant)
+                "audience": doc_meta.get("audience", []),  # Métadonnée éditoriale (reste dans Qdrant)
+                "tenant_id": tenant_id  # Isolation multi-tenant (Phase 1.5 déduplication)
             },
 
             # Sys (infos techniques)
@@ -346,7 +375,18 @@ Each concept should be self-contained and searchable.
 
         for attempt in range(retries):
             try:
-                raw_content = llm_router.complete(TaskType.VISION, msg)
+                try:
+                    raw_content = llm_router.complete(TaskType.VISION, msg)
+                except Exception as llm_error:
+                    logger.error(f"❌ Slide {slide_index} attempt {attempt + 1}: LLM API call failed: {type(llm_error).__name__}: {llm_error}")
+                    raise
+
+                # DEBUG: Log réponse LLM brute pour diagnostic
+                if not raw_content:
+                    logger.error(f"❌ Slide {slide_index}: LLM returned empty response (raw_content is None or empty)")
+                else:
+                    logger.debug(f"✅ Slide {slide_index}: LLM returned {len(raw_content)} characters")
+
                 cleaned_content = clean_gpt_response(raw_content or "")
 
                 # Parser triple-output JSON (toujours format KG maintenant)
@@ -436,7 +476,7 @@ Each concept should be self-contained and searchable.
         megaparse_content=megaparse_content,
         slide_index=slide_index,
         document_type=doc_type,
-        slide_prompt_id=slide_prompt_id
+        slide_prompt_id=deck_prompt_id  # Correction: utiliser deck_prompt_id au lieu de slide_prompt_id
     )
 
     return {
@@ -479,6 +519,9 @@ async def process_pptx_kg(
             "relations_count": int
         }
     """
+    # CONFIGURATION LOGGER: Forcer reconfiguration à chaque job pour workers RQ
+    logger = setup_logging(LOGS_DIR, "ingest_debug.log")
+
     # VALIDATION INPUTS (Priorité 2 Phase 2)
     import re
     import html
@@ -511,6 +554,18 @@ async def process_pptx_kg(
 
     logger.info(f"🚀 [KG PIPELINE] Début ingestion enrichie: {pptx_path.name} (tenant: {tenant_id})")
     logger.info(f"   ✅ Validation: tenant_id={tenant_id}, size={file_size_mb:.1f}MB")
+
+    # ========== DÉDUPLICATION (Phase 1 Critère 1.5) ==========
+    # Génération import_id unique pour ce document
+    import_id = str(uuid.uuid4())
+
+    # 1. Calcul file_hash (immédiat, fichier brut)
+    try:
+        file_hash = compute_file_hash(pptx_path)
+        logger.info(f"   📋 File hash: {file_hash[:24]}...")
+    except Exception as e:
+        logger.warning(f"   ⚠️ Erreur calcul file_hash: {e}, continuant sans hash")
+        file_hash = None
 
     # Vérifier disponibilité Graphiti
     if not GRAPHITI_AVAILABLE:
@@ -549,6 +604,62 @@ async def process_pptx_kg(
     ensure_dirs()
     pdf_path = convert_pptx_to_pdf(pptx_path, SLIDES_PNG)
     slides_data = extract_notes_and_text(pptx_path)
+
+    # 2. Calcul content_hash (post-extraction) + vérification duplicate
+    try:
+        # Concaténer tout le texte extrait pour hashing
+        all_text = "\n".join([
+            f"{slide.get('text', '')} {slide.get('notes', '')}"
+            for slide in slides_data
+        ])
+        content_hash = compute_content_hash(all_text, source_type="pptx")
+        logger.info(f"   📋 Content hash: {content_hash[:24]}...")
+
+        # Vérification duplicate via Qdrant
+        logger.info(f"   🔍 Vérification duplicate (tenant: {tenant_id})...")
+        duplicate_info = await check_duplicate(
+            content_hash=content_hash,
+            tenant_id=tenant_id,
+            qdrant_client=get_qdrant_client(),
+            collection_name=QDRANT_COLLECTION
+        )
+
+        if duplicate_info.is_duplicate:
+            # Document duplicate → REJET
+            logger.warning(
+                f"   ⛔ Document REJETÉ (duplicate): {pptx_path.name}\n"
+                f"      Import existant: {duplicate_info.existing_filename}\n"
+                f"      Importé le: {duplicate_info.imported_at}\n"
+                f"      Chunks: {duplicate_info.existing_chunk_count}\n"
+                f"      Episode: {duplicate_info.existing_episode_uuid}"
+            )
+
+            return {
+                "status": "duplicate_rejected",
+                "message": duplicate_info.message,
+                "existing_import_id": duplicate_info.existing_import_id,
+                "existing_filename": duplicate_info.existing_filename,
+                "existing_chunk_count": duplicate_info.existing_chunk_count,
+                "existing_episode_uuid": duplicate_info.existing_episode_uuid,
+                "imported_at": duplicate_info.imported_at,
+                "chunks_inserted": 0,
+                "episode_id": "",
+                "episode_name": "",
+                "entities_count": 0,
+                "relations_count": 0
+            }
+
+        elif duplicate_info.status == DuplicateStatus.CONTENT_MODIFIED:
+            logger.info(
+                f"   ✅ Contenu modifié détecté (vs import {duplicate_info.existing_import_id[:8]}...) "
+                "→ Nouvel episode autorisé, KG mergera entities automatiquement"
+            )
+        else:
+            logger.info(f"   ✅ Nouveau document, import autorisé")
+
+    except Exception as e:
+        logger.warning(f"   ⚠️ Erreur calcul/check content_hash: {e}, continuant sans déduplication")
+        content_hash = None
 
     if progress_callback:
         progress_callback("Analyse du contenu", 10, 100, "Analyse du contenu et génération du résumé")
@@ -633,7 +744,10 @@ async def process_pptx_kg(
     # BATCH PROCESSING: ThreadPoolExecutor avec max_workers limite la concurrence
     # Évite de surcharger l'API LLM et optimise les temps de traitement
     # Note: max_workers=5 est optimal pour Claude API (rate limiting)
+
+    # IMPORTANT: Utiliser wait=False pour éviter blocage au shutdown si futures bloqués
     with ThreadPoolExecutor(max_workers=actual_workers) as ex:
+        # Soumission des tâches
         for slide in slides_data:
             idx = slide["slide_index"]
             raw_text = slide.get("text", "")
@@ -666,113 +780,143 @@ async def process_pptx_kg(
                     )
                 )
 
-    total_slides = len(tasks)
-    logger.info(f"🚀 [KG] Début analyse LLM de {total_slides} slides")
-    if progress_callback:
-        progress_callback("Analyse des slides", 20, 100, f"Analyse IA de {total_slides} slides")
-        import time
-        time.sleep(0.1)
+        total_slides = len(tasks)
+        logger.info(f"🚀 [KG] Début analyse LLM de {total_slides} slides - {len(tasks)} tâches soumises")
 
-    total_chunks = 0
-
-    for i, (idx, future) in enumerate(tasks):
-        # Progression de 20% à 90% pendant l'analyse des slides
-        slide_progress = 20 + int((i / total_slides) * 70)
+        # ATTENTION: Consommation des résultats À L'INTÉRIEUR du with pour éviter blocage shutdown
         if progress_callback:
-            progress_callback("Analyse des slides", slide_progress, 100, f"Analyse slide {i+1}/{total_slides}")
-
-        logger.info(f"🔍 [KG] Attente résultat LLM pour slide {idx} ({i+1}/{total_slides})")
-
-        # Attendre le résultat avec heartbeats
-        result = None
-        try:
-            import concurrent.futures
+            progress_callback("Analyse des slides", 20, 100, f"Analyse IA de {total_slides} slides")
             import time
+            time.sleep(0.1)
 
-            timeout_seconds = 30
-            start_time = time.time()
+        total_chunks = 0
 
-            while not future.done():
-                try:
-                    result = future.result(timeout=timeout_seconds)
-                    break
-                except concurrent.futures.TimeoutError:
+        for i, (idx, future) in enumerate(tasks):
+            # Progression de 20% à 90% pendant l'analyse des slides
+            slide_progress = 20 + int((i / total_slides) * 70)
+            if progress_callback:
+                progress_callback("Analyse des slides", slide_progress, 100, f"Analyse slide {i+1}/{total_slides}")
+
+            logger.info(f"🔍 [KG] Attente résultat LLM pour slide {idx} ({i+1}/{total_slides})")
+
+            # Attendre le résultat avec heartbeats
+            result = None
+            try:
+                import concurrent.futures
+                import time
+
+                timeout_per_check = 30  # Timeout par tentative
+                max_total_wait = 300  # Timeout global absolu: 5 minutes max par slide
+                start_time = time.time()
+
+                while not future.done():
                     elapsed = time.time() - start_time
+
+                    # Timeout global absolu
+                    if elapsed > max_total_wait:
+                        logger.error(
+                            f"❌ [TIMEOUT GLOBAL] Slide {idx}: Dépassement {max_total_wait}s "
+                            f"(attente totale: {elapsed:.1f}s) - Abandon"
+                        )
+                        future.cancel()
+                        result = {"chunks": [], "entities": [], "relations": []}
+                        break
+
                     try:
-                        from knowbase.ingestion.queue.jobs import send_worker_heartbeat
-                        send_worker_heartbeat()
-                        logger.debug(f"Heartbeat envoyé pendant analyse slide {idx} (attente: {elapsed:.1f}s)")
+                        result = future.result(timeout=timeout_per_check)
+                        logger.debug(f"✅ Slide {idx}: Résultat reçu après {elapsed:.1f}s")
+                        break
+                    except concurrent.futures.TimeoutError:
+                        # Heartbeat pendant l'attente
+                        try:
+                            from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+                            send_worker_heartbeat()
+                            logger.warning(
+                                f"⏳ Slide {idx}: Toujours en attente après {elapsed:.1f}s "
+                                f"(timeout check: {timeout_per_check}s, max global: {max_total_wait}s)"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Erreur envoi heartbeat: {e}")
+                        continue
                     except Exception as e:
-                        logger.warning(f"Erreur envoi heartbeat: {e}")
-                    continue
-                except Exception as e:
-                    logger.error(f"Erreur lors de l'analyse slide {idx}: {e}")
-                    result = {"chunks": [], "entities": [], "relations": []}
-                    break
+                        logger.error(f"❌ Erreur lors de l'analyse slide {idx}: {type(e).__name__}: {e}")
+                        result = {"chunks": [], "entities": [], "relations": []}
+                        break
 
-            if result is None:
-                result = future.result()
+                if result is None:
+                    logger.warning(f"⚠️ Slide {idx}: result=None après boucle, récupération avec future.result()")
+                    result = future.result(timeout=5)  # Dernière tentative avec timeout court
 
-        except Exception as e:
-            logger.error(f"Erreur critique slide {idx}: {e}")
-            result = {"chunks": [], "entities": [], "relations": []}
+            except Exception as e:
+                logger.error(f"Erreur critique slide {idx}: {e}")
+                result = {"chunks": [], "entities": [], "relations": []}
 
-        # Extraire données triple-output
-        chunks = result.get("chunks", [])
-        entities = result.get("entities", [])
-        relations = result.get("relations", [])
+            # Extraire données triple-output
+            chunks = result.get("chunks", [])
+            entities = result.get("entities", [])
+            relations = result.get("relations", [])
 
-        if not chunks:
-            logger.info(f"Slide {idx}: No concepts extracted (empty/title/transition slide)")
-        else:
+            if not chunks:
+                logger.info(f"Slide {idx}: No concepts extracted (empty/title/transition slide)")
+            else:
+                logger.info(
+                    f"✅ [KG] Slide {idx}: {len(chunks)} chunks + {len(entities)} entities + "
+                    f"{len(relations)} relations extraits"
+                )
+
+                # Log détaillé des entities extraites (DEBUG uniquement - Priorité 2 Phase 2)
+                if entities:
+                    entity_types = [e.get('entity_type', 'UNKNOWN') for e in entities]
+                    entity_names = [e.get('name', 'N/A')[:30] for e in entities[:3]]  # 3 premières
+                    logger.debug(f"   📊 Entities types: {', '.join(set(entity_types))}")
+                    logger.debug(f"   📝 Exemples entities: {', '.join(entity_names)}")
+
+                # Log détaillé des relations extraites (DEBUG uniquement - Priorité 2 Phase 2)
+                if relations:
+                    relation_types = [r.get('relation_type', 'UNKNOWN') for r in relations]
+                    logger.debug(f"   🔗 Relations types: {', '.join(set(relation_types))}")
+                    # Exemple de relation
+                    if relations:
+                        r = relations[0]
+                        logger.debug(
+                            f"   📌 Exemple: {r.get('source', 'N/A')[:20]} → "
+                            f"{r.get('relation_type', 'N/A')} → {r.get('target', 'N/A')[:20]}"
+                        )
+
+            # Ingérer chunks dans Qdrant avec tracking des IDs + hashes déduplication (Phase 1.5)
+            chunk_ids = ingest_chunks_kg(
+                chunks,
+                metadata,
+                pptx_path.stem,
+                idx,
+                summary,
+                import_id=import_id,
+                file_hash=file_hash,
+                content_hash=content_hash,
+                tenant_id=tenant_id
+            )
+            logger.info(f"📝 [KG] Slide {idx}: {len(chunk_ids)} chunks ingérés dans Qdrant (IDs: {chunk_ids[:2] if chunk_ids else []}...)")
+            total_chunks += len(chunks)
+
+            # Accumuler chunk IDs pour liaison episode
+            all_chunk_ids.extend(chunk_ids)
+
+            # Accumuler entities/relations pour Graphiti
+            all_entities.extend(entities)
+            all_relations.extend(relations)
+
             logger.info(
-                f"✅ [KG] Slide {idx}: {len(chunks)} chunks + {len(entities)} entities + "
-                f"{len(relations)} relations extraits"
+                f"📊 [KG] Accumulation totale: {len(all_entities)} entities, "
+                f"{len(all_relations)} relations ({len(all_chunk_ids)} chunks)"
             )
 
-            # Log détaillé des entities extraites (DEBUG uniquement - Priorité 2 Phase 2)
-            if entities:
-                entity_types = [e.get('entity_type', 'UNKNOWN') for e in entities]
-                entity_names = [e.get('name', 'N/A')[:30] for e in entities[:3]]  # 3 premières
-                logger.debug(f"   📊 Entities types: {', '.join(set(entity_types))}")
-                logger.debug(f"   📝 Exemples entities: {', '.join(entity_names)}")
-
-            # Log détaillé des relations extraites (DEBUG uniquement - Priorité 2 Phase 2)
-            if relations:
-                relation_types = [r.get('relation_type', 'UNKNOWN') for r in relations]
-                logger.debug(f"   🔗 Relations types: {', '.join(set(relation_types))}")
-                # Exemple de relation
-                if relations:
-                    r = relations[0]
-                    logger.debug(
-                        f"   📌 Exemple: {r.get('source', 'N/A')[:20]} → "
-                        f"{r.get('relation_type', 'N/A')} → {r.get('target', 'N/A')[:20]}"
-                    )
-
-        # Ingérer chunks dans Qdrant avec tracking des IDs (NOUVELLE VERSION)
-        chunk_ids = ingest_chunks_kg(chunks, metadata, pptx_path.stem, idx, summary)
-        logger.info(f"📝 [KG] Slide {idx}: {len(chunk_ids)} chunks ingérés dans Qdrant (IDs: {chunk_ids[:2] if chunk_ids else []}...)")
-        total_chunks += len(chunks)
-
-        # Accumuler chunk IDs pour liaison episode
-        all_chunk_ids.extend(chunk_ids)
-
-        # Accumuler entities/relations pour Graphiti
-        all_entities.extend(entities)
-        all_relations.extend(relations)
-
-        logger.info(
-            f"📊 [KG] Accumulation totale: {len(all_entities)} entities, "
-            f"{len(all_relations)} relations ({len(all_chunk_ids)} chunks)"
-        )
-
-        # Heartbeat après traitement de la slide
-        try:
-            from knowbase.ingestion.queue.jobs import send_worker_heartbeat
-            send_worker_heartbeat()
-            logger.debug(f"Heartbeat envoyé après traitement slide {i+1}/{total_slides}")
-        except Exception:
-            pass
+            # Heartbeat après traitement de la slide
+            try:
+                from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+                send_worker_heartbeat()
+                logger.debug(f"Heartbeat envoyé après traitement slide {i+1}/{total_slides}")
+            except Exception:
+                pass
 
     logger.info(
         f"🎯 [KG] Finalisation: {total_chunks} chunks + {len(all_entities)} entities + "
@@ -785,6 +929,7 @@ async def process_pptx_kg(
 
     # 5. CRÉER EPISODE GRAPHITI avec toutes les données du document
     episode_id = ""
+    episode_uuid = None  # UUID Graphiti (via proxy) ou None
     episode_name = ""
     graphiti_success = False  # Flag pour tracking succès Graphiti
 
@@ -860,46 +1005,60 @@ Qdrant Chunks (total: {len(all_chunk_ids)}): {', '.join(chunk_ids_preview)}{"...
                 sample_relation_types[rt] = sample_relation_types.get(rt, 0) + 1
             logger.debug(f"   🔗 Distribution relation types: {dict(sorted(sample_relation_types.items(), key=lambda x: -x[1])[:5])}")
 
-        # Appel Graphiti avec format correct
-        logger.info(f"🌐 [KG] Appel API Graphiti pour création episode...")
+        # 🆕 INJECTION DIRECTE NEO4J (bypass Graphiti LLM extraction)
+        # Graphiti API /messages RE-FAIT extraction LLM (904 entities → 16 entities)
+        # Solution: Injection directe dans Neo4j au format Graphiti
+        logger.info(f"🌐 [KG] Injection directe Neo4j (bypass Graphiti LLM)...")
 
         # Générer custom_id pour tracking
         custom_id = f"{tenant_id}_{pptx_path.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-        result = graphiti_client.add_episode(
+        # Importer service injection directe
+        from knowbase.graphiti.neo4j_direct_ingest import get_neo4j_direct_ingest
+
+        neo4j_ingest = get_neo4j_direct_ingest()
+
+        # Metadata episode
+        episode_metadata = {
+            "source_date": metadata.get("source_date", ""),
+            "source_type": "pptx",
+            "main_solution": metadata.get("main_solution", ""),
+            "document_type": metadata.get("document_type", "")
+        }
+
+        # Créer episode + entities + relations directement dans Neo4j
+        result = neo4j_ingest.create_episode_with_entities(
+            episode_id=custom_id,
+            episode_name=episode_name,
             group_id=tenant_id,
-            messages=messages,
-            custom_id=custom_id  # GraphitiProxy utilise ceci pour mapping
+            entities=graphiti_entities,
+            relations=graphiti_relations,
+            episode_content=episode_content,
+            metadata=episode_metadata
         )
 
-        # Note: GraphitiProxy enrichit automatiquement la réponse avec episode_uuid
-        # Si GRAPHITI_USE_PROXY=true, result contient {"success": true, "episode_uuid": "abc-123", ...}
-        # Si GRAPHITI_USE_PROXY=false (client standard), result = {"success": true} uniquement
+        neo4j_ingest.close()
 
-        # Récupérer episode_uuid depuis résultat enrichi (si proxy activé)
+        # Récupérer episode_uuid créé
         episode_uuid = result.get("episode_uuid")
-
-        # Fallback: utiliser custom_id si episode_uuid non disponible (client standard)
         episode_id = episode_uuid if episode_uuid else custom_id
 
-        if result.get("success"):
+        if episode_uuid and not result.get("errors"):
             logger.info(
-                f"✅ [KG] Episode envoyé avec succès à Graphiti ({episode_name})"
+                f"✅ [KG] Episode créé directement dans Neo4j ({episode_name})"
             )
             logger.info(
-                f"   📤 Données envoyées: {len(graphiti_entities)} entities, {len(graphiti_relations)} relations"
+                f"   📤 Données insérées: {result['entities_created']} entities, "
+                f"{result['relations_created']} relations, {result['mentions_created']} mentions"
             )
-            if episode_uuid:
-                logger.info(f"   🆔 Episode UUID: {episode_uuid} (via GraphitiProxy)")
-            else:
-                logger.info(f"   🆔 Custom ID: {custom_id} (client standard, pas d'UUID retourné)")
+            logger.info(f"   🆔 Episode UUID: {episode_uuid} (Neo4j direct)")
             logger.info(
-                f"   ⏳ Traitement asynchrone en cours (Graphiti transforme en facts)"
+                f"   ⚡ ÉCONOMIE: 0 appel LLM additionnel (vs Graphiti API qui re-ferait extraction)"
             )
-            graphiti_success = True  # Graphiti a réussi
+            graphiti_success = True
         else:
-            logger.warning(f"⚠️ [KG] Réponse Graphiti inattendue: {result}")
-            graphiti_success = True  # Considérer comme succès (réponse reçue)
+            logger.warning(f"⚠️ [KG] Erreurs Neo4j: {result.get('errors', [])}")
+            graphiti_success = False
 
     except Exception as e:
         logger.error(f"❌ [KG] Erreur création episode Graphiti: {e}", exc_info=True)
@@ -984,6 +1143,7 @@ Qdrant Chunks (total: {len(all_chunk_ids)}): {', '.join(chunk_ids_preview)}{"...
     return {
         "chunks_inserted": total_chunks,
         "episode_id": episode_id,
+        "episode_uuid": episode_uuid,  # UUID Graphiti (via proxy) ou None
         "episode_name": episode_name,
         "entities_count": len(all_entities),
         "relations_count": len(all_relations),

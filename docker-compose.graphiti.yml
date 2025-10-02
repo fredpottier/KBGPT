@@ -39,6 +39,7 @@ services:
       start_period: 40s
     networks:
       - graphiti_net
+      - knowbase_net  # Permet communication avec app/worker
 
   # Postgres pour persistance additionnelle (optionnel selon déploiement)
   postgres-graphiti:
