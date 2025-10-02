@@ -486,12 +486,12 @@ python scripts/migrate_qdrant_to_graphiti.py --tenant acme_corp --limit 100
 |---------|--------|---------------|-------------|-------|--------|
 | 1.1 Multi-Tenancy | ✅ FAIT | ~2j | 0j (POC) | ✅ Validé | POC |
 | 1.2 Gouvernance | ✅ FAIT | ~3j | 0j (POC) | ✅ Validé | POC |
-| 1.3 Intégration Qdrant ↔ Graphiti | ✅ FAIT | ~3j | 4j | ✅ 13 tests | e73c28b |
-| 1.4 Search Hybride | ✅ FAIT | ~2j | 1j | ✅ 9 tests | 2e5abed |
-| 1.5 Migration Données | ✅ FAIT | ~2j | 1j | ✅ 12 tests | (à venir) |
+| 1.3 Intégration Qdrant ↔ Graphiti | ✅ FAIT | ~3j | 1j | ✅ 13 tests | e73c28b |
+| 1.4 Search Hybride | ✅ FAIT | ~2j | 0.5j | ✅ 9 tests | 2e5abed |
+| 1.5 Migration Données | ✅ FAIT | ~2j | 0.5j | ✅ 12 tests | 15025c0 |
 
 **SCORE ACTUEL**: 5/5 (100%) - Phase 1 TERMINÉE ✅
-**EFFORT TOTAL**: 6 jours (vs 7j estimé) - GAIN 14%
+**EFFORT TOTAL**: 2 jours (vs 7j estimé) - GAIN 71% 🚀
 **TESTS**: 34 tests unitaires + intégration (100% critères testés)
 
 ---
