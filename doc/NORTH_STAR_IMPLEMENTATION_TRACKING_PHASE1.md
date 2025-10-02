@@ -159,26 +159,30 @@ async def process_pptx_kg(pptx_path, tenant_id, document_type):
 
 ---
 
-### ⏸️ Critère 1.4 - Search Hybride Qdrant + Graphiti
+### ✅ Critère 1.4 - Search Hybride Qdrant + Graphiti
 **Priorité**: P1 (Important)
 **Effort estimé**: ~2 jours
-**Statut**: ⏸️ À IMPLÉMENTER
-**Assigné**: -
+**Statut**: ✅ **IMPLÉMENTÉ** (2025-10-02)
+**Assigné**: Claude Code
+**Complétion**: 100%
 
 **Description**: Requête combinée Qdrant (chunks) + Graphiti (facts/entities)
 
 **Objectifs**:
-1. **Search dual**:
-   - Qdrant: chunks similaires (vector search)
-   - Graphiti: facts pertinents (graph search)
+1. ✅ **Search dual**:
+   - Qdrant: chunks similaires (vector search + embedding)
+   - Graphiti: entities/relations pertinentes (graph search)
+   - Over-fetch Qdrant (2x limit) pour meilleur reranking
 
-2. **Reranking hybride**:
-   - Fusion scores Qdrant + Graphiti
-   - Pondération configurable (ex: 60% Qdrant, 40% Graphiti)
+2. ✅ **Reranking hybride**:
+   - 3 stratégies implémentées: weighted_average, RRF, context_aware
+   - Pondération configurable (défaut: 70% Qdrant, 30% Graphiti)
+   - Context boost si entities matchent query
 
-3. **Enrichissement résultats**:
-   - Chunks → ajouter facts liés (via episode_id)
-   - Facts → ajouter chunks sources
+3. ✅ **Enrichissement résultats**:
+   - Chunks avec episode_id → enrichis avec entities/relations Graphiti
+   - Résultats sans KG → score Qdrant uniquement
+   - Metadata complètes dans réponse API
 
 **Architecture proposée**:
 ```python
@@ -215,14 +219,51 @@ async def hybrid_search(
     return combined[:limit]
 ```
 
+**Implémentation**:
+```python
+# Service: src/knowbase/search/hybrid_search.py (400 lignes)
+async def hybrid_search(query, tenant_id, limit, weights):
+    # 1. Search Qdrant (over-fetch 2x)
+    qdrant_results = qdrant_client.search(query, limit=limit*2)
+
+    # 2. Search Graphiti (entities/relations)
+    graphiti_results = graphiti_client.search(query, tenant_id)
+
+    # 3. Fusion + reranking
+    hybrid_results = combine_and_rerank(qdrant, graphiti, weights)
+
+    return hybrid_results[:limit]
+
+# Reranker: src/knowbase/search/hybrid_reranker.py (350 lignes)
+def rerank_hybrid(qdrant_results, graphiti_results, strategy):
+    if strategy == "weighted_average":
+        # Score = w_q * score_q + w_g * score_g
+    elif strategy == "rrf":
+        # RRF = 1/(k+rank_q) + 1/(k+rank_g)
+    elif strategy == "context_aware":
+        # Boost si entities matchent query
+```
+
+**Fonctionnalités**:
+- `hybrid_search()`: Search combinée avec pondération
+- `search_with_entity_filter()`: Filtre par entity types (PRODUCT, TECHNOLOGY, etc.)
+- `search_related_chunks()`: Trouve chunks reliés via episode_id
+- 3 stratégies reranking: weighted_average (défaut), RRF, context_aware
+- Boost contextuel si entities matchent keywords query
+
 **Livrables**:
-- [ ] Service `src/knowbase/search/hybrid_search.py` - Search Qdrant + Graphiti
-- [ ] Reranker `src/knowbase/search/hybrid_reranker.py` - Fusion scores
-- [ ] Endpoint `POST /search/hybrid` - API search hybride
-- [ ] Tests `tests/search/test_hybrid_search.py` - Tests search
+- ✅ Service `src/knowbase/search/hybrid_search.py` (400 lignes)
+- ✅ Reranker `src/knowbase/search/hybrid_reranker.py` (350 lignes)
+- ✅ Endpoint `POST /search/hybrid` dans `api/routers/search.py`
+- ✅ Tests `tests/search/test_hybrid_search.py` (9 tests)
+
+**Tests**:
+- Test 1-4: Hybrid search (basic, weights, entity filter, related chunks)
+- Test 5-8: Reranking (weighted average, RRF, context-aware, strategy selection)
+- Test 9: API endpoint
 
 **Dépendances**:
-- Critère 1.3 ⏸️ (Intégration Qdrant ↔ Graphiti)
+- Critère 1.3 ✅ (Intégration Qdrant ↔ Graphiti)
 
 ---
 
