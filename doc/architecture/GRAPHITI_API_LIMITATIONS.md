@@ -187,3 +187,4 @@ L'implémentation actuelle du Critère 1.3 (Phase 1) est **fonctionnelle mais in
 - Code: `src/knowbase/graphiti/backfill_entities.py` (non viable)
 - API Doc: http://localhost:8300/docs (Graphiti OpenAPI)
 - Architecture: `doc/architecture/ENTITIES_VS_FACTS_DISTINCTION.md`
+- **Issue GitHub**: https://github.com/fredpottier/KBGPT/issues/18

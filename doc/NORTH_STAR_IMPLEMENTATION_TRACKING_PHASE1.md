@@ -544,7 +544,7 @@ TENANT_STORAGE_PATH=/data/tenants
 
 ❌ **Critère 1.3 - Backfill Entities** (15%):
 - Limitation API Graphiti: pas de GET `/episode/{uuid}`
-- Issue ouverte sur GitHub Graphiti
+- **Issue GitHub**: https://github.com/fredpottier/KBGPT/issues/18
 - Alternative: enrichissement via `/search` (Phase 2)
 
 ❌ **Critère 1.5 - Migration Données** (100%):
