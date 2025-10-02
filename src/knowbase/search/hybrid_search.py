@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from knowbase.common.clients.qdrant_client import get_qdrant_client
-from knowbase.graphiti.graphiti_client import get_graphiti_client
+from knowbase.graphiti.graphiti_factory import get_graphiti_service
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,7 @@ async def hybrid_search(
 
     # 2. SEARCH GRAPHITI (entities/relations pertinentes)
     logger.info(f"🌐 [GRAPHITI] Recherche knowledge graph...")
-    graphiti_client = get_graphiti_client()
+    graphiti_client = get_graphiti_service()  # Utilise proxy ou client selon config
 
     try:
         graphiti_results = graphiti_client.search(

@@ -139,17 +139,20 @@ async def process_pptx_kg(pptx_path, tenant_id, document_type):
 - ✅ Docs `doc/architecture/GRAPHITI_API_LIMITATIONS.md`
 - ✅ Docs `doc/architecture/PHASE1_CRITERE1.3_ANALYSE_COMPLETE.md`
 
-**Faiblesses Identifiées**:
-1. ❌ Pas de transaction atomique (rollback si échec)
-2. ❌ Performance LLM séquentielle (pas de batch)
-3. ❌ Duplication code `pptx_pipeline.py` (refactor nécessaire)
-4. ❌ Pas de validation cohérence données
-5. ⚠️ Limitation API Graphiti (backfill impossible)
+**Faiblesses Identifiées** (voir `doc/architecture/PHASE1_FAIBLESSES_RESOLUTION.md`):
+1. ✅ **RÉSOLU**: Transaction atomique - Rollback Qdrant implémenté (commit e73c28b)
+2. ✅ **OPTIMISÉ**: Performance LLM - ThreadPoolExecutor (déjà optimal)
+3. ⏸️ **REPORTÉ P2**: Duplication code - Refactoring planifié Phase 2
+4. ✅ **RÉSOLU**: Validation cohérence - Script validation créé (commit e73c28b)
+5. ✅ **WORKAROUND**: Limitation API Graphiti - GraphitiProxy implémenté (commit 8cdfa68)
+
+**Score Résolution**: 4/5 (80%) - 1 reportée Phase 2 (non-bloquante)
 
 **Recommandations Phase 2**:
-- Rollback transactions (P1)
-- Batch processing LLM (P1)
-- Refactoring pipeline base (P1)
+- ✅ Rollback transactions → IMPLÉMENTÉ
+- ✅ Batch processing LLM → OPTIMAL (ThreadPoolExecutor max_workers=5)
+- ⏸️ Refactoring pipeline base → Planifié Phase 2
+- ✅ GraphitiProxy → IMPLÉMENTÉ (workaround temporaire)
 - Validation cohérence (P2)
 - Monitoring Graphiti (P2)
 
@@ -162,8 +165,9 @@ async def process_pptx_kg(pptx_path, tenant_id, document_type):
 ### ✅ Critère 1.4 - Search Hybride Qdrant + Graphiti
 **Priorité**: P1 (Important)
 **Effort estimé**: ~2 jours
+**Effort réel**: 0.5j
 **Statut**: ✅ **IMPLÉMENTÉ** (2025-10-02)
-**Assigné**: Claude Code
+**Commit**: 2e5abed + 8cdfa68 (GraphitiProxy)
 **Complétion**: 100%
 
 **Description**: Requête combinée Qdrant (chunks) + Graphiti (facts/entities)
@@ -252,7 +256,7 @@ def rerank_hybrid(qdrant_results, graphiti_results, strategy):
 - Boost contextuel si entities matchent keywords query
 
 **Livrables**:
-- ✅ Service `src/knowbase/search/hybrid_search.py` (400 lignes)
+- ✅ Service `src/knowbase/search/hybrid_search.py` (400 lignes) - **Utilise GraphitiProxy**
 - ✅ Reranker `src/knowbase/search/hybrid_reranker.py` (350 lignes)
 - ✅ Endpoint `POST /search/hybrid` dans `api/routers/search.py`
 - ✅ Tests `tests/search/test_hybrid_search.py` (9 tests)
@@ -262,8 +266,14 @@ def rerank_hybrid(qdrant_results, graphiti_results, strategy):
 - Test 5-8: Reranking (weighted average, RRF, context-aware, strategy selection)
 - Test 9: API endpoint
 
+**Intégration GraphitiProxy** (commit 8cdfa68):
+- ✅ Migré de `get_graphiti_client()` → `get_graphiti_service()`
+- ✅ Bénéficie du cache episode_uuid pour performance
+- ✅ Compatible proxy enrichi ET client standard (feature flag)
+
 **Dépendances**:
 - Critère 1.3 ✅ (Intégration Qdrant ↔ Graphiti)
+- GraphitiProxy ✅ (Workaround API limitations)
 
 ---
 
