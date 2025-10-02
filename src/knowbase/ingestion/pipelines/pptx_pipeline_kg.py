@@ -57,9 +57,9 @@ import uuid
 from knowbase.graphiti.qdrant_sync import get_sync_service
 from knowbase.common.clients import get_qdrant_client
 
-# Import Graphiti client
+# Import Graphiti service (proxy ou client standard selon config)
 try:
-    from knowbase.graphiti.graphiti_client import get_graphiti_client
+    from knowbase.graphiti.graphiti_factory import get_graphiti_service
     GRAPHITI_AVAILABLE = True
 except ImportError:
     GRAPHITI_AVAILABLE = False
@@ -790,8 +790,8 @@ async def process_pptx_kg(
 
     print(f"\n🌐 [KG] Début création episode Graphiti...")
     try:
-        graphiti_client = get_graphiti_client()
-        print(f"✅ Client Graphiti obtenu")
+        graphiti_client = get_graphiti_service()
+        print(f"✅ Service Graphiti obtenu (proxy ou client standard selon config)")
 
         # Nom episode basé sur metadata
         episode_name = f"PPTX: {pptx_path.name}"
@@ -863,17 +863,24 @@ Qdrant Chunks (total: {len(all_chunk_ids)}): {', '.join(chunk_ids_preview)}{"...
         # Appel Graphiti avec format correct
         logger.info(f"🌐 [KG] Appel API Graphiti pour création episode...")
 
+        # Générer custom_id pour tracking
+        custom_id = f"{tenant_id}_{pptx_path.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
         result = graphiti_client.add_episode(
             group_id=tenant_id,
-            messages=messages
+            messages=messages,
+            custom_id=custom_id  # GraphitiProxy utilise ceci pour mapping
         )
 
-        # Note: Graphiti retourne une réponse asynchrone {"success": true, "message": "..."}
-        # Les données sont traitées en arrière-plan et transformées en "facts"
-        # L'episode_id n'est pas retourné immédiatement, il faut interroger l'API pour l'obtenir
+        # Note: GraphitiProxy enrichit automatiquement la réponse avec episode_uuid
+        # Si GRAPHITI_USE_PROXY=true, result contient {"success": true, "episode_uuid": "abc-123", ...}
+        # Si GRAPHITI_USE_PROXY=false (client standard), result = {"success": true} uniquement
 
-        # Pour l'instant, on utilise un identifiant basé sur le document
-        episode_id = f"{tenant_id}_{pptx_path.stem}"
+        # Récupérer episode_uuid depuis résultat enrichi (si proxy activé)
+        episode_uuid = result.get("episode_uuid")
+
+        # Fallback: utiliser custom_id si episode_uuid non disponible (client standard)
+        episode_id = episode_uuid if episode_uuid else custom_id
 
         if result.get("success"):
             logger.info(
@@ -882,6 +889,10 @@ Qdrant Chunks (total: {len(all_chunk_ids)}): {', '.join(chunk_ids_preview)}{"...
             logger.info(
                 f"   📤 Données envoyées: {len(graphiti_entities)} entities, {len(graphiti_relations)} relations"
             )
+            if episode_uuid:
+                logger.info(f"   🆔 Episode UUID: {episode_uuid} (via GraphitiProxy)")
+            else:
+                logger.info(f"   🆔 Custom ID: {custom_id} (client standard, pas d'UUID retourné)")
             logger.info(
                 f"   ⏳ Traitement asynchrone en cours (Graphiti transforme en facts)"
             )

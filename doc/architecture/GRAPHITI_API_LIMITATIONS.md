@@ -179,12 +179,57 @@ L'implémentation actuelle du Critère 1.3 (Phase 1) est **fonctionnelle mais in
 - Récupération episode spécifique par ID custom
 - Enrichissement rétroactif des chunks avec entities Graphiti
 
-**Statut** : Limitation documentée, contournement via metadata sync uniquement.
+**Statut** : Limitation documentée, **WORKAROUND IMPLÉMENTÉ** via GraphitiProxy.
+
+---
+
+## 🚀 Workaround Implémenté (2025-10-02)
+
+### Solution: GraphitiProxy
+
+Un proxy a été créé pour contourner les limitations API Graphiti:
+
+**Fichiers**:
+- `src/knowbase/graphiti/graphiti_proxy.py` - Proxy enrichi
+- `src/knowbase/graphiti/graphiti_factory.py` - Factory avec feature flag
+- `tests/graphiti/test_graphiti_proxy.py` - Tests (14 tests)
+- `doc/architecture/GRAPHITI_PROXY_WORKAROUND.md` - Documentation complète
+
+**Fonctionnalités**:
+- ✅ add_episode() retourne episode_uuid enrichi
+- ✅ get_episode() par custom_id ou UUID
+- ✅ Cache persistant custom_id ↔ episode_uuid
+- ✅ Feature flag GRAPHITI_USE_PROXY pour activation/désactivation
+
+**Usage**:
+```python
+from knowbase.graphiti.graphiti_factory import get_graphiti_service
+
+graphiti = get_graphiti_service()  # Retourne proxy si GRAPHITI_USE_PROXY=true
+
+result = graphiti.add_episode(..., custom_id="my_episode")
+# {"success": true, "episode_uuid": "abc-123", ...}  ← ENRICHI
+
+episode = graphiti.get_episode("my_episode")  # Par custom_id
+episode = graphiti.get_episode("abc-123")     # Par UUID
+```
+
+**Configuration** (.env):
+```bash
+GRAPHITI_USE_PROXY=true          # Activer proxy
+GRAPHITI_CACHE_ENABLED=true      # Cache disque
+GRAPHITI_CACHE_DIR=/data/graphiti_cache
+```
+
+**Note**: Workaround temporaire - À supprimer si API Graphiti upstream corrigée.
+Surveiller: https://github.com/fredpottier/KBGPT/issues/18
 
 ---
 
 **Références** :
-- Code: `src/knowbase/graphiti/backfill_entities.py` (non viable)
+- Code Proxy: `src/knowbase/graphiti/graphiti_proxy.py`
+- Documentation Workaround: `doc/architecture/GRAPHITI_PROXY_WORKAROUND.md`
+- Code backfill (non viable): `src/knowbase/graphiti/backfill_entities.py`
 - API Doc: http://localhost:8300/docs (Graphiti OpenAPI)
 - Architecture: `doc/architecture/ENTITIES_VS_FACTS_DISTINCTION.md`
 - **Issue GitHub**: https://github.com/fredpottier/KBGPT/issues/18
