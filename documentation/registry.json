@@ -1,0 +1,1499 @@
+[
+  {
+    "name": "create_app",
+    "path": "src/knowbase/api/main.py",
+    "purpose": "Initialise FastAPI, configure CORS/static files et monte les routers",
+    "inputs": [],
+    "outputs": [
+      "FastAPI"
+    ],
+    "calls": [
+      "knowbase.api.dependencies.get_settings",
+      "knowbase.api.dependencies.configure_logging",
+      "knowbase.api.dependencies.warm_clients",
+      "fastapi.middleware.cors.CORSMiddleware",
+      "knowbase.api.middleware.user_context.UserContextMiddleware",
+      "fastapi.staticfiles.StaticFiles"
+    ]
+  },
+  {
+    "name": "search",
+    "path": "src/knowbase/api/routers/search.py",
+    "purpose": "Endpoint POST /search pour la recherche vectorielle",
+    "inputs": [
+      "SearchRequest"
+    ],
+    "outputs": [
+      "dict(status, results, synthesis)"
+    ],
+    "calls": [
+      "knowbase.config.settings.get_settings",
+      "knowbase.common.clients.get_qdrant_client",
+      "knowbase.common.clients.get_sentence_transformer",
+      "knowbase.api.services.search.search_documents"
+    ]
+  },
+  {
+    "name": "get_solutions",
+    "path": "src/knowbase/api/routers/search.py",
+    "purpose": "Endpoint GET /solutions pour récupérer les solutions disponibles",
+    "inputs": [],
+    "outputs": [
+      "List[str]"
+    ],
+    "calls": [
+      "knowbase.config.settings.get_settings",
+      "knowbase.common.clients.get_qdrant_client",
+      "knowbase.api.services.search.get_available_solutions"
+    ]
+  },
+  {
+    "name": "search_documents",
+    "path": "src/knowbase/api/services/search.py",
+    "purpose": "Recherche dans Qdrant, reranking et synthèse",
+    "inputs": [
+      "question",
+      "qdrant_client",
+      "embedding_model",
+      "settings",
+      "solution"
+    ],
+    "outputs": [
+      "dict(status, results, synthesis)"
+    ],
+    "calls": [
+      "qdrant_client.search",
+      "knowbase.common.clients.rerank_chunks",
+      "knowbase.api.services.synthesis.synthesize_response"
+    ]
+  },
+  {
+    "name": "get_available_solutions",
+    "path": "src/knowbase/api/services/search.py",
+    "purpose": "Parcourt Qdrant pour lister les solutions référencées",
+    "inputs": [
+      "qdrant_client",
+      "settings"
+    ],
+    "outputs": [
+      "List[str]"
+    ],
+    "calls": [
+      "qdrant_client.scroll"
+    ]
+  },
+  {
+    "name": "dispatch_action",
+    "path": "src/knowbase/api/routers/ingest.py",
+    "purpose": "Endpoint POST /dispatch pour recherche ou ingestion",
+    "inputs": [
+      "Request",
+      "action_type",
+      "document_type",
+      "question",
+      "UploadFile file",
+      "meta"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.config.settings.get_settings",
+      "knowbase.api.services.ingestion.handle_dispatch"
+    ]
+  },
+  {
+    "name": "handle_dispatch",
+    "path": "src/knowbase/api/services/ingestion.py",
+    "purpose": "Orchestre la recherche directe ou la mise en file d’un import",
+    "inputs": [
+      "request",
+      "action_type",
+      "document_type",
+      "question",
+      "file",
+      "meta",
+      "settings",
+      "logger"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.common.clients.get_qdrant_client",
+      "knowbase.common.clients.get_sentence_transformer",
+      "knowbase.api.services.search.search_documents",
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service",
+      "knowbase.ingestion.queue.enqueue_pptx_ingestion",
+      "knowbase.ingestion.queue.enqueue_pdf_ingestion",
+      "knowbase.ingestion.queue.enqueue_excel_ingestion",
+      "knowbase.ingestion.queue.enqueue_fill_excel"
+    ]
+  },
+  {
+    "name": "upload_excel_qa",
+    "path": "src/knowbase/api/routers/ingest.py",
+    "purpose": "Endpoint POST /documents/upload-excel-qa",
+    "inputs": [
+      "UploadFile file",
+      "UploadFile meta_file"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.config.settings.get_settings",
+      "knowbase.api.services.ingestion.handle_excel_qa_upload"
+    ]
+  },
+  {
+    "name": "handle_excel_qa_upload",
+    "path": "src/knowbase/api/services/ingestion.py",
+    "purpose": "Persist l’Excel Q/A et programme l’ingestion",
+    "inputs": [
+      "file",
+      "meta_file",
+      "settings",
+      "logger"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service",
+      "knowbase.ingestion.queue.enqueue_excel_ingestion"
+    ]
+  },
+  {
+    "name": "fill_excel_rfp",
+    "path": "src/knowbase/api/routers/ingest.py",
+    "purpose": "Endpoint POST /documents/fill-excel-rfp",
+    "inputs": [
+      "UploadFile file",
+      "UploadFile meta_file"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.config.settings.get_settings",
+      "knowbase.api.services.ingestion.handle_excel_rfp_fill"
+    ]
+  },
+  {
+    "name": "handle_excel_rfp_fill",
+    "path": "src/knowbase/api/services/ingestion.py",
+    "purpose": "Met en file le remplissage intelligent d’un RFP",
+    "inputs": [
+      "file",
+      "meta_file",
+      "settings",
+      "logger"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.services.ingestion.get_canonical_solution_name",
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service",
+      "knowbase.ingestion.queue.enqueue_fill_excel"
+    ]
+  },
+  {
+    "name": "analyze_excel",
+    "path": "src/knowbase/api/routers/ingest.py",
+    "purpose": "Endpoint POST /documents/analyze-excel",
+    "inputs": [
+      "UploadFile file"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.config.settings.get_settings",
+      "knowbase.api.services.ingestion.analyze_excel_file"
+    ]
+  },
+  {
+    "name": "analyze_excel_file",
+    "path": "src/knowbase/api/services/ingestion.py",
+    "purpose": "Analyse structurelle d’un classeur Excel",
+    "inputs": [
+      "file",
+      "settings",
+      "logger"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "openpyxl.load_workbook",
+      "pandas.read_excel"
+    ]
+  },
+  {
+    "name": "get_status",
+    "path": "src/knowbase/api/routers/status.py",
+    "purpose": "Endpoint GET /api/status/{uid}",
+    "inputs": [
+      "uid"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.services.status.job_status"
+    ]
+  },
+  {
+    "name": "job_status",
+    "path": "src/knowbase/api/services/status.py",
+    "purpose": "Lit un job RQ et synchronise l’historique Redis",
+    "inputs": [
+      "uid"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.ingestion.queue.fetch_job",
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service"
+    ]
+  },
+  {
+    "name": "get_import_history",
+    "path": "src/knowbase/api/routers/imports.py",
+    "purpose": "Endpoint GET /api/imports/history",
+    "inputs": [
+      "limit"
+    ],
+    "outputs": [
+      "List[Dict]"
+    ],
+    "calls": [
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service"
+    ]
+  },
+  {
+    "name": "get_active_imports",
+    "path": "src/knowbase/api/routers/imports.py",
+    "purpose": "Endpoint GET /api/imports/active",
+    "inputs": [],
+    "outputs": [
+      "List[Dict]"
+    ],
+    "calls": [
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service"
+    ]
+  },
+  {
+    "name": "sync_orphaned_jobs",
+    "path": "src/knowbase/api/routers/imports.py",
+    "purpose": "Endpoint POST /api/imports/sync",
+    "inputs": [],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service"
+    ]
+  },
+  {
+    "name": "cleanup_old_imports",
+    "path": "src/knowbase/api/routers/imports.py",
+    "purpose": "Endpoint POST /api/imports/cleanup",
+    "inputs": [
+      "days"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service"
+    ]
+  },
+  {
+    "name": "delete_import_completely_endpoint",
+    "path": "src/knowbase/api/routers/imports.py",
+    "purpose": "Endpoint DELETE /api/imports/{uid}/delete",
+    "inputs": [
+      "uid"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.services.import_deletion.delete_import_completely"
+    ]
+  },
+  {
+    "name": "delete_import_completely",
+    "path": "src/knowbase/api/services/import_deletion.py",
+    "purpose": "Supprime fichiers, chunks Qdrant et historique pour un import",
+    "inputs": [
+      "uid"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service",
+      "knowbase.common.clients.get_qdrant_client",
+      "pathlib.Path.unlink"
+    ]
+  },
+  {
+    "name": "sap_get_solutions",
+    "path": "src/knowbase/api/routers/sap_solutions.py",
+    "purpose": "Endpoint GET /api/sap-solutions/",
+    "inputs": [],
+    "outputs": [
+      "SolutionsListResponse"
+    ],
+    "calls": [
+      "knowbase.api.services.sap_solutions.get_sap_solutions_manager"
+    ]
+  },
+  {
+    "name": "sap_resolve_solution",
+    "path": "src/knowbase/api/routers/sap_solutions.py",
+    "purpose": "Endpoint POST /api/sap-solutions/resolve",
+    "inputs": [
+      "SolutionResolveRequest"
+    ],
+    "outputs": [
+      "SolutionResolveResponse"
+    ],
+    "calls": [
+      "knowbase.api.services.sap_solutions.get_sap_solutions_manager"
+    ]
+  },
+  {
+    "name": "sap_search_solutions",
+    "path": "src/knowbase/api/routers/sap_solutions.py",
+    "purpose": "Endpoint GET /api/sap-solutions/search/{query}",
+    "inputs": [
+      "query"
+    ],
+    "outputs": [
+      "SolutionsListResponse"
+    ],
+    "calls": [
+      "knowbase.api.services.sap_solutions.get_sap_solutions_manager"
+    ]
+  },
+  {
+    "name": "sap_get_solutions_with_chunks",
+    "path": "src/knowbase/api/routers/sap_solutions.py",
+    "purpose": "Endpoint GET /api/sap-solutions/with-chunks",
+    "inputs": [
+      "extend_search"
+    ],
+    "outputs": [
+      "SolutionsListResponse"
+    ],
+    "calls": [
+      "knowbase.config.settings.get_settings",
+      "knowbase.common.clients.get_qdrant_client",
+      "knowbase.api.services.sap_solutions.get_sap_solutions_manager"
+    ]
+  },
+  {
+    "name": "download_filled_rfp",
+    "path": "src/knowbase/api/routers/downloads.py",
+    "purpose": "Endpoint GET /api/downloads/filled-rfp/{uid}",
+    "inputs": [
+      "uid"
+    ],
+    "outputs": [
+      "FileResponse"
+    ],
+    "calls": [
+      "knowbase.config.settings.get_settings",
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service"
+    ]
+  },
+  {
+    "name": "download_import_file",
+    "path": "src/knowbase/api/routers/downloads.py",
+    "purpose": "Endpoint GET /api/downloads/import-files/{uid}",
+    "inputs": [
+      "uid"
+    ],
+    "outputs": [
+      "FileResponse"
+    ],
+    "calls": [
+      "knowbase.config.settings.get_settings",
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service"
+    ]
+  },
+  {
+    "name": "token_stats",
+    "path": "src/knowbase/api/routers/token_analysis.py",
+    "purpose": "Endpoint GET /api/tokens/stats",
+    "inputs": [
+      "query params selon endpoint"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.common.token_tracker.get_token_tracker"
+    ]
+  },
+  {
+    "name": "estimate_deck_cost",
+    "path": "src/knowbase/api/routers/token_analysis.py",
+    "purpose": "Endpoint GET /api/tokens/estimate-deck",
+    "inputs": [
+      "query params selon endpoint"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.common.token_tracker.get_token_tracker"
+    ]
+  },
+  {
+    "name": "compare_providers_cost",
+    "path": "src/knowbase/api/routers/token_analysis.py",
+    "purpose": "Endpoint GET /api/tokens/compare-providers",
+    "inputs": [
+      "query params selon endpoint"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.common.token_tracker.get_token_tracker"
+    ]
+  },
+  {
+    "name": "cost_by_task_type",
+    "path": "src/knowbase/api/routers/token_analysis.py",
+    "purpose": "Endpoint GET /api/tokens/cost-by-task",
+    "inputs": [
+      "query params selon endpoint"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.common.token_tracker.get_token_tracker"
+    ]
+  },
+  {
+    "name": "get_model_pricing",
+    "path": "src/knowbase/api/routers/token_analysis.py",
+    "purpose": "Endpoint GET /api/tokens/pricing",
+    "inputs": [
+      "query params selon endpoint"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.common.token_tracker.get_token_tracker"
+    ]
+  },
+  {
+    "name": "reset_token_tracking",
+    "path": "src/knowbase/api/routers/token_analysis.py",
+    "purpose": "Endpoint POST /api/tokens/reset",
+    "inputs": [
+      "query params selon endpoint"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.common.token_tracker.get_token_tracker"
+    ]
+  },
+  {
+    "name": "estimate_sagemaker_savings",
+    "path": "src/knowbase/api/routers/token_analysis.py",
+    "purpose": "Endpoint GET /api/tokens/sagemaker-savings",
+    "inputs": [
+      "query params selon endpoint"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.common.token_tracker.get_token_tracker"
+    ]
+  },
+  {
+    "name": "create_tenant",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint POST /api/tenants/",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.create_tenant"
+    ]
+  },
+  {
+    "name": "list_tenants",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint GET /api/tenants/",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.list_tenants"
+    ]
+  },
+  {
+    "name": "get_tenant",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint GET /api/tenants/{tenant_id}",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.get_tenant"
+    ]
+  },
+  {
+    "name": "update_tenant",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint PUT /api/tenants/{tenant_id}",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.update_tenant"
+    ]
+  },
+  {
+    "name": "delete_tenant",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint DELETE /api/tenants/{tenant_id}",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.delete_tenant"
+    ]
+  },
+  {
+    "name": "add_user_to_tenant",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint POST /api/tenants/{tenant_id}/users",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.add_user_to_tenant"
+    ]
+  },
+  {
+    "name": "get_tenant_users",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint GET /api/tenants/{tenant_id}/users",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.get_tenant_users"
+    ]
+  },
+  {
+    "name": "get_tenant_hierarchy",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint GET /api/tenants/{tenant_id}/hierarchy",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.get_tenant_hierarchy"
+    ]
+  },
+  {
+    "name": "update_tenant_stats",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint PUT /api/tenants/{tenant_id}/stats",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.update_tenant_stats"
+    ]
+  },
+  {
+    "name": "get_user_tenants",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint GET /api/tenants/user/{user_id}/tenants",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.get_user_tenants"
+    ]
+  },
+  {
+    "name": "get_user_default_tenant",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint GET /api/tenants/user/{user_id}/default-tenant",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.get_default_tenant_for_user"
+    ]
+  },
+  {
+    "name": "check_user_permission",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint POST /api/tenants/user/{user_id}/check-permission",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.user_has_permission"
+    ]
+  },
+  {
+    "name": "initialize_default_tenants",
+    "path": "src/knowbase/api/routers/tenants.py",
+    "purpose": "Endpoint POST /api/tenants/initialize-defaults",
+    "inputs": [
+      "pydantic request / path params"
+    ],
+    "outputs": [
+      "Tenant/response dict"
+    ],
+    "calls": [
+      "TenantService.create_tenant"
+    ]
+  },
+  {
+    "name": "list_users",
+    "path": "src/knowbase/api/routers/users.py",
+    "purpose": "Endpoint GET /api/users",
+    "inputs": [
+      "params selon endpoint"
+    ],
+    "outputs": [
+      "User ou dict"
+    ],
+    "calls": [
+      "user_service.list_users"
+    ]
+  },
+  {
+    "name": "get_default_user",
+    "path": "src/knowbase/api/routers/users.py",
+    "purpose": "Endpoint GET /api/users/default",
+    "inputs": [
+      "params selon endpoint"
+    ],
+    "outputs": [
+      "User ou dict"
+    ],
+    "calls": [
+      "user_service.get_default_user"
+    ]
+  },
+  {
+    "name": "get_user",
+    "path": "src/knowbase/api/routers/users.py",
+    "purpose": "Endpoint GET /api/users/{user_id}",
+    "inputs": [
+      "params selon endpoint"
+    ],
+    "outputs": [
+      "User ou dict"
+    ],
+    "calls": [
+      "user_service.get_user"
+    ]
+  },
+  {
+    "name": "create_user",
+    "path": "src/knowbase/api/routers/users.py",
+    "purpose": "Endpoint POST /api/users",
+    "inputs": [
+      "params selon endpoint"
+    ],
+    "outputs": [
+      "User ou dict"
+    ],
+    "calls": [
+      "user_service.create_user"
+    ]
+  },
+  {
+    "name": "update_user",
+    "path": "src/knowbase/api/routers/users.py",
+    "purpose": "Endpoint PUT /api/users/{user_id}",
+    "inputs": [
+      "params selon endpoint"
+    ],
+    "outputs": [
+      "User ou dict"
+    ],
+    "calls": [
+      "user_service.update_user"
+    ]
+  },
+  {
+    "name": "delete_user",
+    "path": "src/knowbase/api/routers/users.py",
+    "purpose": "Endpoint DELETE /api/users/{user_id}",
+    "inputs": [
+      "params selon endpoint"
+    ],
+    "outputs": [
+      "User ou dict"
+    ],
+    "calls": [
+      "user_service.delete_user"
+    ]
+  },
+  {
+    "name": "update_user_activity",
+    "path": "src/knowbase/api/routers/users.py",
+    "purpose": "Endpoint POST /api/users/{user_id}/activity",
+    "inputs": [
+      "params selon endpoint"
+    ],
+    "outputs": [
+      "User ou dict"
+    ],
+    "calls": [
+      "user_service.update_last_active"
+    ]
+  },
+  {
+    "name": "set_default_user",
+    "path": "src/knowbase/api/routers/users.py",
+    "purpose": "Endpoint POST /api/users/{user_id}/set-default",
+    "inputs": [
+      "params selon endpoint"
+    ],
+    "outputs": [
+      "User ou dict"
+    ],
+    "calls": [
+      "user_service.set_default_user"
+    ]
+  },
+  {
+    "name": "health_check_full",
+    "path": "src/knowbase/api/routers/health.py",
+    "purpose": "Endpoint GET /api/health/",
+    "inputs": [],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "httpx.AsyncClient",
+      "TenantService.list_tenants"
+    ]
+  },
+  {
+    "name": "health_check_tenants",
+    "path": "src/knowbase/api/routers/health.py",
+    "purpose": "Endpoint GET /api/health/tenants",
+    "inputs": [],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "TenantService.list_tenants"
+    ]
+  },
+  {
+    "name": "health_check_graphiti",
+    "path": "src/knowbase/api/routers/health.py",
+    "purpose": "Endpoint GET /api/health/graphiti",
+    "inputs": [],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "httpx.AsyncClient"
+    ]
+  },
+  {
+    "name": "health_check_quick",
+    "path": "src/knowbase/api/routers/health.py",
+    "purpose": "Endpoint GET /api/health/quick",
+    "inputs": [],
+    "outputs": [
+      "dict"
+    ],
+    "calls": []
+  },
+  {
+    "name": "graphiti_health",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint GET /api/graphiti/health",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.common.graphiti.config.graphiti_config"
+    ]
+  },
+  {
+    "name": "graphiti_health_full",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint GET /api/graphiti/health-full",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.store.health_check"
+    ]
+  },
+  {
+    "name": "create_episode",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint POST /api/graphiti/episodes",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.isolate_tenant_data"
+    ]
+  },
+  {
+    "name": "create_fact_graphiti",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint POST /api/graphiti/facts",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.isolate_tenant_data"
+    ]
+  },
+  {
+    "name": "search_facts_graphiti",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint GET /api/graphiti/facts",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.isolate_tenant_data",
+      "GraphitiTenantManager.store.search_facts"
+    ]
+  },
+  {
+    "name": "create_relation_graphiti",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint POST /api/graphiti/relations",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.store.create_relation"
+    ]
+  },
+  {
+    "name": "get_subgraph_graphiti",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint POST /api/graphiti/subgraph",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.isolate_tenant_data",
+      "GraphitiTenantManager.store.get_subgraph"
+    ]
+  },
+  {
+    "name": "get_memory_graphiti",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint GET /api/graphiti/memory/{group_id}",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.isolate_tenant_data"
+    ]
+  },
+  {
+    "name": "create_tenant_graphiti",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint POST /api/graphiti/tenants",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.create_tenant"
+    ]
+  },
+  {
+    "name": "list_tenants_graphiti",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint GET /api/graphiti/tenants",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.list_tenants"
+    ]
+  },
+  {
+    "name": "get_tenant_info_graphiti",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint GET /api/graphiti/tenants/{group_id}",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.get_tenant_info"
+    ]
+  },
+  {
+    "name": "delete_tenant_graphiti",
+    "path": "src/knowbase/api/routers/graphiti.py",
+    "purpose": "Endpoint DELETE /api/graphiti/tenants/{group_id}",
+    "inputs": [
+      "pydantic body / path params"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "knowbase.api.routers.graphiti.get_tenant_manager",
+      "GraphitiTenantManager.delete_tenant"
+    ]
+  },
+  {
+    "name": "kg_health",
+    "path": "src/knowbase/api/routers/knowledge_graph.py",
+    "purpose": "Endpoint GET /api/knowledge-graph/health",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "UserKnowledgeGraphService.get_user_stats"
+    ]
+  },
+  {
+    "name": "kg_create_entity",
+    "path": "src/knowbase/api/routers/knowledge_graph.py",
+    "purpose": "Endpoint POST /api/knowledge-graph/entities",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "UserKnowledgeGraphService.create_entity_for_user"
+    ]
+  },
+  {
+    "name": "kg_get_entity",
+    "path": "src/knowbase/api/routers/knowledge_graph.py",
+    "purpose": "Endpoint GET /api/knowledge-graph/entities/{entity_id}",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "UserKnowledgeGraphService.get_entity_for_user"
+    ]
+  },
+  {
+    "name": "kg_create_relation",
+    "path": "src/knowbase/api/routers/knowledge_graph.py",
+    "purpose": "Endpoint POST /api/knowledge-graph/relations",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "UserKnowledgeGraphService.create_relation_for_user"
+    ]
+  },
+  {
+    "name": "kg_list_relations",
+    "path": "src/knowbase/api/routers/knowledge_graph.py",
+    "purpose": "Endpoint GET /api/knowledge-graph/relations",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "UserKnowledgeGraphService.list_relations_for_user"
+    ]
+  },
+  {
+    "name": "kg_delete_relation",
+    "path": "src/knowbase/api/routers/knowledge_graph.py",
+    "purpose": "Endpoint DELETE /api/knowledge-graph/relations/{relation_id}",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "UserKnowledgeGraphService.delete_relation_for_user"
+    ]
+  },
+  {
+    "name": "kg_get_subgraph",
+    "path": "src/knowbase/api/routers/knowledge_graph.py",
+    "purpose": "Endpoint POST /api/knowledge-graph/subgraph",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "UserKnowledgeGraphService.get_subgraph_for_user"
+    ]
+  },
+  {
+    "name": "kg_get_stats",
+    "path": "src/knowbase/api/routers/knowledge_graph.py",
+    "purpose": "Endpoint GET /api/knowledge-graph/stats",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "UserKnowledgeGraphService.get_user_stats"
+    ]
+  },
+  {
+    "name": "create_fact",
+    "path": "src/knowbase/api/routers/facts_governance.py",
+    "purpose": "Endpoint POST /api/facts",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.detect_conflicts",
+      "FactsGovernanceService.create_fact"
+    ]
+  },
+  {
+    "name": "list_facts",
+    "path": "src/knowbase/api/routers/facts_governance.py",
+    "purpose": "Endpoint GET /api/facts",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.list_facts"
+    ]
+  },
+  {
+    "name": "get_fact",
+    "path": "src/knowbase/api/routers/facts_governance.py",
+    "purpose": "Endpoint GET /api/facts/{fact_id}",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.get_fact"
+    ]
+  },
+  {
+    "name": "approve_fact",
+    "path": "src/knowbase/api/routers/facts_governance.py",
+    "purpose": "Endpoint PUT /api/facts/{fact_id}/approve",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.approve_fact"
+    ]
+  },
+  {
+    "name": "reject_fact",
+    "path": "src/knowbase/api/routers/facts_governance.py",
+    "purpose": "Endpoint PUT /api/facts/{fact_id}/reject",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.reject_fact"
+    ]
+  },
+  {
+    "name": "list_conflicts",
+    "path": "src/knowbase/api/routers/facts_governance.py",
+    "purpose": "Endpoint GET /api/facts/conflicts/list",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.get_conflicts"
+    ]
+  },
+  {
+    "name": "get_entity_timeline",
+    "path": "src/knowbase/api/routers/facts_governance.py",
+    "purpose": "Endpoint GET /api/facts/timeline/{entity_id}",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.get_timeline"
+    ]
+  },
+  {
+    "name": "delete_fact",
+    "path": "src/knowbase/api/routers/facts_governance.py",
+    "purpose": "Endpoint DELETE /api/facts/{fact_id}",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.get_fact",
+      "FactsGovernanceService.reject_fact"
+    ]
+  },
+  {
+    "name": "get_facts_stats",
+    "path": "src/knowbase/api/routers/facts_governance.py",
+    "purpose": "Endpoint GET /api/facts/stats/overview",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "Pydantic response"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.get_stats"
+    ]
+  },
+  {
+    "name": "calculate_confidence",
+    "path": "src/knowbase/api/routers/facts_intelligence.py",
+    "purpose": "Endpoint POST /api/facts/intelligence/confidence-score",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "dict ou Pydantic"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.list_facts",
+      "FactsIntelligenceService.calculate_confidence_score"
+    ]
+  },
+  {
+    "name": "suggest_conflict_resolution",
+    "path": "src/knowbase/api/routers/facts_intelligence.py",
+    "purpose": "Endpoint POST /api/facts/intelligence/suggest-resolution/{fact_uuid}",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "dict ou Pydantic"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.get_fact",
+      "FactsGovernanceService.detect_conflicts",
+      "FactsIntelligenceService.suggest_conflict_resolutions"
+    ]
+  },
+  {
+    "name": "detect_patterns",
+    "path": "src/knowbase/api/routers/facts_intelligence.py",
+    "purpose": "Endpoint POST /api/facts/intelligence/detect-patterns",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "dict ou Pydantic"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.list_facts",
+      "FactsIntelligenceService.detect_patterns_and_anomalies"
+    ]
+  },
+  {
+    "name": "get_governance_metrics",
+    "path": "src/knowbase/api/routers/facts_intelligence.py",
+    "purpose": "Endpoint GET /api/facts/intelligence/metrics",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "dict ou Pydantic"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.list_facts",
+      "FactsIntelligenceService.calculate_governance_metrics"
+    ]
+  },
+  {
+    "name": "get_governance_alerts",
+    "path": "src/knowbase/api/routers/facts_intelligence.py",
+    "purpose": "Endpoint GET /api/facts/intelligence/alerts",
+    "inputs": [
+      "Request",
+      "schemas selon endpoint"
+    ],
+    "outputs": [
+      "dict ou Pydantic"
+    ],
+    "calls": [
+      "knowbase.api.middleware.user_context.get_user_context",
+      "FactsGovernanceService.set_group",
+      "FactsGovernanceService.list_facts",
+      "FactsGovernanceService.get_conflicts",
+      "FactsIntelligenceService.calculate_governance_metrics"
+    ]
+  },
+  {
+    "name": "ingest_pptx_job",
+    "path": "src/knowbase/ingestion/queue/jobs.py",
+    "purpose": "Traitement worker d’un PPTX (extraction, embeddings, Qdrant)",
+    "inputs": [
+      "pptx_path",
+      "document_type",
+      "meta_path"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "mark_job_as_processing",
+      "update_job_progress",
+      "knowbase.ingestion.pipelines.pptx_pipeline.process_pptx",
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service"
+    ]
+  },
+  {
+    "name": "ingest_pdf_job",
+    "path": "src/knowbase/ingestion/queue/jobs.py",
+    "purpose": "Traitement worker d’un PDF",
+    "inputs": [
+      "pdf_path"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "mark_job_as_processing",
+      "update_job_progress",
+      "knowbase.ingestion.pipelines.pdf_pipeline.process_pdf",
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service"
+    ]
+  },
+  {
+    "name": "ingest_excel_job",
+    "path": "src/knowbase/ingestion/queue/jobs.py",
+    "purpose": "Traitement worker d’un Excel Q/A",
+    "inputs": [
+      "xlsx_path",
+      "meta"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "mark_job_as_processing",
+      "update_job_progress",
+      "knowbase.ingestion.pipelines.excel_pipeline.process_excel_rfp",
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service",
+      "knowbase.api.services.import_deletion.delete_import_completely"
+    ]
+  },
+  {
+    "name": "fill_excel_job",
+    "path": "src/knowbase/ingestion/queue/jobs.py",
+    "purpose": "Worker pour le remplissage intelligent d’un RFP",
+    "inputs": [
+      "xlsx_path",
+      "meta_path"
+    ],
+    "outputs": [
+      "dict"
+    ],
+    "calls": [
+      "mark_job_as_processing",
+      "update_job_progress",
+      "knowbase.ingestion.pipelines.smart_fill_excel_pipeline.main",
+      "knowbase.api.services.import_history_redis.get_redis_import_history_service"
+    ]
+  }
+]
