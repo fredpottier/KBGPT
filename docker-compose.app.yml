@@ -1,0 +1,176 @@
+# Application Services (Stateless - Frequently Restarted)
+# Usage: docker-compose -f docker-compose.app.yml up -d
+# Note: Requires infrastructure services running (docker-compose.infra.yml)
+
+x-common-config: &common-config
+  stop_grace_period: 10s
+
+services:
+  # ===================================
+  # BACKEND API - FastAPI
+  # ===================================
+  app:
+    <<: *common-config
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    image: sap-kb-app:latest
+    container_name: knowbase-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /app:/app/src
+      HF_HOME: /data/models
+      KNOWBASE_DATA_DIR: /data
+      REDIS_URL: redis://redis:6379/0
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-neo4j_password}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+    ports:
+      - "${APP_PORT:-8000}:8000"
+      - "5678:5678"  # Debug port
+    volumes:
+      - ./app:/app
+      - ./data:/data
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./tests:/app/tests
+    networks:
+      - knowbase_network
+    working_dir: /app
+    command: python -Xfrozen_modules=off -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8000/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ===================================
+  # INGESTION WORKER - RQ Worker
+  # ===================================
+  ingestion-worker:
+    <<: *common-config
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    image: sap-kb-worker:latest
+    container_name: knowbase-worker
+    restart: unless-stopped
+    stop_grace_period: 15s  # Longer grace period for worker
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /app:/app/src
+      HF_HOME: /data/models
+      KNOWBASE_DATA_DIR: /data
+      REDIS_URL: redis://redis:6379/0
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-neo4j_password}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+    ports:
+      - "5679:5679"  # Debug port for worker
+    volumes:
+      - ./app:/app
+      - ./data:/data
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./tests:/app/tests
+    networks:
+      - knowbase_network
+    working_dir: /app
+    command: python -m knowbase.ingestion.queue
+
+  # ===================================
+  # FRONTEND - Next.js
+  # ===================================
+  frontend:
+    <<: *common-config
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: sap-kb-frontend:latest
+    container_name: knowbase-frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://app:8000
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - frontend_node_modules:/app/node_modules
+      - ./frontend/next.config.js:/app/next.config.js
+      - ./frontend/package.json:/app/package.json
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+      - ./frontend/tailwind.config.js:/app/tailwind.config.js
+      - ./frontend/warmup.js:/app/warmup.js
+    command: npm run dev
+    networks:
+      - knowbase_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ===================================
+  # LEGACY UI - Streamlit (optional)
+  # ===================================
+  ui:
+    <<: *common-config
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    image: sap-kb-ui:latest
+    container_name: knowbase-ui
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BACKEND_URL: ${BACKEND_URL:-http://app:8000}
+      PYTHONPATH: /app/src
+      KNOWBASE_DATA_DIR: /data
+    ports:
+      - "${APP_UI_PORT:-8501}:8501"
+    volumes:
+      - ./ui:/app
+      - ./src:/app/src
+      - ./data:/data
+    networks:
+      - knowbase_network
+
+  # ===================================
+  # NGROK - Tunnel (optional, dev only)
+  # ===================================
+  # ngrok:
+  #   image: ngrok/ngrok:latest
+  #   container_name: knowbase-ngrok
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./ngrok.yml:/etc/ngrok.yml
+  #     - ./data/logs:/logs
+  #   env_file:
+  #     - .env
+  #   command: start --config /etc/ngrok.yml --all
+  #   networks:
+  #     - knowbase_network
+
+networks:
+  knowbase_network:
+    name: knowbase_network
+    external: true  # Network created by docker-compose.infra.yml
+
+volumes:
+  frontend_node_modules:
+    name: knowbase_frontend_node_modules
