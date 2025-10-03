@@ -425,6 +425,39 @@ git tag | grep archive
 
 ---
 
+## ⚠️ Risques Sécurité à Traiter Avant Production
+
+**Statut** : 🟡 Identifiés, non bloquants pour développement
+**Référence** : `doc/SECURITY_AUDIT_PHASE0.md`
+
+### 🔴 Vulnérabilités Critiques (P0) - BLOCKER PRODUCTION
+
+| ID | Vulnérabilité | Impact | Phase Correctif |
+|----|---------------|--------|-----------------|
+| SEC-1 | Mot de passe Neo4j par défaut hardcodé | Accès root DB | Phase 5 (Tests) |
+| SEC-2 | Redis sans authentification | Accès cache/queue | Phase 5 (Tests) |
+| SEC-3 | Ports sensibles exposés publiquement | RCE via debug ports | Phase 5 (Tests) |
+| SEC-4 | Volumes code source en RW | Backdoor persistant | Phase 6 (Prod) |
+| SEC-5 | Pas de limites ressources (CPU/RAM) | DoS host | Phase 5 (Tests) |
+
+### 🟠 Vulnérabilités Élevées (P1) - RECOMMANDÉES AVANT TESTS ÉLARGIS
+
+| ID | Vulnérabilité | Phase Correctif |
+|----|---------------|-----------------|
+| SEC-6 | API keys en clair dans .env | Phase 4 (UI) |
+| SEC-7 | Neo4j APOC procedures unrestricted | Phase 5 (Tests) |
+| SEC-8 | Qdrant sans authentification | Phase 5 (Tests) |
+| SEC-9 | Logs sensibles non sécurisés | Phase 5 (Tests) |
+| SEC-10 | Restart policy sans monitoring | Phase 5 (Tests) |
+| SEC-11 | Network bridge sans isolation | Phase 6 (Prod) |
+| SEC-12 | Healthchecks peu sécurisés | Phase 4 (UI) |
+
+**Gate Production** : Les 5 vulnérabilités critiques (SEC-1 à SEC-5) DOIVENT être corrigées avant tout déploiement production.
+
+**Effort estimé correctifs** : 1-2 jours (Phase 5)
+
+---
+
 ## 📅 Timeline Macro
 
 ```
@@ -462,6 +495,7 @@ Semaine 3 (Jour 11-15)
 - ✅ 7/7 tests validation Phase 0 passés
 - ✅ Documentation North Star créée
 - ✅ Code review approuvé (pair review)
+- ✅ Audit sécurité réalisé (18 vulnérabilités identifiées, tracking updated)
 
 **Gate Phase 1 → Phase 2** :
 - ✅ POC Neo4j Facts fonctionnel (insert, query, conflict detection)
