@@ -1274,8 +1274,132 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
 
     logger.info(f"🎯 Finalisation: {total} chunks au total traités")
 
+    # === PHASE 3: EXTRACTION FACTS ===
+    logger.info(f"🧠 Début extraction facts structurés depuis {len(slides_data)} slides...")
+
     if progress_callback:
-        progress_callback("Ingestion dans Qdrant", 95, 100, "Insertion des chunks dans la base vectorielle")
+        progress_callback("Extraction facts", 90, 100, "Extraction facts métier structurés (LLM Vision)")
+
+    # Import modules extraction facts
+    try:
+        import asyncio
+        from knowbase.ingestion.facts_extractor import (
+            extract_facts_from_slide,
+            insert_facts_to_neo4j,
+            detect_and_log_conflicts,
+        )
+        from knowbase.ingestion.notifications import notify_critical_conflicts
+
+        all_facts = []
+
+        # Extraction facts par slide (async)
+        async def extract_all_facts():
+            facts_tasks = []
+            for slide in slides_data:
+                idx = slide["slide_index"]
+                img_path = image_paths.get(idx)
+                img_b64 = encode_image_base64(img_path) if img_path and img_path.exists() else None
+
+                # Générer chunk_id unique pour traçabilité
+                chunk_id = f"{pptx_path.stem}_slide_{idx}"
+
+                facts_tasks.append(
+                    extract_facts_from_slide(
+                        slide_data=slide,
+                        slide_image_base64=img_b64,
+                        source_document=f"{pptx_path.stem}.pptx",
+                        chunk_id=chunk_id,
+                        deck_summary=summary,
+                        llm_router=llm_router,
+                    )
+                )
+
+            # Extraire facts en parallèle (5 slides max simultané pour éviter rate limit)
+            results = []
+            batch_size = 5
+            for i in range(0, len(facts_tasks), batch_size):
+                batch = facts_tasks[i:i + batch_size]
+                batch_results = await asyncio.gather(*batch, return_exceptions=True)
+                results.extend(batch_results)
+
+            return results
+
+        # Exécuter extraction async
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        facts_per_slide = loop.run_until_complete(extract_all_facts())
+        loop.close()
+
+        # Aplatir liste facts
+        for facts_list in facts_per_slide:
+            if isinstance(facts_list, list):
+                all_facts.extend(facts_list)
+
+        logger.info(f"✅ Extraction terminée: {len(all_facts)} facts extraits depuis {len(slides_data)} slides")
+
+        if all_facts:
+            # Insertion facts Neo4j
+            logger.info(f"💾 Insertion {len(all_facts)} facts dans Neo4j...")
+
+            if progress_callback:
+                progress_callback("Insertion facts", 93, 100, f"Insertion {len(all_facts)} facts dans Neo4j")
+
+            # Déterminer tenant_id (depuis metadata si disponible, sinon default)
+            tenant_id = metadata.get("tenant_id", "default")
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            inserted_uuids = loop.run_until_complete(
+                insert_facts_to_neo4j(all_facts, tenant_id=tenant_id)
+            )
+            loop.close()
+
+            logger.info(f"✅ Facts insérés: {len(inserted_uuids)}/{len(all_facts)} ({len(inserted_uuids)/len(all_facts)*100:.1f}%)")
+
+            # Détection conflits post-ingestion
+            if inserted_uuids:
+                logger.info(f"🔍 Détection conflits pour {len(inserted_uuids)} facts...")
+
+                if progress_callback:
+                    progress_callback("Détection conflits", 95, 100, "Vérification conflits facts")
+
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                critical_conflicts = loop.run_until_complete(
+                    detect_and_log_conflicts(inserted_uuids, tenant_id=tenant_id)
+                )
+                loop.close()
+
+                # Notification webhook si conflits critiques
+                if critical_conflicts:
+                    logger.info(f"📤 Envoi notification: {len(critical_conflicts)} conflits critiques")
+
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    notification_sent = loop.run_until_complete(
+                        notify_critical_conflicts(critical_conflicts)
+                    )
+                    loop.close()
+
+                    if notification_sent:
+                        logger.info(f"✅ Notification webhook envoyée ({len(critical_conflicts)} conflits)")
+                    else:
+                        logger.warning(f"⚠️ Notification webhook échouée ou désactivée")
+
+        else:
+            logger.info(f"ℹ️ Aucun fact extrait (slides génériques/vides)")
+
+    except ImportError as e:
+        logger.warning(f"⚠️ Module extraction facts non disponible (Phase 3 désactivée): {e}")
+    except Exception as e:
+        logger.error(f"❌ Erreur extraction facts (Phase 3): {e}")
+        # Ne pas bloquer l'ingestion Qdrant en cas d'erreur facts
+        pass
+
+    # === FIN PHASE 3 ===
+
+    if progress_callback:
+        progress_callback("Ingestion dans Qdrant", 97, 100, "Insertion des chunks dans la base vectorielle")
 
     # Heartbeat final avant finalisation
     try:
