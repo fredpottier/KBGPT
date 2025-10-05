@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis
+from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts
 
 
 def create_app() -> FastAPI:
@@ -24,7 +24,86 @@ def create_app() -> FastAPI:
         debugpy.wait_for_client()
         logger.info("🐛 FastAPI debugger attached!")
 
-    app = FastAPI()
+    app = FastAPI(
+        title="SAP Knowbase API",
+        description="""
+        **API Knowledge Base SAP** avec Knowledge Graph Neo4j Native.
+
+        ## Fonctionnalités principales
+
+        ### 📚 Recherche & Ingestion
+        - Recherche hybride vectorielle (Qdrant) + Knowledge Graph (Neo4j)
+        - Ingestion documents (PDF, PPTX, Excel, DOCX)
+        - Traitement RFP Q/A automatisé
+
+        ### 🧠 Knowledge Graph Facts (Phase 2)
+        - CRUD complet Facts structurés
+        - Gouvernance approve/reject avec workflow
+        - Détection conflits (CONTRADICTS, OVERRIDES, OUTDATED)
+        - Timeline historique valeurs
+        - Statistiques agrégées
+
+        ### 🔐 Multi-tenancy
+        - Isolation tenant_id pour tous les endpoints
+        - Headers: `X-Tenant-ID`, `X-User-ID`
+
+        ## Endpoints principaux
+
+        - **`/api/facts`** : CRUD Facts Knowledge Graph
+        - **`/search`** : Recherche hybride multi-sources
+        - **`/api/imports`** : Historique imports documents
+        - **`/api/sap-solutions`** : Catalogue SAP
+        - **`/api/token-analysis`** : Analyse coûts LLM
+
+        ## Architecture
+        - **Backend** : FastAPI + Pydantic v2
+        - **Vector DB** : Qdrant (embeddings)
+        - **Knowledge Graph** : Neo4j Native (facts structurés)
+        - **LLM** : Multi-provider (OpenAI, Anthropic, Ollama)
+        """,
+        version="2.0.0",
+        contact={
+            "name": "SAP Knowbase Team",
+            "email": "support@example.com",
+        },
+        license_info={
+            "name": "Proprietary",
+        },
+        openapi_tags=[
+            {
+                "name": "Facts",
+                "description": "**Knowledge Graph Facts** - CRUD, gouvernance, conflits, timeline, stats (Phase 2 - Neo4j Native)"
+            },
+            {
+                "name": "Search",
+                "description": "Recherche hybride vectorielle + Knowledge Graph"
+            },
+            {
+                "name": "Ingestion",
+                "description": "Import et traitement documents (PDF, PPTX, Excel)"
+            },
+            {
+                "name": "Status",
+                "description": "Monitoring systèmes (Qdrant, Neo4j, Redis, LLM)"
+            },
+            {
+                "name": "Imports",
+                "description": "Historique imports et statistiques"
+            },
+            {
+                "name": "SAP Solutions",
+                "description": "Catalogue solutions SAP"
+            },
+            {
+                "name": "Downloads",
+                "description": "Téléchargement documents source"
+            },
+            {
+                "name": "Token Analysis",
+                "description": "Analyse coûts et tokens LLM"
+            },
+        ],
+    )
 
     # Configure CORS
     app.add_middleware(
@@ -71,6 +150,7 @@ def create_app() -> FastAPI:
     app.include_router(sap_solutions.router)  # Déjà avec préfixe /api/sap-solutions
     app.include_router(downloads.router)  # Déjà avec préfixe /api/downloads
     app.include_router(token_analysis.router, prefix="/api")  # Analyse des tokens et coûts
+    app.include_router(facts.router, prefix="/api")  # Facts API - Neo4j Native (Phase 2)
 
     return app
 

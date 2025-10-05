@@ -1,8 +1,9 @@
-# Migration Neo4j Native - Tracking & Planning
+# Migration Neo4j Native - Tracking Global
 
 **Date début** : 2025-10-03
-**Statut** : 🟡 En préparation
-**Branche cible** : `feat/neo4j-native` (depuis `main`)
+**Statut** : 🟢 En cours
+**Branche actuelle** : `feat/north-star-phase1`
+**Progression globale** : **50%** (3/6 phases complétées)
 
 ---
 
@@ -16,533 +17,411 @@ Migrer de l'architecture Graphiti vers une solution **Neo4j Native + Custom Laye
 
 ## 📊 Vue d'Ensemble des Phases
 
-| Phase | Objectif | Durée | Statut |
-|-------|----------|-------|--------|
-| **Phase 0** | Clean Slate Setup & Restructuration Infrastructure | 1 jour | ⏳ En attente |
-| **Phase 1** | POC Neo4j Facts (Validation Technique) | 2 jours | ⏳ En attente |
-| **Phase 2** | Migration APIs & Services Facts | 3 jours | ⏳ En attente |
-| **Phase 3** | Pipeline Ingestion & Détection Conflits | 3 jours | ⏳ En attente |
-| **Phase 4** | UI Admin Gouvernance Facts | 3 jours | ⏳ En attente |
-| **Phase 5** | Tests E2E & Documentation | 2 jours | ⏳ En attente |
-| **Phase 6** | Décommission Graphiti & Cleanup | 1 jour | ⏳ En attente |
+| Phase | Objectif | Durée Est. | Durée Réelle | Statut | Progression | Tracking Détaillé |
+|-------|----------|------------|--------------|--------|-------------|-------------------|
+| **Phase 0** | Clean Slate Setup & Restructuration Infrastructure | 1 jour | 1 jour | ✅ Complété | 100% | [phase0/TRACKING_PHASE0.md](phase0/TRACKING_PHASE0.md) |
+| **Phase 1** | POC Neo4j Facts (Validation Technique) | 2 jours | 1 jour | ✅ Complété | 100% | [phase1/TRACKING_PHASE1.md](phase1/TRACKING_PHASE1.md) |
+| **Phase 2** | Migration APIs & Services Facts | 3 jours | 2 jours | ✅ Complété | 100% | [phase2/TRACKING_PHASE2.md](phase2/TRACKING_PHASE2.md) |
+| **Phase 3** | Pipeline Ingestion & Détection Conflits | 3 jours | - | ⏳ En attente | 0% | [phase3/TRACKING_PHASE3.md](phase3/TRACKING_PHASE3.md) |
+| **Phase 4** | UI Admin Gouvernance Facts | 3 jours | - | ⏳ En attente | 0% | [phase4/TRACKING_PHASE4.md](phase4/TRACKING_PHASE4.md) |
+| **Phase 5** | Tests E2E & Hardening Sécurité | 2 jours | - | ⏳ En attente | 0% | [phase5/TRACKING_PHASE5.md](phase5/TRACKING_PHASE5.md) |
+| **Phase 6** | Décommission Graphiti & Cleanup | 1 jour | - | ⏳ En attente | 0% | [phase6/TRACKING_PHASE6.md](phase6/TRACKING_PHASE6.md) |
 
 **Durée totale estimée** : **15 jours** (3 semaines)
+**Durée réelle cumulée** : **4 jours** (vs 6 jours estimé = **33% gain**)
+**Progression** : **50%** (3/6 phases complétées)
 
 ---
 
-## 📋 PHASE 0 : Clean Slate Setup & Restructuration Infrastructure
+## 📈 Indicateurs Projet Global
 
-**Durée** : 1 jour
-**Statut** : ⏳ En attente
-**Responsable** : Architecture & DevOps
-
-### Objectifs
-
-1. ✅ Créer branche propre `feat/neo4j-native` depuis `main`
-2. ✅ Restructurer Docker Compose (séparation infra/app)
-3. ✅ Migrer sélectivement code réutilisable (modules utilitaires)
-4. ✅ Créer structure Neo4j custom (`neo4j_custom/`, `facts/`)
-5. ✅ Archiver branches obsolètes (tags)
-6. ✅ Mettre à jour documentation North Star
-
-### Critères d'Achèvement
-
-- [ ] Branche `feat/neo4j-native` créée et poussée sur remote
-- [ ] Docker séparé en 2 fichiers :
-  - `docker-compose.infra.yml` (Qdrant, Redis, Neo4j, Postgres)
-  - `docker-compose.app.yml` (App, Frontend, Worker)
-- [ ] Modules utilitaires migrés sans dépendances Graphiti
-- [ ] Structure `src/knowbase/neo4j_custom/` et `src/knowbase/facts/` créée
-- [ ] Tags archive créés : `archive/zep-multiuser`, `archive/graphiti-integration`, `archive/north-star-phase0`
-- [ ] Documentation `NORTH_STAR_NEO4J_NATIVE.md` créée
-- [ ] Fichier tracking par phase créé (`PHASE0_DETAILS.md`, `PHASE1_DETAILS.md`, etc.)
-
-### Tâches Détaillées
-
-#### 0.1 - Création Branche Clean Slate
-**Durée** : 30 min
-
-```bash
-# Partir de main propre
-git checkout main
-git pull origin main
-
-# Créer branche neo4j-native
-git checkout -b feat/neo4j-native
-git push -u origin feat/neo4j-native
-```
-
-**Livrable** : Branche vide prête à recevoir code propre
+| Indicateur | Cible | Actuel | Statut |
+|------------|-------|--------|--------|
+| **% Phases complétées** | 100% (6/6) | 50% (3/6) | 🟢 En cours |
+| **Jours écoulés** | 15 jours | 4 jours | 🟢 Avance |
+| **Gain temps réel vs estimé** | 0% | +33% | 🟢 Efficace |
+| **Tests validation passés** | 100% | 100% (62/62) | ✅ Parfait |
+| **Performance détection conflits** | < 50ms | 6.28ms | ✅ 8x mieux |
+| **Couverture tests** | > 80% | ~85% (Phase 2) | 🟢 Bon |
+| **Dette technique réduite** | -100% (vs Graphiti) | -100% | ✅ Clean slate |
+| **Vulnérabilités sécurité** | 0 critiques | 19 critiques | 🔴 Phase 5 |
 
 ---
 
-#### 0.2 - Restructuration Docker Compose
-**Durée** : 2h
+## 🔒 Suivi Sécurité Global
 
-**Objectif** : Séparer infrastructure (stateful) et application (stateless) pour gestion indépendante.
+### Vue d'Ensemble Sécurité
 
-**Ancien modèle** (problème) :
-```yaml
-# docker-compose.yml (tout mélangé)
-services:
-  qdrant:     # Infra - jamais touché
-  redis:      # Infra - jamais touché
-  app:        # App - redémarré souvent
-  worker:     # App - redémarré souvent
-  frontend:   # App - redémarré souvent
-```
-→ `docker-compose restart app` redémarre aussi Qdrant/Redis (inutile, lent)
+**Audits réalisés** : 3/6 phases
+**Vulnérabilités totales identifiées** : **63 failles** (Phase 0 + Phase 1 + Phase 2)
+**Score sécurité moyen** : **4.17/10** 🔴 **CRITIQUE**
 
-**Nouveau modèle** (solution) :
-```yaml
-# docker-compose.infra.yml
-services:
-  qdrant:     # Bases de données
-  redis:      # Cache/Queue
-  neo4j:      # Knowledge Graph
-  postgres:   # Metadata (futur)
+### Vulnérabilités par Phase
 
-# docker-compose.app.yml
-services:
-  app:        # FastAPI backend
-  worker:     # RQ worker
-  frontend:   # Next.js UI
-```
+| Phase | Audit | Total | 🔴 P0 Critical | 🟠 P1 High | 🟡 P2 Medium | 🟢 P3 Low | Score |
+|-------|-------|-------|---------------|-----------|-------------|----------|-------|
+| **Phase 0** | [SECURITY_AUDIT_PHASE0.md](phase0/SECURITY_AUDIT_PHASE0.md) | 18 | 5 | 7 | 4 | 2 | 3.5/10 |
+| **Phase 1** | [SECURITY_AUDIT_PHASE1.md](phase1/SECURITY_AUDIT_PHASE1.md) | 22 | 6 | 8 | 6 | 2 | 4.2/10 |
+| **Phase 2** | [SECURITY_AUDIT_PHASE2.md](phase2/SECURITY_AUDIT_PHASE2.md) | 23 | 8 | 7 | 6 | 2 | 4.5/10 |
+| **TOTAL** | - | **63** | **19** | **22** | **16** | **6** | **4.17/10** |
 
-**Commandes** :
-```bash
-# Démarrer infra (1 fois au boot machine)
-docker-compose -f docker-compose.infra.yml up -d
+### Vulnérabilités Critiques (P0) à Traiter en Priorité
 
-# Redémarrer app (développement)
-docker-compose -f docker-compose.app.yml restart app
+**Phase 0 (Infrastructure)** :
+1. 🔴 **SEC-P0-01** : Neo4j password hardcoded (CVSS 9.8)
+2. 🔴 **SEC-P0-02** : Redis no authentication (CVSS 9.1)
+3. 🔴 **SEC-P0-03** : Ports exposed publicly (CVSS 8.8)
+4. 🔴 **SEC-P0-04** : Volumes RW on source code (CVSS 8.5)
+5. 🔴 **SEC-P0-05** : No resource limits (CVSS 7.5)
 
-# Tout arrêter
-docker-compose -f docker-compose.infra.yml down
-docker-compose -f docker-compose.app.yml down
-```
+**Phase 1 (Code Neo4j Custom)** :
+6. 🔴 **SEC-P1-01** : TLS désactivé - Credentials en clair (CVSS 9.1)
+7. 🔴 **SEC-P1-02** : Credentials loggés (CVSS 7.5)
+8. 🔴 **SEC-P1-03** : Absence totale de RBAC (CVSS 8.8)
+9. 🔴 **SEC-P1-04** : Injection Cypher migrations (CVSS 8.6)
+10. 🔴 **SEC-P1-05** : Logs queries exposant données sensibles (CVSS 7.2)
+11. 🔴 **SEC-P1-06** : Absence d'audit trail (CVSS 7.8)
 
-**Fichiers à créer** :
-- `docker-compose.infra.yml` (infrastructure stateful)
-- `docker-compose.app.yml` (application stateless)
-- `docker-compose.override.yml` (dev local overrides)
-- `.env.example` (variables template)
-- `scripts/start-infra.sh` (helper script)
-- `scripts/start-app.sh` (helper script)
-- `scripts/restart-app.sh` (helper script)
+**Phase 2 (API Facts REST)** :
+12. 🔴 **SEC-P2-01** : Absence totale d'authentification (CVSS 9.8)
+13. 🔴 **SEC-P2-02** : Bypass isolation tenant_id (CVSS 9.1)
+14. 🔴 **SEC-P2-03** : Injection Cypher potentielle /timeline (CVSS 9.6)
+15. 🔴 **SEC-P2-04** : Absence rate limiting (DoS facile) (CVSS 8.6)
+16. 🔴 **SEC-P2-05** : Leaks informations sensibles logs/erreurs (CVSS 7.8)
+17. 🔴 **SEC-P2-06** : Absence audit trail (non-conformité RGPD) (CVSS 8.2)
+18. 🔴 **SEC-P2-07** : CORS trop permissif (CVSS 7.5)
+19. 🔴 **SEC-P2-08** : Pas de limite payload size (DoS mémoire) (CVSS 8.1)
 
-**Livrable** : Docker séparé fonctionnel avec scripts helpers
+### Plan Correctifs Sécurité
 
----
+**Phase Immédiate (1 jour - URGENT)** :
+- ✅ Activer TLS Neo4j (SEC-P1-01)
+- ✅ Retirer credentials des logs (SEC-P1-02, SEC-P0-01)
+- ✅ Implémenter ACL basique (SEC-P1-03)
+- ✅ Validation stricte migrations (SEC-P1-04)
+- ✅ Désactiver logs queries sensibles (SEC-P1-05)
+- ✅ Audit trail basique (SEC-P1-06)
 
-#### 0.3 - Migration Sélective Code Réutilisable
-**Durée** : 2h
+**Phase Court Terme (2-3 jours)** :
+- ✅ Authentification Redis (SEC-P0-02)
+- ✅ Network policies (SEC-P0-03)
+- ✅ Volumes read-only (SEC-P0-04)
+- ✅ Resource limits containers (SEC-P0-05)
+- ✅ Timeouts queries (SEC-P1-07)
+- ✅ Connection pool sécurisé (SEC-P1-08)
 
-**Modules à migrer** (0 dépendance Graphiti) :
+**Phase Moyen Terme (1 semaine)** :
+- ✅ Secrets management (Vault, AWS Secrets Manager)
+- ✅ Monitoring anomalies
+- ✅ Secrets rotation automatique
+- ✅ Chiffrement at-rest (optionnel)
 
-**Common utilities** :
-- `src/knowbase/common/logging.py` ✅
-- `src/knowbase/common/metrics.py` ✅
-- `src/knowbase/common/pagination.py` ✅
-- `src/knowbase/common/auth.py` ✅
-- `src/knowbase/common/circuit_breaker.py` ✅
-- `src/knowbase/common/redis_client_resilient.py` ✅
-- `src/knowbase/common/tracing.py` ✅
-- `src/knowbase/common/input_validation.py` ✅
+### Gate Production - Critères Sécurité
 
-**Audit & Observabilité** :
-- `src/knowbase/audit/*` (tout) ✅
+**Bloquants Production** :
+- ❌ **19 vulnérabilités P0 (Critical) DOIVENT être corrigées** avant production
+- ⚠️ **22 vulnérabilités P1 (High) DOIVENT être traitées ou mitigées**
+- ✅ Audit sécurité externe recommandé avant production
 
-**Ingestion base** (sans KG) :
-- `src/knowbase/ingestion/pipelines/pptx_pipeline.py` ✅
-- `src/knowbase/ingestion/deduplication.py` ✅
-- `src/knowbase/ingestion/queue/jobs.py` ✅
+**Statut** : 🔴 **NON prêt pour production** - Correctifs planifiés Phase 5
 
-**Configuration** :
-- `config/llm_models.yaml` ✅
-- `config/prompts.yaml` ✅
-- `config/document_types.yaml` ✅
-
-**Modules à NE PAS migrer** (dépendances Graphiti) :
-- ❌ `src/knowbase/graphiti/*` (tout)
-- ❌ `src/knowbase/search/hybrid_search.py` (utilise GraphitiProxy)
-- ❌ `src/knowbase/ingestion/pipelines/pptx_pipeline_kg.py` (à réécrire pour Neo4j)
-
-**Script migration** :
-```bash
-# Exécuter scripts/migrate_to_neo4j_clean.sh
-bash scripts/migrate_to_neo4j_clean.sh
-```
-
-**Livrable** : Code utilitaire migré sans dépendances Graphiti
+**Priorité Critique Phase 2** :
+- 🔴 Authentification JWT endpoints /facts
+- 🔴 Vérification isolation tenant_id (penetration tests)
+- 🔴 Rate limiting (slowapi + Redis)
+- 🔴 Audit trail gouvernance (approve/reject)
 
 ---
 
-#### 0.4 - Création Structure Neo4j Custom
-**Durée** : 1h
+## 📋 Détails par Phase
 
-**Structure cible** :
-```
-src/knowbase/
-├── neo4j_custom/           # Neo4j native layer
-│   ├── __init__.py
-│   ├── client.py           # Neo4j driver wrapper
-│   ├── schemas.py          # Cypher schemas (Facts, Entities)
-│   ├── queries.py          # Requêtes Cypher réutilisables
-│   └── migrations.py       # Schema migrations
-├── facts/                  # Facts governance layer
-│   ├── __init__.py
-│   ├── service.py          # FactsService (CRUD, gouvernance)
-│   ├── conflict_detector.py # Détection conflits
-│   ├── schemas.py          # Pydantic models
-│   ├── timeline.py         # Timeline temporelle
-│   └── validators.py       # Validation facts
-├── api/routers/
-│   └── facts.py            # Endpoints /api/facts/*
-tests/
-├── neo4j_custom/           # Tests Neo4j layer
-│   ├── test_client.py
-│   └── test_queries.py
-├── facts/                  # Tests facts service
-│   ├── test_service.py
-│   ├── test_conflict_detector.py
-│   └── test_timeline.py
-```
+### ✅ Phase 0 : Clean Slate Setup & Restructuration Infrastructure
 
-**Commandes** :
-```bash
-mkdir -p src/knowbase/neo4j_custom
-mkdir -p src/knowbase/facts
-mkdir -p tests/neo4j_custom
-mkdir -p tests/facts
+**Statut** : ✅ **COMPLÉTÉE**
+**Durée** : 1 jour (estimé : 1 jour)
+**Progression** : **100%** (7/7 tâches)
 
-# Créer fichiers __init__.py
-touch src/knowbase/neo4j_custom/__init__.py
-touch src/knowbase/facts/__init__.py
-```
+**Tracking détaillé** : [phase0/TRACKING_PHASE0.md](phase0/TRACKING_PHASE0.md)
+**Validation** : [phase0/PHASE0_COMPLETED.md](phase0/PHASE0_COMPLETED.md)
+**Sécurité** : [phase0/SECURITY_AUDIT_PHASE0.md](phase0/SECURITY_AUDIT_PHASE0.md)
 
-**Livrable** : Structure vide prête à recevoir implémentation
+**Livrables** :
+- ✅ Branche `feat/north-star-phase0` créée et archivée
+- ✅ Docker séparé (application + infrastructure temporaire)
+- ✅ Structure `src/knowbase/neo4j_custom/` créée (stubs)
+- ✅ Documentation North Star v2.0 (800 lignes)
+- ✅ 7/7 tests validation passés
+
+**Gate Phase 0 → Phase 1** : ✅ **VALIDÉ** (6/6 critères passés)
 
 ---
 
-#### 0.5 - Archivage Branches Obsolètes
-**Durée** : 30 min
+### ✅ Phase 1 : POC Neo4j Facts (Validation Technique)
 
-**Branches à archiver** :
-- `feat/zep-multiuser` (architecture Zep abandonnée)
-- `feat/graphiti-integration` (architecture Graphiti abandonnée)
-- `feat/north-star-phase0` (code Graphiti à remplacer)
+**Statut** : ✅ **COMPLÉTÉE**
+**Durée** : 1 jour (estimé : 2 jours = **50% gain**)
+**Progression** : **100%** (4/4 tâches)
 
-**Stratégie** : Tags Git (préserve code sans polluer branches)
+**Tracking détaillé** : [phase1/TRACKING_PHASE1.md](phase1/TRACKING_PHASE1.md)
+**Validation** : [phase1/PHASE1_POC_VALIDATION.md](phase1/PHASE1_POC_VALIDATION.md)
+**Sécurité** : [phase1/SECURITY_AUDIT_PHASE1.md](phase1/SECURITY_AUDIT_PHASE1.md)
 
-```bash
-# Créer tags archive
-git tag archive/zep-multiuser feat/zep-multiuser
-git tag archive/graphiti-integration feat/graphiti-integration
-git tag archive/north-star-phase0 feat/north-star-phase0
+**Livrables** :
+- ✅ Module `neo4j_custom` complet (1420 lignes)
+  - `client.py` - Wrapper Neo4j avec retry logic
+  - `schemas.py` - Schéma Facts + 6 indexes
+  - `migrations.py` - Système versioning
+  - `queries.py` - CRUD + détection conflits
+- ✅ Test POC `test_neo4j_poc.py` (450 lignes)
+- ✅ 5/5 tests POC passés (100%)
+- ✅ Performance validée : **6.28ms** < 50ms (**8x plus rapide**)
 
-# Pousser tags sur remote
-git push origin --tags
-
-# Supprimer branches locales
-git branch -D feat/zep-multiuser
-git branch -D feat/graphiti-integration
-git branch -D feat/north-star-phase0
-
-# (Optionnel) Supprimer branches remote après validation
-# git push origin --delete feat/zep-multiuser
-# git push origin --delete feat/graphiti-integration
-# git push origin --delete feat/north-star-phase0
-```
-
-**Récupération ultérieure** (si besoin) :
-```bash
-git checkout archive/graphiti-integration
-```
-
-**Livrable** : Branches archivées, projet allégé
+**Gate Phase 1 → Phase 2** : ✅ **VALIDÉ** (4/4 critères passés)
 
 ---
 
-#### 0.6 - Documentation North Star Neo4j
-**Durée** : 2h
+### ✅ Phase 2 : Migration APIs & Services Facts
 
-**Fichiers à créer** :
+**Statut** : ✅ **COMPLÉTÉE**
+**Durée** : 2 jours (estimé : 3 jours = **33% gain**)
+**Progression** : **100%** (10/10 tâches)
 
-1. **`doc/NORTH_STAR_NEO4J_NATIVE.md`** (vision globale)
-   - Architecture cible Neo4j custom
-   - Séparation responsabilités (Qdrant / Neo4j / Facts)
-   - Schémas Cypher Facts
-   - Workflows gouvernance
-   - Principes non négociables
+**Tracking détaillé** : [phase2/TRACKING_PHASE2.md](phase2/TRACKING_PHASE2.md)
+**Sécurité** : [phase2/SECURITY_AUDIT_PHASE2.md](phase2/SECURITY_AUDIT_PHASE2.md)
 
-2. **`doc/MIGRATION_NEO4J_NATIVE_PHASE0_DETAILS.md`** (Phase 0 détaillée)
-3. **`doc/MIGRATION_NEO4J_NATIVE_PHASE1_DETAILS.md`** (Phase 1 POC)
-4. **`doc/MIGRATION_NEO4J_NATIVE_PHASE2_DETAILS.md`** (Phase 2 APIs)
-5. **`doc/MIGRATION_NEO4J_NATIVE_PHASE3_DETAILS.md`** (Phase 3 Ingestion)
-6. **`doc/MIGRATION_NEO4J_NATIVE_PHASE4_DETAILS.md`** (Phase 4 UI)
-7. **`doc/MIGRATION_NEO4J_NATIVE_PHASE5_DETAILS.md`** (Phase 5 Tests)
-8. **`doc/MIGRATION_NEO4J_NATIVE_PHASE6_DETAILS.md`** (Phase 6 Cleanup)
+**Livrables** :
+- ✅ **Schémas Pydantic** : `schemas/facts.py` (376 lignes) - 6 enums, validation stricte
+- ✅ **Service Layer** : `services/facts_service.py` (450 lignes) - CRUD complet + gouvernance
+- ✅ **API Router** : `routers/facts.py` (500 lignes) - 10 endpoints REST
+- ✅ **Documentation Swagger** : OpenAPI enrichie avec tags, descriptions
+- ✅ **Tests Service** : `test_facts_service.py` (400 lignes) - 30+ tests
+- ✅ **Tests Endpoints** : `test_facts_endpoints.py` (500 lignes) - 25+ tests
+- ✅ **Fixtures** : `conftest.py` (170 lignes) - 10 fixtures mocks Neo4j
+- ✅ 62/62 tests fonctionnels (100%)
+- ✅ Couverture ~85% (estimation)
 
-**Template fichier phase** :
-```markdown
-# Phase X : [Nom Phase]
+**Endpoints Créés** :
+- `POST /api/facts` - Créer fact
+- `GET /api/facts/{uuid}` - Récupérer fact
+- `GET /api/facts` - Liste avec filtres
+- `PUT /api/facts/{uuid}` - Mettre à jour
+- `DELETE /api/facts/{uuid}` - Supprimer
+- `POST /api/facts/{uuid}/approve` - Approuver
+- `POST /api/facts/{uuid}/reject` - Rejeter
+- `GET /api/facts/conflicts` - Détecter conflits
+- `GET /api/facts/timeline/{subject}/{predicate}` - Timeline
+- `GET /api/facts/stats` - Statistiques
 
-**Durée** : X jours
-**Statut** : ⏳ En attente
-**Dépendances** : Phase X-1 complétée
+**Gate Phase 2 → Phase 3** : ✅ **VALIDÉ** (4/4 critères passés)
+- ✅ 10 endpoints `/api/facts` fonctionnels
+- ✅ FactsService migré Neo4j Native
+- ✅ 62 tests API passés (100%)
+- ✅ Documentation Swagger complète
 
-## Objectifs
-- Objectif 1
-- Objectif 2
-
-## Critères d'Achèvement
-- [ ] Critère 1
-- [ ] Critère 2
-
-## Tâches Détaillées
-### X.1 - Tâche 1
-**Durée** : Xh
-**Livrable** : ...
-
-## Risques & Mitigation
-| Risque | Probabilité | Impact | Mitigation |
-|--------|-------------|--------|------------|
-
-## Tests de Validation
-- Test 1
-- Test 2
-
-## Métriques de Succès
-- Métrique 1 : Objectif
-- Métrique 2 : Objectif
-```
-
-**Livrable** : Documentation complète migration
+**⚠️ Sécurité** : 23 vulnérabilités (8 P0) - Correctifs Phase 5
 
 ---
 
-### Impacts sur l'Existant
+### ⏳ Phase 3 : Pipeline Ingestion & Détection Conflits
 
-**Code supprimé** :
-- ❌ `src/knowbase/graphiti/*` (tout)
-- ❌ `docker-compose.graphiti.yml`
-- ❌ Scripts migration Graphiti
-- ❌ Documentation Graphiti
+**Statut** : ⏳ **EN ATTENTE**
+**Durée estimée** : 3 jours
+**Progression** : **0%**
 
-**Code créé** :
-- ✅ `src/knowbase/neo4j_custom/*`
-- ✅ `src/knowbase/facts/*`
-- ✅ `docker-compose.infra.yml`
-- ✅ `docker-compose.app.yml`
-- ✅ Documentation Neo4j native
+**Tracking détaillé** : [phase3/TRACKING_PHASE3.md](phase3/TRACKING_PHASE3.md) *(à créer)*
 
-**Code migré** :
-- ♻️ Modules utilitaires (logging, metrics, audit, etc.)
-- ♻️ Ingestion pipeline base
-- ♻️ Configuration LLM/prompts
+**Objectifs** :
+1. Intégrer extraction facts dans pipeline PPTX
+2. Appel LLM Vision pour extraction facts structurés
+3. Insertion facts Neo4j (status="proposed")
+4. Détection conflits automatique post-ingestion
+5. Notification conflits critiques (webhook/email)
 
----
-
-### Tests de Validation Phase 0
-
-**Test 1 : Branche propre créée**
-```bash
-git branch --show-current
-# Attendu: feat/neo4j-native
-```
-
-**Test 2 : Docker infra séparé fonctionne**
-```bash
-docker-compose -f docker-compose.infra.yml up -d
-docker ps | grep -E "qdrant|redis|neo4j"
-# Attendu: 3+ containers running (qdrant, redis, neo4j)
-```
-
-**Test 3 : Docker app séparé fonctionne**
-```bash
-docker-compose -f docker-compose.app.yml up -d
-docker ps | grep -E "app|worker|frontend"
-# Attendu: 3 containers running (app, worker, frontend)
-```
-
-**Test 4 : Redémarrage app sans infra**
-```bash
-docker-compose -f docker-compose.app.yml restart app
-docker ps | grep qdrant | grep "Up"
-# Attendu: qdrant toujours Up (pas redémarré)
-```
-
-**Test 5 : Modules utilitaires importables**
-```bash
-docker-compose -f docker-compose.app.yml exec app python -c "
-from knowbase.common.logging import setup_logging
-from knowbase.audit.audit_logger import AuditLogger
-print('Imports OK')
-"
-# Attendu: "Imports OK"
-```
-
-**Test 6 : Structure Neo4j créée**
-```bash
-ls -la src/knowbase/neo4j_custom/
-ls -la src/knowbase/facts/
-# Attendu: Répertoires existent avec __init__.py
-```
-
-**Test 7 : Tags archive créés**
-```bash
-git tag | grep archive
-# Attendu:
-# archive/zep-multiuser
-# archive/graphiti-integration
-# archive/north-star-phase0
-```
+**Gate Phase 3 → Phase 4** :
+- Pipeline PPTX extrait facts Neo4j
+- Détection conflits post-ingestion fonctionnelle
+- Tests pipeline 100% passés
 
 ---
 
-### Risques & Mitigation Phase 0
+### ⏳ Phase 4 : UI Admin Gouvernance Facts
 
-| Risque | Probabilité | Impact | Mitigation |
-|--------|-------------|--------|------------|
-| Migration code rate fichier utilitaire | Faible (10%) | Moyen | Revue code systématique avant migration |
-| Docker séparé casse dépendances inter-services | Moyen (20%) | Élevé | Tester communication app→qdrant, app→redis avant merge |
-| Perte code utile lors cleanup | Faible (5%) | Élevé | Tags archive préservent tout l'historique |
-| Documentation incomplète | Moyen (20%) | Moyen | Template phase détaillé + review pair |
+**Statut** : ⏳ **EN ATTENTE**
+**Durée estimée** : 3 jours
+**Progression** : **0%**
 
----
+**Tracking détaillé** : [phase4/TRACKING_PHASE4.md](phase4/TRACKING_PHASE4.md) *(à créer)*
 
-### Métriques de Succès Phase 0
+**Objectifs** :
+1. Créer page admin `/admin/facts`
+2. Liste facts (proposed, approved, conflicted)
+3. Workflow approbation/rejet facts
+4. Résolution conflits (approve, reject, merge)
+5. Timeline visualisation
 
-| Métrique | Objectif | Mesure |
-|----------|----------|--------|
-| **Temps migration** | < 1 jour | Réel: ___h |
-| **Tests validation passés** | 7/7 | Réel: ___/7 |
-| **Modules utilitaires migrés** | 100% (sans dépendance Graphiti) | Réel: ___% |
-| **Docker infra startup time** | < 30s | Réel: ___s |
-| **Docker app startup time** | < 20s | Réel: ___s |
-| **Taille branche** (commits) | < 10 commits Phase 0 | Réel: ___ commits |
+**Gate Phase 4 → Phase 5** :
+- UI admin fonctionnelle
+- Workflow gouvernance complet
+- Tests UI E2E passés
 
 ---
 
-## ⚠️ Risques Sécurité à Traiter Avant Production
+### ⏳ Phase 5 : Tests E2E & Hardening Sécurité
 
-**Statut** : 🟡 Identifiés, non bloquants pour développement
-**Référence** : `doc/SECURITY_AUDIT_PHASE0.md`
+**Statut** : ⏳ **EN ATTENTE**
+**Durée estimée** : 2 jours
+**Progression** : **0%**
 
-### 🔴 Vulnérabilités Critiques (P0) - BLOCKER PRODUCTION
+**Tracking détaillé** : [phase5/TRACKING_PHASE5.md](phase5/TRACKING_PHASE5.md) *(à créer)*
 
-| ID | Vulnérabilité | Impact | Phase Correctif |
-|----|---------------|--------|-----------------|
-| SEC-1 | Mot de passe Neo4j par défaut hardcodé | Accès root DB | Phase 5 (Tests) |
-| SEC-2 | Redis sans authentification | Accès cache/queue | Phase 5 (Tests) |
-| SEC-3 | Ports sensibles exposés publiquement | RCE via debug ports | Phase 5 (Tests) |
-| SEC-4 | Volumes code source en RW | Backdoor persistant | Phase 6 (Prod) |
-| SEC-5 | Pas de limites ressources (CPU/RAM) | DoS host | Phase 5 (Tests) |
+**Objectifs** :
+1. Tests E2E complets (ingestion → détection → resolution)
+2. **Correction 11 vulnérabilités P0 (BLOQUANT PRODUCTION)**
+3. **Correction/mitigation 15 vulnérabilités P1**
+4. Documentation sécurité
+5. Audit sécurité externe (recommandé)
 
-### 🟠 Vulnérabilités Élevées (P1) - RECOMMANDÉES AVANT TESTS ÉLARGIS
-
-| ID | Vulnérabilité | Phase Correctif |
-|----|---------------|-----------------|
-| SEC-6 | API keys en clair dans .env | Phase 4 (UI) |
-| SEC-7 | Neo4j APOC procedures unrestricted | Phase 5 (Tests) |
-| SEC-8 | Qdrant sans authentification | Phase 5 (Tests) |
-| SEC-9 | Logs sensibles non sécurisés | Phase 5 (Tests) |
-| SEC-10 | Restart policy sans monitoring | Phase 5 (Tests) |
-| SEC-11 | Network bridge sans isolation | Phase 6 (Prod) |
-| SEC-12 | Healthchecks peu sécurisés | Phase 4 (UI) |
-
-**Gate Production** : Les 5 vulnérabilités critiques (SEC-1 à SEC-5) DOIVENT être corrigées avant tout déploiement production.
-
-**Effort estimé correctifs** : 1-2 jours (Phase 5)
+**Gate Phase 5 → Phase 6** :
+- Tests E2E 100% passés
+- **11 vulnérabilités P0 corrigées**
+- Vulnérabilités P1 traitées/mitigées
+- Score sécurité > 7/10
+- Documentation complète
 
 ---
 
-## 📅 Timeline Macro
+### ⏳ Phase 6 : Décommission Graphiti & Cleanup
 
-```
-Semaine 1 (Jour 1-5)
-├── Jour 1: Phase 0 - Clean Slate Setup ✅
-├── Jour 2: Phase 1 - POC Neo4j Facts (Jour 1/2)
-├── Jour 3: Phase 1 - POC Neo4j Facts (Jour 2/2) + Validation
-├── Jour 4: Phase 2 - APIs Facts (Jour 1/3)
-└── Jour 5: Phase 2 - APIs Facts (Jour 2/3)
+**Statut** : ⏳ **EN ATTENTE**
+**Durée estimée** : 1 jour
+**Progression** : **0%**
 
-Semaine 2 (Jour 6-10)
-├── Jour 6: Phase 2 - APIs Facts (Jour 3/3) + Tests
-├── Jour 7: Phase 3 - Pipeline Ingestion (Jour 1/3)
-├── Jour 8: Phase 3 - Pipeline Ingestion (Jour 2/3)
-├── Jour 9: Phase 3 - Détection Conflits (Jour 3/3)
-└── Jour 10: Phase 4 - UI Admin (Jour 1/3)
+**Tracking détaillé** : [phase6/TRACKING_PHASE6.md](phase6/TRACKING_PHASE6.md) *(à créer)*
 
-Semaine 3 (Jour 11-15)
-├── Jour 11: Phase 4 - UI Admin (Jour 2/3)
-├── Jour 12: Phase 4 - UI Admin (Jour 3/3) + Tests
-├── Jour 13: Phase 5 - Tests E2E (Jour 1/2)
-├── Jour 14: Phase 5 - Documentation (Jour 2/2)
-└── Jour 15: Phase 6 - Cleanup & Décommission Graphiti
-```
+**Objectifs** :
+1. Retirer `docker-compose.graphiti.yml`
+2. Supprimer code Graphiti résiduel
+3. Nettoyage dépendances Python
+4. Documentation finale
+5. Tag release `v2.0.0-neo4j-native`
+
+**Gate Phase 6 → Production** :
+- Code Graphiti complètement retiré
+- Dépendances nettoyées
+- Documentation à jour
+- Release tag créé
+- **Sécurité production validée**
 
 ---
 
-## 🎯 Critères de Passage Entre Phases
+## 📅 Planning Prévisionnel
 
-**Règle stricte** : Aucune phase n'est validée tant que tous les critères ne sont pas atteints.
+### Semaine 1 (Jours 1-5)
+- ✅ **Jour 1** : Phase 0 - Clean Slate (COMPLÉTÉ)
+- ✅ **Jour 2** : Phase 1 - POC Neo4j (COMPLÉTÉ - gain 1 jour)
+- ✅ **Jour 3** : Phase 2 - APIs Facts (Jour 1/2 - COMPLÉTÉ)
+- ✅ **Jour 4** : Phase 2 - APIs Facts (Jour 2/2 - COMPLÉTÉ - gain 1 jour)
+- 🆕 **Jour 5** : Phase 3 - Pipeline Ingestion (Jour 1/3)
 
-**Gate Phase 0 → Phase 1** :
-- ✅ Branche `feat/neo4j-native` créée et pushed
-- ✅ Docker séparé (infra + app) fonctionnel
-- ✅ 7/7 tests validation Phase 0 passés
-- ✅ Documentation North Star créée
-- ✅ Code review approuvé (pair review)
-- ✅ Audit sécurité réalisé (18 vulnérabilités identifiées, tracking updated)
+### Semaine 2 (Jours 6-10)
+- ⏳ **Jour 6** : Phase 3 - Pipeline Ingestion (Jour 2/3)
+- ⏳ **Jour 7** : Phase 3 - Détection Conflits (Jour 3/3)
+- ⏳ **Jour 8** : Phase 4 - UI Admin (Jour 1/3)
+- ⏳ **Jour 9** : Phase 4 - UI Admin (Jour 2/3)
+- ⏳ **Jour 10** : Phase 4 - UI Admin (Jour 3/3)
 
-**Gate Phase 1 → Phase 2** :
-- ✅ POC Neo4j Facts fonctionnel (insert, query, conflict detection)
-- ✅ Performance < 50ms confirmée
-- ✅ Équipe confortable avec Cypher
-- ✅ Tests POC passés (insert, query, detect conflicts)
+### Semaine 3 (Jours 11-13)
+- ⏳ **Jour 11** : Phase 5 - Tests E2E (Jour 1/2)
+- ⏳ **Jour 12** : Phase 5 - Hardening Sécurité (Jour 2/2)
+- ⏳ **Jour 13** : Phase 6 - Cleanup & Release v2.0.0
 
-**Gates suivants** : Définis dans fichiers phase détaillés
-
----
-
-## 📊 Indicateurs Projet Global
-
-| Indicateur | Cible | Actuel |
-|------------|-------|--------|
-| **% Phases complétées** | 100% (6/6) | 0% (0/6) |
-| **Jours écoulés** | 15 jours | 0 jours |
-| **Tests validation passés** | 100% | ___% |
-| **Performance détection conflits** | < 50ms | ___ ms |
-| **Couverture tests** | > 80% | ___% |
-| **Dette technique réduite** | -100% (vs Graphiti) | ___% |
+**État actuel** : Fin Jour 4 - **Avance de 2 jours sur planning** (estimé 15j → réel 13j)
 
 ---
 
-## 🚀 Prochaines Actions
+## 📚 Documents de Référence
 
-### Immédiat (Aujourd'hui)
-1. ✅ Valider ce plan de migration
-2. ⏳ Lancer Phase 0 (Clean Slate Setup)
+### Documentation Globale
+- **Vision Architecture** : [NORTH_STAR_NEO4J_NATIVE.md](NORTH_STAR_NEO4J_NATIVE.md)
+- **Décision Migration** : [DECISION_GRAPHITI_ALTERNATIVES_SYNTHESE.md](DECISION_GRAPHITI_ALTERNATIVES_SYNTHESE.md)
+- **Documentation Projet** : [projet-reference-documentation.md](projet-reference-documentation.md)
 
-### Demain
-3. ⏳ Finaliser Phase 0
-4. ⏳ Démarrer Phase 1 (POC Neo4j)
+### Documentation par Phase
+- **Phase 0** : [phase0/](phase0/)
+  - Tracking : [TRACKING_PHASE0.md](phase0/TRACKING_PHASE0.md)
+  - Validation : [PHASE0_COMPLETED.md](phase0/PHASE0_COMPLETED.md)
+  - Sécurité : [SECURITY_AUDIT_PHASE0.md](phase0/SECURITY_AUDIT_PHASE0.md)
+
+- **Phase 1** : [phase1/](phase1/)
+  - Tracking : [TRACKING_PHASE1.md](phase1/TRACKING_PHASE1.md)
+  - Validation : [PHASE1_POC_VALIDATION.md](phase1/PHASE1_POC_VALIDATION.md)
+  - Sécurité : [SECURITY_AUDIT_PHASE1.md](phase1/SECURITY_AUDIT_PHASE1.md)
+
+- **Phase 2** : [phase2/](phase2/)
+  - Tracking : [TRACKING_PHASE2.md](phase2/TRACKING_PHASE2.md)
+  - Sécurité : [SECURITY_AUDIT_PHASE2.md](phase2/SECURITY_AUDIT_PHASE2.md)
+
+### Archive
+- **Documentation obsolète** : [archive/](archive/)
+  - Graphiti Integration Plan
+  - Zep Integration Plan
+  - LLM Migration Plans
+  - Architecture Reviews (legacy)
 
 ---
 
-## 📚 Documents Associés
+## 🎯 Prochaines Actions
 
-- **Vision globale** : `doc/NORTH_STAR_NEO4J_NATIVE.md` (à créer)
-- **Décision migration** : `doc/DECISION_GRAPHITI_ALTERNATIVES_SYNTHESE.md`
-- **Analyse alternatives** : `doc/GRAPHITI_ALTERNATIVES_ANALYSIS_RESULTS.md`
-- **Phase 0 détails** : `doc/MIGRATION_NEO4J_NATIVE_PHASE0_DETAILS.md` (à créer)
-- **Phases suivantes** : `doc/MIGRATION_NEO4J_NATIVE_PHASE{1-6}_DETAILS.md` (à créer)
+### Immédiat (Jour 5)
+1. ✅ Créer `doc/phase3/TRACKING_PHASE3.md`
+2. ✅ Intégrer extraction facts dans pipeline PPTX
+3. ✅ Appel LLM Vision pour extraction structurée
+
+### Court Terme (Semaine 2)
+1. ✅ Compléter Phase 3 (Pipeline Ingestion + Conflits)
+2. ✅ Phase 4 : UI Admin Gouvernance
+3. ✅ Tests E2E pipeline complet
+
+### Moyen Terme (Semaine 3)
+1. ✅ Phase 5 : Tests E2E + Hardening Sécurité (19 P0 à corriger)
+2. ✅ Phase 6 : Cleanup & Release v2.0.0
+3. ✅ Documentation finale production
+
+---
+
+## ✅ Succès & Apprentissages
+
+### Points Forts du Projet
+1. ✅ **Gain temps 33%** - 4 jours vs 6 jours estimé (Phases 0-2)
+2. ✅ **Performance exceptionnelle** - 6.28ms vs 50ms (8x mieux)
+3. ✅ **Tests 100%** - Tous tests validation passés (62/62)
+4. ✅ **Clean slate effectif** - Dette technique Graphiti éliminée
+5. ✅ **Documentation exhaustive** - 6000+ lignes doc créées
+6. ✅ **API REST complète** - 10 endpoints Facts production-ready (hors sécurité)
+7. ✅ **Couverture tests** - ~85% Phase 2 (55+ tests unitaires/intégration)
+
+### Challenges & Risques
+1. 🔴 **Sécurité CRITIQUE** - 63 vulnérabilités identifiées (19 P0)
+2. 🔴 **Authentification absente** - Endpoints /facts sans auth (CVSS 9.8)
+3. 🔴 **Rate limiting absent** - DoS facile sans protection
+4. ⚠️ **Correctifs sécurité Phase 5** - BLOQUANT pour production
+5. ⚠️ **Neo4j Community vs Enterprise** - Contraintes limitées (validation applicative OK)
+6. ⚠️ **Complexité governance workflow** - Phase 4 peut prendre plus de temps
+
+### Décisions Techniques Clés
+1. ✅ Validation applicative (compense contraintes Enterprise)
+2. ✅ Singleton global client Neo4j
+3. ✅ Tracking sécurité centralisé (niveau global)
+4. ✅ Documentation par phase (lisibilité)
+5. ✅ Pydantic v2 + FastAPI (validation stricte automatique)
+6. ✅ Service Layer pattern (séparation concerns)
+7. ✅ Tests mocks Neo4j (isolation, rapidité)
+8. ✅ OpenAPI tags personnalisés (UX Swagger)
 
 ---
 
 **Créé le** : 2025-10-03
-**Dernière mise à jour** : 2025-10-03
-**Version** : 1.0
-**Statut** : 🟡 En préparation - Attente validation
+**Dernière mise à jour** : 2025-10-05
+**Version** : 3.0
+**Statut** : 🟢 **EN COURS** - Phase 2 complétée, Phase 3 à démarrer
+**Progression** : **50%** (3/6 phases)
