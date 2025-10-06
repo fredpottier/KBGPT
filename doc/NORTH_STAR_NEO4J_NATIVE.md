@@ -1,10 +1,12 @@
 # Plateforme RAG Hybride (Qdrant + Neo4j Native) — North Star
 
-**Date** : 2025-10-03
-**Version** : 2.0 (Neo4j Native)
-**Statut** : 🟢 Architecture validée
+**Date** : 2025-10-06
+**Version** : 2.1 (Neo4j Native + Dynamic Entity Types)
+**Statut** : 🟢 Architecture validée + En évolution
 
-> **Évolution majeure** : Migration de Graphiti vers Neo4j Native + Custom Layer pour gouvernance intelligente des facts métier.
+> **Évolutions majeures** :
+> 1. Migration de Graphiti vers Neo4j Native + Custom Layer pour gouvernance intelligente des facts métier (v2.0)
+> 2. Système auto-learning entity types avec workflow validation admin (v2.1 - Phases 1-4 complétées)
 
 ---
 
@@ -29,7 +31,9 @@
 ### Différenciateur Clé
 
 ❌ **Pas un RAG classique** : Recherche chunks + synthèse LLM
-✅ **RAG Intelligent** : Facts structurés + Détection conflits + Gouvernance + Timeline
+✅ **RAG Intelligent** : Facts structurés + Détection conflits + Gouvernance + Timeline + **Auto-Learning Entity Types**
+
+**Nouveauté v2.1** : Le système apprend automatiquement de nouveaux types d'entités métier découverts par le LLM, avec validation admin avant enrichissement de l'ontologie.
 
 ---
 
@@ -38,26 +42,34 @@
 ### A. Séparation Nette des Responsabilités
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    ARCHITECTURE CIBLE                       │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌──────────────┐      ┌──────────────┐     ┌───────────┐ │
-│  │   QDRANT     │      │   NEO4J      │     │  POSTGRES │ │
-│  │  (Vector DB) │      │ (Graph + KG) │     │ (Metadata)│ │
-│  └──────────────┘      └──────────────┘     └───────────┘ │
-│         │                      │                    │      │
-│         └──────────────────────┼────────────────────┘      │
-│                                │                           │
-│  ┌─────────────────────────────▼────────────────────────┐  │
-│  │          CUSTOM FACTS GOVERNANCE LAYER               │  │
-│  │  • Facts structurés (subject, predicate, value)      │  │
-│  │  • Détection conflits (CONTRADICTS, OVERRIDES, ...)  │  │
-│  │  • Workflow proposed → approved                      │  │
-│  │  • Timeline bi-temporelle (valid_from/until)         │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                      ARCHITECTURE CIBLE                          │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐   ┌──────────────┐   ┌─────────┐  ┌────────┐ │
+│  │   QDRANT     │   │   NEO4J      │   │ SQLITE  │  │POSTGRES│ │
+│  │  (Vector DB) │   │ (Graph + KG) │   │(Registry│  │(Futur) │ │
+│  └──────────────┘   └──────────────┘   └─────────┘  └────────┘ │
+│         │                   │                │           │       │
+│         └───────────────────┼────────────────┼───────────┘       │
+│                             │                │                   │
+│  ┌──────────────────────────▼────────────────▼────────────────┐  │
+│  │        CUSTOM GOVERNANCE LAYERS (v2.1)                     │  │
+│  │                                                             │  │
+│  │  1. FACTS GOVERNANCE (v2.0)                                │  │
+│  │     • Facts structurés (subject, predicate, value)         │  │
+│  │     • Détection conflits (CONTRADICTS, OVERRIDES, ...)     │  │
+│  │     • Workflow proposed → approved                         │  │
+│  │     • Timeline bi-temporelle (valid_from/until)            │  │
+│  │                                                             │  │
+│  │  2. ENTITY TYPES AUTO-LEARNING (v2.1 - NEW)               │  │
+│  │     • LLM découvre types → EntityTypeRegistry (SQLite)     │  │
+│  │     • Validation entities (cataloged vs pending)           │  │
+│  │     • Workflow admin (approve/reject/merge)                │  │
+│  │     • Enrichissement ontologie YAML automatique            │  │
+│  └─────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 **Qdrant** : Mémoire textuelle (chunks)
@@ -67,6 +79,8 @@
 
 **Neo4j** : Sémantique métier + Facts structurés
 - **Entities** : Concepts métier (ex: "SAP S/4HANA Cloud")
+  - **Champs dynamiques (v2.1)** : `status` (validated/pending), `is_cataloged` (true/false)
+  - **Workflow auto** : Entités cataloguées → validated, non cataloguées → pending
 - **Relations** : Liens sémantiques (ex: "USES_INTERFACE")
 - **Facts** (first-class nodes) : Assertions quantifiables structurées
   ```cypher
@@ -82,6 +96,12 @@
     valid_until: null
   })
   ```
+
+**SQLite** : Entity Types Registry (v2.1 - NEW)
+- Auto-découverte types par LLM
+- Workflow validation admin (pending/approved/rejected)
+- Multi-tenancy avec composite unique index `(type_name, tenant_id)`
+- Traçabilité découverte (discovered_by, first_seen, approved_by)
 
 **PostgreSQL** : Metadata applicative (futur)
 - Historique imports
@@ -429,10 +449,15 @@ docker-compose -f docker-compose.app.yml down
 
 ## 5) Architecture Code
 
-### Structure Cible
+### Structure Cible (v2.1 - Mise à Jour)
 
 ```
 src/knowbase/
+├── db/                        # NEW v2.1 - Entity Types Registry
+│   ├── __init__.py
+│   ├── base.py                # SQLAlchemy setup
+│   └── models.py              # EntityTypeRegistry model
+│
 ├── neo4j_custom/              # Neo4j native layer
 │   ├── __init__.py
 │   ├── client.py              # Neo4jCustomClient (wrapper driver)
@@ -448,33 +473,60 @@ src/knowbase/
 │   ├── schemas.py             # Pydantic (FactCreate, FactResponse, ConflictDetail)
 │   └── validators.py          # Validation business rules
 │
-├── api/routers/
-│   ├── facts.py               # Endpoints /api/facts/*
-│   │   # GET    /api/facts
-│   │   # POST   /api/facts
-│   │   # GET    /api/facts/{id}
-│   │   # PUT    /api/facts/{id}/approve
-│   │   # PUT    /api/facts/{id}/reject
-│   │   # GET    /api/facts/conflicts
-│   │   # GET    /api/facts/timeline/{subject}/{predicate}
+├── api/
+│   ├── routers/
+│   │   ├── entity_types.py    # NEW v2.1 - Endpoints /api/entity-types/*
+│   │   │   # GET    /api/entity-types (list, filter par status)
+│   │   │   # POST   /api/entity-types (création manuelle)
+│   │   │   # GET    /api/entity-types/{type_name}
+│   │   │   # POST   /api/entity-types/{type_name}/approve
+│   │   │   # POST   /api/entity-types/{type_name}/reject
+│   │   │   # DELETE /api/entity-types/{type_name}
+│   │   │
+│   │   ├── entities.py        # EXTENDED v2.1 - Admin actions
+│   │   │   # GET    /api/entities/pending (entités non cataloguées)
+│   │   │   # POST   /api/entities/{uuid}/approve (+ ajout ontologie)
+│   │   │   # POST   /api/entities/{uuid}/merge (fusion + transfert)
+│   │   │   # DELETE /api/entities/{uuid} (cascade delete)
+│   │   │
+│   │   ├── facts.py           # Endpoints /api/facts/*
+│   │   │   # GET    /api/facts
+│   │   │   # POST   /api/facts
+│   │   │   # GET    /api/facts/{id}
+│   │   │   # PUT    /api/facts/{id}/approve
+│   │   │   # PUT    /api/facts/{id}/reject
+│   │   │   # GET    /api/facts/conflicts
+│   │   │   # GET    /api/facts/timeline/{subject}/{predicate}
+│   │   │
+│   │   └── search.py          # Search hybride Qdrant + Neo4j Facts
 │   │
-│   └── search.py              # Search hybride Qdrant + Neo4j Facts
+│   ├── services/
+│   │   ├── entity_type_registry_service.py  # NEW v2.1 - CRUD Registry
+│   │   └── knowledge_graph_service.py       # MODIFIED v2.1 - Auto-discovery
+│   │
+│   ├── schemas/
+│   │   ├── entity_types.py    # NEW v2.1 - Pydantic schemas Registry
+│   │   └── knowledge_graph.py # EXTENDED v2.1 - Entity status/validation
+│   │
+│   └── auth_deps/             # NEW v2.1 - Auth dependencies
+│       ├── __init__.py
+│       └── auth.py            # require_admin, get_tenant_id
 │
-├── ingestion/pipelines/
-│   └── pptx_pipeline_neo4j.py # Pipeline extraction Facts → Neo4j
+├── common/
+│   ├── entity_normalizer.py  # MODIFIED v2.1 - is_cataloged detection
+│   ├── logging.py
+│   ├── metrics.py
+│   └── auth.py
 │
-└── common/                    # Utilitaires (inchangés)
-    ├── logging.py
-    ├── metrics.py
-    ├── auth.py
-    └── ...
+└── ingestion/pipelines/
+    └── pptx_pipeline_neo4j.py # Pipeline extraction Facts → Neo4j
 ```
 
 ---
 
 ## 6) Workflows Principaux
 
-### Workflow 1 : Ingestion Document
+### Workflow 1 : Ingestion Document (v2.1 - Mise à Jour)
 
 ```
 1. Upload PPTX
@@ -487,9 +539,19 @@ src/knowbase/
    ├→ Relations (Neo4j)
    └→ Facts structurés (Neo4j, status="proposed")
    ↓
-4. Détection conflits automatique
+4. NEW v2.1 - Auto-Discovery Entity Types
+   ├→ Type détecté → EntityTypeRegistry (SQLite)
+   ├→ Si nouveau type → status="pending" (LLM discovery)
+   └→ Si type connu → status="approved"
    ↓
-5. Notification expert si conflits critiques
+5. NEW v2.1 - Validation Entities
+   ├→ Normalisation entité (EntityNormalizer)
+   ├→ Check ontologie YAML → is_cataloged=true/false
+   └→ Auto-set status (validated si cataloguée, pending sinon)
+   ↓
+6. Détection conflits automatique (Facts)
+   ↓
+7. Notification expert si conflits critiques
 ```
 
 ### Workflow 2 : Recherche Utilisateur
@@ -552,6 +614,66 @@ Expert Admin UI: /governance/facts
        └→ Optionnel: éditer valeur manuellement
 ```
 
+### Workflow 4 : Gouvernance Entity Types (NEW v2.1)
+
+```
+Expert Admin UI: /admin/dynamic-types
+   ↓
+1. Liste types découverts (EntityTypeRegistry)
+   ├→ Filtres: status (all/pending/approved/rejected)
+   ├→ Affichage: type_name, status, entity_count, first_seen
+   └→ Tri par: pending_entity_count DESC
+   ↓
+2. Sélection type à reviewer (status="pending")
+   ↓
+3. Actions admin
+   ├→ APPROVE
+   │  ├→ UPDATE status="approved"
+   │  ├→ Enregistrement approved_by + approved_at
+   │  └→ Type devient utilisable pour classification
+   │
+   └→ REJECT
+       ├→ UPDATE status="rejected" + raison
+       ├→ Type ignoré dans futures extractions
+       └→ Optionnel: suggestion type alternatif
+   ↓
+4. Optionnel: Bulk approve types similaires
+```
+
+### Workflow 5 : Gouvernance Entities Pending (NEW v2.1)
+
+```
+Expert Admin UI: /admin/entities-pending
+   ↓
+1. Liste entités pending (is_cataloged=false)
+   ├→ Filtres: entity_type, confidence, source_document
+   ├→ Affichage: name, type, description, confidence
+   └→ Tri par: created_at DESC
+   ↓
+2. Sélection entité à reviewer
+   ↓
+3. Actions admin
+   ├→ APPROVE (+ Ajout Ontologie YAML optionnel)
+   │  ├→ UPDATE status="validated"
+   │  ├→ Si add_to_ontology=true:
+   │  │  ├→ Déterminer fichier YAML (par entity_type)
+   │  │  ├→ Ajouter entité avec aliases, description
+   │  │  └→ Futures entités similaires → is_cataloged=true
+   │  └→ Enregistrement validated_by + validated_at
+   │
+   ├→ MERGE (Fusion entités)
+   │  ├→ Sélectionner target_uuid (entité cible)
+   │  ├→ Transfert relations (IN + OUT) vers cible
+   │  ├→ Optionnel: canonical_name (nom final)
+   │  ├→ Suppression source entity
+   │  └→ Stats: relations_transferred
+   │
+   └→ DELETE (Cascade)
+       ├→ Suppression entité Neo4j (DETACH DELETE)
+       ├→ Suppression relations associées
+       └→ Stats: relations_deleted
+```
+
 ---
 
 ## 7) Métriques de Succès
@@ -588,17 +710,39 @@ Expert Admin UI: /governance/facts
 
 ## 8) Prochaines Évolutions (Roadmap)
 
-### Phase Future 1 : Canonicalisation Entities (Post-Migration)
-- Dédoublonnage entities Neo4j
-- Suggestions merge probabilistes
-- UI Admin canonicalisation
+### ✅ Phase v2.1 : Entity Types Auto-Learning (COMPLÉTÉ - Oct 2025)
+- ✅ EntityTypeRegistry SQLite avec workflow admin
+- ✅ Auto-discovery types par LLM
+- ✅ Validation entities (cataloged vs pending)
+- ✅ Admin actions API (approve/merge/delete)
+- ✅ Frontend UI admin (/admin/dynamic-types, /admin/entities-pending)
+- ✅ Tests complets (97/97 PASS)
 
-### Phase Future 2 : Enrichissement Facts
+**Résultats** :
+- 2500+ lignes backend
+- 97 tests (100% PASS)
+- 12 nouveaux endpoints API
+- 2 pages admin UI React TypeScript
+- Multi-tenancy complet
+
+### Phase Future 1 : JWT & RBAC Production (P0)
+- JWT complet (RS256, claims, expiration)
+- tenant_id depuis JWT claims (sécurité)
+- RBAC roles (admin/editor/viewer)
+- Rate limiting API
+- Audit logs Prometheus
+
+### Phase Future 2 : Canonicalisation Entities (Post-Migration)
+- Dédoublonnage entities Neo4j automatique
+- Suggestions merge probabilistes (ML)
+- UI Admin canonicalisation avancée
+
+### Phase Future 3 : Enrichissement Facts
 - Extraction relations causales entre facts
 - Prédiction valeurs futures (ML)
 - Alertes proactives changements
 
-### Phase Future 3 : Multi-Source Consolidation
+### Phase Future 4 : Multi-Source Consolidation
 - Agrégation facts multiples sources
 - Score confiance composite
 - Résolution contradictions automatique
@@ -624,6 +768,39 @@ Expert Admin UI: /governance/facts
 **Statut** : ✅ Accepté
 **Décision** : Facts = Nodes Neo4j (pas propriétés relations)
 **Raison** : Requêtes directes possibles, index performants, schema flexible.
+
+### ADR-004 : SQLite pour Entity Types Registry (NEW v2.1)
+**Date** : 2025-10-06
+**Statut** : ✅ Accepté
+**Décision** : Utiliser SQLite embarqué pour EntityTypeRegistry (pas Neo4j, pas PostgreSQL)
+**Raison** :
+- **Simplicité** : Pas besoin d'un serveur SQL dédié pour metadata simple
+- **Performance** : SQLite excellent pour lectures fréquentes, écritures occasionnelles
+- **Migration facile** : Passage PostgreSQL trivial si scaling nécessaire (SQLAlchemy)
+- **Séparation concerns** : Registry = metadata applicative, Neo4j = graph sémantique
+**Alternative écartée** : Neo4j nodes → Requêtes Cypher complexes pour filtres SQL-like
+
+### ADR-005 : Composite Unique Index (type_name, tenant_id) (NEW v2.1)
+**Date** : 2025-10-06
+**Statut** : ✅ Accepté
+**Décision** : Index unique composite `(type_name, tenant_id)` au lieu de `type_name` seul
+**Raison** : Multi-tenancy → Même type peut exister pour différents tenants avec status différent
+**Impact** : Tests isolation tenant validés (100% PASS)
+
+### ADR-006 : Auth Simplifiée X-Admin-Key (Temporaire v2.1)
+**Date** : 2025-10-06
+**Statut** : ⚠️ Temporaire (Production nécessite JWT)
+**Décision** : Header `X-Admin-Key` pour auth admin Phase 1-4
+**Raison** : Rapidité implémentation, focus fonctionnel
+**Migration prévue** : JWT RS256 avec claims (user_id, role, tenant_id) - Phase Future 1 (P0)
+**Sécurité actuelle** : OK pour dev/staging, INTERDIT production
+
+### ADR-007 : Auto-Discovery Entity Types dans KnowledgeGraphService (NEW v2.1)
+**Date** : 2025-10-06
+**Statut** : ✅ Accepté
+**Décision** : Chaque création Entity → Auto-enregistrement type dans Registry
+**Raison** : Garantit cohérence, aucun type orphelin, traçabilité complète découverte LLM
+**Impact** : 0 code client à modifier, transparent pour pipelines ingestion
 
 ---
 
@@ -844,7 +1021,89 @@ Expert Admin UI: /governance/facts
 
 ---
 
+---
+
+## Changelog v2.1 (Oct 2025)
+
+### Ajouts Majeurs
+- **Entity Types Auto-Learning** : Découverte automatique types par LLM + workflow validation admin
+- **Entity Status Workflow** : Distinction validated/pending basée sur ontologie YAML
+- **EntityTypeRegistry** : Base SQLite pour traçabilité types découverts
+- **Admin Actions API** : Approve/Merge/Delete entities avec enrichissement ontologie
+- **Frontend Admin UI** : 2 pages React TypeScript (/admin/dynamic-types, /admin/entities-pending)
+- **Multi-Tenancy** : Composite unique index (type_name, tenant_id)
+- **Security Validation** : Regex anti-injection, parameterized queries, require_admin dependency
+
+### Modifications
+- `KnowledgeGraphService.get_or_create_entity()` : Auto-enregistrement types + auto-set status
+- `EntityNormalizer` : Retourne `is_cataloged` (check ontologie YAML)
+- Schémas Entity : Nouveaux champs `status`, `is_cataloged`, `validated_by/at`
+
+### Endpoints API (12 nouveaux)
+**Entity Types** :
+- `GET /api/entity-types` - Liste avec filtres status
+- `POST /api/entity-types` - Création manuelle
+- `GET /api/entity-types/{type_name}`
+- `POST /api/entity-types/{type_name}/approve`
+- `POST /api/entity-types/{type_name}/reject`
+- `DELETE /api/entity-types/{type_name}`
+
+**Entities Admin** :
+- `GET /api/entities/pending` - Liste entités non cataloguées
+- `POST /api/entities/{uuid}/approve` - Validation + ajout ontologie YAML
+- `POST /api/entities/{uuid}/merge` - Fusion + transfert relations
+- `DELETE /api/entities/{uuid}` - Cascade delete
+
+**Types Discovery** :
+- `GET /api/entities/types/discovered` - Stats types auto-découverts
+
+### Tests
+- **97/97 tests PASS** (100% success rate)
+- Couverture : Entity validation, Registry CRUD, API integration, Security validation
+- Isolation multi-tenant validée
+
+### Fichiers Créés
+```
+src/knowbase/db/                              # NEW Package
+├── __init__.py
+├── base.py
+└── models.py
+
+src/knowbase/api/routers/entity_types.py      # NEW
+src/knowbase/api/services/entity_type_registry_service.py  # NEW
+src/knowbase/api/schemas/entity_types.py      # NEW
+src/knowbase/api/auth_deps/                   # NEW Package
+├── __init__.py
+└── auth.py
+
+frontend/src/app/admin/dynamic-types/page.tsx         # NEW
+frontend/src/app/admin/entities-pending/page.tsx      # NEW
+
+tests/db/test_entity_type_registry_service.py         # NEW (25 tests)
+tests/api/test_entity_types_router.py                 # NEW (21 tests)
+tests/api/test_entities_pending.py                    # NEW (8 tests)
+tests/api/test_entities_admin_actions.py              # NEW (10 tests)
+tests/api/test_schemas_validation_security.py         # NEW (19 tests)
+tests/common/test_entity_normalizer_status.py         # NEW (14 tests)
+
+doc/PHASES_1-3_RECAP.md                               # NEW
+doc/SECURITY_AUDIT_DYNAMIC_TYPES.md                   # NEW (40+ pages)
+```
+
+### Décisions Architecturales
+- **ADR-004** : SQLite pour Registry (vs Neo4j/PostgreSQL)
+- **ADR-005** : Composite unique index multi-tenancy
+- **ADR-006** : Auth simplifiée X-Admin-Key (temporaire, JWT prod prévu)
+- **ADR-007** : Auto-discovery dans KnowledgeGraphService
+
+### Roadmap Completion
+- Phase 1-4 : **100%** ✅ (21/21 tâches)
+- Tests : **97/97 PASS** (100%)
+- Overall : **95% projet complet** (3 tâches finales : OpenAPI docs, E2E test, JWT prod)
+
+---
+
 **Créé le** : 2025-10-03
-**Dernière mise à jour** : 2025-10-03
-**Version** : 2.0 (Neo4j Native)
+**Dernière mise à jour** : 2025-10-06 (v2.1 - Entity Types Auto-Learning)
+**Version** : 2.1 (Neo4j Native + Dynamic Entity Types)
 **Auteur** : Équipe SAP KB
