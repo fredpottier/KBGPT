@@ -1,12 +1,11 @@
 /**
  * Page Drill-Down - Entités d'un Type Spécifique
  *
- * Phase 5A - UX Refactoring
+ * Phase 5A - UX Refactoring (Chakra UI)
  *
  * Affiche toutes les entités d'un type donné avec actions:
  * - Approve individuel
- * - Merge similaires
- * - Delete
+ * - Bulk approve
  * - Génération ontologie (si type approved)
  */
 
@@ -15,6 +14,48 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import {
+  Box,
+  Container,
+  Heading,
+  Text,
+  Card,
+  CardHeader,
+  CardBody,
+  Stat,
+  StatLabel,
+  StatNumber,
+  Badge,
+  Button,
+  Spinner,
+  Alert,
+  AlertIcon,
+  HStack,
+  VStack,
+  Icon,
+  Flex,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+  Checkbox,
+  useToast,
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  SimpleGrid,
+  Divider,
+} from "@chakra-ui/react";
+import {
+  FiLayers,
+  FiCheckCircle,
+  FiClock,
+  FiArrowLeft,
+  FiCheckSquare,
+  FiCpu,
+} from "react-icons/fi";
 
 interface Entity {
   uuid: string;
@@ -42,6 +83,7 @@ export default function TypeEntitiesPage() {
   const params = useParams();
   const router = useRouter();
   const typeName = params.typeName as string;
+  const toast = useToast();
 
   const [entities, setEntities] = useState<Entity[]>([]);
   const [typeInfo, setTypeInfo] = useState<TypeInfo | null>(null);
@@ -69,18 +111,21 @@ export default function TypeEntitiesPage() {
   const fetchEntities = async () => {
     setLoading(true);
     try {
-      let url = `/api/entities?entity_type=${typeName}`;
-      if (statusFilter !== 'all') {
-        url += `&status=${statusFilter}`;
-      }
+      const url = statusFilter === 'all'
+        ? `/api/entities?entity_type=${typeName}`
+        : `/api/entities?entity_type=${typeName}&status=${statusFilter}`;
 
       const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        setEntities(data.entities || []);
-      }
+      const data = await response.json();
+      setEntities(data.entities || []);
     } catch (error) {
       console.error('Error fetching entities:', error);
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de charger les entités',
+        status: 'error',
+        duration: 3000,
+      });
     } finally {
       setLoading(false);
     }
@@ -94,72 +139,40 @@ export default function TypeEntitiesPage() {
           'Content-Type': 'application/json',
           'X-Admin-Key': 'admin-dev-key-change-in-production'
         },
-        body: JSON.stringify({
-          add_to_ontology: false,
-          admin_email: 'admin@example.com'
-        })
+        body: JSON.stringify({ admin_email: 'admin@example.com' })
       });
 
       if (response.ok) {
-        alert('Entité approuvée');
+        toast({
+          title: 'Entité approuvée',
+          status: 'success',
+          duration: 2000,
+        });
         fetchEntities();
         fetchTypeInfo();
       } else {
-        alert('Erreur lors de l\'approbation');
+        throw new Error('Approval failed');
       }
     } catch (error) {
-      console.error('Error approving entity:', error);
-    }
-  };
-
-  const handleDeleteEntity = async (uuid: string) => {
-    if (!confirm('Supprimer cette entité ?')) return;
-
-    try {
-      const response = await fetch(`/api/entities/${uuid}`, {
-        method: 'DELETE',
-        headers: {
-          'X-Admin-Key': 'admin-dev-key-change-in-production'
-        }
+      toast({
+        title: 'Erreur',
+        description: 'Erreur lors de l\'approbation',
+        status: 'error',
+        duration: 3000,
       });
-
-      if (response.ok) {
-        alert('Entité supprimée');
-        fetchEntities();
-        fetchTypeInfo();
-      } else {
-        alert('Erreur lors de la suppression');
-      }
-    } catch (error) {
-      console.error('Error deleting entity:', error);
-    }
-  };
-
-  const handleToggleSelect = (uuid: string) => {
-    const newSelected = new Set(selectedEntities);
-    if (newSelected.has(uuid)) {
-      newSelected.delete(uuid);
-    } else {
-      newSelected.add(uuid);
-    }
-    setSelectedEntities(newSelected);
-  };
-
-  const handleSelectAll = () => {
-    if (selectedEntities.size === entities.length) {
-      setSelectedEntities(new Set());
-    } else {
-      setSelectedEntities(new Set(entities.map(e => e.uuid)));
     }
   };
 
   const handleBulkApprove = async () => {
     if (selectedEntities.size === 0) {
-      alert('Aucune entité sélectionnée');
+      toast({
+        title: 'Aucune sélection',
+        description: 'Sélectionnez au moins une entité',
+        status: 'warning',
+        duration: 2000,
+      });
       return;
     }
-
-    if (!confirm(`Approuver ${selectedEntities.size} entités ?`)) return;
 
     let approved = 0;
     for (const uuid of selectedEntities) {
@@ -170,212 +183,311 @@ export default function TypeEntitiesPage() {
             'Content-Type': 'application/json',
             'X-Admin-Key': 'admin-dev-key-change-in-production'
           },
-          body: JSON.stringify({
-            add_to_ontology: false,
-            admin_email: 'admin@example.com'
-          })
+          body: JSON.stringify({ admin_email: 'admin@example.com' })
         });
+
         if (response.ok) approved++;
       } catch (error) {
-        console.error('Error approving entity:', error);
+        console.error(`Error approving entity ${uuid}:`, error);
       }
     }
 
-    alert(`${approved}/${selectedEntities.size} entités approuvées`);
+    toast({
+      title: `${approved} entité(s) approuvée(s)`,
+      status: 'success',
+      duration: 3000,
+    });
+
     setSelectedEntities(new Set());
     fetchEntities();
     fetchTypeInfo();
   };
 
   const handleGenerateOntology = async () => {
-    alert('🤖 Génération ontologie avec LLM (Step 2 à venir)');
-    // TODO: Step 2 - Appel endpoint génération ontologie
+    if (!typeInfo || typeInfo.status !== 'approved') {
+      toast({
+        title: 'Type non approuvé',
+        description: 'Le type doit être approuvé avant de générer l\'ontologie',
+        status: 'warning',
+        duration: 3000,
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/entity-types/${typeName}/generate-ontology`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Key': 'admin-dev-key-change-in-production'
+        },
+        body: JSON.stringify({ model_preference: 'claude-sonnet' })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        toast({
+          title: 'Génération démarrée',
+          description: `Job ID: ${result.job_id}`,
+          status: 'info',
+          duration: 5000,
+        });
+      } else {
+        throw new Error('Generation failed');
+      }
+    } catch (error) {
+      toast({
+        title: 'Erreur',
+        description: 'Erreur lors du lancement de la génération',
+        status: 'error',
+        duration: 3000,
+      });
+    }
+  };
+
+  const handleToggleEntity = (uuid: string) => {
+    const newSelected = new Set(selectedEntities);
+    if (newSelected.has(uuid)) {
+      newSelected.delete(uuid);
+    } else {
+      newSelected.add(uuid);
+    }
+    setSelectedEntities(newSelected);
+  };
+
+  const handleToggleAll = () => {
+    if (selectedEntities.size === entities.length) {
+      setSelectedEntities(new Set());
+    } else {
+      setSelectedEntities(new Set(entities.map(e => e.uuid)));
+    }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending': return 'bg-yellow-100 text-yellow-800';
-      case 'validated': return 'bg-green-100 text-green-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'pending': return 'yellow';
+      case 'validated': return 'green';
+      default: return 'gray';
     }
   };
 
-  if (!typeInfo) {
-    return <div className="p-6">Chargement...</div>;
+  if (loading && !typeInfo) {
+    return (
+      <Container maxW="container.xl" py={8}>
+        <VStack spacing={4}>
+          <Spinner size="xl" />
+          <Text>Chargement...</Text>
+        </VStack>
+      </Container>
+    );
   }
 
   return (
-    <div className="p-6">
-      {/* Header avec breadcrumb */}
-      <div className="mb-6">
-        <div className="text-sm text-gray-500 mb-2">
-          <Link href="/admin/dynamic-types" className="hover:underline">
-            Types Dynamiques
-          </Link>
-          {' '}/{' '}
-          <span className="font-semibold">{typeName}</span>
-        </div>
-        <h1 className="text-2xl font-bold mb-2">{typeName}</h1>
-        <p className="text-gray-600">{typeInfo.description || 'Aucune description'}</p>
-      </div>
+    <Container maxW="container.xl" py={8}>
+      <VStack spacing={6} align="stretch">
+        {/* Breadcrumb */}
+        <Breadcrumb>
+          <BreadcrumbItem>
+            <BreadcrumbLink as={Link} href="/admin/dynamic-types">
+              <Icon as={FiArrowLeft} mr={2} />
+              Types Dynamiques
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbItem isCurrentPage>
+            <BreadcrumbLink>{typeName}</BreadcrumbLink>
+          </BreadcrumbItem>
+        </Breadcrumb>
 
-      {/* Statistiques */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-2xl font-bold">{typeInfo.entity_count}</div>
-          <div className="text-sm text-gray-600">Total Entités</div>
-        </div>
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="text-2xl font-bold text-yellow-700">{typeInfo.pending_entity_count}</div>
-          <div className="text-sm text-yellow-700">En attente</div>
-        </div>
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="text-2xl font-bold text-green-700">{typeInfo.validated_entity_count}</div>
-          <div className="text-sm text-green-700">Validées</div>
-        </div>
-        <div className={`border rounded-lg p-4 ${
-          typeInfo.status === 'pending' ? 'bg-yellow-50 border-yellow-200' : 'bg-green-50 border-green-200'
-        }`}>
-          <div className="text-2xl font-bold">
-            {typeInfo.status === 'pending' ? '⏳' : '✅'}
-          </div>
-          <div className="text-sm">Type {typeInfo.status}</div>
-        </div>
-      </div>
+        {/* Type Info Card */}
+        {typeInfo && (
+          <Card borderWidth={2} borderColor={`${getStatusColor(typeInfo.status)}.300`}>
+            <CardHeader>
+              <Flex justify="space-between" align="center">
+                <HStack>
+                  <Icon as={FiLayers} boxSize={6} />
+                  <Heading size="lg">{typeInfo.type_name}</Heading>
+                </HStack>
+                <Badge colorScheme={getStatusColor(typeInfo.status)} fontSize="md" px={3} py={1}>
+                  {typeInfo.status}
+                </Badge>
+              </Flex>
+            </CardHeader>
 
-      {/* Actions Globales */}
-      <div className="mb-4 flex flex-wrap gap-2">
-        {typeInfo.status === 'approved' && (
-          <button
-            onClick={handleGenerateOntology}
-            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 font-medium"
-          >
-            🤖 Générer Ontologie (LLM)
-          </button>
+            <CardBody>
+              <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+                <Stat>
+                  <StatLabel>Total Entités</StatLabel>
+                  <StatNumber>{typeInfo.entity_count}</StatNumber>
+                </Stat>
+                <Stat>
+                  <StatLabel>En attente</StatLabel>
+                  <StatNumber color="yellow.500">{typeInfo.pending_entity_count}</StatNumber>
+                </Stat>
+                <Stat>
+                  <StatLabel>Validées</StatLabel>
+                  <StatNumber color="green.500">{typeInfo.validated_entity_count}</StatNumber>
+                </Stat>
+              </SimpleGrid>
+
+              {typeInfo.description && (
+                <>
+                  <Divider my={4} />
+                  <Text color="gray.600">{typeInfo.description}</Text>
+                </>
+              )}
+            </CardBody>
+          </Card>
         )}
 
-        {selectedEntities.size > 0 && (
-          <>
-            <button
-              onClick={handleBulkApprove}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 font-medium"
+        {/* Actions Bar */}
+        <Flex justify="space-between" align="center" flexWrap="wrap" gap={4}>
+          {/* Filters */}
+          <HStack>
+            <Text fontWeight="bold">Filtre:</Text>
+            <Button
+              size="sm"
+              variant={statusFilter === 'all' ? 'solid' : 'outline'}
+              colorScheme="blue"
+              onClick={() => setStatusFilter('all')}
             >
-              ✓ Approuver sélection ({selectedEntities.size})
-            </button>
-            <button
-              onClick={() => setSelectedEntities(new Set())}
-              className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 font-medium"
+              Tous ({entities.length})
+            </Button>
+            <Button
+              size="sm"
+              variant={statusFilter === 'pending' ? 'solid' : 'outline'}
+              colorScheme="yellow"
+              onClick={() => setStatusFilter('pending')}
             >
-              Désélectionner
-            </button>
-          </>
+              En attente
+            </Button>
+            <Button
+              size="sm"
+              variant={statusFilter === 'validated' ? 'solid' : 'outline'}
+              colorScheme="green"
+              onClick={() => setStatusFilter('validated')}
+            >
+              Validées
+            </Button>
+          </HStack>
+
+          {/* Bulk Actions */}
+          <HStack>
+            {selectedEntities.size > 0 && (
+              <>
+                <Badge colorScheme="blue" fontSize="md" px={2}>
+                  {selectedEntities.size} sélectionnée(s)
+                </Badge>
+                <Button
+                  size="sm"
+                  colorScheme="green"
+                  leftIcon={<FiCheckSquare />}
+                  onClick={handleBulkApprove}
+                >
+                  Approuver sélection
+                </Button>
+              </>
+            )}
+
+            {typeInfo?.status === 'approved' && (
+              <Button
+                size="sm"
+                colorScheme="purple"
+                leftIcon={<FiCpu />}
+                onClick={handleGenerateOntology}
+              >
+                🤖 Générer Ontologie
+              </Button>
+            )}
+          </HStack>
+        </Flex>
+
+        {/* Empty State */}
+        {!loading && entities.length === 0 && (
+          <Alert status="info">
+            <AlertIcon />
+            Aucune entité trouvée pour ce filtre.
+          </Alert>
         )}
-      </div>
 
-      {/* Filtres Status */}
-      <div className="mb-4 flex gap-2">
-        <button
-          onClick={() => setStatusFilter('all')}
-          className={`px-4 py-2 rounded ${statusFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-        >
-          Toutes
-        </button>
-        <button
-          onClick={() => setStatusFilter('pending')}
-          className={`px-4 py-2 rounded ${statusFilter === 'pending' ? 'bg-yellow-600 text-white' : 'bg-gray-200'}`}
-        >
-          En attente
-        </button>
-        <button
-          onClick={() => setStatusFilter('validated')}
-          className={`px-4 py-2 rounded ${statusFilter === 'validated' ? 'bg-green-600 text-white' : 'bg-gray-200'}`}
-        >
-          Validées
-        </button>
-      </div>
+        {/* Loading State */}
+        {loading && (
+          <Flex justify="center" py={8}>
+            <Spinner size="lg" />
+          </Flex>
+        )}
 
-      {/* Liste Entités */}
-      {loading ? (
-        <p>Chargement...</p>
-      ) : (
-        <div className="bg-white rounded-lg border">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="p-3 text-left">
-                  <input
-                    type="checkbox"
-                    checked={selectedEntities.size === entities.length && entities.length > 0}
-                    onChange={handleSelectAll}
-                    className="w-4 h-4"
-                  />
-                </th>
-                <th className="p-3 text-left font-semibold">Nom</th>
-                <th className="p-3 text-left font-semibold">Status</th>
-                <th className="p-3 text-left font-semibold">Description</th>
-                <th className="p-3 text-left font-semibold">Confiance</th>
-                <th className="p-3 text-left font-semibold">Créé le</th>
-                <th className="p-3 text-left font-semibold">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entities.map((entity) => (
-                <tr key={entity.uuid} className="border-b hover:bg-gray-50">
-                  <td className="p-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedEntities.has(entity.uuid)}
-                      onChange={() => handleToggleSelect(entity.uuid)}
-                      className="w-4 h-4"
-                    />
-                  </td>
-                  <td className="p-3 font-medium">{entity.name}</td>
-                  <td className="p-3">
-                    <span className={`px-2 py-1 rounded text-sm ${getStatusColor(entity.status)}`}>
-                      {entity.status}
-                    </span>
-                  </td>
-                  <td className="p-3 text-sm text-gray-600">
-                    {entity.description || '-'}
-                  </td>
-                  <td className="p-3 text-sm">
-                    {entity.confidence ? `${(entity.confidence * 100).toFixed(0)}%` : '-'}
-                  </td>
-                  <td className="p-3 text-sm text-gray-600">
-                    {new Date(entity.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="p-3">
-                    <div className="flex gap-2">
-                      {entity.status === 'pending' && (
-                        <button
-                          onClick={() => handleApproveEntity(entity.uuid)}
-                          className="px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
-                          title="Approuver"
-                        >
-                          ✓
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleDeleteEntity(entity.uuid)}
-                        className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
-                        title="Supprimer"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {entities.length === 0 && (
-            <div className="text-center py-12 text-gray-500">
-              Aucune entité trouvée pour ce type
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+        {/* Entities Table */}
+        {!loading && entities.length > 0 && (
+          <Card>
+            <CardBody p={0}>
+              <Table variant="simple">
+                <Thead>
+                  <Tr>
+                    <Th width="50px">
+                      <Checkbox
+                        isChecked={selectedEntities.size === entities.length}
+                        isIndeterminate={selectedEntities.size > 0 && selectedEntities.size < entities.length}
+                        onChange={handleToggleAll}
+                      />
+                    </Th>
+                    <Th>Nom</Th>
+                    <Th>Status</Th>
+                    <Th>Description</Th>
+                    <Th>Confidence</Th>
+                    <Th>Créée le</Th>
+                    <Th>Actions</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {entities.map((entity) => (
+                    <Tr key={entity.uuid} _hover={{ bg: 'gray.50' }}>
+                      <Td>
+                        <Checkbox
+                          isChecked={selectedEntities.has(entity.uuid)}
+                          onChange={() => handleToggleEntity(entity.uuid)}
+                        />
+                      </Td>
+                      <Td fontWeight="bold">{entity.name}</Td>
+                      <Td>
+                        <Badge colorScheme={getStatusColor(entity.status)}>
+                          {entity.status}
+                        </Badge>
+                      </Td>
+                      <Td maxW="300px" isTruncated>
+                        <Text fontSize="sm" color="gray.600">
+                          {entity.description || '-'}
+                        </Text>
+                      </Td>
+                      <Td>
+                        {entity.confidence ? (
+                          <Badge colorScheme={entity.confidence > 0.8 ? 'green' : 'orange'}>
+                            {(entity.confidence * 100).toFixed(0)}%
+                          </Badge>
+                        ) : '-'}
+                      </Td>
+                      <Td fontSize="sm">
+                        {new Date(entity.created_at).toLocaleDateString()}
+                      </Td>
+                      <Td>
+                        {entity.status === 'pending' && (
+                          <Button
+                            size="xs"
+                            colorScheme="green"
+                            leftIcon={<FiCheckCircle />}
+                            onClick={() => handleApproveEntity(entity.uuid)}
+                          >
+                            Approuver
+                          </Button>
+                        )}
+                      </Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </CardBody>
+          </Card>
+        )}
+      </VStack>
+    </Container>
   );
 }

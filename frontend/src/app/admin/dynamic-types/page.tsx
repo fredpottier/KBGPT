@@ -1,7 +1,7 @@
 /**
  * Page Admin - Gestion Types d'Entités Dynamiques
  *
- * Phase 4 - Frontend UI (Refactored with Cards)
+ * Phase 4 - Frontend UI (Refactored with Chakra UI)
  * Phase 5A - UX Refactoring: Cards groupées + drill-down
  *
  * Affiche les entity types découverts par le LLM avec workflow approve/reject.
@@ -11,6 +11,44 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import {
+  Box,
+  Container,
+  Heading,
+  Text,
+  SimpleGrid,
+  Card,
+  CardHeader,
+  CardBody,
+  Stat,
+  StatLabel,
+  StatNumber,
+  StatHelpText,
+  Badge,
+  Button,
+  Spinner,
+  Alert,
+  AlertIcon,
+  HStack,
+  VStack,
+  Icon,
+  Flex,
+  Input,
+  Select,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+  useToast,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
+} from "@chakra-ui/react";
+import { FiLayers, FiCheckCircle, FiXCircle, FiClock, FiUpload, FiDownload, FiGrid, FiList } from "react-icons/fi";
 
 interface EntityType {
   id: number;
@@ -31,6 +69,7 @@ export default function DynamicTypesPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const toast = useToast();
 
   useEffect(() => {
     fetchTypes();
@@ -48,14 +87,18 @@ export default function DynamicTypesPage() {
       setTypes(data.types || []);
     } catch (error) {
       console.error('Error fetching types:', error);
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de charger les types',
+        status: 'error',
+        duration: 3000,
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleApprove = async (typeName: string) => {
-    if (!confirm(`Approuver le type "${typeName}" ?`)) return;
-
     try {
       const response = await fetch(`/api/entity-types/${typeName}/approve`, {
         method: 'POST',
@@ -67,19 +110,27 @@ export default function DynamicTypesPage() {
       });
 
       if (response.ok) {
-        alert('Type approuvé !');
+        toast({
+          title: 'Type approuvé',
+          status: 'success',
+          duration: 2000,
+        });
         fetchTypes();
       } else {
-        alert('Erreur lors de l\'approbation');
+        throw new Error('Approval failed');
       }
     } catch (error) {
-      console.error('Error approving type:', error);
-      alert('Erreur réseau');
+      toast({
+        title: 'Erreur',
+        description: 'Erreur lors de l\'approbation',
+        status: 'error',
+        duration: 3000,
+      });
     }
   };
 
   const handleReject = async (typeName: string) => {
-    const reason = prompt(`Rejeter le type "${typeName}". Raison ?`);
+    const reason = window.prompt('Raison du rejet ?');
     if (!reason) return;
 
     try {
@@ -91,57 +142,74 @@ export default function DynamicTypesPage() {
         },
         body: JSON.stringify({
           admin_email: 'admin@example.com',
-          reason
+          rejection_reason: reason
         })
       });
 
       if (response.ok) {
-        alert('Type rejeté');
+        toast({
+          title: 'Type rejeté',
+          status: 'info',
+          duration: 2000,
+        });
         fetchTypes();
       } else {
-        alert('Erreur lors du rejet');
+        throw new Error('Rejection failed');
       }
     } catch (error) {
-      console.error('Error rejecting type:', error);
+      toast({
+        title: 'Erreur',
+        description: 'Erreur lors du rejet',
+        status: 'error',
+        duration: 3000,
+      });
     }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (file) {
       setUploadFile(file);
     }
   };
 
   const handleImportYAML = async () => {
-    if (!uploadFile) {
-      alert('Veuillez sélectionner un fichier YAML');
-      return;
-    }
+    if (!uploadFile) return;
 
     setUploading(true);
-
     try {
       const formData = new FormData();
       formData.append('file', uploadFile);
 
-      const response = await fetch('/api/entity-types/import-yaml?auto_approve=true&skip_existing=true', {
+      const response = await fetch('/api/entity-types/import-yaml', {
         method: 'POST',
+        headers: {
+          'X-Admin-Key': 'admin-dev-key-change-in-production'
+        },
         body: formData
       });
 
       if (response.ok) {
         const result = await response.json();
-        alert(`Import réussi !\n\nCréés: ${result.created}\nIgnorés: ${result.skipped}\nErreurs: ${result.errors.length}`);
+        toast({
+          title: 'Import réussi',
+          description: `${result.imported_count} types importés`,
+          status: 'success',
+          duration: 3000,
+        });
         setUploadFile(null);
         fetchTypes();
       } else {
         const error = await response.json();
-        alert(`Erreur: ${error.detail}`);
+        throw new Error(error.detail);
       }
-    } catch (error) {
-      console.error('Error importing YAML:', error);
-      alert('Erreur réseau');
+    } catch (error: any) {
+      toast({
+        title: 'Erreur import',
+        description: error.message,
+        status: 'error',
+        duration: 5000,
+      });
     } finally {
       setUploading(false);
     }
@@ -162,279 +230,360 @@ export default function DynamicTypesPage() {
         a.click();
         a.remove();
         window.URL.revokeObjectURL(downloadUrl);
+
+        toast({
+          title: 'Export réussi',
+          status: 'success',
+          duration: 2000,
+        });
       } else {
-        alert('Erreur lors de l\'export');
+        throw new Error('Export failed');
       }
     } catch (error) {
-      console.error('Error exporting YAML:', error);
-      alert('Erreur réseau');
+      toast({
+        title: 'Erreur export',
+        status: 'error',
+        duration: 3000,
+      });
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-      case 'approved': return 'bg-green-100 text-green-800 border-green-300';
-      case 'rejected': return 'bg-red-100 text-red-800 border-red-300';
-      default: return 'bg-gray-100 text-gray-800 border-gray-300';
+      case 'pending': return 'yellow';
+      case 'approved': return 'green';
+      case 'rejected': return 'red';
+      default: return 'gray';
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'pending': return '⏳';
-      case 'approved': return '✅';
-      case 'rejected': return '❌';
-      default: return '❓';
+      case 'pending': return FiClock;
+      case 'approved': return FiCheckCircle;
+      case 'rejected': return FiXCircle;
+      default: return FiLayers;
     }
   };
 
+  if (loading) {
+    return (
+      <Container maxW="container.xl" py={8}>
+        <VStack spacing={4}>
+          <Spinner size="xl" />
+          <Text>Chargement des types...</Text>
+        </VStack>
+      </Container>
+    );
+  }
+
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Types d'Entités Dynamiques</h1>
+    <Container maxW="container.xl" py={8}>
+      <VStack spacing={6} align="stretch">
+        {/* Header */}
+        <Flex justify="space-between" align="center">
+          <Heading size="lg">
+            <Icon as={FiLayers} mr={3} />
+            Types d'Entités Dynamiques
+          </Heading>
 
-        {/* Toggle View Mode */}
-        <div className="flex gap-2">
-          <button
-            onClick={() => setViewMode('cards')}
-            className={`px-3 py-1 rounded ${viewMode === 'cards' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-          >
-            📇 Cards
-          </button>
-          <button
-            onClick={() => setViewMode('table')}
-            className={`px-3 py-1 rounded ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-          >
-            📊 Table
-          </button>
-        </div>
-      </div>
-
-      {/* Section Import/Export YAML */}
-      <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-        <h2 className="text-lg font-semibold mb-3">Import / Export YAML</h2>
-
-        <div className="flex flex-col md:flex-row gap-4">
-          {/* Import YAML */}
-          <div className="flex-1">
-            <label className="block text-sm font-medium mb-2">📤 Importer Ontologie YAML</label>
-            <div className="flex gap-2">
-              <input
-                type="file"
-                accept=".yaml,.yml"
-                onChange={handleFileUpload}
-                className="flex-1 text-sm"
-                disabled={uploading}
-              />
-              <button
-                onClick={handleImportYAML}
-                disabled={!uploadFile || uploading}
-                className={`px-4 py-2 rounded font-medium ${
-                  uploadFile && !uploading
-                    ? 'bg-blue-600 text-white hover:bg-blue-700'
-                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                }`}
-              >
-                {uploading ? 'Import...' : 'Importer'}
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Format: config/ontologies/*.yaml (auto-approve, skip existing)
-            </p>
-          </div>
-
-          {/* Export YAML */}
-          <div className="flex-1">
-            <label className="block text-sm font-medium mb-2">📥 Exporter Types</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleExportYAML('approved')}
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 font-medium"
-              >
-                Export Approuvés
-              </button>
-              <button
-                onClick={() => handleExportYAML('all')}
-                className="flex-1 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 font-medium"
-              >
-                Export Tous
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Télécharge fichier YAML réimportable
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Filtres Status */}
-      <div className="mb-4 flex gap-2">
-        <button
-          onClick={() => setStatusFilter('all')}
-          className={`px-4 py-2 rounded ${statusFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-        >
-          Tous
-        </button>
-        <button
-          onClick={() => setStatusFilter('pending')}
-          className={`px-4 py-2 rounded ${statusFilter === 'pending' ? 'bg-yellow-600 text-white' : 'bg-gray-200'}`}
-        >
-          En attente
-        </button>
-        <button
-          onClick={() => setStatusFilter('approved')}
-          className={`px-4 py-2 rounded ${statusFilter === 'approved' ? 'bg-green-600 text-white' : 'bg-gray-200'}`}
-        >
-          Approuvés
-        </button>
-        <button
-          onClick={() => setStatusFilter('rejected')}
-          className={`px-4 py-2 rounded ${statusFilter === 'rejected' ? 'bg-red-600 text-white' : 'bg-gray-200'}`}
-        >
-          Rejetés
-        </button>
-      </div>
-
-      {loading ? (
-        <p>Chargement...</p>
-      ) : viewMode === 'cards' ? (
-        /* Vue Cards */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {types.map((type) => (
-            <div
-              key={type.id}
-              className={`border-2 rounded-lg p-4 hover:shadow-lg transition-shadow ${getStatusColor(type.status)}`}
+          {/* Toggle View Mode */}
+          <HStack>
+            <Button
+              size="sm"
+              leftIcon={<FiGrid />}
+              colorScheme={viewMode === 'cards' ? 'blue' : 'gray'}
+              onClick={() => setViewMode('cards')}
             >
-              {/* Header Card */}
-              <div className="flex justify-between items-start mb-3">
-                <div className="flex-1">
-                  <h3 className="font-mono font-bold text-lg mb-1">{type.type_name}</h3>
-                  <p className="text-xs text-gray-600">{type.description || 'Aucune description'}</p>
-                </div>
-                <span className="text-2xl ml-2">{getStatusIcon(type.status)}</span>
-              </div>
+              Cards
+            </Button>
+            <Button
+              size="sm"
+              leftIcon={<FiList />}
+              colorScheme={viewMode === 'table' ? 'blue' : 'gray'}
+              onClick={() => setViewMode('table')}
+            >
+              Table
+            </Button>
+          </HStack>
+        </Flex>
 
-              {/* Statistiques */}
-              <div className="grid grid-cols-3 gap-2 mb-3 text-center">
-                <div className="bg-white bg-opacity-50 rounded p-2">
-                  <div className="text-xl font-bold">{type.entity_count}</div>
-                  <div className="text-xs">Total</div>
-                </div>
-                <div className="bg-yellow-50 rounded p-2">
-                  <div className="text-xl font-bold text-yellow-700">{type.pending_entity_count}</div>
-                  <div className="text-xs text-yellow-700">Pending</div>
-                </div>
-                <div className="bg-green-50 rounded p-2">
-                  <div className="text-xl font-bold text-green-700">{type.validated_entity_count || 0}</div>
-                  <div className="text-xs text-green-700">Validées</div>
-                </div>
-              </div>
+        {/* Import/Export Section */}
+        <Card>
+          <CardHeader>
+            <Heading size="md">Import / Export YAML</Heading>
+          </CardHeader>
+          <CardBody>
+            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+              {/* Import */}
+              <Box>
+                <Text fontWeight="bold" mb={2}>
+                  <Icon as={FiUpload} mr={2} />
+                  Importer Ontologie YAML
+                </Text>
+                <HStack>
+                  <Input
+                    type="file"
+                    accept=".yaml,.yml"
+                    onChange={handleFileUpload}
+                    size="sm"
+                    disabled={uploading}
+                  />
+                  <Button
+                    onClick={handleImportYAML}
+                    isDisabled={!uploadFile || uploading}
+                    isLoading={uploading}
+                    colorScheme="blue"
+                    size="sm"
+                  >
+                    Importer
+                  </Button>
+                </HStack>
+              </Box>
 
-              {/* Métadonnées */}
-              <div className="text-xs text-gray-600 mb-3 space-y-1">
-                <div>📅 {new Date(type.first_seen).toLocaleDateString()}</div>
-                <div>🔍 {type.discovered_by}</div>
-              </div>
+              {/* Export */}
+              <Box>
+                <Text fontWeight="bold" mb={2}>
+                  <Icon as={FiDownload} mr={2} />
+                  Exporter Types
+                </Text>
+                <HStack>
+                  <Select size="sm" id="exportStatus" defaultValue="approved">
+                    <option value="approved">Approuvés</option>
+                    <option value="pending">En attente</option>
+                    <option value="all">Tous</option>
+                  </Select>
+                  <Button
+                    onClick={() => {
+                      const select = document.getElementById('exportStatus') as HTMLSelectElement;
+                      handleExportYAML(select.value);
+                    }}
+                    colorScheme="green"
+                    size="sm"
+                  >
+                    Exporter
+                  </Button>
+                </HStack>
+              </Box>
+            </SimpleGrid>
+          </CardBody>
+        </Card>
 
-              {/* Actions */}
-              <div className="space-y-2">
-                {type.status === 'pending' && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleApprove(type.type_name)}
-                      className="flex-1 px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm font-medium"
-                    >
-                      ✓ Approuver
-                    </button>
-                    <button
-                      onClick={() => handleReject(type.type_name)}
-                      className="flex-1 px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600 text-sm font-medium"
-                    >
-                      ✗ Rejeter
-                    </button>
-                  </div>
-                )}
+        {/* Filters */}
+        <HStack>
+          <Text fontWeight="bold">Filtre:</Text>
+          <Button
+            size="sm"
+            variant={statusFilter === 'all' ? 'solid' : 'outline'}
+            colorScheme="blue"
+            onClick={() => setStatusFilter('all')}
+          >
+            Tous ({types.length})
+          </Button>
+          <Button
+            size="sm"
+            variant={statusFilter === 'pending' ? 'solid' : 'outline'}
+            colorScheme="yellow"
+            onClick={() => setStatusFilter('pending')}
+          >
+            En attente
+          </Button>
+          <Button
+            size="sm"
+            variant={statusFilter === 'approved' ? 'solid' : 'outline'}
+            colorScheme="green"
+            onClick={() => setStatusFilter('approved')}
+          >
+            Approuvés
+          </Button>
+          <Button
+            size="sm"
+            variant={statusFilter === 'rejected' ? 'solid' : 'outline'}
+            colorScheme="red"
+            onClick={() => setStatusFilter('rejected')}
+          >
+            Rejetés
+          </Button>
+        </HStack>
 
-                <Link
-                  href={`/admin/dynamic-types/${type.type_name}`}
-                  className="block w-full px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-center text-sm font-medium"
-                >
-                  👁️ Voir entités ({type.entity_count})
-                </Link>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        /* Vue Table (ancienne) */
-        <table className="w-full border-collapse border border-gray-300">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="border p-2">Type</th>
-              <th className="border p-2">Status</th>
-              <th className="border p-2">Entités</th>
-              <th className="border p-2">Pending</th>
-              <th className="border p-2">Découvert</th>
-              <th className="border p-2">Source</th>
-              <th className="border p-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
+        {/* Empty State */}
+        {types.length === 0 && (
+          <Alert status="info">
+            <AlertIcon />
+            Aucun type trouvé pour ce filtre.
+          </Alert>
+        )}
+
+        {/* Cards View */}
+        {viewMode === 'cards' && types.length > 0 && (
+          <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
             {types.map((type) => (
-              <tr key={type.id}>
-                <td className="border p-2 font-mono">{type.type_name}</td>
-                <td className="border p-2">
-                  <span className={`px-2 py-1 rounded text-sm ${
-                    type.status === 'pending' ? 'bg-yellow-200' :
-                    type.status === 'approved' ? 'bg-green-200' :
-                    'bg-red-200'
-                  }`}>
-                    {type.status}
-                  </span>
-                </td>
-                <td className="border p-2 text-center">{type.entity_count}</td>
-                <td className="border p-2 text-center">{type.pending_entity_count}</td>
-                <td className="border p-2 text-sm">{new Date(type.first_seen).toLocaleDateString()}</td>
-                <td className="border p-2">{type.discovered_by}</td>
-                <td className="border p-2">
-                  <div className="flex gap-2 flex-wrap">
-                    {type.status === 'pending' && (
-                      <>
-                        <button
-                          onClick={() => handleApprove(type.type_name)}
-                          className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
-                        >
-                          ✓ Approuver
-                        </button>
-                        <button
-                          onClick={() => handleReject(type.type_name)}
-                          className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
-                        >
-                          ✗ Rejeter
-                        </button>
-                      </>
-                    )}
-                    <Link
-                      href={`/admin/dynamic-types/${type.type_name}`}
-                      className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-                    >
-                      Voir
-                    </Link>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+              <Card
+                key={type.id}
+                borderWidth={2}
+                borderColor={`${getStatusColor(type.status)}.300`}
+                _hover={{ shadow: 'lg', transform: 'translateY(-2px)' }}
+                transition="all 0.2s"
+              >
+                <CardHeader pb={2}>
+                  <Flex justify="space-between" align="center">
+                    <HStack>
+                      <Icon as={getStatusIcon(type.status)} boxSize={5} />
+                      <Heading size="md">{type.type_name}</Heading>
+                    </HStack>
+                    <Badge colorScheme={getStatusColor(type.status)}>
+                      {type.status}
+                    </Badge>
+                  </Flex>
+                </CardHeader>
 
-      {types.length === 0 && !loading && (
-        <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-          <p className="text-gray-500 text-lg mb-2">Aucun type trouvé</p>
-          <p className="text-gray-400 text-sm">Importez un document pour découvrir des types automatiquement</p>
-        </div>
-      )}
-    </div>
+                <CardBody>
+                  <VStack align="stretch" spacing={3}>
+                    {/* Statistics */}
+                    <SimpleGrid columns={3} spacing={2}>
+                      <Stat size="sm">
+                        <StatLabel fontSize="xs">Total</StatLabel>
+                        <StatNumber fontSize="lg">{type.entity_count}</StatNumber>
+                      </Stat>
+                      <Stat size="sm">
+                        <StatLabel fontSize="xs">En attente</StatLabel>
+                        <StatNumber fontSize="lg" color="yellow.500">
+                          {type.pending_entity_count}
+                        </StatNumber>
+                      </Stat>
+                      <Stat size="sm">
+                        <StatLabel fontSize="xs">Validés</StatLabel>
+                        <StatNumber fontSize="lg" color="green.500">
+                          {type.validated_entity_count}
+                        </StatNumber>
+                      </Stat>
+                    </SimpleGrid>
+
+                    {/* Description */}
+                    {type.description && (
+                      <Text fontSize="sm" color="gray.600">
+                        {type.description}
+                      </Text>
+                    )}
+
+                    {/* Metadata */}
+                    <Text fontSize="xs" color="gray.500">
+                      Découvert: {new Date(type.first_seen).toLocaleDateString()}
+                      {' • '}
+                      Par: {type.discovered_by}
+                    </Text>
+
+                    {/* Actions */}
+                    <VStack spacing={2}>
+                      <Link href={`/admin/dynamic-types/${type.type_name}`} style={{ width: '100%' }}>
+                        <Button
+                          size="sm"
+                          colorScheme="blue"
+                          variant="outline"
+                          width="100%"
+                        >
+                          👁️ Voir entités ({type.entity_count})
+                        </Button>
+                      </Link>
+
+                      {type.status === 'pending' && (
+                        <HStack width="100%" spacing={2}>
+                          <Button
+                            size="sm"
+                            colorScheme="green"
+                            onClick={() => handleApprove(type.type_name)}
+                            flex={1}
+                          >
+                            ✅ Approuver
+                          </Button>
+                          <Button
+                            size="sm"
+                            colorScheme="red"
+                            onClick={() => handleReject(type.type_name)}
+                            flex={1}
+                          >
+                            ❌ Rejeter
+                          </Button>
+                        </HStack>
+                      )}
+                    </VStack>
+                  </VStack>
+                </CardBody>
+              </Card>
+            ))}
+          </SimpleGrid>
+        )}
+
+        {/* Table View */}
+        {viewMode === 'table' && types.length > 0 && (
+          <Card>
+            <CardBody p={0}>
+              <Table variant="simple">
+                <Thead>
+                  <Tr>
+                    <Th>Type</Th>
+                    <Th>Status</Th>
+                    <Th isNumeric>Total</Th>
+                    <Th isNumeric>En attente</Th>
+                    <Th isNumeric>Validés</Th>
+                    <Th>Découvert</Th>
+                    <Th>Actions</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {types.map((type) => (
+                    <Tr key={type.id}>
+                      <Td fontWeight="bold">{type.type_name}</Td>
+                      <Td>
+                        <Badge colorScheme={getStatusColor(type.status)}>
+                          {type.status}
+                        </Badge>
+                      </Td>
+                      <Td isNumeric>{type.entity_count}</Td>
+                      <Td isNumeric>
+                        <Text color="yellow.500">{type.pending_entity_count}</Text>
+                      </Td>
+                      <Td isNumeric>
+                        <Text color="green.500">{type.validated_entity_count}</Text>
+                      </Td>
+                      <Td fontSize="sm">
+                        {new Date(type.first_seen).toLocaleDateString()}
+                      </Td>
+                      <Td>
+                        <HStack spacing={2}>
+                          <Link href={`/admin/dynamic-types/${type.type_name}`}>
+                            <Button size="xs" colorScheme="blue" variant="outline">
+                              Voir
+                            </Button>
+                          </Link>
+                          {type.status === 'pending' && (
+                            <>
+                              <Button
+                                size="xs"
+                                colorScheme="green"
+                                onClick={() => handleApprove(type.type_name)}
+                              >
+                                ✓
+                              </Button>
+                              <Button
+                                size="xs"
+                                colorScheme="red"
+                                onClick={() => handleReject(type.type_name)}
+                              >
+                                ✗
+                              </Button>
+                            </>
+                          )}
+                        </HStack>
+                      </Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </CardBody>
+          </Card>
+        )}
+      </VStack>
+    </Container>
   );
 }
