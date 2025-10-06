@@ -34,26 +34,78 @@ logger = setup_logging(settings.logs_dir, "entity_types_router.log")
 router = APIRouter(prefix="/entity-types", tags=["entity-types"])
 
 
-@router.get("", response_model=EntityTypeListResponse)
+@router.get(
+    "",
+    response_model=EntityTypeListResponse,
+    summary="Liste entity types découverts",
+    description="""
+    Liste tous les entity types enregistrés dans le registry avec filtrage et pagination.
+
+    **Workflow Auto-Learning**:
+    - Types découverts automatiquement par LLM lors extraction → status='pending'
+    - Types créés manuellement ou approuvés → status='approved'
+    - Types rejetés par admin → status='rejected'
+
+    **Use Cases**:
+    - Admin UI: Affichage types pending pour validation
+    - Monitoring: Stats découverte types par tenant
+    - Analytics: Types les plus utilisés (tri par entity_count)
+
+    **Performance**: < 50ms (index SQLite sur tenant_id, status)
+    """,
+    responses={
+        200: {
+            "description": "Liste types avec compteurs",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "types": [
+                            {
+                                "id": 1,
+                                "type_name": "SAP_COMPONENT",
+                                "status": "pending",
+                                "entity_count": 42,
+                                "pending_entity_count": 15,
+                                "validated_entity_count": 27,
+                                "first_seen": "2025-10-06T10:30:00Z",
+                                "discovered_by": "llm",
+                                "approved_by": None,
+                                "approved_at": None,
+                                "tenant_id": "default"
+                            }
+                        ],
+                        "total": 1,
+                        "status_filter": "pending",
+                        "tenant_id": "default"
+                    }
+                }
+            }
+        }
+    }
+)
 async def list_entity_types(
     status: Optional[str] = Query(
         default=None,
-        description="Filtrer par status (pending | approved | rejected)"
+        description="Filtrer par status (pending | approved | rejected)",
+        example="pending"
     ),
     tenant_id: str = Query(
         default="default",
-        description="Tenant ID"
+        description="Tenant ID pour isolation multi-tenant",
+        example="default"
     ),
     limit: int = Query(
         default=100,
         ge=1,
         le=1000,
-        description="Limite résultats"
+        description="Limite résultats pagination (max 1000)",
+        example=100
     ),
     offset: int = Query(
         default=0,
         ge=0,
-        description="Offset pagination"
+        description="Offset pagination (0-based)",
+        example=0
     ),
     db: Session = Depends(get_db)
 ):
@@ -110,7 +162,71 @@ async def list_entity_types(
         )
 
 
-@router.post("", response_model=EntityTypeResponse, status_code=201)
+@router.post(
+    "",
+    response_model=EntityTypeResponse,
+    status_code=201,
+    summary="Créer entity type manuellement",
+    description="""
+    Crée un nouveau entity type dans le registry (création manuelle admin).
+
+    **Use Case**: Admin souhaite préenregistrer un type avant que le LLM ne le découvre.
+
+    **Validation**:
+    - `type_name` : Format `^[A-Z][A-Z0-9_]{0,49}$` (UPPERCASE, max 50 chars)
+    - Préfixes interdits : `_`, `SYSTEM_`, `ADMIN_`, `INTERNAL_`
+    - Unicité : `(type_name, tenant_id)` composite unique
+
+    **Status Initial**: 'pending' (nécessite approbation)
+    """,
+    responses={
+        201: {
+            "description": "Type créé avec succès",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 5,
+                        "type_name": "CUSTOM_MODULE",
+                        "status": "pending",
+                        "entity_count": 0,
+                        "pending_entity_count": 0,
+                        "validated_entity_count": 0,
+                        "first_seen": "2025-10-06T14:22:00Z",
+                        "discovered_by": "admin-manual",
+                        "approved_by": None,
+                        "approved_at": None,
+                        "tenant_id": "default",
+                        "description": "Custom business module"
+                    }
+                }
+            }
+        },
+        409: {
+            "description": "Type déjà existant",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Entity type 'CUSTOM_MODULE' already exists"}
+                }
+            }
+        },
+        422: {
+            "description": "Validation échouée (format type_name invalide)",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "loc": ["body", "type_name"],
+                                "msg": "Type must match ^[A-Z][A-Z0-9_]{0,49}$",
+                                "type": "value_error.str.regex"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+)
 async def create_entity_type(
     entity_type: EntityTypeCreate,
     db: Session = Depends(get_db)
@@ -204,7 +320,63 @@ async def get_entity_type(
     return EntityTypeResponse.from_orm(entity_type)
 
 
-@router.post("/{type_name}/approve", response_model=EntityTypeResponse)
+@router.post(
+    "/{type_name}/approve",
+    response_model=EntityTypeResponse,
+    summary="Approuver entity type",
+    description="""
+    Approuve un entity type découvert par le LLM (transition pending → approved).
+
+    **Workflow**:
+    1. Type découvert automatiquement → status='pending'
+    2. Admin review type dans UI
+    3. Approve → status='approved' + enregistrement approved_by/at
+    4. Type devient utilisable pour classification entités
+
+    **Validation**:
+    - Type doit exister avec status='pending'
+    - Requiert X-Admin-Key header (auth simplifiée dev, JWT prod)
+
+    **Impact**:
+    - Futures entités avec ce type → Automatiquement considérées valides
+    - Type visible dans ontologie effective
+    """,
+    responses={
+        200: {
+            "description": "Type approuvé avec succès",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "type_name": "SAP_COMPONENT",
+                        "status": "approved",
+                        "entity_count": 42,
+                        "approved_by": "admin@example.com",
+                        "approved_at": "2025-10-06T15:30:00Z"
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Status invalide (déjà approuvé ou rejeté)",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Cannot approve type with status 'approved' (must be pending)"
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Type non trouvé",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Entity type 'UNKNOWN_TYPE' not found"}
+                }
+            }
+        }
+    }
+)
 async def approve_entity_type(
     type_name: str,
     approve_data: EntityTypeApprove,

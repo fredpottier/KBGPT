@@ -40,26 +40,98 @@ class PendingEntitiesResponse(BaseModel):
     )
 
 
-@router.get("/pending", response_model=PendingEntitiesResponse)
+@router.get(
+    "/pending",
+    response_model=PendingEntitiesResponse,
+    summary="Liste entités non cataloguées (pending)",
+    description="""
+    Retourne toutes les entités avec status='pending' (non cataloguées dans ontologie YAML).
+
+    **Workflow Auto-Classification**:
+    - Import document → LLM extrait entités → EntityNormalizer check ontologie
+    - Si entité trouvée dans YAML → status='validated', is_cataloged=true
+    - Si entité NON trouvée → status='pending', is_cataloged=false
+    - Admin review via cette API → Approve/Merge/Delete
+
+    **Use Cases**:
+    - UI Admin: Page /admin/entities-pending affiche cette liste
+    - Curation: Identifier nouvelles entités métier découvertes
+    - Quality: Détecter entités mal extraites (typos, doublons)
+
+    **Filtrage**:
+    - `entity_type` : Focus sur un type spécifique (ex: SOLUTION, COMPONENT)
+    - `tenant_id` : Isolation multi-tenant stricte
+    - Pagination : limit/offset
+
+    **Performance**: < 100ms (index Neo4j sur tenant_id + status)
+    """,
+    responses={
+        200: {
+            "description": "Liste entités pending",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "entities": [
+                            {
+                                "uuid": "ent-123",
+                                "name": "SAP Analytics Cloud Advanced",
+                                "entity_type": "SOLUTION",
+                                "description": "Advanced analytics platform",
+                                "status": "pending",
+                                "is_cataloged": False,
+                                "confidence": 0.87,
+                                "source_document": "SAP_Portfolio_2025.pptx",
+                                "created_at": "2025-10-06T10:15:00Z"
+                            }
+                        ],
+                        "total": 1,
+                        "entity_type_filter": None,
+                        "tenant_id": "default"
+                    }
+                }
+            }
+        },
+        422: {
+            "description": "Paramètres invalides (limit/offset négatifs)",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "loc": ["query", "limit"],
+                                "msg": "ensure this value is greater than or equal to 1",
+                                "type": "value_error.number.not_ge"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+)
 async def list_pending_entities(
     entity_type: Optional[str] = Query(
         default=None,
-        description="Filtrer par type d'entité (ex: INFRASTRUCTURE)"
+        description="Filtrer par type d'entité (ex: INFRASTRUCTURE)",
+        example="SOLUTION"
     ),
     tenant_id: str = Query(
         default="default",
-        description="Tenant ID (multi-tenancy)"
+        description="Tenant ID (multi-tenancy)",
+        example="default"
     ),
     limit: int = Query(
         default=100,
         ge=1,
         le=1000,
-        description="Nombre max entités retournées"
+        description="Nombre max entités retournées",
+        example=100
     ),
     offset: int = Query(
         default=0,
         ge=0,
-        description="Offset pagination"
+        description="Offset pagination",
+        example=0
     )
 ):
     """
@@ -256,7 +328,86 @@ class MergeEntitiesRequest(BaseModel):
     )
 
 
-@router.post("/{uuid}/approve", response_model=EntityResponse)
+@router.post(
+    "/{uuid}/approve",
+    response_model=EntityResponse,
+    summary="Approuver entité pending",
+    description="""
+    Approuve une entité pending (transition pending → validated) + optionnel enrichissement ontologie YAML.
+
+    **Workflow Complet**:
+    1. Vérification existence entité (status='pending')
+    2. UPDATE Neo4j : status='validated', validated_by, validated_at
+    3. **Optionnel** (si add_to_ontology=true):
+       - Détermine fichier YAML selon entity_type (ex: SOLUTION → solutions.yaml)
+       - Ajoute entité avec name, aliases, description
+       - **Impact futur** : Entités similaires → Automatiquement is_cataloged=true
+
+    **Use Cases**:
+    - Nouvelle entité métier découverte → Approuver pour futures utilisations
+    - Enrichir ontologie automatiquement sans édition manuelle YAML
+    - Traçabilité : Qui a validé quoi et quand
+
+    **Security**:
+    - Requiert header `X-Admin-Key` (auth simplifiée dev, JWT prévu prod)
+    - Requiert header `X-Tenant-ID` (isolation multi-tenant)
+
+    **Performance**: < 50ms (Neo4j update + optionnel YAML write)
+    """,
+    responses={
+        200: {
+            "description": "Entité approuvée avec succès",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "uuid": "ent-456",
+                        "name": "SAP Analytics Cloud Advanced",
+                        "entity_type": "SOLUTION",
+                        "status": "validated",
+                        "is_cataloged": True,
+                        "validated_by": "admin@example.com",
+                        "validated_at": "2025-10-06T16:00:00Z",
+                        "tenant_id": "default"
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Entité déjà validated",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Entity already validated (current status: validated)"
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "X-Admin-Key manquant",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "X-Admin-Key header required"}
+                }
+            }
+        },
+        403: {
+            "description": "X-Admin-Key invalide",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Admin access required"}
+                }
+            }
+        },
+        404: {
+            "description": "Entité non trouvée",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Entity with uuid 'ent-unknown' not found"}
+                }
+            }
+        }
+    }
+)
 async def approve_entity(
     uuid: str,
     request: ApproveEntityRequest,
