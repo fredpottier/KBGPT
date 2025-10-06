@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from knowbase.api.schemas.knowledge_graph import EntityResponse
 from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
-from knowbase.api.dependencies.auth import require_admin, get_tenant_id
+from knowbase.api.auth_deps.auth import require_admin, get_tenant_id
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 
