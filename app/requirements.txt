@@ -77,3 +77,7 @@ pydantic-settings
 # === Zep Integration ===
 zep-python>=2.0.2
 asyncpg>=0.29.0
+
+# === Fuzzy Matching (Phase 5B) ===
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.21.0

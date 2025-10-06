@@ -2,6 +2,7 @@
 Router API pour gestion Entity Types Registry.
 
 Phase 2 - Entity Types Management
+Phase 5B - Ontology Generation & Normalization
 
 Endpoints:
 - GET /entity-types - Liste tous les types
@@ -10,11 +11,21 @@ Endpoints:
 - POST /entity-types/{type_name}/approve - Approuver type
 - POST /entity-types/{type_name}/reject - Rejeter type
 - DELETE /entity-types/{type_name} - Supprimer type
+- POST /entity-types/import-yaml - Import bulk depuis fichier YAML
+- GET /entity-types/export-yaml - Export types en YAML
+- POST /entity-types/{type_name}/generate-ontology - Génération ontologie LLM (async)
+- GET /entity-types/{type_name}/ontology-proposal - Récupérer proposition ontologie
 """
 from typing import Optional
+import yaml
+from io import StringIO
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, UploadFile, File, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from redis import Redis
+from rq import Queue
+from rq.job import Job
 
 from knowbase.api.schemas.entity_types import (
     EntityTypeCreate,
@@ -534,6 +545,795 @@ async def delete_entity_type(
 
     # 204 No Content (pas de body retourné)
     return
+
+
+@router.post(
+    "/import-yaml",
+    summary="Import bulk entity types depuis YAML",
+    description="""
+    Importe entity types depuis fichier YAML (format ontologies).
+
+    **Format YAML attendu**:
+    ```yaml
+    ENTITY_TYPE_NAME:
+      canonical_name: "Display Name"
+      aliases:
+        - "Alias1"
+        - "Alias2"
+      category: "Category Name"
+      vendor: "Vendor Name"
+      description: "Type description"
+    ```
+
+    **Options**:
+    - `auto_approve=true`: Types créés directement en status='approved'
+    - `auto_approve=false`: Types créés en status='pending' (validation manuelle)
+    - `skip_existing=true`: Ignore types déjà existants
+    - `skip_existing=false`: Retourne erreur si type existe
+
+    **Use Cases**:
+    - Bootstrap rapide environnement avec ontologies prédéfinies
+    - Migration types entre environnements
+    - Réinitialisation système avec types métier
+
+    **Returns**:
+    - `created`: Nombre types créés
+    - `skipped`: Nombre types ignorés (déjà existants)
+    - `errors`: Liste erreurs rencontrées
+    """,
+    responses={
+        200: {
+            "description": "Import réussi",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "created": 15,
+                        "skipped": 3,
+                        "errors": [],
+                        "types": ["TECHNOLOGY", "COMPONENT", "SOLUTION"]
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Format YAML invalide",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Invalid YAML format"}
+                }
+            }
+        }
+    }
+)
+async def import_entity_types_yaml(
+    file: UploadFile = File(..., description="Fichier YAML à importer"),
+    auto_approve: bool = Query(default=True, description="Auto-approuver types importés"),
+    skip_existing: bool = Query(default=True, description="Ignorer types existants"),
+    tenant_id: str = Query(default="default", description="Tenant ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Import bulk entity types depuis fichier YAML.
+
+    Parse fichier YAML format ontologies et crée types dans registry.
+    """
+    logger.info(
+        f"📤 POST /entity-types/import-yaml - "
+        f"file={file.filename}, auto_approve={auto_approve}, skip_existing={skip_existing}"
+    )
+
+    # Vérifier extension fichier
+    if not file.filename.endswith(('.yaml', '.yml')):
+        raise HTTPException(
+            status_code=400,
+            detail="File must be .yaml or .yml"
+        )
+
+    # Lire contenu fichier
+    try:
+        content = await file.read()
+        yaml_data = yaml.safe_load(content.decode('utf-8'))
+    except yaml.YAMLError as e:
+        logger.error(f"❌ YAML parse error: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid YAML format: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"❌ File read error: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to read file: {str(e)}"
+        )
+
+    if not isinstance(yaml_data, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="YAML root must be dictionary"
+        )
+
+    service = EntityTypeRegistryService(db)
+
+    created = 0
+    skipped = 0
+    errors = []
+    created_types = []
+
+    # Traiter chaque type du YAML
+    for type_name, type_data in yaml_data.items():
+        # Valider format type_name (doit matcher ^[A-Z][A-Z0-9_]{0,49}$)
+        if not type_name.isupper() or not type_name.replace('_', '').isalnum():
+            errors.append(f"Invalid type_name format: {type_name}")
+            continue
+
+        # Vérifier si type existe déjà
+        existing = service.get_type_by_name(type_name, tenant_id)
+
+        if existing:
+            if skip_existing:
+                skipped += 1
+                logger.info(f"⏭️ Skipped existing type: {type_name}")
+                continue
+            else:
+                errors.append(f"Type already exists: {type_name}")
+                continue
+
+        # Extraire description du YAML
+        description = None
+        if isinstance(type_data, dict):
+            description = type_data.get('description') or type_data.get('canonical_name')
+
+        # Créer type
+        try:
+            status = "approved" if auto_approve else "pending"
+            approved_by = "yaml-import" if auto_approve else None
+
+            new_type = service.create_type(
+                type_name=type_name,
+                description=description,
+                discovered_by="yaml-import",
+                tenant_id=tenant_id,
+                status=status,
+                approved_by=approved_by
+            )
+
+            created += 1
+            created_types.append(type_name)
+            logger.info(f"✅ Created type: {type_name} (status={status})")
+
+        except Exception as e:
+            errors.append(f"Failed to create {type_name}: {str(e)}")
+            logger.error(f"❌ Failed to create type {type_name}: {e}")
+
+    logger.info(
+        f"📤 Import YAML terminé - created={created}, skipped={skipped}, errors={len(errors)}"
+    )
+
+    return {
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+        "types": created_types
+    }
+
+
+@router.get(
+    "/export-yaml",
+    summary="Export entity types en YAML",
+    description="""
+    Exporte tous les entity types (ou filtrés) au format YAML ontologie.
+
+    **Filtres disponibles**:
+    - `status`: Filtrer par status (pending/approved/rejected)
+    - `tenant_id`: Tenant ID
+
+    **Format retourné**:
+    ```yaml
+    ENTITY_TYPE_NAME:
+      canonical_name: "Type Name"
+      description: "Type description"
+      status: "approved"
+      entity_count: 42
+    ```
+
+    **Use Cases**:
+    - Backup types approuvés
+    - Migration types vers autre environnement
+    - Documentation ontologie effective
+    - Réimport après réinitialisation système
+    """,
+    responses={
+        200: {
+            "description": "Export YAML réussi",
+            "content": {
+                "application/x-yaml": {
+                    "example": "TECHNOLOGY:\n  canonical_name: Technology\n  status: approved\n"
+                }
+            }
+        }
+    }
+)
+async def export_entity_types_yaml(
+    status: Optional[str] = Query(default=None, description="Filtrer par status"),
+    tenant_id: str = Query(default="default", description="Tenant ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Export entity types en fichier YAML.
+
+    Retourne fichier YAML téléchargeable format ontologies.
+    """
+    logger.info(
+        f"📥 GET /entity-types/export-yaml - status={status}, tenant_id={tenant_id}"
+    )
+
+    service = EntityTypeRegistryService(db)
+
+    # Récupérer types
+    types = service.list_types(
+        status=status,
+        tenant_id=tenant_id,
+        limit=1000,
+        offset=0
+    )
+
+    # Construire structure YAML
+    yaml_data = {}
+
+    for entity_type in types:
+        yaml_data[entity_type.type_name] = {
+            "canonical_name": entity_type.type_name.replace('_', ' ').title(),
+            "description": entity_type.description or f"{entity_type.type_name} entities",
+            "status": entity_type.status,
+            "entity_count": entity_type.entity_count,
+            "discovered_by": entity_type.discovered_by,
+        }
+
+        # Ajouter infos approbation si applicable
+        if entity_type.approved_by:
+            yaml_data[entity_type.type_name]["approved_by"] = entity_type.approved_by
+            yaml_data[entity_type.type_name]["approved_at"] = entity_type.approved_at.isoformat() if entity_type.approved_at else None
+
+    # Convertir en YAML
+    yaml_output = yaml.dump(yaml_data, default_flow_style=False, allow_unicode=True, sort_keys=True)
+
+    # Créer stream pour download
+    yaml_stream = StringIO(yaml_output)
+
+    filename = f"entity_types_{status or 'all'}_{tenant_id}.yaml"
+
+    logger.info(f"📥 Export YAML généré - {len(types)} types, filename={filename}")
+
+    return StreamingResponse(
+        iter([yaml_stream.getvalue()]),
+        media_type="application/x-yaml",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
+
+
+@router.post(
+    "/{type_name}/generate-ontology",
+    summary="Génère ontologie depuis entités (LLM async)",
+    description="""
+    Déclenche job async de génération d'ontologie via LLM.
+
+    **Workflow**:
+    1. Récupère toutes entités du type
+    2. Lance job RQ avec OntologyGeneratorService
+    3. LLM (Claude Sonnet) analyse et propose groupes + aliases
+    4. Résultat stocké en Redis (clé: ontology_proposal:{type_name})
+
+    **Prérequis**:
+    - Type doit exister
+    - Au moins 1 entité du type
+
+    **Returns**:
+    - `job_id`: ID job RQ pour suivi
+    - `status_url`: URL pour vérifier progression
+    """,
+    responses={
+        202: {
+            "description": "Job lancé",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "job_id": "abc-123",
+                        "status": "queued",
+                        "status_url": "/api/jobs/abc-123/status"
+                    }
+                }
+            }
+        }
+    }
+)
+async def generate_ontology(
+    type_name: str,
+    model_preference: str = Query(default="claude-sonnet", description="Modèle LLM"),
+    tenant_id: str = Query(default="default", description="Tenant ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Génère ontologie pour type via job async LLM.
+
+    Args:
+        type_name: Nom type
+        model_preference: Modèle LLM (default: claude-sonnet)
+        tenant_id: Tenant ID
+        db: Session DB
+
+    Returns:
+        Dict avec job_id et status_url
+    """
+    from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
+    import os
+
+    logger.info(f"🤖 POST /entity-types/{type_name}/generate-ontology - model={model_preference}")
+
+    # Vérifier type existe
+    service = EntityTypeRegistryService(db)
+    entity_type = service.get_type_by_name(type_name, tenant_id)
+
+    if not entity_type:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Entity type '{type_name}' not found"
+        )
+
+    # Récupérer entités Neo4j
+    kg_service = KnowledgeGraphService()
+    entities_raw = kg_service.get_entities_by_type(type_name, tenant_id)
+
+    if len(entities_raw) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No entities found for type '{type_name}'. Cannot generate ontology."
+        )
+
+    # Formater entités pour OntologyGenerator
+    entities = [
+        {
+            "uuid": e.get("uuid"),
+            "name": e.get("name"),
+            "description": e.get("description", ""),
+            "status": e.get("status", "pending")
+        }
+        for e in entities_raw
+    ]
+
+    logger.info(f"📊 {len(entities)} entités récupérées pour génération ontologie")
+
+    # Enqueue job RQ
+    redis_conn = Redis(
+        host=os.getenv("REDIS_HOST", "redis"),
+        port=int(os.getenv("REDIS_PORT", "6379")),
+        db=1
+    )
+    queue = Queue("default", connection=redis_conn)
+
+    job = queue.enqueue(
+        "knowbase.api.workers.ontology_worker.generate_ontology_task",
+        type_name=type_name,
+        entities=entities,
+        model_preference=model_preference,
+        tenant_id=tenant_id,
+        job_timeout="10m"
+    )
+
+    logger.info(f"✅ Job ontology generation enqueued: {job.id}")
+
+    return {
+        "job_id": job.id,
+        "status": "queued",
+        "status_url": f"/api/jobs/{job.id}/status",
+        "entities_count": len(entities)
+    }
+
+
+@router.get(
+    "/{type_name}/ontology-proposal",
+    summary="Récupère proposition ontologie générée",
+    description="""
+    Récupère ontologie proposée par LLM (après génération async).
+
+    **Returns**:
+    - Ontologie au format JSON éditable
+    - null si génération pas encore lancée ou en cours
+    """,
+    responses={
+        200: {
+            "description": "Ontologie disponible",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "entity_type": "SOLUTION",
+                        "generated_at": "2025-10-06T...",
+                        "groups_proposed": 12,
+                        "ontology": {
+                            "SAP_S4HANA_PRIVATE_CLOUD": {
+                                "canonical_name": "SAP S/4HANA Private Cloud Edition",
+                                "aliases": ["SAP S/4HANA PCE"],
+                                "confidence": 0.95,
+                                "entities_merged": ["uuid-1", "uuid-2"]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Ontologie pas encore générée"
+        }
+    }
+)
+async def get_ontology_proposal(
+    type_name: str,
+    tenant_id: str = Query(default="default", description="Tenant ID")
+):
+    """
+    Récupère ontologie proposée depuis Redis.
+
+    Args:
+        type_name: Nom type
+        tenant_id: Tenant ID
+
+    Returns:
+        Dict ontologie ou 404
+    """
+    import os
+    import json
+
+    logger.info(f"📥 GET /entity-types/{type_name}/ontology-proposal")
+
+    redis_conn = Redis(
+        host=os.getenv("REDIS_HOST", "redis"),
+        port=int(os.getenv("REDIS_PORT", "6379")),
+        db=1
+    )
+
+    # Clé Redis pour proposition ontologie
+    redis_key = f"ontology_proposal:{type_name}:{tenant_id}"
+
+    ontology_json = redis_conn.get(redis_key)
+
+    if not ontology_json:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No ontology proposal found for type '{type_name}'. Generate one first."
+        )
+
+    ontology_data = json.loads(ontology_json)
+
+    logger.info(f"✅ Ontologie trouvée: {ontology_data.get('groups_proposed', 0)} groupes")
+
+    return ontology_data
+
+
+@router.post(
+    "/{type_name}/preview-normalization",
+    summary="Preview normalisation entités avec ontologie",
+    description="""
+    Calcule preview des merges entre entités et ontologie (fuzzy matching).
+
+    **Workflow**:
+    1. Récupère entités du type depuis Neo4j
+    2. Applique fuzzy matching avec ontologie fournie
+    3. Retourne groupes proposés avec scores
+
+    **Seuils fuzzy matching**:
+    - >= 90% : Auto-coché (haute confiance)
+    - 75-89% : Suggéré mais décoché (confirmation manuelle)
+    - < 75% : Pas de match
+
+    **Returns**:
+    - `merge_groups`: Groupes proposés avec entités matchées
+    - `summary`: Statistiques (total, matchées, auto, manuelles)
+    """,
+    responses={
+        200: {
+            "description": "Preview calculé",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "merge_groups": [
+                            {
+                                "canonical_key": "SAP_S4HANA_PRIVATE_CLOUD",
+                                "canonical_name": "SAP S/4HANA Private Cloud Edition",
+                                "entities": [
+                                    {
+                                        "uuid": "...",
+                                        "name": "SAP S/4HANA PCE",
+                                        "score": 92,
+                                        "auto_match": True,
+                                        "selected": True
+                                    }
+                                ],
+                                "master_uuid": "..."
+                            }
+                        ],
+                        "summary": {
+                            "total_entities": 47,
+                            "entities_matched": 35,
+                            "groups_proposed": 12
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
+async def preview_normalization(
+    type_name: str,
+    ontology: Dict,  # Ontologie fournie par user (depuis LLM ou manuelle)
+    tenant_id: str = Query(default="default", description="Tenant ID")
+):
+    """
+    Calcule preview normalisation avec fuzzy matching.
+
+    Args:
+        type_name: Nom type
+        ontology: Dict ontologie (format OntologyGenerator)
+        tenant_id: Tenant ID
+
+    Returns:
+        Dict avec merge_groups et summary
+    """
+    from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
+    from knowbase.api.services.fuzzy_matcher_service import FuzzyMatcherService
+
+    logger.info(f"🔍 POST /entity-types/{type_name}/preview-normalization")
+
+    # Récupérer entités Neo4j
+    kg_service = KnowledgeGraphService()
+    entities_raw = kg_service.get_entities_by_type(type_name, tenant_id)
+
+    entities = [
+        {
+            "uuid": e.get("uuid"),
+            "name": e.get("name"),
+            "description": e.get("description", ""),
+            "status": e.get("status", "pending")
+        }
+        for e in entities_raw
+    ]
+
+    logger.info(f"📊 {len(entities)} entités récupérées pour preview")
+
+    # Calculer preview avec fuzzy matching
+    fuzzy_service = FuzzyMatcherService()
+    preview = fuzzy_service.compute_merge_preview(entities, ontology)
+
+    logger.info(
+        f"✅ Preview généré: {preview['summary']['groups_proposed']} groupes, "
+        f"{preview['summary']['entities_matched']}/{preview['summary']['total_entities']} matchées"
+    )
+
+    return preview
+
+
+@router.post(
+    "/{type_name}/normalize-entities",
+    summary="Lance normalisation entités (merge + job async)",
+    description="""
+    Déclenche job async de normalisation (merge) des entités.
+
+    **Workflow**:
+    1. Reçoit sélections utilisateur (groupes + entités cochées)
+    2. Lance job RQ EntityMergeService
+    3. Batch merge tous les groupes sélectionnés
+    4. Snapshot pré-normalisation pour undo (24h)
+
+    **Body**:
+    ```json
+    {
+        "merge_groups": [...],  // Preview filtré par user
+        "create_snapshot": true  // Activer undo (default: true)
+    }
+    ```
+
+    **Returns**:
+    - `job_id`: ID job RQ
+    - `status_url`: URL monitoring
+    """,
+    responses={
+        202: {
+            "description": "Job lancé",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "job_id": "xyz-789",
+                        "status": "queued",
+                        "status_url": "/api/jobs/xyz-789/status",
+                        "groups_count": 12,
+                        "entities_count": 35
+                    }
+                }
+            }
+        }
+    }
+)
+async def normalize_entities(
+    type_name: str,
+    merge_groups: List[Dict],  # Groupes validés par user
+    create_snapshot: bool = True,
+    tenant_id: str = Query(default="default", description="Tenant ID")
+):
+    """
+    Lance normalisation async.
+
+    Args:
+        type_name: Nom type
+        merge_groups: Groupes depuis preview (filtrés par user)
+        create_snapshot: Créer snapshot pour undo
+        tenant_id: Tenant ID
+
+    Returns:
+        Dict job info
+    """
+    import os
+
+    logger.info(
+        f"🚀 POST /entity-types/{type_name}/normalize-entities - "
+        f"{len(merge_groups)} groupes"
+    )
+
+    # Enqueue job RQ
+    redis_conn = Redis(
+        host=os.getenv("REDIS_HOST", "redis"),
+        port=int(os.getenv("REDIS_PORT", "6379")),
+        db=1
+    )
+    queue = Queue("default", connection=redis_conn)
+
+    job = queue.enqueue(
+        "knowbase.api.workers.normalization_worker.normalize_entities_task",
+        type_name=type_name,
+        merge_groups=merge_groups,
+        tenant_id=tenant_id,
+        create_snapshot=create_snapshot,
+        job_timeout="30m"
+    )
+
+    entities_count = sum(len(g["entities"]) for g in merge_groups)
+
+    logger.info(f"✅ Job normalisation enqueued: {job.id}")
+
+    return {
+        "job_id": job.id,
+        "status": "queued",
+        "status_url": f"/api/jobs/{job.id}/status",
+        "groups_count": len(merge_groups),
+        "entities_count": entities_count
+    }
+
+
+@router.post(
+    "/{type_name}/undo-normalization/{snapshot_id}",
+    summary="Annule normalisation (undo via snapshot)",
+    description="""
+    Restaure état pré-normalisation depuis snapshot.
+
+    **Workflow**:
+    1. Récupère snapshot depuis SQLite
+    2. Vérifie TTL (24h)
+    3. Lance job RQ de restauration
+    4. Recrée entités mergées + supprime master
+
+    **⚠️ ATTENTION**: Cette opération est irréversible.
+
+    **Returns**:
+    - `job_id`: ID job restauration
+    """,
+    responses={
+        202: {
+            "description": "Undo lancé",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "job_id": "undo-123",
+                        "status": "queued",
+                        "snapshot_id": "abc-456"
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Snapshot non trouvé ou expiré"
+        }
+    }
+)
+async def undo_normalization(
+    type_name: str,
+    snapshot_id: str,
+    tenant_id: str = Query(default="default", description="Tenant ID")
+):
+    """
+    Lance undo normalisation.
+
+    Args:
+        type_name: Nom type
+        snapshot_id: ID snapshot
+        tenant_id: Tenant ID
+
+    Returns:
+        Dict job info
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from datetime import datetime
+    import os
+
+    logger.info(f"↩️ POST /entity-types/{type_name}/undo-normalization/{snapshot_id}")
+
+    # Récupérer snapshot depuis SQLite
+    engine = create_engine('sqlite:////data/entity_types_registry.db')
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    try:
+        result = session.execute(
+            """
+            SELECT snapshot_id, type_name, tenant_id, merge_groups_json, expires_at, restored
+            FROM normalization_snapshots
+            WHERE snapshot_id = ? AND type_name = ? AND tenant_id = ?
+            """,
+            (snapshot_id, type_name, tenant_id)
+        ).fetchone()
+
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Snapshot '{snapshot_id}' not found"
+            )
+
+        snap_id, snap_type, snap_tenant, merge_groups_json, expires_at, restored = result
+
+        # Vérifier expiration
+        expires_dt = datetime.fromisoformat(expires_at)
+        if datetime.utcnow() > expires_dt:
+            raise HTTPException(
+                status_code=410,
+                detail=f"Snapshot expired (TTL 24h)"
+            )
+
+        # Vérifier si déjà restauré
+        if restored:
+            raise HTTPException(
+                status_code=400,
+                detail="Snapshot already restored"
+            )
+
+        merge_groups = json.loads(merge_groups_json)
+
+    finally:
+        session.close()
+
+    # Enqueue job RQ undo
+    redis_conn = Redis(
+        host=os.getenv("REDIS_HOST", "redis"),
+        port=int(os.getenv("REDIS_PORT", "6379")),
+        db=1
+    )
+    queue = Queue("default", connection=redis_conn)
+
+    job = queue.enqueue(
+        "knowbase.api.workers.normalization_worker.undo_normalization_task",
+        snapshot_id=snapshot_id,
+        type_name=type_name,
+        merge_groups=merge_groups,
+        tenant_id=tenant_id,
+        job_timeout="30m"
+    )
+
+    logger.info(f"✅ Job undo enqueued: {job.id}")
+
+    return {
+        "job_id": job.id,
+        "status": "queued",
+        "status_url": f"/api/jobs/{job.id}/status",
+        "snapshot_id": snapshot_id
+    }
 
 
 __all__ = ["router"]

@@ -16,8 +16,9 @@ import {
   EditIcon,
   ViewIcon,
   SettingsIcon,
+  CheckCircleIcon,
 } from '@chakra-ui/icons'
-import { FiDatabase } from 'react-icons/fi'
+import { FiDatabase, FiLayers } from 'react-icons/fi'
 
 interface SidebarItemProps {
   icon?: any
@@ -100,6 +101,16 @@ export default function ContextualSidebar({ section }: ContextualSidebarProps) {
             icon: FiDatabase,
             label: 'Ontologies',
             href: '/admin/ontology',
+          },
+          {
+            icon: FiLayers,
+            label: 'Types Dynamiques',
+            href: '/admin/dynamic-types',
+          },
+          {
+            icon: CheckCircleIcon,
+            label: 'Entités en attente',
+            href: '/admin/entities-pending',
           },
           {
             icon: SettingsIcon,
