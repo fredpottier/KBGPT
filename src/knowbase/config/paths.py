@@ -23,6 +23,9 @@ PRESENTATIONS_DIR = DOCS_DONE_DIR
 SLIDES_DIR = PUBLIC_FILES_DIR / "slides"
 THUMBNAILS_DIR = PUBLIC_FILES_DIR / "thumbnails"
 
+# Phase 3 - Ontologies directory
+ONTOLOGIES_DIR = CONFIG_DIR / "ontologies"
+
 LEGACY_DIRECTORIES: dict[Path, Path] = {
     PROJECT_ROOT / "docs_in": DOCS_IN_DIR,
     PROJECT_ROOT / "docs_done": DOCS_DONE_DIR,

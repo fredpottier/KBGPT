@@ -15,6 +15,7 @@ from .paths import (
     DOCS_IN_DIR,
     LOGS_DIR,
     MODELS_DIR,
+    ONTOLOGIES_DIR,
     PRESENTATIONS_DIR,
     PROJECT_ROOT,
     SLIDES_DIR,
@@ -70,6 +71,7 @@ class Settings(BaseSettings):
     presentations_dir: Path = Field(default=PRESENTATIONS_DIR)
     slides_dir: Path = Field(default=SLIDES_DIR)
     thumbnails_dir: Path = Field(default=THUMBNAILS_DIR)
+    ontologies_dir: Path = Field(default=ONTOLOGIES_DIR)  # Phase 3
 
     class Config:
         env_file = PROJECT_ROOT / ".env"
