@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts
+from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts, ontology, entities
 
 
 def create_app() -> FastAPI:
@@ -102,6 +102,14 @@ def create_app() -> FastAPI:
                 "name": "Token Analysis",
                 "description": "Analyse coûts et tokens LLM"
             },
+            {
+                "name": "Ontology",
+                "description": "Gestion catalogues d'ontologies (entités Knowledge Graph)"
+            },
+            {
+                "name": "Entities",
+                "description": "Gestion entités dynamiques - validation, pending, types découverts (Phase 1)"
+            },
         ],
     )
 
@@ -151,6 +159,8 @@ def create_app() -> FastAPI:
     app.include_router(downloads.router)  # Déjà avec préfixe /api/downloads
     app.include_router(token_analysis.router, prefix="/api")  # Analyse des tokens et coûts
     app.include_router(facts.router, prefix="/api")  # Facts API - Neo4j Native (Phase 2)
+    app.include_router(ontology.router, prefix="/api")  # Ontology API - Catalogues entités
+    app.include_router(entities.router, prefix="/api")  # Entities API - Gestion entités dynamiques (Phase 1)
 
     return app
 
