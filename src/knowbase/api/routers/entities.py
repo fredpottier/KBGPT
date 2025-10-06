@@ -23,6 +23,27 @@ logger = setup_logging(settings.logs_dir, "entities_router.log")
 router = APIRouter(prefix="/entities", tags=["entities"])
 
 
+class EntitiesListResponse(BaseModel):
+    """Réponse liste entités avec filtres."""
+
+    entities: List[EntityResponse] = Field(
+        ...,
+        description="Liste entités"
+    )
+    total: int = Field(
+        ...,
+        description="Nombre total entités"
+    )
+    entity_type_filter: Optional[str] = Field(
+        default=None,
+        description="Filtre entity_type appliqué (si any)"
+    )
+    status_filter: Optional[str] = Field(
+        default=None,
+        description="Filtre status appliqué (si any)"
+    )
+
+
 class PendingEntitiesResponse(BaseModel):
     """Réponse liste entités pending."""
 
@@ -38,6 +59,188 @@ class PendingEntitiesResponse(BaseModel):
         default=None,
         description="Filtre entity_type appliqué (si any)"
     )
+
+
+@router.get(
+    "",
+    response_model=EntitiesListResponse,
+    summary="Liste entités avec filtres",
+    description="""
+    Liste les entités du Knowledge Graph avec filtres optionnels.
+
+    **Filtres disponibles**:
+    - `entity_type` : Filtrer par type (SOLUTION, COMPONENT, etc.)
+    - `status` : Filtrer par statut (pending, validated)
+    - `tenant_id` : Isolation multi-tenant
+    - `limit` / `offset` : Pagination
+
+    **Use Case**: Page drill-down types dynamiques (/admin/dynamic-types/{typeName})
+    """,
+    responses={
+        200: {
+            "description": "Liste entités avec filtres",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "entities": [
+                            {
+                                "uuid": "123e4567-e89b-12d3-a456-426614174000",
+                                "name": "SAP S/4HANA",
+                                "entity_type": "SOLUTION",
+                                "status": "pending",
+                                "description": "ERP solution",
+                                "confidence": 0.95
+                            }
+                        ],
+                        "total": 22,
+                        "entity_type_filter": "SOLUTION",
+                        "status_filter": None
+                    }
+                }
+            }
+        }
+    }
+)
+async def list_entities(
+    entity_type: Optional[str] = Query(
+        default=None,
+        description="Filtrer par entity_type (ex: SOLUTION, COMPONENT)",
+        example="SOLUTION"
+    ),
+    status: Optional[str] = Query(
+        default=None,
+        description="Filtrer par status (pending | validated)",
+        example="pending"
+    ),
+    tenant_id: str = Query(
+        default="default",
+        description="Tenant ID",
+        example="default"
+    ),
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Limite résultats (max 1000)",
+        example=100
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Offset pagination",
+        example=0
+    )
+):
+    """
+    Liste entités avec filtres entity_type et status.
+
+    Args:
+        entity_type: Type d'entité (optionnel)
+        status: Statut entité (optionnel)
+        tenant_id: Tenant ID
+        limit: Limite résultats
+        offset: Offset pagination
+
+    Returns:
+        Liste entités filtrées
+    """
+    logger.info(
+        f"📋 GET /entities - entity_type={entity_type}, status={status}, "
+        f"tenant={tenant_id}, limit={limit}, offset={offset}"
+    )
+
+    kg_service = KnowledgeGraphService(tenant_id=tenant_id)
+
+    try:
+        # Query Neo4j avec filtres
+        query = """
+        MATCH (e:Entity {tenant_id: $tenant_id})
+        """
+
+        params = {"tenant_id": tenant_id, "limit": limit, "offset": offset}
+
+        # Ajouter filtres conditionnels
+        if entity_type:
+            query += " WHERE e.entity_type = $entity_type"
+            params["entity_type"] = entity_type
+
+        if status:
+            if entity_type:
+                query += " AND e.status = $status"
+            else:
+                query += " WHERE e.status = $status"
+            params["status"] = status
+
+        query += """
+        RETURN e
+        ORDER BY e.created_at DESC
+        SKIP $offset
+        LIMIT $limit
+        """
+
+        entities = []
+        total = 0
+
+        with kg_service.driver.session() as session:
+            # Compter total (enlever ORDER BY, SKIP, LIMIT)
+            count_query = query.replace("RETURN e\n        ORDER BY e.created_at DESC\n        SKIP $offset\n        LIMIT $limit", "RETURN count(e) AS total")
+            count_result = session.run(count_query, params)
+            count_record = count_result.single()
+            total = count_record["total"] if count_record else 0
+
+            # Récupérer entités
+            result = session.run(query, params)
+
+            for record in result:
+                node = record["e"]
+
+                # Parse attributes si c'est une string JSON
+                attributes = node.get("attributes", {})
+                if isinstance(attributes, str):
+                    import json
+                    try:
+                        attributes = json.loads(attributes) if attributes else {}
+                    except:
+                        attributes = {}
+
+                entities.append(EntityResponse(
+                    uuid=node["uuid"],
+                    name=node["name"],
+                    entity_type=node["entity_type"],
+                    description=node.get("description"),
+                    confidence=node.get("confidence", 0.0),
+                    attributes=attributes,
+                    source_slide_number=node.get("source_slide_number"),
+                    source_document=node.get("source_document"),
+                    source_chunk_id=node.get("source_chunk_id"),
+                    tenant_id=node["tenant_id"],
+                    status=node.get("status", "pending"),
+                    is_cataloged=node.get("is_cataloged", False),
+                    created_at=node["created_at"].to_native(),
+                    updated_at=node.get("updated_at").to_native() if node.get("updated_at") else None
+                ))
+
+        logger.info(
+            f"✅ Trouvé {len(entities)} entités (total={total}, "
+            f"type={entity_type or 'all'}, status={status or 'all'})"
+        )
+
+        kg_service.close()
+
+        return EntitiesListResponse(
+            entities=entities,
+            total=total,
+            entity_type_filter=entity_type,
+            status_filter=status
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erreur list entities: {e}", exc_info=True)
+        kg_service.close()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list entities: {str(e)}"
+        )
 
 
 @router.get(
