@@ -155,6 +155,23 @@ async def list_entity_types(
         # Count total (sans pagination)
         total = service.count_types(tenant_id=tenant_id, status=status)
 
+        # ✨ Enrichir avec compteurs dynamiques depuis Neo4j
+        from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
+        kg_service = KnowledgeGraphService()
+
+        for entity_type in types:
+            # Compter entités dans Neo4j
+            counts = kg_service.count_entities_by_type(
+                entity_type=entity_type.type_name,
+                tenant_id=tenant_id
+            )
+
+            # Mettre à jour les compteurs
+            entity_type.entity_count = counts.get('total', 0)
+            entity_type.pending_entity_count = counts.get('pending', 0)
+            # Calculer validées = total - pending
+            entity_type.validated_entity_count = counts.get('total', 0) - counts.get('pending', 0)
+
         logger.info(
             f"✅ Trouvé {len(types)} types (total={total}, status={status or 'all'})"
         )

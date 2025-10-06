@@ -7,7 +7,7 @@ Phase 3 - Knowledge Graph Neo4j Native
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict
 import uuid
 
 from neo4j import GraphDatabase
@@ -555,6 +555,53 @@ class KnowledgeGraphService:
             metadata=node["metadata"],
             created_at=node["created_at"].to_native()
         )
+
+
+    def count_entities_by_type(
+        self,
+        entity_type: str,
+        tenant_id: str = "default"
+    ) -> Dict[str, int]:
+        """
+        Compte les entités d'un type donné par statut.
+
+        Args:
+            entity_type: Type d'entité (SOLUTION, ORGANIZATION, etc.)
+            tenant_id: Tenant ID
+
+        Returns:
+            Dict avec compteurs:
+            {
+                "total": int,  # Total entités du type
+                "pending": int,  # Entités status=pending
+                "validated": int  # Entités status=validated
+            }
+        """
+        query = """
+        MATCH (e:Entity {entity_type: $entity_type, tenant_id: $tenant_id})
+        RETURN
+            count(e) AS total,
+            sum(CASE WHEN e.status = 'pending' THEN 1 ELSE 0 END) AS pending,
+            sum(CASE WHEN e.status = 'validated' THEN 1 ELSE 0 END) AS validated
+        """
+
+        with self.driver.session() as session:
+            result = session.run(
+                query,
+                entity_type=entity_type,
+                tenant_id=tenant_id
+            )
+
+            record = result.single()
+
+            if not record:
+                return {"total": 0, "pending": 0, "validated": 0}
+
+            return {
+                "total": record["total"] or 0,
+                "pending": record["pending"] or 0,
+                "validated": record["validated"] or 0
+            }
 
 
 __all__ = [
