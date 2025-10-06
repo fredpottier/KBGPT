@@ -603,6 +603,93 @@ class KnowledgeGraphService:
                 "validated": record["validated"] or 0
             }
 
+    def get_entities_by_type(
+        self,
+        entity_type: str,
+        tenant_id: str = "default",
+        status: Optional[str] = None,
+        limit: int = 1000
+    ) -> List[Dict]:
+        """
+        Récupère toutes les entités d'un type donné.
+
+        Args:
+            entity_type: Type d'entité (SOLUTION, ORGANIZATION, etc.)
+            tenant_id: Tenant ID
+            status: Filtrer par status (optionnel: 'pending', 'validated')
+            limit: Limite résultats (défaut: 1000)
+
+        Returns:
+            Liste de dictionnaires avec données entités:
+            [
+                {
+                    "uuid": str,
+                    "name": str,
+                    "entity_type": str,
+                    "description": str,
+                    "confidence": float,
+                    "attributes": dict,
+                    "status": str,
+                    "source_document": str,
+                    "created_at": str
+                },
+                ...
+            ]
+        """
+        # Build query avec filtre status optionnel
+        query = """
+        MATCH (e:Entity {entity_type: $entity_type, tenant_id: $tenant_id})
+        """
+
+        params = {
+            "entity_type": entity_type,
+            "tenant_id": tenant_id,
+            "limit": limit
+        }
+
+        if status:
+            query += " WHERE e.status = $status"
+            params["status"] = status
+
+        query += """
+        RETURN e
+        ORDER BY e.created_at DESC
+        LIMIT $limit
+        """
+
+        entities = []
+        with self.driver.session() as session:
+            result = session.run(query, params)
+
+            for record in result:
+                node = record["e"]
+
+                # Parser attributes JSON string vers dict
+                import json
+                attributes = node.get("attributes", {})
+                if isinstance(attributes, str):
+                    try:
+                        attributes = json.loads(attributes) if attributes else {}
+                    except:
+                        attributes = {}
+
+                entities.append({
+                    "uuid": node["uuid"],
+                    "name": node["name"],
+                    "entity_type": node["entity_type"],
+                    "description": node.get("description", ""),
+                    "confidence": float(node.get("confidence", 0.0)),
+                    "attributes": attributes,
+                    "status": node.get("status", "pending"),
+                    "source_document": node.get("source_document", ""),
+                    "source_slide_number": node.get("source_slide_number"),
+                    "source_chunk_id": node.get("source_chunk_id"),
+                    "created_at": str(node.get("created_at", "")),
+                    "updated_at": str(node.get("updated_at", ""))
+                })
+
+        return entities
+
 
 __all__ = [
     "KnowledgeGraphService",

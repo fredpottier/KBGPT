@@ -102,7 +102,8 @@ def _create_snapshot(
 
     try:
         # Créer table si pas existante
-        session.execute("""
+        from sqlalchemy import text
+        session.execute(text("""
         CREATE TABLE IF NOT EXISTS normalization_snapshots (
             snapshot_id TEXT PRIMARY KEY,
             type_name TEXT NOT NULL,
@@ -112,24 +113,24 @@ def _create_snapshot(
             expires_at TIMESTAMP NOT NULL,
             restored BOOLEAN DEFAULT FALSE
         )
-        """)
+        """))
 
         # Insérer snapshot
         expires_at = datetime.utcnow() + timedelta(hours=24)
 
         session.execute(
-            """
+            text("""
             INSERT INTO normalization_snapshots
             (snapshot_id, type_name, tenant_id, merge_groups_json, expires_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                snapshot_id,
-                type_name,
-                tenant_id,
-                json.dumps(merge_groups),
-                expires_at
-            )
+            VALUES (:snapshot_id, :type_name, :tenant_id, :merge_groups_json, :expires_at)
+            """),
+            {
+                "snapshot_id": snapshot_id,
+                "type_name": type_name,
+                "tenant_id": tenant_id,
+                "merge_groups_json": json.dumps(merge_groups),
+                "expires_at": expires_at
+            }
         )
 
         session.commit()

@@ -91,7 +91,7 @@ async def get_job_status(job_id: str):
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
         port=int(os.getenv("REDIS_PORT", "6379")),
-        db=1
+        db=0  # Même DB que worker ingestion
     )
 
     try:
