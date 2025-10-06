@@ -345,6 +345,20 @@ async def get_entity_type(
             detail=f"Entity type '{type_name}' not found"
         )
 
+    # ✨ Enrichir avec compteurs dynamiques depuis Neo4j
+    from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
+    kg_service = KnowledgeGraphService()
+
+    counts = kg_service.count_entities_by_type(
+        entity_type=entity_type.type_name,
+        tenant_id=tenant_id
+    )
+
+    # Mettre à jour les compteurs
+    entity_type.entity_count = counts.get('total', 0)
+    entity_type.pending_entity_count = counts.get('pending', 0)
+    entity_type.validated_entity_count = counts.get('validated', 0)
+
     return EntityTypeResponse.from_orm(entity_type)
 
 
