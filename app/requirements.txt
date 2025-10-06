@@ -5,6 +5,9 @@ uvicorn==0.30.3
 # === Vector DB ===
 qdrant-client==1.15.1
 
+# === Graph DB ===
+neo4j>=5.14.0
+
 # === Embeddings et Reranking (CPU SEULEMENT) ===
 # Forcer versions CPU pour Ã©viter les 4GB NVIDIA
 --extra-index-url https://download.pytorch.org/whl/cpu

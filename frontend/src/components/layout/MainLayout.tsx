@@ -24,7 +24,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const currentSection = getCurrentSection()
   const showSidebar = currentSection !== 'chat' && (
     currentSection === 'documents' ||
-    (currentSection === 'admin' && false) // Admin sidebar vide pour le moment
+    currentSection === 'admin' // Admin sidebar avec menu ontologies
   )
 
   return (
@@ -39,7 +39,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
         {/* Contenu principal */}
         <Box
           flex="1"
-          ml={showSidebar && currentSection === 'documents' ? '256px' : '0'} // 64 * 4 = 256px
+          ml={showSidebar ? '256px' : '0'} // 64 * 4 = 256px (sidebar documents ou admin)
           minH="calc(100vh - 64px)"
           bg="gray.50"
         >

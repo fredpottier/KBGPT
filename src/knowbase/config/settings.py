@@ -9,6 +9,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from .paths import (
+    CONFIG_DIR,
     DATA_DIR,
     DOCS_DONE_DIR,
     DOCS_IN_DIR,
@@ -45,6 +46,11 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
 
+    # Configuration Neo4j
+    neo4j_uri: str = Field(default="bolt://graphiti-neo4j:7687", alias="NEO4J_URI")
+    neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
+    neo4j_password: str = Field(default="graphiti_neo4j_pass", alias="NEO4J_PASSWORD")
+
     embeddings_model: str = Field(
         default="intfloat/multilingual-e5-base", alias="EMB_MODEL_NAME"
     )
@@ -54,6 +60,7 @@ class Settings(BaseSettings):
     qdrant_qa_collection: str = Field(default="rfp_qa", alias="QDRANT_QA_COLLECTION")
     hf_home: Path = Field(default=MODELS_DIR, alias="HF_HOME")
 
+    config_dir: Path = Field(default=CONFIG_DIR)
     data_dir: Path = Field(default=DATA_DIR, alias="DATA_DIR")
     docs_in_dir: Path = Field(default=DOCS_IN_DIR)
     docs_done_dir: Path = Field(default=DOCS_DONE_DIR)

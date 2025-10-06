@@ -10,13 +10,18 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts, ontology, entities
+from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts, ontology, entities, entity_types
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     logger = configure_logging()
     warm_clients()
+
+    # Initialiser base de données SQLite (entity_types_registry)
+    from knowbase.db import init_db
+    init_db()
+    logger.info("✅ Base de données SQLite initialisée (entity_types_registry)")
 
     if os.getenv("DEBUG_APP") == "true":
         logger.info("🐛 Attaching debugpy to FastAPI app on port 5678...")
@@ -110,6 +115,10 @@ def create_app() -> FastAPI:
                 "name": "Entities",
                 "description": "Gestion entités dynamiques - validation, pending, types découverts (Phase 1)"
             },
+            {
+                "name": "Entity Types",
+                "description": "Registry types d'entités découverts - approve/reject, compteurs, workflow validation (Phase 2)"
+            },
         ],
     )
 
@@ -161,6 +170,7 @@ def create_app() -> FastAPI:
     app.include_router(facts.router, prefix="/api")  # Facts API - Neo4j Native (Phase 2)
     app.include_router(ontology.router, prefix="/api")  # Ontology API - Catalogues entités
     app.include_router(entities.router, prefix="/api")  # Entities API - Gestion entités dynamiques (Phase 1)
+    app.include_router(entity_types.router, prefix="/api")  # Entity Types Registry - Workflow validation types (Phase 2)
 
     return app
 

@@ -15,7 +15,9 @@ import {
   AttachmentIcon,
   EditIcon,
   ViewIcon,
+  SettingsIcon,
 } from '@chakra-ui/icons'
+import { FiDatabase } from 'react-icons/fi'
 
 interface SidebarItemProps {
   icon?: any
@@ -94,7 +96,16 @@ export default function ContextualSidebar({ section }: ContextualSidebarProps) {
         ]
       case 'admin':
         return [
-          // Menu vide pour le moment
+          {
+            icon: FiDatabase,
+            label: 'Ontologies',
+            href: '/admin/ontology',
+          },
+          {
+            icon: SettingsIcon,
+            label: 'Configuration',
+            href: '/admin/settings',
+          },
         ]
       default:
         return []
