@@ -16,7 +16,7 @@ Endpoints:
 - POST /entity-types/{type_name}/generate-ontology - Génération ontologie LLM (async)
 - GET /entity-types/{type_name}/ontology-proposal - Récupérer proposition ontologie
 """
-from typing import Optional
+from typing import Optional, Dict, List
 import yaml
 from io import StringIO
 
