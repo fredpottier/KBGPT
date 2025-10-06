@@ -1,7 +1,7 @@
 /**
  * Page Admin - Entités Pending (non cataloguées)
  *
- * Phase 4 - Frontend UI
+ * Phase 4 - Frontend UI (Chakra UI)
  *
  * Liste les entités avec status=pending pour validation admin.
  */
@@ -9,6 +9,41 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import {
+  Box,
+  Container,
+  Heading,
+  Text,
+  Card,
+  CardHeader,
+  CardBody,
+  Badge,
+  Button,
+  Spinner,
+  Alert,
+  AlertIcon,
+  HStack,
+  VStack,
+  Icon,
+  Flex,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+  Select,
+  useToast,
+  Stat,
+  StatLabel,
+  StatNumber,
+  SimpleGrid,
+} from "@chakra-ui/react";
+import {
+  FiCheckCircle,
+  FiClock,
+  FiFilter,
+} from "react-icons/fi";
 
 interface PendingEntity {
   uuid: string;
@@ -24,12 +59,28 @@ export default function EntitiesPendingPage() {
   const [entities, setEntities] = useState<PendingEntity[]>([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState<string>('');
-  const [selectedEntity, setSelectedEntity] = useState<PendingEntity | null>(null);
-  const [mergeTarget, setMergeTarget] = useState<string>('');
+  const [availableTypes, setAvailableTypes] = useState<string[]>([]);
+  const toast = useToast();
+
+  useEffect(() => {
+    fetchAvailableTypes();
+    fetchEntities();
+  }, []);
 
   useEffect(() => {
     fetchEntities();
   }, [typeFilter]);
+
+  const fetchAvailableTypes = async () => {
+    try {
+      const response = await fetch('/api/entity-types?status=all');
+      const data = await response.json();
+      const types = data.types.map((t: any) => t.type_name);
+      setAvailableTypes(types);
+    } catch (error) {
+      console.error('Error fetching types:', error);
+    }
+  };
 
   const fetchEntities = async () => {
     setLoading(true);
@@ -43,16 +94,18 @@ export default function EntitiesPendingPage() {
       setEntities(data.entities || []);
     } catch (error) {
       console.error('Error fetching entities:', error);
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de charger les entités',
+        status: 'error',
+        duration: 3000,
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleApprove = async (entity: PendingEntity) => {
-    const addToOntology = confirm(
-      `Approuver "${entity.name}" (${entity.entity_type}).\n\nAjouter à l'ontologie YAML ?`
-    );
-
     try {
       const response = await fetch(`/api/entities/${entity.uuid}/approve`, {
         method: 'POST',
@@ -62,228 +115,229 @@ export default function EntitiesPendingPage() {
           'X-Tenant-ID': 'default'
         },
         body: JSON.stringify({
-          add_to_ontology: addToOntology,
-          ontology_description: entity.description || `Entity ${entity.name}`
+          admin_email: 'admin@example.com',
+          add_to_ontology: false
         })
       });
 
       if (response.ok) {
-        alert('Entité approuvée !');
+        toast({
+          title: 'Entité approuvée',
+          description: `"${entity.name}" a été approuvée`,
+          status: 'success',
+          duration: 2000,
+        });
         fetchEntities();
       } else {
         const error = await response.json();
-        alert(`Erreur: ${error.detail}`);
+        throw new Error(error.detail);
       }
-    } catch (error) {
-      console.error('Error approving entity:', error);
-      alert('Erreur réseau');
+    } catch (error: any) {
+      toast({
+        title: 'Erreur',
+        description: error.message,
+        status: 'error',
+        duration: 3000,
+      });
     }
   };
 
-  const handleMerge = async (sourceEntity: PendingEntity) => {
-    const targetUuid = prompt(
-      `Fusionner "${sourceEntity.name}" avec une autre entité.\n\nEntrez l'UUID de l'entité cible:`
-    );
-
-    if (!targetUuid) return;
-
-    const canonicalName = prompt(
-      'Nom final après fusion (laisser vide pour garder le nom de la cible):'
-    );
-
+  const handleReject = async (entity: PendingEntity) => {
     try {
-      const response = await fetch(`/api/entities/${sourceEntity.uuid}/merge`, {
-        method: 'POST',
+      const response = await fetch(`/api/entities/${entity.uuid}`, {
+        method: 'DELETE',
         headers: {
-          'Content-Type': 'application/json',
-          'X-Admin-Key': 'admin-dev-key-change-in-production',
-          'X-Tenant-ID': 'default'
-        },
-        body: JSON.stringify({
-          target_uuid: targetUuid.trim(),
-          canonical_name: canonicalName?.trim() || undefined
-        })
+          'X-Admin-Key': 'admin-dev-key-change-in-production'
+        }
       });
 
       if (response.ok) {
-        const result = await response.json();
-        alert(
-          `Fusion réussie !\nRelations transférées: ${result.relations_transferred}`
-        );
+        toast({
+          title: 'Entité supprimée',
+          status: 'info',
+          duration: 2000,
+        });
         fetchEntities();
       } else {
-        const error = await response.json();
-        alert(`Erreur: ${error.detail}`);
+        throw new Error('Deletion failed');
       }
     } catch (error) {
-      console.error('Error merging entities:', error);
-      alert('Erreur réseau');
+      toast({
+        title: 'Erreur',
+        description: 'Erreur lors de la suppression',
+        status: 'error',
+        duration: 3000,
+      });
     }
   };
 
-  const handleDelete = async (entity: PendingEntity) => {
-    if (
-      !confirm(
-        `ATTENTION: Supprimer définitivement "${entity.name}" ?\n\nCette action est irréversible.`
-      )
-    ) {
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `/api/entities/${entity.uuid}?cascade=true`,
-        {
-          method: 'DELETE',
-          headers: {
-            'X-Admin-Key': 'admin-dev-key-change-in-production',
-            'X-Tenant-ID': 'default'
-          }
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        alert(
-          `Entité supprimée\nRelations supprimées: ${result.relations_deleted}`
-        );
-        fetchEntities();
-      } else {
-        const error = await response.json();
-        alert(`Erreur: ${error.detail}`);
-      }
-    } catch (error) {
-      console.error('Error deleting entity:', error);
-      alert('Erreur réseau');
-    }
+  const getConfidenceColor = (confidence: number) => {
+    if (confidence >= 0.8) return 'green';
+    if (confidence >= 0.6) return 'orange';
+    return 'red';
   };
 
-  // Extraire types uniques pour filtre
-  const uniqueTypes = Array.from(
-    new Set(entities.map((e) => e.entity_type))
-  ).sort();
+  // Group by type for stats
+  const entityCountByType = entities.reduce((acc, entity) => {
+    acc[entity.entity_type] = (acc[entity.entity_type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  if (loading && entities.length === 0) {
+    return (
+      <Container maxW="container.xl" py={8}>
+        <VStack spacing={4}>
+          <Spinner size="xl" />
+          <Text>Chargement des entités...</Text>
+        </VStack>
+      </Container>
+    );
+  }
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">
-        Entités Pending (Non Cataloguées)
-      </h1>
+    <Container maxW="container.xl" py={8}>
+      <VStack spacing={6} align="stretch">
+        {/* Header */}
+        <Flex justify="space-between" align="center">
+          <Heading size="lg">
+            <Icon as={FiClock} mr={3} />
+            Entités en Attente
+          </Heading>
+          <Badge colorScheme="yellow" fontSize="lg" px={3} py={1}>
+            {entities.length} entité(s)
+          </Badge>
+        </Flex>
 
-      {/* Filtres */}
-      <div className="mb-4 flex gap-4 items-center">
-        <label className="font-medium">Filtrer par type:</label>
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          className="px-4 py-2 border rounded"
-        >
-          <option value="">Tous les types</option>
-          {uniqueTypes.map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </select>
+        {/* Stats by Type */}
+        {Object.keys(entityCountByType).length > 0 && (
+          <SimpleGrid columns={{ base: 2, md: 4, lg: 6 }} spacing={4}>
+            {Object.entries(entityCountByType).map(([type, count]) => (
+              <Card key={type} size="sm">
+                <CardBody>
+                  <Stat>
+                    <StatLabel fontSize="xs">{type}</StatLabel>
+                    <StatNumber fontSize="lg">{count}</StatNumber>
+                  </Stat>
+                </CardBody>
+              </Card>
+            ))}
+          </SimpleGrid>
+        )}
 
-        <button
-          onClick={fetchEntities}
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-        >
-          🔄 Rafraîchir
-        </button>
+        {/* Filters */}
+        <Card>
+          <CardHeader>
+            <Heading size="sm">
+              <Icon as={FiFilter} mr={2} />
+              Filtres
+            </Heading>
+          </CardHeader>
+          <CardBody>
+            <HStack>
+              <Text fontWeight="bold">Type:</Text>
+              <Select
+                placeholder="Tous les types"
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                maxW="300px"
+              >
+                {availableTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </Select>
+              {typeFilter && (
+                <Button size="sm" onClick={() => setTypeFilter('')}>
+                  Réinitialiser
+                </Button>
+              )}
+            </HStack>
+          </CardBody>
+        </Card>
 
-        <span className="ml-auto text-gray-600">
-          {entities.length} entité(s) pending
-        </span>
-      </div>
+        {/* Empty State */}
+        {!loading && entities.length === 0 && (
+          <Alert status="success">
+            <AlertIcon />
+            Aucune entité en attente ! Toutes les entités ont été validées.
+          </Alert>
+        )}
 
-      {/* Table */}
-      {loading ? (
-        <p>Chargement...</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse border border-gray-300">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="border p-2">Nom</th>
-                <th className="border p-2">Type</th>
-                <th className="border p-2">Description</th>
-                <th className="border p-2">Source</th>
-                <th className="border p-2">Confiance</th>
-                <th className="border p-2">Créé</th>
-                <th className="border p-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entities.map((entity) => (
-                <tr key={entity.uuid} className="hover:bg-gray-50">
-                  <td className="border p-2 font-medium">{entity.name}</td>
-                  <td className="border p-2">
-                    <span className="px-2 py-1 bg-blue-100 rounded text-sm font-mono">
-                      {entity.entity_type}
-                    </span>
-                  </td>
-                  <td className="border p-2 text-sm text-gray-600 max-w-xs truncate">
-                    {entity.description || '-'}
-                  </td>
-                  <td className="border p-2 text-sm text-gray-500">
-                    {entity.source_document || '-'}
-                  </td>
-                  <td className="border p-2 text-center">
-                    <span
-                      className={`px-2 py-1 rounded text-sm ${
-                        entity.confidence >= 0.8
-                          ? 'bg-green-100 text-green-800'
-                          : entity.confidence >= 0.5
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {(entity.confidence * 100).toFixed(0)}%
-                    </span>
-                  </td>
-                  <td className="border p-2 text-sm">
-                    {new Date(entity.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="border p-2">
-                    <div className="flex flex-col gap-1">
-                      <button
-                        onClick={() => handleApprove(entity)}
-                        className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
-                      >
-                        ✓ Approuver
-                      </button>
-                      <button
-                        onClick={() => handleMerge(entity)}
-                        className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
-                      >
-                        🔀 Fusionner
-                      </button>
-                      <button
-                        onClick={() => handleDelete(entity)}
-                        className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
-                      >
-                        🗑️ Supprimer
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+        {/* Loading State */}
+        {loading && (
+          <Flex justify="center" py={8}>
+            <Spinner size="lg" />
+          </Flex>
+        )}
 
-      {entities.length === 0 && !loading && (
-        <div className="text-center py-12">
-          <p className="text-gray-500 text-lg">
-            ✨ Aucune entité pending
-          </p>
-          <p className="text-gray-400 text-sm mt-2">
-            Toutes les entités sont cataloguées ou validées
-          </p>
-        </div>
-      )}
-    </div>
+        {/* Entities Table */}
+        {!loading && entities.length > 0 && (
+          <Card>
+            <CardBody p={0}>
+              <Table variant="simple">
+                <Thead>
+                  <Tr>
+                    <Th>Nom</Th>
+                    <Th>Type</Th>
+                    <Th>Description</Th>
+                    <Th>Confidence</Th>
+                    <Th>Source</Th>
+                    <Th>Créée le</Th>
+                    <Th>Actions</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {entities.map((entity) => (
+                    <Tr key={entity.uuid} _hover={{ bg: 'gray.50' }}>
+                      <Td fontWeight="bold">{entity.name}</Td>
+                      <Td>
+                        <Badge colorScheme="blue">{entity.entity_type}</Badge>
+                      </Td>
+                      <Td maxW="300px" isTruncated>
+                        <Text fontSize="sm" color="gray.600">
+                          {entity.description || '-'}
+                        </Text>
+                      </Td>
+                      <Td>
+                        <Badge colorScheme={getConfidenceColor(entity.confidence)}>
+                          {(entity.confidence * 100).toFixed(0)}%
+                        </Badge>
+                      </Td>
+                      <Td fontSize="sm" maxW="200px" isTruncated>
+                        {entity.source_document || '-'}
+                      </Td>
+                      <Td fontSize="sm">
+                        {new Date(entity.created_at).toLocaleDateString()}
+                      </Td>
+                      <Td>
+                        <HStack spacing={2}>
+                          <Button
+                            size="xs"
+                            colorScheme="green"
+                            leftIcon={<FiCheckCircle />}
+                            onClick={() => handleApprove(entity)}
+                          >
+                            Valider
+                          </Button>
+                          <Button
+                            size="xs"
+                            colorScheme="red"
+                            variant="outline"
+                            onClick={() => handleReject(entity)}
+                          >
+                            Rejeter
+                          </Button>
+                        </HStack>
+                      </Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </CardBody>
+          </Card>
+        )}
+      </VStack>
+    </Container>
   );
 }
