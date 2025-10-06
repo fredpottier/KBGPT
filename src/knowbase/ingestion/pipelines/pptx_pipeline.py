@@ -961,19 +961,53 @@ def ask_gpt_slide_analysis(
     ]
     for attempt in range(retries):
         try:
-            raw_content = llm_router.complete(TaskType.VISION, msg)
+            # max_tokens=8000 pour format unifié (concepts + facts + entities + relations)
+            raw_content = llm_router.complete(
+                TaskType.VISION,
+                msg,
+                temperature=0.2,
+                max_tokens=8000
+            )
             cleaned_content = clean_gpt_response(raw_content or "")
-            items = json.loads(cleaned_content)
+            response_data = json.loads(cleaned_content)
+
+            # DEBUG: Log type de réponse LLM
+            logger.debug(f"Slide {slide_index}: LLM response type = {type(response_data).__name__}, keys = {list(response_data.keys()) if isinstance(response_data, dict) else 'N/A'}")
+
+            # === NOUVEAU: Support format unifié 4 outputs {"concepts": [...], "facts": [...], "entities": [...], "relations": [...]} ===
+            # Compatibilité: Si ancien format (array direct), wrapper en {"concepts": [...]}
+            if isinstance(response_data, list):
+                # Ancien format (array de concepts)
+                items = response_data
+                facts_data = []
+                entities_data = []
+                relations_data = []
+            elif isinstance(response_data, dict):
+                # Nouveau format unifié (4 outputs)
+                items = response_data.get("concepts", [])
+                facts_data = response_data.get("facts", [])
+                entities_data = response_data.get("entities", [])
+                relations_data = response_data.get("relations", [])
+            else:
+                logger.warning(f"Slide {slide_index}: Format JSON inattendu: {type(response_data)}")
+                items = []
+                facts_data = []
+                entities_data = []
+                relations_data = []
+
+            # Parser concepts pour Qdrant (comme avant)
             enriched = []
             for it in items:
                 expl = it.get("full_explanation", "")
                 meta = it.get("meta", {})
                 if expl:
                     for seg in recursive_chunk(expl, max_len=400, overlap_ratio=0.15):
+                        # Enrichir meta avec slide_index pour Phase 3
+                        meta_enriched = {**meta, "slide_index": slide_index}
                         enriched.append(
                             {
                                 "full_explanation": seg,
-                                "meta": meta,
+                                "meta": meta_enriched,
                                 "prompt_meta": {
                                     "document_type": doc_type,
                                     "slide_prompt_id": slide_prompt_id,
@@ -983,12 +1017,27 @@ def ask_gpt_slide_analysis(
                                 },
                             }
                         )
-            # Log simple avec le nombre de concepts extraits
-            logger.info(f"Slide {slide_index}: {len(enriched)} concepts extraits")
+
+            # Stocker ALL extracted data dans enriched pour récupération ultérieure
+            # (ajouté clés "_facts", "_entities", "_relations" pour passage à phase3)
+            if facts_data or entities_data or relations_data:
+                for concept in enriched:
+                    concept["_facts"] = facts_data  # Attacher facts
+                    concept["_entities"] = entities_data  # Attacher entities
+                    concept["_relations"] = relations_data  # Attacher relations
+
+            # Log avec tous les outputs
+            logger.info(
+                f"Slide {slide_index}: {len(enriched)} concepts + {len(facts_data)} facts + "
+                f"{len(entities_data)} entities + {len(relations_data)} relations extraits"
+            )
+
             return enriched
+
         except Exception as e:
             logger.warning(f"Slide {slide_index} attempt {attempt} failed: {e}")
             time.sleep(2 * (attempt + 1))
+
     return []
 
 
@@ -1061,6 +1110,9 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
 # Fonction principale pour traiter un fichier PPTX
 def process_pptx(pptx_path: Path, document_type: str = "default", progress_callback=None, rq_job=None):
     logger.info(f"start ingestion for {pptx_path.name}")
+
+    # Générer ID unique pour cet import (pour traçabilité dans Neo4j)
+    import_id = str(uuid.uuid4())[:8]  # UUID court pour lisibilité
 
     # Obtenir le job RQ actuel si pas fourni
     if rq_job is None:
@@ -1206,6 +1258,7 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
         time.sleep(0.1)
 
     total = 0
+    all_slide_chunks = []  # Collecter tous les chunks pour Phase 3
 
     for i, (idx, future) in enumerate(tasks):
         # Progression de 20% à 90% pendant l'analyse des slides
@@ -1259,6 +1312,9 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
         else:
             logger.info(f"✅ Slide {idx}: {len(chunks)} concepts extracted")
 
+        # Collecter les chunks pour Phase 3 (avant ingestion)
+        all_slide_chunks.append(chunks)
+
         ingest_chunks(chunks, metadata, pptx_path.stem, idx, summary)
         logger.debug(f"📝 Slide {idx}: chunks ingérés dans Qdrant")
         total += len(chunks)
@@ -1274,68 +1330,191 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
 
     logger.info(f"🎯 Finalisation: {total} chunks au total traités")
 
-    # === PHASE 3: EXTRACTION FACTS ===
-    logger.info(f"🧠 Début extraction facts structurés depuis {len(slides_data)} slides...")
+    # === PHASE 3: EXTRACTION KNOWLEDGE GRAPH (Facts + Entities + Relations) ===
+    logger.info(f"🧠 Collecte Knowledge Graph depuis slides (extraction unifiée 4 outputs)...")
 
     if progress_callback:
-        progress_callback("Extraction facts", 90, 100, "Extraction facts métier structurés (LLM Vision)")
+        progress_callback("Collecte KG", 90, 100, "Collecte Facts + Entities + Relations via LLM unifié")
 
-    # Import modules extraction facts
+    # Import modules facts + KG
     try:
         import asyncio
         from knowbase.ingestion.facts_extractor import (
-            extract_facts_from_slide,
             insert_facts_to_neo4j,
             detect_and_log_conflicts,
         )
         from knowbase.ingestion.notifications import notify_critical_conflicts
+        from knowbase.api.schemas.facts import FactCreate, FactType, ValueType
+        from knowbase.api.schemas.knowledge_graph import (
+            EntityCreate,
+            EntityType,
+            RelationCreate,
+            RelationType,
+            EpisodeCreate,
+        )
+        from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
+        from pydantic import ValidationError
 
         all_facts = []
+        all_entities = []
+        all_relations = []
+        all_slide_chunks_with_data = []
 
-        # Extraction facts par slide (async)
-        async def extract_all_facts():
-            facts_tasks = []
-            for slide in slides_data:
-                idx = slide["slide_index"]
-                img_path = image_paths.get(idx)
-                img_b64 = encode_image_base64(img_path) if img_path and img_path.exists() else None
+        # Collecter tous les chunks avec leurs facts/entities/relations depuis all_slide_chunks
+        for slide_chunks in all_slide_chunks:
+            for chunk in slide_chunks:
+                facts_raw = chunk.get("_facts", [])
+                entities_raw = chunk.get("_entities", [])
+                relations_raw = chunk.get("_relations", [])
 
-                # Générer chunk_id unique pour traçabilité
-                chunk_id = f"{pptx_path.stem}_slide_{idx}"
+                # Ajouter slide si au moins un output présent
+                if facts_raw or entities_raw or relations_raw:
+                    all_slide_chunks_with_data.append({
+                        "slide_index": chunk.get("meta", {}).get("slide_index"),
+                        "facts_raw": facts_raw,
+                        "entities_raw": entities_raw,
+                        "relations_raw": relations_raw,
+                        "source_document": f"{pptx_path.stem}.pptx",
+                    })
 
-                facts_tasks.append(
-                    extract_facts_from_slide(
-                        slide_data=slide,
-                        slide_image_base64=img_b64,
-                        source_document=f"{pptx_path.stem}.pptx",
-                        chunk_id=chunk_id,
-                        deck_summary=summary,
-                        llm_router=llm_router,
+        logger.info(
+            f"📊 {len(all_slide_chunks_with_data)} slides contiennent des données KG extraites"
+        )
+
+        # === Traiter FACTS, ENTITIES, RELATIONS ===
+        for slide_data in all_slide_chunks_with_data:
+            slide_idx = slide_data["slide_index"]
+            facts_raw = slide_data["facts_raw"]
+            entities_raw = slide_data["entities_raw"]
+            relations_raw = slide_data["relations_raw"]
+            source_doc = slide_data["source_document"]
+            chunk_id = f"{pptx_path.stem}_slide_{slide_idx}"
+
+            # 1. Traiter FACTS
+            for i, fact_data in enumerate(facts_raw, 1):
+                try:
+                    # Enrichir métadonnées traçabilité
+                    fact_enriched = {
+                        **fact_data,
+                        "source_chunk_id": chunk_id,
+                        "source_document": source_doc,
+                        "extraction_method": "llm_vision_unified",
+                        "extraction_model": "gpt-4-vision-preview",  # Depuis llm_router
+                        "extraction_prompt_id": "slide_default_v3_unified_facts",
+                    }
+
+                    # Normaliser fact_type si absent
+                    if "fact_type" not in fact_enriched:
+                        fact_enriched["fact_type"] = FactType.GENERAL
+
+                    # Normaliser value_type si absent
+                    if "value_type" not in fact_enriched:
+                        value = fact_enriched.get("value")
+                        if isinstance(value, (int, float)):
+                            fact_enriched["value_type"] = ValueType.NUMERIC
+                        elif isinstance(value, bool):
+                            fact_enriched["value_type"] = ValueType.BOOLEAN
+                        else:
+                            fact_enriched["value_type"] = ValueType.TEXT
+
+                    # Validation Pydantic
+                    fact = FactCreate(**fact_enriched)
+                    all_facts.append(fact)
+
+                    logger.debug(
+                        f"  ✅ Fact {i}: {fact.subject} | {fact.predicate} = "
+                        f"{fact.value}{fact.unit or ''} (slide {slide_idx})"
                     )
-                )
 
-            # Extraire facts en parallèle (5 slides max simultané pour éviter rate limit)
-            results = []
-            batch_size = 5
-            for i in range(0, len(facts_tasks), batch_size):
-                batch = facts_tasks[i:i + batch_size]
-                batch_results = await asyncio.gather(*batch, return_exceptions=True)
-                results.extend(batch_results)
+                except ValidationError as e:
+                    logger.warning(
+                        f"  ⚠️ Slide {slide_idx} fact {i} validation échouée: "
+                        f"{e.errors()[0]['msg']} | Data: {fact_data}"
+                    )
+                    continue
+                except Exception as e:
+                    logger.error(
+                        f"  ❌ Slide {slide_idx} fact {i} erreur: {e} | Data: {fact_data}"
+                    )
+                    continue
 
-            return results
+            # 2. Traiter ENTITIES
+            for i, entity_data in enumerate(entities_raw, 1):
+                try:
+                    # Enrichir métadonnées traçabilité
+                    entity_enriched = {
+                        **entity_data,
+                        "source_slide_number": slide_idx,
+                        "source_document": source_doc,
+                        "source_chunk_id": chunk_id,
+                        "tenant_id": metadata.get("tenant_id", "default"),
+                    }
 
-        # Exécuter extraction async
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        facts_per_slide = loop.run_until_complete(extract_all_facts())
-        loop.close()
+                    # Normaliser entity_type si absent
+                    if "entity_type" not in entity_enriched:
+                        entity_enriched["entity_type"] = EntityType.CONCEPT
 
-        # Aplatir liste facts
-        for facts_list in facts_per_slide:
-            if isinstance(facts_list, list):
-                all_facts.extend(facts_list)
+                    # Validation Pydantic
+                    entity = EntityCreate(**entity_enriched)
+                    all_entities.append(entity)
 
-        logger.info(f"✅ Extraction terminée: {len(all_facts)} facts extraits depuis {len(slides_data)} slides")
+                    logger.debug(
+                        f"  ✅ Entity {i}: {entity.name} ({entity.entity_type}) - slide {slide_idx}"
+                    )
+
+                except ValidationError as e:
+                    logger.warning(
+                        f"  ⚠️ Slide {slide_idx} entity {i} validation échouée: "
+                        f"{e.errors()[0]['msg']} | Data: {entity_data}"
+                    )
+                    continue
+                except Exception as e:
+                    logger.error(
+                        f"  ❌ Slide {slide_idx} entity {i} erreur: {e} | Data: {entity_data}"
+                    )
+                    continue
+
+            # 3. Traiter RELATIONS
+            for i, relation_data in enumerate(relations_raw, 1):
+                try:
+                    # Enrichir métadonnées traçabilité
+                    relation_enriched = {
+                        **relation_data,
+                        "source_slide_number": slide_idx,
+                        "source_document": source_doc,
+                        "source_chunk_id": chunk_id,
+                        "tenant_id": metadata.get("tenant_id", "default"),
+                    }
+
+                    # Normaliser relation_type si absent
+                    if "relation_type" not in relation_enriched:
+                        relation_enriched["relation_type"] = RelationType.INTERACTS_WITH
+
+                    # Validation Pydantic
+                    relation = RelationCreate(**relation_enriched)
+                    all_relations.append(relation)
+
+                    logger.debug(
+                        f"  ✅ Relation {i}: {relation.source} --{relation.relation_type}-> "
+                        f"{relation.target} - slide {slide_idx}"
+                    )
+
+                except ValidationError as e:
+                    logger.warning(
+                        f"  ⚠️ Slide {slide_idx} relation {i} validation échouée: "
+                        f"{e.errors()[0]['msg']} | Data: {relation_data}"
+                    )
+                    continue
+                except Exception as e:
+                    logger.error(
+                        f"  ❌ Slide {slide_idx} relation {i} erreur: {e} | Data: {relation_data}"
+                    )
+                    continue
+
+        logger.info(
+            f"✅ Collecte terminée: {len(all_facts)} facts + {len(all_entities)} entities + "
+            f"{len(all_relations)} relations validés depuis {len(all_slide_chunks_with_data)} slides"
+        )
 
         if all_facts:
             # Insertion facts Neo4j
@@ -1388,6 +1567,138 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
 
         else:
             logger.info(f"ℹ️ Aucun fact extrait (slides génériques/vides)")
+
+        # === INSERTION ENTITIES + RELATIONS NEO4J ===
+        tenant_id = metadata.get("tenant_id", "default")
+        inserted_entity_uuids = []
+        inserted_relation_uuids = []
+
+        if all_entities or all_relations:
+            logger.info(
+                f"💾 Insertion Knowledge Graph dans Neo4j: {len(all_entities)} entities + "
+                f"{len(all_relations)} relations..."
+            )
+
+            kg_service = KnowledgeGraphService(tenant_id=tenant_id)
+
+            try:
+                # 1. Insérer entities (avec get_or_create pour éviter doublons)
+                for entity in all_entities:
+                    try:
+                        entity_response = kg_service.get_or_create_entity(entity)
+                        inserted_entity_uuids.append(entity_response.uuid)
+
+                        logger.debug(
+                            f"  ✅ Entity inserted/found: {entity_response.uuid[:8]}... | "
+                            f"{entity.name} ({entity.entity_type})"
+                        )
+
+                    except Exception as e:
+                        logger.error(
+                            f"  ❌ Insertion entity échouée: {e.__class__.__name__} | "
+                            f"{entity.name}"
+                        )
+                        logger.error(f"     Détails erreur: {str(e)}")
+                        continue
+
+                logger.info(
+                    f"✅ Entities insérées: {len(inserted_entity_uuids)}/{len(all_entities)} "
+                    f"({len(inserted_entity_uuids)/len(all_entities)*100:.1f}%)"
+                )
+
+                # 2. Insérer relations (nécessite que les entities existent)
+                for relation in all_relations:
+                    try:
+                        relation_response = kg_service.create_relation(relation)
+                        inserted_relation_uuids.append(relation_response.uuid)
+
+                        logger.debug(
+                            f"  ✅ Relation inserted: {relation_response.uuid[:8]}... | "
+                            f"{relation.source} --{relation.relation_type}-> {relation.target}"
+                        )
+
+                    except ValueError as e:
+                        # Entités source/target n'existent pas
+                        logger.warning(
+                            f"  ⚠️ Relation skipped (entities not found): "
+                            f"{relation.source} -> {relation.target} | {e}"
+                        )
+                        continue
+                    except Exception as e:
+                        logger.error(
+                            f"  ❌ Insertion relation échouée: {e.__class__.__name__} | "
+                            f"{relation.source} -> {relation.target}"
+                        )
+                        continue
+
+                logger.info(
+                    f"✅ Relations insérées: {len(inserted_relation_uuids)}/{len(all_relations)} "
+                    f"({len(inserted_relation_uuids)/len(all_relations)*100:.1f}% si > 0 else 100%)"
+                )
+
+            finally:
+                kg_service.close()
+
+        else:
+            logger.info(f"ℹ️ Aucune entity/relation extraite (slides génériques/vides)")
+
+        # === CRÉATION EPISODE (liaison Qdrant ↔ Neo4j) ===
+        logger.info("📝 Création épisode pour lier Qdrant ↔ Neo4j...")
+
+        # Collecter tous les chunk_ids Qdrant insérés
+        all_chunk_ids = []
+        for slide_chunks in all_slide_chunks:
+            for chunk in slide_chunks:
+                chunk_id = chunk.get("id")
+                if chunk_id:
+                    all_chunk_ids.append(str(chunk_id))
+
+        # Nom épisode basé sur document
+        episode_name = f"{pptx_path.stem}_{import_id}"
+
+        # Créer épisode
+        try:
+            from knowbase.api.schemas.knowledge_graph import EpisodeCreate
+
+            # Construire metadata avec types primitifs pour Neo4j
+            metadata_dict = {
+                "import_id": import_id,
+                "total_slides": int(len(all_slide_chunks)),
+                "total_chunks": int(total),
+                "total_entities": int(len(inserted_entity_uuids)),
+                "total_relations": int(len(inserted_relation_uuids)),
+                "total_facts": int(len(inserted_uuids if 'inserted_uuids' in locals() else []))
+            }
+
+            episode_data = EpisodeCreate(
+                name=episode_name,
+                source_document=pptx_path.name,
+                source_type="pptx",
+                content_summary=f"Document PPTX ingéré: {pptx_path.name} ({total} chunks)",
+                chunk_ids=all_chunk_ids,
+                entity_uuids=inserted_entity_uuids,
+                relation_uuids=inserted_relation_uuids,
+                fact_uuids=inserted_uuids if 'inserted_uuids' in locals() else [],
+                slide_number=None,  # Episode global document
+                tenant_id=tenant_id,
+                metadata=metadata_dict
+            )
+
+            kg_service = KnowledgeGraphService(tenant_id=tenant_id)
+            try:
+                episode_response = kg_service.create_episode(episode_data)
+                logger.info(
+                    f"✅ Épisode créé: {episode_response.uuid} - "
+                    f"{len(all_chunk_ids)} chunks liés à "
+                    f"{len(inserted_entity_uuids)} entities + "
+                    f"{len(inserted_relation_uuids)} relations"
+                )
+            finally:
+                kg_service.close()
+
+        except Exception as e:
+            logger.error(f"❌ Erreur création épisode: {e}")
+            # Ne pas bloquer l'ingestion si épisode échoue
 
     except ImportError as e:
         logger.warning(f"⚠️ Module extraction facts non disponible (Phase 3 désactivée): {e}")

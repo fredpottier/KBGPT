@@ -1,9 +1,22 @@
 # -*- coding: utf-8 -*-
 """
+⚠️  DEPRECATED - Migré vers config/ontologies/solutions.yaml
+
 Dictionnaire des solutions SAP avec noms canoniques et alias etendus.
 Peut etre utilise pour le fuzzy matching afin de normaliser les noms detectes
 dans les documents injectes dans la knowledge base.
+
+Ce fichier est conservé pour compatibilité mais les données ont été migrées
+vers le nouveau système d'ontologies YAML (config/ontologies/solutions.yaml).
 """
+
+import warnings
+
+warnings.warn(
+    "solutions_dict.py est déprécié. Les données ont été migrées vers config/ontologies/solutions.yaml",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 SAP_SOLUTIONS = {
     # --- ERP ---

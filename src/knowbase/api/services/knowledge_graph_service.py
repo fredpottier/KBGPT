@@ -146,12 +146,32 @@ class KnowledgeGraphService:
 
         Normalise le nom de l'entité avant insertion pour éviter doublons.
 
+        **Phase 2**: Enregistre automatiquement le entity_type dans le registry
+        avec status=pending si découvert par LLM.
+
         Args:
             entity: Données entité
 
         Returns:
             EntityResponse: Entité (existante ou créée)
         """
+        # Phase 2: Enregistrer le type dans le registry (auto-discovery)
+        from knowbase.db import get_db
+        from knowbase.api.services.entity_type_registry_service import EntityTypeRegistryService
+
+        db_session = next(get_db())
+        try:
+            type_registry_service = EntityTypeRegistryService(db_session)
+            type_registry_service.get_or_create_type(
+                type_name=entity.entity_type,
+                tenant_id=entity.tenant_id,
+                discovered_by="llm"  # Type découvert par LLM lors de l'extraction
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  Erreur enregistrement type {entity.entity_type}: {e}")
+        finally:
+            db_session.close()
+
         # Normaliser le nom avant insertion
         entity_id, canonical_name, is_cataloged = self.normalizer.normalize_entity_name(
             entity.name,

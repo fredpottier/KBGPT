@@ -53,13 +53,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Pr??-t??l??chargement des packages NLTK pour ??viter les erreurs r??seau (unstructured dependencies)
 RUN python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True); nltk.download('averaged_perceptron_tagger', quiet=True); nltk.download('averaged_perceptron_tagger_eng', quiet=True)" || echo "NLTK download failed, will try at runtime"
 
-# Code application (?? la fin pour optimiser cache Docker)
-COPY app/ /app/
+# Code application (à la fin pour optimiser cache Docker)
+COPY src/knowbase/ /app/knowbase/
+COPY app/main.py /app/main.py
+COPY app/patch_unstructured.py /app/patch_unstructured.py
+COPY app/claims_utils.py /app/claims_utils.py
 RUN mkdir -p /app/config
 
 ENV HF_HOME=/data/models
 ENV KNOWBASE_DATA_DIR=/data
-ENV PYTHONPATH="/app:$PYTHONPATH"
+ENV PYTHONPATH="/app:/app/src:$PYTHONPATH"
 
 EXPOSE 8000
 

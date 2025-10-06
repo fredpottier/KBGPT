@@ -1,0 +1,41 @@
+# Catalogue ontologie - Type d'entité: COMPONENT
+# Composants techniques, modules, services
+
+COMPONENTS:
+  # Exemples à enrichir progressivement via uncataloged_entities.log
+
+  LOAD_BALANCER:
+    canonical_name: "Load Balancer"
+    aliases:
+      - "LoadBalancer"
+      - "LB"
+      - "load-balancer"
+      - "load balancer"
+    category: "Infrastructure"
+
+  API_GATEWAY:
+    canonical_name: "API Gateway"
+    aliases:
+      - "API GW"
+      - "APIGW"
+      - "api-gateway"
+      - "gateway"
+    category: "Integration"
+
+  DATABASE:
+    canonical_name: "Database"
+    aliases:
+      - "DB"
+      - "database"
+      - "data base"
+    category: "Data"
+
+  MESSAGE_BROKER:
+    canonical_name: "Message Broker"
+    aliases:
+      - "MessageBroker"
+      - "message-broker"
+      - "broker"
+    category: "Integration"
+
+  # À enrichir au fur et à mesure des ingestions
