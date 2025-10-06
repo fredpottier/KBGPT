@@ -179,6 +179,7 @@ class EntityMergeService:
                 query_update_master = """
                 MATCH (master:Entity {uuid: $master_uuid, tenant_id: $tenant_id})
                 SET master.name = $canonical_name,
+                    master.canonical_name = $canonical_name,
                     master.status = 'validated',
                     master.normalized_at = datetime(),
                     master.normalized_from = $dup_count
@@ -244,11 +245,15 @@ class EntityMergeService:
         """
         logger.info(f"📦 Batch merge: {len(merge_groups)} groupes")
 
+        # Fusionner les groupes avec le même canonical_name
+        deduplicated_groups = self._deduplicate_canonical_names(merge_groups)
+        logger.info(f"📊 Après déduplication: {len(deduplicated_groups)} groupes")
+
         total_merged = 0
         total_relations = {"out": 0, "in": 0}
         errors = []
 
-        for group in merge_groups:
+        for group in deduplicated_groups:
             try:
                 master_uuid = group["master_uuid"]
                 canonical_name = group["canonical_name"]
@@ -260,7 +265,13 @@ class EntityMergeService:
                 ]
 
                 if len(duplicate_uuids) == 0:
-                    continue  # Rien à merger
+                    # Entité unique : juste valider le master sans merge
+                    self._validate_single_entity(
+                        entity_uuid=master_uuid,
+                        canonical_name=canonical_name,
+                        tenant_id=tenant_id
+                    )
+                    continue
 
                 # Merge ce groupe
                 result = self.merge_entities(
@@ -293,6 +304,75 @@ class EntityMergeService:
             "errors": errors,
             "completed_at": datetime.utcnow().isoformat()
         }
+
+    def _deduplicate_canonical_names(self, merge_groups: List[Dict]) -> List[Dict]:
+        """
+        Fusionne les groupes ayant le même canonical_name.
+
+        Si 2+ groupes ont le même canonical_name, on les fusionne en 1 seul groupe
+        avec toutes leurs entités combinées.
+        """
+        canonical_to_group = {}
+
+        for group in merge_groups:
+            canonical = group["canonical_name"]
+
+            if canonical in canonical_to_group:
+                # Fusionner avec le groupe existant
+                existing = canonical_to_group[canonical]
+                existing["entities"].extend(group["entities"])
+
+                # Choisir le meilleur master (celui avec le score le plus élevé)
+                all_entities = existing["entities"]
+                best_master = max(all_entities, key=lambda e: e.get("score", 0))
+                existing["master_uuid"] = best_master["uuid"]
+
+            else:
+                # Premier groupe avec ce canonical_name
+                canonical_to_group[canonical] = group
+
+        return list(canonical_to_group.values())
+
+    def _validate_single_entity(
+        self,
+        entity_uuid: str,
+        canonical_name: str,
+        tenant_id: str
+    ):
+        """
+        Valide une entité unique (sans merge).
+
+        Pour les entités sans variantes, on les passe juste en status=validated
+        avec leur nom comme canonical_name.
+        """
+        from neo4j import GraphDatabase
+        import os
+
+        neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session() as session:
+            query = """
+            MATCH (e:Entity {uuid: $uuid, tenant_id: $tenant_id})
+            SET e.canonical_name = $canonical_name,
+                e.status = 'validated',
+                e.normalized_at = datetime()
+            RETURN e
+            """
+
+            session.run(
+                query,
+                uuid=entity_uuid,
+                canonical_name=canonical_name,
+                tenant_id=tenant_id
+            )
+
+        driver.close()
+
+        logger.info(f"✅ Entité unique validée: {entity_uuid} → {canonical_name}")
 
 
 __all__ = ["EntityMergeService"]

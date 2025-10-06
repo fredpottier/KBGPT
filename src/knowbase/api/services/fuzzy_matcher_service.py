@@ -176,6 +176,33 @@ class FuzzyMatcherService:
                     "master_uuid": master["uuid"]
                 })
 
+        # Ajouter entités non-matchées comme groupes individuels (auto-validation)
+        unmatched_entities = [e for e in entities if e["uuid"] not in matched_entity_uuids]
+
+        for entity in unmatched_entities:
+            canonical_key = entity["name"].replace(" ", "_").replace("/", "_").upper()[:50]
+
+            merge_groups.append({
+                "canonical_key": canonical_key,
+                "canonical_name": entity["name"],  # Garde son nom actuel comme canonique
+                "description": entity.get("description", ""),
+                "confidence": 1.0,  # 100% car c'est elle-même
+                "entities": [
+                    {
+                        "uuid": entity["uuid"],
+                        "name": entity["name"],
+                        "description": entity.get("description", ""),
+                        "score": 100,  # 100% match avec elle-même
+                        "auto_match": True,  # Auto-match car unique
+                        "selected": True,  # Auto-sélectionné
+                        "matched_via": "self"  # Match avec elle-même
+                    }
+                ],
+                "master_uuid": entity["uuid"]
+            })
+
+            matched_entity_uuids.add(entity["uuid"])
+
         # Calculer statistiques
         total_matched = len(matched_entity_uuids)
         total_unmatched = len(entities) - total_matched

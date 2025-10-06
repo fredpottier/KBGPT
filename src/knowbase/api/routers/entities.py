@@ -8,7 +8,7 @@ from typing import List, Optional
 from pathlib import Path
 import yaml
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Body
 from pydantic import BaseModel, Field
 
 from knowbase.api.schemas.knowledge_graph import EntityResponse
@@ -207,6 +207,7 @@ async def list_entities(
                     uuid=node["uuid"],
                     name=node["name"],
                     entity_type=node["entity_type"],
+                    canonical_name=node.get("canonical_name"),  # Nom canonique après normalisation
                     description=node.get("description"),
                     confidence=node.get("confidence", 0.0),
                     attributes=attributes,
@@ -1047,6 +1048,107 @@ def _add_entity_to_ontology(
         yaml.dump(ontology, f, allow_unicode=True, sort_keys=False)
 
     logger.info(f"📝 Entité ajoutée à {ontology_file}: {entity_id}")
+
+
+class ChangeEntityTypeRequest(BaseModel):
+    """Requête changement type entité."""
+
+    new_entity_type: str = Field(
+        ...,
+        description="Nouveau type d'entité (ex: SOLUTION, COMPONENT, etc.)"
+    )
+
+
+@router.patch("/{entity_uuid}/change-type")
+async def change_entity_type(
+    entity_uuid: str,
+    new_entity_type: str = Body(..., embed=True),
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id)
+):
+    """
+    Change le type d'une entité.
+
+    Utile quand le LLM a mal classifié une entité lors de l'extraction.
+
+    Args:
+        entity_uuid: UUID de l'entité
+        request: Nouveau type d'entité
+        admin: Admin authentifié
+        tenant_id: Tenant ID
+
+    Returns:
+        Entité mise à jour
+    """
+    logger.info(f"🔄 Changement type entité {entity_uuid} → {new_entity_type}")
+
+    from neo4j import GraphDatabase
+    import os
+
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+
+    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+    try:
+        with driver.session() as session:
+            # Récupérer entité actuelle et changer son type
+            query = """
+            MATCH (e:Entity {uuid: $uuid, tenant_id: $tenant_id})
+            WITH e, e.entity_type AS old_type
+            SET e.entity_type = $new_type,
+                e.updated_at = datetime()
+            RETURN e, old_type
+            """
+
+            result = session.run(
+                query,
+                uuid=entity_uuid,
+                tenant_id=tenant_id,
+                new_type=new_entity_type.upper()
+            )
+
+            record = result.single()
+            if not record:
+                driver.close()
+                raise HTTPException(status_code=404, detail="Entity not found")
+
+            node = record["e"]
+            old_type = record["old_type"]
+
+        driver.close()
+
+        logger.info(
+            f"✅ Type changé: {entity_uuid} de {old_type} → {new_entity_type}"
+        )
+
+        # Retourner entité mise à jour
+        updated_entity = dict(node)
+
+        # Convertir Neo4j DateTime en Python datetime si nécessaire
+        created_at = updated_entity.get("created_at")
+        if hasattr(created_at, 'to_native'):
+            created_at = created_at.to_native()
+
+        return EntityResponse(
+            uuid=updated_entity["uuid"],
+            name=updated_entity["name"],
+            entity_type=updated_entity["entity_type"],
+            canonical_name=updated_entity.get("canonical_name"),
+            description=updated_entity.get("description", ""),
+            confidence=updated_entity.get("confidence", 1.0),
+            status=updated_entity.get("status", "pending"),
+            is_cataloged=updated_entity.get("is_cataloged", False),
+            created_at=created_at,
+            tenant_id=updated_entity.get("tenant_id", "default")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erreur changement type: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 __all__ = ["router"]

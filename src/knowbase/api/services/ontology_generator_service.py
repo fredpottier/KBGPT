@@ -11,7 +11,7 @@ import json
 from typing import Dict, List, Optional
 from datetime import datetime
 
-from knowbase.common.llm_router import LLMRouter
+from knowbase.common.llm_router import LLMRouter, TaskType
 from knowbase.config.settings import get_settings
 from knowbase.common.logging import setup_logging
 
@@ -54,17 +54,17 @@ class OntologyGeneratorService:
         Returns:
             Dict avec structure:
             {
-                "entity_type": "SOLUTION",
+                "entity_type": "PRODUCT",
                 "generated_at": "2025-10-06T...",
                 "entities_analyzed": 47,
                 "groups_proposed": 12,
                 "ontology": {
-                    "SAP_S4HANA_PRIVATE_CLOUD": {
-                        "canonical_name": "SAP S/4HANA Private Cloud Edition",
-                        "aliases": ["SAP S/4HANA PCE", "S/4HANA Private Cloud"],
+                    "ENTERPRISE_DATABASE_CLOUD": {
+                        "canonical_name": "Enterprise Database Cloud Edition",
+                        "aliases": ["DB Cloud", "Enterprise DB Cloud", "Cloud Database"],
                         "confidence": 0.95,
                         "entities_merged": ["uuid-1", "uuid-2", "uuid-3"],
-                        "description": "SAP's private cloud ERP solution"
+                        "description": "Cloud-based enterprise database solution"
                     },
                     ...
                 }
@@ -90,9 +90,16 @@ class OntologyGeneratorService:
 
         # Appeler LLM
         try:
-            response = await self.llm_router.complete(
-                prompt=prompt,
-                model_preference=model_preference,
+            messages = [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+
+            response = self.llm_router.complete(
+                task_type=TaskType.METADATA_EXTRACTION,
+                messages=messages,
                 temperature=0.2,  # Faible température pour cohérence
                 max_tokens=4000
             )
@@ -158,11 +165,17 @@ class OntologyGeneratorService:
    - Liste les **UUIDs** des entités à merger
    - Ajoute une brève **description** du concept
 
-3. **Règles importantes**:
-   - Ne groupe que si tu es >75% sûr qu'elles sont identiques
-   - Préserve les différences subtiles (ex: "SAP S/4HANA Cloud" ≠ "SAP S/4HANA Private Cloud")
-   - Gère les typos courantes (ex: "S/4 HANA" vs "S/4HANA")
-   - Respecte la casse pour acronymes (SAP, ERP, etc.)
+3. **Règles CRITIQUES - Différences sémantiques**:
+   - Ne groupe que si tu es >75% sûr qu'elles sont **strictement identiques**
+   - **ATTENTION**: Produits/concepts différents doivent TOUJOURS rester séparés :
+     * Même si les noms se ressemblent, vérifie qu'il s'agit du MÊME produit/concept
+     * Un composant technique ≠ le système qui l'utilise (ex: base de données ≠ ERP qui l'utilise)
+     * Une version Cloud ≠ une version Private Cloud ≠ une version On-Premise (ce sont des variantes différentes)
+   - Groupe uniquement les **variantes orthographiques/typographiques du MÊME produit** :
+     * ✅ Variantes valides : abréviations, typos, espaces, tirets, casse
+     * ❌ Produits différents : même si un nom est contenu dans l'autre, ce ne sont pas forcément le même produit
+   - Respecte la casse pour acronymes et noms propres
+   - En cas de doute sur l'identité sémantique : NE PAS regrouper
 
 **Format de sortie JSON attendu**:
 ```json

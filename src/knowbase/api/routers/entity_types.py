@@ -17,10 +17,11 @@ Endpoints:
 - GET /entity-types/{type_name}/ontology-proposal - Récupérer proposition ontologie
 """
 from typing import Optional, Dict, List
+from datetime import datetime, timedelta
 import yaml
 from io import StringIO
 
-from fastapi import APIRouter, HTTPException, Query, Depends, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, Depends, UploadFile, File, BackgroundTasks, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from redis import Redis
@@ -35,6 +36,7 @@ from knowbase.api.schemas.entity_types import (
     EntityTypeListResponse,
 )
 from knowbase.api.services.entity_type_registry_service import EntityTypeRegistryService
+from knowbase.api.auth_deps.auth import require_admin
 from knowbase.db import get_db
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
@@ -882,6 +884,7 @@ async def export_entity_types_yaml(
 async def generate_ontology(
     type_name: str,
     model_preference: str = Query(default="claude-sonnet", description="Modèle LLM"),
+    include_validated: bool = Query(default=False, description="Inclure entités validées (⚠️ peut re-proposer merges existants)"),
     tenant_id: str = Query(default="default", description="Tenant ID"),
     db: Session = Depends(get_db)
 ):
@@ -891,6 +894,7 @@ async def generate_ontology(
     Args:
         type_name: Nom type
         model_preference: Modèle LLM (default: claude-sonnet)
+        include_validated: Si False (défaut), analyse seulement entités pending. Si True, inclut aussi validated.
         tenant_id: Tenant ID
         db: Session DB
 
@@ -916,10 +920,21 @@ async def generate_ontology(
     kg_service = KnowledgeGraphService()
     entities_raw = kg_service.get_entities_by_type(type_name, tenant_id)
 
-    if len(entities_raw) == 0:
+    # Filtrer selon include_validated
+    if include_validated:
+        # Inclure toutes les entités (pending + validated)
+        entities_filtered = entities_raw
+        logger.info(f"⚠️ include_validated=True : analyse de TOUTES les entités (peut re-proposer merges)")
+    else:
+        # Par défaut : seulement les pending (protection entités validées)
+        entities_filtered = [e for e in entities_raw if e.get("status") == "pending"]
+        logger.info(f"✅ include_validated=False : analyse seulement entités pending (protection validées)")
+
+    if len(entities_filtered) == 0:
+        status_hint = " (Astuce : activez 'include_validated' si vous voulez analyser les entités validées)" if not include_validated else ""
         raise HTTPException(
             status_code=400,
-            detail=f"No entities found for type '{type_name}'. Cannot generate ontology."
+            detail=f"No pending entities found for type '{type_name}'.{status_hint}"
         )
 
     # Formater entités pour OntologyGenerator
@@ -930,18 +945,18 @@ async def generate_ontology(
             "description": e.get("description", ""),
             "status": e.get("status", "pending")
         }
-        for e in entities_raw
+        for e in entities_filtered
     ]
 
     logger.info(f"📊 {len(entities)} entités récupérées pour génération ontologie")
 
-    # Enqueue job RQ
+    # Enqueue job RQ dans queue "ingestion" (même queue que worker)
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
         port=int(os.getenv("REDIS_PORT", "6379")),
-        db=1
+        db=0  # Même DB que worker ingestion
     )
-    queue = Queue("default", connection=redis_conn)
+    queue = Queue("ingestion", connection=redis_conn)
 
     job = queue.enqueue(
         "knowbase.api.workers.ontology_worker.generate_ontology_task",
@@ -1096,7 +1111,7 @@ async def get_ontology_proposal(
 )
 async def preview_normalization(
     type_name: str,
-    ontology: Dict,  # Ontologie fournie par user (depuis LLM ou manuelle)
+    ontology: Dict = Body(..., description="Ontologie fournie (depuis LLM ou manuelle)"),
     tenant_id: str = Query(default="default", description="Tenant ID")
 ):
     """
@@ -1130,6 +1145,12 @@ async def preview_normalization(
     ]
 
     logger.info(f"📊 {len(entities)} entités récupérées pour preview")
+
+    # Extraire ontologie si wrappée dans {"ontology": ...}
+    if "ontology" in ontology and len(ontology) == 1:
+        ontology = ontology["ontology"]
+
+    logger.info(f"🔍 Ontologie reçue: {list(ontology.keys()) if ontology else 'None'}")
 
     # Calculer preview avec fuzzy matching
     fuzzy_service = FuzzyMatcherService()
@@ -1186,8 +1207,8 @@ async def preview_normalization(
 )
 async def normalize_entities(
     type_name: str,
-    merge_groups: List[Dict],  # Groupes validés par user
-    create_snapshot: bool = True,
+    merge_groups: List[Dict] = Body(..., description="Groupes validés par user"),
+    create_snapshot: bool = Body(default=True, description="Créer snapshot pour undo"),
     tenant_id: str = Query(default="default", description="Tenant ID")
 ):
     """
@@ -1213,9 +1234,9 @@ async def normalize_entities(
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
         port=int(os.getenv("REDIS_PORT", "6379")),
-        db=1
+        db=0  # Même DB que worker ingestion
     )
-    queue = Queue("default", connection=redis_conn)
+    queue = Queue("ingestion", connection=redis_conn)
 
     job = queue.enqueue(
         "knowbase.api.workers.normalization_worker.normalize_entities_task",
@@ -1344,9 +1365,9 @@ async def undo_normalization(
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
         port=int(os.getenv("REDIS_PORT", "6379")),
-        db=1
+        db=0  # Même DB que worker ingestion
     )
-    queue = Queue("default", connection=redis_conn)
+    queue = Queue("ingestion", connection=redis_conn)
 
     job = queue.enqueue(
         "knowbase.api.workers.normalization_worker.undo_normalization_task",
@@ -1365,6 +1386,221 @@ async def undo_normalization(
         "status_url": f"/api/jobs/{job.id}/status",
         "snapshot_id": snapshot_id
     }
+
+
+@router.post("/{source_type}/merge-into/{target_type}")
+async def merge_entity_types(
+    source_type: str,
+    target_type: str,
+    tenant_id: str = Query(default="default", description="Tenant ID"),
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Merge TYPE_SOURCE dans TYPE_TARGET.
+
+    Actions:
+    1. Transférer toutes les entités de SOURCE vers TARGET
+    2. Mettre à jour entity_type dans Neo4j
+    3. Supprimer TYPE_SOURCE du registry
+    4. Créer snapshot pour rollback
+
+    Args:
+        source_type: Type source (sera supprimé)
+        target_type: Type cible (recevra les entités)
+        tenant_id: Tenant ID
+        admin: Admin authentifié
+        db: Session DB
+
+    Returns:
+        Résultat du merge
+    """
+    from neo4j import GraphDatabase
+    import os
+    import uuid
+
+    logger.info(f"🔀 Merge types: {source_type} → {target_type}")
+
+    # Vérifier que les deux types existent
+    service = EntityTypeRegistryService(db)
+    source_entity_type = service.get_type_by_name(source_type, tenant_id)
+    target_entity_type = service.get_type_by_name(target_type, tenant_id)
+
+    if not source_entity_type:
+        raise HTTPException(status_code=404, detail=f"Source type '{source_type}' not found")
+
+    if not target_entity_type:
+        raise HTTPException(status_code=404, detail=f"Target type '{target_type}' not found")
+
+    if source_type == target_type:
+        raise HTTPException(status_code=400, detail="Source and target types cannot be the same")
+
+    # Créer snapshot avant merge
+    snapshot_id = str(uuid.uuid4())
+    merge_info = {
+        "source_type": source_type,
+        "target_type": target_type,
+        "source_entity_count": source_entity_type.entity_count
+    }
+
+    from sqlalchemy import create_engine, text as sql_text
+    from sqlalchemy.orm import sessionmaker
+    from datetime import timedelta
+
+    engine = create_engine('sqlite:////data/entity_types_registry.db')
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    try:
+        # Créer snapshot
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+        session.execute(
+            sql_text("""
+            INSERT INTO normalization_snapshots
+            (snapshot_id, type_name, tenant_id, merge_groups_json, expires_at)
+            VALUES (:snapshot_id, :type_name, :tenant_id, :merge_info, :expires_at)
+            """),
+            {
+                "snapshot_id": snapshot_id,
+                "type_name": f"TYPE_MERGE_{source_type}_TO_{target_type}",
+                "tenant_id": tenant_id,
+                "merge_info": json.dumps(merge_info),
+                "expires_at": expires_at
+            }
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    # Transférer entités dans Neo4j
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+
+    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+    try:
+        with driver.session() as neo_session:
+            # Transférer toutes les entités
+            query = """
+            MATCH (e:Entity {entity_type: $source_type, tenant_id: $tenant_id})
+            SET e.entity_type = $target_type,
+                e.updated_at = datetime(),
+                e.merged_from_type = $source_type
+            RETURN count(e) AS transferred_count
+            """
+
+            result = neo_session.run(
+                query,
+                source_type=source_type,
+                target_type=target_type,
+                tenant_id=tenant_id
+            )
+
+            record = result.single()
+            transferred_count = record["transferred_count"] if record else 0
+
+        driver.close()
+
+        logger.info(f"✅ {transferred_count} entités transférées de {source_type} → {target_type}")
+
+        # Supprimer le type source du registry
+        service.delete_type(source_entity_type.id)
+
+        return {
+            "success": True,
+            "source_type": source_type,
+            "target_type": target_type,
+            "entities_transferred": transferred_count,
+            "snapshot_id": snapshot_id,
+            "message": f"{transferred_count} entités transférées de {source_type} vers {target_type}"
+        }
+
+    except Exception as e:
+        driver.close()
+        logger.error(f"❌ Erreur merge types: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{type_name}/snapshots")
+async def list_snapshots(
+    type_name: str,
+    tenant_id: str = Query(default="default", description="Tenant ID")
+):
+    """
+    Liste les snapshots disponibles pour rollback.
+
+    Args:
+        type_name: Nom du type
+        tenant_id: Tenant ID
+
+    Returns:
+        Liste des snapshots avec TTL
+    """
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine('sqlite:////data/entity_types_registry.db')
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    try:
+        result = session.execute(
+            text("""
+            SELECT snapshot_id, type_name, created_at, expires_at, restored, merge_groups_json
+            FROM normalization_snapshots
+            WHERE type_name = :type_name AND tenant_id = :tenant_id
+            ORDER BY created_at DESC
+            """),
+            {"type_name": type_name, "tenant_id": tenant_id}
+        ).fetchall()
+
+        snapshots = []
+        for row in result:
+            snap_id, snap_type, created_at, expires_at, restored, merge_groups_json = row
+
+            # Parser dates
+            created_dt = datetime.fromisoformat(created_at)
+            expires_dt = datetime.fromisoformat(expires_at)
+            now = datetime.utcnow()
+
+            is_expired = now > expires_dt
+            ttl_hours = (expires_dt - now).total_seconds() / 3600 if not is_expired else 0
+
+            # Compter entités dans le snapshot
+            import json
+            entities_count = 0
+            if merge_groups_json:
+                try:
+                    merge_groups = json.loads(merge_groups_json)
+                    for group in merge_groups:
+                        # Essayer plusieurs structures possibles
+                        entities = group.get("entities", [])
+                        if entities:
+                            entities_count += len(entities)
+                        else:
+                            # Fallback sur entity_uuids si présent
+                            entity_uuids = group.get("entity_uuids", [])
+                            entities_count += len(entity_uuids)
+                except Exception as e:
+                    logger.warning(f"Erreur comptage entités snapshot {snap_id}: {e}")
+
+            snapshots.append({
+                "snapshot_id": snap_id,
+                "type_name": snap_type,
+                "created_at": created_at,
+                "expires_at": expires_at,
+                "is_expired": is_expired,
+                "is_restored": bool(restored),
+                "ttl_hours": round(ttl_hours, 1),
+                "can_rollback": not is_expired and not restored,
+                "entities_count": entities_count
+            })
+
+        return {"snapshots": snapshots}
+
+    finally:
+        session.close()
 
 
 __all__ = ["router"]

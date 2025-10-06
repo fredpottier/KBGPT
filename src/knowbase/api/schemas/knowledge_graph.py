@@ -146,6 +146,10 @@ class EntityResponse(EntityCreate):
         ...,
         description="UUID unique de l'entité dans Neo4j"
     )
+    canonical_name: Optional[str] = Field(
+        default=None,
+        description="Nom canonique après normalisation"
+    )
     created_at: datetime = Field(
         ...,
         description="Date création"
