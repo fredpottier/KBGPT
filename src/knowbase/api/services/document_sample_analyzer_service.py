@@ -240,12 +240,15 @@ IMPORTANT: Si un type existe déjà dans cette liste, utilise-le tel quel (même
 Propose de NOUVEAUX types uniquement si aucun type existant ne convient.
 """
 
+        context_section = ""
+        if context_prompt:
+            context_section = f"**CONTEXTE ADDITIONNEL**:\n{context_prompt}\n\n"
+
         prompt = f"""Tu es un expert en analyse de documents et modélisation d'entités.
 
 **TÂCHE**: Analyser ce document et identifier les types d'entités pertinents pour l'extraction automatique.
 {existing_types_section}
-{"**CONTEXTE ADDITIONNEL**:\n" + context_prompt + "\n" if context_prompt else ""}
-**DOCUMENT À ANALYSER**:
+{context_section}**DOCUMENT À ANALYSER**:
 {content_preview}
 
 **INSTRUCTIONS**:
