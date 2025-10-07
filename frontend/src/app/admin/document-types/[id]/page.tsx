@@ -34,7 +34,7 @@ import { ArrowBackIcon, DeleteIcon, AddIcon } from '@chakra-ui/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter, useParams } from 'next/navigation'
 import axios from 'axios'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 interface EntityTypeAssociation {
   entity_type_name: string
@@ -76,7 +76,7 @@ export default function DocumentTypeDetailPage() {
   })
 
   // Initialiser les champs quand les données arrivent
-  useState(() => {
+  useEffect(() => {
     if (data) {
       setName(data.name || '')
       setSlug(data.slug || '')
@@ -84,7 +84,7 @@ export default function DocumentTypeDetailPage() {
       setContextPrompt(data.context_prompt || '')
       setIsActive(data.is_active ?? true)
     }
-  })
+  }, [data])
 
   const updateMutation = useMutation({
     mutationFn: async (updateData: any) => {
