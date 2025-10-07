@@ -209,6 +209,7 @@ export default function NewDocumentTypePage() {
                       </HStack>
                     </Box>
                   )}
+                </VStack>
         </CardBody>
       </Card>
 
