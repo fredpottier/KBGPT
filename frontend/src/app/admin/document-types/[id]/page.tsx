@@ -187,7 +187,7 @@ export default function DocumentTypeDetailPage() {
     )
   }
 
-  const entityTypes: EntityTypeAssociation[] = entityTypesData?.entity_types || []
+  const entityTypes: EntityTypeAssociation[] = entityTypesData || []
 
   return (
     <VStack spacing={6} align="stretch">
