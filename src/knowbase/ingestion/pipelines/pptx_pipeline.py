@@ -1108,8 +1108,9 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
 
 
 # Fonction principale pour traiter un fichier PPTX
-def process_pptx(pptx_path: Path, document_type: str = "default", progress_callback=None, rq_job=None):
+def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_callback=None, rq_job=None):
     logger.info(f"start ingestion for {pptx_path.name}")
+    logger.info(f"📋 Document Type ID: {document_type_id or 'default'}")
 
     # Générer ID unique pour cet import (pour traçabilité dans Neo4j)
     import_id = str(uuid.uuid4())[:8]  # UUID court pour lisibilité
@@ -1142,7 +1143,7 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
     auto_metadata = extract_pptx_metadata(pptx_path)
 
     deck_info = analyze_deck_summary(
-        slides_data, pptx_path.name, document_type=document_type, auto_metadata=auto_metadata
+        slides_data, pptx_path.name, document_type=document_type_id or "default", auto_metadata=auto_metadata
     )
     summary = deck_info.get("summary", "")
     metadata = deck_info.get("metadata", {})
@@ -1243,7 +1244,7 @@ def process_pptx(pptx_path: Path, document_type: str = "default", progress_callb
                             prompt_text,
                             notes,
                             megaparse_content,
-                            document_type,
+                            document_type_id or "default",
                             deck_prompt_id,
                         ),
                     )

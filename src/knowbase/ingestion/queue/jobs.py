@@ -76,7 +76,7 @@ def mark_job_as_processing():
 def ingest_pptx_job(
     *,
     pptx_path: str,
-    document_type: str = "default",
+    document_type_id: Optional[str] = None,
     meta_path: Optional[str] = None,
 ) -> dict[str, Any]:
     try:
@@ -94,7 +94,7 @@ def ingest_pptx_job(
                     meta_file.replace(target)
 
         update_job_progress("Traitement", 2, 6, "Traitement du document PowerPoint")
-        result = pptx_pipeline.process_pptx(path, document_type=document_type, progress_callback=update_job_progress)
+        result = pptx_pipeline.process_pptx(path, document_type_id=document_type_id, progress_callback=update_job_progress)
 
         update_job_progress("Finalisation", 6, 6, "Import terminé avec succès")
         destination = pptx_pipeline.DOCS_DONE / f"{path.stem}.pptx"
@@ -147,7 +147,7 @@ def ingest_pptx_job(
         raise
 
 
-def ingest_pdf_job(*, pdf_path: str) -> dict[str, Any]:
+def ingest_pdf_job(*, pdf_path: str, document_type_id: Optional[str] = None) -> dict[str, Any]:
     try:
         # Marquer comme en cours de traitement
         mark_job_as_processing()
@@ -155,7 +155,7 @@ def ingest_pdf_job(*, pdf_path: str) -> dict[str, Any]:
         path = _ensure_exists(Path(pdf_path))
 
         update_job_progress("Traitement", 1, 3, "Traitement du document PDF")
-        result = pdf_pipeline.process_pdf(path)
+        result = pdf_pipeline.process_pdf(path, document_type_id=document_type_id)
         destination = pdf_pipeline.DOCS_DONE / f"{path.stem}.pdf"
 
         update_job_progress("Terminé", 3, 3, "Import PDF terminé avec succès")
