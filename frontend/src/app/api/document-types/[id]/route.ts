@@ -8,7 +8,12 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const url = `${BACKEND_URL}/api/document-types/${params.id}`;
+    const { id } = params;
+    const searchParams = request.nextUrl.searchParams;
+    const queryString = searchParams.toString();
+    const url = queryString
+      ? `${BACKEND_URL}/api/document-types/${id}?${queryString}`
+      : `${BACKEND_URL}/api/document-types/${id}`;
 
     const response = await fetch(url, {
       headers: {
@@ -17,7 +22,11 @@ export async function GET(
     });
 
     if (!response.ok) {
-      throw new Error(`Backend returned ${response.status}`);
+      const errorData = await response.json().catch(() => ({}));
+      return NextResponse.json(
+        { error: errorData.detail || 'Failed to fetch document type' },
+        { status: response.status }
+      );
     }
 
     const data = await response.json();
@@ -36,8 +45,9 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    const { id } = params;
     const body = await request.json();
-    const url = `${BACKEND_URL}/api/document-types/${params.id}`;
+    const url = `${BACKEND_URL}/api/document-types/${id}`;
 
     const response = await fetch(url, {
       method: 'PUT',
@@ -49,7 +59,11 @@ export async function PUT(
     });
 
     if (!response.ok) {
-      throw new Error(`Backend returned ${response.status}`);
+      const errorData = await response.json().catch(() => ({}));
+      return NextResponse.json(
+        { error: errorData.detail || 'Failed to update document type' },
+        { status: response.status }
+      );
     }
 
     const data = await response.json();
@@ -68,7 +82,8 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const url = `${BACKEND_URL}/api/document-types/${params.id}`;
+    const { id } = params;
+    const url = `${BACKEND_URL}/api/document-types/${id}`;
 
     const response = await fetch(url, {
       method: 'DELETE',
@@ -78,14 +93,19 @@ export async function DELETE(
     });
 
     if (!response.ok) {
-      throw new Error(`Backend returned ${response.status}`);
+      const errorData = await response.json().catch(() => ({}));
+      return NextResponse.json(
+        { message: errorData.detail || 'Failed to delete document type' },
+        { status: response.status }
+      );
     }
 
+    // DELETE returns 204 No Content
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error deleting document type:', error);
     return NextResponse.json(
-      { error: 'Failed to delete document type' },
+      { message: 'Failed to delete document type' },
       { status: 500 }
     );
   }
