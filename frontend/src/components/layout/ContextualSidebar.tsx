@@ -98,19 +98,19 @@ export default function ContextualSidebar({ section }: ContextualSidebarProps) {
       case 'admin':
         return [
           {
-            icon: FiDatabase,
-            label: 'Ontologies',
-            href: '/admin/ontology',
+            icon: ViewIcon,
+            label: 'Dashboard',
+            href: '/admin',
           },
           {
             icon: FiLayers,
-            label: 'Types Dynamiques',
+            label: 'Types Entités',
             href: '/admin/dynamic-types',
           },
           {
-            icon: CheckCircleIcon,
-            label: 'Entités en attente',
-            href: '/admin/entities-pending',
+            icon: FiDatabase,
+            label: 'Types de Documents',
+            href: '/admin/document-types',
           },
           {
             icon: SettingsIcon,
