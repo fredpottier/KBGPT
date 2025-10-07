@@ -125,9 +125,14 @@ export default function AdminDashboard() {
 
   return (
     <VStack spacing={6} align="stretch">
-      <Text fontSize="2xl" fontWeight="bold" mb={4}>
-        Dashboard Overview
-      </Text>
+      <Box>
+        <Text fontSize="2xl" fontWeight="bold">
+          Dashboard Administration
+        </Text>
+        <Text color="gray.600" mt={2}>
+          Vue d'ensemble du système SAP Knowledge Base
+        </Text>
+      </Box>
 
       {/* Statistics Cards */}
       <Grid templateColumns="repeat(auto-fit, minmax(250px, 1fr))" gap={6}>
