@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     qdrant_qa_collection: str = Field(default="rfp_qa", alias="QDRANT_QA_COLLECTION")
     hf_home: Path = Field(default=MODELS_DIR, alias="HF_HOME")
 
+    # Configuration Redis (pour RQ jobs async)
+    redis_host: str = Field(default="redis", alias="REDIS_HOST")
+    redis_port: int = Field(default=6379, alias="REDIS_PORT")
+
     config_dir: Path = Field(default=CONFIG_DIR)
     data_dir: Path = Field(default=DATA_DIR, alias="DATA_DIR")
     docs_in_dir: Path = Field(default=DOCS_IN_DIR)
