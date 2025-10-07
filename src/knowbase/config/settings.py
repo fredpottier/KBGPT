@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     model_fast: str = Field(default="gpt-4o-mini", alias="MODEL_FAST")
 
     # Modèles Anthropic
-    model_long_text: str = Field(default="claude-3-5-sonnet-20240620", alias="MODEL_LONG_TEXT")
+    model_long_text: str = Field(default="claude-3-5-sonnet-latest", alias="MODEL_LONG_TEXT")
     model_enrichment: str = Field(default="claude-3-5-haiku-20241022", alias="MODEL_ENRICHMENT")
 
     # Configuration clients
