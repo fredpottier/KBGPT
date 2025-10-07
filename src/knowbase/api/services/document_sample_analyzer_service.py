@@ -79,8 +79,12 @@ class DocumentSampleAnalyzerService:
             anthropic_client = get_anthropic_client()
 
             # Format Anthropic pour PDF natif
+            # Utiliser le modèle long_text de settings (Claude Sonnet)
+            model_name = settings.model_long_text
+            logger.info(f"🤖 Utilisation modèle Claude: {model_name}")
+
             response = anthropic_client.messages.create(
-                model="claude-3-5-sonnet-20241022",  # Claude Sonnet 3.5
+                model=model_name,
                 max_tokens=4000,
                 temperature=0.3,
                 messages=[
