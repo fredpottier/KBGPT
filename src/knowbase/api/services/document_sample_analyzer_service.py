@@ -4,6 +4,7 @@ Service pour analyser des documents samples et suggérer entity types.
 Phase 6 - Document Types Management
 """
 import json
+import base64
 from typing import List, Dict, Optional
 from fastapi import UploadFile
 from pathlib import Path
@@ -39,12 +40,12 @@ class DocumentSampleAnalyzerService:
         tenant_id: str = "default"
     ) -> Dict:
         """
-        Analyser un document sample pour suggérer entity types.
+        Analyser un document sample PDF pour suggérer entity types.
 
         Args:
-            file: Fichier uploadé (PPTX ou PDF)
+            file: Fichier PDF uploadé
             context_prompt: Contexte additionnel pour guider le LLM
-            model_preference: Modèle LLM à utiliser
+            model_preference: Modèle LLM à utiliser (doit être Claude)
             tenant_id: Tenant ID pour récupérer entity types existants
 
         Returns:
@@ -52,37 +53,49 @@ class DocumentSampleAnalyzerService:
         """
         logger.info(f"📄 Analyse document sample: {file.filename}")
 
+        # Vérifier que c'est bien un PDF
+        file_ext = Path(file.filename).suffix.lower()
+        if file_ext != ".pdf":
+            raise ValueError(f"Format non supporté: {file_ext}. Seul PDF est accepté.")
+
         # Récupérer entity types existants approuvés
         existing_types = self._get_existing_entity_types(tenant_id)
         logger.info(f"📋 {len(existing_types)} entity types existants trouvés")
 
-        # Extraire contenu du document
-        content = await self._extract_document_content(file)
-
-        if not content:
-            logger.warning("⚠️ Aucun contenu extrait du document")
-            return {
-                "suggested_types": [],
-                "document_summary": "Impossible d'extraire le contenu du document",
-                "pages_analyzed": 0
-            }
+        # Lire le PDF en base64
+        pdf_content = await file.read()
+        pdf_base64 = base64.b64encode(pdf_content).decode('utf-8')
+        logger.info(f"📦 PDF encodé: {len(pdf_base64)} caractères base64")
 
         # Construire prompt pour LLM
-        prompt = self._build_analysis_prompt(content, context_prompt, existing_types)
+        prompt_text = self._build_analysis_prompt_for_pdf(context_prompt, existing_types)
 
-        # Appeler LLM
+        # Appeler Claude avec PDF natif
         try:
             messages = [
                 {
                     "role": "user",
-                    "content": prompt
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": pdf_base64
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt_text
+                        }
+                    ]
                 }
             ]
 
             response = self.llm_router.complete(
                 task_type=TaskType.METADATA_EXTRACTION,
                 messages=messages,
-                temperature=0.3,  # Température moyenne pour équilibre
+                temperature=0.3,
                 max_tokens=4000,
                 model_preference=model_preference
             )
@@ -129,115 +142,21 @@ class DocumentSampleAnalyzerService:
             logger.error(f"❌ Erreur récupération entity types existants: {e}")
             return []
 
-    async def _extract_document_content(self, file: UploadFile) -> str:
-        """
-        Extraire contenu textuel du document.
-
-        Args:
-            file: Fichier uploadé
-
-        Returns:
-            Contenu textuel extrait
-        """
-        file_ext = Path(file.filename).suffix.lower()
-
-        # Sauvegarder temporairement le fichier
-        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
-            content = await file.read()
-            tmp_file.write(content)
-            tmp_path = Path(tmp_file.name)
-
-        try:
-            if file_ext == ".pdf":
-                return await self._extract_pdf_content(tmp_path)
-            elif file_ext in [".pptx", ".ppt"]:
-                return await self._extract_pptx_content(tmp_path)
-            else:
-                logger.warning(f"⚠️ Format non supporté: {file_ext}")
-                return ""
-        finally:
-            # Nettoyer fichier temporaire
-            if tmp_path.exists():
-                tmp_path.unlink()
-
-    async def _extract_pdf_content(self, pdf_path: Path) -> str:
-        """Extraire contenu d'un PDF."""
-        try:
-            from knowbase.ingestion.pipelines.pdf_pipeline import extract_text_from_pdf
-
-            # Extraire texte (limiter à 10 premières pages pour analyse)
-            text_parts = []
-            pages = extract_text_from_pdf(str(pdf_path), max_pages=10)
-
-            for page_num, page_text in pages:
-                if page_text.strip():
-                    text_parts.append(f"--- Page {page_num} ---\n{page_text}")
-
-            return "\n\n".join(text_parts)
-
-        except Exception as e:
-            logger.error(f"❌ Erreur extraction PDF: {e}")
-            return ""
-
-    async def _extract_pptx_content(self, pptx_path: Path) -> str:
-        """Extraire contenu d'un PPTX."""
-        try:
-            from pptx import Presentation
-
-            prs = Presentation(str(pptx_path))
-            text_parts = []
-
-            # Limiter à 10 premières slides
-            for i, slide in enumerate(prs.slides[:10], start=1):
-                slide_text_parts = []
-
-                try:
-                    for shape in slide.shapes:
-                        try:
-                            if hasattr(shape, "text") and shape.text and shape.text.strip():
-                                slide_text_parts.append(shape.text)
-                        except Exception as shape_error:
-                            # Ignorer les shapes problématiques (images, graphiques, etc.)
-                            continue
-
-                    if slide_text_parts:
-                        text_parts.append(
-                            f"--- Slide {i} ---\n" + "\n".join(slide_text_parts)
-                        )
-                except Exception as slide_error:
-                    logger.warning(f"⚠️ Erreur slide {i}: {slide_error}")
-                    continue
-
-            result = "\n\n".join(text_parts)
-            logger.info(f"✅ Extraction PPTX: {len(result)} caractères extraits")
-            return result
-
-        except Exception as e:
-            logger.error(f"❌ Erreur extraction PPTX: {e}")
-            return ""
-
-    def _build_analysis_prompt(
+    def _build_analysis_prompt_for_pdf(
         self,
-        document_content: str,
         context_prompt: Optional[str] = None,
         existing_types: Optional[List[str]] = None
     ) -> str:
         """
-        Construire prompt LLM pour analyse.
+        Construire prompt LLM pour analyse de PDF.
 
         Args:
-            document_content: Contenu du document
             context_prompt: Contexte additionnel
             existing_types: Liste des entity types déjà existants en base
 
         Returns:
             Prompt formaté
         """
-        # Limiter taille du contenu (max 8000 chars)
-        content_preview = document_content[:8000]
-        if len(document_content) > 8000:
-            content_preview += "\n\n[... contenu tronqué ...]"
-
         # Formater liste types existants
         existing_types_section = ""
         if existing_types:
@@ -256,13 +175,11 @@ Propose de NOUVEAUX types uniquement si aucun type existant ne convient.
 
         prompt = f"""Tu es un expert en analyse de documents et modélisation d'entités.
 
-**TÂCHE**: Analyser ce document et identifier les types d'entités pertinents pour l'extraction automatique.
+**TÂCHE**: Analyser le document PDF fourni et identifier les types d'entités pertinents pour l'extraction automatique.
 {existing_types_section}
-{context_section}**DOCUMENT À ANALYSER**:
-{content_preview}
-
+{context_section}
 **INSTRUCTIONS**:
-1. Analyse le document et identifie les types d'entités présents
+1. Analyse le document PDF complet (texte + images + mise en page)
 2. **EN PRIORITÉ**: Vérifie si des types EXISTANTS (listés ci-dessus) sont pertinents
 3. Propose de NOUVEAUX types uniquement si nécessaire
 4. Pour chaque type identifié:

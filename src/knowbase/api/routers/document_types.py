@@ -448,25 +448,25 @@ async def list_templates():
     "/analyze-sample",
     response_model=AnalyzeSampleResult,
     status_code=status.HTTP_200_OK,
-    summary="Analyser document sample (synchrone)"
+    summary="Analyser document sample PDF (synchrone)"
 )
 async def analyze_document_sample(
-    file: UploadFile = File(..., description="Document à analyser (PDF ou PPTX)"),
+    file: UploadFile = File(..., description="Document PDF à analyser"),
     context_prompt: Optional[str] = Form(None, description="Contexte additionnel"),
-    model_preference: str = Form(default="claude-sonnet", description="Modèle LLM"),
+    model_preference: str = Form(default="claude-sonnet", description="Modèle LLM (Claude uniquement)"),
     tenant_id: str = Form(default="default", description="Tenant ID"),
     admin: dict = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
     """
-    Analyser un document sample pour suggérer entity types.
+    Analyser un document sample PDF pour suggérer entity types.
 
-    Traitement synchrone (5-15 secondes).
+    Traitement synchrone avec Claude (PDF natif, inclut texte + images + mise en page).
 
     Args:
-        file: Fichier PDF ou PPTX
+        file: Fichier PDF uniquement
         context_prompt: Contexte additionnel pour guider le LLM
-        model_preference: Modèle LLM à utiliser
+        model_preference: Modèle LLM à utiliser (Claude uniquement)
         tenant_id: Tenant ID
 
     Returns:
@@ -474,10 +474,10 @@ async def analyze_document_sample(
     """
     # Valider extension
     file_ext = Path(file.filename).suffix.lower()
-    if file_ext not in [".pdf", ".pptx", ".ppt"]:
+    if file_ext != ".pdf":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Format non supporté: {file_ext}. Formats acceptés: PDF, PPTX"
+            detail=f"Format non supporté: {file_ext}. Seul le format PDF est accepté."
         )
 
     logger.info(f"📤 Upload document sample pour analyse: {file.filename}")

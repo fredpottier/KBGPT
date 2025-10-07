@@ -185,7 +185,6 @@ export default function NewDocumentTypePage() {
     onDrop,
     accept: {
       'application/pdf': ['.pdf'],
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
     },
     multiple: false,
     maxSize: 50 * 1024 * 1024, // 50MB
@@ -341,7 +340,7 @@ export default function NewDocumentTypePage() {
                       <Text fontWeight="semibold" color={isDragActive ? 'blue.700' : 'gray.700'}>
                         {isDragActive
                           ? 'Déposez votre fichier ici'
-                          : 'Glissez-déposez un document exemple (PDF/PPTX)'}
+                          : 'Glissez-déposez un document PDF exemple'}
                       </Text>
                       {uploadedFile && (
                         <Badge colorScheme="green" fontSize="sm">
