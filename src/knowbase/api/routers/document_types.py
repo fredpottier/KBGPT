@@ -457,6 +457,7 @@ async def analyze_document_sample(
     file: UploadFile = File(..., description="Document à analyser (PDF ou PPTX)"),
     context_prompt: Optional[str] = Form(None, description="Contexte additionnel"),
     model_preference: str = Form(default="claude-sonnet", description="Modèle LLM"),
+    tenant_id: str = Form(default="default", description="Tenant ID"),
     admin: dict = Depends(require_admin)
 ):
     """
@@ -508,6 +509,7 @@ async def analyze_document_sample(
             file_path=tmp_path,
             context_prompt=context_prompt,
             model_preference=model_preference,
+            tenant_id=tenant_id,
             job_timeout="10m",
             result_ttl=3600,  # Garder résultat 1h
             failure_ttl=3600

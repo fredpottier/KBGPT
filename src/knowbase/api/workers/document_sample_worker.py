@@ -18,7 +18,8 @@ logger = setup_logging(settings.logs_dir, "document_sample_worker.log")
 async def analyze_document_sample_task(
     file_path: str,
     context_prompt: Optional[str] = None,
-    model_preference: str = "claude-sonnet"
+    model_preference: str = "claude-sonnet",
+    tenant_id: str = "default"
 ) -> Dict:
     """
     Tâche RQ pour analyser document sample.
@@ -27,6 +28,7 @@ async def analyze_document_sample_task(
         file_path: Chemin vers fichier temporaire
         context_prompt: Contexte additionnel
         model_preference: Modèle LLM
+        tenant_id: Tenant ID pour récupérer entity types existants
 
     Returns:
         Résultat analyse avec suggested_types
@@ -51,13 +53,22 @@ async def analyze_document_sample_task(
 
         file_wrapper = FileWrapper(file_path)
 
-        # Analyser
-        service = DocumentSampleAnalyzerService()
-        result = await service.analyze_document_sample(
-            file=file_wrapper,
-            context_prompt=context_prompt,
-            model_preference=model_preference
-        )
+        # Créer session DB
+        from knowbase.db import get_db
+        db_generator = get_db()
+        db_session = next(db_generator)
+
+        try:
+            # Analyser
+            service = DocumentSampleAnalyzerService(db_session=db_session)
+            result = await service.analyze_document_sample(
+                file=file_wrapper,
+                context_prompt=context_prompt,
+                model_preference=model_preference,
+                tenant_id=tenant_id
+            )
+        finally:
+            db_session.close()
 
         logger.info(
             f"✅ Analyse terminée: {len(result['suggested_types'])} types suggérés"
