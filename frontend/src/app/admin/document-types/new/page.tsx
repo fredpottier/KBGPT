@@ -103,13 +103,13 @@ export default function NewDocumentTypePage() {
       return response.data
     },
     onSuccess: (data) => {
-      setAnalysisJobId(data.job_id)
-      setIsPolling(true)
-      startPolling(data.job_id)
+      // Réponse directe (synchrone)
+      setSuggestedTypes(data.suggested_types || [])
+      setSelectedSuggested((data.suggested_types || []).map((t: SuggestedEntityType) => t.name))
       toast({
-        title: 'Analyse lancée',
-        description: 'Le LLM analyse votre document...',
-        status: 'info',
+        title: 'Analyse terminée',
+        description: `${data.suggested_types?.length || 0} types suggérés`,
+        status: 'success',
         duration: 3000,
         isClosable: true,
       })
@@ -351,7 +351,7 @@ export default function NewDocumentTypePage() {
                     </VStack>
                   </Box>
 
-                  {isPolling && (
+                  {analyzeMutation.isPending && (
                     <Center py={8}>
                       <VStack spacing={4}>
                         <Spinner size="xl" color="blue.500" />

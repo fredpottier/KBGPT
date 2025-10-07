@@ -17,11 +17,8 @@ Endpoints:
 """
 from typing import Optional, List
 from pathlib import Path
-import tempfile
 from fastapi import APIRouter, HTTPException, Query, Depends, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from redis import Redis
-from rq import Queue
 
 from knowbase.api.schemas.document_types import (
     DocumentTypeCreate,
@@ -33,7 +30,7 @@ from knowbase.api.schemas.document_types import (
     DocumentTypeTemplateListResponse,
     DocumentTypeTemplate,
     EntityTypeAssociationResponse,
-    AnalyzeSampleResponse,
+    AnalyzeSampleResult,
 )
 from knowbase.api.services.document_type_service import DocumentTypeService
 from knowbase.api.auth_deps.auth import require_admin
@@ -449,29 +446,31 @@ async def list_templates():
 
 @router.post(
     "/analyze-sample",
-    response_model=AnalyzeSampleResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Analyser document sample (async)"
+    response_model=AnalyzeSampleResult,
+    status_code=status.HTTP_200_OK,
+    summary="Analyser document sample (synchrone)"
 )
 async def analyze_document_sample(
     file: UploadFile = File(..., description="Document à analyser (PDF ou PPTX)"),
     context_prompt: Optional[str] = Form(None, description="Contexte additionnel"),
     model_preference: str = Form(default="claude-sonnet", description="Modèle LLM"),
     tenant_id: str = Form(default="default", description="Tenant ID"),
-    admin: dict = Depends(require_admin)
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db)
 ):
     """
     Analyser un document sample pour suggérer entity types.
 
-    Traitement asynchrone via RQ.
+    Traitement synchrone (5-15 secondes).
 
     Args:
         file: Fichier PDF ou PPTX
         context_prompt: Contexte additionnel pour guider le LLM
         model_preference: Modèle LLM à utiliser
+        tenant_id: Tenant ID
 
     Returns:
-        Job ID et statut
+        Résultat de l'analyse avec types suggérés
     """
     # Valider extension
     file_ext = Path(file.filename).suffix.lower()
@@ -483,53 +482,24 @@ async def analyze_document_sample(
 
     logger.info(f"📤 Upload document sample pour analyse: {file.filename}")
 
-    # Sauvegarder temporairement le fichier
-    with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
-        content = await file.read()
-        tmp_file.write(content)
-        tmp_path = tmp_file.name
-
-    logger.info(f"💾 Fichier temporaire créé: {tmp_path}")
-
-    # Créer job RQ
+    # Analyser directement (synchrone)
     try:
-        redis_conn = Redis(
-            host=settings.redis_host,
-            port=settings.redis_port,
-            db=1,  # DB 1 pour jobs
-            decode_responses=False
-        )
-        queue = Queue("default", connection=redis_conn)
+        from knowbase.api.services.document_sample_analyzer_service import DocumentSampleAnalyzerService
 
-        # Enqueue job
-        from knowbase.api.workers.document_sample_worker import analyze_document_sample_task
-
-        job = queue.enqueue(
-            analyze_document_sample_task,
-            file_path=tmp_path,
+        service = DocumentSampleAnalyzerService(db_session=db)
+        result = await service.analyze_document_sample(
+            file=file,
             context_prompt=context_prompt,
             model_preference=model_preference,
-            tenant_id=tenant_id,
-            job_timeout="10m",
-            result_ttl=3600,  # Garder résultat 1h
-            failure_ttl=3600
+            tenant_id=tenant_id
         )
 
-        logger.info(f"✅ Job créé: {job.id}")
+        logger.info(f"✅ Analyse terminée: {len(result['suggested_types'])} types suggérés")
 
-        return AnalyzeSampleResponse(
-            job_id=job.id,
-            status="queued",
-            message=f"Analysis of {file.filename} started. Check job status at /api/jobs/{job.id}"
-        )
+        return AnalyzeSampleResult(**result)
 
     except Exception as e:
-        logger.error(f"❌ Erreur création job: {e}")
-        # Nettoyer fichier temporaire en cas d'erreur
-        try:
-            Path(tmp_path).unlink()
-        except:
-            pass
+        logger.error(f"❌ Erreur analyse: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create analysis job: {str(e)}"
