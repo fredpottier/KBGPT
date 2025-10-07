@@ -115,12 +115,12 @@ class DocumentSampleAnalyzerService:
             return []
 
         try:
-            from knowbase.db import DynamicEntityType
+            from knowbase.db import EntityTypeRegistry
 
             # Requête pour récupérer types approuvés
-            types = self.db_session.query(DynamicEntityType).filter(
-                DynamicEntityType.tenant_id == tenant_id,
-                DynamicEntityType.status == "approved"
+            types = self.db_session.query(EntityTypeRegistry).filter(
+                EntityTypeRegistry.tenant_id == tenant_id,
+                EntityTypeRegistry.status == "approved"
             ).all()
 
             return [t.type_name for t in types]
@@ -191,16 +191,26 @@ class DocumentSampleAnalyzerService:
             for i, slide in enumerate(prs.slides[:10], start=1):
                 slide_text_parts = []
 
-                for shape in slide.shapes:
-                    if hasattr(shape, "text") and shape.text.strip():
-                        slide_text_parts.append(shape.text)
+                try:
+                    for shape in slide.shapes:
+                        try:
+                            if hasattr(shape, "text") and shape.text and shape.text.strip():
+                                slide_text_parts.append(shape.text)
+                        except Exception as shape_error:
+                            # Ignorer les shapes problématiques (images, graphiques, etc.)
+                            continue
 
-                if slide_text_parts:
-                    text_parts.append(
-                        f"--- Slide {i} ---\n" + "\n".join(slide_text_parts)
-                    )
+                    if slide_text_parts:
+                        text_parts.append(
+                            f"--- Slide {i} ---\n" + "\n".join(slide_text_parts)
+                        )
+                except Exception as slide_error:
+                    logger.warning(f"⚠️ Erreur slide {i}: {slide_error}")
+                    continue
 
-            return "\n\n".join(text_parts)
+            result = "\n\n".join(text_parts)
+            logger.info(f"✅ Extraction PPTX: {len(result)} caractères extraits")
+            return result
 
         except Exception as e:
             logger.error(f"❌ Erreur extraction PPTX: {e}")

@@ -68,10 +68,10 @@ class DocumentTypeService:
         # Ajouter entity types si fournis
         if data.entity_types:
             # Vérifier quels types existent déjà
-            from knowbase.db import DynamicEntityType
+            from knowbase.db import EntityTypeRegistry
 
-            existing_types = self.db.query(DynamicEntityType.type_name).filter(
-                DynamicEntityType.tenant_id == data.tenant_id
+            existing_types = self.db.query(EntityTypeRegistry.type_name).filter(
+                EntityTypeRegistry.tenant_id == data.tenant_id
             ).all()
             existing_types_set = {t[0] for t in existing_types}
 
@@ -79,7 +79,7 @@ class DocumentTypeService:
                 # Créer le type s'il n'existe pas
                 if entity_type_name not in existing_types_set:
                     logger.info(f"🆕 Création automatique entity type: {entity_type_name}")
-                    new_type = DynamicEntityType(
+                    new_type = EntityTypeRegistry(
                         type_name=entity_type_name,
                         status="approved",
                         discovered_by="admin",
