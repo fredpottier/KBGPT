@@ -63,6 +63,7 @@ export default function NewDocumentTypePage() {
   const [selectedSuggested, setSelectedSuggested] = useState<string[]>([])
   const [isPolling, setIsPolling] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const [suggestedPrompt, setSuggestedPrompt] = useState<string>('')
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -106,6 +107,13 @@ export default function NewDocumentTypePage() {
       // Réponse directe (synchrone)
       setSuggestedTypes(data.suggested_types || [])
       setSelectedSuggested((data.suggested_types || []).map((t: SuggestedEntityType) => t.name))
+
+      // Récupérer le prompt suggéré et le placer dans le champ context_prompt
+      if (data.suggested_context_prompt) {
+        setSuggestedPrompt(data.suggested_context_prompt)
+        setContextPrompt(data.suggested_context_prompt)
+      }
+
       toast({
         title: 'Analyse terminée',
         description: `${data.suggested_types?.length || 0} types suggérés`,
@@ -278,15 +286,25 @@ export default function NewDocumentTypePage() {
             </FormControl>
 
             <FormControl>
-              <FormLabel>Prompt Contextuel</FormLabel>
+              <FormLabel>
+                Prompt Contextuel
+                {suggestedPrompt && (
+                  <Badge ml={2} colorScheme="purple" fontSize="xs">
+                    ✨ Optimisé par IA
+                  </Badge>
+                )}
+              </FormLabel>
               <Textarea
                 value={contextPrompt}
                 onChange={(e) => setContextPrompt(e.target.value)}
-                placeholder="Prompt utilisé pour guider l'extraction LLM"
+                placeholder="Prompt utilisé pour guider l'extraction LLM (peut être généré automatiquement après analyse)"
                 rows={5}
+                borderColor={suggestedPrompt ? 'purple.300' : undefined}
               />
               <Text fontSize="sm" color="gray.500" mt={1}>
-                Ce prompt sera injecté dans l'analyse LLM pour contextualiser l'extraction
+                {suggestedPrompt
+                  ? "✨ Ce prompt a été optimisé par l'IA suite à l'analyse du document. Vous pouvez le modifier si nécessaire."
+                  : "Ce prompt sera injecté dans l'analyse LLM pour contextualiser l'extraction. Uploadez un document sample pour qu'il soit généré automatiquement."}
               </Text>
             </FormControl>
 

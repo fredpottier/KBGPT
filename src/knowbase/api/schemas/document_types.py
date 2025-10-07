@@ -123,6 +123,10 @@ class AnalyzeSampleResult(BaseModel):
         description="Types suggérés par le LLM"
     )
     document_summary: Optional[str] = Field(None, description="Résumé du document analysé")
+    suggested_context_prompt: Optional[str] = Field(
+        None,
+        description="Prompt contextuel optimisé suggéré par le LLM pour l'ingestion de documents similaires"
+    )
     pages_analyzed: int = Field(default=0, description="Nombre de pages analysées")
 
 
