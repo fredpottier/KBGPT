@@ -106,6 +106,7 @@ class SuggestedEntityType(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score")
     examples: List[str] = Field(default_factory=list, description="Exemples trouvés dans le document")
     description: Optional[str] = Field(None, description="Description du type")
+    is_existing: bool = Field(default=False, description="True si le type existe déjà en base, False si nouveau")
 
 
 class AnalyzeSampleResponse(BaseModel):
