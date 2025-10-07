@@ -18,12 +18,30 @@ import {
   useToast,
   IconButton,
   Badge,
+  Spinner,
+  Center,
+  Checkbox,
+  Divider,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
 } from '@chakra-ui/react'
-import { ArrowBackIcon } from '@chakra-ui/icons'
+import { ArrowBackIcon, AttachmentIcon, DeleteIcon } from '@chakra-ui/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
-import { useState } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useDropzone } from 'react-dropzone'
+
+interface SuggestedEntityType {
+  name: string
+  confidence: number
+  examples: string[]
+  description: string
+  is_existing: boolean
+}
 
 export default function NewDocumentTypePage() {
   const router = useRouter()
@@ -37,6 +55,14 @@ export default function NewDocumentTypePage() {
   const [isActive, setIsActive] = useState(true)
   const [manualEntityTypes, setManualEntityTypes] = useState<string[]>([])
   const [newEntityType, setNewEntityType] = useState('')
+
+  // LLM Analysis
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [analysisJobId, setAnalysisJobId] = useState<string | null>(null)
+  const [suggestedTypes, setSuggestedTypes] = useState<SuggestedEntityType[]>([])
+  const [selectedSuggested, setSelectedSuggested] = useState<string[]>([])
+  const [isPolling, setIsPolling] = useState(false)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -64,6 +90,107 @@ export default function NewDocumentTypePage() {
     },
   })
 
+  const analyzeMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      if (contextPrompt) {
+        formData.append('context_prompt', contextPrompt)
+      }
+      const response = await axios.post('/api/document-types/analyze', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return response.data
+    },
+    onSuccess: (data) => {
+      setAnalysisJobId(data.job_id)
+      setIsPolling(true)
+      startPolling(data.job_id)
+      toast({
+        title: 'Analyse lancée',
+        description: 'Le LLM analyse votre document...',
+        status: 'info',
+        duration: 3000,
+        isClosable: true,
+      })
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Erreur d\'analyse',
+        description: error.response?.data?.message || 'Échec de l\'analyse',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    },
+  })
+
+  const startPolling = (jobId: string) => {
+    // Poll toutes les 2 secondes
+    pollingIntervalRef.current = setInterval(async () => {
+      try {
+        const response = await axios.get(`/api/jobs/${jobId}`)
+        const job = response.data
+
+        if (job.status === 'completed' && job.result) {
+          stopPolling()
+          setSuggestedTypes(job.result.suggested_types || [])
+          // Pré-sélectionner tous les types
+          setSelectedSuggested((job.result.suggested_types || []).map((t: SuggestedEntityType) => t.name))
+          toast({
+            title: 'Analyse terminée',
+            description: `${job.result.suggested_types?.length || 0} types suggérés`,
+            status: 'success',
+            duration: 3000,
+            isClosable: true,
+          })
+        } else if (job.status === 'failed') {
+          stopPolling()
+          toast({
+            title: 'Erreur d\'analyse',
+            description: job.error || 'L\'analyse a échoué',
+            status: 'error',
+            duration: 5000,
+            isClosable: true,
+          })
+        }
+      } catch (error) {
+        console.error('Polling error:', error)
+      }
+    }, 2000)
+  }
+
+  const stopPolling = () => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+    setIsPolling(false)
+  }
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => stopPolling()
+  }, [])
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      const file = acceptedFiles[0]
+      setUploadedFile(file)
+      analyzeMutation.mutate(file)
+    }
+  }, [])
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'application/pdf': ['.pdf'],
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+    },
+    multiple: false,
+    maxSize: 50 * 1024 * 1024, // 50MB
+  })
+
   const handleAddManualEntityType = () => {
     if (newEntityType.trim() && !manualEntityTypes.includes(newEntityType.trim().toUpperCase())) {
       setManualEntityTypes([...manualEntityTypes, newEntityType.trim().toUpperCase()])
@@ -75,14 +202,28 @@ export default function NewDocumentTypePage() {
     setManualEntityTypes(manualEntityTypes.filter((t) => t !== type))
   }
 
+  const handleToggleSuggested = (typeName: string) => {
+    setSelectedSuggested(prev =>
+      prev.includes(typeName)
+        ? prev.filter(t => t !== typeName)
+        : [...prev, typeName]
+    )
+  }
+
   const handleCreate = () => {
+    // Combiner types manuels et suggérés sélectionnés
+    const allEntityTypes = [
+      ...manualEntityTypes,
+      ...selectedSuggested.filter(s => !manualEntityTypes.includes(s)),
+    ]
+
     createMutation.mutate({
       name,
       slug,
       description,
       context_prompt: contextPrompt,
       is_active: isActive,
-      entity_types: manualEntityTypes,
+      entity_types: allEntityTypes,
     })
   }
 
@@ -166,10 +307,107 @@ export default function NewDocumentTypePage() {
         <CardHeader>
           <Heading size="md">Types d'Entités</Heading>
           <Text fontSize="sm" color="gray.600" mt={2}>
-            Définissez les types d'entités suggérés pour ce type de document
+            Définissez les types d'entités pour ce document type
           </Text>
         </CardHeader>
         <CardBody>
+          <Tabs>
+            <TabList>
+              <Tab>Analyse LLM</Tab>
+              <Tab>Manuel</Tab>
+            </TabList>
+
+            <TabPanels>
+              {/* Analyse LLM */}
+              <TabPanel>
+                <VStack spacing={4} align="stretch">
+                  <Box
+                    {...getRootProps()}
+                    p={8}
+                    border="2px dashed"
+                    borderColor={isDragActive ? 'blue.400' : 'gray.300'}
+                    borderRadius="lg"
+                    bg={isDragActive ? 'blue.50' : 'gray.50'}
+                    cursor="pointer"
+                    transition="all 0.2s"
+                    _hover={{
+                      borderColor: 'blue.400',
+                      bg: 'blue.50',
+                    }}
+                  >
+                    <input {...getInputProps()} />
+                    <VStack spacing={4}>
+                      <AttachmentIcon boxSize={8} color={isDragActive ? 'blue.500' : 'gray.400'} />
+                      <Text fontWeight="semibold" color={isDragActive ? 'blue.700' : 'gray.700'}>
+                        {isDragActive
+                          ? 'Déposez votre fichier ici'
+                          : 'Glissez-déposez un document exemple (PDF/PPTX)'}
+                      </Text>
+                      {uploadedFile && (
+                        <Badge colorScheme="green" fontSize="sm">
+                          {uploadedFile.name} ({(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB)
+                        </Badge>
+                      )}
+                    </VStack>
+                  </Box>
+
+                  {isPolling && (
+                    <Center py={8}>
+                      <VStack spacing={4}>
+                        <Spinner size="xl" color="blue.500" />
+                        <Text color="gray.600">Analyse en cours...</Text>
+                      </VStack>
+                    </Center>
+                  )}
+
+                  {suggestedTypes.length > 0 && (
+                    <Box>
+                      <Text fontSize="sm" fontWeight="semibold" mb={3}>
+                        Types suggérés ({suggestedTypes.length})
+                      </Text>
+                      <VStack spacing={2} align="stretch">
+                        {suggestedTypes.map((type) => (
+                          <Card key={type.name} size="sm" variant="outline">
+                            <CardBody>
+                              <HStack spacing={3}>
+                                <Checkbox
+                                  isChecked={selectedSuggested.includes(type.name)}
+                                  onChange={() => handleToggleSuggested(type.name)}
+                                />
+                                <VStack align="start" spacing={1} flex={1}>
+                                  <HStack>
+                                    <Badge colorScheme="blue" fontSize="sm">{type.name}</Badge>
+                                    <Badge
+                                      colorScheme={type.is_existing ? 'green' : 'orange'}
+                                      fontSize="xs"
+                                    >
+                                      {type.is_existing ? 'Existant' : 'Nouveau'}
+                                    </Badge>
+                                    <Badge colorScheme="purple" fontSize="xs">
+                                      {(type.confidence * 100).toFixed(0)}%
+                                    </Badge>
+                                  </HStack>
+                                  <Text fontSize="xs" color="gray.600">
+                                    {type.description}
+                                  </Text>
+                                  {type.examples.length > 0 && (
+                                    <Text fontSize="xs" color="gray.500">
+                                      Exemples: {type.examples.slice(0, 3).join(', ')}
+                                    </Text>
+                                  )}
+                                </VStack>
+                              </HStack>
+                            </CardBody>
+                          </Card>
+                        ))}
+                      </VStack>
+                    </Box>
+                  )}
+                </VStack>
+              </TabPanel>
+
+              {/* Manuel */}
+              <TabPanel>
                 <VStack spacing={4} align="stretch">
                   <HStack>
                     <Input
@@ -210,6 +448,9 @@ export default function NewDocumentTypePage() {
                     </Box>
                   )}
                 </VStack>
+              </TabPanel>
+            </TabPanels>
+          </Tabs>
         </CardBody>
       </Card>
 
