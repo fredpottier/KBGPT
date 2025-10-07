@@ -275,21 +275,29 @@ Propose de NOUVEAUX types uniquement si aucun type existant ne convient.
   "suggested_context_prompt": "Prompt optimisé pour l'ingestion future de documents similaires"
 }}
 
-7. **PROMPT OPTIMISÉ**: En te basant sur ton analyse approfondie du document:
-   - Génère un prompt contextuel optimisé pour l'analyse FUTURE de slides similaires
-   - Ce prompt sera injecté lors de l'ingestion réelle de documents de ce type
-   - Il doit guider le LLM d'ingestion pour extraire efficacement les types d'entités identifiés
-   - Inspiré des prompts du fichier config/prompts.yaml (familles: default, technical, functional)
-   - Le prompt doit être:
-     * Concis (3-6 phrases max)
-     * Spécifique au type de document analysé
-     * Focus sur les types d'entités et relations attendues
-     * Adapté au domaine métier (technique, fonctionnel, marketing, etc.)
-   - Format du prompt suggéré:
-     * Commence par une description du type de document
-     * Liste les types d'entités prioritaires à extraire
-     * Indique les relations attendues entre entités
-     * Mentionne les spécificités visuelles ou structurelles du document
+7. **PROMPT OPTIMISÉ GÉNÉRALISTE**: En te basant sur ton analyse approfondie du document:
+   - Génère un prompt contextuel GÉNÉRALISTE pour l'analyse FUTURE de documents similaires
+   - Ce prompt sera injecté lors de l'ingestion de TOUT document de ce type (pas seulement ce sample)
+   - Il doit capturer la NATURE et la STRUCTURE du document, pas son contenu spécifique
+
+   **RÈGLES CRITIQUES pour le prompt généraliste**:
+   - ❌ NE PAS mentionner les sujets/thèmes spécifiques du document sample (ex: "sécurité", "AWS", "cloud")
+   - ✅ Décrire la CATÉGORIE de document (ex: "documentation technique", "architecture", "processus métier")
+   - ✅ Mentionner les TYPES D'ENTITÉS généraux attendus (SOLUTION, INFRASTRUCTURE, COMPONENT, etc.)
+   - ✅ Décrire les PATTERNS VISUELS typiques (diagrammes, tableaux, workflows, etc.)
+   - ✅ Indiquer les TYPES DE RELATIONS générales (INTEGRATES_WITH, PART_OF, USES, etc.)
+
+   **EXEMPLE de prompt TROP SPÉCIFIQUE (à éviter)**:
+   "Document sur sécurité cloud AWS. Extraire SOLUTION SAP, INFRASTRUCTURE AWS/Azure, SECURITY_CONTROL."
+
+   **EXEMPLE de prompt GÉNÉRALISTE (à suivre)**:
+   "Documentation technique présentant des architectures et infrastructures système. Extraire prioritairement les entités SOLUTION, INFRASTRUCTURE, COMPONENT, TECHNOLOGY, et leurs relations INTEGRATES_WITH, PART_OF, USES. Attention aux diagrammes d'architecture, spécifications techniques, et topologies réseau."
+
+   - Format du prompt (3-5 phrases max):
+     1. Nature/catégorie du document (technique/fonctionnel/marketing)
+     2. Types d'entités généraux prioritaires
+     3. Relations générales attendues
+     4. Patterns visuels/structurels typiques
 
 Retourne UNIQUEMENT le JSON, sans texte avant/après.
 """
