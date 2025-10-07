@@ -64,8 +64,26 @@ class DocumentSampleAnalyzerService:
 
         # Lire le PDF en base64
         pdf_content = await file.read()
+        pdf_size_mb = len(pdf_content) / (1024 * 1024)
+
+        # Validation basique du PDF
+        if not pdf_content.startswith(b'%PDF-'):
+            raise ValueError(
+                f"Le fichier n'est pas un PDF valide (header manquant). "
+                f"Veuillez vérifier que le fichier n'est pas corrompu."
+            )
+
+        # Vérifier taille fichier (Claude limite: 32 MB pour requête totale)
+        # Recommandation: PDF < 10 MB pour laisser de la marge
+        if pdf_size_mb > 10:
+            raise ValueError(
+                f"PDF trop volumineux: {pdf_size_mb:.2f} MB. "
+                f"Limite recommandée: 10 MB (limite Claude: 32 MB pour requête totale). "
+                f"Veuillez réduire le nombre de pages ou compresser le PDF."
+            )
+
         pdf_base64 = base64.b64encode(pdf_content).decode('utf-8')
-        logger.info(f"📦 PDF encodé: {len(pdf_base64)} caractères base64")
+        logger.info(f"📦 PDF encodé: {pdf_size_mb:.2f} MB ({len(pdf_base64)} caractères base64)")
 
         # Construire prompt pour LLM
         prompt_text = self._build_analysis_prompt_for_pdf(context_prompt, existing_types)
@@ -125,8 +143,30 @@ class DocumentSampleAnalyzerService:
             return result
 
         except Exception as e:
+            error_msg = str(e)
             logger.error(f"❌ Erreur analyse LLM: {e}")
-            raise
+
+            # Message d'erreur plus explicite pour erreurs courantes
+            if "Could not process PDF" in error_msg:
+                raise ValueError(
+                    f"Claude n'a pas pu traiter le PDF. Causes possibles:\n"
+                    f"1. PDF corrompu ou mal formé\n"
+                    f"2. PDF trop complexe (trop d'images haute résolution)\n"
+                    f"3. PDF protégé par mot de passe\n"
+                    f"Suggestions:\n"
+                    f"- Ré-exporter le PDF depuis l'original\n"
+                    f"- Réduire la résolution des images\n"
+                    f"- Limiter à 50-60 pages maximum\n"
+                    f"- Essayer avec un PDF plus simple pour tester"
+                ) from e
+            elif "exceeds" in error_msg.lower() or "limit" in error_msg.lower():
+                raise ValueError(
+                    f"Le PDF dépasse les limites de Claude (max 100 pages, 32 MB total).\n"
+                    f"Taille actuelle: {pdf_size_mb:.2f} MB\n"
+                    f"Veuillez réduire le nombre de pages ou compresser le PDF."
+                ) from e
+            else:
+                raise
 
     def _get_existing_entity_types(self, tenant_id: str = "default") -> List[str]:
         """
