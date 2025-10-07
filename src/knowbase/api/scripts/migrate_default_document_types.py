@@ -29,7 +29,7 @@ DEFAULT_DOCUMENT_TYPES = [
         "slug": "technical",
         "description": "Documentation technique détaillant architectures, API, et implémentations",
         "context_prompt": "Document technique présentant des solutions technologiques avec focus sur l'architecture, les composants système, et les intégrations.",
-        "entity_types": ["SOLUTION", "INFRASTRUCTURE", "DATABASE", "API", "PROTOCOL", "TECHNOLOGY"],
+        "entity_types": ["SOLUTION", "INFRASTRUCTURE", "COMPONENT", "TECHNOLOGY"],
         "is_active": True,
     },
     {
@@ -37,7 +37,7 @@ DEFAULT_DOCUMENT_TYPES = [
         "slug": "functional",
         "description": "Documentation fonctionnelle décrivant processus métier et cas d'usage",
         "context_prompt": "Document fonctionnel décrivant les processus métier, workflows, et fonctionnalités utilisateur.",
-        "entity_types": ["PROCESS", "FEATURE", "MODULE", "ROLE", "WORKFLOW"],
+        "entity_types": ["SOLUTION", "COMPONENT", "ORGANIZATION"],
         "is_active": True,
     },
     {
@@ -45,7 +45,7 @@ DEFAULT_DOCUMENT_TYPES = [
         "slug": "marketing",
         "description": "Matériel marketing : brochures, présentations produits, cas clients",
         "context_prompt": "Matériel marketing présentant des produits, leurs avantages, et témoignages clients.",
-        "entity_types": ["PRODUCT", "SOLUTION", "BENEFIT", "CUSTOMER", "USE_CASE", "INDUSTRY"],
+        "entity_types": ["SOLUTION", "ORGANIZATION", "INFRASTRUCTURE", "TECHNOLOGY"],
         "is_active": True,
     },
 ]
