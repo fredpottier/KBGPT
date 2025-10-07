@@ -187,7 +187,7 @@ export default function NewDocumentTypePage() {
       'application/pdf': ['.pdf'],
     },
     multiple: false,
-    maxSize: 50 * 1024 * 1024, // 50MB
+    maxSize: 10 * 1024 * 1024, // 10MB (Claude limite: 32MB total, on laisse de la marge)
   })
 
   const handleAddManualEntityType = () => {
@@ -341,6 +341,9 @@ export default function NewDocumentTypePage() {
                         {isDragActive
                           ? 'Déposez votre fichier ici'
                           : 'Glissez-déposez un document PDF exemple'}
+                      </Text>
+                      <Text fontSize="xs" color="gray.500">
+                        Max 10 MB, 100 pages • Format PDF uniquement
                       </Text>
                       {uploadedFile && (
                         <Badge colorScheme="green" fontSize="sm">
