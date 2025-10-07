@@ -173,10 +173,24 @@ def ask_gpt_slide_analysis(
     slide_text: str,
     source_name: str,
     slide_index: int,
+    custom_prompt: str | None = None,
 ):
     logger.info(f"🧠 GPT: analyse page {slide_index}")
     try:
         image_b64 = encode_image_base64(image_path)
+
+        # Utiliser custom_prompt si fourni, sinon prompt par défaut
+        if custom_prompt:
+            analysis_text = custom_prompt.replace("{slide_content}", slide_text).replace("{slide_index}", str(slide_index)).replace("{source_name}", source_name)
+        else:
+            analysis_text = (
+                f"You are analyzing page {slide_index} from '{source_name}'.\n"
+                f"Page content:\n{slide_text}\n\n"
+                "Extract 1–5 standalone content blocks. For each, return:\n"
+                "- `text`\n- `meta` with `type`, `level`, `topic`\n\n"
+                "Return only a JSON array."
+            )
+
         prompt: ChatCompletionUserMessageParam = {
             "role": "user",
             "content": [
@@ -186,13 +200,7 @@ def ask_gpt_slide_analysis(
                 },
                 {
                     "type": "text",
-                    "text": (
-                        f"You are analyzing page {slide_index} from '{source_name}'.\n"
-                        f"Page content:\n{slide_text}\n\n"
-                        "Extract 1–5 standalone content blocks. For each, return:\n"
-                        "- `text`\n- `meta` with `type`, `level`, `topic`\n\n"
-                        "Return only a JSON array."
-                    ),
+                    "text": analysis_text,
                 },
             ],
         }
@@ -273,6 +281,25 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None):
         gpt_meta = analyze_pdf_metadata(pdf_text, pdf_path.name)
         doc_meta = {**user_meta, **gpt_meta}
 
+        # Générer prompt contextualisé si document_type_id fourni
+        custom_prompt = None
+        if document_type_id:
+            try:
+                from knowbase.api.services.document_type_service import DocumentTypeService
+                from knowbase.db.session import get_session_context
+
+                logger.info(f"🎯 Génération du prompt contextualisé pour document_type_id: {document_type_id}")
+                with get_session_context() as session:
+                    doc_type_service = DocumentTypeService(session)
+                    custom_prompt = doc_type_service.generate_extraction_prompt(
+                        document_type_id=document_type_id,
+                        slide_content="{slide_content}"
+                    )
+                    logger.info(f"✅ Prompt contextualisé généré ({len(custom_prompt)} caractères)")
+            except Exception as e:
+                logger.warning(f"⚠️ Impossible de générer le prompt contextualisé: {e}")
+                custom_prompt = None
+
         logger.info("🖼️ Génération PNG des pages")
         images = convert_from_path(str(pdf_path))
         image_paths = {}
@@ -287,7 +314,7 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None):
             logger.info(f"📸 Page {page_index}/{len(image_paths)}")
             # Optionnel : extraire le texte de la page individuellement si besoin
             chunks = ask_gpt_slide_analysis(
-                img_path, pdf_text, pdf_path.name, page_index
+                img_path, pdf_text, pdf_path.name, page_index, custom_prompt
             )
             logger.info(f"🧩 Page {page_index}: chunks générés = {len(chunks)}")
             ingest_chunks(chunks, doc_meta, pdf_path.stem, page_index)
