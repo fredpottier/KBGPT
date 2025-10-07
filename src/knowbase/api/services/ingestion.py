@@ -160,6 +160,7 @@ def handle_dispatch(
     request,
     action_type: str | None,
     document_type: str | None,
+    document_type_id: str | None = None,
     question: str | None,
     file: UploadFile | None,
     meta: str | None,
@@ -237,15 +238,22 @@ def handle_dispatch(
             import_type="document"
         )
 
+        # Passer document_type_id si fourni, sinon fallback sur document_type legacy
+        doc_type_for_pipeline = document_type_id if document_type_id else meta_dict.get("document_type", "default")
+
         if document_kind == "pptx":
             job = enqueue_pptx_ingestion(
                 job_id=uid,
                 file_path=str(saved_path),
-                document_type=meta_dict.get("document_type", "default"),
+                document_type_id=doc_type_for_pipeline,
                 meta_path=str(meta_path) if meta_path else None,
             )
         elif document_kind == "pdf":
-            job = enqueue_pdf_ingestion(job_id=uid, file_path=str(saved_path))
+            job = enqueue_pdf_ingestion(
+                job_id=uid,
+                file_path=str(saved_path),
+                document_type_id=doc_type_for_pipeline
+            )
         else:
             job = enqueue_excel_ingestion(
                 job_id=uid,

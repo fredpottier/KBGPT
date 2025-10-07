@@ -249,8 +249,9 @@ def ingest_chunks(chunks, doc_metadata, file_uid, page_index):
             logger.error(f"❌ Qdrant upsert failed (page {page_index}): {e}")
 
 
-def process_pdf(pdf_path: Path):
+def process_pdf(pdf_path: Path, document_type_id: str | None = None):
     logger.info(f"🚀 Traitement: {pdf_path.name}")
+    logger.info(f"📋 Document Type ID: {document_type_id or 'default'}")
     status_file = STATUS_DIR / f"{pdf_path.stem}.status"
     try:
         status_file.write_text("processing")
@@ -263,6 +264,10 @@ def process_pdf(pdf_path: Path):
                 logger.info("📎 Meta utilisateur détectée")
             except Exception as e:
                 logger.warning(f"⚠️ Meta invalide: {e}")
+
+        # Ajouter document_type_id aux métadonnées si fourni
+        if document_type_id:
+            user_meta["document_type_id"] = document_type_id
 
         pdf_text = extract_text_from_pdf(pdf_path)
         gpt_meta = analyze_pdf_metadata(pdf_text, pdf_path.name)
