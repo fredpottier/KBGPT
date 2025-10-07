@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs
+from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types
 
 
 def create_app() -> FastAPI:
@@ -119,6 +119,10 @@ def create_app() -> FastAPI:
                 "name": "Entity Types",
                 "description": "Registry types d'entités découverts - approve/reject, compteurs, workflow validation (Phase 2)"
             },
+            {
+                "name": "Document Types",
+                "description": "Gestion types de documents pour guider extraction LLM (Phase 6)"
+            },
         ],
     )
 
@@ -172,6 +176,7 @@ def create_app() -> FastAPI:
     app.include_router(entities.router, prefix="/api")  # Entities API - Gestion entités dynamiques (Phase 1)
     app.include_router(entity_types.router, prefix="/api")  # Entity Types Registry - Workflow validation types (Phase 2)
     app.include_router(jobs.router, prefix="/api")  # Jobs API - Monitoring jobs async RQ (Phase 5B)
+    app.include_router(document_types.router, prefix="/api")  # Document Types - Guidage extraction LLM (Phase 6)
 
     return app
 
