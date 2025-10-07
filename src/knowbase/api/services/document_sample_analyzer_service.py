@@ -71,37 +71,48 @@ class DocumentSampleAnalyzerService:
         prompt_text = self._build_analysis_prompt_for_pdf(context_prompt, existing_types)
 
         # Appeler Claude avec PDF natif
+        # IMPORTANT: Le format 'document' PDF est spécifique à Anthropic Claude
+        # On doit bypasser le router et appeler directement Claude
         try:
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "document",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "application/pdf",
-                                "data": pdf_base64
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": prompt_text
-                        }
-                    ]
-                }
-            ]
+            from knowbase.common.clients import get_anthropic_client
 
-            response = self.llm_router.complete(
-                task_type=TaskType.METADATA_EXTRACTION,
-                messages=messages,
-                temperature=0.3,
+            anthropic_client = get_anthropic_client()
+
+            # Format Anthropic pour PDF natif
+            response = anthropic_client.messages.create(
+                model="claude-3-5-sonnet-20241022",  # Claude Sonnet 3.5
                 max_tokens=4000,
-                model_preference=model_preference
+                temperature=0.3,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "application/pdf",
+                                    "data": pdf_base64
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": prompt_text
+                            }
+                        ]
+                    }
+                ]
             )
 
+            # Extraire contenu de la réponse Claude
+            llm_response = response.content[0].text if response.content else ""
+
+            # Log tokens
+            if response.usage:
+                logger.info(f"[TOKENS] Claude PDF Analysis - Input: {response.usage.input_tokens}, Output: {response.usage.output_tokens}")
+
             # Parser réponse LLM
-            result = self._parse_llm_response(response, existing_types)
+            result = self._parse_llm_response(llm_response, existing_types)
 
             logger.info(
                 f"✅ Analyse terminée: {len(result['suggested_types'])} types suggérés"
