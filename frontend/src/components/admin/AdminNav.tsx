@@ -11,10 +11,8 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/admin' },
-  { label: 'Ontologie', href: '/admin/ontology' },
-  { label: 'Types Dynamiques', href: '/admin/dynamic-types' },
+  { label: 'Types Entités', href: '/admin/dynamic-types' },
   { label: 'Types de Documents', href: '/admin/document-types' },
-  { label: 'Entités en Attente', href: '/admin/entities-pending' },
   { label: 'Configuration', href: '/admin/settings' },
 ]
 
