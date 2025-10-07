@@ -271,8 +271,25 @@ Propose de NOUVEAUX types uniquement si aucun type existant ne convient.
       "description": "Modèles de déploiement mentionnés",
       "is_existing": false
     }}
-  ]
+  ],
+  "suggested_context_prompt": "Prompt optimisé pour l'ingestion future de documents similaires"
 }}
+
+7. **PROMPT OPTIMISÉ**: En te basant sur ton analyse approfondie du document:
+   - Génère un prompt contextuel optimisé pour l'analyse FUTURE de slides similaires
+   - Ce prompt sera injecté lors de l'ingestion réelle de documents de ce type
+   - Il doit guider le LLM d'ingestion pour extraire efficacement les types d'entités identifiés
+   - Inspiré des prompts du fichier config/prompts.yaml (familles: default, technical, functional)
+   - Le prompt doit être:
+     * Concis (3-6 phrases max)
+     * Spécifique au type de document analysé
+     * Focus sur les types d'entités et relations attendues
+     * Adapté au domaine métier (technique, fonctionnel, marketing, etc.)
+   - Format du prompt suggéré:
+     * Commence par une description du type de document
+     * Liste les types d'entités prioritaires à extraire
+     * Indique les relations attendues entre entités
+     * Mentionne les spécificités visuelles ou structurelles du document
 
 Retourne UNIQUEMENT le JSON, sans texte avant/après.
 """
@@ -308,6 +325,7 @@ Retourne UNIQUEMENT le JSON, sans texte avant/après.
             # Valider structure
             suggested_types = data.get("suggested_types", [])
             document_summary = data.get("document_summary", "")
+            suggested_context_prompt = data.get("suggested_context_prompt", "")
 
             # Valider chaque type suggéré
             validated_types = []
@@ -355,6 +373,7 @@ Retourne UNIQUEMENT le JSON, sans texte avant/après.
             return {
                 "suggested_types": validated_types,
                 "document_summary": document_summary,
+                "suggested_context_prompt": suggested_context_prompt,
                 "pages_analyzed": 10  # Max pages analysées
             }
 
