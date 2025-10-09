@@ -2,6 +2,12 @@
 fastapi==0.116.1
 uvicorn==0.30.3
 
+# === Authentication & Security (Phase 0) ===
+PyJWT[crypto]==2.9.0
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+slowapi==0.1.9  # Rate limiting
+
 # === Vector DB ===
 qdrant-client==1.15.1
 

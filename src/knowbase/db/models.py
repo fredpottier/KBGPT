@@ -445,4 +445,198 @@ class DocumentTypeEntityType(Base):
         )
 
 
-__all__ = ["EntityTypeRegistry", "DocumentType", "DocumentTypeEntityType"]
+class User(Base):
+    """
+    Utilisateurs du système avec authentification.
+
+    Phase 0 - Security Hardening
+    """
+
+    __tablename__ = "users"
+
+    # Primary key
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        comment="UUID de l'utilisateur"
+    )
+
+    # Informations d'identification
+    email = Column(
+        String(255),
+        nullable=False,
+        unique=True,
+        index=True,
+        comment="Email de l'utilisateur (login)"
+    )
+
+    password_hash = Column(
+        String(255),
+        nullable=False,
+        comment="Hash bcrypt du mot de passe"
+    )
+
+    # Informations personnelles
+    full_name = Column(
+        String(100),
+        nullable=True,
+        comment="Nom complet de l'utilisateur"
+    )
+
+    # Rôle (RBAC Phase 0)
+    role = Column(
+        String(20),
+        nullable=False,
+        default="viewer",
+        index=True,
+        comment="Rôle: admin | editor | viewer"
+    )
+
+    # Multi-tenancy
+    tenant_id = Column(
+        String(50),
+        nullable=False,
+        default="default",
+        index=True,
+        comment="Tenant ID (isolation multi-tenant)"
+    )
+
+    # État
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        comment="Utilisateur actif ou désactivé"
+    )
+
+    # Timestamps
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        comment="Date création compte"
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        comment="Date dernière modification"
+    )
+
+    last_login_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Date dernière connexion"
+    )
+
+    # Indexes
+    __table_args__ = (
+        Index('ix_user_email', 'email'),
+        Index('ix_user_tenant_role', 'tenant_id', 'role'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, email='{self.email}', role='{self.role}')>"
+
+
+class AuditLog(Base):
+    """
+    Journal d'audit pour traçabilité des actions admin.
+
+    Phase 0 - Security Hardening
+    """
+
+    __tablename__ = "audit_log"
+
+    # Primary key
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        comment="UUID de l'entrée audit"
+    )
+
+    # Qui
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="FK vers users (null si user supprimé)"
+    )
+
+    user_email = Column(
+        String(255),
+        nullable=False,
+        index=True,
+        comment="Email user (redondant pour historique)"
+    )
+
+    # Quoi
+    action = Column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="Action effectuée: CREATE | UPDATE | DELETE | APPROVE | REJECT"
+    )
+
+    resource_type = Column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="Type de ressource: entity | fact | entity_type | document_type..."
+    )
+
+    resource_id = Column(
+        String(255),
+        nullable=True,
+        index=True,
+        comment="ID de la ressource affectée"
+    )
+
+    # Contexte
+    tenant_id = Column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="Tenant ID"
+    )
+
+    details = Column(
+        Text,
+        nullable=True,
+        comment="JSON avec détails (before, after, reason...)"
+    )
+
+    # Quand
+    timestamp = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        index=True,
+        comment="Date/heure de l'action"
+    )
+
+    # Indexes
+    __table_args__ = (
+        Index('ix_audit_timestamp', 'timestamp'),
+        Index('ix_audit_user_action', 'user_id', 'action'),
+        Index('ix_audit_resource', 'resource_type', 'resource_id'),
+        Index('ix_audit_tenant_timestamp', 'tenant_id', 'timestamp'),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<AuditLog(id={self.id}, user='{self.user_email}', "
+            f"action='{self.action}', resource='{self.resource_type}')>"
+        )
+
+
+__all__ = ["EntityTypeRegistry", "DocumentType", "DocumentTypeEntityType", "User", "AuditLog"]

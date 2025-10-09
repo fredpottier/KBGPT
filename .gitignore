@@ -11,6 +11,11 @@ venv/
 dist/
 build/
 
+# Security (Phase 0)
+config/keys/
+*.pem
+*.key
+
 # Jupyter Notebooks
 .ipynb_checkpoints/
 

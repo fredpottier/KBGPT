@@ -1,4 +1,20 @@
-﻿from . import search, ingest, status, imports, sap_solutions, downloads, token_analysis, facts
+﻿from . import (
+    search,
+    ingest,
+    status,
+    imports,
+    sap_solutions,
+    downloads,
+    token_analysis,
+    facts,
+    ontology,
+    entities,
+    entity_types,
+    jobs,
+    document_types,
+    admin,
+    auth,  # Phase 0 - JWT Authentication
+)
 
 __all__ = [
     "search",
@@ -9,4 +25,11 @@ __all__ = [
     "downloads",
     "token_analysis",
     "facts",
+    "ontology",
+    "entities",
+    "entity_types",
+    "jobs",
+    "document_types",
+    "admin",
+    "auth",
 ]
