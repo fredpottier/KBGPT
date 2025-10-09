@@ -1,0 +1,61 @@
+- #phase #facts #governance #p1
+- phase-number:: 2
+- status:: [[PENDING]]
+- priority:: P1 - HAUTE VALEUR
+- duration:: 4 semaines
+- effort:: 160 heures
+- dependencies:: [[Phase 1 - Document Backbone]]
+-
+- ## 🎯 Objectif
+	- Finaliser le système de gouvernance des faits
+	- Détection de conflits avancée
+	- Timeline bi-temporelle complète
+	- UI admin complète pour gestion facts
+-
+- ## 📋 Tâches Principales
+	- ### 1. ConflictDetector Avancé
+		- TODO Détecter contradictions sémantiques (LLM)
+		- TODO Détecter incohérences temporelles
+		- TODO Scoring de confiance (0.0-1.0)
+		- TODO Résolution automatique si confiance > 0.9
+		- estimated-effort:: 50h
+	-
+	- ### 2. Timeline Bi-Temporelle
+		- TODO Implémenter valid_from / valid_to (valid time)
+		- TODO Implémenter created_at / updated_at (transaction time)
+		- TODO Query "Quelle était la valeur le [date] ?"
+		- TODO Query "Quand avons-nous appris cette info ?"
+		- estimated-effort:: 40h
+	-
+	- ### 3. UI Admin Facts Complete
+		- TODO Table facts proposed avec actions (approve/reject)
+		- TODO Vue conflicts avec comparaison side-by-side
+		- TODO Timeline visuelle des révisions
+		- TODO Bulk actions (approve multiple facts)
+		- estimated-effort:: 50h
+	-
+	- ### 4. Workflow Approbation
+		- TODO Notifications pour facts en attente
+		- TODO Historique des décisions (qui a approuvé quand)
+		- TODO Commentaires sur facts
+		- TODO Escalation si attente > 7 jours
+		- estimated-effort:: 20h
+-
+- ## ✅ Critères d'Acceptance
+	- [ ] Conflicts détectés automatiquement à 95%+ précision
+	- [ ] Timeline queries fonctionnent correctement
+	- [ ] Admin peut approve/reject facts en 1 clic
+	- [ ] Historique complet des approbations
+	- [ ] Tests e2e workflow complet
+-
+- ## 📊 Métriques de Succès
+	- **Détection conflicts** : 95%+ recall, 90%+ precision
+	- **Temps approbation** : < 30s par fact
+	- **Coverage temporelle** : 100% facts ont valid_from
+-
+- ## 🔗 Références
+	- [[BACK2PROMISE_MASTER_ROADMAP]] Section "Phase 2"
+	- [[Back2Promise Project]]
+-
+- ## 📝 Notes de Session
+	-

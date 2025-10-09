@@ -1,0 +1,64 @@
+- #adr #decision #architecture #neo4j
+- adr-number:: 001
+- date:: [[2025-09]]
+- status:: ACCEPTED
+- related-phases:: Toutes
+-
+- ## Contexte
+	- Projet initialement utilisait Graphiti + Zep pour la gestion du Knowledge Graph
+	- Besoin de **Facts Governance** : workflow proposed → approved avec détection de conflits
+	- Besoin de **traçabilité temporelle** (bi-temporal timeline)
+	- Graphiti stocke les faits comme texte dans relations (non-structuré)
+	- Impossibilité de faire des queries structurées sur les faits
+	- Impossibilité de versioning et conflits
+-
+- ## Décision
+	- **Migrer vers Neo4j natif avec modèle custom**
+	- Faits structurés : `(:Fact {subject, predicate, object, status, valid_from, valid_to})`
+	- Dynamic Entity Types : découverte automatique + normalisation
+	- Architecture 100% custom pour maîtrise totale
+-
+- ## Conséquences
+	-
+	- ### ✅ Positives
+		- Contrôle total sur le modèle de données
+		- Facts queryables et gouvernables
+		- Performance optimisée (indexes Neo4j)
+		- Pas de limitations framework
+		- Possibilité d'implémenter bi-temporal timeline
+	-
+	- ### ❌ Négatives
+		- Plus de code à maintenir (pas de framework)
+		- Nécessite expertise Neo4j dans l'équipe
+		- Migration complexe si données Graphiti existantes
+	-
+	- ### ⚠️ Risques
+		- Courbe d'apprentissage Neo4j
+		- Bugs potentiels dans code custom
+		- **Mitigation** : Tests exhaustifs, documentation complète
+-
+- ## Alternatives Considérées
+	-
+	- ### Option 1 : Rester sur Graphiti
+		- ❌ Impossible d'implémenter facts governance
+		- ❌ Pas de contrôle sur structure interne
+	-
+	- ### Option 2 : Utiliser Zep
+		- ❌ Trop orienté chat/memory, pas assez flexible
+		- ❌ Pas de support bi-temporal
+	-
+	- ### Option 3 : Framework KG générique (RDF/OWL)
+		- ❌ Complexité excessive pour nos besoins
+		- ❌ Performance inférieure Neo4j
+-
+- ## Statut Implémentation
+	- ✅ Modèle Neo4j défini
+	- ✅ Dynamic Entity Types (90%)
+	- ✅ Facts basiques (70%)
+	- 🚧 Facts Governance workflow (Phase 2)
+	- 🚧 Bi-temporal timeline (Phase 2)
+-
+- ## Références
+	- [[DECISION_GRAPHITI_ALTERNATIVES_SYNTHESE]] dans `doc/`
+	- [[NORTH_STAR_NEO4J_NATIVE]] - Architecture complète
+	- [[Phase 2 - Facts Governance Finalization]]

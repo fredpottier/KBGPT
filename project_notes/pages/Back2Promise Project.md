@@ -1,0 +1,62 @@
+- #project #back2promise #roadmap
+- status:: [[ACTIVE]]
+- start-date:: [[2025-10-09]]
+- duration:: 32 semaines (8 mois)
+- team-size:: 2-3 FTE
+- current-maturity:: 56%
+-
+- ## 🎯 Vision
+	- Revenir à la **promesse centrale** du projet : "Know Where to Know"
+	- Consolider toutes les analyses en un chantier unique cohérent
+	- Délivrer un système fiable, sécurisé et performant
+-
+- ## 📋 Documents de Référence
+	- [[BACK2PROMISE_MASTER_ROADMAP]] - Roadmap consolidée 6 phases
+	- [[KG_VALUE_PROPOSITION_CONCRETE]] - Proposition de valeur du Knowledge Graph
+-
+- ## 🚀 Phases du Projet
+	- [[Phase 0 - Security Hardening]] - **P0 BLOQUANT** - 4 semaines
+		- status:: [[PENDING]]
+		- priority:: P0
+	- [[Phase 1 - Document Backbone]] - **P0 BLOQUANT** - 5 semaines
+		- status:: [[PENDING]]
+		- priority:: P0
+	- [[Phase 2 - Facts Governance Finalization]] - P1 - 4 semaines
+		- status:: [[PENDING]]
+		- priority:: P1
+	- [[Phase 3 - Semantic Overlay & Provenance]] - P1 - 6 semaines
+		- status:: [[PENDING]]
+		- priority:: P1
+	- [[Phase 4 - Definition Tracking]] - P1 - 4 semaines
+		- status:: [[PENDING]]
+		- priority:: P2
+	- [[Phase 5 - Conversational Memory]] - P2 - 5 semaines
+		- status:: [[PENDING]]
+		- priority:: P2
+	- [[Phase 6 - Production Hardening]] - P1 - 4 semaines
+		- status:: [[PENDING]]
+		- priority:: P1
+-
+- ## 📊 Dashboard Avancement Global
+	- **Phases Complétées** : 0/7
+	- **Semaines Écoulées** : 0/32
+	- **Avancement Estimé** : 0%
+	-
+	- ### Statistiques par Priorité
+		- **P0 (Bloquant Prod)** : 0/2 phases complétées
+		- **P1 (Haute Valeur)** : 0/3 phases complétées
+		- **P2 (Amélioration)** : 0/2 phases complétées
+-
+- ## 🎯 Objectifs Actuels
+	- TODO Décider de l'ordre de démarrage (Phase 0 recommandée)
+	- TODO Définir les critères d'acceptance pour Phase 0
+	- TODO Mettre en place le système de tracking des tâches
+-
+- ## 📝 Sessions de Travail
+	- [[2025-10-09]] - Initialisation projet Logseq et structure tracking
+-
+- ## 🚨 Blockers Actifs
+	- Voir [[Project Blockers]]
+-
+- ## 📚 Architecture Decision Records
+	- Voir [[ADR Index]]
