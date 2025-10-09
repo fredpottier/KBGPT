@@ -104,7 +104,15 @@ class PurgeService:
             }
 
     async def _purge_neo4j(self) -> Dict:
-        """Purge Neo4j (supprime nodes et relations d'ingestion)."""
+        """Purge Neo4j (supprime nodes et relations d'ingestion).
+
+        PRÉSERVE :
+        - OntologyEntity (référentiel ontologies)
+        - OntologyAlias (référentiel ontologies)
+
+        SUPPRIME :
+        - Entity, Episode, Fact, Relation (données métier)
+        """
         logger.info("🔄 Purge Neo4j...")
 
         try:
@@ -117,9 +125,10 @@ class PurgeService:
 
             try:
                 with driver.session() as session:
-                    # Compter nodes/relations avant purge
+                    # Compter nodes/relations métier avant purge (EXCLURE ontologies)
                     count_result = session.run("""
                         MATCH (n)
+                        WHERE NOT n:OntologyEntity AND NOT n:OntologyAlias
                         OPTIONAL MATCH (n)-[r]->()
                         RETURN count(DISTINCT n) as nodes, count(r) as relations
                     """)
@@ -127,14 +136,21 @@ class PurgeService:
                     nodes_before = counts["nodes"]
                     relations_before = counts["relations"]
 
-                    # Supprimer TOUS les nodes et relations
-                    # ATTENTION: Supprime TOUT dans Neo4j (pas de config à préserver côté Neo4j)
-                    session.run("MATCH (n) DETACH DELETE n")
+                    # Supprimer SEULEMENT les nodes métier (préserver ontologies)
+                    # ⚠️ IMPORTANT : Ne PAS toucher aux OntologyEntity et OntologyAlias
+                    session.run("""
+                        MATCH (n)
+                        WHERE NOT n:OntologyEntity AND NOT n:OntologyAlias
+                        DETACH DELETE n
+                    """)
 
-                    logger.info(f"✅ Neo4j purgé: {nodes_before} nodes, {relations_before} relations supprimés")
+                    logger.info(
+                        f"✅ Neo4j purgé: {nodes_before} nodes métier, "
+                        f"{relations_before} relations supprimés (ontologies préservées)"
+                    )
                     return {
                         "success": True,
-                        "message": f"Neo4j purgé complètement",
+                        "message": f"Neo4j purgé (ontologies préservées)",
                         "nodes_deleted": nodes_before,
                         "relations_deleted": relations_before,
                     }

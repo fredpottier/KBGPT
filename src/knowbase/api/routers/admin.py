@@ -113,7 +113,12 @@ async def admin_health() -> Dict:
         driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
         with driver.session() as session:
-            result = session.run("MATCH (n) RETURN count(n) as count")
+            # Compter SEULEMENT les nodes métier (exclure ontologies)
+            result = session.run("""
+                MATCH (n)
+                WHERE NOT n:OntologyEntity AND NOT n:OntologyAlias
+                RETURN count(n) as count
+            """)
             count = result.single()["count"]
             health_status["neo4j"] = {
                 "status": "healthy",
