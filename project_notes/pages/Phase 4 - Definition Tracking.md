@@ -1,0 +1,57 @@
+- #phase #definitions #quality #p2
+- phase-number:: 4
+- status:: [[PENDING]]
+- priority:: P2 - AMÉLIORATION
+- duration:: 4 semaines
+- effort:: 160 heures
+- dependencies:: [[Phase 3 - Semantic Overlay & Provenance]]
+-
+- ## 🎯 Objectif
+	- Tracker l'évolution des définitions d'entités
+	- Détecter le drift sémantique
+	- Proposer mises à jour automatiques
+-
+- ## 📋 Tâches Principales
+	- ### 1. EntityDefinition Versioning
+		- TODO Nodes `(:EntityDefinition)` avec version
+		- TODO Relation `(:EntityType)-[:HAS_DEFINITION {valid_from, valid_to}]->(:EntityDefinition)`
+		- TODO Historique des changements de définition
+		- TODO API CRUD definitions
+		- estimated-effort:: 40h
+	-
+	- ### 2. Drift Detection
+		- TODO Analyser nouvelles mentions vs définition actuelle
+		- TODO LLM détecte divergences sémantiques
+		- TODO Scoring drift (0.0-1.0)
+		- TODO Alert si drift > 0.3
+		- estimated-effort:: 50h
+	-
+	- ### 3. Auto-Suggestion Updates
+		- TODO LLM propose nouvelle définition
+		- TODO Workflow approbation définition
+		- TODO A/B testing sur impact qualité
+		- estimated-effort:: 40h
+	-
+	- ### 4. UI Definitions Management
+		- TODO Vue historique définitions
+		- TODO Comparaison versions side-by-side
+		- TODO Approve/reject suggestions
+		- estimated-effort:: 30h
+-
+- ## ✅ Critères d'Acceptance
+	- [ ] Définitions versionnées avec timestamps
+	- [ ] Drift détecté automatiquement
+	- [ ] Suggestions pertinentes (80%+ acceptance rate)
+	- [ ] UI intuitive pour gestion définitions
+-
+- ## 📊 Métriques de Succès
+	- **Drift detection recall** : 85%+
+	- **Suggestion acceptance** : 80%+
+	- **Time to update definition** : < 5 min
+-
+- ## 🔗 Références
+	- [[BACK2PROMISE_MASTER_ROADMAP]] Section "Phase 4"
+	- [[Back2Promise Project]]
+-
+- ## 📝 Notes de Session
+	-

@@ -1,0 +1,81 @@
+- #adr #decision #security #p0
+- adr-number:: 003
+- date:: [[2025-10-09]]
+- status:: ACCEPTED
+- related-phases:: [[Phase 0 - Security Hardening]]
+-
+- ## Contexte
+	- Audit sécurité révèle score 6.5/10 (MEDIUM-HIGH risk)
+	- Vulnérabilités critiques :
+		- ❌ Aucune authentification JWT
+		- ❌ Aucun RBAC
+		- ❌ Validation faible entity_types
+		- ❌ Aucun audit trail
+	- **Impossible de mettre en production** dans cet état
+	- Risque de fuite de données multi-tenant
+	- Risque d'injections et abus
+-
+- ## Décision
+	- **Phase 0 (Security) DOIT précéder tout développement fonctionnel**
+	- Security = P0 BLOQUANT
+	- Pas de nouvelles features avant Phase 0 complète
+	- Audit sécurité continu à chaque phase
+-
+- ## Conséquences
+	-
+	- ### ✅ Positives
+		- Production possible après Phase 0
+		- Conformité RGPD/SOC2 facilitée
+		- Confiance clients augmentée
+		- Évite dette technique sécurité
+		- Audit trail = debuggabilité
+	-
+	- ### ❌ Négatives
+		- Retarde features business (4 semaines)
+		- Complexité dev augmentée (auth partout)
+		- Overhead performance (JWT verification)
+	-
+	- ### ⚠️ Risques
+		- Implémentation JWT incorrecte → failles
+		- RBAC mal configuré → escalation privilèges
+		- **Mitigation** : Utiliser librairies éprouvées, audit externe, pentesting
+-
+- ## Alternatives Considérées
+	-
+	- ### Option 1 : Features d'abord, sécurité après
+		- ❌ INACCEPTABLE : risque production
+		- ❌ Dette technique majeure
+		- ❌ Refactoring massif nécessaire après
+	-
+	- ### Option 2 : Sécurité minimale puis itérations
+		- ⚠️ Risqué : peut oublier aspects critiques
+		- ⚠️ Complexifie roadmap
+	-
+	- ### Option 3 : Sécurité au fil de l'eau
+		- ❌ Pas de vision d'ensemble
+		- ❌ Incohérences potentielles
+-
+- ## Implémentation Phase 0
+	- **JWT RS256** : Tokens signés, courts lifetime
+	- **RBAC 3 rôles** : admin, editor, viewer
+	- **Validation stricte** : Regex sur entity_type, tenant_id
+	- **Audit trail** : Table audit_log PostgreSQL
+	- **Tests sécurité** : OWASP Top 10, fuzzing
+-
+- ## Critères d'Acceptance
+	- [ ] JWT obligatoire sur tous endpoints sauf `/auth/login`
+	- [ ] RBAC testé pour 3 rôles
+	- [ ] entity_type invalide → 400 Bad Request
+	- [ ] Audit trail complet
+	- [ ] Score sécurité > 8.5/10
+-
+- ## Métriques de Succès
+	- **Score sécurité** : 8.5+/10 (target 9.0/10)
+	- **Coverage tests sécurité** : 85%+
+	- **Overhead JWT** : < 10ms par requête
+	- **Audit log storage** : < 1GB/mois
+-
+- ## Références
+	- [[SECURITY_AUDIT_DYNAMIC_TYPES]] dans `doc/`
+	- [[Phase 0 - Security Hardening]]
+	- [[Back2Promise Project]]

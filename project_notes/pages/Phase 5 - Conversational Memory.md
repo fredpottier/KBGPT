@@ -1,0 +1,63 @@
+- #phase #memory #ux #p2
+- phase-number:: 5
+- status:: [[PENDING]]
+- priority:: P2 - AMÉLIORATION UX
+- duration:: 5 semaines
+- effort:: 200 heures
+- dependencies:: [[Phase 4 - Definition Tracking]]
+-
+- ## 🎯 Objectif
+	- Mémoire conversationnelle multi-sessions
+	- Préférences utilisateur persistantes
+	- Contexte intelligent pour LLM
+-
+- ## 📋 Tâches Principales
+	- ### 1. Graph Conversationnel
+		- TODO Nodes `(:Conversation)` avec thread_id
+		- TODO Nodes `(:Message)` avec role, content, timestamp
+		- TODO Relations `(:Conversation)-[:HAS_MESSAGE]->(:Message)`
+		- TODO Relations `(:Message)-[:REFERENCES]->(:Fact|Entity)`
+		- estimated-effort:: 50h
+	-
+	- ### 2. User Context Extraction
+		- TODO LLM extrait préférences (langue, verbosité, domaine)
+		- TODO Nodes `(:UserPreference)` liées à `(:User)`
+		- TODO Propagation contexte dans prompts
+		- estimated-effort:: 40h
+	-
+	- ### 3. Contextual RAG
+		- TODO Enrichir query avec historique conversation
+		- TODO Résolution pronoms ("il", "ce module")
+		- TODO Expansion contexte via graph
+		- estimated-effort:: 50h
+	-
+	- ### 4. UI Conversational
+		- TODO Sidebar historique conversations
+		- TODO Search dans conversations
+		- TODO Export conversation en markdown
+		- estimated-effort:: 40h
+	-
+	- ### 5. Analytics Conversations
+		- TODO Dashboard usage (topics, durée, satisfaction)
+		- TODO Détection questions fréquentes
+		- TODO Suggestions amélioration KB
+		- estimated-effort:: 20h
+-
+- ## ✅ Critères d'Acceptance
+	- [ ] Conversations persistent multi-sessions
+	- [ ] Contexte utilisateur améliore réponses
+	- [ ] Pronoms résolus correctement (90%+)
+	- [ ] UI fluide pour multi-conversations
+	- [ ] Analytics exploitables
+-
+- ## 📊 Métriques de Succès
+	- **Satisfaction utilisateur** : +20%
+	- **Résolution pronoms** : 90%+ accuracy
+	- **Time to answer** : -30% avec contexte
+-
+- ## 🔗 Références
+	- [[BACK2PROMISE_MASTER_ROADMAP]] Section "Phase 5"
+	- [[Back2Promise Project]]
+-
+- ## 📝 Notes de Session
+	-
