@@ -66,6 +66,23 @@ def normalize_entities_task(
             f"{len(result['errors'])} erreurs"
         )
 
+        # Auto-save ontologie dans Neo4j (boucle feedback fermée)
+        try:
+            from knowbase.ontology.ontology_saver import save_ontology_to_neo4j
+
+            save_ontology_to_neo4j(
+                merge_groups=merge_groups,
+                entity_type=type_name,
+                tenant_id=tenant_id,
+                source="llm_generated"
+            )
+
+            logger.info(f"✅ Ontologie sauvegardée dans Neo4j: {type_name}")
+
+        except Exception as e:
+            logger.error(f"⚠️ Erreur sauvegarde ontologie Neo4j: {e}")
+            # Non-bloquant, continuer
+
         return result
 
     except Exception as e:
