@@ -30,9 +30,71 @@ Sécuriser le système pour permettre un déploiement en production. Sans cette 
 
 ---
 
-## 📋 Tâches par Semaine
+## 📋 Vue d'Ensemble des Tâches
 
-### ✅ Semaine 1 : Authentication & Authorization (4/4 tâches - ⚠️ Tests restants)
+### Résumé Visuel
+
+```
+Semaine 1 : Authentication & Authorization
+├── [✅] 1.1 JWT Authentication (RS256) - Implementation complète
+│   ├── [✅] PyJWT installé et configuré
+│   ├── [✅] Clés RSA générées (private + public)
+│   ├── [✅] generate_access_token() implémenté
+│   ├── [✅] generate_refresh_token() implémenté
+│   ├── [✅] verify_token() avec validation claims
+│   ├── [✅] Claims JWT (user_id, email, role, tenant_id)
+│   ├── [✅] Gestion expiration (1h access, 7j refresh)
+│   ├── [✅] Endpoint POST /auth/login
+│   ├── [✅] Endpoint POST /auth/refresh
+│   ├── [✅] Endpoint GET /auth/me
+│   ├── [✅] Endpoint POST /auth/register
+│   └── [⚠️] Tests unitaires (15+ tests) - À CRÉER
+│
+├── [✅] 1.2 Dependencies FastAPI - Implementation complète
+│   ├── [✅] get_current_user() créée
+│   ├── [✅] require_admin() créée
+│   ├── [✅] require_editor() créée
+│   ├── [✅] get_tenant_id() créée
+│   └── [⚠️] Tests dependencies (10+ tests) - À CRÉER
+│
+├── [⏸️] 1.3 Extraction tenant_id depuis JWT - Structure prête
+│   ├── [✅] Dependency get_tenant_id() créée
+│   ├── [⏸️] Migration endpoints (tenant_id Query → JWT)
+│   └── [⏸️] Tests isolation multi-tenant
+│
+└── [⏸️] 1.4 Tests Authentication E2E - À créer
+    ├── [⏸️] Test login success
+    ├── [⏸️] Test login échec
+    ├── [⏸️] Test refresh token
+    ├── [⏸️] Test token expiré
+    └── [⏸️] Test token invalide
+
+Semaine 2 : Input Validation
+├── [⏸️] 2.1 Validation entity_type et relation_type
+├── [⏸️] 2.2 Validation entity.name
+├── [⏸️] 2.3 Sanitization logs
+└── [⏸️] 2.4 Tests Fuzzing (1000+ inputs)
+
+Semaine 3 : RBAC
+├── [⏸️] 3.1 Définition rôles (admin/editor/viewer)
+├── [⏸️] 3.2 Implémentation RBAC sur endpoints
+├── [⏸️] 3.3 Verify entity ownership
+└── [⏸️] 3.4 Tests RBAC (30+ scénarios)
+
+Semaine 4 : Audit & Rate Limiting
+├── [⏸️] 4.1 AuditService
+├── [⏸️] 4.2 UI Admin Audit Trail
+├── [⏸️] 4.3 Rate Limiting (SlowAPI)
+└── [⏸️] 4.4 Monitoring & Alertes
+```
+
+**Légende** : ✅ Complété | ⚠️ Partiel | ⏸️ Pending
+
+---
+
+## 📋 Tâches par Semaine (Détails)
+
+### ✅ Semaine 1 : Authentication & Authorization (2/4 tâches complètes, 2 partielles)
 
 #### 1.1 JWT Authentication (RS256)
 **Status** : ✅ COMPLÉTÉ (Implementation) - ⚠️ Tests à créer
