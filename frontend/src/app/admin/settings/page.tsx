@@ -238,8 +238,8 @@ export default function AdminSettingsPage() {
                 <Box>
                   <Text fontWeight="semibold">Purge complète des données d'ingestion</Text>
                   <Text fontSize="sm" mt={1}>
-                    Cette action supprimera TOUTES les données importées (Qdrant, Neo4j, Redis) mais préservera
-                    les configurations (Types de documents, Types d'entités).
+                    Cette action supprimera TOUTES les données importées (Qdrant, Neo4j métier, Redis) mais préservera
+                    les configurations (Types de documents, Types d'entités, Ontologies).
                   </Text>
                 </Box>
               </Alert>
@@ -250,7 +250,7 @@ export default function AdminSettingsPage() {
                 </Text>
                 <VStack align="start" spacing={1} pl={4}>
                   <Text fontSize="sm">• Tous les points vectoriels (Qdrant)</Text>
-                  <Text fontSize="sm">• Tous les nodes et relations (Neo4j)</Text>
+                  <Text fontSize="sm">• Tous les nodes métier (Neo4j : Entity, Episode, Fact, Relation)</Text>
                   <Text fontSize="sm">• Toutes les queues et jobs (Redis)</Text>
                 </VStack>
               </Box>
@@ -262,6 +262,7 @@ export default function AdminSettingsPage() {
                 <VStack align="start" spacing={1} pl={4}>
                   <Text fontSize="sm">• Types de documents (DocumentType)</Text>
                   <Text fontSize="sm">• Types d'entités (EntityTypeRegistry)</Text>
+                  <Text fontSize="sm">• Ontologies Neo4j (OntologyEntity, OntologyAlias)</Text>
                   <Text fontSize="sm">• Configuration système</Text>
                 </VStack>
               </Box>
