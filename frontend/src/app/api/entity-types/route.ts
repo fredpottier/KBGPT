@@ -3,6 +3,10 @@ import { NextRequest } from 'next/server';
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8000';
 
+// Désactiver le cache Next.js pour toujours afficher les types à jour
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET(request: NextRequest) {
   try {
     // Récupérer les query params (status, etc.)
@@ -16,6 +20,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'X-Admin-Key': 'admin-dev-key-change-in-production',
       },
+      cache: 'no-store',
     });
 
     if (!response.ok) {

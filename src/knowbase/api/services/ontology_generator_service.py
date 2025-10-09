@@ -158,14 +158,19 @@ class OntologyGeneratorService:
 
 **Instructions**:
 1. Identifie les entités qui représentent **exactement la même chose** (synonymes, variantes, typos)
-2. Pour chaque groupe identifié:
+2. Pour CHAQUE entité (groupée OU individuelle), propose une normalisation :
+   - Si plusieurs entités sont synonymes : crée un groupe avec un **canonical_name** commun
+   - Si une entité est seule mais son nom peut être amélioré : crée un groupe à 1 seul membre avec le nom normalisé
+   - Normalisations courantes : capitalisation, espaces, symboles (&→and, /→or), abréviations, typos
+
+3. Pour chaque groupe (1+ entités):
    - Choisis le **canonical_name** (le nom le plus formel, complet, et couramment utilisé)
-   - Liste tous les **aliases** (variantes détectées)
-   - Donne un **confidence score** (0.0 à 1.0) selon ta certitude du regroupement
-   - Liste les **UUIDs** des entités à merger
+   - Liste tous les **aliases** (variantes détectées, y compris le nom original si différent)
+   - Donne un **confidence score** (0.0 à 1.0) selon ta certitude de la normalisation
+   - Liste les **UUIDs** des entités concernées
    - Ajoute une brève **description** du concept
 
-3. **Règles CRITIQUES - Différences sémantiques**:
+4. **Règles CRITIQUES - Différences sémantiques**:
    - Ne groupe que si tu es >75% sûr qu'elles sont **strictement identiques**
    - **ATTENTION**: Produits/concepts différents doivent TOUJOURS rester séparés :
      * Même si les noms se ressemblent, vérifie qu'il s'agit du MÊME produit/concept
@@ -176,6 +181,7 @@ class OntologyGeneratorService:
      * ❌ Produits différents : même si un nom est contenu dans l'autre, ce ne sont pas forcément le même produit
    - Respecte la casse pour acronymes et noms propres
    - En cas de doute sur l'identité sémantique : NE PAS regrouper
+   - **Pour normalisation individuelle** : propose si amélioration de qualité (formalisation, cohérence, lisibilité)
 
 **Format de sortie JSON attendu**:
 ```json
@@ -188,10 +194,19 @@ class OntologyGeneratorService:
     "description": "Description courte du concept"
   }},
   "CANONICAL_KEY_2": {{
-    ...
+    "canonical_name": "General Terms and Conditions",
+    "aliases": ["General Terms & Conditions"],
+    "confidence": 0.85,
+    "entities_merged": ["uuid-3"],
+    "description": "Standard contractual terms (normalisation individuelle: & → and)"
   }}
 }}
 ```
+
+**Exemples de normalisations**:
+- "Technical & Organizational Measures" → "Technical and Organizational Measures" (groupe à 1 membre)
+- "sap cloud platform" → "SAP Cloud Platform" (capitalisation)
+- "S/4HANA" et "S4HANA" et "SAP S/4HANA" → "SAP S/4HANA" (groupe à 3 membres)
 
 **Important**: Retourne UNIQUEMENT le JSON, sans texte avant/après.
 """

@@ -73,6 +73,24 @@ def generate_ontology_task(
             json.dumps(ontology_result)
         )
 
+        # Mettre à jour statut normalisation dans registry
+        from knowbase.db.base import SessionLocal
+        from knowbase.api.services.entity_type_registry_service import EntityTypeRegistryService
+
+        db = SessionLocal()
+        try:
+            service = EntityTypeRegistryService(db)
+            entity_type = service.get_type_by_name(type_name, tenant_id)
+
+            if entity_type:
+                entity_type.normalization_status = 'pending_review'
+                db.commit()
+                logger.info(f"📝 [Worker] Statut normalisation mis à jour: pending_review")
+            else:
+                logger.warning(f"⚠️ [Worker] Type {type_name} non trouvé dans registry, statut non mis à jour")
+        finally:
+            db.close()
+
         logger.info(
             f"✅ [Worker] Ontologie générée et stockée: {redis_key} - "
             f"{ontology_result['groups_proposed']} groupes"
@@ -82,6 +100,26 @@ def generate_ontology_task(
 
     except Exception as e:
         logger.error(f"❌ [Worker] Erreur génération ontologie: {e}", exc_info=True)
+
+        # Réinitialiser statut normalisation en cas d'erreur
+        from knowbase.db.base import SessionLocal
+        from knowbase.api.services.entity_type_registry_service import EntityTypeRegistryService
+
+        db = SessionLocal()
+        try:
+            service = EntityTypeRegistryService(db)
+            entity_type = service.get_type_by_name(type_name, tenant_id)
+
+            if entity_type:
+                entity_type.normalization_status = None
+                entity_type.normalization_job_id = None
+                db.commit()
+                logger.info(f"📝 [Worker] Statut normalisation réinitialisé suite à erreur")
+        except Exception as db_error:
+            logger.error(f"⚠️ [Worker] Erreur lors de la mise à jour du statut: {db_error}")
+        finally:
+            db.close()
+
         raise
 
 

@@ -356,12 +356,28 @@ async def get_entity_type(
         tenant_id=tenant_id
     )
 
-    # Mettre à jour les compteurs
-    entity_type.entity_count = counts.get('total', 0)
-    entity_type.pending_entity_count = counts.get('pending', 0)
-    entity_type.validated_entity_count = counts.get('validated', 0)
-
-    return EntityTypeResponse.from_orm(entity_type)
+    # Construire la réponse avec les compteurs mis à jour
+    return EntityTypeResponse(
+        id=entity_type.id,
+        type_name=entity_type.type_name,
+        description=entity_type.description,
+        status=entity_type.status,
+        first_seen=entity_type.first_seen,
+        discovered_by=entity_type.discovered_by,
+        entity_count=counts.get('total', 0),
+        pending_entity_count=counts.get('pending', 0),
+        approved_by=entity_type.approved_by,
+        approved_at=entity_type.approved_at,
+        rejected_by=entity_type.rejected_by,
+        rejected_at=entity_type.rejected_at,
+        rejection_reason=entity_type.rejection_reason,
+        normalization_status=entity_type.normalization_status,
+        normalization_job_id=entity_type.normalization_job_id,
+        normalization_started_at=entity_type.normalization_started_at,
+        tenant_id=entity_type.tenant_id,
+        created_at=entity_type.created_at,
+        updated_at=entity_type.updated_at
+    )
 
 
 @router.post(
@@ -950,6 +966,12 @@ async def generate_ontology(
 
     logger.info(f"📊 {len(entities)} entités récupérées pour génération ontologie")
 
+    # Limiter à 50 entités max pour éviter erreurs JSON trop long
+    MAX_ENTITIES = 50
+    if len(entities) > MAX_ENTITIES:
+        logger.warning(f"⚠️ {len(entities)} entités trouvées, limitation à {MAX_ENTITIES} pour éviter timeout LLM")
+        entities = entities[:MAX_ENTITIES]
+
     # Enqueue job RQ dans queue "ingestion" (même queue que worker)
     redis_conn = Redis(
         host=os.getenv("REDIS_HOST", "redis"),
@@ -968,6 +990,14 @@ async def generate_ontology(
     )
 
     logger.info(f"✅ Job ontology generation enqueued: {job.id}")
+
+    # Mettre à jour statut normalisation dans registry
+    from datetime import datetime, timezone
+    entity_type.normalization_status = 'generating'
+    entity_type.normalization_job_id = job.id
+    entity_type.normalization_started_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info(f"📝 Statut normalisation mis à jour: generating (job={job.id})")
 
     return {
         "job_id": job.id,
@@ -1054,6 +1084,86 @@ async def get_ontology_proposal(
     logger.info(f"✅ Ontologie trouvée: {ontology_data.get('groups_proposed', 0)} groupes")
 
     return ontology_data
+
+
+@router.delete(
+    "/{type_name}/ontology-proposal",
+    summary="Annuler normalisation en cours",
+    description="""
+    Annule processus de normalisation pour un type:
+    - Supprime ontologie en cache Redis
+    - Réinitialise statut normalisation dans registry
+
+    **Use case**: Utilisateur décide de ne pas valider les propositions.
+    """,
+    responses={
+        200: {
+            "description": "Normalisation annulée",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Normalisation annulée",
+                        "type_name": "SOLUTION"
+                    }
+                }
+            }
+        }
+    }
+)
+async def cancel_normalization(
+    type_name: str,
+    tenant_id: str = Query(default="default", description="Tenant ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Annule normalisation en cours.
+
+    Args:
+        type_name: Nom type
+        tenant_id: Tenant ID
+        db: Session DB
+
+    Returns:
+        Dict confirmation
+    """
+    import os
+    import json
+
+    logger.info(f"🗑️ DELETE /entity-types/{type_name}/ontology-proposal - Annulation normalisation")
+
+    # Supprimer cache Redis
+    redis_conn = Redis(
+        host=os.getenv("REDIS_HOST", "redis"),
+        port=int(os.getenv("REDIS_PORT", "6379")),
+        db=1
+    )
+
+    redis_key = f"ontology_proposal:{type_name}:{tenant_id}"
+    deleted_count = redis_conn.delete(redis_key)
+
+    if deleted_count > 0:
+        logger.info(f"✅ Cache Redis supprimé: {redis_key}")
+    else:
+        logger.info(f"ℹ️ Pas de cache Redis à supprimer")
+
+    # Réinitialiser statut dans registry
+    service = EntityTypeRegistryService(db)
+    entity_type = service.get_type_by_name(type_name, tenant_id)
+
+    if entity_type:
+        entity_type.normalization_status = None
+        entity_type.normalization_job_id = None
+        entity_type.normalization_started_at = None
+        db.commit()
+        logger.info(f"📝 Statut normalisation réinitialisé pour {type_name}")
+    else:
+        logger.warning(f"⚠️ Type {type_name} non trouvé dans registry")
+
+    return {
+        "message": "Normalisation annulée",
+        "type_name": type_name,
+        "cache_deleted": deleted_count > 0
+    }
 
 
 @router.post(
@@ -1209,7 +1319,8 @@ async def normalize_entities(
     type_name: str,
     merge_groups: List[Dict] = Body(..., description="Groupes validés par user"),
     create_snapshot: bool = Body(default=True, description="Créer snapshot pour undo"),
-    tenant_id: str = Query(default="default", description="Tenant ID")
+    tenant_id: str = Query(default="default", description="Tenant ID"),
+    db: Session = Depends(get_db)
 ):
     """
     Lance normalisation async.
@@ -1219,6 +1330,7 @@ async def normalize_entities(
         merge_groups: Groupes depuis preview (filtrés par user)
         create_snapshot: Créer snapshot pour undo
         tenant_id: Tenant ID
+        db: Session DB
 
     Returns:
         Dict job info
@@ -1250,6 +1362,27 @@ async def normalize_entities(
     entities_count = sum(len(g["entities"]) for g in merge_groups)
 
     logger.info(f"✅ Job normalisation enqueued: {job.id}")
+
+    # Réinitialiser statut normalisation (validation appliquée)
+    service = EntityTypeRegistryService(db)
+    entity_type = service.get_type_by_name(type_name, tenant_id)
+
+    if entity_type:
+        entity_type.normalization_status = None
+        entity_type.normalization_job_id = None
+        entity_type.normalization_started_at = None
+        db.commit()
+        logger.info(f"📝 Statut normalisation réinitialisé (validation appliquée)")
+
+    # Supprimer cache Redis aussi
+    redis_conn_cache = Redis(
+        host=os.getenv("REDIS_HOST", "redis"),
+        port=int(os.getenv("REDIS_PORT", "6379")),
+        db=1
+    )
+    redis_key = f"ontology_proposal:{type_name}:{tenant_id}"
+    redis_conn_cache.delete(redis_key)
+    logger.info(f"🗑️ Cache ontologie supprimé après validation")
 
     return {
         "job_id": job.id,
@@ -1311,10 +1444,11 @@ async def undo_normalization(
     Returns:
         Dict job info
     """
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
     from datetime import datetime
     import os
+    import json
 
     logger.info(f"↩️ POST /entity-types/{type_name}/undo-normalization/{snapshot_id}")
 
@@ -1325,12 +1459,12 @@ async def undo_normalization(
 
     try:
         result = session.execute(
-            """
+            text("""
             SELECT snapshot_id, type_name, tenant_id, merge_groups_json, expires_at, restored
             FROM normalization_snapshots
-            WHERE snapshot_id = ? AND type_name = ? AND tenant_id = ?
-            """,
-            (snapshot_id, type_name, tenant_id)
+            WHERE snapshot_id = :snapshot_id AND type_name = :type_name AND tenant_id = :tenant_id
+            """),
+            {"snapshot_id": snapshot_id, "type_name": type_name, "tenant_id": tenant_id}
         ).fetchone()
 
         if not result:

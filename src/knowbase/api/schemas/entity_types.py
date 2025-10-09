@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, computed_field
 
 
 # Regex validation pour type_name (sécurité Phase 1)
@@ -86,12 +86,23 @@ class EntityTypeResponse(EntityTypeBase):
     rejected_at: Optional[datetime] = Field(None, description="Date rejet")
     rejection_reason: Optional[str] = Field(None, description="Raison rejet")
 
+    # Normalisation workflow (Phase 5B)
+    normalization_status: Optional[str] = Field(None, description="Statut normalisation (generating | pending_review | None)")
+    normalization_job_id: Optional[str] = Field(None, description="Job ID génération ontologie")
+    normalization_started_at: Optional[datetime] = Field(None, description="Date lancement normalisation")
+
     # Multi-tenancy
     tenant_id: str = Field(..., description="Tenant ID")
 
     # Timestamps
     created_at: datetime = Field(..., description="Date création record")
     updated_at: datetime = Field(..., description="Date dernière modification")
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def validated_entity_count(self) -> int:
+        """Nombre d'entités validées (calculé)."""
+        return max(0, self.entity_count - self.pending_entity_count)
 
     class Config:
         from_attributes = True  # Pydantic v2 (ex orm_mode)

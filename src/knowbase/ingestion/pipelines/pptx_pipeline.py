@@ -32,6 +32,7 @@ from knowbase.config.prompts_loader import load_prompts, select_prompt, render_p
 
 from knowbase.config.paths import ensure_directories
 from knowbase.config.settings import get_settings
+from knowbase.db import SessionLocal, DocumentType
 
 
 # --- Initialisation des chemins et variables globales ---
@@ -830,7 +831,7 @@ def extract_pptx_metadata(pptx_path: Path) -> dict:
 
 # Analyse globale du deck pour extraire résumé et métadonnées (document, solution)
 def analyze_deck_summary(
-    slides_data: List[Dict[str, Any]], source_name: str, document_type: str = "default", auto_metadata: dict = None
+    slides_data: List[Dict[str, Any]], source_name: str, document_type: str = "default", auto_metadata: dict = None, document_context_prompt: str = None
 ) -> dict:
     logger.info(f"🔍 GPT: analyse du deck via texte extrait — {source_name}")
     summary_text = summarize_large_pptx(slides_data, document_type)
@@ -841,6 +842,17 @@ def analyze_deck_summary(
     prompt = render_prompt(
         deck_template, summary_text=summary_text, source_name=source_name
     )
+
+    # Injection du context_prompt personnalisé si fourni
+    if document_context_prompt:
+        logger.debug(f"Deck summary: Injection context_prompt personnalisé ({len(document_context_prompt)} chars)")
+        prompt = f"""**CONTEXTE DOCUMENT TYPE**:
+{document_context_prompt}
+
+---
+
+{prompt}"""
+
     try:
         messages = [
             {
@@ -920,6 +932,7 @@ def ask_gpt_slide_analysis(
     megaparse_content="",
     document_type="default",
     deck_prompt_id="unknown",
+    document_context_prompt=None,
     retries=2,
 ):
     # Heartbeat avant l'appel LLM vision (long processus)
@@ -943,6 +956,18 @@ def ask_gpt_slide_analysis(
         notes=notes,
         megaparse_content=megaparse_content,
     )
+
+    # Injection du context_prompt personnalisé si fourni
+    if document_context_prompt:
+        logger.debug(f"Slide {slide_index}: Injection context_prompt personnalisé ({len(document_context_prompt)} chars)")
+        # Préfixer le prompt avec le contexte personnalisé
+        prompt_text = f"""**CONTEXTE DOCUMENT TYPE**:
+{document_context_prompt}
+
+---
+
+{prompt_text}"""
+
     msg = [
         {
             "role": "system",
@@ -1107,10 +1132,44 @@ def ingest_chunks(chunks, doc_meta, file_uid, slide_index, deck_summary):
     logger.info(f"Slide {slide_index}: ingested {len(points)} chunks")
 
 
+def load_document_type_context(document_type_id: str | None) -> str | None:
+    """
+    Charge le context_prompt depuis la DB pour un document_type_id donné.
+
+    Args:
+        document_type_id: ID du DocumentType (peut être None ou "default")
+
+    Returns:
+        context_prompt si trouvé, None sinon
+    """
+    if not document_type_id or document_type_id == "default":
+        logger.info("📋 Pas de document_type_id spécifique, utilisation prompts par défaut")
+        return None
+
+    try:
+        db = SessionLocal()
+        try:
+            doc_type = db.query(DocumentType).filter(DocumentType.id == document_type_id).first()
+            if doc_type and doc_type.context_prompt:
+                logger.info(f"✅ Context prompt chargé depuis DocumentType '{doc_type.name}' ({len(doc_type.context_prompt)} chars)")
+                return doc_type.context_prompt
+            else:
+                logger.warning(f"⚠️ DocumentType {document_type_id} trouvé mais sans context_prompt")
+                return None
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Erreur chargement context_prompt depuis DB: {e}")
+        return None
+
+
 # Fonction principale pour traiter un fichier PPTX
 def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_callback=None, rq_job=None):
     logger.info(f"start ingestion for {pptx_path.name}")
     logger.info(f"📋 Document Type ID: {document_type_id or 'default'}")
+
+    # Charger le context_prompt personnalisé depuis la DB
+    document_context_prompt = load_document_type_context(document_type_id)
 
     # Générer ID unique pour cet import (pour traçabilité dans Neo4j)
     import_id = str(uuid.uuid4())[:8]  # UUID court pour lisibilité
@@ -1143,7 +1202,7 @@ def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_
     auto_metadata = extract_pptx_metadata(pptx_path)
 
     deck_info = analyze_deck_summary(
-        slides_data, pptx_path.name, document_type=document_type_id or "default", auto_metadata=auto_metadata
+        slides_data, pptx_path.name, document_type=document_type_id or "default", auto_metadata=auto_metadata, document_context_prompt=document_context_prompt
     )
     summary = deck_info.get("summary", "")
     metadata = deck_info.get("metadata", {})
@@ -1246,6 +1305,7 @@ def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_
                             megaparse_content,
                             document_type_id or "default",
                             deck_prompt_id,
+                            document_context_prompt,  # Nouveau paramètre
                         ),
                     )
                 )
