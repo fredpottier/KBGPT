@@ -21,7 +21,7 @@ from knowbase.api.schemas.knowledge_graph import (
     EpisodeResponse,
 )
 from knowbase.common.logging import setup_logging
-from knowbase.common.entity_normalizer import get_entity_normalizer
+from knowbase.ontology.entity_normalizer_neo4j import get_entity_normalizer_neo4j
 from knowbase.config.settings import get_settings
 
 settings = get_settings()
@@ -43,7 +43,7 @@ class KnowledgeGraphService:
             settings.neo4j_uri,
             auth=(settings.neo4j_user, settings.neo4j_password)
         )
-        self.normalizer = get_entity_normalizer()
+        self.normalizer = get_entity_normalizer_neo4j(self.driver)
 
     def close(self):
         """Ferme la connexion Neo4j."""
@@ -173,10 +173,18 @@ class KnowledgeGraphService:
             db_session.close()
 
         # Normaliser le nom avant insertion
-        entity_id, canonical_name, is_cataloged = self.normalizer.normalize_entity_name(
+        entity_id, canonical_name, entity_type_corrected, is_cataloged = self.normalizer.normalize_entity_name(
             entity.name,
-            entity.entity_type
+            entity_type_hint=entity.entity_type,
+            tenant_id=entity.tenant_id
         )
+
+        # Si type corrigé par ontologie, utiliser le type corrigé
+        if entity_type_corrected and entity_type_corrected != entity.entity_type:
+            logger.info(
+                f"🔄 Type corrigé par ontologie: {entity.entity_type} → {entity_type_corrected}"
+            )
+            entity.entity_type = entity_type_corrected
 
         # Définir status et is_cataloged automatiquement
         if is_cataloged:
@@ -190,7 +198,7 @@ class KnowledgeGraphService:
         if entity_id:
             metadata = self.normalizer.get_entity_metadata(
                 entity_id,
-                entity.entity_type
+                tenant_id=entity.tenant_id
             )
             if metadata:
                 entity.attributes["catalog_id"] = entity_id
@@ -258,7 +266,7 @@ class KnowledgeGraphService:
                 name=node["name"],
                 entity_type=node["entity_type"],
                 description=node["description"],
-                confidence=node["confidence"],
+                confidence=node.get("confidence", 0.0),  # Backward compat
                 attributes=attributes_dict,
                 source_slide_number=node.get("source_slide_number"),
                 source_document=node.get("source_document"),
