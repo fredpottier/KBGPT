@@ -194,12 +194,25 @@ def undo_normalization_task(
                 master_uuid = group["master_uuid"]
                 canonical_name = group["canonical_name"]
 
-                # Recrée entités duplicatas
-                for entity in group["entities"]:
-                    if entity["uuid"] == master_uuid:
-                        continue  # Ne pas recréer master (sera supprimé après)
+                # ÉTAPE 1: Supprimer d'abord le master normalisé (qui contient les données mergées)
+                query_delete_master = """
+                MATCH (master:Entity {uuid: $master_uuid, tenant_id: $tenant_id})
+                DETACH DELETE master
+                RETURN count(master) AS deleted
+                """
 
-                    # CREATE entité
+                result_delete = session.run(
+                    query_delete_master,
+                    master_uuid=master_uuid,
+                    tenant_id=tenant_id
+                )
+                record = result_delete.single()
+                if record and record["deleted"] > 0:
+                    masters_deleted += 1
+
+                # ÉTAPE 2: Recréer TOUTES les entités originales (y compris le master avec ses données originales)
+                for entity in group["entities"]:
+                    # CREATE entité (toujours, y compris l'ancien master)
                     query_create = """
                     CREATE (e:Entity {
                         uuid: $uuid,
@@ -226,22 +239,6 @@ def undo_normalization_task(
 
                     entities_restored += 1
 
-                # Supprimer master normalisé
-                query_delete_master = """
-                MATCH (master:Entity {uuid: $master_uuid, tenant_id: $tenant_id})
-                DETACH DELETE master
-                RETURN count(master) AS deleted
-                """
-
-                result_delete = session.run(
-                    query_delete_master,
-                    master_uuid=master_uuid,
-                    tenant_id=tenant_id
-                )
-                record = result_delete.single()
-                if record and record["deleted"] > 0:
-                    masters_deleted += 1
-
         driver.close()
 
         # Marquer snapshot comme restored
@@ -266,7 +263,7 @@ def undo_normalization_task(
 
 def _mark_snapshot_restored(snapshot_id: str):
     """Marque snapshot comme restored dans SQLite."""
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
 
     engine = create_engine('sqlite:////data/entity_types_registry.db')
@@ -275,12 +272,12 @@ def _mark_snapshot_restored(snapshot_id: str):
 
     try:
         session.execute(
-            """
+            text("""
             UPDATE normalization_snapshots
             SET restored = TRUE
-            WHERE snapshot_id = ?
-            """,
-            (snapshot_id,)
+            WHERE snapshot_id = :snapshot_id
+            """),
+            {"snapshot_id": snapshot_id}
         )
         session.commit()
         logger.info(f"✅ Snapshot {snapshot_id} marqué restored")

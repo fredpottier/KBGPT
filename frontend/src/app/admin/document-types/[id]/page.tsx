@@ -114,7 +114,7 @@ export default function DocumentTypeDetailPage() {
   const addEntityTypeMutation = useMutation({
     mutationFn: async (entityTypeName: string) => {
       await axios.post(`/api/document-types/${id}/entity-types`, {
-        entity_types: [entityTypeName],
+        entity_type_names: [entityTypeName],
         source: 'manual',
       })
     },

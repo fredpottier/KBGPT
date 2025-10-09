@@ -8,12 +8,14 @@ from typing import List, Optional
 from pathlib import Path
 import yaml
 
-from fastapi import APIRouter, HTTPException, Query, Depends, Body
+from fastapi import APIRouter, HTTPException, Query, Depends, Body, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from knowbase.api.schemas.knowledge_graph import EntityResponse
 from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
 from knowbase.api.auth_deps.auth import require_admin, get_tenant_id
+from knowbase.db import get_db
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 
@@ -738,7 +740,7 @@ async def approve_entity(
 @router.post("/{source_uuid}/merge")
 async def merge_entities(
     source_uuid: str,
-    request: MergeEntitiesRequest,
+    merge_entities_request: MergeEntitiesRequest = Body(..., embed=False),
     admin: dict = Depends(require_admin),
     tenant_id: str = Depends(get_tenant_id)
 ):
@@ -754,7 +756,7 @@ async def merge_entities(
 
     Args:
         source_uuid: UUID entité source (sera supprimée)
-        request: UUID target + options
+        merge_request: UUID target + options
         admin: Admin user (authenticated)
         tenant_id: Tenant ID (from header)
 
@@ -766,11 +768,11 @@ async def merge_entities(
         400: Tentative fusion même entité
     """
     logger.info(
-        f"🔀 POST /entities/{source_uuid}/merge → {request.target_uuid} "
+        f"🔀 POST /entities/{source_uuid}/merge → {merge_entities_request.target_uuid} "
         f"- admin={admin['email']}"
     )
 
-    if source_uuid == request.target_uuid:
+    if source_uuid == merge_entities_request.target_uuid:
         raise HTTPException(
             status_code=400,
             detail="Cannot merge entity with itself"
@@ -790,7 +792,7 @@ async def merge_entities(
             result_check = session.run(
                 query_check,
                 source_uuid=source_uuid,
-                target_uuid=request.target_uuid,
+                target_uuid=merge_entities_request.target_uuid,
                 tenant_id=tenant_id
             )
             record_check = result_check.single()
@@ -815,7 +817,7 @@ async def merge_entities(
             result_out = session.run(
                 query_transfer_out,
                 source_uuid=source_uuid,
-                target_uuid=request.target_uuid,
+                target_uuid=merge_entities_request.target_uuid,
                 tenant_id=tenant_id
             )
             transferred_out = result_out.single()["transferred_out"]
@@ -834,22 +836,22 @@ async def merge_entities(
             result_in = session.run(
                 query_transfer_in,
                 source_uuid=source_uuid,
-                target_uuid=request.target_uuid,
+                target_uuid=merge_entities_request.target_uuid,
                 tenant_id=tenant_id
             )
             transferred_in = result_in.single()["transferred_in"]
 
             # Optionnel: Renommer entité cible
-            if request.canonical_name:
+            if merge_entities_request.canonical_name:
                 query_rename = """
                 MATCH (target:Entity {uuid: $target_uuid, tenant_id: $tenant_id})
                 SET target.name = $canonical_name
                 """
                 session.run(
                     query_rename,
-                    target_uuid=request.target_uuid,
+                    target_uuid=merge_entities_request.target_uuid,
                     tenant_id=tenant_id,
-                    canonical_name=request.canonical_name
+                    canonical_name=merge_entities_request.canonical_name
                 )
 
             # Supprimer entité source
@@ -860,16 +862,16 @@ async def merge_entities(
             session.run(query_delete_source, source_uuid=source_uuid, tenant_id=tenant_id)
 
             logger.info(
-                f"✅ Fusion réussie: {source_uuid} → {request.target_uuid} "
+                f"✅ Fusion réussie: {source_uuid} → {merge_entities_request.target_uuid} "
                 f"(relations transférées: {transferred_out + transferred_in})"
             )
 
             return {
                 "status": "merged",
                 "source_uuid": source_uuid,
-                "target_uuid": request.target_uuid,
+                "target_uuid": merge_entities_request.target_uuid,
                 "relations_transferred": transferred_out + transferred_in,
-                "canonical_name": request.canonical_name
+                "canonical_name": merge_entities_request.canonical_name
             }
 
     except HTTPException:
@@ -1064,7 +1066,8 @@ async def change_entity_type(
     entity_uuid: str,
     new_entity_type: str = Body(..., embed=True),
     admin: dict = Depends(require_admin),
-    tenant_id: str = Depends(get_tenant_id)
+    tenant_id: str = Depends(get_tenant_id),
+    db: Session = Depends(get_db)
 ):
     """
     Change le type d'une entité.
@@ -1084,6 +1087,7 @@ async def change_entity_type(
 
     from neo4j import GraphDatabase
     import os
+    from knowbase.api.services.entity_type_registry_service import EntityTypeRegistryService
 
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
     neo4j_user = os.getenv("NEO4J_USER", "neo4j")
@@ -1123,6 +1127,50 @@ async def change_entity_type(
             f"✅ Type changé: {entity_uuid} de {old_type} → {new_entity_type}"
         )
 
+        # Enregistrer le nouveau type dans le registry s'il n'existe pas
+        # Les types créés manuellement sont automatiquement approuvés
+        registry_service = EntityTypeRegistryService(db)
+        entity_type_record = registry_service.get_or_create_type(
+            type_name=new_entity_type.upper(),
+            tenant_id=tenant_id,
+            discovered_by="admin"  # Type créé manuellement par admin
+        )
+
+        # Si le type a été créé maintenant, l'approuver automatiquement
+        # (les types créés manuellement par admin sont considérés valides)
+        if entity_type_record.status == "pending" and entity_type_record.discovered_by == "admin":
+            registry_service.approve_type(
+                type_name=new_entity_type.upper(),
+                admin_email=admin.get("email", "admin@example.com"),
+                tenant_id=tenant_id
+            )
+            logger.info(f"✅ Type {new_entity_type} auto-approuvé (créé manuellement)")
+
+        # Mettre à jour les compteurs pour les deux types (ancien et nouveau)
+        # On recalcule les compteurs depuis Neo4j
+        driver_counts = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        for type_to_update in [old_type, new_entity_type.upper()]:
+            with driver_counts.session() as session:
+                result = session.run("""
+                    MATCH (e:Entity {entity_type: $type, tenant_id: $tenant_id})
+                    RETURN count(e) as total,
+                           sum(CASE WHEN e.status = 'pending' THEN 1 ELSE 0 END) as pending
+                """, type=type_to_update, tenant_id=tenant_id)
+
+                record = result.single()
+                if record:
+                    registry_service.update_entity_counts(
+                        type_name=type_to_update,
+                        tenant_id=tenant_id,
+                        total_count=record["total"],
+                        pending_count=record["pending"]
+                    )
+
+        driver_counts.close()
+
+        logger.info(f"📝 Type {new_entity_type} enregistré dans le registry")
+
         # Retourner entité mise à jour
         updated_entity = dict(node)
 
@@ -1148,6 +1196,184 @@ async def change_entity_type(
         raise
     except Exception as e:
         logger.error(f"❌ Erreur changement type: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class BulkChangeTypeRequest(BaseModel):
+    """Requête changement type en masse."""
+
+    entity_uuids: List[str] = Field(
+        ...,
+        description="Liste des UUIDs des entités à migrer"
+    )
+    new_entity_type: str = Field(
+        ...,
+        description="Nouveau type d'entité (ex: SOLUTION, COMPONENT, etc.)"
+    )
+
+
+class BulkChangeTypeResponse(BaseModel):
+    """Réponse changement type en masse."""
+
+    migrated_count: int = Field(
+        ...,
+        description="Nombre d'entités migrées avec succès"
+    )
+    failed_count: int = Field(
+        default=0,
+        description="Nombre d'entités en échec"
+    )
+    errors: List[dict] = Field(
+        default_factory=list,
+        description="Liste des erreurs rencontrées"
+    )
+
+
+@router.post("/bulk-change-type", response_model=BulkChangeTypeResponse)
+async def bulk_change_entity_type(
+    request: Request,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Change le type de plusieurs entités en une seule opération.
+
+    Utile pour migrer en masse des entités d'un type vers un autre.
+
+    Args:
+        request: Liste des UUIDs et nouveau type
+        admin: Admin authentifié
+        tenant_id: Tenant ID
+        db: Session DB
+
+    Returns:
+        Statistiques de migration
+    """
+    # Parser le body manuellement pour debug
+    body = await request.json()
+    logger.info(f"🔍 DEBUG bulk-change-type - Body reçu: {body}")
+
+    try:
+        bulk_request = BulkChangeTypeRequest(**body)
+    except Exception as e:
+        logger.error(f"❌ Erreur validation Pydantic: {e}")
+        raise
+
+    logger.info(
+        f"🔄 Migration en masse de {len(bulk_request.entity_uuids)} entités → {bulk_request.new_entity_type}"
+    )
+
+    from neo4j import GraphDatabase
+    import os
+    from knowbase.api.services.entity_type_registry_service import EntityTypeRegistryService
+
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+
+    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+    migrated_count = 0
+    failed_count = 0
+    errors = []
+    old_types = set()
+
+    try:
+        # Migrer chaque entité
+        for entity_uuid in bulk_request.entity_uuids:
+            try:
+                with driver.session() as session:
+                    query = """
+                    MATCH (e:Entity {uuid: $uuid, tenant_id: $tenant_id})
+                    WITH e, e.entity_type AS old_type
+                    SET e.entity_type = $new_type,
+                        e.updated_at = datetime()
+                    RETURN e, old_type
+                    """
+
+                    result = session.run(
+                        query,
+                        uuid=entity_uuid,
+                        tenant_id=tenant_id,
+                        new_type=bulk_request.new_entity_type.upper()
+                    )
+
+                    record = result.single()
+                    if not record:
+                        failed_count += 1
+                        errors.append({
+                            "uuid": entity_uuid,
+                            "error": "Entity not found"
+                        })
+                        continue
+
+                    old_types.add(record["old_type"])
+                    migrated_count += 1
+
+            except Exception as e:
+                failed_count += 1
+                errors.append({
+                    "uuid": entity_uuid,
+                    "error": str(e)
+                })
+                logger.error(f"❌ Erreur migration {entity_uuid}: {e}")
+
+        driver.close()
+
+        # Enregistrer le nouveau type dans le registry s'il n'existe pas
+        registry_service = EntityTypeRegistryService(db)
+        entity_type_record = registry_service.get_or_create_type(
+            type_name=bulk_request.new_entity_type.upper(),
+            tenant_id=tenant_id,
+            discovered_by="admin"
+        )
+
+        # Approuver automatiquement si créé maintenant
+        if entity_type_record.status == "pending" and entity_type_record.discovered_by == "admin":
+            registry_service.approve_type(
+                type_name=bulk_request.new_entity_type.upper(),
+                admin_email=admin.get("email", "admin@example.com"),
+                tenant_id=tenant_id
+            )
+
+        # Mettre à jour les compteurs pour tous les types concernés
+        driver_counts = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        # Types à mettre à jour : ancien types + nouveau type
+        types_to_update = list(old_types) + [bulk_request.new_entity_type.upper()]
+
+        for type_to_update in types_to_update:
+            with driver_counts.session() as session:
+                result = session.run("""
+                    MATCH (e:Entity {entity_type: $type, tenant_id: $tenant_id})
+                    RETURN count(e) as total,
+                           sum(CASE WHEN e.status = 'pending' THEN 1 ELSE 0 END) as pending
+                """, type=type_to_update, tenant_id=tenant_id)
+
+                record = result.single()
+                if record:
+                    registry_service.update_entity_counts(
+                        type_name=type_to_update,
+                        tenant_id=tenant_id,
+                        total_count=record["total"],
+                        pending_count=record["pending"]
+                    )
+
+        driver_counts.close()
+
+        logger.info(
+            f"✅ Migration terminée: {migrated_count} réussies, {failed_count} échecs"
+        )
+
+        return BulkChangeTypeResponse(
+            migrated_count=migrated_count,
+            failed_count=failed_count,
+            errors=errors
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erreur migration en masse: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

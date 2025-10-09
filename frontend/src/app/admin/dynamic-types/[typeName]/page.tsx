@@ -68,6 +68,15 @@ import {
   ModalCloseButton,
   useDisclosure,
   Select,
+  Radio,
+  RadioGroup,
+  Stack,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  IconButton,
+  Tooltip,
 } from "@chakra-ui/react";
 import {
   FiLayers,
@@ -79,6 +88,7 @@ import {
   FiSave,
   FiClock,
   FiGitMerge,
+  FiMoreVertical,
 } from "react-icons/fi";
 
 interface Entity {
@@ -100,8 +110,11 @@ interface TypeInfo {
   status: string;
   entity_count: number;
   pending_entity_count: number;
-  validated_entity_count: number;
+  validated_entity_count?: number;
   description?: string;
+  normalization_status?: string | null;
+  normalization_job_id?: string | null;
+  normalization_started_at?: string | null;
 }
 
 interface OntologyProposal {
@@ -126,6 +139,7 @@ export default function TypeEntitiesPage() {
   const [typeInfo, setTypeInfo] = useState<TypeInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('pending');
+  const [initialFilterSet, setInitialFilterSet] = useState(false);
   const [selectedEntities, setSelectedEntities] = useState<Set<string>>(new Set());
 
   // Normalisation workflow
@@ -133,6 +147,8 @@ export default function TypeEntitiesPage() {
   const [generatingOntology, setGeneratingOntology] = useState(false);
   const [ontologyProposals, setOntologyProposals] = useState<OntologyProposal[]>([]);
   const [editingCanonical, setEditingCanonical] = useState<Record<string, string>>({});
+  const [hasExistingOntology, setHasExistingOntology] = useState(false);
+  const [checkingOntology, setCheckingOntology] = useState(false);
 
   // Job de normalisation en cours
   const [normalizationJobId, setNormalizationJobId] = useState<string | null>(null);
@@ -143,6 +159,7 @@ export default function TypeEntitiesPage() {
   const [entityToChangeType, setEntityToChangeType] = useState<Entity | null>(null);
   const [newEntityType, setNewEntityType] = useState<string>('');
   const [availableTypes, setAvailableTypes] = useState<string[]>([]);
+  const [typeInputMode, setTypeInputMode] = useState<'existing' | 'new'>('existing');
 
   // Option normalisation : inclure entités validées
   const [includeValidated, setIncludeValidated] = useState(false);
@@ -156,12 +173,69 @@ export default function TypeEntitiesPage() {
   const { isOpen: isMergeTypeOpen, onOpen: onMergeTypeOpen, onClose: onMergeTypeClose } = useDisclosure();
   const [targetMergeType, setTargetMergeType] = useState<string>('');
 
+  // Modal merge entity
+  const { isOpen: isMergeEntityOpen, onOpen: onMergeEntityOpen, onClose: onMergeEntityClose } = useDisclosure();
+  const [entityToMerge, setEntityToMerge] = useState<Entity | null>(null);
+  const [targetEntityUuid, setTargetEntityUuid] = useState<string>('');
+  const [mergeCanonicalName, setMergeCanonicalName] = useState<string>('');
+
+  // Migration en masse
+  const [bulkAction, setBulkAction] = useState<'approve' | 'merge' | 'change-type'>('approve');
+  const [bulkTargetType, setBulkTargetType] = useState<string>('');
+  const [bulkTypeInputMode, setBulkTypeInputMode] = useState<'existing' | 'new'>('existing');
+  const [isBulkMigrating, setIsBulkMigrating] = useState(false);
+
+  // Réinitialiser le filtre quand on change de type
+  useEffect(() => {
+    setStatusFilter('pending');
+    setInitialFilterSet(false);
+  }, [typeName]);
+
   useEffect(() => {
     fetchTypeInfo();
     fetchEntities();
     fetchAvailableTypes();
     fetchSnapshots();
   }, [typeName, statusFilter]);
+
+  // Vérifier l'existence d'une ontologie et auto-charger si pending_review
+  useEffect(() => {
+    checkIfOntologyExists();
+  }, [typeName]);
+
+  // Auto-charger ontologie si normalization_status = 'pending_review'
+  useEffect(() => {
+    if (typeInfo?.normalization_status === 'pending_review' && !showNormalization) {
+      console.log('[Auto-load] Normalisation pending_review détectée, chargement automatique...');
+      loadExistingOntology();
+    }
+  }, [typeInfo?.normalization_status]);
+
+  // Vérifier si une ontologie existe en cache (sans l'afficher automatiquement)
+  const checkIfOntologyExists = async () => {
+    try {
+      const ontologyResponse = await fetch(`/api/entity-types/${typeName}/ontology-proposal`);
+      if (ontologyResponse.ok) {
+        const ontologyData = await ontologyResponse.json();
+        setHasExistingOntology(ontologyData.ontology && Object.keys(ontologyData.ontology).length > 0);
+      } else {
+        setHasExistingOntology(false);
+      }
+    } catch (error) {
+      setHasExistingOntology(false);
+    }
+  };
+
+  // Ajuster le filtre initial selon le nombre d'entités pending
+  useEffect(() => {
+    if (typeInfo && !initialFilterSet) {
+      // Si aucune entité pending, basculer sur "all"
+      if (typeInfo.pending_entity_count === 0 && typeInfo.entity_count > 0) {
+        setStatusFilter('all');
+      }
+      setInitialFilterSet(true);
+    }
+  }, [typeInfo, initialFilterSet]);
 
   const fetchAvailableTypes = async () => {
     try {
@@ -204,6 +278,10 @@ export default function TypeEntitiesPage() {
       const response = await fetch(`/api/entity-types/${typeName}`);
       if (response.ok) {
         const data = await response.json();
+        // Calculer validated_entity_count si absent
+        if (data.validated_entity_count === undefined) {
+          data.validated_entity_count = Math.max(0, data.entity_count - data.pending_entity_count);
+        }
         setTypeInfo(data);
       }
     } catch (error) {
@@ -220,7 +298,13 @@ export default function TypeEntitiesPage() {
 
       const response = await fetch(url);
       const data = await response.json();
-      setEntities(data.entities || []);
+
+      // Trier par nom alphabétiquement
+      const sortedEntities = (data.entities || []).sort((a: Entity, b: Entity) =>
+        a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' })
+      );
+
+      setEntities(sortedEntities);
     } catch (error) {
       console.error('Error fetching entities:', error);
       toast({
@@ -231,6 +315,84 @@ export default function TypeEntitiesPage() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Charger automatiquement l'ontologie disponible (si elle existe)
+  const loadExistingOntology = async () => {
+    setCheckingOntology(true);
+    try {
+      const ontologyResponse = await fetch(`/api/entity-types/${typeName}/ontology-proposal`);
+
+      if (ontologyResponse.ok) {
+        const ontologyData = await ontologyResponse.json();
+
+        // Calculer le preview avec l'ontologie disponible
+        const previewResponse = await fetch(`/api/entity-types/${typeName}/preview-normalization`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Key': 'admin-dev-key-change-in-production'
+          },
+          body: JSON.stringify({ ontology: ontologyData.ontology })
+        });
+
+        if (previewResponse.ok) {
+          const previewData = await previewResponse.json();
+          const mergeGroups = previewData.merge_groups || [];
+
+          if (mergeGroups.length > 0) {
+            setOntologyProposals(mergeGroups);
+            setShowNormalization(true);
+            setHasExistingOntology(true);
+
+            console.log(`[Auto-load] Ontologie trouvée: ${mergeGroups.length} groupes`);
+          }
+        }
+      }
+    } catch (error) {
+      // Pas d'ontologie disponible, c'est normal
+      console.log('[Auto-load] Pas d\'ontologie disponible');
+    } finally {
+      setCheckingOntology(false);
+    }
+  };
+
+  const handleCancelNormalization = async () => {
+    try {
+      const response = await fetch(`/api/entity-types/${typeName}/ontology-proposal`, {
+        method: 'DELETE',
+        headers: {
+          'X-Admin-Key': 'admin-dev-key-change-in-production'
+        }
+      });
+
+      if (response.ok) {
+        // Réinitialiser l'état UI
+        setShowNormalization(false);
+        setOntologyProposals([]);
+        setHasExistingOntology(false);
+
+        // Recharger typeInfo pour mettre à jour normalization_status
+        await fetchTypeInfo();
+
+        toast({
+          title: '✅ Normalisation annulée',
+          description: 'Les propositions ont été supprimées',
+          status: 'success',
+          duration: 3000,
+        });
+      } else {
+        throw new Error('Failed to cancel normalization');
+      }
+    } catch (error) {
+      console.error('Error canceling normalization:', error);
+      toast({
+        title: 'Erreur',
+        description: 'Impossible d\'annuler la normalisation',
+        status: 'error',
+        duration: 3000,
+      });
     }
   };
 
@@ -245,10 +407,16 @@ export default function TypeEntitiesPage() {
       return;
     }
 
+    // Si une ontologie existe déjà, la charger au lieu de régénérer
+    if (hasExistingOntology && !showNormalization) {
+      await loadExistingOntology();
+      return;
+    }
+
     setGeneratingOntology(true);
 
     try {
-      // Step 1: Lancer génération ontologie
+      // Lancer génération ontologie (asynchrone)
       const response = await fetch(`/api/entity-types/${typeName}/generate-ontology?include_validated=${includeValidated}`, {
         method: 'POST',
         headers: {
@@ -263,80 +431,26 @@ export default function TypeEntitiesPage() {
       }
 
       const result = await response.json();
-      const jobId = result.job_id;
+      const entitiesCount = result.entities_count || 0;
+
+      setGeneratingOntology(false);
+      setHasExistingOntology(false); // Invalider l'ancienne ontologie
 
       toast({
-        title: 'Génération démarrée',
-        description: `Job ID: ${jobId}. Attente résultat...`,
-        status: 'info',
-        duration: 3000,
+        title: '✅ Génération lancée',
+        description: `Traitement de ${entitiesCount} entités en cours. Rechargez la page dans quelques minutes pour voir les résultats.`,
+        status: 'success',
+        duration: 10000,
+        isClosable: true,
       });
-
-      // Step 2: Polling job status
-      let attempts = 0;
-      const maxAttempts = 60; // 60 * 2s = 2 minutes max
-
-      const pollJobStatus = async () => {
-        try {
-          const statusResponse = await fetch(`/api/jobs/${jobId}/status`);
-          const statusData = await statusResponse.json();
-
-          if (statusData.status === 'finished') {
-            // Step 3: Récupérer ontologie générée
-            const ontologyResponse = await fetch(`/api/entity-types/${typeName}/ontology-proposal`);
-            const ontologyData = await ontologyResponse.json();
-
-            // Step 4: Calculer preview normalisation
-            const previewResponse = await fetch(`/api/entity-types/${typeName}/preview-normalization`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Admin-Key': 'admin-dev-key-change-in-production'
-              },
-              body: JSON.stringify({ ontology: ontologyData.ontology })
-            });
-
-            const previewData = await previewResponse.json();
-            setOntologyProposals(previewData.merge_groups || []);
-            setShowNormalization(true);
-            setGeneratingOntology(false);
-
-            toast({
-              title: 'Ontologie générée',
-              description: `${previewData.summary.groups_proposed} groupes proposés`,
-              status: 'success',
-              duration: 3000,
-            });
-
-          } else if (statusData.status === 'failed') {
-            throw new Error('Job failed');
-          } else if (attempts < maxAttempts) {
-            attempts++;
-            setTimeout(pollJobStatus, 2000);
-          } else {
-            throw new Error('Timeout');
-          }
-        } catch (error) {
-          console.error('Polling error:', error);
-          setGeneratingOntology(false);
-          toast({
-            title: 'Erreur',
-            description: 'Impossible de récupérer le résultat',
-            status: 'error',
-            duration: 3000,
-          });
-        }
-      };
-
-      await pollJobStatus();
 
     } catch (error) {
       setGeneratingOntology(false);
       toast({
         title: 'Erreur',
-        description: 'Erreur lors de la génération',
+        description: 'Erreur lors du lancement de la génération',
         status: 'error',
-        duration: 3000,
+        duration: 5000,
       });
     }
   };
@@ -383,6 +497,57 @@ export default function TypeEntitiesPage() {
           : group
       )
     );
+  };
+
+  const handleMoveEntity = (sourceGroupKey: string, targetGroupKey: string, entityUuid: string) => {
+    setOntologyProposals(prev => {
+      const sourceGroup = prev.find(g => g.canonical_key === sourceGroupKey);
+      const targetGroup = prev.find(g => g.canonical_key === targetGroupKey);
+      const entityToMove = sourceGroup?.entities.find(e => e.uuid === entityUuid);
+
+      if (!entityToMove || !targetGroup) return prev;
+
+      // Déplacer l'entité vers le groupe cible
+      return prev.map(group => {
+        if (group.canonical_key === sourceGroupKey) {
+          // Retirer l'entité du groupe source
+          const newEntities = group.entities.filter(e => e.uuid !== entityUuid);
+          // Si c'était le master et qu'il reste des entités, choisir un nouveau master
+          const newMasterUuid = group.master_uuid === entityUuid && newEntities.length > 0
+            ? newEntities[0].uuid
+            : group.master_uuid;
+
+          return {
+            ...group,
+            entities: newEntities,
+            master_uuid: newMasterUuid
+          };
+        } else if (group.canonical_key === targetGroupKey) {
+          // Ajouter l'entité au groupe cible
+          return {
+            ...group,
+            entities: [
+              ...group.entities,
+              {
+                ...entityToMove,
+                selected: true, // Par défaut sélectionnée
+                score: 80, // Score manuel
+                auto_match: false,
+                matched_via: 'manual_move'
+              }
+            ]
+          };
+        }
+        return group;
+      }).filter(group => group.entities.length > 0); // Supprimer groupes vides
+    });
+
+    toast({
+      title: 'Entité déplacée',
+      description: `L'entité a été déplacée vers le groupe cible`,
+      status: 'success',
+      duration: 2000,
+    });
   };
 
   const handleExtractEntity = (canonicalKey: string, entityUuid: string) => {
@@ -597,6 +762,7 @@ export default function TypeEntitiesPage() {
   const handleOpenChangeType = (entity: Entity) => {
     setEntityToChangeType(entity);
     setNewEntityType('');
+    setTypeInputMode('existing');
     onChangeTypeOpen();
   };
 
@@ -709,6 +875,54 @@ export default function TypeEntitiesPage() {
     }
   };
 
+  const handleOpenMergeEntity = (entity: Entity) => {
+    setEntityToMerge(entity);
+    setTargetEntityUuid('');
+    setMergeCanonicalName('');
+    onMergeEntityOpen();
+  };
+
+  const handleMergeEntitySubmit = async () => {
+    if (!entityToMerge || !targetEntityUuid) return;
+
+    try {
+      const response = await fetch(`/api/entities/${entityToMerge.uuid}/merge`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Key': 'admin-dev-key-change-in-production'
+        },
+        body: JSON.stringify({
+          target_uuid: targetEntityUuid,
+          canonical_name: mergeCanonicalName || null
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        toast({
+          title: 'Entités fusionnées',
+          description: `${data.relations_transferred} relations transférées`,
+          status: 'success',
+          duration: 3000,
+        });
+        onMergeEntityClose();
+        fetchEntities();
+        fetchTypeInfo();
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Merge failed');
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Erreur fusion',
+        description: error.message || 'Impossible de fusionner les entités',
+        status: 'error',
+        duration: 3000,
+      });
+    }
+  };
+
   const handleToggleEntity = (uuid: string) => {
     const newSelected = new Set(selectedEntities);
     if (newSelected.has(uuid)) {
@@ -724,6 +938,132 @@ export default function TypeEntitiesPage() {
       setSelectedEntities(new Set());
     } else {
       setSelectedEntities(new Set(entities.map(e => e.uuid)));
+    }
+  };
+
+  const handleBulkApprove = async () => {
+    if (selectedEntities.size === 0) {
+      toast({
+        title: 'Aucune sélection',
+        description: 'Sélectionnez au moins une entité à approuver',
+        status: 'warning',
+        duration: 3000,
+      });
+      return;
+    }
+
+    setIsBulkMigrating(true);
+    try {
+      const promises = Array.from(selectedEntities).map(uuid =>
+        fetch(`/api/entities/${uuid}/approve`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Key': 'admin-dev-key-change-in-production'
+          },
+          body: JSON.stringify({ admin_email: 'admin@example.com' })
+        })
+      );
+
+      const results = await Promise.all(promises);
+      const successCount = results.filter(r => r.ok).length;
+
+      toast({
+        title: 'Approbation réussie',
+        description: `${successCount} entité(s) approuvée(s)`,
+        status: 'success',
+        duration: 4000,
+      });
+
+      setSelectedEntities(new Set());
+      fetchEntities();
+      fetchTypeInfo();
+    } catch (error: any) {
+      toast({
+        title: 'Erreur approbation',
+        description: error.message || 'Impossible d\'approuver les entités',
+        status: 'error',
+        duration: 5000,
+      });
+    } finally {
+      setIsBulkMigrating(false);
+    }
+  };
+
+  const handleBulkMerge = () => {
+    if (selectedEntities.size < 2) {
+      toast({
+        title: 'Sélection insuffisante',
+        description: 'Sélectionnez au moins 2 entités à fusionner',
+        status: 'warning',
+        duration: 3000,
+      });
+      return;
+    }
+
+    // Ouvrir la modal de fusion avec la première entité comme source
+    const firstEntityUuid = Array.from(selectedEntities)[0];
+    const firstEntity = entities.find(e => e.uuid === firstEntityUuid);
+    if (firstEntity) {
+      handleOpenMergeEntity(firstEntity);
+      // Pré-sélectionner la deuxième entité comme target si possible
+      const secondEntityUuid = Array.from(selectedEntities)[1];
+      if (secondEntityUuid) {
+        setTargetEntityUuid(secondEntityUuid);
+      }
+    }
+  };
+
+  const handleBulkMigrateSubmit = async () => {
+    if (selectedEntities.size === 0 || !bulkTargetType) {
+      toast({
+        title: 'Sélection incomplète',
+        description: 'Sélectionnez des entités et un type de destination',
+        status: 'warning',
+        duration: 3000,
+      });
+      return;
+    }
+
+    setIsBulkMigrating(true);
+    try {
+      const response = await fetch('/api/entities/bulk-change-type', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Key': 'admin-dev-key-change-in-production'
+        },
+        body: JSON.stringify({
+          entity_uuids: Array.from(selectedEntities),
+          new_entity_type: bulkTargetType
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        toast({
+          title: 'Migration réussie',
+          description: `${data.migrated_count} entités migrées vers ${bulkTargetType}`,
+          status: 'success',
+          duration: 4000,
+        });
+        setSelectedEntities(new Set());
+        setBulkTargetType('');
+        fetchEntities();
+        fetchTypeInfo();
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Migration failed');
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Erreur migration',
+        description: error.message || 'Impossible de migrer les entités',
+        status: 'error',
+        duration: 5000,
+      });
+    } finally {
+      setIsBulkMigrating(false);
     }
   };
 
@@ -789,7 +1129,7 @@ export default function TypeEntitiesPage() {
                 </Stat>
                 <Stat>
                   <StatLabel>Validées</StatLabel>
-                  <StatNumber color="green.500">{typeInfo.validated_entity_count}</StatNumber>
+                  <StatNumber color="green.500">{typeInfo.validated_entity_count ?? 0}</StatNumber>
                 </Stat>
               </SimpleGrid>
 
@@ -883,11 +1223,28 @@ export default function TypeEntitiesPage() {
                           colorScheme="purple"
                           leftIcon={<FiCpu />}
                           onClick={handleGenerateOntology}
-                          isLoading={generatingOntology}
-                          loadingText="Génération..."
+                          isLoading={generatingOntology || checkingOntology || typeInfo?.normalization_status === 'generating'}
+                          loadingText={
+                            typeInfo?.normalization_status === 'generating' ? '⏳ Génération en cours...' :
+                            checkingOntology ? "Chargement..." :
+                            "Génération..."
+                          }
+                          isDisabled={typeInfo?.normalization_status === 'generating'}
                         >
-                          🤖 Générer propositions canoniques
+                          {typeInfo?.normalization_status === 'generating' ? '⏳ Génération en cours...' :
+                           hasExistingOntology && !showNormalization ? '📥 Charger propositions existantes' :
+                           showNormalization ? '🔄 Régénérer propositions' :
+                           '🤖 Générer propositions canoniques'}
                         </Button>
+                        {showNormalization && (
+                          <Button
+                            colorScheme="red"
+                            variant="outline"
+                            onClick={handleCancelNormalization}
+                          >
+                            🗑️ Annuler normalisation
+                          </Button>
+                        )}
                       </>
                     )}
                     <Button
@@ -977,12 +1334,128 @@ export default function TypeEntitiesPage() {
 
                 {/* Entities Table */}
                 {!loading && entities.length > 0 && (
-                  <Card>
-                    <CardBody p={0}>
-                      <Table variant="simple">
-                        <Thead>
-                          <Tr>
-                            <Th>Nom</Th>
+                  <>
+                    {/* Barre d'actions en masse */}
+                    {selectedEntities.size > 0 && (
+                      <Card bg="blue.50" borderColor="blue.200" borderWidth="2px" mb={4}>
+                        <CardBody>
+                          <Flex direction={{ base: 'column', md: 'row' }} gap={4} align="center" wrap="wrap">
+                            <Badge colorScheme="blue" fontSize="md" px={3} py={1}>
+                              {selectedEntities.size} entité(s) sélectionnée(s)
+                            </Badge>
+
+                            <Select
+                              value={bulkAction}
+                              onChange={(e) => {
+                                setBulkAction(e.target.value as 'approve' | 'merge' | 'change-type');
+                                setBulkTargetType('');
+                              }}
+                              maxW="200px"
+                            >
+                              <option value="approve">Approuver</option>
+                              <option value="merge">Fusionner</option>
+                              <option value="change-type">Changer type</option>
+                            </Select>
+
+                            {bulkAction === 'change-type' && (
+                              <>
+                                <RadioGroup
+                                  value={bulkTypeInputMode}
+                                  onChange={(value) => {
+                                    setBulkTypeInputMode(value as 'existing' | 'new');
+                                    setBulkTargetType('');
+                                  }}
+                                >
+                                  <Stack direction="row" spacing={4}>
+                                    <Radio value="existing">Type existant</Radio>
+                                    <Radio value="new">Créer nouveau</Radio>
+                                  </Stack>
+                                </RadioGroup>
+
+                                {bulkTypeInputMode === 'existing' ? (
+                                  <Select
+                                    placeholder="Sélectionnez le type de destination"
+                                    value={bulkTargetType}
+                                    onChange={(e) => setBulkTargetType(e.target.value)}
+                                    maxW="300px"
+                                  >
+                                    {availableTypes
+                                      .filter(t => t !== typeName)
+                                      .map(type => (
+                                        <option key={type} value={type}>{type}</option>
+                                      ))
+                                    }
+                                  </Select>
+                                ) : (
+                                  <Input
+                                    placeholder="ex: SERVICE, TECHNOLOGY..."
+                                    value={bulkTargetType}
+                                    onChange={(e) => setBulkTargetType(e.target.value.toUpperCase())}
+                                    maxW="300px"
+                                  />
+                                )}
+                              </>
+                            )}
+
+                            <HStack ml="auto">
+                              {bulkAction === 'approve' && (
+                                <Button
+                                  colorScheme="green"
+                                  leftIcon={<FiCheckCircle />}
+                                  onClick={handleBulkApprove}
+                                  isLoading={isBulkMigrating}
+                                  loadingText="Approbation..."
+                                >
+                                  Approuver ({selectedEntities.size})
+                                </Button>
+                              )}
+                              {bulkAction === 'merge' && (
+                                <Button
+                                  colorScheme="purple"
+                                  leftIcon={<FiGitMerge />}
+                                  onClick={handleBulkMerge}
+                                  isDisabled={selectedEntities.size < 2}
+                                >
+                                  Fusionner ({selectedEntities.size})
+                                </Button>
+                              )}
+                              {bulkAction === 'change-type' && (
+                                <Button
+                                  colorScheme="blue"
+                                  leftIcon={<FiEdit2 />}
+                                  onClick={handleBulkMigrateSubmit}
+                                  isLoading={isBulkMigrating}
+                                  loadingText="Migration..."
+                                  isDisabled={!bulkTargetType}
+                                >
+                                  Migrer vers {bulkTargetType || '...'}
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                onClick={() => setSelectedEntities(new Set())}
+                              >
+                                Annuler
+                              </Button>
+                            </HStack>
+                          </Flex>
+                        </CardBody>
+                      </Card>
+                    )}
+
+                    <Card>
+                      <CardBody p={0}>
+                        <Table variant="simple">
+                          <Thead>
+                            <Tr>
+                              <Th width="50px">
+                                <Checkbox
+                                  isChecked={selectedEntities.size === entities.length && entities.length > 0}
+                                  onChange={handleToggleAll}
+                                  colorScheme="blue"
+                                />
+                              </Th>
+                              <Th>Nom</Th>
                             <Th maxW="200px">Nom canonique</Th>
                             <Th>Status</Th>
                             <Th>Description</Th>
@@ -993,6 +1466,13 @@ export default function TypeEntitiesPage() {
                         <Tbody>
                           {entities.map((entity) => (
                             <Tr key={entity.uuid} _hover={{ bg: 'gray.50' }}>
+                              <Td>
+                                <Checkbox
+                                  isChecked={selectedEntities.has(entity.uuid)}
+                                  onChange={() => handleToggleEntity(entity.uuid)}
+                                  colorScheme="blue"
+                                />
+                              </Td>
                               <Td fontWeight="bold">{entity.name}</Td>
                               <Td maxW="200px">
                                 {entity.canonical_name ? (
@@ -1008,36 +1488,53 @@ export default function TypeEntitiesPage() {
                                   {entity.status}
                                 </Badge>
                               </Td>
-                              <Td maxW="300px" isTruncated>
-                                <Text fontSize="sm" color="gray.600">
-                                  {entity.description || '-'}
-                                </Text>
+                              <Td maxW="300px">
+                                <Tooltip label={entity.description || '-'} hasArrow placement="top">
+                                  <Text
+                                    fontSize="sm"
+                                    color="gray.600"
+                                    noOfLines={3}
+                                    whiteSpace="normal"
+                                  >
+                                    {entity.description || '-'}
+                                  </Text>
+                                </Tooltip>
                               </Td>
                               <Td fontSize="sm" whiteSpace="nowrap">
                                 {new Date(entity.created_at).toLocaleDateString('fr-FR')}
                               </Td>
                               <Td>
-                                <HStack spacing={2}>
-                                  {entity.status === 'pending' && (
-                                    <Button
-                                      size="xs"
-                                      colorScheme="green"
-                                      leftIcon={<FiCheckCircle />}
-                                      onClick={() => handleApproveEntity(entity.uuid)}
+                                <Menu>
+                                  <MenuButton
+                                    as={IconButton}
+                                    icon={<FiMoreVertical />}
+                                    variant="ghost"
+                                    size="sm"
+                                    aria-label="Actions"
+                                  />
+                                  <MenuList>
+                                    {entity.status === 'pending' && (
+                                      <MenuItem
+                                        icon={<FiCheckCircle />}
+                                        onClick={() => handleApproveEntity(entity.uuid)}
+                                      >
+                                        Approuver
+                                      </MenuItem>
+                                    )}
+                                    <MenuItem
+                                      icon={<FiGitMerge />}
+                                      onClick={() => handleOpenMergeEntity(entity)}
                                     >
-                                      Approuver
-                                    </Button>
-                                  )}
-                                  <Button
-                                    size="xs"
-                                    colorScheme="blue"
-                                    variant="outline"
-                                    leftIcon={<FiEdit2 />}
-                                    onClick={() => handleOpenChangeType(entity)}
-                                  >
-                                    Changer type
-                                  </Button>
-                                </HStack>
+                                      Fusionner
+                                    </MenuItem>
+                                    <MenuItem
+                                      icon={<FiEdit2 />}
+                                      onClick={() => handleOpenChangeType(entity)}
+                                    >
+                                      Changer type
+                                    </MenuItem>
+                                  </MenuList>
+                                </Menu>
                               </Td>
                             </Tr>
                           ))}
@@ -1045,6 +1542,7 @@ export default function TypeEntitiesPage() {
                       </Table>
                     </CardBody>
                   </Card>
+                  </>
                 )}
               </VStack>
             </TabPanel>
@@ -1134,7 +1632,7 @@ export default function TypeEntitiesPage() {
                                   <Th>Nom actuel</Th>
                                   <Th>Score</Th>
                                   <Th>Auto-match</Th>
-                                  <Th width="120px">Actions</Th>
+                                  <Th width="280px">Actions</Th>
                                 </Tr>
                               </Thead>
                               <Tbody>
@@ -1165,15 +1663,37 @@ export default function TypeEntitiesPage() {
                                       )}
                                     </Td>
                                     <Td>
-                                      <Button
-                                        size="sm"
-                                        colorScheme="purple"
-                                        variant="outline"
-                                        onClick={() => handleExtractEntity(group.canonical_key, entity.uuid)}
-                                        title="Extraire cette entité dans un groupe séparé"
-                                      >
-                                        Extraire
-                                      </Button>
+                                      <HStack spacing={2}>
+                                        <Select
+                                          size="sm"
+                                          placeholder="Déplacer vers..."
+                                          onChange={(e) => {
+                                            if (e.target.value) {
+                                              handleMoveEntity(group.canonical_key, e.target.value, entity.uuid);
+                                              e.target.value = ''; // Reset
+                                            }
+                                          }}
+                                          maxW="150px"
+                                        >
+                                          {ontologyProposals
+                                            .filter(g => g.canonical_key !== group.canonical_key)
+                                            .map(g => (
+                                              <option key={g.canonical_key} value={g.canonical_key}>
+                                                {g.canonical_name}
+                                              </option>
+                                            ))
+                                          }
+                                        </Select>
+                                        <Button
+                                          size="sm"
+                                          colorScheme="purple"
+                                          variant="outline"
+                                          onClick={() => handleExtractEntity(group.canonical_key, entity.uuid)}
+                                          title="Extraire cette entité dans un groupe séparé"
+                                        >
+                                          Extraire
+                                        </Button>
+                                      </HStack>
                                     </Td>
                                   </Tr>
                                 ))}
@@ -1229,25 +1749,51 @@ export default function TypeEntitiesPage() {
 
               <Box>
                 <Text fontWeight="bold" mb={2}>Nouveau type :</Text>
-                <Select
-                  placeholder="Sélectionnez un type"
-                  value={newEntityType}
-                  onChange={(e) => setNewEntityType(e.target.value)}
+
+                <RadioGroup
+                  value={typeInputMode}
+                  onChange={(value) => {
+                    setTypeInputMode(value as 'existing' | 'new');
+                    setNewEntityType('');
+                  }}
+                  mb={3}
                 >
-                  {availableTypes
-                    .filter(t => t !== entityToChangeType?.entity_type)
-                    .map(type => (
-                      <option key={type} value={type}>{type}</option>
-                    ))
-                  }
-                </Select>
+                  <Stack direction="row" spacing={4}>
+                    <Radio value="existing">Type existant</Radio>
+                    <Radio value="new">Créer nouveau type</Radio>
+                  </Stack>
+                </RadioGroup>
+
+                {typeInputMode === 'existing' ? (
+                  <Select
+                    placeholder="Sélectionnez un type"
+                    value={newEntityType}
+                    onChange={(e) => setNewEntityType(e.target.value)}
+                  >
+                    {availableTypes
+                      .filter(t => t !== entityToChangeType?.entity_type)
+                      .map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))
+                    }
+                  </Select>
+                ) : (
+                  <Input
+                    placeholder="ex: SERVICE, TECHNOLOGY..."
+                    value={newEntityType}
+                    onChange={(e) => setNewEntityType(e.target.value.toUpperCase())}
+                    autoFocus
+                  />
+                )}
               </Box>
 
               <Alert status="info" variant="left-accent">
                 <AlertIcon />
                 <Text fontSize="sm">
-                  L'entité sera déplacée vers le type sélectionné.
-                  Vous pourrez ensuite la normaliser avec les autres entités de ce type.
+                  {typeInputMode === 'new'
+                    ? "Le nouveau type d'entité sera créé automatiquement lors du changement. L'entité sera la première de ce nouveau type."
+                    : "L'entité sera déplacée vers le type sélectionné. Vous pourrez ensuite la normaliser avec les autres entités de ce type."
+                  }
                 </Text>
               </Alert>
             </VStack>
@@ -1334,6 +1880,104 @@ export default function TypeEntitiesPage() {
               isDisabled={!targetMergeType}
             >
               Fusionner les types
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* Modal Merge Entity */}
+      <Modal isOpen={isMergeEntityOpen} onClose={onMergeEntityClose} size="lg">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Fusionner deux entités</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <VStack spacing={4} align="stretch">
+              <Alert status="warning" variant="left-accent">
+                <AlertIcon />
+                <VStack align="start" spacing={1}>
+                  <Text fontWeight="bold" fontSize="sm">⚠️ Fusion manuelle d'entités</Text>
+                  <Text fontSize="xs">
+                    L'entité source sera fusionnée dans l'entité cible.
+                    Toutes les relations seront transférées et l'entité source sera supprimée.
+                  </Text>
+                </VStack>
+              </Alert>
+
+              <Box>
+                <Text fontWeight="bold" mb={2}>Entité source (sera supprimée) :</Text>
+                <Badge colorScheme="red" fontSize="md" px={3} py={1}>
+                  {entityToMerge?.name}
+                </Badge>
+                {entityToMerge?.canonical_name && (
+                  <Text fontSize="xs" color="gray.600" mt={1}>
+                    Nom canonique : {entityToMerge.canonical_name}
+                  </Text>
+                )}
+              </Box>
+
+              <Box>
+                <Text fontWeight="bold" mb={2}>Entité cible (sera conservée) :</Text>
+                <Select
+                  placeholder="Sélectionnez l'entité cible"
+                  value={targetEntityUuid}
+                  onChange={(e) => {
+                    setTargetEntityUuid(e.target.value);
+                    // Pré-remplir le nom canonique avec le nom de l'entité cible
+                    const targetEntity = entities.find(ent => ent.uuid === e.target.value);
+                    if (targetEntity) {
+                      setMergeCanonicalName(targetEntity.canonical_name || targetEntity.name);
+                    }
+                  }}
+                  size="md"
+                >
+                  {entities
+                    .filter(e => e.uuid !== entityToMerge?.uuid)
+                    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }))
+                    .map(entity => (
+                      <option key={entity.uuid} value={entity.uuid}>
+                        {entity.name}
+                        {entity.canonical_name ? ` (${entity.canonical_name})` : ''}
+                      </option>
+                    ))
+                  }
+                </Select>
+              </Box>
+
+              <Box>
+                <Text fontWeight="bold" mb={2}>Nom canonique final (optionnel) :</Text>
+                <Input
+                  placeholder="Ex: SAP S/4HANA PCE"
+                  value={mergeCanonicalName}
+                  onChange={(e) => setMergeCanonicalName(e.target.value)}
+                  size="md"
+                />
+                <Text fontSize="xs" color="gray.600" mt={1}>
+                  Si non renseigné, conserve le nom actuel de l'entité cible
+                </Text>
+              </Box>
+
+              <Alert status="info" variant="left-accent">
+                <AlertIcon />
+                <Text fontSize="sm">
+                  Cette action transfère toutes les relations (entrantes et sortantes) de l'entité source vers l'entité cible,
+                  puis supprime l'entité source.
+                </Text>
+              </Alert>
+            </VStack>
+          </ModalBody>
+
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={onMergeEntityClose}>
+              Annuler
+            </Button>
+            <Button
+              colorScheme="purple"
+              leftIcon={<FiGitMerge />}
+              onClick={handleMergeEntitySubmit}
+              isDisabled={!targetEntityUuid}
+            >
+              Fusionner les entités
             </Button>
           </ModalFooter>
         </ModalContent>

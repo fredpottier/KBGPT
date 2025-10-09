@@ -128,6 +128,25 @@ class EntityTypeRegistry(Base):
         comment="Description du type (ajoutée par admin)"
     )
 
+    # Normalisation workflow (Phase 5B)
+    normalization_status = Column(
+        String(20),
+        nullable=True,
+        comment="Statut normalisation: generating | pending_review | NULL (none)"
+    )
+
+    normalization_job_id = Column(
+        String(50),
+        nullable=True,
+        comment="Job ID RQ de la génération d'ontologie en cours"
+    )
+
+    normalization_started_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Date lancement dernière normalisation"
+    )
+
     # Timestamps auto
     created_at = Column(
         DateTime(timezone=True),

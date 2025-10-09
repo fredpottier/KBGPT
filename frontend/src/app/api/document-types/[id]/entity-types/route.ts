@@ -49,15 +49,29 @@ export async function POST(
     });
 
     if (!response.ok) {
-      throw new Error(`Backend returned ${response.status}`);
+      // Essayer de récupérer le message d'erreur du backend
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.detail || errorData.message || `Backend returned ${response.status}`;
+
+      console.error('Backend error:', errorMessage, errorData);
+
+      return NextResponse.json(
+        {
+          error: errorMessage,
+          message: errorMessage,
+          detail: errorData.detail,
+          status: response.status
+        },
+        { status: response.status }
+      );
     }
 
     const data = await response.json();
     return NextResponse.json(data);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error adding entity types:', error);
     return NextResponse.json(
-      { error: 'Failed to add entity types' },
+      { error: error.message || 'Failed to add entity types' },
       { status: 500 }
     );
   }

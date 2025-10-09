@@ -9,8 +9,16 @@ export async function POST(
   try {
     const { typeName } = params;
     const body = await request.json();
+    const snapshotId = body.snapshot_id;
 
-    const url = `${BACKEND_URL}/api/entity-types/${encodeURIComponent(typeName)}/undo-normalization`;
+    if (!snapshotId) {
+      return NextResponse.json(
+        { error: 'snapshot_id is required' },
+        { status: 400 }
+      );
+    }
+
+    const url = `${BACKEND_URL}/api/entity-types/${encodeURIComponent(typeName)}/undo-normalization/${encodeURIComponent(snapshotId)}`;
 
     const response = await fetch(url, {
       method: 'POST',
@@ -18,7 +26,7 @@ export async function POST(
         'Content-Type': 'application/json',
         'X-Admin-Key': 'admin-dev-key-change-in-production',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({}),
     });
 
     if (!response.ok) {
