@@ -2,8 +2,9 @@
 
 **Projet** : SAP Knowledge Base
 **Date création** : 10 octobre 2025
-**Version** : 1.0 - Document de référence UNIQUE
-**Statut** : 🎯 **Plan directeur consolidé**
+**Version** : 1.1 - Phase 0 démarrée
+**Statut** : 🚀 **EN COURS - Phase 0 Security Hardening**
+**Dernière mise à jour** : 09 octobre 2025
 
 > **Mission** : Ramener KnowBase à sa promesse fondamentale en unifiant tous les chantiers (architecture, sécurité, promise business) en un plan cohérent et réaliste.
 
@@ -366,7 +367,9 @@ graph TD
 
 **Durée** : 4 semaines
 **Priorité** : P0 (CRITIQUE)
+**Statut** : 🚀 **EN COURS** (Démarré le 2025-10-09)
 **Objectif** : Sécuriser le système pour permettre déploiement production
+**Tracking détaillé** : `doc/PHASE_0_SECURITY_TRACKING.md`
 
 #### Travaux
 
