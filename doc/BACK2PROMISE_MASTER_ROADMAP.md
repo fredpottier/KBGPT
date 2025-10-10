@@ -2,8 +2,8 @@
 
 **Projet** : SAP Knowledge Base
 **Date création** : 10 octobre 2025
-**Version** : 1.4 - Phase 0 complétée, Phase 1 en cours (60%)
-**Statut** : 🚀 **EN COURS - Phase 1 Document Backbone (Semaine 4/5)**
+**Version** : 1.5 - Phase 0 + Phase 1 complétées (28% total)
+**Statut** : ✅ **Phase 1 COMPLÉTÉE** - Prêt pour Phase 2 (Facts Governance)
 **Dernière mise à jour** : 10 octobre 2025
 
 > **Mission** : Ramener KnowBase à sa promesse fondamentale en unifiant tous les chantiers (architecture, sécurité, promise business) en un plan cohérent et réaliste.
@@ -385,7 +385,7 @@ Gaps bloquant "know where to know" :
 
 ```
 Phase 0: Security Hardening (P0)         [4 semaines]  ✅ COMPLÉTÉE (10 oct 2025)
-Phase 1: Document Backbone               [5 semaines]  🟡 EN COURS (60% - Sem 1-3/5)
+Phase 1: Document Backbone               [5 semaines]  ✅ COMPLÉTÉE (10 oct 2025)
 Phase 2: Facts Governance Finalization   [4 semaines]  ⏸️ EN ATTENTE
 Phase 3: Semantic Overlay & Provenance   [6 semaines]  ⏸️ EN ATTENTE
 Phase 4: Definition Tracking             [4 semaines]  ⏸️ EN ATTENTE
@@ -393,7 +393,7 @@ Phase 5: Conversational Memory           [5 semaines]  ⏸️ EN ATTENTE
 Phase 6: Production Hardening & Scale    [4 semaines]  ⏸️ EN ATTENTE
 ───────────────────────────────────────────────────────────────────
 TOTAL                                    [32 semaines ≈ 8 mois]
-PROGRESSION ACTUELLE                     [7 semaines = 22% du total]
+PROGRESSION ACTUELLE                     [9 semaines = 28% du total]
 ```
 
 ### Dépendances Entre Phases
@@ -486,11 +486,11 @@ graph TD
 
 ---
 
-### **PHASE 1 : Document Backbone** - 🟡 **EN COURS (60% COMPLÉTÉ)**
+### **PHASE 1 : Document Backbone** - ✅ **COMPLÉTÉE (100%)**
 
 **Durée** : 5 semaines
 **Priorité** : P0 (BLOQUANT PROMISE)
-**Statut** : 🟡 **EN COURS** - Semaines 1-3 complétées (Démarré le 2025-10-10)
+**Statut** : ✅ **COMPLÉTÉ** - Toutes les 5 semaines complétées (10 octobre 2025)
 **Objectif** : Implémenter cycle de vie documentaire pour "know where to know"
 **Tracking détaillé** : `doc/PHASE1_DOCUMENT_BACKBONE_TRACKING.md`
 
@@ -524,31 +524,38 @@ graph TD
 - **Fichier** : `src/knowbase/ingestion/pipelines/pptx_pipeline.py` (+292 lignes)
 - **Fix critique** : Erreur Pydantic `any` → `Any` résolue (commit d472124)
 
-**Semaine 4 : APIs REST** ⏸️ **EN ATTENTE**
-- [ ] `GET /documents` (liste avec versions)
-- [ ] `GET /documents/{id}/versions` (historique)
-- [ ] `GET /documents/{id}/lineage` (graphe modifications)
-- [ ] `POST /documents/{id}/versions` (upload nouvelle version)
+**Semaine 4 : APIs REST** ✅ **COMPLÉTÉE** (10 octobre 2025)
+- [x] `GET /documents` (liste avec filtres pagination)
+- [x] `GET /documents/{id}` (détail document + versions)
+- [x] `GET /documents/{id}/versions` (historique complet)
+- [x] `GET /documents/{id}/lineage` (graphe modifications)
+- [x] `POST /documents/{id}/versions` (upload nouvelle version avec checksum + SUPERSEDES)
+- [x] `GET /documents/by-episode/{uuid}` (résolution provenance Episode → Document)
+- **Fichier** : `src/knowbase/api/routers/documents.py` (778 lignes)
+- **Authentification** : JWT + RBAC (admin/editor/viewer) sur tous endpoints
 
-**Semaine 5 : UI Admin** ⏸️ **EN ATTENTE**
-- [ ] Timeline view documents
-- [ ] Comparaison versions (diff metadata)
-- [ ] Flags obsolescence
-- [ ] Change log visualisation
+**Semaine 5 : UI Admin** ✅ **COMPLÉTÉE** (10 octobre 2025)
+- [x] Timeline view documents (visualisation verticale avec avatars)
+- [x] Comparaison versions (diff metadata side-by-side, highlight changements)
+- [x] Flags obsolescence (badges + switch filtre "versions actives uniquement")
+- [x] Change log visualisation (dates relatives, metadata preview)
+- **Fichiers** :
+  - `frontend/src/app/admin/documents/[id]/timeline/page.tsx` (360 lignes)
+  - `frontend/src/app/admin/documents/[id]/compare/page.tsx` (375 lignes)
+  - `frontend/src/lib/api.ts` (+52 lignes API client)
 
-#### Livrables (60% Complétés)
+#### Livrables (100% Complétés) ✅
 
-**Complétés** :
+**Tous complétés** :
 - ✅ Document/DocumentVersion schema Neo4j (4 contraintes, 7 indexes)
 - ✅ DocumentRegistryService + VersionResolutionService opérationnels
 - ✅ Schémas Pydantic complets
 - ✅ Pipeline ingestion PPTX intégré (extraction 12 metadata, checksum SHA256, duplicate detection)
 - ✅ Checksum anti-duplicatas fonctionnel et opérationnel
 - ✅ Episode → DocumentVersion relations implémentées
-
-**En attente** :
-- ⏸️ API REST documents (4 endpoints)
-- ⏸️ UI visualisation historique (timeline + comparaison versions)
+- ✅ API REST documents (6 endpoints avec JWT + RBAC)
+- ✅ UI visualisation historique (timeline + comparaison versions + filtres)
+- ✅ Provenance complète (Episode → Document resolution)
 
 #### Métriques Succès (Targets Phase 1 complète)
 
@@ -990,21 +997,23 @@ Ce document **"Back2Promise"** consolide **4 analyses différentes** en **UN SEU
 
 ### État Actuel (10 octobre 2025)
 
-**Progression Back2Promise** : 22% (7/32 semaines)
+**Progression Back2Promise** : 28% (9/32 semaines)
 
 **Réalisations** :
-- ✅ Phase 0 (Security Hardening) : 100% COMPLÉTÉE
-- ✅ Phase 1 (Document Backbone) : 60% COMPLÉTÉE (Semaines 1-3/5)
+- ✅ Phase 0 (Security Hardening) : 100% COMPLÉTÉE (4 semaines)
+- ✅ Phase 1 (Document Backbone) : 100% COMPLÉTÉE (5 semaines) - **NOUVEAU**
   - ✅ Schema Neo4j Document/DocumentVersion (Sem 1)
   - ✅ Services backend DocumentRegistry + VersionResolution (Sem 2)
-  - ✅ Pipeline ingestion PPTX intégré (Sem 3) - **NOUVEAU**
-  - ✅ Fix critique Pydantic any → Any résolu - **NOUVEAU**
+  - ✅ Pipeline ingestion PPTX intégré (Sem 3)
+  - ✅ APIs REST 6 endpoints documents (Sem 4) - **NOUVEAU**
+  - ✅ UI Admin Timeline + Comparaison versions (Sem 5) - **NOUVEAU**
+  - ✅ Provenance complète Episode → Document - **NOUVEAU**
 - ✅ Migration Graphiti → Neo4j Native : COMPLÉTÉE
 
 **Statut Production** :
 - ✅ Sécurité production-ready (JWT RS256, RBAC, Audit, Rate limiting)
-- ✅ Document lifecycle pipeline opérationnel (Schema ✅, Services ✅, Pipeline ✅)
-- ⏸️ Document lifecycle UI en attente (APIs REST + UI Admin - Semaines 4-5)
+- ✅ Document lifecycle COMPLET (Schema ✅, Services ✅, Pipeline ✅, APIs ✅, UI ✅)
+- ✅ Traçabilité "know where to know" opérationnelle - **PROMISE DÉLIVRÉE**
 
 ### Prochaines Étapes Immédiates
 
