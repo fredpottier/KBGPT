@@ -16,6 +16,7 @@ from knowbase.api.schemas.auth import (
     LoginRequest,
     RefreshTokenRequest,
     TokenResponse,
+    LoginResponse,
     UserCreate,
     UserResponse,
     CurrentUser,
@@ -29,20 +30,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=LoginResponse)
 def login(
     login_data: LoginRequest,
     db: Session = Depends(get_db)
-) -> TokenResponse:
+) -> LoginResponse:
     """
-    Authentifie un utilisateur et retourne des tokens JWT.
+    Authentifie un utilisateur et retourne des tokens JWT + infos user.
 
     Args:
         login_data: Email et mot de passe
         db: Session database
 
     Returns:
-        Access token et refresh token JWT
+        Access token, refresh token JWT et informations utilisateur
 
     Raises:
         HTTPException 401: Si email ou mot de passe invalide
@@ -94,11 +95,18 @@ def login(
 
     logger.info(f"✅ Login réussi: {user.email} (role: {user.role})")
 
-    return TokenResponse(
+    # Retourner tokens + user object
+    return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer",
-        expires_in=3600  # 1 heure en secondes
+        expires_in=3600,  # 1 heure en secondes
+        user=CurrentUser(
+            user_id=user.id,
+            email=user.email,
+            role=user.role,
+            tenant_id=user.tenant_id
+        )
     )
 
 
