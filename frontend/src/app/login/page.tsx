@@ -50,9 +50,15 @@ export default function LoginPage() {
 
     try {
       await login({ email, password })
+
+      // Petite attente pour laisser le temps au state de se mettre à jour
+      await new Promise(resolve => setTimeout(resolve, 100))
+
       // Après login réussi, rediriger vers l'URL de redirection
+      console.log('[Login] Redirecting to:', redirectUrl)
       router.push(redirectUrl)
     } catch (err: any) {
+      console.error('[Login] Error:', err)
       setError(err.message || 'Login failed. Please check your credentials.')
     } finally {
       setIsLoading(false)
