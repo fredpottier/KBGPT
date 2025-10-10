@@ -14,7 +14,10 @@ from sqlalchemy.orm import Session
 
 from knowbase.api.schemas.knowledge_graph import EntityResponse
 from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
-from knowbase.api.auth_deps.auth import require_admin, get_tenant_id
+from knowbase.api.dependencies import require_admin, require_editor, get_tenant_id, get_current_user
+from knowbase.api.validators import validate_entity_type, validate_entity_name
+from knowbase.api.utils.audit_helpers import log_audit
+from knowbase.common.log_sanitizer import sanitize_for_log
 from knowbase.db import get_db
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
@@ -104,6 +107,8 @@ class PendingEntitiesResponse(BaseModel):
     }
 )
 async def list_entities(
+    tenant_id: str = Depends(get_tenant_id),
+    current_user: dict = Depends(get_current_user),
     entity_type: Optional[str] = Query(
         default=None,
         description="Filtrer par entity_type (ex: SOLUTION, COMPONENT)",
@@ -113,11 +118,6 @@ async def list_entities(
         default=None,
         description="Filtrer par status (pending | validated)",
         example="pending"
-    ),
-    tenant_id: str = Query(
-        default="default",
-        description="Tenant ID",
-        example="default"
     ),
     limit: int = Query(
         default=100,
@@ -146,9 +146,16 @@ async def list_entities(
     Returns:
         Liste entités filtrées
     """
+    # Validation entity_type si fourni (Phase 0 - Input Validation)
+    if entity_type:
+        try:
+            entity_type = validate_entity_type(entity_type)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     logger.info(
-        f"📋 GET /entities - entity_type={entity_type}, status={status}, "
-        f"tenant={tenant_id}, limit={limit}, offset={offset}"
+        f"📋 GET /entities - entity_type={sanitize_for_log(entity_type)}, status={status}, "
+        f"tenant={tenant_id}, limit={limit}, offset={offset}, user={current_user.get('email')}"
     )
 
     kg_service = KnowledgeGraphService(tenant_id=tenant_id)
@@ -316,15 +323,12 @@ async def list_entities(
     }
 )
 async def list_pending_entities(
+    tenant_id: str = Depends(get_tenant_id),
+    current_user: dict = Depends(get_current_user),
     entity_type: Optional[str] = Query(
         default=None,
         description="Filtrer par type d'entité (ex: INFRASTRUCTURE)",
         example="SOLUTION"
-    ),
-    tenant_id: str = Query(
-        default="default",
-        description="Tenant ID (multi-tenancy)",
-        example="default"
     ),
     limit: int = Query(
         default=100,
@@ -355,9 +359,16 @@ async def list_pending_entities(
     Returns:
         Liste entités pending avec total count
     """
+    # Validation entity_type si fourni (Phase 0 - Input Validation)
+    if entity_type:
+        try:
+            entity_type = validate_entity_type(entity_type)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     logger.info(
-        f"📋 GET /entities/pending - entity_type={entity_type}, tenant={tenant_id}, "
-        f"limit={limit}, offset={offset}"
+        f"📋 GET /entities/pending - entity_type={sanitize_for_log(entity_type)}, tenant={tenant_id}, "
+        f"limit={limit}, offset={offset}, user={current_user.get('email')}"
     )
 
     kg_service = KnowledgeGraphService(tenant_id=tenant_id)
@@ -379,7 +390,7 @@ async def list_pending_entities(
         # Filtre optionnel entity_type
         if entity_type:
             query += " AND e.entity_type = $entity_type"
-            params["entity_type"] = entity_type.upper()
+            params["entity_type"] = entity_type
 
         # Order by created_at desc (plus récents en premier)
         query += """
@@ -710,6 +721,16 @@ async def approve_entity(
 
             logger.info(f"✅ Entité approuvée: {uuid}")
 
+            # Audit logging (Phase 0 - Audit Trail)
+            log_audit(
+                action="APPROVE",
+                user=admin,
+                resource_type="entity",
+                resource_id=uuid,
+                tenant_id=tenant_id,
+                details=f"Entity '{updated_node['name']}' approved, type={updated_node['entity_type']}"
+            )
+
             # Convertir en EntityResponse
             return EntityResponse(
                 uuid=updated_node["uuid"],
@@ -966,6 +987,16 @@ async def delete_entity_cascade(
             logger.info(
                 f"✅ Entité supprimée: {uuid} (cascade={cascade}, "
                 f"relations supprimées={relation_count if cascade else 0})"
+            )
+
+            # Audit logging (Phase 0 - Audit Trail)
+            log_audit(
+                action="DELETE",
+                user=admin,
+                resource_type="entity",
+                resource_id=uuid,
+                tenant_id=tenant_id,
+                details=f"Entity deleted (cascade={cascade}, relations={relation_count})"
             )
 
             return {
