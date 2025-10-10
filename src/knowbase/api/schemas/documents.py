@@ -4,7 +4,7 @@ Schemas Pydantic pour Document Backbone - Phase 1.
 Gère les documents et leurs versions avec metadata, lineage et provenance.
 """
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -39,7 +39,7 @@ class DocumentBase(BaseModel):
 class DocumentCreate(DocumentBase):
     """Création nouveau document."""
     description: Optional[str] = Field(None, max_length=2000, description="Description optionnelle")
-    metadata: Optional[Dict[str, any]] = Field(default_factory=dict, description="Metadata custom")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Metadata custom")
 
 
 class DocumentUpdate(BaseModel):
@@ -47,7 +47,7 @@ class DocumentUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     description: Optional[str] = Field(None, max_length=2000)
     status: Optional[DocumentStatus] = None
-    metadata: Optional[Dict[str, any]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class DocumentResponse(DocumentBase):
@@ -55,7 +55,7 @@ class DocumentResponse(DocumentBase):
     document_id: str = Field(..., description="UUID unique du document")
     description: Optional[str] = None
     status: DocumentStatus = Field(default=DocumentStatus.ACTIVE)
-    metadata: Dict[str, any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
@@ -93,7 +93,7 @@ class DocumentVersionCreate(DocumentVersionBase):
     supersedes_version_id: Optional[str] = Field(None, description="ID version précédente (lineage)")
 
     # Metadata custom
-    metadata: Optional[Dict[str, any]] = Field(default_factory=dict, description="Metadata custom extraite")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Metadata custom extraite")
 
     @validator('checksum')
     def validate_checksum_format(cls, v):
@@ -111,7 +111,7 @@ class DocumentVersionUpdate(BaseModel):
     effective_date: Optional[datetime] = None
     author_name: Optional[str] = None
     reviewer_name: Optional[str] = None
-    metadata: Optional[Dict[str, any]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class DocumentVersionResponse(DocumentVersionBase):
@@ -137,7 +137,7 @@ class DocumentVersionResponse(DocumentVersionBase):
     superseded_by_version_id: Optional[str] = Field(None, description="ID version suivante")
 
     # Metadata custom
-    metadata: Dict[str, any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
     # Timestamps
     created_at: datetime
@@ -181,7 +181,7 @@ class DocumentVersionComparison(BaseModel):
     version_2_date: datetime
 
     # Différences
-    metadata_changes: Dict[str, any] = Field(default_factory=dict, description="Changements metadata")
+    metadata_changes: Dict[str, Any] = Field(default_factory=dict, description="Changements metadata")
     checksum_differs: bool = Field(default=False, description="Contenu différent ?")
     author_changed: bool = Field(default=False)
 
