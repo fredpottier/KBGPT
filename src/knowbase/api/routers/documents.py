@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from knowbase.api.schemas.documents import (
     DocumentResponse,
     DocumentVersionResponse,
-    DocumentLineage,
+    DocumentLineageResponse,
     DocumentVersionCreate,
     DocumentStatus,
     DocumentType,
@@ -380,7 +380,7 @@ async def get_document_versions(
 
 @router.get(
     "/{document_id}/lineage",
-    response_model=DocumentLineage,
+    response_model=DocumentLineageResponse,
     summary="Graphe modifications document",
     description="""
     Récupère le graphe de modifications (lineage) d'un document.
