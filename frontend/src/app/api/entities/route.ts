@@ -8,11 +8,24 @@ export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   try {
+    // Forward JWT token from client to backend
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader) {
+      return NextResponse.json(
+        { error: 'Missing authorization token' },
+        { status: 401 }
+      );
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const queryString = searchParams.toString();
     const url = `${BACKEND_URL}/api/entities${queryString ? `?${queryString}` : ''}`;
 
     const response = await fetch(url, {
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+      },
       cache: 'no-store',
     });
 
