@@ -71,10 +71,17 @@ Semaine 2 : Services Backend ✅ COMPLÉTÉE (100%)
 │   ├── [✅] compare_versions() : Diff metadata entre versions
 │   └── [✅] check_obsolescence() : Détection versions obsolètes
 │
-└── [✅] 2.3 Intégration KnowledgeGraphService - PARTIEL
+└── [✅] 2.3 Intégration KnowledgeGraphService - COMPLET
     ├── [✅] Schémas Pydantic (Document, DocumentVersion)
-    ├── [⏸️] Intégration dans KnowledgeGraphService
-    └── [⏸️] Mise à jour pipeline ingestion
+    ├── [✅] Intégration dans KnowledgeGraphService
+    │   └── Justification: get_episode_by_uuid() implémentée (commit 3d3febb)
+    │       + API /api/documents/by-episode/{uuid} qui lie KG ↔ Document
+    │       + Collaboration KnowledgeGraphService + DocumentRegistryService opérationnelle
+    └── [✅] Mise à jour pipeline ingestion
+        └── Justification: Complétée en Semaine 3 (commit e2a46ae)
+            + pptx_pipeline.py utilise DocumentRegistryService (ligne 38, 1333)
+            + Création Document + DocumentVersion intégrée (lignes 1401-1463)
+            + Stockage document_id/document_version_id dans Episode.metadata (lignes 1988-1989)
 
 Semaine 3 : Ingestion Updates ✅ **COMPLÉTÉE (100%)**
 ├── [✅] 3.1 Parser metadata documents - COMPLET
@@ -405,6 +412,17 @@ print(f"Document créé: {doc['document_id']}")
 ---
 
 ## 📝 Changelog
+
+**10 octobre 2025 (Semaine 2-3 - Clarification Tâches)** :
+- ✅ Tâche "Intégration dans KnowledgeGraphService" marquée comme complétée
+  - Justification: get_episode_by_uuid() implémentée (commit 3d3febb)
+  - API /api/documents/by-episode/{uuid} assure collaboration KG ↔ Document
+- ✅ Tâche "Mise à jour pipeline ingestion" marquée comme complétée
+  - Justification: Complétée en Semaine 3 (commit e2a46ae)
+  - pptx_pipeline.py utilise DocumentRegistryService (ligne 38, 1333)
+  - Création Document + DocumentVersion intégrée (lignes 1401-1463)
+  - Stockage document_id/document_version_id dans Episode.metadata (lignes 1988-1989)
+- 📊 Semaines 2-3 : 100% confirmées complètes avec justifications documentées
 
 **10 octobre 2025 (Semaine 4 - API Résolution)** :
 - ✅ GET /api/documents/by-episode/{uuid} implémenté (traçabilité provenance)
