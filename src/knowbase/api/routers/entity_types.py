@@ -36,7 +36,10 @@ from knowbase.api.schemas.entity_types import (
     EntityTypeListResponse,
 )
 from knowbase.api.services.entity_type_registry_service import EntityTypeRegistryService
-from knowbase.api.auth_deps.auth import require_admin
+from knowbase.api.dependencies import require_admin, require_editor, get_tenant_id, get_current_user
+from knowbase.api.validators import validate_entity_type
+from knowbase.api.utils.audit_helpers import log_audit
+from knowbase.common.log_sanitizer import sanitize_for_log
 from knowbase.db import get_db
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
@@ -97,15 +100,12 @@ router = APIRouter(prefix="/entity-types", tags=["entity-types"])
     }
 )
 async def list_entity_types(
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    current_user: dict = Depends(get_current_user),  # ✅ Phase 0 - Auth
     status: Optional[str] = Query(
         default=None,
         description="Filtrer par status (pending | approved | rejected)",
         example="pending"
-    ),
-    tenant_id: str = Query(
-        default="default",
-        description="Tenant ID pour isolation multi-tenant",
-        example="default"
     ),
     limit: int = Query(
         default=100,
@@ -139,7 +139,8 @@ async def list_entity_types(
         Liste types avec total count
     """
     logger.info(
-        f"📋 GET /entity-types - status={status}, tenant={tenant_id}, "
+        f"📋 GET /entity-types - status={sanitize_for_log(status)}, "
+        f"tenant={tenant_id}, user={current_user.get('email')}, "
         f"limit={limit}, offset={offset}"
     )
 
@@ -259,6 +260,7 @@ async def list_entity_types(
 )
 async def create_entity_type(
     entity_type: EntityTypeCreate,
+    current_user: dict = Depends(require_editor),  # ✅ Phase 0 - Editor role required
     db: Session = Depends(get_db)
 ):
     """
@@ -274,7 +276,10 @@ async def create_entity_type(
     Returns:
         EntityTypeResponse créé
     """
-    logger.info(f"📝 POST /entity-types - type_name={entity_type.type_name}")
+    logger.info(
+        f"📝 POST /entity-types - type_name={sanitize_for_log(entity_type.type_name)}, "
+        f"user={current_user.get('email')}"
+    )
 
     service = EntityTypeRegistryService(db)
 
@@ -306,6 +311,16 @@ async def create_entity_type(
 
         logger.info(f"✅ Type créé: {new_type.type_name} (id={new_type.id})")
 
+        # Audit logging (Phase 0 - Audit Trail)
+        log_audit(
+            action="CREATE",
+            user=current_user,
+            resource_type="entity_type",
+            resource_id=str(new_type.id),
+            tenant_id=entity_type.tenant_id,
+            details=f"Entity type '{new_type.type_name}' created, status={new_type.status}"
+        )
+
         return EntityTypeResponse.from_orm(new_type)
 
     except HTTPException:
@@ -321,7 +336,8 @@ async def create_entity_type(
 @router.get("/{type_name}", response_model=EntityTypeResponse)
 async def get_entity_type(
     type_name: str,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    current_user: dict = Depends(get_current_user),  # ✅ Phase 0 - Auth
     db: Session = Depends(get_db)
 ):
     """
@@ -335,7 +351,16 @@ async def get_entity_type(
     Returns:
         EntityTypeResponse détails
     """
-    logger.info(f"📋 GET /entity-types/{type_name} - tenant={tenant_id}")
+    # Validation type_name (Phase 0 - Input Validation)
+    try:
+        type_name = validate_entity_type(type_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    logger.info(
+        f"📋 GET /entity-types/{sanitize_for_log(type_name)} - "
+        f"tenant={tenant_id}, user={current_user.get('email')}"
+    )
 
     service = EntityTypeRegistryService(db)
 
@@ -440,7 +465,8 @@ async def get_entity_type(
 async def approve_entity_type(
     type_name: str,
     approve_data: EntityTypeApprove,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """
@@ -458,9 +484,15 @@ async def approve_entity_type(
     Returns:
         EntityTypeResponse approuvé
     """
+    # Validation type_name (Phase 0 - Input Validation)
+    try:
+        type_name = validate_entity_type(type_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     logger.info(
-        f"✅ POST /entity-types/{type_name}/approve - "
-        f"admin={approve_data.admin_email}"
+        f"✅ POST /entity-types/{sanitize_for_log(type_name)}/approve - "
+        f"admin={admin.get('email')}"
     )
 
     service = EntityTypeRegistryService(db)
@@ -490,6 +522,16 @@ async def approve_entity_type(
 
     logger.info(f"✅ Type approuvé: {type_name}")
 
+    # Audit logging (Phase 0 - Audit Trail)
+    log_audit(
+        action="APPROVE",
+        user=admin,
+        resource_type="entity_type",
+        resource_id=str(approved_type.id),
+        tenant_id=tenant_id,
+        details=f"Entity type '{type_name}' approved"
+    )
+
     return EntityTypeResponse.from_orm(approved_type)
 
 
@@ -497,7 +539,8 @@ async def approve_entity_type(
 async def reject_entity_type(
     type_name: str,
     reject_data: EntityTypeReject,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """
@@ -517,9 +560,15 @@ async def reject_entity_type(
     Returns:
         EntityTypeResponse rejeté
     """
+    # Validation type_name (Phase 0 - Input Validation)
+    try:
+        type_name = validate_entity_type(type_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     logger.info(
-        f"❌ POST /entity-types/{type_name}/reject - "
-        f"admin={reject_data.admin_email}, reason={reject_data.reason}"
+        f"❌ POST /entity-types/{sanitize_for_log(type_name)}/reject - "
+        f"admin={admin.get('email')}, reason={sanitize_for_log(reject_data.reason)}"
     )
 
     service = EntityTypeRegistryService(db)
@@ -543,13 +592,24 @@ async def reject_entity_type(
 
     logger.info(f"❌ Type rejeté: {type_name}")
 
+    # Audit logging (Phase 0 - Audit Trail)
+    log_audit(
+        action="REJECT",
+        user=admin,
+        resource_type="entity_type",
+        resource_id=str(rejected_type.id),
+        tenant_id=tenant_id,
+        details=f"Entity type '{type_name}' rejected, reason={reject_data.reason}"
+    )
+
     return EntityTypeResponse.from_orm(rejected_type)
 
 
 @router.delete("/{type_name}", status_code=204)
 async def delete_entity_type(
     type_name: str,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """
@@ -568,7 +628,16 @@ async def delete_entity_type(
     Returns:
         204 No Content
     """
-    logger.info(f"🗑️ DELETE /entity-types/{type_name} - tenant={tenant_id}")
+    # Validation type_name (Phase 0 - Input Validation)
+    try:
+        type_name = validate_entity_type(type_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    logger.info(
+        f"🗑️ DELETE /entity-types/{sanitize_for_log(type_name)} - "
+        f"tenant={tenant_id}, admin={admin.get('email')}"
+    )
 
     service = EntityTypeRegistryService(db)
 
@@ -591,6 +660,16 @@ async def delete_entity_type(
         )
 
     logger.info(f"🗑️ Type supprimé: {type_name}")
+
+    # Audit logging (Phase 0 - Audit Trail)
+    log_audit(
+        action="DELETE",
+        user=admin,
+        resource_type="entity_type",
+        resource_id=str(entity_type.id),
+        tenant_id=tenant_id,
+        details=f"Entity type '{type_name}' deleted from registry"
+    )
 
     # 204 No Content (pas de body retourné)
     return
@@ -656,9 +735,10 @@ async def delete_entity_type(
 )
 async def import_entity_types_yaml(
     file: UploadFile = File(..., description="Fichier YAML à importer"),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only (bulk create)
     auto_approve: bool = Query(default=True, description="Auto-approuver types importés"),
     skip_existing: bool = Query(default=True, description="Ignorer types existants"),
-    tenant_id: str = Query(default="default", description="Tenant ID"),
     db: Session = Depends(get_db)
 ):
     """
@@ -668,7 +748,8 @@ async def import_entity_types_yaml(
     """
     logger.info(
         f"📤 POST /entity-types/import-yaml - "
-        f"file={file.filename}, auto_approve={auto_approve}, skip_existing={skip_existing}"
+        f"file={sanitize_for_log(file.filename)}, auto_approve={auto_approve}, "
+        f"skip_existing={skip_existing}, admin={admin.get('email')}"
     )
 
     # Vérifier extension fichier
@@ -803,8 +884,9 @@ async def import_entity_types_yaml(
     }
 )
 async def export_entity_types_yaml(
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    current_user: dict = Depends(get_current_user),  # ✅ Phase 0 - Auth
     status: Optional[str] = Query(default=None, description="Filtrer par status"),
-    tenant_id: str = Query(default="default", description="Tenant ID"),
     db: Session = Depends(get_db)
 ):
     """
@@ -899,9 +981,10 @@ async def export_entity_types_yaml(
 )
 async def generate_ontology(
     type_name: str,
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only (ontology generation)
     model_preference: str = Query(default="claude-sonnet", description="Modèle LLM"),
     include_validated: bool = Query(default=False, description="Inclure entités validées (⚠️ peut re-proposer merges existants)"),
-    tenant_id: str = Query(default="default", description="Tenant ID"),
     db: Session = Depends(get_db)
 ):
     """
@@ -1045,7 +1128,8 @@ async def generate_ontology(
 )
 async def get_ontology_proposal(
     type_name: str,
-    tenant_id: str = Query(default="default", description="Tenant ID")
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    current_user: dict = Depends(get_current_user)  # ✅ Phase 0 - Auth
 ):
     """
     Récupère ontologie proposée depuis Redis.
@@ -1112,7 +1196,8 @@ async def get_ontology_proposal(
 )
 async def cancel_normalization(
     type_name: str,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """
@@ -1222,7 +1307,8 @@ async def cancel_normalization(
 async def preview_normalization(
     type_name: str,
     ontology: Dict = Body(..., description="Ontologie fournie (depuis LLM ou manuelle)"),
-    tenant_id: str = Query(default="default", description="Tenant ID")
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    current_user: dict = Depends(get_current_user)  # ✅ Phase 0 - Auth
 ):
     """
     Calcule preview normalisation avec fuzzy matching.
@@ -1319,7 +1405,8 @@ async def normalize_entities(
     type_name: str,
     merge_groups: List[Dict] = Body(..., description="Groupes validés par user"),
     create_snapshot: bool = Body(default=True, description="Créer snapshot pour undo"),
-    tenant_id: str = Query(default="default", description="Tenant ID"),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only (normalization)
     db: Session = Depends(get_db)
 ):
     """
@@ -1431,7 +1518,8 @@ async def normalize_entities(
 async def undo_normalization(
     type_name: str,
     snapshot_id: str,
-    tenant_id: str = Query(default="default", description="Tenant ID")
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin)  # ✅ Phase 0 - Admin only (undo)
 ):
     """
     Lance undo normalisation.
@@ -1526,8 +1614,8 @@ async def undo_normalization(
 async def merge_entity_types(
     source_type: str,
     target_type: str,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
-    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """
@@ -1553,7 +1641,17 @@ async def merge_entity_types(
     import os
     import uuid
 
-    logger.info(f"🔀 Merge types: {source_type} → {target_type}")
+    # Validation type_names (Phase 0 - Input Validation)
+    try:
+        source_type = validate_entity_type(source_type)
+        target_type = validate_entity_type(target_type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    logger.info(
+        f"🔀 Merge types: {sanitize_for_log(source_type)} → {sanitize_for_log(target_type)}, "
+        f"admin={admin.get('email')}"
+    )
 
     # Vérifier que les deux types existent
     service = EntityTypeRegistryService(db)
@@ -1641,6 +1739,16 @@ async def merge_entity_types(
         # Supprimer le type source du registry
         service.delete_type(source_entity_type.id)
 
+        # Audit logging (Phase 0 - Audit Trail)
+        log_audit(
+            action="MERGE",
+            user=admin,
+            resource_type="entity_type",
+            resource_id=f"{source_entity_type.id}→{target_entity_type.id}",
+            tenant_id=tenant_id,
+            details=f"Merged {source_type} into {target_type}, {transferred_count} entities transferred"
+        )
+
         return {
             "success": True,
             "source_type": source_type,
@@ -1659,7 +1767,8 @@ async def merge_entity_types(
 @router.get("/{type_name}/snapshots")
 async def list_snapshots(
     type_name: str,
-    tenant_id: str = Query(default="default", description="Tenant ID")
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    current_user: dict = Depends(get_current_user)  # ✅ Phase 0 - Auth
 ):
     """
     Liste les snapshots disponibles pour rollback.

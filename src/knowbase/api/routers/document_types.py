@@ -33,7 +33,9 @@ from knowbase.api.schemas.document_types import (
     AnalyzeSampleResult,
 )
 from knowbase.api.services.document_type_service import DocumentTypeService
-from knowbase.api.auth_deps.auth import require_admin
+from knowbase.api.dependencies import require_admin, get_tenant_id, get_current_user
+from knowbase.api.utils.audit_helpers import log_audit
+from knowbase.common.log_sanitizer import sanitize_for_log
 from knowbase.db import get_db, DocumentTypeEntityType
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
@@ -50,8 +52,9 @@ router = APIRouter(prefix="/document-types", tags=["document-types"])
     summary="Liste tous les document types"
 )
 async def list_document_types(
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    current_user: dict = Depends(get_current_user),  # ✅ Phase 0 - Auth
     is_active: Optional[bool] = Query(default=None, description="Filtrer par statut actif"),
-    tenant_id: str = Query(default="default", description="Tenant ID"),
     db: Session = Depends(get_db)
 ):
     """
@@ -103,7 +106,7 @@ async def list_document_types(
 )
 async def create_document_type(
     data: DocumentTypeCreate,
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """
@@ -134,6 +137,16 @@ async def create_document_type(
     # Créer
     doc_type = service.create(data, admin_email=admin.get("email"))
 
+    # Audit logging (Phase 0 - Audit Trail)
+    log_audit(
+        action="CREATE",
+        user=admin,
+        resource_type="document_type",
+        resource_id=doc_type.id,
+        tenant_id=data.tenant_id,
+        details=f"Document type '{doc_type.name}' (slug={doc_type.slug}) created"
+    )
+
     # Récupérer suggested_entity_types
     suggested_types = service.get_suggested_entity_types(doc_type.id, data.tenant_id)
 
@@ -160,7 +173,8 @@ async def create_document_type(
 )
 async def get_document_type(
     document_type_id: str,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    current_user: dict = Depends(get_current_user),  # ✅ Phase 0 - Auth
     db: Session = Depends(get_db)
 ):
     """
@@ -207,8 +221,8 @@ async def get_document_type(
 async def update_document_type(
     document_type_id: str,
     data: DocumentTypeUpdate,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
-    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """
@@ -224,6 +238,16 @@ async def update_document_type(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document type {document_type_id} not found"
         )
+
+    # Audit logging (Phase 0 - Audit Trail)
+    log_audit(
+        action="UPDATE",
+        user=admin,
+        resource_type="document_type",
+        resource_id=doc_type.id,
+        tenant_id=tenant_id,
+        details=f"Document type '{doc_type.name}' updated"
+    )
 
     suggested_types = service.get_suggested_entity_types(doc_type.id, tenant_id)
 
@@ -250,8 +274,8 @@ async def update_document_type(
 )
 async def delete_document_type(
     document_type_id: str,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
-    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """
@@ -261,20 +285,34 @@ async def delete_document_type(
     Échoue si usage_count > 0.
     """
     service = DocumentTypeService(db)
+
+    # Récupérer doc_type AVANT suppression pour audit log
+    doc_type = service.get_by_id(document_type_id, tenant_id)
+    if not doc_type:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document type {document_type_id} not found"
+        )
+
+    doc_type_name = doc_type.name  # Sauvegarder pour audit log
+
     success = service.delete(document_type_id, tenant_id)
 
     if not success:
-        doc_type = service.get_by_id(document_type_id, tenant_id)
-        if not doc_type:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Document type {document_type_id} not found"
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Cannot delete document type with usage_count={doc_type.usage_count}"
-            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot delete document type with usage_count={doc_type.usage_count}"
+        )
+
+    # Audit logging (Phase 0 - Audit Trail)
+    log_audit(
+        action="DELETE",
+        user=admin,
+        resource_type="document_type",
+        resource_id=document_type_id,
+        tenant_id=tenant_id,
+        details=f"Document type '{doc_type_name}' deleted"
+    )
 
 
 @router.get(
@@ -284,7 +322,8 @@ async def delete_document_type(
 )
 async def list_entity_types_associations(
     document_type_id: str,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    current_user: dict = Depends(get_current_user),  # ✅ Phase 0 - Auth
     db: Session = Depends(get_db)
 ):
     """
@@ -328,8 +367,8 @@ async def list_entity_types_associations(
 async def add_entity_types(
     document_type_id: str,
     data: AddEntityTypesRequest,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
-    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """
@@ -354,6 +393,16 @@ async def add_entity_types(
         tenant_id=tenant_id
     )
 
+    # Audit logging (Phase 0 - Audit Trail)
+    log_audit(
+        action="ADD",
+        user=admin,
+        resource_type="document_type_entity_types",
+        resource_id=document_type_id,
+        tenant_id=tenant_id,
+        details=f"Added {added_count} entity types to document type {document_type_id}: {', '.join(data.entity_type_names)}"
+    )
+
     return {
         "message": f"{added_count} entity types added",
         "added_count": added_count
@@ -368,8 +417,8 @@ async def add_entity_types(
 async def remove_entity_type(
     document_type_id: str,
     entity_type_name: str,
-    tenant_id: str = Query(default="default", description="Tenant ID"),
-    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """
@@ -385,6 +434,16 @@ async def remove_entity_type(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Association not found"
         )
+
+    # Audit logging (Phase 0 - Audit Trail)
+    log_audit(
+        action="REMOVE",
+        user=admin,
+        resource_type="document_type_entity_types",
+        resource_id=document_type_id,
+        tenant_id=tenant_id,
+        details=f"Removed entity type '{entity_type_name}' from document type {document_type_id}"
+    )
 
 
 @router.get(
@@ -455,7 +514,7 @@ async def analyze_document_sample(
     context_prompt: Optional[str] = Form(None, description="Contexte additionnel"),
     model_preference: str = Form(default="claude-sonnet", description="Modèle LLM (Claude uniquement)"),
     tenant_id: str = Form(default="default", description="Tenant ID"),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),  # ✅ Phase 0 - Admin only
     db: Session = Depends(get_db)
 ):
     """

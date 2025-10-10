@@ -3,12 +3,18 @@ Router FastAPI pour les fonctions d'administration.
 
 Phase 7 - Admin Management
 """
-from fastapi import APIRouter, Depends, HTTPException, Header
-from typing import Dict
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from typing import Dict, List, Optional
+from pydantic import BaseModel, Field
 
 from knowbase.api.services.purge_service import PurgeService
+from knowbase.api.services.audit_service import get_audit_service
+from knowbase.api.dependencies import require_admin, get_tenant_id
+from knowbase.db import get_db
+from knowbase.db.models import AuditLog
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
+from sqlalchemy.orm import Session
 
 settings = get_settings()
 logger = setup_logging(settings.logs_dir, "admin_router.log")
@@ -152,6 +158,155 @@ async def admin_health() -> Dict:
         "overall_status": "healthy" if all_healthy else "degraded",
         "components": health_status,
     }
+
+
+class AuditLogResponse(BaseModel):
+    """Response model pour un audit log."""
+    id: str
+    user_email: str
+    action: str
+    resource_type: str
+    resource_id: Optional[str]
+    tenant_id: str
+    details: Optional[str]
+    timestamp: str
+
+    class Config:
+        from_attributes = True
+
+
+class AuditLogsListResponse(BaseModel):
+    """Response model pour liste audit logs."""
+    logs: List[AuditLogResponse]
+    total: int
+    filters: Dict
+
+
+@router.get(
+    "/audit-logs",
+    response_model=AuditLogsListResponse,
+    summary="Liste logs d'audit (Admin only)",
+    description="""
+    Récupère les logs d'audit pour traçabilité des actions critiques.
+
+    **Phase 0 - Security Hardening - Audit Trail**
+
+    **Filtres disponibles**:
+    - `user_id`: Filtrer par utilisateur spécifique
+    - `action`: Filtrer par type d'action (CREATE, UPDATE, DELETE, APPROVE, REJECT)
+    - `resource_type`: Filtrer par type de ressource (entity, fact, entity_type, etc.)
+    - `limit` / `offset`: Pagination
+
+    **Permissions**: Admin only (require_admin)
+
+    **Use Cases**:
+    - Audit trail complet des actions admin
+    - Traçabilité qui a fait quoi et quand
+    - Sécurité et compliance
+    """,
+    responses={
+        200: {
+            "description": "Liste des audit logs",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "logs": [
+                            {
+                                "id": "log-123",
+                                "user_email": "admin@example.com",
+                                "action": "DELETE",
+                                "resource_type": "entity",
+                                "resource_id": "ent-456",
+                                "tenant_id": "tenant-1",
+                                "details": "Entity deleted with cascade",
+                                "timestamp": "2025-10-09T10:30:00Z"
+                            }
+                        ],
+                        "total": 1,
+                        "filters": {"action": "DELETE"}
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Accès refusé (admin uniquement)"
+        }
+    }
+)
+async def list_audit_logs(
+    current_user: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Query(None, description="Filtrer par user_id"),
+    action: Optional[str] = Query(None, description="Filtrer par action"),
+    resource_type: Optional[str] = Query(None, description="Filtrer par resource_type"),
+    limit: int = Query(100, ge=1, le=1000, description="Limite résultats"),
+    offset: int = Query(0, ge=0, description="Offset pagination")
+):
+    """
+    Liste les audit logs avec filtres.
+
+    Args:
+        current_user: Admin user (authenticated via require_admin)
+        tenant_id: Tenant ID (from JWT)
+        db: Database session
+        user_id: Filtrer par utilisateur
+        action: Filtrer par action
+        resource_type: Filtrer par type ressource
+        limit: Limite résultats
+        offset: Offset pagination
+
+    Returns:
+        Liste logs d'audit avec total et filtres appliqués
+    """
+    logger.info(
+        f"📋 GET /admin/audit-logs - admin={current_user.get('email')}, "
+        f"filters: user_id={user_id}, action={action}, resource_type={resource_type}"
+    )
+
+    audit_service = get_audit_service(db)
+
+    logs = audit_service.get_audit_logs(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        action=action,
+        resource_type=resource_type,
+        limit=limit,
+        offset=offset
+    )
+
+    # Compter total (sans limit/offset)
+    from knowbase.db.models import AuditLog
+    query = db.query(AuditLog).filter(AuditLog.tenant_id == tenant_id)
+    if user_id:
+        query = query.filter(AuditLog.user_id == user_id)
+    if action:
+        query = query.filter(AuditLog.action == action)
+    if resource_type:
+        query = query.filter(AuditLog.resource_type == resource_type)
+    total = query.count()
+
+    return AuditLogsListResponse(
+        logs=[
+            AuditLogResponse(
+                id=log.id,
+                user_email=log.user_email,
+                action=log.action,
+                resource_type=log.resource_type,
+                resource_id=log.resource_id,
+                tenant_id=log.tenant_id,
+                details=log.details,
+                timestamp=log.timestamp.isoformat()
+            )
+            for log in logs
+        ],
+        total=total,
+        filters={
+            "user_id": user_id,
+            "action": action,
+            "resource_type": resource_type
+        }
+    )
 
 
 __all__ = ["router"]
