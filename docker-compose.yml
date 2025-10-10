@@ -135,6 +135,9 @@ services:
       - NEXT_TELEMETRY_DISABLED=1
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true
+      # API URLs - Client uses localhost, Server uses Docker service name
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_INTERNAL_URL=http://app:8000
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     volumes:
