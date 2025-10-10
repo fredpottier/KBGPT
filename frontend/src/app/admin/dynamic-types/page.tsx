@@ -82,7 +82,14 @@ export default function DynamicTypesPage() {
         ? '/api/entity-types'
         : `/api/entity-types?status=${statusFilter}`;
 
-      const response = await fetch(url);
+      // Get JWT token from localStorage
+      const token = localStorage.getItem('auth_token');
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
       const data = await response.json();
       setTypes(data.types || []);
     } catch (error) {

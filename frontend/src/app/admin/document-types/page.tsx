@@ -26,7 +26,7 @@ import {
 import { AddIcon, EditIcon, ViewIcon, DeleteIcon } from '@chakra-ui/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
-import axios from 'axios'
+import { apiClient } from '@/lib/api'
 
 interface DocumentType {
   id: string
@@ -50,14 +50,14 @@ export default function DocumentTypesPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['document-types'],
     queryFn: async () => {
-      const response = await axios.get('/api/document-types')
+      const response = await apiClient.get('/document-types')
       return response.data
     },
   })
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await axios.delete(`/api/document-types/${id}`)
+      await apiClient.delete(`/document-types/${id}`)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['document-types'] })
