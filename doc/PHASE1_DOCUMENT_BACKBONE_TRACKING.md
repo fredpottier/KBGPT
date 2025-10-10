@@ -99,8 +99,8 @@ Semaine 3 : Ingestion Updates ✅ **COMPLÉTÉE (100%)**
 └── [✅] 3.4 Link Episode → DocumentVersion - COMPLET
     ├── [✅] Relation PRODUCES créée (Cypher MATCH + MERGE)
     ├── [✅] Stockage document_id + document_version_id dans Episode.metadata
-    └── [✅] Logging complet de la relation
-    └── [⏸️] API résolution Episode → Document (prévu Semaine 4)
+    ├── [✅] Logging complet de la relation
+    └── [✅] API résolution Episode → Document (GET /api/documents/by-episode/{uuid})
 
 Semaine 4 : APIs REST ✅ **COMPLÉTÉE (100%)** (10 octobre 2025)
 ├── [✅] 4.1 GET /documents - Liste documents
@@ -139,11 +139,24 @@ Semaine 4 : APIs REST ✅ **COMPLÉTÉE (100%)** (10 octobre 2025)
     ├── [✅] Nettoyage fichier temporaire (finally block)
     └── [✅] RBAC: require_editor (admin ou editor uniquement, viewer interdit)
 
+└── [✅] 4.6 GET /api/documents/by-episode/{uuid} - Résolution Episode → Document
+    ├── [✅] Endpoint traçabilité provenance complète
+    ├── [✅] Récupération Episode par UUID via KnowledgeGraphService
+    ├── [✅] Extraction document_id et document_version_id depuis Episode.metadata
+    ├── [✅] Récupération Document et DocumentVersion
+    ├── [✅] Response enrichie (Episode + Document + Version + found flag)
+    ├── [✅] Gestion cas legacy (Episode sans document_id/version_id)
+    ├── [✅] Messages informatifs (success, warning, error)
+    └── [✅] RBAC: tous roles (admin, editor, viewer)
+
 ### Méthodes Service Ajoutées
 
 **DocumentRegistryService** (2 nouvelles méthodes):
 - ✅ `count_documents(status, document_type)` : Count avec filtres pour pagination
 - ✅ `get_document_versions(document_id)` : Liste versions document (ORDER BY DESC)
+
+**KnowledgeGraphService** (1 nouvelle méthode):
+- ✅ `get_episode_by_uuid(episode_uuid)` : Récupération Episode par UUID pour résolution provenance
 
 Semaine 5 : UI Admin ⏸️ EN ATTENTE (0%)
 ├── [⏸️] 5.1 Timeline view documents
@@ -392,6 +405,14 @@ print(f"Document créé: {doc['document_id']}")
 ---
 
 ## 📝 Changelog
+
+**10 octobre 2025 (Semaine 4 - API Résolution)** :
+- ✅ GET /api/documents/by-episode/{uuid} implémenté (traçabilité provenance)
+- ✅ Méthode get_episode_by_uuid() ajoutée dans KnowledgeGraphService
+- ✅ Résolution Episode → Document + DocumentVersion complète
+- ✅ Gestion cas legacy (Episode ingéré avant Phase 1)
+- 📊 Router documents.py : 606 → 778 lignes (+172 lignes)
+- 📊 Total 6 endpoints documents API (5 CRUD + 1 résolution provenance)
 
 **10 octobre 2025 (Semaine 4 - Complétion)** :
 - ✅ POST /documents/{id}/versions implémentation complète

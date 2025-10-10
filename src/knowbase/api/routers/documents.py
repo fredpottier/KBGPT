@@ -28,6 +28,7 @@ from knowbase.api.schemas.documents import (
 )
 from knowbase.api.services.document_registry_service import DocumentRegistryService
 from knowbase.api.services.version_resolution_service import VersionResolutionService
+from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
 from knowbase.api.dependencies import get_current_user, require_admin, require_editor, get_tenant_id
 from knowbase.api.utils.audit_helpers import log_audit
 from knowbase.common.logging import setup_logging
@@ -86,6 +87,31 @@ class VersionsListResponse(BaseModel):
         description="Historique versions (ordre chronologique DESC)"
     )
     total: int = Field(..., description="Nombre total versions")
+
+
+class EpisodeDocumentResolution(BaseModel):
+    """Réponse résolution Episode → Document (traçabilité provenance)."""
+
+    episode_uuid: str = Field(..., description="UUID de l'épisode")
+    episode_name: str = Field(..., description="Nom de l'épisode")
+    source_document: str = Field(..., description="Nom fichier source")
+    slide_number: Optional[int] = Field(None, description="Numéro slide")
+    document: Optional[DocumentResponse] = Field(
+        None,
+        description="Document source complet (si trouvé)"
+    )
+    document_version: Optional[DocumentVersionResponse] = Field(
+        None,
+        description="Version document utilisée lors ingestion (si trouvée)"
+    )
+    found: bool = Field(
+        ...,
+        description="Indique si le document a été trouvé (true) ou non (false)"
+    )
+    message: Optional[str] = Field(
+        None,
+        description="Message d'information ou d'erreur"
+    )
 
 
 # ===================================
@@ -602,3 +628,150 @@ async def create_document_version(
 
     finally:
         service.close()
+
+
+@router.get(
+    "/by-episode/{episode_uuid}",
+    response_model=EpisodeDocumentResolution,
+    summary="Résolution Episode → Document (traçabilité provenance)",
+    description="""
+    Récupère le Document et DocumentVersion source à partir d'un Episode UUID.
+
+    **Use Case**: Traçabilité provenance complète
+    - À partir d'une réponse chatbot (Episode)
+    - Retrouver le document source exact (Document + Version)
+    - Afficher provenance complète à l'utilisateur
+
+    **Process**:
+    1. Récupère Episode par UUID
+    2. Extrait document_id et document_version_id depuis Episode.metadata
+    3. Récupère Document et DocumentVersion
+    4. Retourne tout (Episode + Document + Version)
+
+    **Authentification**: JWT token requis
+    **RBAC**: admin, editor, viewer
+    """,
+    responses={
+        200: {
+            "description": "Résolution réussie",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "episode_uuid": "123e4567-e89b-12d3-a456-426614174000",
+                        "episode_name": "proposal_2024_slide_5",
+                        "source_document": "proposal_2024.pptx",
+                        "slide_number": 5,
+                        "document": {
+                            "document_id": "doc_456",
+                            "title": "Proposal 2024",
+                            "document_type": "pptx"
+                        },
+                        "document_version": {
+                            "version_id": "ver_789",
+                            "version_label": "v1.0",
+                            "checksum": "abc123..."
+                        },
+                        "found": True,
+                        "message": "Document source trouvé"
+                    }
+                }
+            }
+        },
+        404: {"description": "Episode non trouvé"},
+        401: {"description": "Non authentifié"},
+        403: {"description": "Accès refusé"}
+    }
+)
+async def resolve_episode_to_document(
+    episode_uuid: str,
+    tenant_id: str = Depends(get_tenant_id),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Résout Episode → Document pour traçabilité provenance.
+
+    Accessible par: admin, editor, viewer
+    """
+    logger.info(
+        f"GET /documents/by-episode/{episode_uuid} - User: {current_user.get('user_id')}"
+    )
+
+    kg_service = KnowledgeGraphService(tenant_id=tenant_id)
+    doc_service = DocumentRegistryService(tenant_id=tenant_id)
+
+    try:
+        # 1. Récupérer Episode
+        episode = kg_service.get_episode_by_uuid(episode_uuid)
+
+        if not episode:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Episode {episode_uuid} non trouvé"
+            )
+
+        logger.info(f"Episode trouvé: {episode.name} (slide {episode.slide_number})")
+
+        # 2. Extraire document_id et document_version_id des metadata
+        document_id = episode.metadata.get('document_id') if episode.metadata else None
+        document_version_id = episode.metadata.get('document_version_id') if episode.metadata else None
+
+        logger.info(f"Metadata Episode: document_id={document_id}, document_version_id={document_version_id}")
+
+        # 3. Récupérer Document et DocumentVersion si IDs présents
+        document = None
+        document_version = None
+        found = False
+        message = None
+
+        if document_id:
+            try:
+                document = doc_service.get_document(document_id)
+                if document:
+                    found = True
+                    logger.info(f"Document trouvé: {document.title}")
+                else:
+                    message = f"Document {document_id} non trouvé dans Neo4j"
+                    logger.warning(message)
+            except Exception as e:
+                message = f"Erreur récupération Document: {str(e)}"
+                logger.error(message)
+
+        if document_version_id:
+            try:
+                document_version = doc_service.get_version(document_version_id)
+                if document_version:
+                    logger.info(f"DocumentVersion trouvée: {document_version.version_label}")
+                else:
+                    message = f"DocumentVersion {document_version_id} non trouvée"
+                    logger.warning(message)
+            except Exception as e:
+                message = f"Erreur récupération DocumentVersion: {str(e)}"
+                logger.error(message)
+
+        if not document_id and not document_version_id:
+            message = "Episode sans metadata document_id/document_version_id (probablement ingéré avant Phase 1)"
+            logger.warning(message)
+
+        if found and not message:
+            message = "Document source trouvé avec succès"
+
+        return EpisodeDocumentResolution(
+            episode_uuid=episode.uuid,
+            episode_name=episode.name,
+            source_document=episode.source_document,
+            slide_number=episode.slide_number,
+            document=document,
+            document_version=document_version,
+            found=found,
+            message=message
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur résolution Episode → Document {episode_uuid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
+
+    finally:
+        kg_service.close()
+        doc_service.close()

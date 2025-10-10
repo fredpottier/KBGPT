@@ -517,6 +517,56 @@ class KnowledgeGraphService:
             created_at=node["created_at"].to_native()
         )
 
+    def get_episode_by_uuid(self, episode_uuid: str) -> Optional[EpisodeResponse]:
+        """
+        Récupère un épisode par son UUID.
+
+        Args:
+            episode_uuid: UUID de l'épisode
+
+        Returns:
+            EpisodeResponse ou None si non trouvé
+        """
+        with self.driver.session() as session:
+            result = session.execute_read(self._get_episode_by_uuid_tx, episode_uuid, self.tenant_id)
+            return result
+
+    @staticmethod
+    def _get_episode_by_uuid_tx(tx, episode_uuid: str, tenant_id: str) -> Optional[EpisodeResponse]:
+        """Transaction récupération épisode par UUID."""
+        query = """
+        MATCH (ep:Episode {uuid: $uuid, tenant_id: $tenant_id})
+        RETURN ep
+        LIMIT 1
+        """
+
+        result = tx.run(query, uuid=episode_uuid, tenant_id=tenant_id)
+        record = result.single()
+
+        if not record:
+            return None
+
+        node = record["ep"]
+
+        import json
+        metadata = json.loads(node["metadata"]) if node.get("metadata") else {}
+
+        return EpisodeResponse(
+            uuid=node["uuid"],
+            name=node["name"],
+            source_document=node["source_document"],
+            source_type=node["source_type"],
+            content_summary=node["content_summary"],
+            chunk_ids=node["chunk_ids"],
+            entity_uuids=node["entity_uuids"],
+            relation_uuids=node["relation_uuids"],
+            fact_uuids=node["fact_uuids"],
+            slide_number=node["slide_number"],
+            tenant_id=node["tenant_id"],
+            metadata=metadata,
+            created_at=node["created_at"].to_native()
+        )
+
     def get_episode_by_name(self, episode_name: str) -> Optional[EpisodeResponse]:
         """
         Récupère un épisode par son nom.
