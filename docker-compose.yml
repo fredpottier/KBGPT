@@ -178,6 +178,7 @@ services:
 
 networks:
   knowbase_net:
+    name: knowbase_network
     driver: bridge
 
 volumes:
