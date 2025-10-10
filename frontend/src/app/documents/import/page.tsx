@@ -22,6 +22,7 @@ import { AttachmentIcon, CheckIcon } from '@chakra-ui/icons'
 import { useMutation } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
+import { authService } from '@/lib/auth'
 
 interface FileUploadProps {
   onFileSelect: (file: File) => void
@@ -106,8 +107,33 @@ export default function ImportPage() {
   useEffect(() => {
     async function fetchDocumentTypes() {
       try {
-        const response = await fetch('/api/document-types?is_active=true')
+        const token = authService.getAccessToken()
+
+        if (!token) {
+          console.error('Pas de token d\'authentification disponible')
+          toast({
+            title: 'Erreur d\'authentification',
+            description: 'Veuillez vous reconnecter',
+            status: 'error',
+            duration: 3000,
+            isClosable: true,
+          })
+          setLoadingTypes(false)
+          return
+        }
+
+        const response = await fetch('/api/document-types?is_active=true', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        })
+
+        if (!response.ok) {
+          throw new Error(`Erreur ${response.status}`)
+        }
+
         const data = await response.json()
+        console.log('Document types chargés:', data)
         setDocumentTypes(data.document_types || [])
       } catch (error) {
         console.error('Erreur lors du chargement des types de documents:', error)
