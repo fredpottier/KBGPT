@@ -34,6 +34,10 @@ from knowbase.config.paths import ensure_directories
 from knowbase.config.settings import get_settings
 from knowbase.db import SessionLocal, DocumentType
 
+# Phase 1 - Document Backbone Services
+from knowbase.ontology.neo4j_client import Neo4jClient
+from knowbase.api.services.document_registry_service import DocumentRegistryService
+
 
 # --- Initialisation des chemins et variables globales ---
 settings = get_settings()
@@ -106,6 +110,39 @@ def ensure_dirs():
         MODELS_DIR,
     ])
 
+
+def calculate_checksum(file_path: Path) -> str:
+    """
+    Calcule le checksum SHA256 d'un fichier pour détecter les duplicatas.
+
+    Args:
+        file_path: Chemin vers le fichier
+
+    Returns:
+        Checksum SHA256 en hexadécimal (64 caractères)
+
+    Example:
+        >>> checksum = calculate_checksum(Path("/data/docs_in/presentation.pptx"))
+        >>> print(checksum)  # "a3d5f6e8b9c1d2e3f4..."
+    """
+    import hashlib
+
+    logger.debug(f"🔐 Calcul checksum SHA256: {file_path.name}")
+    sha256_hash = hashlib.sha256()
+
+    try:
+        with open(file_path, "rb") as f:
+            # Lire par chunks de 4096 bytes pour économiser la mémoire
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+
+        checksum = sha256_hash.hexdigest()
+        logger.info(f"✅ Checksum calculé: {checksum[:16]}... ({file_path.name})")
+        return checksum
+
+    except Exception as e:
+        logger.error(f"❌ Erreur calcul checksum pour {file_path.name}: {e}")
+        raise
 
 
 # Exécute une commande système avec timeout
@@ -779,50 +816,144 @@ def summarize_large_pptx(slides_data: List[Dict[str, Any]], document_type: str =
 
 def extract_pptx_metadata(pptx_path: Path) -> dict:
     """
-    Extrait les métadonnées depuis le fichier PPTX (docProps/core.xml)
-    Retourne notamment la date de modification pour éliminer la saisie manuelle
+    Extrait les métadonnées depuis le fichier PPTX (docProps/core.xml + app.xml).
+
+    Extrait notamment :
+    - Date de modification (source_date)
+    - Titre, créateur, version
+    - Last modified by, reviewers (si disponibles)
+
+    Args:
+        pptx_path: Chemin vers le fichier PPTX
+
+    Returns:
+        dict: Métadonnées extraites (titre, creator, source_date, version, etc.)
     """
     try:
+        metadata = {}
+
         with zipfile.ZipFile(pptx_path, 'r') as pptx_zip:
-            if 'docProps/core.xml' not in pptx_zip.namelist():
+            # === Extraction docProps/core.xml (métadonnées standard) ===
+            if 'docProps/core.xml' in pptx_zip.namelist():
+                core_xml = pptx_zip.read('docProps/core.xml').decode('utf-8')
+                root = ET.fromstring(core_xml)
+
+                # Namespaces Office Open XML
+                namespaces = {
+                    'cp': 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties',
+                    'dc': 'http://purl.org/dc/elements/1.1/',
+                    'dcterms': 'http://purl.org/dc/terms/',
+                    'xsi': 'http://www.w3.org/2001/XMLSchema-instance'
+                }
+
+                # Date de modification (prioritaire pour source_date)
+                modified_elem = root.find('dcterms:modified', namespaces)
+                if modified_elem is not None and modified_elem.text:
+                    try:
+                        modified_str = modified_elem.text
+                        modified_dt = datetime.fromisoformat(modified_str.replace('Z', '+00:00'))
+                        metadata['source_date'] = modified_dt.strftime('%Y-%m-%d')
+                        metadata['modified_at'] = modified_dt.isoformat()
+                        logger.info(f"📅 Date de modification extraite: {metadata['source_date']}")
+                    except Exception as e:
+                        logger.warning(f"Erreur parsing date modification: {e}")
+
+                # Date de création
+                created_elem = root.find('dcterms:created', namespaces)
+                if created_elem is not None and created_elem.text:
+                    try:
+                        created_str = created_elem.text
+                        created_dt = datetime.fromisoformat(created_str.replace('Z', '+00:00'))
+                        metadata['created_at'] = created_dt.isoformat()
+                        logger.debug(f"📅 Date de création extraite: {created_dt.strftime('%Y-%m-%d')}")
+                    except Exception as e:
+                        logger.warning(f"Erreur parsing date création: {e}")
+
+                # Titre
+                title_elem = root.find('dc:title', namespaces)
+                if title_elem is not None and title_elem.text:
+                    metadata['title'] = title_elem.text.strip()
+                    logger.info(f"📄 Titre extrait: {metadata['title']}")
+
+                # Créateur (auteur initial)
+                creator_elem = root.find('dc:creator', namespaces)
+                if creator_elem is not None and creator_elem.text:
+                    metadata['creator'] = creator_elem.text.strip()
+                    logger.info(f"👤 Créateur extrait: {metadata['creator']}")
+
+                # Last modified by (dernier modificateur)
+                last_modified_by_elem = root.find('cp:lastModifiedBy', namespaces)
+                if last_modified_by_elem is not None and last_modified_by_elem.text:
+                    metadata['last_modified_by'] = last_modified_by_elem.text.strip()
+                    logger.debug(f"👤 Dernier modificateur: {metadata['last_modified_by']}")
+
+                # Version (si présente)
+                version_elem = root.find('cp:version', namespaces)
+                if version_elem is not None and version_elem.text:
+                    metadata['version'] = version_elem.text.strip()
+                    logger.info(f"🔖 Version extraite: {metadata['version']}")
+
+                # Révision (nombre de révisions)
+                revision_elem = root.find('cp:revision', namespaces)
+                if revision_elem is not None and revision_elem.text:
+                    try:
+                        metadata['revision'] = int(revision_elem.text)
+                        logger.debug(f"🔄 Révision: {metadata['revision']}")
+                    except ValueError:
+                        pass
+
+                # Subject / Description
+                subject_elem = root.find('dc:subject', namespaces)
+                if subject_elem is not None and subject_elem.text:
+                    metadata['subject'] = subject_elem.text.strip()
+                    logger.debug(f"📝 Sujet: {metadata['subject']}")
+
+                description_elem = root.find('dc:description', namespaces)
+                if description_elem is not None and description_elem.text:
+                    metadata['description'] = description_elem.text.strip()
+                    logger.debug(f"📝 Description extraite ({len(metadata['description'])} chars)")
+
+            else:
                 logger.warning(f"Pas de métadonnées core.xml dans {pptx_path.name}")
-                return {}
 
-            core_xml = pptx_zip.read('docProps/core.xml').decode('utf-8')
-            root = ET.fromstring(core_xml)
-
-            # Namespaces Office Open XML
-            namespaces = {
-                'cp': 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties',
-                'dc': 'http://purl.org/dc/elements/1.1/',
-                'dcterms': 'http://purl.org/dc/terms/',
-                'xsi': 'http://www.w3.org/2001/XMLSchema-instance'
-            }
-
-            metadata = {}
-
-            # Date de modification (prioritaire pour source_date)
-            modified_elem = root.find('dcterms:modified', namespaces)
-            if modified_elem is not None:
+            # === Extraction docProps/app.xml (propriétés application) ===
+            if 'docProps/app.xml' in pptx_zip.namelist():
                 try:
-                    modified_str = modified_elem.text
-                    modified_dt = datetime.fromisoformat(modified_str.replace('Z', '+00:00'))
-                    metadata['source_date'] = modified_dt.strftime('%Y-%m-%d')
-                    logger.info(f"📅 Date de modification extraite: {metadata['source_date']}")
+                    app_xml = pptx_zip.read('docProps/app.xml').decode('utf-8')
+                    app_root = ET.fromstring(app_xml)
+
+                    # Namespace pour app.xml
+                    app_ns = {
+                        'vt': 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes',
+                        'ap': 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties'
+                    }
+
+                    # Company (organisation)
+                    company_elem = app_root.find('ap:Company', app_ns)
+                    if company_elem is not None and company_elem.text:
+                        metadata['company'] = company_elem.text.strip()
+                        logger.debug(f"🏢 Compagnie: {metadata['company']}")
+
+                    # Manager (peut servir pour approver/reviewer)
+                    manager_elem = app_root.find('ap:Manager', app_ns)
+                    if manager_elem is not None and manager_elem.text:
+                        metadata['manager'] = manager_elem.text.strip()
+                        logger.debug(f"👔 Manager: {metadata['manager']}")
+
                 except Exception as e:
-                    logger.warning(f"Erreur parsing date modification: {e}")
+                    logger.warning(f"Erreur parsing app.xml: {e}")
 
-            # Autres métadonnées utiles
-            title_elem = root.find('dc:title', namespaces)
-            if title_elem is not None and title_elem.text:
-                metadata['title'] = title_elem.text
-                logger.info(f"📄 Titre extrait: {metadata['title']}")
+        # Fallback : Extraire version depuis filename si non trouvée dans metadata
+        if 'version' not in metadata:
+            import re
+            # Pattern: fichier_v1.0.pptx, fichier_version_1.2.pptx, etc.
+            version_match = re.search(r'v(\d+\.\d+)', pptx_path.name, re.IGNORECASE)
+            if version_match:
+                metadata['version'] = version_match.group(1)
+                logger.info(f"🔖 Version extraite du filename: v{metadata['version']}")
 
-            creator_elem = root.find('dc:creator', namespaces)
-            if creator_elem is not None and creator_elem.text:
-                metadata['creator'] = creator_elem.text
-
-            return metadata
+        logger.info(f"✅ Métadonnées extraites: {len(metadata)} champs ({', '.join(metadata.keys())})")
+        return metadata
 
     except Exception as e:
         logger.warning(f"Erreur extraction métadonnées PPTX {pptx_path.name}: {e}")
@@ -1188,6 +1319,54 @@ def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_
     # Supprimer les slides cachés DIRECTEMENT du PPTX uploadé
     remove_hidden_slides_inplace(pptx_path)
 
+    # === PHASE 1 : DOCUMENT BACKBONE - Checksum & Duplicate Detection ===
+    logger.info(f"🔐 Phase 1: Calcul checksum et vérification duplicatas...")
+
+    if progress_callback:
+        progress_callback("Vérification duplicatas", 3, 100, "Calcul checksum SHA256")
+
+    # Calculer checksum du document
+    checksum = calculate_checksum(pptx_path)
+
+    # Initialiser DocumentRegistryService
+    neo4j_client = Neo4jClient()
+    doc_registry = DocumentRegistryService(neo4j_client)
+
+    # Vérifier si document déjà ingéré (duplicate detection)
+    try:
+        existing_version = doc_registry.get_version_by_checksum(checksum)
+        if existing_version:
+            logger.warning(f"⚠️ Document DUPLICATE détecté: {pptx_path.name}")
+            logger.warning(f"   Checksum: {checksum[:16]}...")
+            logger.warning(f"   Document existant: {existing_version['document_id']}")
+            logger.warning(f"   Version existante: {existing_version['version_label']}")
+            logger.warning(f"   Date source: {existing_version.get('source_date', 'N/A')}")
+            logger.warning(f"   ⏭️ SKIP INGESTION (document déjà présent dans la base)")
+
+            neo4j_client.close()
+
+            # Déplacer quand même vers docs_done pour éviter re-tentatives
+            logger.info(f"📁 Déplacement du fichier vers docs_done (already processed)...")
+            shutil.move(str(pptx_path), DOCS_DONE / f"{pptx_path.stem}.pptx")
+
+            if progress_callback:
+                progress_callback("Terminé (duplicata)", 100, 100, "Document déjà présent - ignoré")
+
+            return {
+                "chunks_inserted": 0,
+                "status": "skipped_duplicate",
+                "existing_document_id": existing_version['document_id'],
+                "checksum": checksum,
+                "message": f"Document duplicate of {existing_version['document_id']}"
+            }
+    except ValueError as e:
+        # Aucun duplicata trouvé (comportement normal)
+        logger.info(f"✅ Aucun duplicata détecté - Poursuite de l'ingestion")
+    except Exception as e:
+        # Erreur inattendue lors de la vérification
+        logger.error(f"❌ Erreur vérification duplicatas: {e}")
+        logger.info(f"⚠️ Poursuite de l'ingestion par sécurité")
+
     if progress_callback:
         progress_callback("Conversion PDF", 5, 100, "Conversion du PowerPoint en PDF")
 
@@ -1207,6 +1386,58 @@ def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_
     summary = deck_info.get("summary", "")
     metadata = deck_info.get("metadata", {})
     deck_prompt_id = deck_info.get("_prompt_meta", {}).get("deck_prompt_id", "unknown")
+
+    # === PHASE 1 : DOCUMENT BACKBONE - Create Document + DocumentVersion ===
+    logger.info(f"📝 Phase 1: Création Document + DocumentVersion dans Neo4j...")
+
+    if progress_callback:
+        progress_callback("Création Document", 12, 100, "Enregistrement document dans Neo4j")
+
+    try:
+        # Préparer les metadata pour le document
+        document_title = metadata.get('title') or auto_metadata.get('title') or pptx_path.stem
+        document_type = document_type_id or "Technical Presentation"
+        source_date = metadata.get('source_date') or auto_metadata.get('source_date')
+        creator = auto_metadata.get('creator', 'Unknown')
+        version_label = auto_metadata.get('version', 'v1.0')
+
+        # Créer le document + version initiale
+        document_response = doc_registry.create_document(
+            title=document_title,
+            source_path=str(pptx_path),
+            document_type=document_type,
+            version_label=version_label,
+            checksum=checksum,
+            file_size=pptx_path.stat().st_size,
+            source_date=source_date,
+            creator=creator,
+            description=summary[:500] if summary else None,  # Limite description à 500 chars
+            metadata={
+                'import_id': import_id,
+                'main_solution': metadata.get('main_solution'),
+                'supporting_solutions': metadata.get('supporting_solutions', []),
+                'objective': metadata.get('objective'),
+                'audience': metadata.get('audience', []),
+                'language': metadata.get('language'),
+                'company': auto_metadata.get('company'),
+                'last_modified_by': auto_metadata.get('last_modified_by'),
+                'revision': auto_metadata.get('revision'),
+            }
+        )
+
+        document_id = document_response['document_id']
+        document_version_id = document_response['latest_version']['version_id']
+
+        logger.info(f"✅ Document créé: {document_id}")
+        logger.info(f"   Version: {version_label} (ID: {document_version_id})")
+        logger.info(f"   Checksum: {checksum[:16]}...")
+        logger.info(f"   Titre: {document_title}")
+
+    except Exception as e:
+        logger.error(f"❌ Erreur création Document dans Neo4j: {e}")
+        # Ne pas bloquer l'ingestion si erreur Neo4j
+        document_id = None
+        document_version_id = None
 
     if progress_callback:
         progress_callback("Génération des miniatures", 15, 100, "Conversion PDF → images en cours")
@@ -1731,6 +1962,12 @@ def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_
                 "total_facts": int(len(inserted_uuids if 'inserted_uuids' in locals() else []))
             }
 
+            # === PHASE 1 : Ajouter document_id et document_version_id ===
+            if 'document_id' in locals() and document_id:
+                metadata_dict["document_id"] = document_id
+                metadata_dict["document_version_id"] = document_version_id if 'document_version_id' in locals() else None
+                logger.info(f"📎 Liaison Episode → Document {document_id} (version {document_version_id})")
+
             episode_data = EpisodeCreate(
                 name=episode_name,
                 source_document=pptx_path.name,
@@ -1748,12 +1985,40 @@ def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_
             kg_service = KnowledgeGraphService(tenant_id=tenant_id)
             try:
                 episode_response = kg_service.create_episode(episode_data)
+                episode_uuid = episode_response.uuid
                 logger.info(
-                    f"✅ Épisode créé: {episode_response.uuid} - "
+                    f"✅ Épisode créé: {episode_uuid} - "
                     f"{len(all_chunk_ids)} chunks liés à "
                     f"{len(inserted_entity_uuids)} entities + "
                     f"{len(inserted_relation_uuids)} relations"
                 )
+
+                # === PHASE 1 : Créer relation PRODUCES (Episode → DocumentVersion) ===
+                if 'document_version_id' in locals() and document_version_id:
+                    try:
+                        logger.info(f"🔗 Création relation (:Episode)-[:PRODUCES]->(:DocumentVersion)...")
+
+                        # Créer la relation dans Neo4j
+                        query = """
+                        MATCH (e:Episode {uuid: $episode_uuid})
+                        MATCH (dv:DocumentVersion {version_id: $version_id})
+                        MERGE (e)-[r:PRODUCES]->(dv)
+                        RETURN r
+                        """
+                        neo4j_client.execute_query(
+                            query,
+                            parameters={
+                                "episode_uuid": episode_uuid,
+                                "version_id": document_version_id
+                            }
+                        )
+
+                        logger.info(f"✅ Relation PRODUCES créée: {episode_uuid} → {document_version_id}")
+
+                    except Exception as e:
+                        logger.error(f"❌ Erreur création relation PRODUCES: {e}")
+                        # Ne pas bloquer l'ingestion si relation échoue
+
             finally:
                 kg_service.close()
 
@@ -1791,7 +2056,21 @@ def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_
 
     logger.info(f"Done {pptx_path.name} — total chunks: {total}")
 
-    return {"chunks_inserted": total}
+    # Fermer le client Neo4j
+    try:
+        neo4j_client.close()
+        logger.debug("Neo4j client fermé")
+    except Exception as e:
+        logger.warning(f"Erreur fermeture Neo4j client: {e}")
+
+    # Retourner les résultats incluant le document_id
+    result = {"chunks_inserted": total}
+    if 'document_id' in locals() and document_id:
+        result["document_id"] = document_id
+        result["document_version_id"] = document_version_id
+        result["checksum"] = checksum
+
+    return result
 
 
 # Fusionne plusieurs dictionnaires de métadonnées et normalise les solutions
