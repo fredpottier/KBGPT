@@ -48,27 +48,53 @@ class AuthService {
    * Login utilisateur et stocke les tokens.
    */
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(credentials),
-    })
+    console.log('[AuthService] Sending login request to:', `${API_BASE_URL}/api/auth/login`)
+    console.log('[AuthService] Credentials:', { email: credentials.email, password: '***' })
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Login failed' }))
-      throw new Error(error.detail || 'Invalid credentials')
+    // Timeout de 10 secondes pour éviter de rester bloqué
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(credentials),
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      console.log('[AuthService] Response status:', response.status, response.statusText)
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Login failed' }))
+        console.error('[AuthService] Login failed:', error)
+        throw new Error(error.detail || 'Invalid credentials')
+      }
+
+      const data: AuthResponse = await response.json()
+      console.log('[AuthService] Login successful, received tokens')
+
+      // Stocker tokens et user
+      this.setAccessToken(data.access_token)
+      this.setRefreshToken(data.refresh_token)
+      this.setUser(data.user)
+
+      console.log('[AuthService] Tokens and user stored in localStorage')
+
+      return data
+    } catch (error: any) {
+      clearTimeout(timeoutId)
+      if (error.name === 'AbortError') {
+        console.error('[AuthService] Login request timeout (10s)')
+        throw new Error('Request timeout - please check your connection')
+      }
+      console.error('[AuthService] Login error:', error)
+      throw error
     }
-
-    const data: AuthResponse = await response.json()
-
-    // Stocker tokens et user
-    this.setAccessToken(data.access_token)
-    this.setRefreshToken(data.refresh_token)
-    this.setUser(data.user)
-
-    return data
   }
 
   /**
