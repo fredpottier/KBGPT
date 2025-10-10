@@ -129,10 +129,14 @@ Semaine 4 : APIs REST ✅ **COMPLÉTÉE (100%)** (10 octobre 2025)
 │   └── [✅] Include author_name et dates pour chaque node
 │
 └── [✅] 4.5 POST /documents/{id}/versions - Upload nouvelle version
-    ├── [✅] Endpoint créé (structure prête)
-    ├── [⏸️] Upload fichier (Not Implemented - prévu Semaine 5)
-    ├── [⏸️] Calcul checksum automatique
-    ├── [⏸️] Création DocumentVersion avec SUPERSEDES
+    ├── [✅] Endpoint créé avec upload fichier complet
+    ├── [✅] Sauvegarde temporaire fichier uploadé
+    ├── [✅] Calcul checksum SHA256 automatique (chunks 4096 bytes)
+    ├── [✅] Détection duplicata par checksum (HTTP 409 Conflict)
+    ├── [✅] Création DocumentVersion avec SUPERSEDES automatique
+    ├── [✅] Mise à jour is_latest (ancienne → false, nouvelle → true)
+    ├── [✅] Audit logging (action, user, metadata)
+    ├── [✅] Nettoyage fichier temporaire (finally block)
     └── [✅] RBAC: require_editor (admin ou editor uniquement, viewer interdit)
 
 ### Méthodes Service Ajoutées
@@ -388,6 +392,14 @@ print(f"Document créé: {doc['document_id']}")
 ---
 
 ## 📝 Changelog
+
+**10 octobre 2025 (Semaine 4 - Complétion)** :
+- ✅ POST /documents/{id}/versions implémentation complète
+- ✅ Upload fichier avec sauvegarde temporaire + calcul checksum SHA256
+- ✅ Création DocumentVersion avec relation SUPERSEDES automatique
+- ✅ Détection duplicata par checksum (HTTP 409 Conflict)
+- ✅ Gestion is_latest + audit logging complet
+- 📊 Router documents.py : 469 → 606 lignes (+137 lignes)
 
 **10 octobre 2025 (Semaine 4)** :
 - ✅ Semaine 4 complétée : APIs REST Documents

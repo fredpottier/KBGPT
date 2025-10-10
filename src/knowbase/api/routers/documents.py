@@ -9,7 +9,11 @@ Phase 1 - Semaine 4 : APIs REST Documents
 - POST /documents/{id}/versions : Upload nouvelle version
 """
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
+import hashlib
+import tempfile
+import shutil
 
 from fastapi import APIRouter, HTTPException, Query, Depends, UploadFile, File
 from pydantic import BaseModel, Field
@@ -491,25 +495,104 @@ async def create_document_version(
                 detail=f"Document {document_id} non trouvé"
             )
 
-        # TODO: Implémenter upload fichier et calcul checksum
-        # Pour l'instant, retourner erreur "Not Implemented"
-        raise HTTPException(
-            status_code=501,
-            detail="Upload fichier non encore implémenté - Phase 1 Semaine 5"
-        )
+        # Sauvegarder fichier uploadé temporairement
+        temp_file = None
+        try:
+            # Créer fichier temporaire
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp:
+                temp_file = Path(tmp.name)
+                # Copier contenu uploadé
+                shutil.copyfileobj(file.file, tmp)
 
-        # Log audit
-        await log_audit(
-            action="create_document_version",
-            resource_type="document_version",
-            resource_id=document_id,
-            user_id=current_user.get('user_id'),
-            tenant_id=tenant_id,
-            metadata={
-                "version_label": version_label,
-                "filename": file.filename
-            }
-        )
+            logger.info(f"Fichier uploadé sauvegardé: {temp_file}")
+
+            # Calculer checksum SHA256
+            logger.info(f"Calcul checksum SHA256...")
+            sha256_hash = hashlib.sha256()
+
+            with open(temp_file, "rb") as f:
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(byte_block)
+
+            checksum = sha256_hash.hexdigest()
+            file_size = temp_file.stat().st_size
+
+            logger.info(f"Checksum calculé: {checksum[:16]}... ({file_size} bytes)")
+
+            # Vérifier si checksum déjà existe (duplicata)
+            existing_version = service.get_version_by_checksum(checksum)
+            if existing_version:
+                logger.warning(f"Version avec checksum identique déjà existe: {existing_version.version_id}")
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Une version avec le même contenu existe déjà: {existing_version.version_label}"
+                )
+
+            # Récupérer version actuelle (is_latest = true) pour créer relation SUPERSEDES
+            version_resolver = VersionResolutionService(tenant_id=tenant_id)
+            try:
+                current_latest_version = version_resolver.resolve_latest(document_id)
+                supersedes_version_id = current_latest_version.version_id if current_latest_version else None
+
+                if supersedes_version_id:
+                    logger.info(f"Nouvelle version va superseder: {current_latest_version.version_label} ({supersedes_version_id})")
+                else:
+                    logger.info("Première version du document - Aucune version à superseder")
+
+            finally:
+                version_resolver.close()
+
+            # Créer DocumentVersion
+            version_create = DocumentVersionCreate(
+                document_id=document_id,
+                version_label=version_label,
+                effective_date=effective_date or datetime.now(timezone.utc),
+                checksum=checksum,
+                file_size=file_size,
+                author_name=author_name or current_user.get('user_id', 'Unknown'),
+                supersedes_version_id=supersedes_version_id,  # Relation SUPERSEDES automatique
+                metadata={
+                    'original_filename': file.filename,
+                    'uploaded_by': current_user.get('user_id'),
+                    'uploaded_at': datetime.now(timezone.utc).isoformat(),
+                }
+            )
+
+            # Le service create_version gère automatiquement:
+            # 1. Création du node DocumentVersion
+            # 2. Relation HAS_VERSION vers Document
+            # 3. Relation SUPERSEDES vers version précédente
+            # 4. Mise à jour is_latest (ancienne → false, nouvelle → true)
+            version_response = service.create_version(version_create)
+
+            logger.info(
+                f"✅ Version créée: {version_response.version_id} - "
+                f"{version_label} (checksum: {checksum[:16]}...)"
+            )
+
+            # Log audit
+            await log_audit(
+                action="create_document_version",
+                resource_type="document_version",
+                resource_id=version_response.version_id,
+                user_id=current_user.get('user_id'),
+                tenant_id=tenant_id,
+                metadata={
+                    "document_id": document_id,
+                    "version_label": version_label,
+                    "filename": file.filename,
+                    "checksum": checksum,
+                    "file_size": file_size
+                }
+            )
+
+            return version_response
+
+        finally:
+            # Nettoyer fichier temporaire
+            if temp_file and temp_file.exists():
+                temp_file.unlink()
+                logger.debug(f"Fichier temporaire supprimé: {temp_file}")
 
     except HTTPException:
         raise
