@@ -632,3 +632,114 @@ class DocumentRegistryService:
             versions=versions,
             total_versions=len(versions)
         )
+
+    def count_documents(
+        self,
+        status: Optional[DocumentStatus] = None,
+        document_type: Optional[DocumentType] = None
+    ) -> int:
+        """
+        Compte le nombre de documents avec filtres optionnels.
+
+        Args:
+            status: Filtrer par statut
+            document_type: Filtrer par type
+
+        Returns:
+            Nombre de documents
+        """
+        with self.driver.session() as session:
+            result = session.execute_read(
+                self._count_documents_tx,
+                self.tenant_id,
+                status,
+                document_type
+            )
+            return result
+
+    @staticmethod
+    def _count_documents_tx(
+        tx,
+        tenant_id: str,
+        status: Optional[DocumentStatus],
+        document_type: Optional[DocumentType]
+    ) -> int:
+        """Transaction count documents."""
+        where_clauses = ["d.tenant_id = $tenant_id"]
+        params = {"tenant_id": tenant_id}
+
+        if status:
+            where_clauses.append("d.status = $status")
+            params["status"] = status.value
+
+        if document_type:
+            where_clauses.append("d.document_type = $document_type")
+            params["document_type"] = document_type.value
+
+        where_clause = " AND ".join(where_clauses)
+
+        query = f"""
+        MATCH (d:Document)
+        WHERE {where_clause}
+        RETURN COUNT(d) as total
+        """
+
+        result = tx.run(query, params)
+        record = result.single()
+        return record["total"] if record else 0
+
+    def get_document_versions(self, document_id: str) -> List[DocumentVersionResponse]:
+        """
+        Récupère toutes les versions d'un document.
+
+        Args:
+            document_id: ID du document
+
+        Returns:
+            Liste des versions (ordre chronologique DESC)
+        """
+        with self.driver.session() as session:
+            result = session.execute_read(
+                self._get_document_versions_tx,
+                document_id,
+                self.tenant_id
+            )
+            return result
+
+    @staticmethod
+    def _get_document_versions_tx(
+        tx,
+        document_id: str,
+        tenant_id: str
+    ) -> List[DocumentVersionResponse]:
+        """Transaction get document versions."""
+        import json
+
+        query = """
+        MATCH (d:Document {document_id: $document_id, tenant_id: $tenant_id})
+              -[:HAS_VERSION]->(v:DocumentVersion)
+        RETURN v
+        ORDER BY v.effective_date DESC
+        """
+
+        result = tx.run(query, {"document_id": document_id, "tenant_id": tenant_id})
+
+        versions = []
+        for record in result:
+            node = record["v"]
+            metadata_dict = json.loads(node["metadata"]) if node["metadata"] else {}
+
+            versions.append(DocumentVersionResponse(
+                version_id=node["version_id"],
+                document_id=node["document_id"],
+                version_label=node["version_label"],
+                effective_date=node["effective_date"].to_native(),
+                checksum=node["checksum"],
+                file_size=node["file_size"],
+                author_name=node["author_name"],
+                is_latest=node["is_latest"],
+                metadata=metadata_dict,
+                created_at=node["created_at"].to_native()
+            ))
+
+        return versions
