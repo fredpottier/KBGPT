@@ -25,10 +25,13 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isMounted, setIsMounted] = useState(false)
   const router = useRouter()
 
   // Au chargement, vérifier si user authentifié
   useEffect(() => {
+    setIsMounted(true)
+
     const initAuth = async () => {
       try {
         if (authService.isAuthenticated()) {
@@ -117,6 +120,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     refreshUser,
     hasRole,
     isAdmin,
+  }
+
+  // Éviter hydration mismatch : ne pas rendre tant que client-side n'est pas monté
+  if (!isMounted) {
+    return null
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

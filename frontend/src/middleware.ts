@@ -1,33 +1,15 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-// Routes qui nécessitent authentification
-const protectedRoutes = ['/admin', '/documents/upload', '/documents/import']
-
-// Routes publiques même si authentifié
-const publicRoutes = ['/login', '/register', '/']
+// Note: Middleware ne peut pas accéder à localStorage (client-side uniquement).
+// La protection des routes est gérée par AuthContext côté client.
+// Ce middleware ne fait que des redirections basiques.
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Vérifier si l'utilisateur a un token
-  const token = request.cookies.get('auth_token')?.value ||
-                request.headers.get('authorization')?.replace('Bearer ', '')
-
-  // Si route protégée et pas de token, rediriger vers login
-  const isProtectedRoute = protectedRoutes.some((route) => pathname.startsWith(route))
-
-  if (isProtectedRoute && !token) {
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('redirect', pathname)
-    return NextResponse.redirect(loginUrl)
-  }
-
-  // Si déjà authentifié et sur page login/register, rediriger vers home
-  if (token && (pathname === '/login' || pathname === '/register')) {
-    return NextResponse.redirect(new URL('/', request.url))
-  }
-
+  // Laisser passer toutes les requêtes
+  // La vraie protection est gérée par AuthContext + useEffect dans les pages
   return NextResponse.next()
 }
 
