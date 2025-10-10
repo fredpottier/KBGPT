@@ -12,6 +12,18 @@ interface MainLayoutProps {
 export default function MainLayout({ children }: MainLayoutProps) {
   const pathname = usePathname()
 
+  // Pages d'authentification (pas de navigation)
+  const isAuthPage = pathname === '/login' || pathname === '/register'
+
+  // Si page d'authentification, afficher uniquement le contenu sans navigation
+  if (isAuthPage) {
+    return (
+      <Box minH="100vh" bg="gray.50">
+        {children}
+      </Box>
+    )
+  }
+
   // Déterminer la section actuelle
   const getCurrentSection = (): 'chat' | 'documents' | 'admin' => {
     if (pathname?.startsWith('/chat')) return 'chat'
