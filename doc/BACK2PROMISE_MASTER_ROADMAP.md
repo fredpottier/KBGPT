@@ -2,8 +2,8 @@
 
 **Projet** : SAP Knowledge Base
 **Date création** : 10 octobre 2025
-**Version** : 1.2 - Phase 0 complétée, Phase 1 en cours
-**Statut** : 🚀 **EN COURS - Phase 1 Document Backbone (Semaine 3/5)**
+**Version** : 1.4 - Phase 0 complétée, Phase 1 en cours (60%)
+**Statut** : 🚀 **EN COURS - Phase 1 Document Backbone (Semaine 4/5)**
 **Dernière mise à jour** : 10 octobre 2025
 
 > **Mission** : Ramener KnowBase à sa promesse fondamentale en unifiant tous les chantiers (architecture, sécurité, promise business) en un plan cohérent et réaliste.
@@ -203,13 +203,13 @@ Gaps bloquant "know where to know" :
 |-----------|----------|-------------|
 | **Architecture Neo4j** | 70% | Fondation solide, gouvernance partielle |
 | **Sécurité** | 100% ✅ | Phase 0 complétée - JWT RS256, RBAC, Validation, Audit |
-| **Business Promise** | 40% | Phase 1 en cours (Document schema ✅, pipeline ⏸️) |
+| **Business Promise** | 60% | Phase 1 en cours (Document schema ✅, pipeline ✅, APIs/UI ⏸️) |
 | **Ontologie** | 90% | Migration Neo4j excellente |
 | **Dynamic Types** | 95% | Auto-learning opérationnel |
 | **Mémoire Conversationnelle** | 0% | Pas encore implémentée (Phase 5) |
 | **Tests & Qualité** | 85% | Excellente couverture (74 tests sécurité + 97 tests dynamic types) |
 
-**Moyenne** : **69% - BETA AVANCÉ** (production-ready après Phase 1 complète)
+**Moyenne** : **71% - BETA AVANCÉ** (production-ready après Phase 1 complète)
 
 ---
 
@@ -385,7 +385,7 @@ Gaps bloquant "know where to know" :
 
 ```
 Phase 0: Security Hardening (P0)         [4 semaines]  ✅ COMPLÉTÉE (10 oct 2025)
-Phase 1: Document Backbone               [5 semaines]  🟡 EN COURS (40% - Sem 1-2/5)
+Phase 1: Document Backbone               [5 semaines]  🟡 EN COURS (60% - Sem 1-3/5)
 Phase 2: Facts Governance Finalization   [4 semaines]  ⏸️ EN ATTENTE
 Phase 3: Semantic Overlay & Provenance   [6 semaines]  ⏸️ EN ATTENTE
 Phase 4: Definition Tracking             [4 semaines]  ⏸️ EN ATTENTE
@@ -393,7 +393,7 @@ Phase 5: Conversational Memory           [5 semaines]  ⏸️ EN ATTENTE
 Phase 6: Production Hardening & Scale    [4 semaines]  ⏸️ EN ATTENTE
 ───────────────────────────────────────────────────────────────────
 TOTAL                                    [32 semaines ≈ 8 mois]
-PROGRESSION ACTUELLE                     [6 semaines = 19% du total]
+PROGRESSION ACTUELLE                     [7 semaines = 22% du total]
 ```
 
 ### Dépendances Entre Phases
@@ -486,11 +486,11 @@ graph TD
 
 ---
 
-### **PHASE 1 : Document Backbone** - 🟡 **EN COURS (40% COMPLÉTÉ)**
+### **PHASE 1 : Document Backbone** - 🟡 **EN COURS (60% COMPLÉTÉ)**
 
 **Durée** : 5 semaines
 **Priorité** : P0 (BLOQUANT PROMISE)
-**Statut** : 🟡 **EN COURS** - Semaines 1-2 complétées (Démarré le 2025-10-10)
+**Statut** : 🟡 **EN COURS** - Semaines 1-3 complétées (Démarré le 2025-10-10)
 **Objectif** : Implémenter cycle de vie documentaire pour "know where to know"
 **Tracking détaillé** : `doc/PHASE1_DOCUMENT_BACKBONE_TRACKING.md`
 
@@ -516,11 +516,13 @@ graph TD
   - `src/knowbase/api/services/version_resolution_service.py`
   - `src/knowbase/api/schemas/documents.py`
 
-**Semaine 3 : Ingestion Updates** ⏸️ **EN ATTENTE**
-- [ ] Parser metadata (version, creator, date) PPTX/PDF
-- [ ] Calcul checksum (SHA256)
-- [ ] Détection duplicatas
-- [ ] Link Episode → DocumentVersion
+**Semaine 3 : Ingestion Updates** ✅ **COMPLÉTÉE** (10 octobre 2025)
+- [x] Parser metadata (version, creator, date) PPTX - 12 champs vs 3 précédemment
+- [x] Calcul checksum (SHA256) - fonction `calculate_checksum()` implémentée
+- [x] Détection duplicatas - vérification via `DocumentRegistryService.get_version_by_checksum()`
+- [x] Link Episode → DocumentVersion - références `document_id` et `document_version_id` dans Episode metadata
+- **Fichier** : `src/knowbase/ingestion/pipelines/pptx_pipeline.py` (+292 lignes)
+- **Fix critique** : Erreur Pydantic `any` → `Any` résolue (commit d472124)
 
 **Semaine 4 : APIs REST** ⏸️ **EN ATTENTE**
 - [ ] `GET /documents` (liste avec versions)
@@ -534,18 +536,19 @@ graph TD
 - [ ] Flags obsolescence
 - [ ] Change log visualisation
 
-#### Livrables (40% Complétés)
+#### Livrables (60% Complétés)
 
 **Complétés** :
 - ✅ Document/DocumentVersion schema Neo4j (4 contraintes, 7 indexes)
 - ✅ DocumentRegistryService + VersionResolutionService opérationnels
 - ✅ Schémas Pydantic complets
+- ✅ Pipeline ingestion PPTX intégré (extraction 12 metadata, checksum SHA256, duplicate detection)
+- ✅ Checksum anti-duplicatas fonctionnel et opérationnel
+- ✅ Episode → DocumentVersion relations implémentées
 
 **En attente** :
-- ⏸️ 100% documents ingérés ont version tracking (pipeline non intégré)
 - ⏸️ API REST documents (4 endpoints)
-- ⏸️ UI visualisation historique
-- ⏸️ Checksum anti-duplicatas fonctionnel (implémentation prête, intégration pending)
+- ⏸️ UI visualisation historique (timeline + comparaison versions)
 
 #### Métriques Succès (Targets Phase 1 complète)
 
@@ -987,29 +990,38 @@ Ce document **"Back2Promise"** consolide **4 analyses différentes** en **UN SEU
 
 ### État Actuel (10 octobre 2025)
 
-**Progression Back2Promise** : 19% (6/32 semaines)
+**Progression Back2Promise** : 22% (7/32 semaines)
 
 **Réalisations** :
 - ✅ Phase 0 (Security Hardening) : 100% COMPLÉTÉE
-- ✅ Phase 1 (Document Backbone) : 40% COMPLÉTÉE (Semaines 1-2/5)
+- ✅ Phase 1 (Document Backbone) : 60% COMPLÉTÉE (Semaines 1-3/5)
+  - ✅ Schema Neo4j Document/DocumentVersion (Sem 1)
+  - ✅ Services backend DocumentRegistry + VersionResolution (Sem 2)
+  - ✅ Pipeline ingestion PPTX intégré (Sem 3) - **NOUVEAU**
+  - ✅ Fix critique Pydantic any → Any résolu - **NOUVEAU**
 - ✅ Migration Graphiti → Neo4j Native : COMPLÉTÉE
 
 **Statut Production** :
 - ✅ Sécurité production-ready (JWT RS256, RBAC, Audit, Rate limiting)
-- ⏸️ Document lifecycle en cours (Schema ✅, Services ✅, Pipeline intégration pending)
+- ✅ Document lifecycle pipeline opérationnel (Schema ✅, Services ✅, Pipeline ✅)
+- ⏸️ Document lifecycle UI en attente (APIs REST + UI Admin - Semaines 4-5)
 
 ### Prochaines Étapes Immédiates
 
 **Cette semaine (10-17 octobre 2025)** :
-1. ✅ Documentation complétée (BACK2PROMISE_MASTER_ROADMAP.md à jour)
-2. **NEXT** : Phase 1 Semaine 3 - Ingestion Updates
-   - Parser metadata documents (version, creator, date)
-   - Calcul checksum SHA256
-   - Détection duplicatas
-   - Link Episode → DocumentVersion
+1. ✅ Documentation complétée (BACK2PROMISE_MASTER_ROADMAP.md + PHASE1_DOCUMENT_BACKBONE_TRACKING.md à jour)
+2. ✅ Phase 1 Semaine 3 - Ingestion Updates **COMPLÉTÉE**
+   - ✅ Parser metadata documents (12 champs PPTX)
+   - ✅ Calcul checksum SHA256
+   - ✅ Détection duplicatas
+   - ✅ Link Episode → DocumentVersion
+3. **NEXT** : Phase 1 Semaine 4 - APIs REST Documents
+   - Router `/documents` avec endpoints CRUD
+   - Endpoints versions et lineage
+   - Authentification & RBAC sur tous endpoints
 
 **Prochains 2 mois** :
-- Semaines 3-5 : Finaliser Phase 1 (APIs REST + UI Admin)
+- Semaines 4-5 : Finaliser Phase 1 (APIs REST + UI Admin)
 - Semaines 6-9 : Phase 2 (Facts Governance UI)
 - Semaines 10-15 : Phase 3 (Semantic Overlay + Provenance)
 
@@ -1035,8 +1047,23 @@ Ce document **"Back2Promise"** consolide **4 analyses différentes** en **UN SEU
 
 ---
 
-**Version** : 1.3 - Phase 0 complétée, Phase 1 en cours (40%)
+**Version** : 1.4 - Phase 0 complétée, Phase 1 en cours (60%)
 **Date** : 2025-10-10
 **Auteur** : Équipe SAP KB + Claude Code
-**Statut** : ✅ **EN EXÉCUTION - Phase 1 Semaine 3**
+**Statut** : ✅ **EN EXÉCUTION - Phase 1 Semaine 4**
 **Next Review** : Fin Phase 1 (Semaine 5) - Environ 20 octobre 2025
+
+---
+
+## 📝 Changelog
+
+**10 octobre 2025 (v1.4)** :
+- ✅ Phase 1 Semaine 3 complétée - Pipeline ingestion PPTX intégré
+- ✅ Fix critique Pydantic any → Any résolu (worker opérationnel)
+- 📊 Progression globale : 19% → 22% (7/32 semaines)
+- 📊 Phase 1 : 40% → 60% (3/5 semaines)
+- 📄 Documentation tracking mise à jour (PHASE1_DOCUMENT_BACKBONE_TRACKING.md)
+
+**9 octobre 2025 (v1.3)** :
+- ✅ Phase 0 Security Hardening complétée (JWT, RBAC, Audit)
+- 📊 Phase 1 Semaines 1-2 complétées (Schema + Services)

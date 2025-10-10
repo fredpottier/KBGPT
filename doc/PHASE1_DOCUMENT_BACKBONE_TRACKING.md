@@ -195,6 +195,38 @@ Semaine 5 : UI Admin ⏸️ EN ATTENTE (0%)
   - Relation Episode → DocumentVersion (PRODUCES) après création Episode
   - Retour enrichi avec document_id, document_version_id, checksum
 
+### Problèmes Résolus (10 octobre 2025)
+
+#### ❌ → ✅ Crash Worker au Démarrage (Erreur Pydantic)
+**Symptôme** : Worker crashait immédiatement après rebuild avec erreur :
+```
+PydanticSchemaGenerationError: Unable to generate pydantic-core schema for <built-in function any>
+```
+
+**Cause** : Erreur de typage dans `src/knowbase/api/schemas/documents.py`
+- Utilisation de `any` (built-in function Python) au lieu de `Any` (type de `typing`)
+- 7 occurrences dans les type hints `Dict[str, any]`
+
+**Fix Appliqué** (commit d472124):
+```python
+# Avant
+from typing import Optional, List, Dict
+metadata: Optional[Dict[str, any]]  # ❌ Incorrect
+
+# Après
+from typing import Optional, List, Dict, Any
+metadata: Optional[Dict[str, Any]]  # ✅ Correct
+```
+
+**Résultat** :
+- ✅ Worker démarre sans erreur
+- ✅ Phase 1 Document Backbone opérationnelle
+- ✅ Pipeline PPTX traite documents avec versioning
+
+**Commits Associés** :
+- `e2a46ae` : feat(phase1): Réintégrer Document Backbone dans pipeline PPTX (Semaines 1-2)
+- `d472124` : fix(phase1): Corriger erreur Pydantic any → Any dans documents.py
+
 ### Tests
 - ⏸️ Pas de tests créés encore (prévu avec Semaine 4)
 
@@ -227,47 +259,34 @@ Semaine 5 : UI Admin ⏸️ EN ATTENTE (0%)
 
 ## ⏭️ Prochaines Actions
 
-### Semaine 3 : Pipeline Ingestion (5-7 jours effort)
+### Semaine 4 : APIs REST (4-5 jours effort) ⏸️ **EN ATTENTE**
 
-**Priorité 1 - Extraction Metadata** :
-1. Modifier `megaparse_parser.py` pour extraire :
-   - Version (PPTX metadata `dc:version` ou filename pattern)
-   - Creator (`dc:creator`)
-   - Date publication (`dcterms:created`)
-   - Reviewers/Approvers (custom properties si disponibles)
+**Priorité 1 - Endpoints Documents** :
+1. Router `src/knowbase/api/routers/documents.py` :
+   - `GET /documents` : Liste documents avec filtres (date, type, auteur)
+   - `GET /documents/{id}` : Détail document avec versions
+   - `GET /documents/{id}/versions` : Historique complet versions
+   - `GET /documents/{id}/lineage` : Graphe modifications (format graph pour D3.js)
 
-2. Calculer checksum SHA256 :
-   - Fonction `calculate_checksum(file_path)` → SHA256 hex
-   - Appel avant ingestion
-   - Stockage dans DocumentVersion
+2. Router versions :
+   - `POST /documents/{id}/versions` : Upload nouvelle version
+   - `GET /documents/{id}/versions/{version_id}` : Détail version spécifique
+   - `GET /documents/{id}/versions/latest` : Dernière version active
 
-3. Intégrer DocumentRegistry dans pipeline :
-   ```python
-   # Dans ingestion pipeline
-   doc_service = DocumentRegistryService(neo4j_client)
+3. Intégration services existants :
+   - Utiliser DocumentRegistryService (déjà créé)
+   - Utiliser VersionResolutionService (déjà créé)
+   - Schémas Pydantic response (déjà créés)
 
-   # Vérifier duplicata
-   existing = doc_service.detect_duplicate(checksum)
-   if existing:
-       logger.info(f"Document duplicate détecté: {filename}")
-       return  # Skip ingestion
+4. Authentification & Permissions :
+   - Appliquer `get_current_user()` sur tous endpoints
+   - RBAC : admin (full access), editor (create versions), viewer (read-only)
 
-   # Créer document + version
-   doc = doc_service.create_document(
-       title=title,
-       source_path=source_path,
-       document_type=doc_type,
-       version_label="v1.0",
-       checksum=checksum,
-       creator=creator
-   )
-   ```
+**Effort estimé** : 4-5 jours
 
-4. Lier Episode → DocumentVersion :
-   - Ajouter `document_id` et `document_version_id` dans Episode metadata
-   - Créer relation `(:Episode)-[:PRODUCES]->(:DocumentVersion)`
+### Semaine 5 : UI Admin ⏸️ **EN ATTENTE**
 
-**Effort estimé** : 5-7 jours
+Voir section détaillée Semaine 5 ci-dessus (lignes 129-151)
 
 ---
 
@@ -336,5 +355,15 @@ print(f"Document créé: {doc['document_id']}")
 
 ---
 
-**Dernière mise à jour** : 2025-10-10
-**Prochaine revue** : Fin Semaine 3 (après intégration pipeline)
+## 📝 Changelog
+
+**10 octobre 2025** :
+- ✅ Semaine 3 complétée : Pipeline ingestion intégré
+- ✅ Fix critique Pydantic (any → Any) résolu
+- ✅ Worker opérationnel avec Phase 1 Document Backbone
+- 📊 Progression Phase 1 : 60% (3/5 semaines complétées)
+
+---
+
+**Dernière mise à jour** : 2025-10-10 (Semaine 3 complétée)
+**Prochaine revue** : Fin Semaine 4 (après APIs REST)
