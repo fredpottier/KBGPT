@@ -5,6 +5,15 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8000';
 
 export async function GET(request: NextRequest) {
   try {
+    // Forward JWT token from client to backend
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader) {
+      return NextResponse.json(
+        { error: 'Missing authorization token' },
+        { status: 401 }
+      );
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const queryString = searchParams.toString();
     const url = queryString
@@ -13,7 +22,8 @@ export async function GET(request: NextRequest) {
 
     const response = await fetch(url, {
       headers: {
-        'X-Admin-Key': 'admin-dev-key-change-in-production',
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
       },
     });
 
@@ -34,6 +44,15 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // Forward JWT token from client to backend
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader) {
+      return NextResponse.json(
+        { error: 'Missing authorization token' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     const url = `${BACKEND_URL}/api/document-types`;
 
@@ -41,7 +60,7 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Admin-Key': 'admin-dev-key-change-in-production',
+        'Authorization': authHeader,
       },
       body: JSON.stringify(body),
     });

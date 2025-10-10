@@ -9,6 +9,15 @@ export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   try {
+    // Forward JWT token from client to backend
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader) {
+      return NextResponse.json(
+        { error: 'Missing authorization token' },
+        { status: 401 }
+      );
+    }
+
     // Récupérer les query params (status, etc.)
     const searchParams = request.nextUrl.searchParams;
     const queryString = searchParams.toString();
@@ -18,7 +27,8 @@ export async function GET(request: NextRequest) {
 
     const response = await fetch(url, {
       headers: {
-        'X-Admin-Key': 'admin-dev-key-change-in-production',
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
       },
       cache: 'no-store',
     });

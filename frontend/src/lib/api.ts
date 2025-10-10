@@ -14,7 +14,7 @@ class ApiClient {
 
   constructor() {
     this.client = axios.create({
-      baseURL: '/api',
+      baseURL: `${API_BASE_URL}/api`,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -157,6 +157,40 @@ export const api = {
   // Status endpoint
   status: {
     get: (uid: string) => apiClient.get(`/status/${uid}`),
+  },
+
+  // Imports - Import tracking and history
+  imports: {
+    history: () => apiClient.get('/imports/history'),
+    active: () => apiClient.get('/imports/active'),
+    sync: () => apiClient.post('/imports/sync'),
+    delete: (uid: string) => apiClient.delete(`/imports/${uid}`),
+  },
+
+  // Entity Types - Dynamic entity types management
+  entityTypes: {
+    list: (status?: string) => apiClient.get(`/entity-types${status ? `?status=${status}` : ''}`),
+    get: (typeName: string) => apiClient.get(`/entity-types/${typeName}`),
+    approve: (typeName: string) => apiClient.post(`/entity-types/${typeName}/approve`),
+    reject: (typeName: string, reason?: string) => apiClient.post(`/entity-types/${typeName}/reject`, { reason }),
+    delete: (typeName: string) => apiClient.delete(`/entity-types/${typeName}`),
+    importYaml: (file: File) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      return apiClient.post('/entity-types/import-yaml', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    },
+    exportYaml: () => apiClient.get('/entity-types/export-yaml'),
+  },
+
+  // Document Types - Document type templates
+  documentTypes: {
+    list: () => apiClient.get('/document-types'),
+    get: (id: string) => apiClient.get(`/document-types/${id}`),
+    create: (data: any) => apiClient.post('/document-types', data),
+    update: (id: string, data: any) => apiClient.put(`/document-types/${id}`, data),
+    delete: (id: string) => apiClient.delete(`/document-types/${id}`),
   },
 
   // Admin

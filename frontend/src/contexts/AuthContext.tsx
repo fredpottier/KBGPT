@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
 import { authService, User, LoginCredentials, RegisterData } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
 
@@ -102,18 +102,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }
 
-  const hasRole = (role: 'admin' | 'editor' | 'viewer'): boolean => {
-    return authService.hasRole(role)
-  }
+  const hasRole = useCallback((role: 'admin' | 'editor' | 'viewer'): boolean => {
+    if (!user) return false
 
-  const isAdmin = (): boolean => {
-    return authService.isAdmin()
-  }
+    // Hiérarchie: admin > editor > viewer
+    if (role === 'viewer') return true // Tous les users authentifiés sont au moins viewer
+    if (role === 'editor') return user.role === 'admin' || user.role === 'editor'
+    if (role === 'admin') return user.role === 'admin'
+
+    return false
+  }, [user])
+
+  const isAdmin = useCallback((): boolean => {
+    return user?.role === 'admin'
+  }, [user])
 
   const value: AuthContextType = {
     user,
     isAuthenticated: !!user,
-    isLoading,
+    isLoading: isLoading || !isMounted, // Loading si pas encore monté côté client
     login,
     logout,
     register,
@@ -122,11 +129,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     isAdmin,
   }
 
-  // Éviter hydration mismatch : ne pas rendre tant que client-side n'est pas monté
-  if (!isMounted) {
-    return null
-  }
-
+  // Toujours rendre le Provider, mais avec isLoading=true tant que pas monté côté client
+  // Cela évite l'hydration mismatch tout en permettant à ProtectedRoute de fonctionner
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

@@ -131,7 +131,6 @@ services:
     env_file:
       - .env
     environment:
-      - NEXT_PUBLIC_API_BASE_URL=http://app:8000
       - NODE_ENV=development
       - NEXT_TELEMETRY_DISABLED=1
       - WATCHPACK_POLLING=true
