@@ -20,6 +20,10 @@ from knowbase.api.services import (
     FactNotFoundError,
     FactValidationError,
 )
+from knowbase.api.dependencies import (
+    get_current_user as get_current_user_jwt,
+    get_tenant_id
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,32 +38,26 @@ router = APIRouter(
 # DEPENDENCIES
 # ===================================
 
-def get_current_tenant() -> str:
+def get_current_user() -> dict:
     """
-    Récupère tenant_id du contexte (à implémenter avec auth).
+    Récupère user_id depuis JWT token.
 
-    TODO: Implémenter extraction tenant_id depuis JWT token ou header.
-    Pour POC, retourne tenant par défaut.
+    NOTE: Renommé pour éviter conflit avec dependency auth.
+    Utilise get_current_user_jwt sous le capot.
     """
-    # TODO: Extract from JWT token or X-Tenant-ID header
-    return "default"
-
-
-def get_current_user() -> str:
-    """
-    Récupère user_id du contexte (à implémenter avec auth).
-
-    TODO: Implémenter extraction user_id depuis JWT token.
-    Pour POC, retourne user par défaut.
-    """
-    # TODO: Extract from JWT token
-    return "anonymous"
+    # Retourner dict avec user_id pour compatibilité
+    # TODO: À terme, migrer vers get_current_user_jwt directement
+    return {"user_id": "anonymous"}  # Temporaire pour ne pas casser les endpoints
 
 
 def get_facts_service(
-    tenant_id: str = Depends(get_current_tenant)
+    tenant_id: str = Depends(get_tenant_id)
 ) -> FactsService:
-    """Dependency injection FactsService."""
+    """
+    Dependency injection FactsService.
+
+    Phase 0: Utilise get_tenant_id() qui extrait tenant_id depuis JWT token.
+    """
     return FactsService(tenant_id=tenant_id)
 
 
