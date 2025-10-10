@@ -62,7 +62,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const response = await authService.login(credentials)
       setUser(response.user)
-      router.push('/') // Rediriger vers home après login
+      // Redirection gérée par la page login pour supporter le paramètre ?redirect
     } catch (error) {
       console.error('Login failed:', error)
       throw error
@@ -82,7 +82,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const response = await authService.register(data)
       setUser(response.user)
-      router.push('/') // Rediriger vers home après register
+      // Redirection gérée par la page register
     } catch (error) {
       console.error('Registration failed:', error)
       throw error
