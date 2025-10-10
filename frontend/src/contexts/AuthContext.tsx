@@ -58,13 +58,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const login = async (credentials: LoginCredentials) => {
+    console.log('[AuthContext] Login started for:', credentials.email)
     setIsLoading(true)
     try {
       const response = await authService.login(credentials)
+      console.log('[AuthContext] Login successful, user:', response.user)
       setUser(response.user)
+      console.log('[AuthContext] User state updated, isAuthenticated will become true')
       // Redirection gérée par la page login pour supporter le paramètre ?redirect
     } catch (error) {
-      console.error('Login failed:', error)
+      console.error('[AuthContext] Login failed:', error)
       throw error
     } finally {
       setIsLoading(false)
