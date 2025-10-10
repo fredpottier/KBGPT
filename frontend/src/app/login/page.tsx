@@ -38,7 +38,9 @@ export default function LoginPage() {
 
   // Si déjà authentifié, rediriger vers l'URL de redirection ou home
   useEffect(() => {
+    console.log('[Login] useEffect - isAuthenticated:', isAuthenticated, 'redirectUrl:', redirectUrl)
     if (isAuthenticated) {
+      console.log('[Login] Already authenticated, redirecting to:', redirectUrl)
       router.push(redirectUrl)
     }
   }, [isAuthenticated, router, redirectUrl])
@@ -48,21 +50,22 @@ export default function LoginPage() {
     setError('')
     setIsLoading(true)
 
+    console.log('[Login] Form submitted, email:', email)
+
     try {
       await login({ email, password })
+      console.log('[Login] Login successful, waiting for useEffect to redirect...')
 
-      // Petite attente pour laisser le temps au state de se mettre à jour
-      await new Promise(resolve => setTimeout(resolve, 100))
+      // NE PAS faire router.push ici - laisser le useEffect gérer la redirection
+      // automatiquement quand isAuthenticated devient true
 
-      // Après login réussi, rediriger vers l'URL de redirection
-      console.log('[Login] Redirecting to:', redirectUrl)
-      router.push(redirectUrl)
     } catch (err: any) {
-      console.error('[Login] Error:', err)
+      console.error('[Login] Login error:', err)
       setError(err.message || 'Login failed. Please check your credentials.')
-    } finally {
       setIsLoading(false)
     }
+    // Note: setIsLoading(false) est dans le catch uniquement
+    // En cas de succès, on laisse isLoading=true jusqu'à la redirection
   }
 
   return (

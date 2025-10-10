@@ -77,9 +77,15 @@ class AuthService {
   logout(): void {
     if (typeof window === 'undefined') return
 
+    console.log('[AuthService] Logout - Clearing localStorage')
     localStorage.removeItem(this.ACCESS_TOKEN_KEY)
     localStorage.removeItem(this.REFRESH_TOKEN_KEY)
     localStorage.removeItem(this.USER_KEY)
+    console.log('[AuthService] Logout - LocalStorage cleared:', {
+      hasToken: !!localStorage.getItem(this.ACCESS_TOKEN_KEY),
+      hasRefreshToken: !!localStorage.getItem(this.REFRESH_TOKEN_KEY),
+      hasUser: !!localStorage.getItem(this.USER_KEY)
+    })
   }
 
   /**
