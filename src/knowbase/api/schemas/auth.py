@@ -42,6 +42,21 @@ class TokenResponse(BaseModel):
     expires_in: int = Field(..., description="Durée validité access token (secondes)")
 
 
+class CurrentUserBase(BaseModel):
+    """Utilisateur courant extrait du JWT token."""
+
+    user_id: str = Field(..., description="UUID de l'utilisateur")
+    email: EmailStr = Field(..., description="Email")
+    role: UserRole = Field(..., description="Rôle")
+    tenant_id: str = Field(..., description="Tenant ID")
+
+
+class LoginResponse(TokenResponse):
+    """Response pour login incluant les tokens ET l'objet user."""
+
+    user: CurrentUserBase = Field(..., description="Informations utilisateur")
+
+
 class UserCreate(BaseModel):
     """Request body pour créer un utilisateur."""
 
@@ -94,13 +109,8 @@ class UserResponse(BaseModel):
     }
 
 
-class CurrentUser(BaseModel):
-    """Utilisateur courant extrait du JWT token."""
-
-    user_id: str = Field(..., description="UUID de l'utilisateur")
-    email: EmailStr = Field(..., description="Email")
-    role: UserRole = Field(..., description="Rôle")
-    tenant_id: str = Field(..., description="Tenant ID")
+# Alias pour CurrentUserBase (compatibilité)
+CurrentUser = CurrentUserBase
 
 
 class AuditLogCreate(BaseModel):
