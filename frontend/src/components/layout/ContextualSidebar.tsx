@@ -103,6 +103,11 @@ export default function ContextualSidebar({ section }: ContextualSidebarProps) {
             href: '/admin',
           },
           {
+            icon: AttachmentIcon,
+            label: 'Gestion Documents',
+            href: '/admin/documents',
+          },
+          {
             icon: FiLayers,
             label: 'Types Entités',
             href: '/admin/dynamic-types',
