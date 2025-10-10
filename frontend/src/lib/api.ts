@@ -1,6 +1,12 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
+// Determine if we're running on server or client
+const isServer = typeof window === 'undefined'
+
+// Use internal Docker URL for server-side calls, external URL for client-side
+const API_BASE_URL = isServer
+  ? (process.env.NEXT_PUBLIC_API_INTERNAL_URL || 'http://app:8000')
+  : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000')
 
 export interface ApiResponse<T = any> {
   success: boolean
