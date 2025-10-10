@@ -5,9 +5,12 @@ import os
 from pathlib import Path
 
 import debugpy
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
 from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth
@@ -28,6 +31,9 @@ def create_app() -> FastAPI:
         debugpy.listen(("0.0.0.0", 5678))
         debugpy.wait_for_client()
         logger.info("🐛 FastAPI debugger attached!")
+
+    # Rate Limiting - Phase 0 Security Hardening
+    limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 
     app = FastAPI(
         title="SAP Knowbase API",
@@ -126,14 +132,25 @@ def create_app() -> FastAPI:
         ],
     )
 
-    # Configure CORS
+    # Configure Rate Limiting state
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    logger.info("✅ Rate limiting configuré : 100 requêtes/minute par IP")
+
+    # Configure CORS - Allow frontend to make requests
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+        allow_origins=[
+            "http://localhost:3000",  # Frontend Next.js dev
+            "http://localhost:8501",  # Frontend Streamlit legacy
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8501",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    logger.info("✅ CORS configuré pour localhost:3000 et localhost:8501")
 
     openapi_path = Path(__file__).with_name("openapi.json")
     if openapi_path.exists():
