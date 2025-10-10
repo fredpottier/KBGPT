@@ -75,9 +75,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }
 
   const logout = () => {
+    console.log('[AuthContext] Logout called')
     authService.logout()
     setUser(null)
-    router.push('/login')
+    console.log('[AuthContext] User state cleared, user is now null')
+
+    // Force un refresh complet de la page pour réinitialiser tout le state
+    // plutôt qu'un simple router.push qui garde le state React
+    console.log('[AuthContext] Forcing full page reload to /login')
+    window.location.href = '/login'
   }
 
   const register = async (data: RegisterData) => {
