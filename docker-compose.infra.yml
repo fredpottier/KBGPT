@@ -80,13 +80,13 @@ services:
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*
       - NEO4J_dbms_security_procedures_allowlist=apoc.*
 
-      # Performance
-      - NEO4J_dbms_query_cache__size=1000
-      - NEO4J_dbms_logs_query_enabled=true
-      - NEO4J_dbms_logs_query_threshold=1s
+      # Performance (disabled - not needed for now)
+      # - NEO4J_server_db_query_cache_size=1000
+      # - NEO4J_db_logs_query_enabled=INFO
+      # - NEO4J_db_logs_query_threshold=1s
 
-      # APOC plugin
-      - NEO4JLABS_PLUGINS=["apoc"]
+      # APOC plugin (disabled temporarily to fix config issue)
+      # - NEO4J_PLUGINS=["apoc"]
     networks:
       - knowbase_net
     healthcheck:
