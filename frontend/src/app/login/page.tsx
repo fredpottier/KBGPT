@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Box,
   Button,
@@ -20,8 +20,7 @@ import {
 } from '@chakra-ui/react'
 import { ViewIcon, ViewOffIcon } from '@chakra-ui/icons'
 import { useAuth } from '@/contexts/AuthContext'
-import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -32,13 +31,17 @@ export default function LoginPage() {
 
   const { login, isAuthenticated } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
 
-  // Si déjà authentifié, rediriger vers home
+  // Récupérer l'URL de redirection depuis les query params
+  const redirectUrl = searchParams.get('redirect') || '/'
+
+  // Si déjà authentifié, rediriger vers l'URL de redirection ou home
   useEffect(() => {
     if (isAuthenticated) {
-      router.push('/')
+      router.push(redirectUrl)
     }
-  }, [isAuthenticated, router])
+  }, [isAuthenticated, router, redirectUrl])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -47,7 +50,8 @@ export default function LoginPage() {
 
     try {
       await login({ email, password })
-      // Redirection gérée par AuthContext
+      // Après login réussi, rediriger vers l'URL de redirection
+      router.push(redirectUrl)
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check your credentials.')
     } finally {
