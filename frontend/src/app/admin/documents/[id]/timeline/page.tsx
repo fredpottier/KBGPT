@@ -37,8 +37,19 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useRouter } from 'next/navigation'
-import { formatDistanceToNow } from 'date-fns'
-import { fr } from 'date-fns/locale'
+
+// Fonction simple pour formater les dates relatives en français
+function formatDistanceToNow(date: Date): string {
+  const now = new Date()
+  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000)
+
+  if (diffInSeconds < 60) return 'il y a quelques secondes'
+  if (diffInSeconds < 3600) return `il y a ${Math.floor(diffInSeconds / 60)} minutes`
+  if (diffInSeconds < 86400) return `il y a ${Math.floor(diffInSeconds / 3600)} heures`
+  if (diffInSeconds < 2592000) return `il y a ${Math.floor(diffInSeconds / 86400)} jours`
+  if (diffInSeconds < 31536000) return `il y a ${Math.floor(diffInSeconds / 2592000)} mois`
+  return `il y a ${Math.floor(diffInSeconds / 31536000)} ans`
+}
 
 interface TimelineItemProps {
   version: any
@@ -104,10 +115,7 @@ const TimelineItem = ({ version, isLatest, isFirst, onClick }: TimelineItemProps
               <HStack>
                 <Icon as={TimeIcon} />
                 <Text>
-                  {formatDistanceToNow(effectiveDate, {
-                    addSuffix: true,
-                    locale: fr,
-                  })}
+                  {formatDistanceToNow(effectiveDate)}
                 </Text>
               </HStack>
               {version.author_name && (
