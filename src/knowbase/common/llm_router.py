@@ -39,6 +39,7 @@ class TaskType(Enum):
     CANONICALIZATION = "canonicalization" # Normalisation de noms
     RFP_QUESTION_ANALYSIS = "rfp_question_analysis" # Analyse intelligente questions RFP
     TRANSLATION = "translation"           # Traduction de langues (tâche simple)
+    KNOWLEDGE_EXTRACTION = "knowledge_extraction" # Extraction structurée concepts/facts/entities/relations
 
 
 class LLMRouter:

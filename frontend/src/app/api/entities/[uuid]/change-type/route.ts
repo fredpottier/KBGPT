@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyJWT, createAuthHeaders } from '@/lib/jwt-helpers'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8000';
 
@@ -6,6 +7,13 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { uuid: string } }
 ) {
+  // Verifier JWT token
+  const authResult = verifyJWT(request);
+  if (authResult instanceof NextResponse) {
+    return authResult;
+  }
+  const authHeader = authResult;
+
   try {
     const uuid = params.uuid;
     const body = await request.json();
@@ -17,6 +25,7 @@ export async function PATCH(
     const response = await fetch(url, {
       method: 'PATCH',
       headers: {
+        'Authorization': authHeader,
         'Content-Type': 'application/json',
         'X-Admin-Key': admin_key || 'admin-dev-key-change-in-production',
       },

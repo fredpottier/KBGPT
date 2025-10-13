@@ -75,7 +75,13 @@ export default function AdminSettingsPage() {
   const { data: healthData, isLoading: isLoadingHealth, refetch: refetchHealth } = useQuery<HealthResponse>({
     queryKey: ["admin", "health"],
     queryFn: async () => {
-      const response = await axios.get("/api/admin/health");
+      // Get JWT token from localStorage
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.get("/api/admin/health", {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
       return response.data;
     },
     refetchInterval: 10000, // Rafraîchir toutes les 10 secondes
@@ -84,7 +90,13 @@ export default function AdminSettingsPage() {
   // Mutation purge
   const purgeMutation = useMutation({
     mutationFn: async () => {
-      const response = await axios.post<PurgeResponse>("/api/admin/purge-data");
+      // Get JWT token from localStorage
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.post<PurgeResponse>("/api/admin/purge-data", {}, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
       return response.data;
     },
     onSuccess: (data) => {

@@ -260,6 +260,7 @@ async def list_entity_types(
 )
 async def create_entity_type(
     entity_type: EntityTypeCreate,
+    tenant_id: str = Depends(get_tenant_id),  # ✅ Phase 0 - JWT tenant_id
     current_user: dict = Depends(require_editor),  # ✅ Phase 0 - Editor role required
     db: Session = Depends(get_db)
 ):
@@ -271,6 +272,7 @@ async def create_entity_type(
 
     Args:
         entity_type: Données type à créer
+        tenant_id: Tenant ID (depuis JWT)
         db: Session DB
 
     Returns:
@@ -284,10 +286,10 @@ async def create_entity_type(
     service = EntityTypeRegistryService(db)
 
     try:
-        # Vérifier si type existe déjà
+        # Vérifier si type existe déjà (utilise tenant_id du JWT)
         existing = service.get_type_by_name(
             entity_type.type_name,
-            entity_type.tenant_id
+            tenant_id
         )
 
         if existing:
@@ -296,10 +298,10 @@ async def create_entity_type(
                 detail=f"Entity type '{entity_type.type_name}' already exists"
             )
 
-        # Créer type
+        # Créer type (utilise tenant_id du JWT)
         new_type = service.get_or_create_type(
             type_name=entity_type.type_name,
-            tenant_id=entity_type.tenant_id,
+            tenant_id=tenant_id,
             discovered_by=entity_type.discovered_by
         )
 
@@ -317,7 +319,7 @@ async def create_entity_type(
             user=current_user,
             resource_type="entity_type",
             resource_id=str(new_type.id),
-            tenant_id=entity_type.tenant_id,
+            tenant_id=tenant_id,
             details=f"Entity type '{new_type.type_name}' created, status={new_type.status}"
         )
 

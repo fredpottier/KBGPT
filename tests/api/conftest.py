@@ -127,10 +127,20 @@ def test_client() -> Generator[TestClient, None, None]:
 
 @pytest.fixture
 def auth_headers() -> Dict[str, str]:
-    """Headers d'authentification pour tests."""
+    """Headers d'authentification JWT pour tests."""
+    from knowbase.api.services.auth_service import get_auth_service
+
+    auth_service = get_auth_service()
+    token = auth_service.generate_access_token(
+        user_id="test-user-id",
+        email="test_user@example.com",
+        role="editor",
+        tenant_id="test_tenant"
+    )
+
     return {
-        "X-Tenant-ID": "test_tenant",
-        "X-User-ID": "test_user@example.com"
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
     }
 
 

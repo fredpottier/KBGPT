@@ -1,80 +1,159 @@
 version: 0.2
 
-# Configuration CodeBuild pour build Docker SAP KB
-# Build distant sur instances AWS puissantes
+# AWS CodeBuild specification for KnowBase multi-service images
+# Builds first-party images and mirrors third-party dependencies into ECR.
 
 env:
   variables:
     AWS_DEFAULT_REGION: eu-west-1
-    AWS_ACCOUNT_ID: "715927975014"  # Account ID SAP KB
+    AWS_ACCOUNT_ID: "715927975014"
+
     IMAGE_REPO_NAME_APP: sap-kb-app
-    IMAGE_REPO_NAME_FRONTEND: sap-kb-frontend
     IMAGE_REPO_NAME_WORKER: sap-kb-worker
+    IMAGE_REPO_NAME_FRONTEND: sap-kb-frontend
     IMAGE_REPO_NAME_UI: sap-kb-ui
-    IMAGE_TAG: latest
+    IMAGE_REPO_NAME_NEO4J: sap-kb-neo4j
+    IMAGE_REPO_NAME_REDIS: sap-kb-redis
+    IMAGE_REPO_NAME_QDRANT: sap-kb-qdrant
+    IMAGE_REPO_NAME_NGROK: sap-kb-ngrok
+
+    NEO4J_BASE_IMAGE: neo4j:5.26.0
+    REDIS_BASE_IMAGE: redis:7.2
+    QDRANT_BASE_IMAGE: qdrant/qdrant:v1.15.1
+    NGROK_BASE_IMAGE: ngrok/ngrok:latest
+
+    PUSH_LATEST: "true"
 
 phases:
   pre_build:
     commands:
-      - echo "🚀 Début du build distant SAP KB"
-      - echo "Connexion à Amazon ECR..."
-      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-
-      # Créer les repositories ECR s'ils n'existent pas
+      - echo ">> Starting KnowBase ECR build pipeline"
+      - export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
       - |
-        for repo in $IMAGE_REPO_NAME_APP $IMAGE_REPO_NAME_FRONTEND $IMAGE_REPO_NAME_WORKER $IMAGE_REPO_NAME_UI; do
-          aws ecr describe-repositories --repository-names $repo --region $AWS_DEFAULT_REGION || \
-          aws ecr create-repository --repository-name $repo --region $AWS_DEFAULT_REGION
+        if [ -n "${CODEBUILD_RESOLVED_SOURCE_VERSION}" ] && [ "${CODEBUILD_RESOLVED_SOURCE_VERSION}" != "CODEBUILD_RESOLVED_SOURCE_VERSION" ]; then
+          IMAGE_TAG=$(echo "${CODEBUILD_RESOLVED_SOURCE_VERSION}" | cut -c 1-7)
+        else
+          IMAGE_TAG="latest"
+        fi
+        export IMAGE_TAG
+      - echo ">> Image tag for custom services: ${IMAGE_TAG}"
+      - echo ">> Logging into Amazon ECR..."
+      - aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+      - |
+        echo ">> Ensuring all ECR repositories exist..."
+        REPOS=(
+          "${IMAGE_REPO_NAME_APP}"
+          "${IMAGE_REPO_NAME_WORKER}"
+          "${IMAGE_REPO_NAME_FRONTEND}"
+          "${IMAGE_REPO_NAME_UI}"
+          "${IMAGE_REPO_NAME_NEO4J}"
+          "${IMAGE_REPO_NAME_REDIS}"
+          "${IMAGE_REPO_NAME_QDRANT}"
+          "${IMAGE_REPO_NAME_NGROK}"
+        )
+        for repo in "${REPOS[@]}"; do
+          aws ecr describe-repositories --repository-names "${repo}" --region "${AWS_DEFAULT_REGION}" >/dev/null 2>&1 || \
+          aws ecr create-repository --repository-name "${repo}" --image-scanning-configuration scanOnPush=true --region "${AWS_DEFAULT_REGION}"
         done
 
   build:
     commands:
-      - echo "🔨 Build des images Docker..."
-      - echo "Build démarré le `date`"
-      - echo "Répertoire de travail actuel:"
-      - pwd
-      - echo "Contenu répertoire courant :"
+      - echo ">> Building first-party Docker images"
+      - echo "Repository root content:"
       - ls -la
-      - echo "Vérification structure dossiers :"
-      - ls -la frontend/ || echo "Dossier frontend introuvable"
-      - ls -la app/ || echo "Dossier app introuvable"
-      - echo "Contenu docker-compose.build.yml :"
-      - cat docker-compose.build.yml
+      - echo "Git commit: ${CODEBUILD_RESOLVED_SOURCE_VERSION}"
 
-      # Build avec tags ECR - utiliser fichier build spécifique
-      - docker-compose -f docker-compose.build.yml build --no-cache
+      # Backend API image (also reused by worker)
+      - |
+        echo ">> Building backend/worker image..."
+        APP_LOCAL_TAG="sap-kb-app:build"
+        docker build --file app/Dockerfile --tag "${APP_LOCAL_TAG}" .
+        docker tag "${APP_LOCAL_TAG}" "${ECR_REGISTRY}/${IMAGE_REPO_NAME_APP}:${IMAGE_TAG}"
+        if [ "${PUSH_LATEST}" = "true" ]; then
+          docker tag "${APP_LOCAL_TAG}" "${ECR_REGISTRY}/${IMAGE_REPO_NAME_APP}:latest"
+        fi
 
-      # Tag des images pour ECR (toutes les images optimisées)
-      - docker tag sap-kb-app:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_APP:$IMAGE_TAG
-      - docker tag sap-kb-worker:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_WORKER:$IMAGE_TAG
-      - docker tag sap-kb-ui:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_UI:$IMAGE_TAG
-      - docker tag sap-kb-frontend:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_FRONTEND:$IMAGE_TAG
+        docker tag "${APP_LOCAL_TAG}" "${ECR_REGISTRY}/${IMAGE_REPO_NAME_WORKER}:${IMAGE_TAG}"
+        if [ "${PUSH_LATEST}" = "true" ]; then
+          docker tag "${APP_LOCAL_TAG}" "${ECR_REGISTRY}/${IMAGE_REPO_NAME_WORKER}:latest"
+        fi
+
+      # Streamlit UI
+      - |
+        echo ">> Building Streamlit UI image..."
+        UI_LOCAL_TAG="sap-kb-ui:build"
+        docker build --file ui/Dockerfile --tag "${UI_LOCAL_TAG}" ui
+        docker tag "${UI_LOCAL_TAG}" "${ECR_REGISTRY}/${IMAGE_REPO_NAME_UI}:${IMAGE_TAG}"
+        if [ "${PUSH_LATEST}" = "true" ]; then
+          docker tag "${UI_LOCAL_TAG}" "${ECR_REGISTRY}/${IMAGE_REPO_NAME_UI}:latest"
+        fi
+
+      # Next.js frontend
+      - |
+        echo ">> Building Next.js frontend image..."
+        FRONTEND_LOCAL_TAG="sap-kb-frontend:build"
+        docker build --file frontend/Dockerfile --tag "${FRONTEND_LOCAL_TAG}" frontend
+        docker tag "${FRONTEND_LOCAL_TAG}" "${ECR_REGISTRY}/${IMAGE_REPO_NAME_FRONTEND}:${IMAGE_TAG}"
+        if [ "${PUSH_LATEST}" = "true" ]; then
+          docker tag "${FRONTEND_LOCAL_TAG}" "${ECR_REGISTRY}/${IMAGE_REPO_NAME_FRONTEND}:latest"
+        fi
+
+      - echo ">> Mirroring third-party base images into ECR"
+      # Helper function: mirror image with version tag + optional latest
+      - |
+        mirror_external_image() {
+          local SOURCE_IMAGE="$1"
+          local TARGET_REPO="$2"
+          local VERSION_TAG="${SOURCE_IMAGE##*:}"
+
+          echo ">>>> Mirroring ${SOURCE_IMAGE} -> ${TARGET_REPO}:${VERSION_TAG}"
+          docker pull "${SOURCE_IMAGE}"
+          docker tag "${SOURCE_IMAGE}" "${ECR_REGISTRY}/${TARGET_REPO}:${VERSION_TAG}"
+          if [ "${PUSH_LATEST}" = "true" ]; then
+            docker tag "${SOURCE_IMAGE}" "${ECR_REGISTRY}/${TARGET_REPO}:latest"
+          fi
+        }
+
+        mirror_external_image "${NEO4J_BASE_IMAGE}" "${IMAGE_REPO_NAME_NEO4J}"
+        mirror_external_image "${REDIS_BASE_IMAGE}" "${IMAGE_REPO_NAME_REDIS}"
+        mirror_external_image "${QDRANT_BASE_IMAGE}" "${IMAGE_REPO_NAME_QDRANT}"
+        mirror_external_image "${NGROK_BASE_IMAGE}" "${IMAGE_REPO_NAME_NGROK}"
+
+      - echo ">> Built images:"
+      - docker image ls
 
   post_build:
     commands:
-      - echo "📦 Push des images vers ECR..."
+      - echo ">> Pushing all images to ECR..."
+      - |
+        push_with_tags() {
+          local REPO="$1"
+          local TAG="$2"
+          docker push "${ECR_REGISTRY}/${REPO}:${TAG}"
+          if [ "${PUSH_LATEST}" = "true" ] && [ "${TAG}" != "latest" ]; then
+            docker push "${ECR_REGISTRY}/${REPO}:latest"
+          fi
+        }
 
-      # Push vers ECR (toutes les images optimisées)
-      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_APP:$IMAGE_TAG
-      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_WORKER:$IMAGE_TAG
-      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_UI:$IMAGE_TAG
-      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_FRONTEND:$IMAGE_TAG
+        push_with_tags "${IMAGE_REPO_NAME_APP}" "${IMAGE_TAG}"
+        push_with_tags "${IMAGE_REPO_NAME_WORKER}" "${IMAGE_TAG}"
+        push_with_tags "${IMAGE_REPO_NAME_FRONTEND}" "${IMAGE_TAG}"
+        push_with_tags "${IMAGE_REPO_NAME_UI}" "${IMAGE_TAG}"
 
-      - echo "✅ Build terminé avec succès le `date`"
-      - echo "Images disponibles dans ECR:"
-      - echo "  - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_APP:$IMAGE_TAG"
-      - echo "  - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_WORKER:$IMAGE_TAG"
-      - echo "  - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_UI:$IMAGE_TAG"
-      - echo "  - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_FRONTEND:$IMAGE_TAG"
+        push_with_tags "${IMAGE_REPO_NAME_NEO4J}" "${NEO4J_BASE_IMAGE##*:}"
+        push_with_tags "${IMAGE_REPO_NAME_REDIS}" "${REDIS_BASE_IMAGE##*:}"
+        push_with_tags "${IMAGE_REPO_NAME_QDRANT}" "${QDRANT_BASE_IMAGE##*:}"
+        push_with_tags "${IMAGE_REPO_NAME_NGROK}" "${NGROK_BASE_IMAGE##*:}"
+
+      - echo ">> Build completed successfully at $(date)"
+      - echo "Images available under ${ECR_REGISTRY}"
 
 artifacts:
   files:
     - '**/*'
   name: sap-kb-build-$(date +%Y-%m-%d-%H-%M-%S)
 
-# Configuration cache pour accélérer les builds suivants
 cache:
   paths:
     - '/root/.cache/pip/**/*'
     - '/root/.npm/**/*'
-    - '/var/lib/docker/**/*'

@@ -15,6 +15,11 @@ import {
   CardBody,
   Divider,
   Spinner,
+  Switch,
+  HStack,
+  Alert,
+  AlertIcon,
+  AlertDescription,
 } from '@chakra-ui/react'
 import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
@@ -23,6 +28,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
 import { authService } from '@/lib/auth'
+import { fetchWithAuth } from '@/lib/fetchWithAuth'
 
 interface FileUploadProps {
   onFileSelect: (file: File) => void
@@ -99,6 +105,7 @@ export default function ImportPage() {
   const [documentType, setDocumentType] = useState('')
   const [documentTypes, setDocumentTypes] = useState<any[]>([])
   const [loadingTypes, setLoadingTypes] = useState(true)
+  const [useVision, setUseVision] = useState(false) // Vision désactivée par défaut
 
   const toast = useToast()
   const router = useRouter()
@@ -122,11 +129,7 @@ export default function ImportPage() {
           return
         }
 
-        const response = await fetch('/api/document-types?is_active=true', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        })
+        const response = await fetchWithAuth('/api/document-types?is_active=true')
 
         if (!response.ok) {
           throw new Error(`Erreur ${response.status}`)
@@ -162,9 +165,13 @@ export default function ImportPage() {
 
   const uploadMutation = useMutation({
     mutationFn: async (formData: FormData) => {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken()
+
       const response = await axios.post('/api/dispatch', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${token}`,
         },
       })
       return response.data
@@ -225,6 +232,7 @@ export default function ImportPage() {
     formData.append('action_type', 'ingest')
     formData.append('document_type', getFileType(selectedFile))
     formData.append('document_type_id', documentType) // ID du document type sélectionné
+    formData.append('use_vision', useVision.toString()) // Activer/désactiver Vision
 
     const metadata = {
       client: client.trim(),
@@ -290,6 +298,44 @@ export default function ImportPage() {
                   )}
                 </Select>
               </FormControl>
+            </VStack>
+
+            <Divider />
+
+            {/* Toggle Vision */}
+            <VStack spacing={4} align="stretch">
+              <Heading size="md">Mode d'analyse</Heading>
+
+              <FormControl display="flex" alignItems="center">
+                <HStack spacing={3} width="100%">
+                  <Switch
+                    id="vision-mode"
+                    colorScheme="blue"
+                    isChecked={useVision}
+                    onChange={(e) => setUseVision(e.target.checked)}
+                  />
+                  <FormLabel htmlFor="vision-mode" mb={0} fontWeight="semibold">
+                    Activer Vision (GPT-4 avec images)
+                  </FormLabel>
+                </HStack>
+              </FormControl>
+
+              <Alert status={useVision ? "info" : "success"} variant="left-accent">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">
+                  {useVision ? (
+                    <>
+                      <strong>Mode Vision activé :</strong> Utilise GPT-4 Vision pour analyser les images
+                      du document. Plus précis pour les diagrammes et contenus visuels complexes, mais plus coûteux.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Mode Texte activé (recommandé) :</strong> Analyse uniquement le texte extrait
+                      avec un LLM rapide. Plus économique et suffisant pour la plupart des documents.
+                    </>
+                  )}
+                </AlertDescription>
+              </Alert>
             </VStack>
 
             <Divider />

@@ -43,7 +43,11 @@ def generate_xss_payloads(count=100):
 
 
 def generate_sql_injection_payloads(count=100):
-    """Génère des payloads SQL injection variés."""
+    """Génère des payloads SQL injection variés.
+
+    Note: Seuls les payloads avec quotes sont dangereux dans notre contexte.
+    Les commentaires SQL (#, --, /*) sans quotes ne posent pas de risque.
+    """
     payloads = [
         "' OR '1'='1",
         "'; DROP TABLE users--",
@@ -57,11 +61,12 @@ def generate_sql_injection_payloads(count=100):
         "'; EXEC xp_cmdshell('dir')--",
     ]
 
+    # Générer uniquement des variants avec quotes (réellement dangereux)
     while len(payloads) < count:
         variant = random.choice([
             f"' OR '{random.randint(1, 9)}'='{random.randint(1, 9)}",
             f"'; DROP TABLE {random.choice(['users', 'entities', 'facts'])}--",
-            f"admin{random.choice(['--', '#', '/*'])}",
+            f"admin'{random.choice(['--', '#', '/*'])}",  # Avec quote pour être dangereux
         ])
         payloads.append(variant)
 
@@ -126,12 +131,17 @@ def generate_unicode_attack_payloads(count=100):
     while len(payloads) < count:
         word = random.choice(base_words)
         chars = list(word)
-        # Remplacer 1-2 caractères par homoglyphs
-        for _ in range(random.randint(1, min(2, len(chars)))):
-            idx = random.randint(0, len(chars) - 1)
-            if chars[idx] in homoglyphs:
+        # Remplacer 1-2 caractères par homoglyphs (GARANTIR au moins 1 remplacement)
+        replaceable_indices = [i for i, c in enumerate(chars) if c in homoglyphs]
+        if replaceable_indices:  # S'il y a des caractères remplaçables
+            num_replacements = random.randint(1, min(2, len(replaceable_indices)))
+            indices_to_replace = random.sample(replaceable_indices, num_replacements)
+            for idx in indices_to_replace:
                 chars[idx] = random.choice(homoglyphs[chars[idx]])
-        payloads.append(''.join(chars))
+            payloads.append(''.join(chars))
+        else:
+            # Si aucun caractère remplaçable, on skip ce mot
+            continue
 
     return payloads[:count]
 

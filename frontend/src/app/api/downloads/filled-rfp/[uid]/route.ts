@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyJWT, createAuthHeaders } from '@/lib/jwt-helpers'
 
 interface DownloadParams {
   params: {
@@ -7,6 +8,13 @@ interface DownloadParams {
 }
 
 export async function GET(request: NextRequest, { params }: DownloadParams) {
+  // Verifier JWT token
+  const authResult = verifyJWT(request);
+  if (authResult instanceof NextResponse) {
+    return authResult;
+  }
+  const authHeader = authResult;
+
   try {
     const { uid } = params;
 

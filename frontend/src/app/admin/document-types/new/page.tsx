@@ -31,9 +31,9 @@ import {
 import { ArrowBackIcon, AttachmentIcon, DeleteIcon } from '@chakra-ui/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
-import axios from 'axios'
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
+import axiosInstance from '@/lib/axios'
 
 interface SuggestedEntityType {
   name: string
@@ -67,7 +67,7 @@ export default function NewDocumentTypePage() {
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
-      const response = await axios.post('/api/document-types', data)
+      const response = await axiosInstance.post('/api/document-types', data)
       return response.data
     },
     onSuccess: () => {
@@ -98,8 +98,12 @@ export default function NewDocumentTypePage() {
       if (contextPrompt) {
         formData.append('context_prompt', contextPrompt)
       }
-      const response = await axios.post('/api/document-types/analyze', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+
+      const response = await axiosInstance.post('/api/document-types/analyze', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 120000, // 2 minutes timeout pour l'analyse Claude
       })
       return response.data
     },
@@ -137,7 +141,7 @@ export default function NewDocumentTypePage() {
     // Poll toutes les 2 secondes
     pollingIntervalRef.current = setInterval(async () => {
       try {
-        const response = await axios.get(`/api/jobs/${jobId}`)
+        const response = await axiosInstance.get(`/api/jobs/${jobId}`)
         const job = response.data
 
         if (job.status === 'completed' && job.result) {

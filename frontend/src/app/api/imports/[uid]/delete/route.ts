@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyJWT, createAuthHeaders } from '@/lib/jwt-helpers'
 
 const BACKEND_URL = 'http://app:8000'
 
@@ -6,10 +7,18 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { uid: string } }
 ) {
+  // Verifier JWT token
+  const authResult = verifyJWT(request);
+  if (authResult instanceof NextResponse) {
+    return authResult;
+  }
+  const authHeader = authResult;
+
   try {
     const response = await fetch(`${BACKEND_URL}/api/imports/${params.uid}/delete`, {
       method: 'DELETE',
       headers: {
+        'Authorization': authHeader,
         'Content-Type': 'application/json',
       },
     })

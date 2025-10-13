@@ -398,43 +398,101 @@ class DocumentTypeService:
 
         suggested_types = self.get_suggested_entity_types(document_type_id, tenant_id)
 
-        # Construire prompt personnalisé
-        prompt = f"""Analyse ce contenu et extrait les entités pertinentes.
+        # Construire prompt personnalisé avec extraction complète (concepts, facts, entities, relations)
+        prompt = f"""Extract structured knowledge from this content.
 
-**CONTEXTE DU DOCUMENT**: {doc_type.context_prompt or doc_type.description or "Document " + doc_type.name}
+**DOCUMENT CONTEXT**: {doc_type.context_prompt or doc_type.description or "Document " + doc_type.name}
 
-**TYPES D'ENTITÉS SUGGÉRÉS** (à privilégier):
+**SUGGESTED ENTITY TYPES** (prioritize these):
 {self._format_suggested_types(suggested_types)}
 
-**AUTRES TYPES POSSIBLES**:
-Tu peux aussi identifier d'autres types d'entités si pertinents, mais privilégie les types suggérés ci-dessus.
-
-**CONTENU À ANALYSER**:
+**CONTENT TO ANALYZE**:
 {slide_content}
 
-**INSTRUCTIONS**:
-1. Extrait les entités des types suggérés en priorité
-2. Si tu identifies des entités d'autres types pertinents, inclus-les aussi
-3. Pour chaque entité, fournis:
-   - name: Nom de l'entité
-   - entity_type: Type (UPPERCASE)
-   - description: Description courte
-   - confidence: Score de confiance (0.0-1.0)
+**INSTRUCTIONS** - Extract the following 4 types of knowledge:
 
-**FORMAT DE SORTIE JSON**:
+1. **CONCEPTS** - Main ideas, definitions, explanations
+   Each concept must contain:
+   - `full_explanation`: string (detailed description of the concept)
+   - `meta`: object with:
+     - `type`: string (e.g., 'definition', 'process', 'architecture', 'feature')
+     - `level`: number (importance: 1=critical, 2=important, 3=detail)
+     - `topic`: string (main topic)
+
+2. **FACTS** - Factual statements and assertions
+   Each fact must contain:
+   - `subject`: string (what the fact is about)
+   - `predicate`: string (relationship or property)
+   - `value`: string/number (value or target)
+   - `confidence`: number (0-1, certainty level)
+   - `fact_type`: string (e.g., 'specification', 'requirement', 'statistic')
+
+3. **ENTITIES** - Named entities (products, technologies, components)
+   Each entity must contain:
+   - `name`: string (canonical name)
+   - `entity_type`: string (UPPERCASE - prioritize suggested types above)
+   - `description`: string (brief description, optional)
+   - `confidence`: number (0-1, certainty level)
+
+4. **RELATIONS** - Relationships between entities
+   Each relation must contain:
+   - `source`: string (source entity name)
+   - `relation_type`: string (use one of these semantic types):
+     * Structural: PART_OF, CONTAINS, HAS_MEMBER
+     * Functional: USES, USED_BY, REQUIRES, PROVIDES
+     * Implementation: IMPLEMENTS, SUPPORTS, EXTENDS
+     * Reference: MENTIONS, RELATED_TO
+     * Temporal: PRECEDES, FOLLOWS
+     * Version: REPLACES, REPLACED_BY
+     * Technical: INTEGRATES_WITH, DEPENDS_ON, COMPATIBLE_WITH
+   - `target`: string (target entity name)
+   - `description`: string (optional context explaining the relationship)
+
+**JSON OUTPUT FORMAT**:
 {{
+  "concepts": [
+    {{
+      "full_explanation": "SAP S/4HANA is...",
+      "meta": {{
+        "type": "definition",
+        "level": 1,
+        "topic": "ERP"
+      }}
+    }}
+  ],
+  "facts": [
+    {{
+      "subject": "SAP HANA",
+      "predicate": "supports",
+      "value": "in-memory computing",
+      "confidence": 0.95,
+      "fact_type": "specification"
+    }}
+  ],
   "entities": [
     {{
       "name": "SAP HANA",
       "entity_type": "SOLUTION",
       "description": "Database platform",
       "confidence": 0.95
-    }},
-    ...
+    }}
+  ],
+  "relations": [
+    {{
+      "source": "SAP S/4HANA",
+      "relation_type": "USES",
+      "target": "SAP HANA",
+      "description": "S/4HANA runs on HANA database"
+    }}
   ]
 }}
 
-Retourne UNIQUEMENT le JSON, sans texte avant/après.
+**IMPORTANT**:
+- **PRESERVE THE ORIGINAL LANGUAGE**: If the source content is in English, write all extracted content in English. If it's in French, write in French. If it's in Portuguese, write in Portuguese. Match the language of the source document.
+- Extract ALL concepts, facts, entities, and relations present in the content
+- Prioritize the suggested entity types but don't limit yourself to them
+- All 4 keys (concepts, facts, entities, relations) are REQUIRED even if some arrays are empty
+- Return ONLY the JSON, with no text before or after
 """
         return prompt
 

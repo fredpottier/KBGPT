@@ -1,5 +1,13 @@
 """
 Tests unitaires pour EntityNormalizer.
+
+NOTE: EntityNormalizer est OBSOLÈTE depuis la migration vers Neo4j + SQLite.
+La normalisation des entités se fait maintenant via Neo4j Knowledge Graph
+et EntityTypeRegistry (SQLite). Les fichiers YAML dans config/ontologies/
+ne sont plus utilisés dans le pipeline principal.
+
+Ces tests sont conservés pour référence historique mais skippés car
+la classe n'est plus utilisée dans le codebase.
 """
 import pytest
 import sys
@@ -18,80 +26,89 @@ def normalizer():
     return EntityNormalizer()
 
 
+@pytest.mark.skip(reason="EntityNormalizer obsolète - migration Neo4j + EntityTypeRegistry SQLite")
 class TestEntityNormalizer:
     """Tests du service de normalisation d'entités."""
 
     def test_normalize_solution_sap_exact_match(self, normalizer):
         """Test normalisation solution SAP - correspondance exacte."""
-        entity_id, canonical = normalizer.normalize_entity_name(
+        entity_id, canonical, is_cataloged = normalizer.normalize_entity_name(
             "SAP S/4HANA Cloud, Public Edition",
             EntityType.SOLUTION
         )
         assert entity_id == "S4HANA_PUBLIC"
         assert canonical == "SAP S/4HANA Cloud, Public Edition"
+        assert is_cataloged is True
 
     def test_normalize_solution_sap_alias_match(self, normalizer):
         """Test normalisation solution SAP - via alias."""
-        entity_id, canonical = normalizer.normalize_entity_name(
+        entity_id, canonical, is_cataloged = normalizer.normalize_entity_name(
             "SAP Cloud ERP",
             EntityType.SOLUTION
         )
         assert entity_id == "S4HANA_PUBLIC"
         assert canonical == "SAP S/4HANA Cloud, Public Edition"
+        assert is_cataloged is True
 
     def test_normalize_solution_case_insensitive(self, normalizer):
         """Test normalisation insensible à la casse."""
-        entity_id, canonical = normalizer.normalize_entity_name(
+        entity_id, canonical, is_cataloged = normalizer.normalize_entity_name(
             "sap cloud erp",
             EntityType.SOLUTION
         )
         assert entity_id == "S4HANA_PUBLIC"
         assert canonical == "SAP S/4HANA Cloud, Public Edition"
+        assert is_cataloged is True
 
     def test_normalize_component_load_balancer(self, normalizer):
         """Test normalisation component - Load Balancer."""
-        entity_id, canonical = normalizer.normalize_entity_name(
+        entity_id, canonical, is_cataloged = normalizer.normalize_entity_name(
             "LB",
             EntityType.COMPONENT
         )
         assert entity_id == "LOAD_BALANCER"
         assert canonical == "Load Balancer"
+        assert is_cataloged is True
 
     def test_normalize_component_api_gateway(self, normalizer):
         """Test normalisation component - API Gateway."""
-        entity_id, canonical = normalizer.normalize_entity_name(
+        entity_id, canonical, is_cataloged = normalizer.normalize_entity_name(
             "APIGW",
             EntityType.COMPONENT
         )
         assert entity_id == "API_GATEWAY"
         assert canonical == "API Gateway"
+        assert is_cataloged is True
 
     def test_normalize_technology_kubernetes(self, normalizer):
         """Test normalisation technology - Kubernetes."""
-        entity_id, canonical = normalizer.normalize_entity_name(
+        entity_id, canonical, is_cataloged = normalizer.normalize_entity_name(
             "k8s",
             EntityType.TECHNOLOGY
         )
         assert entity_id == "KUBERNETES"
         assert canonical == "Kubernetes"
+        assert is_cataloged is True
 
     def test_normalize_uncataloged_entity(self, normalizer):
         """Test normalisation entité non cataloguée."""
-        entity_id, canonical = normalizer.normalize_entity_name(
+        entity_id, canonical, is_cataloged = normalizer.normalize_entity_name(
             "Custom Solution XYZ",
             EntityType.SOLUTION
         )
         assert entity_id is None
         assert canonical == "Custom Solution XYZ"
+        assert is_cataloged is False
 
     def test_normalize_whitespace_handling(self, normalizer):
         """Test normalisation avec espaces."""
-        entity_id, canonical = normalizer.normalize_entity_name(
+        entity_id, canonical, is_cataloged = normalizer.normalize_entity_name(
             "  Load Balancer  ",
             EntityType.COMPONENT
         )
         assert entity_id == "LOAD_BALANCER"
         assert canonical == "Load Balancer"
+        assert is_cataloged is True
 
     def test_get_entity_metadata_solution(self, normalizer):
         """Test récupération métadonnées solution."""
@@ -163,9 +180,10 @@ class TestEntityNormalizer:
         aliases = ["K8s", "k8s", "Kube", "kubernetes"]
 
         for alias in aliases:
-            entity_id, canonical = normalizer.normalize_entity_name(
+            entity_id, canonical, is_cataloged = normalizer.normalize_entity_name(
                 alias,
                 EntityType.TECHNOLOGY
             )
             assert entity_id == "KUBERNETES"
             assert canonical == "Kubernetes"
+            assert is_cataloged is True

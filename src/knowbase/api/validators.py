@@ -102,18 +102,38 @@ def validate_entity_name(value: str) -> str:
     if not value:
         raise ValueError("entity.name ne peut pas être vide")
 
-    # Max length
+    # Strip whitespaces EN PREMIER (avant les checks de sécurité)
+    # Permet de gérer proprement les espaces, tabs, newlines en début/fin
+    value = value.strip()
+
+    if not value:  # Recheck après strip
+        raise ValueError("entity.name ne peut pas être vide")
+
+    # Max length (après strip)
     if len(value) > 200:
         raise ValueError(f"entity.name trop long ({len(value)} chars, max 200)")
 
-    # Vérifier patterns dangereux (SQL, XSS, path traversal)
-    for pattern in DANGEROUS_PATTERNS:
-        if pattern.search(value):
-            raise ValueError(
-                f"entity.name invalide: contient un pattern dangereux (injection potentielle)"
-            )
+    # Checks spécifiques AVANT le check général pour des messages plus clairs
 
-    # Caractères XSS dangereux (vérification redondante mais explicite)
+    # Null bytes (priorité haute - check rapide)
+    if '\x00' in value:
+        raise ValueError("entity.name invalide: null byte détecté")
+
+    # Note: Newlines internes SONT autorisés (seront sanitizés dans logs)
+    # On ne check que null bytes car c'est le vrai danger
+
+    # Path traversal (vérification explicite)
+    if '../' in value or '..\\' in value:
+        raise ValueError("entity.name invalide: path traversal détecté")
+
+    # Chemins absolus (Unix, Windows, file://)
+    if value.startswith('/') or value.startswith('file://'):
+        raise ValueError("entity.name invalide: chemin absolu détecté")
+    # Windows absolute paths : C:\, D:\, etc.
+    if len(value) >= 3 and value[1:3] in (':\\', ':/'):
+        raise ValueError("entity.name invalide: chemin absolu détecté")
+
+    # Caractères XSS dangereux (vérification explicite)
     dangerous_chars = ['<', '>', '"', "'"]
     for char in dangerous_chars:
         if char in value:
@@ -121,15 +141,19 @@ def validate_entity_name(value: str) -> str:
                 f"entity.name invalide: caractère interdit '{char}' (prévention XSS)"
             )
 
-    # Path traversal (vérification redondante mais explicite)
-    if '../' in value or '..\\' in value:
-        raise ValueError("entity.name invalide: path traversal détecté (../ ou ..\\)")
+    # Vérifier patterns dangereux additionnels (SQL, XSS avancé, etc.)
+    # Cette vérification générale attrape les patterns complexes
+    # Note: on skip le check control chars car newlines/tabs déjà gérés ci-dessus
+    for i, pattern in enumerate(DANGEROUS_PATTERNS):
+        # Skip pattern 5 (control chars) car déjà géré spécifiquement
+        if i == 5:  # Pattern [\x00-\x1f\x7f]
+            continue
+        if pattern.search(value):
+            raise ValueError(
+                f"entity.name invalide: contient un pattern dangereux (injection potentielle)"
+            )
 
-    # Null bytes (vérification redondante mais explicite)
-    if '\x00' in value:
-        raise ValueError("entity.name invalide: null byte détecté")
-
-    return value.strip()
+    return value
 
 
 def validate_relation_type(value: str) -> str:

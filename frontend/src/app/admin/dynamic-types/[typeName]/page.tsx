@@ -15,6 +15,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 import {
   Box,
   Container,
@@ -195,7 +196,7 @@ export default function TypeEntitiesPage() {
     fetchTypeInfo();
     fetchEntities();
     fetchAvailableTypes();
-    fetchSnapshots();
+    // Ne pas charger les snapshots automatiquement - seulement quand l'utilisateur clique sur Rollback
   }, [typeName, statusFilter]);
 
   // Vérifier l'existence d'une ontologie et auto-charger si pending_review
@@ -214,7 +215,9 @@ export default function TypeEntitiesPage() {
   // Vérifier si une ontologie existe en cache (sans l'afficher automatiquement)
   const checkIfOntologyExists = async () => {
     try {
-      const ontologyResponse = await fetch(`/api/entity-types/${typeName}/ontology-proposal`);
+      const ontologyResponse = await fetchWithAuth(`/api/entity-types/${typeName}/ontology-proposal`, {
+        // fetchWithAuth ajoute automatiquement le token
+      });
       if (ontologyResponse.ok) {
         const ontologyData = await ontologyResponse.json();
         setHasExistingOntology(ontologyData.ontology && Object.keys(ontologyData.ontology).length > 0);
@@ -239,7 +242,9 @@ export default function TypeEntitiesPage() {
 
   const fetchAvailableTypes = async () => {
     try {
-      const response = await fetch('/api/entity-types');
+      const response = await fetchWithAuth('/api/entity-types', {
+        // fetchWithAuth ajoute automatiquement le token
+      });
       if (response.ok) {
         const data = await response.json();
         const types = data.types.map((t: any) => t.type_name);
@@ -260,7 +265,9 @@ export default function TypeEntitiesPage() {
     // Sinon on charge et affiche
     setLoadingSnapshots(true);
     try {
-      const response = await fetch(`/api/entity-types/${typeName}/snapshots`);
+      const response = await fetchWithAuth(`/api/entity-types/${typeName}/snapshots`, {
+        // fetchWithAuth ajoute automatiquement le token
+      });
       if (response.ok) {
         const data = await response.json();
         setSnapshots(data.snapshots || []);
@@ -273,9 +280,13 @@ export default function TypeEntitiesPage() {
     }
   };
 
+  // Note: fetchWithAuth() gère automatiquement l'ajout du JWT token
+
   const fetchTypeInfo = async () => {
     try {
-      const response = await fetch(`/api/entity-types/${typeName}`);
+      const response = await fetchWithAuth(`/api/entity-types/${typeName}`, {
+        // fetchWithAuth ajoute automatiquement le token
+      });
       if (response.ok) {
         const data = await response.json();
         // Calculer validated_entity_count si absent
@@ -296,7 +307,9 @@ export default function TypeEntitiesPage() {
         ? `/api/entities?entity_type=${typeName}`
         : `/api/entities?entity_type=${typeName}&status=${statusFilter}`;
 
-      const response = await fetch(url);
+      const response = await fetchWithAuth(url, {
+        // fetchWithAuth ajoute automatiquement le token
+      });
       const data = await response.json();
 
       // Trier par nom alphabétiquement
@@ -322,13 +335,15 @@ export default function TypeEntitiesPage() {
   const loadExistingOntology = async () => {
     setCheckingOntology(true);
     try {
-      const ontologyResponse = await fetch(`/api/entity-types/${typeName}/ontology-proposal`);
+      const ontologyResponse = await fetchWithAuth(`/api/entity-types/${typeName}/ontology-proposal`, {
+        // fetchWithAuth ajoute automatiquement le token
+      });
 
       if (ontologyResponse.ok) {
         const ontologyData = await ontologyResponse.json();
 
         // Calculer le preview avec l'ontologie disponible
-        const previewResponse = await fetch(`/api/entity-types/${typeName}/preview-normalization`, {
+        const previewResponse = await fetchWithAuth(`/api/entity-types/${typeName}/preview-normalization`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -360,9 +375,10 @@ export default function TypeEntitiesPage() {
 
   const handleCancelNormalization = async () => {
     try {
-      const response = await fetch(`/api/entity-types/${typeName}/ontology-proposal`, {
+      const response = await fetchWithAuth(`/api/entity-types/${typeName}/ontology-proposal`, {
         method: 'DELETE',
         headers: {
+          'Content-Type': 'application/json',
           'X-Admin-Key': 'admin-dev-key-change-in-production'
         }
       });
@@ -417,7 +433,7 @@ export default function TypeEntitiesPage() {
 
     try {
       // Lancer génération ontologie (asynchrone)
-      const response = await fetch(`/api/entity-types/${typeName}/generate-ontology?include_validated=${includeValidated}`, {
+      const response = await fetchWithAuth(`/api/entity-types/${typeName}/generate-ontology?include_validated=${includeValidated}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -624,7 +640,7 @@ export default function TypeEntitiesPage() {
     }
 
     try {
-      const response = await fetch(`/api/entity-types/${typeName}/normalize-entities`, {
+      const response = await fetchWithAuth(`/api/entity-types/${typeName}/normalize-entities`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -675,7 +691,9 @@ export default function TypeEntitiesPage() {
 
     const poll = async () => {
       try {
-        const response = await fetch(`/api/jobs/${jobId}/status`);
+        const response = await fetchWithAuth(`/api/jobs/${jobId}/status`, {
+          // fetchWithAuth ajoute automatiquement le token
+        });
         const data = await response.json();
 
         if (data.status === 'finished') {
@@ -729,7 +747,7 @@ export default function TypeEntitiesPage() {
 
   const handleApproveEntity = async (uuid: string) => {
     try {
-      const response = await fetch(`/api/entities/${uuid}/approve`, {
+      const response = await fetchWithAuth(`/api/entities/${uuid}/approve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -770,7 +788,7 @@ export default function TypeEntitiesPage() {
     if (!entityToChangeType || !newEntityType) return;
 
     try {
-      const response = await fetch(`/api/entities/${entityToChangeType.uuid}/change-type`, {
+      const response = await fetchWithAuth(`/api/entities/${entityToChangeType.uuid}/change-type`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -804,7 +822,7 @@ export default function TypeEntitiesPage() {
 
   const handleRollback = async (snapshotId: string) => {
     try {
-      const response = await fetch(`/api/entity-types/${typeName}/undo-normalization`, {
+      const response = await fetchWithAuth(`/api/entity-types/${typeName}/undo-normalization`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -825,7 +843,10 @@ export default function TypeEntitiesPage() {
         setTimeout(() => {
           fetchEntities();
           fetchTypeInfo();
-          fetchSnapshots();
+          // Rafraîchir les snapshots seulement s'ils étaient affichés
+          if (showSnapshots) {
+            fetchSnapshots();
+          }
         }, 3000);
       } else {
         throw new Error('Rollback failed');
@@ -844,9 +865,10 @@ export default function TypeEntitiesPage() {
     if (!targetMergeType) return;
 
     try {
-      const response = await fetch(`/api/entity-types/${typeName}/merge-into/${targetMergeType}`, {
+      const response = await fetchWithAuth(`/api/entity-types/${typeName}/merge-into/${targetMergeType}`, {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'X-Admin-Key': 'admin-dev-key-change-in-production'
         }
       });
@@ -886,7 +908,7 @@ export default function TypeEntitiesPage() {
     if (!entityToMerge || !targetEntityUuid) return;
 
     try {
-      const response = await fetch(`/api/entities/${entityToMerge.uuid}/merge`, {
+      const response = await fetchWithAuth(`/api/entities/${entityToMerge.uuid}/merge`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -955,7 +977,7 @@ export default function TypeEntitiesPage() {
     setIsBulkMigrating(true);
     try {
       const promises = Array.from(selectedEntities).map(uuid =>
-        fetch(`/api/entities/${uuid}/approve`, {
+        fetchWithAuth(`/api/entities/${uuid}/approve`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1027,7 +1049,7 @@ export default function TypeEntitiesPage() {
 
     setIsBulkMigrating(true);
     try {
-      const response = await fetch('/api/entities/bulk-change-type', {
+      const response = await fetchWithAuth('/api/entities/bulk-change-type', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1254,7 +1276,7 @@ export default function TypeEntitiesPage() {
                       onClick={fetchSnapshots}
                       isLoading={loadingSnapshots}
                     >
-                      Rollback
+                      {showSnapshots ? 'Masquer snapshots' : 'Rollback / Snapshots'}
                     </Button>
                     <Button
                       colorScheme="orange"

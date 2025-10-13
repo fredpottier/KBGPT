@@ -164,6 +164,7 @@ def handle_dispatch(
     question: str | None,
     file: UploadFile | None,
     meta: str | None,
+    use_vision: bool = True,
     settings: Settings,
     logger,
 ) -> dict[str, Any]:
@@ -247,12 +248,14 @@ def handle_dispatch(
                 file_path=str(saved_path),
                 document_type_id=doc_type_for_pipeline,
                 meta_path=str(meta_path) if meta_path else None,
+                use_vision=use_vision,
             )
         elif document_kind == "pdf":
             job = enqueue_pdf_ingestion(
                 job_id=uid,
                 file_path=str(saved_path),
-                document_type_id=doc_type_for_pipeline
+                document_type_id=doc_type_for_pipeline,
+                use_vision=use_vision,
             )
         else:
             job = enqueue_excel_ingestion(

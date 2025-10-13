@@ -58,6 +58,8 @@ COPY src/knowbase/ /app/knowbase/
 COPY app/main.py /app/main.py
 COPY app/patch_unstructured.py /app/patch_unstructured.py
 COPY app/claims_utils.py /app/claims_utils.py
+COPY app/entrypoint-worker.sh /app/entrypoint-worker.sh
+RUN chmod +x /app/entrypoint-worker.sh
 RUN mkdir -p /app/config
 
 ENV HF_HOME=/data/models

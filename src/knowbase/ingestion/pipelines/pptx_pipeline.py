@@ -54,7 +54,7 @@ GPT_MODEL = settings.gpt_model
 EMB_MODEL_NAME = settings.embeddings_model
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "2"))
 
-logger = setup_logging(LOGS_DIR, "ingest_debug.log")
+logger = setup_logging(LOGS_DIR, "ingest_debug.log", enable_console=False)
 DetectorFactory.seed = 0
 
 # Patch unstructured pour éviter HTTP 403 avant l'import MegaParse
@@ -1053,6 +1053,147 @@ def analyze_deck_summary(
         return {}
 
 
+# Analyse d'un slide via GPT SANS image (text-only), retourne les chunks enrichis
+def ask_gpt_slide_analysis_text_only(
+    deck_summary,
+    slide_index,
+    source_name,
+    text,
+    notes,
+    megaparse_content="",
+    document_type="default",
+    deck_prompt_id="unknown",
+    document_context_prompt=None,
+    retries=2,
+):
+    """
+    Analyse un slide en utilisant uniquement le texte extrait, sans Vision.
+    Plus rapide et moins coûteux que la version avec Vision.
+    """
+    # Heartbeat avant l'appel LLM
+    try:
+        from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+        send_worker_heartbeat()
+    except Exception:
+        pass
+
+    doc_type = document_type or "default"
+    slide_prompt_id, slide_template = select_prompt(
+        PROMPT_REGISTRY, doc_type, "slide"
+    )
+
+    # Préparer le contenu textuel pour l'analyse
+    content_text = megaparse_content if megaparse_content else text
+    if notes:
+        content_text += f"\n\nNotes: {notes}"
+
+    prompt_text = render_prompt(
+        slide_template,
+        deck_summary=deck_summary,
+        slide_index=slide_index,
+        source_name=source_name,
+        text=content_text,
+        notes=notes,
+        megaparse_content=megaparse_content,
+    )
+
+    # Injection du context_prompt personnalisé si fourni
+    if document_context_prompt:
+        logger.debug(f"Slide {slide_index}: Injection context_prompt personnalisé ({len(document_context_prompt)} chars) [TEXT-ONLY MODE]")
+        prompt_text = f"""**CONTEXTE DOCUMENT TYPE**:
+{document_context_prompt}
+
+---
+
+{prompt_text}"""
+
+    msg = [
+        {
+            "role": "system",
+            "content": "You analyze document content deeply and coherently. Extract concepts, facts, entities, and relations from the provided text.",
+        },
+        {
+            "role": "user",
+            "content": prompt_text,
+        },
+    ]
+
+    for attempt in range(retries):
+        try:
+            # Utiliser TaskType.LONG_TEXT_SUMMARY au lieu de VISION (LLM plus rapide)
+            raw_content = llm_router.complete(
+                TaskType.LONG_TEXT_SUMMARY,
+                msg,
+                temperature=0.2,
+                max_tokens=8000
+            )
+            cleaned_content = clean_gpt_response(raw_content or "")
+            response_data = json.loads(cleaned_content)
+
+            logger.debug(f"Slide {slide_index} [TEXT-ONLY]: LLM response type = {type(response_data).__name__}, keys = {list(response_data.keys()) if isinstance(response_data, dict) else 'N/A'}")
+
+            # Support format unifié 4 outputs
+            if isinstance(response_data, list):
+                items = response_data
+                facts_data = []
+                entities_data = []
+                relations_data = []
+            elif isinstance(response_data, dict):
+                items = response_data.get("concepts", [])
+                facts_data = response_data.get("facts", [])
+                entities_data = response_data.get("entities", [])
+                relations_data = response_data.get("relations", [])
+            else:
+                logger.warning(f"Slide {slide_index} [TEXT-ONLY]: Format JSON inattendu: {type(response_data)}")
+                items = []
+                facts_data = []
+                entities_data = []
+                relations_data = []
+
+            # Parser concepts pour Qdrant
+            enriched = []
+            for it in items:
+                expl = it.get("full_explanation", "")
+                meta = it.get("meta", {})
+                if expl:
+                    for seg in recursive_chunk(expl, max_len=400, overlap_ratio=0.15):
+                        meta_enriched = {**meta, "slide_index": slide_index}
+                        enriched.append(
+                            {
+                                "full_explanation": seg,
+                                "meta": meta_enriched,
+                                "prompt_meta": {
+                                    "document_type": doc_type,
+                                    "slide_prompt_id": slide_prompt_id,
+                                    "prompts_version": PROMPT_REGISTRY.get(
+                                        "version", "unknown"
+                                    ),
+                                    "extraction_mode": "text_only",  # Marqueur mode text-only
+                                },
+                            }
+                        )
+
+            # Attacher facts/entities/relations
+            if facts_data or entities_data or relations_data:
+                for concept in enriched:
+                    concept["_facts"] = facts_data
+                    concept["_entities"] = entities_data
+                    concept["_relations"] = relations_data
+
+            logger.info(
+                f"Slide {slide_index} [TEXT-ONLY]: {len(enriched)} concepts + {len(facts_data)} facts + "
+                f"{len(entities_data)} entities + {len(relations_data)} relations extraits"
+            )
+
+            return enriched
+
+        except Exception as e:
+            logger.warning(f"Slide {slide_index} [TEXT-ONLY] attempt {attempt} failed: {e}")
+            time.sleep(2 * (attempt + 1))
+
+    return []
+
+
 # Analyse d'un slide via GPT + image, retourne les chunks enrichis
 def ask_gpt_slide_analysis(
     image_path,
@@ -1296,9 +1437,15 @@ def load_document_type_context(document_type_id: str | None) -> str | None:
 
 
 # Fonction principale pour traiter un fichier PPTX
-def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_callback=None, rq_job=None):
+def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_callback=None, rq_job=None, use_vision: bool = True):
+    # Reconfigurer logger pour le contexte RQ worker avec lazy file creation
+    global logger
+    logger = setup_logging(LOGS_DIR, "ingest_debug.log", enable_console=False)
+
+    # Premier log réel - c'est ici que le fichier sera créé
     logger.info(f"start ingestion for {pptx_path.name}")
     logger.info(f"📋 Document Type ID: {document_type_id or 'default'}")
+    logger.info(f"🔍 Mode extraction: {'VISION (GPT-4 avec images)' if use_vision else 'TEXT-ONLY (LLM rapide)'}")
 
     # Charger le context_prompt personnalisé depuis la DB
     document_context_prompt = load_document_type_context(document_type_id)
@@ -1546,24 +1693,46 @@ def process_pptx(pptx_path: Path, document_type_id: str | None = None, progress_
             # Suppression des logs détaillés du contenu MegaParse par slide pour simplifier la lecture
 
             if idx in image_paths:
-                tasks.append(
-                    (
-                        idx,
-                        ex.submit(
-                            ask_gpt_slide_analysis,
-                            image_paths[idx],
-                            summary,
+                # Choisir entre Vision (avec image) ou Text-only (sans image) selon use_vision
+                if use_vision:
+                    # Mode VISION : Utiliser GPT-4 Vision avec l'image
+                    tasks.append(
+                        (
                             idx,
-                            pptx_path.name,
-                            prompt_text,
-                            notes,
-                            megaparse_content,
-                            document_type_id or "default",
-                            deck_prompt_id,
-                            document_context_prompt,  # Nouveau paramètre
-                        ),
+                            ex.submit(
+                                ask_gpt_slide_analysis,
+                                image_paths[idx],
+                                summary,
+                                idx,
+                                pptx_path.name,
+                                prompt_text,
+                                notes,
+                                megaparse_content,
+                                document_type_id or "default",
+                                deck_prompt_id,
+                                document_context_prompt,
+                            ),
+                        )
                     )
-                )
+                else:
+                    # Mode TEXT-ONLY : Utiliser LLM rapide sans image
+                    tasks.append(
+                        (
+                            idx,
+                            ex.submit(
+                                ask_gpt_slide_analysis_text_only,
+                                summary,
+                                idx,
+                                pptx_path.name,
+                                prompt_text,
+                                notes,
+                                megaparse_content,
+                                document_type_id or "default",
+                                deck_prompt_id,
+                                document_context_prompt,
+                            ),
+                        )
+                    )
 
     total_slides = len(tasks)
     logger.info(f"🚀 Début analyse LLM de {total_slides} slides")

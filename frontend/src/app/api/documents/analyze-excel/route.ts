@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
+    // ✅ Récupérer le JWT token depuis les headers
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader) {
+      return NextResponse.json(
+        { error: 'Missing authorization token' },
+        { status: 401 }
+      );
+    }
+
     const formData = await request.formData();
     const file = formData.get('file') as File;
 
@@ -16,9 +25,12 @@ export async function POST(request: NextRequest) {
     const backendFormData = new FormData();
     backendFormData.append('file', file);
 
-    // Envoyer vers l'API backend
+    // Envoyer vers l'API backend avec JWT
     const response = await fetch('http://app:8000/documents/analyze-excel', {
       method: 'POST',
+      headers: {
+        'Authorization': authHeader,  // ✅ Transmettre JWT au backend
+      },
       body: backendFormData,
     });
 

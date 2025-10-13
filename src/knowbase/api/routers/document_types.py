@@ -451,9 +451,14 @@ async def remove_entity_type(
     response_model=DocumentTypeTemplateListResponse,
     summary="Liste templates prédéfinis"
 )
-async def list_templates():
+async def list_templates(
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Liste les templates de document types prédéfinis.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
 
     Permet d'importer rapidement des configurations types.
     """

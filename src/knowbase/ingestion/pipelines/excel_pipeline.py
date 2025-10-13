@@ -38,7 +38,7 @@ DOCS_IN = settings.docs_in_dir
 DOCS_DONE = settings.docs_done_dir
 LOGS_DIR = settings.logs_dir
 ensure_directories([DOCS_IN, DOCS_DONE, LOGS_DIR])
-logger = setup_logging(LOGS_DIR, "ingest_excel_enriched.log")
+logger = setup_logging(LOGS_DIR, "ingest_excel_enriched.log", enable_console=False)
 
 # Modèle d'embedding : utilise la même logique que ingest_pptx_via_gpt.py
 EMB_MODEL_NAME = settings.embeddings_model
@@ -272,6 +272,11 @@ Instruction:
 
 
 def process_excel_rfp(path: Path, meta: dict[str, Any]) -> dict[str, Any]:
+    # Reconfigurer logger pour le contexte RQ worker avec lazy file creation
+    global logger
+    logger = setup_logging(LOGS_DIR, "ingest_excel_enriched.log", enable_console=False)
+
+    # Premier log réel - c'est ici que le fichier sera créé
     print(f"▶️ Fichier : {path.name}")
     meta_path = path.with_suffix(".meta.json")
     user_meta = {}

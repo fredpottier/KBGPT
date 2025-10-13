@@ -20,37 +20,31 @@ def client():
         yield c
 
 
-@pytest.fixture
-def admin_headers():
-    """Headers admin pour authentification."""
-    return {
-        "X-Admin-Key": "admin-dev-key-change-in-production",
-        "X-Tenant-ID": "default"
-    }
+# Note: admin_headers fixture désormais fournie par tests/conftest.py avec JWT
 
 
 class TestApproveEntity:
     """Tests POST /api/entities/{uuid}/approve."""
 
     def test_approve_requires_admin_key(self, client):
-        """❌ Sans X-Admin-Key → 401 Unauthorized."""
+        """❌ Sans JWT → 401/403 (non authentifié)."""
         response = client.post(
             "/api/entities/fake-uuid/approve",
             json={"add_to_ontology": False}
         )
 
-        assert response.status_code == 401
-        assert "X-Admin-Key" in response.json()["detail"]
+        # FastAPI peut retourner 401 ou 403 selon la configuration
+        assert response.status_code in [401, 403]
 
     def test_approve_invalid_admin_key(self, client):
-        """❌ Mauvaise clé → 403 Forbidden."""
+        """❌ JWT invalide → 401 Unauthorized."""
         response = client.post(
             "/api/entities/fake-uuid/approve",
             json={"add_to_ontology": False},
-            headers={"X-Admin-Key": "wrong-key"}
+            headers={"Authorization": "Bearer invalid-token-xyz"}
         )
 
-        assert response.status_code == 403
+        assert response.status_code == 401
 
     def test_approve_nonexistent_entity_404(self, client, admin_headers):
         """❌ UUID inexistant → 404."""
@@ -67,13 +61,13 @@ class TestMergeEntities:
     """Tests POST /api/entities/{source_uuid}/merge."""
 
     def test_merge_requires_admin_key(self, client):
-        """❌ Sans X-Admin-Key → 401."""
+        """❌ Sans JWT → 401/403 (non authentifié)."""
         response = client.post(
             "/api/entities/source-uuid/merge",
             json={"target_uuid": "target-uuid"}
         )
 
-        assert response.status_code == 401
+        assert response.status_code in [401, 403]
 
     def test_merge_same_entity_400(self, client, admin_headers):
         """❌ Fusion même entité → 400 Bad Request."""
@@ -102,10 +96,10 @@ class TestDeleteEntity:
     """Tests DELETE /api/entities/{uuid}."""
 
     def test_delete_requires_admin_key(self, client):
-        """❌ Sans X-Admin-Key → 401."""
+        """❌ Sans JWT → 401/403 (non authentifié)."""
         response = client.delete("/api/entities/fake-uuid")
 
-        assert response.status_code == 401
+        assert response.status_code in [401, 403]
 
     def test_delete_nonexistent_entity_404(self, client, admin_headers):
         """❌ UUID inexistant → 404."""
@@ -138,24 +132,18 @@ class TestMultiTenantIsolation:
     """Tests isolation multi-tenant."""
 
     def test_tenant_id_from_header(self, client, admin_headers):
-        """✅ Tenant ID extrait depuis header X-Tenant-ID."""
-        headers_tenant1 = {**admin_headers, "X-Tenant-ID": "tenant1"}
-        headers_tenant2 = {**admin_headers, "X-Tenant-ID": "tenant2"}
+        """✅ Tenant ID extrait depuis JWT claims (pas header manuel)."""
+        # Note: Avec JWT, tenant_id vient du token JWT lui-même
+        # On ne peut plus le surcharger manuellement via header
+        # Ce test vérifie simplement que l'endpoint fonctionne avec JWT admin
 
-        # Les requêtes avec différents tenant_id sont isolées
-        # (404 attendu car entités n'existent pas, mais vérifie que header accepté)
-        response1 = client.delete(
+        response = client.delete(
             "/api/entities/fake-uuid",
-            headers=headers_tenant1
+            headers=admin_headers
         )
 
-        response2 = client.delete(
-            "/api/entities/fake-uuid",
-            headers=headers_tenant2
-        )
-
-        assert response1.status_code == 404
-        assert response2.status_code == 404
+        # 404 attendu car entité n'existe pas (mais auth JWT fonctionne)
+        assert response.status_code == 404
 
 
 # === Résumé Tests ===
