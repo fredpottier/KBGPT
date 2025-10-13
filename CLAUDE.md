@@ -1,6 +1,27 @@
-# Configuration Claude Code - Projet Knowbase SAP KB
+# Configuration Claude Code - KnowWhere (Projet OSMOSE)
 
 *Instructions et préférences pour les sessions Claude Code*
+
+## 🌊 Projet OSMOSE - Naming Important
+
+**Nom Commercial:** **KnowWhere** (anciennement "KnowBase" ou "SAP KB")
+**Tagline:** *"Le Cortex Documentaire des Organisations"*
+
+**Nom de Code Pivot:** **OSMOSE** (Organic Semantic Memory Organization & Smart Extraction)
+- Phase actuelle: Phase 1 - Semantic Core (Semaines 1-10)
+- Architecture: Dual-Graph Semantic Intelligence
+- Différenciation vs Microsoft Copilot/Google Gemini
+
+**⚠️ IMPORTANT - Utiliser dans tout nouveau code:**
+- ✅ Produit = "KnowWhere" (communication, docs, UI)
+- ✅ Projet Pivot = "OSMOSE" (références techniques, logs `[OSMOSE]`)
+- ❌ Ne plus utiliser "KnowBase" ou "SAP KB" (anciens noms)
+
+**Documentation OSMOSE Principale:**
+- `doc/OSMOSE_PROJECT_OVERVIEW.md` : Naming, conventions, overview projet
+- `doc/OSMOSE_ARCHITECTURE_TECHNIQUE.md` : Spécification technique complète
+- `doc/OSMOSE_AMBITION_PRODUIT_ROADMAP.md` : Vision produit, roadmap 32 semaines
+- `doc/phase1_osmose/` : Documentation Phase 1 en cours
 
 ## 🇫🇷 Préférences Linguistiques
 
@@ -239,4 +260,22 @@ docs: mettre à jour documentation API
 
 **💡 Principe Claude Code** : Utiliser cette documentation comme référence pour éviter l'exploration extensive du projet à chaque session. Toujours consulter ces instructions avant toute action Docker ou modification majeure.
 
-*Dernière mise à jour : 2025-09-22*
+---
+
+## 🌊 Pivot OSMOSE - Phase 1 en Cours
+
+**Objectif Phase 1:** Démontrer l'USP unique de KnowWhere avec le cas d'usage KILLER "CRR Evolution Tracker"
+
+**Composants Phase 1:**
+- SemanticDocumentProfiler
+- NarrativeThreadDetector (⚠️ CRITIQUE)
+- IntelligentSegmentationEngine
+- DualStorageExtractor
+
+**Documentation Phase 1:**
+- Plan: `doc/phase1_osmose/PHASE1_IMPLEMENTATION_PLAN.md`
+- Tracking: `doc/phase1_osmose/PHASE1_TRACKING.md`
+
+**Checkpoint Phase 1 (fin Sem 10):** Démo CRR Evolution fonctionne, différenciation vs Copilot prouvée
+
+*Dernière mise à jour : 2025-10-13*
