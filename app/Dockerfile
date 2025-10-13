@@ -64,7 +64,7 @@ RUN mkdir -p /app/config
 
 ENV HF_HOME=/data/models
 ENV KNOWBASE_DATA_DIR=/data
-ENV PYTHONPATH="/app:/app/src:$PYTHONPATH"
+ENV PYTHONPATH="/app:/app/src"
 
 EXPOSE 8000
 

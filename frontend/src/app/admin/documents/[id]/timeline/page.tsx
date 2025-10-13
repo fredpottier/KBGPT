@@ -169,6 +169,9 @@ export default function DocumentTimelinePage({
   const { id } = use(params)
   const router = useRouter()
 
+  // ✅ TOUS les useState AVANT les returns conditionnels
+  const [showActiveOnly, setShowActiveOnly] = useState(false)
+
   const {
     data: documentResponse,
     isLoading: isLoadingDoc,
@@ -221,10 +224,7 @@ export default function DocumentTimelinePage({
   const document = documentResponse.data
   const allVersions = versionsResponse.data.versions || []
 
-  // State for filters
-  const [showActiveOnly, setShowActiveOnly] = useState(false)
-
-  // Apply filters
+  // Apply filters (showActiveOnly déjà défini en haut)
   const versions = showActiveOnly
     ? allVersions.filter((v: any) => v.status !== 'obsolete' && v.is_latest !== false)
     : allVersions
