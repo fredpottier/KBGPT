@@ -278,4 +278,32 @@ docs: mettre à jour documentation API
 
 **Checkpoint Phase 1 (fin Sem 10):** Démo CRR Evolution fonctionne, différenciation vs Copilot prouvée
 
+### 🔧 Commandes OSMOSE Utiles
+
+**Setup Infrastructure Proto-KG** (première installation ou migration)
+```bash
+docker-compose exec app python -m knowbase.semantic.setup_infrastructure
+```
+→ Crée constraints Neo4j + collection Qdrant knowwhere_proto
+
+**Reset Proto-KG** (usage quotidien - purge et réinit)
+```bash
+docker-compose exec app python scripts/reset_proto_kg.py
+```
+→ Purge données + recrée le schéma (idéal pour tests)
+
+**Reset Complet** (incluant schéma)
+```bash
+docker-compose exec app python scripts/reset_proto_kg.py --full
+```
+→ Supprime constraints/indexes + données, puis recrée tout
+
+**Tests Infrastructure OSMOSE**
+```bash
+docker-compose exec app pytest tests/semantic/test_infrastructure.py -v
+```
+→ Valide configuration + modèles + connectivité
+
+**Voir aussi** : `app/scripts/README.md` pour documentation complète
+
 *Dernière mise à jour : 2025-10-13*
