@@ -1,0 +1,39 @@
+Customer Retention Rate: Evolution and Standards
+
+Version History
+
+The Customer Retention Rate (CRR) metric has evolved significantly over the past three years. This document tracks the key changes and provides the current standard definition.
+
+2022 - Original Definition (v1.0)
+
+The initial CRR formula was simple:
+CRR = (Customers at End of Period / Customers at Start of Period) × 100
+
+However, this methodology was criticized because it did not account for new customer acquisitions during the period. Therefore, we revised the approach.
+
+2023 - Revised Methodology (v2.0)
+
+Based on stakeholder feedback, the formula was updated in March 2023:
+CRR = ((E - N) / S) × 100
+
+Where:
+- E = Customers at end of period
+- N = New customers acquired
+- S = Customers at start of period
+
+This revision superseded the previous version as a result of a comprehensive review. The change led to more accurate retention tracking.
+
+2024 - ISO 23592 Compliant (v3.0)
+
+In January 2024, we aligned our CRR calculation with ISO 23592 international standard. The updated formula now includes:
+
+CRR = ((E - N) / S) × 100
+With mandatory quarterly measurement periods and customer segmentation requirements.
+
+This latest version replaced all previous methodologies. Organizations must now use this standard because it ensures comparability across industries.
+
+Key Changes Summary:
+- v1.0 → v2.0: Added new customer adjustment (revised March 2023)
+- v2.0 → v3.0: ISO compliance + segmentation (updated January 2024)
+
+Current Status: v3.0 is the active standard. Previous versions are deprecated and should no longer be used.
