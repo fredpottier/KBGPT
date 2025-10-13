@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyJWT, createAuthHeaders } from '@/lib/jwt-helpers'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8000';
 
@@ -6,6 +7,13 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { uuid: string } }
 ) {
+  // Verifier JWT token
+  const authResult = verifyJWT(request);
+  if (authResult instanceof NextResponse) {
+    return authResult;
+  }
+  const authHeader = authResult;
+
   try {
     const { uuid } = params;
     const body = await request.json();
@@ -21,21 +29,18 @@ export async function POST(
     const url = `${BACKEND_URL}/api/entities/${encodeURIComponent(uuid)}/merge`;
 
     // Construire le payload en omettant canonical_name s'il est vide
-    const innerPayload: any = { target_uuid };
+    const payload: any = { target_uuid };
     if (canonical_name) {
-      innerPayload.canonical_name = canonical_name;
+      payload.canonical_name = canonical_name;
     }
 
-    // FastAPI attend le format imbriqué : { "merge_entities_request": {...} }
-    const payload = {
-      merge_entities_request: innerPayload
-    };
-
+    // FastAPI attend le body directement (embed=False)
     console.log('Merge request:', { uuid, payload, url });
 
     const response = await fetch(url, {
       method: 'POST',
       headers: {
+        'Authorization': authHeader,
         'Content-Type': 'application/json',
         'X-Admin-Key': 'admin-dev-key-change-in-production',
         'X-Tenant-ID': 'default',

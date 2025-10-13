@@ -27,6 +27,7 @@ import {
 } from '@chakra-ui/react';
 import { useState, useEffect, useCallback } from 'react';
 import { useToast } from '@chakra-ui/react';
+import { authService } from '@/lib/auth';
 
 interface SAPSolution {
   name: string;
@@ -67,13 +68,32 @@ export default function SAPSolutionSelector({
 
   const loadSolutions = useCallback(async () => {
     try {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken();
+
+      if (!token) {
+        toast({
+          title: 'Non authentifié',
+          description: 'Veuillez vous reconnecter',
+          status: 'error',
+          duration: 3000,
+        });
+        setIsLoadingSolutions(false);
+        return;
+      }
+
       let endpoint = '/api/sap-solutions';
 
       if (onlyWithChunks) {
         endpoint = `/api/sap-solutions/with-chunks?extend_search=${extendSearchToKb}`;
       }
 
-      const response = await fetch(endpoint);
+      const response = await fetch(endpoint, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
       if (!response.ok) {
         throw new Error('Erreur lors du chargement des solutions');
       }
@@ -119,10 +139,25 @@ export default function SAPSolutionSelector({
 
     setIsResolvingCustom(true);
     try {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken();
+
+      if (!token) {
+        toast({
+          title: 'Non authentifié',
+          description: 'Veuillez vous reconnecter',
+          status: 'error',
+          duration: 3000,
+        });
+        setIsResolvingCustom(false);
+        return;
+      }
+
       const response = await fetch('/api/sap-solutions/resolve', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({ solution_input: customInput }),
       });

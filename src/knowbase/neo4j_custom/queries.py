@@ -423,6 +423,7 @@ class FactsQueries:
     def _node_to_dict(self, node: Any) -> Dict[str, Any]:
         """
         Convertit node Neo4j en dict Python.
+        Convertit les objets neo4j.time.DateTime en strings ISO 8601.
 
         Args:
             node: Node Neo4j
@@ -432,10 +433,51 @@ class FactsQueries:
         """
         if hasattr(node, "_properties"):
             # Node object
-            return dict(node._properties)
+            node_dict = dict(node._properties)
         elif isinstance(node, dict):
             # Déjà un dict
-            return node
+            node_dict = node
         else:
             # Autre type
             return {"value": node}
+
+        # Convertir les objets neo4j.time.DateTime en strings ISO 8601
+        return self._convert_datetime_fields(node_dict)
+
+    def _convert_datetime_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convertit récursivement les objets neo4j.time.DateTime en strings ISO 8601.
+
+        Args:
+            data: Dictionnaire contenant potentiellement des DateTime
+
+        Returns:
+            Dictionnaire avec DateTime convertis en strings
+        """
+        from neo4j.time import DateTime
+
+        converted = {}
+        for key, value in data.items():
+            if isinstance(value, DateTime):
+                # Convertir neo4j.time.DateTime en string ISO 8601
+                # DateTime Neo4j a un attribut .to_native() qui retourne un datetime Python
+                try:
+                    converted[key] = value.to_native().isoformat()
+                except Exception:
+                    # Fallback: utiliser la représentation string
+                    converted[key] = str(value)
+            elif isinstance(value, dict):
+                # Récursif pour les dicts imbriqués
+                converted[key] = self._convert_datetime_fields(value)
+            elif isinstance(value, list):
+                # Traiter les listes
+                converted[key] = [
+                    self._convert_datetime_fields(item) if isinstance(item, dict)
+                    else item.to_native().isoformat() if isinstance(item, DateTime)
+                    else item
+                    for item in value
+                ]
+            else:
+                converted[key] = value
+
+        return converted

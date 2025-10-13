@@ -3,8 +3,9 @@ Router API pour gestion catalogues d'ontologies.
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from knowbase.api.dependencies import get_current_user, get_tenant_id, require_admin
 from knowbase.api.schemas.ontology import (
     EntityCatalogCreate,
     EntityCatalogUpdate,
@@ -32,10 +33,14 @@ router = APIRouter(prefix="/ontology", tags=["ontology"])
 async def list_catalog_entities(
     entity_type: EntityType,
     category: Optional[str] = Query(None, description="Filtrer par catégorie"),
-    vendor: Optional[str] = Query(None, description="Filtrer par vendor")
+    vendor: Optional[str] = Query(None, description="Filtrer par vendor"),
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """
     Liste toutes les entités d'un catalogue.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
 
     **entity_type**: SOLUTION, COMPONENT, TECHNOLOGY, ORGANIZATION, PERSON, CONCEPT
     """
@@ -56,9 +61,15 @@ async def list_catalog_entities(
 @router.get("/catalogs/{entity_type}/entities/{entity_id}", response_model=EntityCatalogResponse)
 async def get_catalog_entity(
     entity_type: EntityType,
-    entity_id: str
+    entity_id: str,
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
 ):
-    """Récupère une entité catalogue par ID."""
+    """
+    Récupère une entité catalogue par ID.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
+    """
     try:
         service = OntologyService()
         entity = service.get_entity(entity_type=entity_type, entity_id=entity_id)
@@ -79,8 +90,15 @@ async def get_catalog_entity(
 
 
 @router.post("/catalogs/entities", response_model=EntityCatalogResponse, status_code=201)
-async def create_catalog_entity(entity_data: EntityCatalogCreate):
-    """Crée une nouvelle entité dans un catalogue."""
+async def create_catalog_entity(
+    entity_data: EntityCatalogCreate,
+    admin: dict = Depends(require_admin),
+):
+    """
+    Crée une nouvelle entité dans un catalogue.
+
+    **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
+    """
     try:
         service = OntologyService()
         entity = service.create_entity(entity_data)
@@ -97,9 +115,14 @@ async def create_catalog_entity(entity_data: EntityCatalogCreate):
 async def update_catalog_entity(
     entity_type: EntityType,
     entity_id: str,
-    update_data: EntityCatalogUpdate
+    update_data: EntityCatalogUpdate,
+    admin: dict = Depends(require_admin),
 ):
-    """Met à jour une entité catalogue."""
+    """
+    Met à jour une entité catalogue.
+
+    **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
+    """
     try:
         service = OntologyService()
         entity = service.update_entity(
@@ -119,9 +142,14 @@ async def update_catalog_entity(
 @router.delete("/catalogs/{entity_type}/entities/{entity_id}", status_code=204)
 async def delete_catalog_entity(
     entity_type: EntityType,
-    entity_id: str
+    entity_id: str,
+    admin: dict = Depends(require_admin),
 ):
-    """Supprime une entité catalogue."""
+    """
+    Supprime une entité catalogue.
+
+    **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
+    """
     try:
         service = OntologyService()
         service.delete_entity(entity_type=entity_type, entity_id=entity_id)
@@ -137,8 +165,16 @@ async def delete_catalog_entity(
 # === Statistiques ===
 
 @router.get("/catalogs/{entity_type}/statistics", response_model=CatalogStatistics)
-async def get_catalog_statistics(entity_type: EntityType):
-    """Retourne statistiques d'un catalogue."""
+async def get_catalog_statistics(
+    entity_type: EntityType,
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Retourne statistiques d'un catalogue.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
+    """
     try:
         service = OntologyService()
         stats = service.get_statistics(entity_type=entity_type)
@@ -153,10 +189,14 @@ async def get_catalog_statistics(entity_type: EntityType):
 
 @router.get("/uncataloged", response_model=List[UncatalogedEntity])
 async def list_uncataloged_entities(
-    entity_type: Optional[EntityType] = Query(None, description="Filtrer par type")
+    entity_type: Optional[EntityType] = Query(None, description="Filtrer par type"),
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """
     Liste toutes les entités non cataloguées détectées.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
 
     Parse le fichier uncataloged_entities.log et agrège les résultats.
     """
@@ -182,10 +222,13 @@ async def list_uncataloged_entities(
 async def approve_uncataloged_entity(
     entity_type: EntityType,
     raw_name: str = Query(..., description="Nom brut de l'entité à approuver"),
-    approve_data: UncatalogedEntityApprove = None
+    approve_data: UncatalogedEntityApprove = None,
+    admin: dict = Depends(require_admin),
 ):
     """
     Approuve une entité non cataloguée (ajoute au catalogue).
+
+    **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
 
     Le raw_name est automatiquement ajouté aux aliases.
     """
@@ -208,9 +251,14 @@ async def approve_uncataloged_entity(
 @router.delete("/uncataloged/{entity_type}/reject", status_code=204)
 async def reject_uncataloged_entity(
     entity_type: EntityType,
-    raw_name: str = Query(..., description="Nom brut de l'entité à rejeter")
+    raw_name: str = Query(..., description="Nom brut de l'entité à rejeter"),
+    admin: dict = Depends(require_admin),
 ):
-    """Rejette une entité non cataloguée (supprime du log)."""
+    """
+    Rejette une entité non cataloguée (supprime du log).
+
+    **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
+    """
     try:
         service = OntologyService()
         service.reject_uncataloged(entity_type=entity_type, raw_name=raw_name)
@@ -224,9 +272,14 @@ async def reject_uncataloged_entity(
 # === Import en masse ===
 
 @router.post("/catalogs/bulk-import", response_model=CatalogBulkImportResult)
-async def bulk_import_catalog(import_data: CatalogBulkImport):
+async def bulk_import_catalog(
+    import_data: CatalogBulkImport,
+    admin: dict = Depends(require_admin),
+):
     """
     Import en masse d'entités dans un catalogue.
+
+    **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
 
     Utile pour migration ou ajout de plusieurs entités d'un coup.
     """

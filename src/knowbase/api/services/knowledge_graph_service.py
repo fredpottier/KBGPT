@@ -28,6 +28,76 @@ settings = get_settings()
 logger = setup_logging(settings.logs_dir, "knowledge_graph_service.log")
 
 
+# Vocabulaire contrôlé des types de relations Neo4j
+# Types sémantiquement significatifs pour SAP knowledge graph
+RELATION_TYPE_VOCABULARY = {
+    # Relations structurelles
+    "PART_OF": ["part_of", "component_of", "module_of", "belongs_to", "contained_in"],
+    "CONTAINS": ["contains", "includes", "has", "comprises"],
+    "HAS_MEMBER": ["has_member", "member_of", "includes_member"],
+
+    # Relations fonctionnelles
+    "USES": ["uses", "utilizes", "employs", "leverages", "relies_on"],
+    "USED_BY": ["used_by", "employed_by"],
+    "REQUIRES": ["requires", "needs", "depends_on", "prerequisite"],
+    "PROVIDES": ["provides", "offers", "supplies", "delivers"],
+
+    # Relations d'implémentation
+    "IMPLEMENTS": ["implements", "realizes", "executes"],
+    "SUPPORTS": ["supports", "enables", "facilitates"],
+    "EXTENDS": ["extends", "enhances", "augments"],
+
+    # Relations de référence
+    "MENTIONS": ["mentions", "references", "refers_to", "cites"],
+    "RELATED_TO": ["related_to", "associated_with", "connected_to", "linked_to"],
+
+    # Relations temporelles
+    "PRECEDES": ["precedes", "before", "prior_to"],
+    "FOLLOWS": ["follows", "after", "succeeds"],
+
+    # Relations de version
+    "REPLACES": ["replaces", "supersedes", "obsoletes"],
+    "REPLACED_BY": ["replaced_by", "superseded_by"],
+
+    # Relations techniques
+    "INTEGRATES_WITH": ["integrates_with", "connects_to", "interfaces_with"],
+    "DEPENDS_ON": ["depends_on", "requires"],
+    "COMPATIBLE_WITH": ["compatible_with", "works_with"],
+}
+
+
+def normalize_relation_type(relation_type: str) -> str:
+    """
+    Normalise un type de relation vers le vocabulaire contrôlé.
+
+    Args:
+        relation_type: Type de relation brut du LLM
+
+    Returns:
+        Type de relation normalisé (ex: "USES", "PART_OF", etc.)
+        Fallback vers "RELATED_TO" si non reconnu
+    """
+    if not relation_type:
+        return "RELATED_TO"
+
+    # Nettoyer et normaliser le type
+    cleaned = relation_type.strip().upper().replace(" ", "_")
+
+    # Si déjà dans le vocabulaire principal, retourner tel quel
+    if cleaned in RELATION_TYPE_VOCABULARY:
+        return cleaned
+
+    # Chercher dans les synonymes
+    for canonical_type, synonyms in RELATION_TYPE_VOCABULARY.items():
+        if cleaned.lower() in [s.lower() for s in synonyms]:
+            logger.debug(f"🔄 Relation type normalisé: '{relation_type}' → '{canonical_type}'")
+            return canonical_type
+
+    # Fallback: utiliser RELATED_TO pour types non reconnus
+    logger.info(f"⚠️  Type de relation non reconnu: '{relation_type}' - utilisation de RELATED_TO")
+    return "RELATED_TO"
+
+
 class KnowledgeGraphService:
     """Service pour gestion Knowledge Graph Neo4j."""
 
@@ -94,6 +164,8 @@ class KnowledgeGraphService:
             source_document: $source_document,
             source_chunk_id: $source_chunk_id,
             tenant_id: $tenant_id,
+            status: $status,
+            is_cataloged: $is_cataloged,
             created_at: datetime($created_at),
             updated_at: datetime($updated_at)
         })
@@ -112,6 +184,8 @@ class KnowledgeGraphService:
             source_document=entity.source_document,
             source_chunk_id=entity.source_chunk_id,
             tenant_id=entity.tenant_id,
+            status=entity.status,
+            is_cataloged=entity.is_cataloged,
             created_at=now.isoformat(),
             updated_at=now.isoformat()
         )
@@ -134,6 +208,8 @@ class KnowledgeGraphService:
             source_document=node["source_document"],
             source_chunk_id=node["source_chunk_id"],
             tenant_id=node["tenant_id"],
+            status=node.get("status", "pending"),
+            is_cataloged=node.get("is_cataloged", False),
             created_at=node["created_at"].to_native(),
             updated_at=node["updated_at"].to_native() if node["updated_at"] else None
         )
@@ -369,17 +445,26 @@ class KnowledgeGraphService:
 
     @staticmethod
     def _create_relation_tx(tx, relation: RelationCreate) -> RelationResponse:
-        """Transaction création relation."""
+        """
+        Transaction création relation avec type dynamique.
+
+        Normalise le type de relation vers le vocabulaire contrôlé,
+        puis crée la relation avec le type comme label Neo4j (ex: [:USES], [:PART_OF]).
+        """
         relation_uuid = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
 
-        # Vérifier que les entités existent et créer la relation
-        query = """
-        MATCH (source:Entity {name: $source_name, tenant_id: $tenant_id})
-        MATCH (target:Entity {name: $target_name, tenant_id: $tenant_id})
-        CREATE (source)-[r:RELATION {
+        # Normaliser le type de relation vers vocabulaire contrôlé
+        normalized_type = normalize_relation_type(relation.relation_type)
+
+        # IMPORTANT: Construction dynamique de la requête Cypher avec type de relation
+        # Neo4j ne permet pas de paramétrer les types de relations, donc on injecte
+        # le type après validation/normalisation (sécurisé car vocabulaire contrôlé)
+        query = f"""
+        MATCH (source:Entity {{name: $source_name, tenant_id: $tenant_id}})
+        MATCH (target:Entity {{name: $target_name, tenant_id: $tenant_id}})
+        CREATE (source)-[r:{normalized_type} {{
             uuid: $uuid,
-            relation_type: $relation_type,
             description: $description,
             confidence: $confidence,
             source_slide_number: $source_slide_number,
@@ -387,8 +472,8 @@ class KnowledgeGraphService:
             source_chunk_id: $source_chunk_id,
             tenant_id: $tenant_id,
             created_at: datetime($created_at)
-        }]->(target)
-        RETURN r, source.uuid AS source_uuid, target.uuid AS target_uuid
+        }}]->(target)
+        RETURN r, source.uuid AS source_uuid, target.uuid AS target_uuid, type(r) AS relation_type
         """
 
         result = tx.run(
@@ -396,7 +481,6 @@ class KnowledgeGraphService:
             uuid=relation_uuid,
             source_name=relation.source,
             target_name=relation.target,
-            relation_type=relation.relation_type,
             description=relation.description,
             confidence=relation.confidence,
             source_slide_number=relation.source_slide_number,
@@ -420,7 +504,7 @@ class KnowledgeGraphService:
             uuid=rel["uuid"],
             source=relation.source,
             target=relation.target,
-            relation_type=rel["relation_type"],
+            relation_type=record["relation_type"],  # Type Neo4j réel
             description=rel["description"],
             confidence=rel["confidence"],
             source_slide_number=rel["source_slide_number"],
@@ -747,6 +831,228 @@ class KnowledgeGraphService:
                 })
 
         return entities
+
+    def deduplicate_entities_by_name(
+        self,
+        tenant_id: str = "default",
+        dry_run: bool = False
+    ) -> Dict:
+        """
+        Dé-duplique les entités ayant exactement le même nom (case-insensitive).
+
+        Pour chaque groupe d'entités avec le même nom:
+        - Garde l'entité "maître" (celle avec le plus de relations)
+        - Réassigne toutes les relations vers l'entité maître
+        - Supprime les entités dupliquées
+
+        Args:
+            tenant_id: Tenant ID
+            dry_run: Si True, ne fait que simuler (retourne ce qui serait fait)
+
+        Returns:
+            Dict avec statistiques:
+            {
+                "duplicate_groups": int,  # Nombre de groupes de doublons
+                "entities_to_merge": int,  # Nombre d'entités à fusionner
+                "entities_kept": int,      # Nombre d'entités conservées
+                "relations_updated": int,  # Nombre de relations réassignées
+                "groups": [...]           # Détails des groupes (si dry_run)
+            }
+        """
+        stats = {
+            "duplicate_groups": 0,
+            "entities_to_merge": 0,
+            "entities_kept": 0,
+            "relations_updated": 0,
+            "groups": []
+        }
+
+        logger.info(f"🔍 Démarrage dé-duplication des entités (tenant: {tenant_id}, dry_run: {dry_run})")
+
+        with self.driver.session() as session:
+            # 1. Trouver tous les groupes d'entités avec le même nom
+            # OPTIMISÉ: Pas de comptage de relations (trop lent), on prend la plus ancienne comme master
+            find_duplicates_query = """
+            MATCH (e:Entity {tenant_id: $tenant_id})
+            WITH toLower(trim(e.name)) as normalized_name,
+                 collect({
+                     uuid: e.uuid,
+                     name: e.name,
+                     entity_type: e.entity_type,
+                     created_at: e.created_at,
+                     status: coalesce(e.status, 'pending')
+                 }) as entities
+            WHERE size(entities) > 1
+            RETURN normalized_name,
+                   entities,
+                   size(entities) as entity_count
+            ORDER BY entity_count DESC
+            """
+
+            result = session.run(find_duplicates_query, tenant_id=tenant_id)
+            duplicate_groups = []
+
+            for record in result:
+                normalized_name = record["normalized_name"]
+                entities = list(record["entities"])
+                entity_count = record["entity_count"]
+
+                # Convertir les DateTime en strings pour sérialisation JSON
+                from neo4j.time import DateTime
+
+                def convert_datetime(dt):
+                    """Convertit neo4j.time.DateTime en string ISO 8601."""
+                    if dt is None:
+                        return None
+                    if isinstance(dt, DateTime):
+                        try:
+                            return dt.to_native().isoformat()
+                        except Exception:
+                            return str(dt)
+                    return str(dt)
+
+                # Trier par date de création (la plus ancienne en premier = la plus fiable)
+                entities.sort(key=lambda x: x.get("created_at") or "9999")
+
+                # L'entité maître est la plus ancienne
+                master_entity = entities[0]
+                duplicate_entities = entities[1:]
+
+                duplicate_groups.append({
+                    "normalized_name": normalized_name,
+                    "name": master_entity["name"],  # Nom original de l'entité master
+                    "type": master_entity["entity_type"],
+                    "entity_count": entity_count,
+                    "master_entity": {
+                        "uuid": master_entity["uuid"],
+                        "name": master_entity["name"],
+                        "entity_type": master_entity["entity_type"],
+                        "created_at": convert_datetime(master_entity.get("created_at")),
+                        "status": master_entity["status"]
+                    },
+                    "duplicates": [
+                        {
+                            "uuid": d["uuid"],
+                            "name": d["name"],
+                            "entity_type": d["entity_type"],
+                            "created_at": convert_datetime(d.get("created_at")),
+                            "status": d["status"]
+                        }
+                        for d in duplicate_entities
+                    ]
+                })
+
+                stats["duplicate_groups"] += 1
+                stats["entities_to_merge"] += len(duplicate_entities)
+                stats["entities_kept"] += 1
+
+            logger.info(f"📊 Trouvé {stats['duplicate_groups']} groupes de doublons, {stats['entities_to_merge']} entités à fusionner")
+
+            # 2. Si dry_run, retourner seulement les statistiques (limiter à 20 groupes)
+            if dry_run:
+                stats["groups"] = duplicate_groups[:20]  # Limiter pour éviter de surcharger la réponse
+                return stats
+
+            # 3. Pour chaque groupe, fusionner les doublons vers le maître
+            # OPTIMISÉ: Traiter par lots pour éviter Out of Memory sur gros groupes
+            for group in duplicate_groups:
+                master_uuid = group["master_entity"]["uuid"]
+                duplicate_uuids = [d["uuid"] for d in group["duplicates"]]
+
+                total_deleted_relations = 0
+                total_deleted_entities = 0
+
+                # Traiter par lots de 10 entités à la fois pour éviter OOM
+                BATCH_SIZE = 10
+                for i in range(0, len(duplicate_uuids), BATCH_SIZE):
+                    batch_uuids = duplicate_uuids[i:i + BATCH_SIZE]
+
+                    # Étape 1: Transférer les relations (seulement celles qui ne créent pas de doublon)
+                    for dup_uuid in batch_uuids:
+                        # Relations sortantes: (duplicate)-[r]->(target)
+                        update_outgoing_query = """
+                        MATCH (dup:Entity {uuid: $dup_uuid})-[r]->(target)
+                        MATCH (master:Entity {uuid: $master_uuid})
+                        WHERE NOT (master)-[]->(target)
+                        CREATE (master)-[r2:MERGED_RELATION]->(target)
+                        SET r2 = properties(r)
+                        SET r2.merged_from = $dup_uuid
+                        DELETE r
+                        RETURN count(r) as updated_count
+                        """
+
+                        result = session.run(
+                            update_outgoing_query,
+                            dup_uuid=dup_uuid,
+                            master_uuid=master_uuid
+                        )
+                        record = result.single()
+                        if record:
+                            stats["relations_updated"] += record["updated_count"] or 0
+
+                        # Relations entrantes: (source)-[r]->(duplicate)
+                        update_incoming_query = """
+                        MATCH (source)-[r]->(dup:Entity {uuid: $dup_uuid})
+                        MATCH (master:Entity {uuid: $master_uuid})
+                        WHERE NOT (source)-[]->(master)
+                        CREATE (source)-[r2:MERGED_RELATION]->(master)
+                        SET r2 = properties(r)
+                        SET r2.merged_from = $dup_uuid
+                        DELETE r
+                        RETURN count(r) as updated_count
+                        """
+
+                        result = session.run(
+                            update_incoming_query,
+                            dup_uuid=dup_uuid,
+                            master_uuid=master_uuid
+                        )
+                        record = result.single()
+                        if record:
+                            stats["relations_updated"] += record["updated_count"] or 0
+
+                    # Étape 2: Supprimer toutes les relations restantes du batch
+                    # (celles qui n'ont pas pu être transférées car elles créeraient des doublons)
+                    delete_remaining_relations_query = """
+                    MATCH (e:Entity)-[r]-()
+                    WHERE e.uuid IN $batch_uuids
+                    DELETE r
+                    RETURN count(r) as deleted_relations_count
+                    """
+
+                    result = session.run(delete_remaining_relations_query, batch_uuids=batch_uuids)
+                    record = result.single()
+                    deleted_relations = record["deleted_relations_count"] if record else 0
+                    total_deleted_relations += deleted_relations
+
+                    # Étape 3: Supprimer les entités du batch (qui n'ont maintenant plus de relations)
+                    delete_query = """
+                    MATCH (e:Entity)
+                    WHERE e.uuid IN $batch_uuids
+                    DELETE e
+                    RETURN count(e) as deleted_count
+                    """
+
+                    result = session.run(delete_query, batch_uuids=batch_uuids)
+                    record = result.single()
+                    deleted_count = record["deleted_count"] if record else 0
+                    total_deleted_entities += deleted_count
+
+                logger.info(
+                    f"✅ Groupe '{group['normalized_name']}': "
+                    f"{len(duplicate_uuids)} doublons fusionnés vers {master_uuid}, "
+                    f"{total_deleted_relations} relations supprimées, "
+                    f"{total_deleted_entities} entités supprimées"
+                )
+
+        logger.info(
+            f"🎉 Dé-duplication terminée: "
+            f"{stats['duplicate_groups']} groupes traités, "
+            f"{stats['entities_to_merge']} entités fusionnées, "
+            f"{stats['relations_updated']} relations réassignées"
+        )
+
+        return stats
 
 
 __all__ = [

@@ -2,9 +2,10 @@
 Router API pour la gestion des solutions SAP.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
 from pydantic import BaseModel
+from knowbase.api.dependencies import get_current_user, get_tenant_id
 from knowbase.api.services.sap_solutions import get_sap_solutions_manager
 from knowbase.common.logging import setup_logging
 from knowbase.common.clients import get_qdrant_client
@@ -41,9 +42,14 @@ class SolutionResolveResponse(BaseModel):
 
 
 @router.get("/", response_model=SolutionsListResponse)
-async def get_solutions():
+async def get_solutions(
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Récupère la liste de toutes les solutions SAP disponibles.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
 
     Returns:
         SolutionsListResponse: Liste des solutions avec ID et nom canonique
@@ -69,9 +75,15 @@ async def get_solutions():
 
 
 @router.post("/resolve", response_model=SolutionResolveResponse)
-async def resolve_solution(request: SolutionResolveRequest):
+async def resolve_solution(
+    request: SolutionResolveRequest,
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Résout une solution SAP depuis l'input utilisateur en utilisant l'IA.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
 
     Args:
         request: Requête contenant l'input utilisateur
@@ -101,9 +113,15 @@ async def resolve_solution(request: SolutionResolveRequest):
 
 
 @router.get("/search/{query}")
-async def search_solutions(query: str):
+async def search_solutions(
+    query: str,
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Recherche des solutions SAP par nom ou alias.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
 
     Args:
         query: Terme de recherche
@@ -135,9 +153,15 @@ async def search_solutions(query: str):
 
 
 @router.get("/with-chunks", response_model=SolutionsListResponse)
-async def get_solutions_with_chunks(extend_search: bool = False):
+async def get_solutions_with_chunks(
+    extend_search: bool = False,
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Récupère uniquement les solutions SAP qui ont des chunks dans les collections Qdrant.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
 
     Args:
         extend_search: Si False, ne cherche que dans Q/A RFP. Si True, inclut aussi la collection principale.

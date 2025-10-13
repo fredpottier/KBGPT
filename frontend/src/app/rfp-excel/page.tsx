@@ -47,6 +47,8 @@ import { useDropzone } from 'react-dropzone';
 import { useRouter } from 'next/navigation';
 import ExcelPreviewTable from '@/components/ui/ExcelPreviewTable';
 import SAPSolutionSelector from '@/components/ui/SAPSolutionSelector';
+import { authService } from '@/lib/auth';
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 
 interface ExcelSheet {
   name: string;
@@ -142,10 +144,24 @@ export default function RfpExcelPageImproved() {
   const analyzeExcelFile = useCallback(async (file: File, workflowType: 'qa' | 'rfp') => {
     setIsAnalyzing(true);
     try {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken();
+
+      if (!token) {
+        toast({
+          title: 'Non authentifié',
+          description: 'Veuillez vous reconnecter',
+          status: 'error',
+          duration: 3000,
+        });
+        setIsAnalyzing(false);
+        return;
+      }
+
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('/api/documents/analyze-excel', {
+      const response = await fetchWithAuth('/api/documents/analyze-excel', {
         method: 'POST',
         body: formData,
       });
@@ -289,6 +305,20 @@ export default function RfpExcelPageImproved() {
 
     setIsUploading(true);
     try {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken();
+
+      if (!token) {
+        toast({
+          title: 'Non authentifié',
+          description: 'Veuillez vous reconnecter',
+          status: 'error',
+          duration: 3000,
+        });
+        setIsUploading(false);
+        return;
+      }
+
       const formData = new FormData();
       formData.append('file', workflow.file);
 
@@ -306,7 +336,7 @@ export default function RfpExcelPageImproved() {
         ? '/api/documents/upload-excel-qa'
         : '/api/documents/fill-rfp-excel';
 
-      const response = await fetch(endpoint, {
+      const response = await fetchWithAuth(endpoint, {
         method: 'POST',
         body: formData,
       });

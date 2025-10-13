@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from knowbase.api.services.purge_service import PurgeService
 from knowbase.api.services.audit_service import get_audit_service
+from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
 from knowbase.api.dependencies import require_admin, get_tenant_id
 from knowbase.db import get_db
 from knowbase.db.models import AuditLog
@@ -22,28 +23,17 @@ logger = setup_logging(settings.logs_dir, "admin_router.log")
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def verify_admin_key(x_admin_key: str = Header(...)):
-    """
-    Vérifie la clé admin pour sécuriser les endpoints sensibles.
-
-    Args:
-        x_admin_key: Header X-Admin-Key
-
-    Raises:
-        HTTPException: Si clé invalide
-    """
-    ADMIN_KEY = "admin-dev-key-change-in-production"  # TODO: Déplacer vers .env
-    if x_admin_key != ADMIN_KEY:
-        logger.warning(f"⚠️ Tentative accès admin avec clé invalide: {x_admin_key[:10]}...")
-        raise HTTPException(status_code=401, detail="Invalid admin key")
-
-
-@router.post("/purge-data", dependencies=[Depends(verify_admin_key)])
-async def purge_all_data() -> Dict:
+@router.post("/purge-data")
+async def purge_all_data(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> Dict:
     """
     Purge toutes les données d'ingestion (Qdrant, Neo4j, Redis).
 
     ATTENTION: Action destructive irréversible !
+
+    **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
 
     Nettoie:
     - Collection Qdrant (tous les points vectoriels)
@@ -56,9 +46,6 @@ async def purge_all_data() -> Dict:
 
     Returns:
         Dict avec résultats de purge par composant
-
-    Requires:
-        Header X-Admin-Key pour authentification
     """
     logger.warning("🚨 Requête PURGE SYSTÈME reçue")
 
@@ -80,16 +67,18 @@ async def purge_all_data() -> Dict:
         raise HTTPException(status_code=500, detail=f"Erreur purge: {str(e)}")
 
 
-@router.get("/health", dependencies=[Depends(verify_admin_key)])
-async def admin_health() -> Dict:
+@router.get("/health")
+async def admin_health(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> Dict:
     """
     Vérifie l'état de santé des composants système.
 
+    **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
+
     Returns:
         Dict avec statut de chaque composant
-
-    Requires:
-        Header X-Admin-Key pour authentification
     """
     health_status = {
         "qdrant": {"status": "unknown", "message": ""},
@@ -307,6 +296,70 @@ async def list_audit_logs(
             "resource_type": resource_type
         }
     )
+
+
+@router.post("/deduplicate-entities")
+async def deduplicate_entities(
+    dry_run: bool = Query(False, description="Si true, simule seulement (ne modifie pas)"),
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> Dict:
+    """
+    Dé-duplique globalement toutes les entités ayant le même nom (case-insensitive).
+
+    Cette opération:
+    1. Trouve tous les groupes d'entités avec des noms identiques
+    2. Pour chaque groupe, garde l'entité avec le plus de relations (entité "maître")
+    3. Réassigne toutes les relations vers l'entité maître
+    4. Supprime les entités dupliquées qui n'ont plus de relations
+
+    Args:
+        dry_run: Si True, simule seulement et retourne ce qui serait fait
+
+    Returns:
+        Statistiques de dé-duplication:
+        {
+            "duplicate_groups": int,
+            "entities_to_merge": int,
+            "entities_kept": int,
+            "relations_updated": int,
+            "groups": [...] (si dry_run=True)
+        }
+    """
+    try:
+        logger.info(f"🔍 Dé-duplication des entités demandée (dry_run={dry_run}, tenant={tenant_id})")
+
+        # Créer le service Knowledge Graph
+        kg_service = KnowledgeGraphService(tenant_id=tenant_id)
+
+        # Lancer la dé-duplication
+        stats = kg_service.deduplicate_entities_by_name(
+            tenant_id=tenant_id,
+            dry_run=dry_run
+        )
+
+        logger.info(
+            f"✅ Dé-duplication {'simulée' if dry_run else 'terminée'}: "
+            f"{stats['duplicate_groups']} groupes, "
+            f"{stats['entities_to_merge']} entités à fusionner"
+        )
+
+        return {
+            "success": True,
+            "dry_run": dry_run,
+            "stats": stats,
+            "message": (
+                f"Simulation: {stats['duplicate_groups']} groupes de doublons détectés, "
+                f"{stats['entities_to_merge']} entités à fusionner"
+                if dry_run else
+                f"Dé-duplication terminée: {stats['entities_to_merge']} entités fusionnées, "
+                f"{stats['relations_updated']} relations réassignées"
+            )
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Erreur dé-duplication: {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur dé-duplication: {str(e)}")
 
 
 __all__ = ["router"]

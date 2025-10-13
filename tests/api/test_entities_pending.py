@@ -23,9 +23,9 @@ def client():
 class TestListPendingEntities:
     """Tests GET /api/entities/pending."""
 
-    def test_list_pending_default_params(self, client):
+    def test_list_pending_default_params(self, client, viewer_headers):
         """✅ Liste pending avec params défaut."""
-        response = client.get("/api/entities/pending")
+        response = client.get("/api/entities/pending", headers=viewer_headers)
 
         assert response.status_code == 200
         data = response.json()
@@ -38,18 +38,18 @@ class TestListPendingEntities:
         assert isinstance(data["entities"], list)
         assert isinstance(data["total"], int)
 
-    def test_list_pending_with_entity_type_filter(self, client):
+    def test_list_pending_with_entity_type_filter(self, client, viewer_headers):
         """✅ Filtre par entity_type."""
-        response = client.get("/api/entities/pending?entity_type=SOLUTION")
+        response = client.get("/api/entities/pending?entity_type=SOLUTION", headers=viewer_headers)
 
         assert response.status_code == 200
         data = response.json()
 
         assert data["entity_type_filter"] == "SOLUTION"
 
-    def test_list_pending_with_pagination(self, client):
+    def test_list_pending_with_pagination(self, client, viewer_headers):
         """✅ Pagination limit/offset."""
-        response = client.get("/api/entities/pending?limit=10&offset=0")
+        response = client.get("/api/entities/pending?limit=10&offset=0", headers=viewer_headers)
 
         assert response.status_code == 200
         data = response.json()
@@ -57,21 +57,22 @@ class TestListPendingEntities:
         # Max 10 résultats
         assert len(data["entities"]) <= 10
 
-    def test_list_pending_with_tenant_id(self, client):
-        """✅ Filtrage par tenant_id."""
-        response = client.get("/api/entities/pending?tenant_id=tenant1")
+    def test_list_pending_with_tenant_id(self, client, viewer_headers):
+        """✅ Filtrage par tenant_id (via JWT, pas query param)."""
+        # Note: Avec JWT, tenant_id vient du token automatiquement
+        response = client.get("/api/entities/pending", headers=viewer_headers)
 
         assert response.status_code == 200
 
-    def test_list_pending_invalid_limit(self, client):
+    def test_list_pending_invalid_limit(self, client, viewer_headers):
         """❌ Limite invalide → 422."""
-        response = client.get("/api/entities/pending?limit=0")
+        response = client.get("/api/entities/pending?limit=0", headers=viewer_headers)
 
         assert response.status_code == 422
 
-    def test_list_pending_invalid_offset(self, client):
+    def test_list_pending_invalid_offset(self, client, viewer_headers):
         """❌ Offset négatif → 422."""
-        response = client.get("/api/entities/pending?offset=-1")
+        response = client.get("/api/entities/pending?offset=-1", headers=viewer_headers)
 
         assert response.status_code == 422
 
@@ -79,9 +80,9 @@ class TestListPendingEntities:
 class TestDiscoveredTypes:
     """Tests GET /api/entities/types/discovered."""
 
-    def test_list_discovered_types(self, client):
+    def test_list_discovered_types(self, client, viewer_headers):
         """✅ Liste types découverts."""
-        response = client.get("/api/entities/types/discovered")
+        response = client.get("/api/entities/types/discovered", headers=viewer_headers)
 
         assert response.status_code == 200
         data = response.json()
@@ -96,9 +97,10 @@ class TestDiscoveredTypes:
             assert "pending_count" in type_entry
             assert "validated_count" in type_entry
 
-    def test_discovered_types_with_tenant(self, client):
-        """✅ Types découverts par tenant."""
-        response = client.get("/api/entities/types/discovered?tenant_id=tenant1")
+    def test_discovered_types_with_tenant(self, client, viewer_headers):
+        """✅ Types découverts par tenant (via JWT)."""
+        # Tenant ID vient automatiquement du JWT
+        response = client.get("/api/entities/types/discovered", headers=viewer_headers)
 
         assert response.status_code == 200
 

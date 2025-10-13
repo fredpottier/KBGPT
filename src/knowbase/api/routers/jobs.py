@@ -3,11 +3,12 @@ Router API pour monitoring jobs async (RQ).
 
 Phase 5B - Job Status Monitoring
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from redis import Redis
 from rq.job import Job
 import os
 
+from knowbase.api.dependencies import get_current_user, get_tenant_id
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 
@@ -76,9 +77,15 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
         }
     }
 )
-async def get_job_status(job_id: str):
+async def get_job_status(
+    job_id: str,
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Récupère statut job RQ.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
 
     Args:
         job_id: ID job RQ

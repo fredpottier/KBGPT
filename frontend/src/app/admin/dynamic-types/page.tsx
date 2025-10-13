@@ -11,6 +11,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { authService } from '@/lib/auth';
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 import {
   Box,
   Container,
@@ -48,7 +50,7 @@ import {
   Tab,
   TabPanel,
 } from "@chakra-ui/react";
-import { FiLayers, FiCheckCircle, FiXCircle, FiClock, FiUpload, FiDownload, FiGrid, FiList } from "react-icons/fi";
+import { FiLayers, FiCheckCircle, FiXCircle, FiClock, FiUpload, FiDownload, FiGrid, FiList, FiCopy } from "react-icons/fi";
 
 interface EntityType {
   id: number;
@@ -69,6 +71,7 @@ export default function DynamicTypesPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [deduplicating, setDeduplicating] = useState(false);
   const toast = useToast();
 
   useEffect(() => {
@@ -78,18 +81,25 @@ export default function DynamicTypesPage() {
   const fetchTypes = async () => {
     setLoading(true);
     try {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken();
+
+      if (!token) {
+        toast({
+          title: 'Non authentifié',
+          description: 'Veuillez vous reconnecter',
+          status: 'error',
+          duration: 3000,
+        });
+        setLoading(false);
+        return;
+      }
+
       const url = statusFilter === 'all'
         ? '/api/entity-types'
         : `/api/entity-types?status=${statusFilter}`;
 
-      // Get JWT token from localStorage
-      const token = localStorage.getItem('auth_token');
-
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await fetchWithAuth(url);
       const data = await response.json();
       setTypes(data.types || []);
     } catch (error) {
@@ -107,11 +117,23 @@ export default function DynamicTypesPage() {
 
   const handleApprove = async (typeName: string) => {
     try {
-      const response = await fetch(`/api/entity-types/${typeName}/approve`, {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken();
+
+      if (!token) {
+        toast({
+          title: 'Non authentifié',
+          description: 'Veuillez vous reconnecter',
+          status: 'error',
+          duration: 3000,
+        });
+        return;
+      }
+
+      const response = await fetchWithAuth(`/api/entity-types/${typeName}/approve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Admin-Key': 'admin-dev-key-change-in-production'
         },
         body: JSON.stringify({ admin_email: 'admin@example.com' })
       });
@@ -124,12 +146,13 @@ export default function DynamicTypesPage() {
         });
         fetchTypes();
       } else {
-        throw new Error('Approval failed');
+        const error = await response.json();
+        throw new Error(error.detail || 'Approval failed');
       }
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: 'Erreur',
-        description: 'Erreur lors de l\'approbation',
+        description: error.message || 'Erreur lors de l\'approbation',
         status: 'error',
         duration: 3000,
       });
@@ -141,11 +164,23 @@ export default function DynamicTypesPage() {
     if (!reason) return;
 
     try {
-      const response = await fetch(`/api/entity-types/${typeName}/reject`, {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken();
+
+      if (!token) {
+        toast({
+          title: 'Non authentifié',
+          description: 'Veuillez vous reconnecter',
+          status: 'error',
+          duration: 3000,
+        });
+        return;
+      }
+
+      const response = await fetchWithAuth(`/api/entity-types/${typeName}/reject`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Admin-Key': 'admin-dev-key-change-in-production'
         },
         body: JSON.stringify({
           admin_email: 'admin@example.com',
@@ -185,14 +220,25 @@ export default function DynamicTypesPage() {
 
     setUploading(true);
     try {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken();
+
+      if (!token) {
+        toast({
+          title: 'Non authentifié',
+          description: 'Veuillez vous reconnecter',
+          status: 'error',
+          duration: 3000,
+        });
+        setUploading(false);
+        return;
+      }
+
       const formData = new FormData();
       formData.append('file', uploadFile);
 
-      const response = await fetch('/api/entity-types/import-yaml', {
+      const response = await fetchWithAuth('/api/entity-types/import-yaml', {
         method: 'POST',
-        headers: {
-          'X-Admin-Key': 'admin-dev-key-change-in-production'
-        },
         body: formData
       });
 
@@ -224,8 +270,21 @@ export default function DynamicTypesPage() {
 
   const handleExportYAML = async (statusExport: string = 'approved') => {
     try {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken();
+
+      if (!token) {
+        toast({
+          title: 'Non authentifié',
+          description: 'Veuillez vous reconnecter',
+          status: 'error',
+          duration: 3000,
+        });
+        return;
+      }
+
       const url = `/api/entity-types/export-yaml?status=${statusExport}`;
-      const response = await fetch(url);
+      const response = await fetchWithAuth(url);
 
       if (response.ok) {
         const blob = await response.blob();
@@ -252,6 +311,64 @@ export default function DynamicTypesPage() {
         status: 'error',
         duration: 3000,
       });
+    }
+  };
+
+  const handleDeduplicate = async (dry_run: boolean = false) => {
+    try {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken();
+
+      if (!token) {
+        toast({
+          title: 'Non authentifié',
+          description: 'Veuillez vous reconnecter',
+          status: 'error',
+          duration: 3000,
+        });
+        return;
+      }
+
+      setDeduplicating(true);
+
+      const response = await fetchWithAuth('/api/admin/deduplicate-entities', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ dry_run })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const stats = data.stats;
+
+        toast({
+          title: dry_run ? 'Simulation terminée' : 'Dé-duplication terminée',
+          description: dry_run
+            ? `${stats.duplicate_groups} groupes de doublons détectés, ${stats.entities_to_merge} entités à fusionner`
+            : `${stats.entities_to_merge} entités fusionnées, ${stats.relations_updated} relations réassignées`,
+          status: 'success',
+          duration: 5000,
+          isClosable: true,
+        });
+
+        // Rafraîchir la liste des types après dé-duplication réelle
+        if (!dry_run) {
+          fetchTypes();
+        }
+      } else {
+        throw new Error('Deduplication failed');
+      }
+    } catch (error) {
+      toast({
+        title: 'Erreur dé-duplication',
+        description: 'Impossible de dé-dupliquer les entités',
+        status: 'error',
+        duration: 3000,
+      });
+    } finally {
+      setDeduplicating(false);
     }
   };
 
@@ -373,6 +490,51 @@ export default function DynamicTypesPage() {
                 </HStack>
               </Box>
             </SimpleGrid>
+          </CardBody>
+        </Card>
+
+        {/* Global Deduplication */}
+        <Card borderWidth={2} borderColor="purple.300">
+          <CardHeader bg="purple.50">
+            <Heading size="md">
+              <Icon as={FiCopy} mr={2} />
+              Dé-duplication globale des entités
+            </Heading>
+          </CardHeader>
+          <CardBody>
+            <VStack spacing={3} align="stretch">
+              <Text fontSize="sm" color="gray.600">
+                Fusionne automatiquement toutes les entités ayant exactement le même nom (insensible à la casse).
+                Pour chaque groupe de doublons, garde l'entité avec le plus de relations et supprime les autres.
+              </Text>
+              <Alert status="info" fontSize="sm">
+                <AlertIcon />
+                Recommandé avant la normalisation manuelle pour réduire drastiquement le nombre d'entités à traiter.
+              </Alert>
+              <HStack spacing={3}>
+                <Button
+                  onClick={() => handleDeduplicate(true)}
+                  isLoading={deduplicating}
+                  colorScheme="purple"
+                  variant="outline"
+                  size="sm"
+                >
+                  Simuler (Dry-run)
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (confirm('Êtes-vous sûr de vouloir dé-dupliquer toutes les entités ? Cette action ne peut pas être annulée.')) {
+                      handleDeduplicate(false);
+                    }
+                  }}
+                  isLoading={deduplicating}
+                  colorScheme="purple"
+                  size="sm"
+                >
+                  Lancer la dé-duplication
+                </Button>
+              </HStack>
+            </VStack>
           </CardBody>
         </Card>
 

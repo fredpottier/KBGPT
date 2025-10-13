@@ -52,12 +52,12 @@ class TestFactsEndpointCreate:
 
     @patch("knowbase.api.routers.facts.FactsService")
     def test_create_fact_missing_auth_headers(self, mock_service_class, test_client: TestClient, sample_fact_create):
-        """Test création sans headers auth."""
+        """Test création sans headers auth (devrait retourner 403)."""
+        # Pas de headers JWT → devrait échouer
         response = test_client.post("/api/facts", json=sample_fact_create)
 
-        # Dépend de l'implémentation dependency injection
-        # Si tenant_id obligatoire, devrait échouer
-        assert response.status_code in [400, 401, 422]
+        # Sans JWT, devrait retourner 403 Forbidden
+        assert response.status_code in [401, 403]
 
 
 class TestFactsEndpointRead:

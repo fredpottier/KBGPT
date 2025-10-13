@@ -24,6 +24,7 @@ def enqueue_pptx_ingestion(
     file_path: str,
     document_type_id: Optional[str] = None,
     meta_path: Optional[str] = None,
+    use_vision: bool = True,
     queue_name: Optional[str] = None,
 ) -> Job:
     job = get_queue(queue_name).enqueue_call(
@@ -32,6 +33,7 @@ def enqueue_pptx_ingestion(
             "pptx_path": file_path,
             "document_type_id": document_type_id,
             "meta_path": meta_path,
+            "use_vision": use_vision,
         },
         job_id=job_id,
         result_ttl=DEFAULT_JOB_TIMEOUT,
@@ -41,10 +43,10 @@ def enqueue_pptx_ingestion(
     return _register_meta(job, job_type="ingest", document_type=document_type_id or "default", source=file_path)
 
 
-def enqueue_pdf_ingestion(*, job_id: str, file_path: str, document_type_id: Optional[str] = None, queue_name: Optional[str] = None) -> Job:
+def enqueue_pdf_ingestion(*, job_id: str, file_path: str, document_type_id: Optional[str] = None, use_vision: bool = True, queue_name: Optional[str] = None) -> Job:
     job = get_queue(queue_name).enqueue_call(
         func="knowbase.ingestion.queue.jobs.ingest_pdf_job",
-        kwargs={"pdf_path": file_path, "document_type_id": document_type_id},
+        kwargs={"pdf_path": file_path, "document_type_id": document_type_id, "use_vision": use_vision},
         job_id=job_id,
         result_ttl=DEFAULT_JOB_TIMEOUT,
         failure_ttl=DEFAULT_JOB_TIMEOUT,
