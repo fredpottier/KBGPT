@@ -1,7 +1,7 @@
 # KnowWhere - Ambition Produit & Roadmap Complète
 
-**Version:** 1.0
-**Date:** 2025-10-13
+**Version:** 2.1
+**Date:** 2025-10-14
 **Vision:** Le Cortex Documentaire des Organisations
 
 ---
@@ -57,16 +57,18 @@
 │ ❌ Répond avec extraits de docs (RAG basique)               │
 │ ❌ Ne sait pas que Doc A, B, C parlent du même concept      │
 │ ❌ Ne détecte pas contradictions entre versions             │
+│ ❌ Dépendant de la langue (keywords hardcodés)              │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
-│ KNOWBASE (Semantic Intelligence)                            │
+│ KNOWWHERE (Semantic Intelligence)                           │
 ├─────────────────────────────────────────────────────────────┤
 │ ✅ Comprend que les 3 docs parlent du MÊME concept          │
-│ ✅ Détecte que Doc B révise Doc A (liens narratifs)         │
-│ ✅ Construit timeline d'évolution automatique               │
+│ ✅ Unifie concepts cross-lingual (FR ↔ EN ↔ DE)            │
+│ ✅ Construit graph de relations conceptuelles               │
 │ ✅ Identifie version ACTUELLE et warnings contradictions    │
 │ ✅ Trace provenance et justifie chaque réponse              │
+│ ✅ Language-agnostic (fonctionne sur toutes les langues)    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -105,14 +107,15 @@
 | **Recherche full-text** | ✅ | ✅✅ | ✅✅ | ✅✅ |
 | **Semantic search (embeddings)** | ❌ | ✅✅ | ✅✅ | ✅✅ |
 | **RAG Q&A** | ❌ | ✅✅ | ✅✅ | ✅✅ |
-| **Cross-document relations** | ❌ | ❌ | ❌ | ✅✅✅ |
-| **Narrative threads detection** | ❌ | ❌ | ❌ | ✅✅✅ |
-| **Evolution tracking** | ❌ | ❌ | ❌ | ✅✅✅ |
+| **Concept extraction multilingue** | ❌ | 🟡 Limited | 🟡 Limited | ✅✅✅ |
+| **Cross-lingual concept unification** | ❌ | ❌ | ❌ | ✅✅✅ |
+| **Cross-document concept relations** | ❌ | ❌ | ❌ | ✅✅✅ |
+| **Semantic compliance tracking** | ❌ | ❌ | ❌ | ✅✅✅ |
 | **Version conflict detection** | ❌ | ❌ | ❌ | ✅✅✅ |
-| **Semantic governance** | ❌ | ❌ | ❌ | ✅✅✅ |
-| **Living Ontology** | ❌ | ❌ | ❌ | ✅✅✅ |
-| **Causal reasoning chains** | ❌ | 🟡 Limited | 🟡 Limited | ✅✅✅ |
-| **Multi-document reasoning** | ❌ | 🟡 Limited | 🟡 Limited | ✅✅✅ |
+| **Semantic governance (quality control)** | ❌ | ❌ | ❌ | ✅✅✅ |
+| **Living Ontology (auto-discovery)** | ❌ | ❌ | ❌ | ✅✅✅ |
+| **Language-agnostic processing** | ❌ | 🟡 Per-language | 🟡 Per-language | ✅✅✅ |
+| **Multi-document conceptual reasoning** | ❌ | 🟡 Limited | 🟡 Limited | ✅✅✅ |
 
 **Légende** :
 - ✅✅✅ = Différenciateur unique
@@ -123,39 +126,44 @@
 
 ### 2.2 USP (Unique Selling Propositions)
 
-**USP #1 : Semantic Narrative Intelligence**
+**USP #1 : Semantic Concept Intelligence**
 
-> *"KnowWhere comprend comment vos documents se **parlent** entre eux."*
+> *"KnowWhere comprend les **concepts** de vos documents, quelle que soit leur langue."*
 
-- Détecte fils narratifs cross-documents
-- Relie versions d'un même concept automatiquement
-- Construit chaînes causales et temporelles
+- Extraction automatique de concepts (entities, practices, standards, tools, roles)
+- Unification cross-lingual (FR "authentification" = EN "authentication")
+- Construction automatique de graph de relations conceptuelles
+- Fonctionne sur toutes langues (FR, EN, DE, ES, IT...) sans configuration
 
-**USP #2 : Evolution Tracking & Conflict Detection**
+**USP #2 : Cross-Document Semantic Linking**
 
-> *"KnowWhere détecte les questions que vous **devriez** poser."*
+> *"KnowWhere détecte les connexions que vous **devriez** connaître."*
 
-- Timeline d'évolution automatique des concepts
-- Warnings si document contradictoire
-- Identification version outdated vs actuelle
+- Relations entre concepts à travers les documents (IMPLEMENTS, DEFINES, AUDITS, PROVES)
+- Détection automatique de définitions multiples (ex: 3 formules CRR différentes)
+- Warnings si concepts contradictoires entre documents
+- Traçabilité complète (provenance, sources, évolution)
 
-**USP #3 : Semantic Governance**
+**USP #3 : Semantic Governance & Living Ontology**
 
-> *"Transformez la masse documentaire en connaissance **gouvernée**."*
+> *"Transformez la masse documentaire en connaissance **gouvernée et évolutive**."*
 
 - Quality control intelligent avec gatekeeper
-- Living Ontology qui évolue automatiquement
+- Living Ontology qui découvre patterns automatiquement
 - Volumétrie maîtrisée (pas d'explosion données)
+- Language-agnostic → fonctionne sur environnements multilingues réels
 
 ### 2.3 Barriers to Entry
 
 **Pourquoi Copilot/Gemini ne peuvent pas simplement copier ?**
 
 1. **Architecture Dual-Graph** : Proto-KG → Published-KG = complexité technique élevée
-2. **Narrative Thread Detection** : Nécessite NLP avancé + LLM reasoning combinés
-3. **Living Ontology** : Pattern discovery sémantique ≠ statistical frequency
-4. **Time-to-Market** : 8 mois dev solo, 2-3 ans pour Microsoft/Google (bureaucratie)
-5. **Niche Focus** : KnowWhere focus documents d'entreprise, Copilot focus everything (dilution)
+2. **Cross-Lingual Concept Unification** : Nécessite embeddings multilingues + canonicalization sophistiquée
+3. **Semantic Concept Extraction** : Triple approche (NER + Clustering + LLM) avec validation contextuelle
+4. **Living Ontology** : Pattern discovery sémantique ≠ statistical frequency
+5. **Time-to-Market** : 8 mois dev solo, 2-3 ans pour Microsoft/Google (bureaucratie)
+6. **Niche Focus** : KnowWhere focus documents d'entreprise descriptifs, Copilot focus everything (dilution)
+7. **Language-Agnostic Core** : Architecture pensée multilingue dès le départ vs bolt-on translation
 
 ---
 
@@ -329,42 +337,54 @@ KnowWhere:
 
 **Tasks** :
 - [ ] Créer structure `src/knowbase/semantic/`
-- [ ] Setup Neo4j Proto-KG schema
-- [ ] Setup Qdrant Proto collections
+- [ ] Setup Neo4j Proto-KG schema V2.1 (Concept-centric, cross-lingual)
+- [ ] Setup Qdrant Proto collections (`knowwhere_proto`)
 - [ ] Configuration `config/semantic_intelligence.yaml`
+- [ ] Setup modèles NER multilingues (spaCy: en, fr, de, xx)
+- [ ] Configuration embeddings multilingues (multilingual-e5-large)
 
-**Validation** : Infrastructure prête, tests unitaires passent
+**Validation** : Infrastructure prête, tests unitaires passent, modèles chargés
 
-#### Semaine 3-4 : Semantic Document Profiler
-
-**Tasks** :
-- [ ] Implémenter `SemanticDocumentProfiler`
-- [ ] Narrative threads detection (basique)
-- [ ] Complexity zones mapping
-- [ ] Tests sur 10 documents variés
-
-**Validation** : Profiler analyse 10 docs, narrative threads détectés
-
-#### Semaine 5-8 : Narrative Thread Detection (CRITIQUE)
+#### Semaine 3-4 : Topic Segmentation (Validé)
 
 **Tasks** :
-- [ ] Implémenter `NarrativeThreadDetector`
-- [ ] Causal connectors detection
-- [ ] Temporal sequences detection
-- [ ] Cross-document references detection
-- [ ] **Tests CRR Evolution** (use case killer)
+- [ ] Implémenter `TopicSegmenter` (composant déjà validé)
+- [ ] HDBSCAN clustering + Agglomerative fallback
+- [ ] Topic boundary detection
+- [ ] Tests sur 10 documents variés (descriptifs)
 
-**Validation** : CRR Evolution fonctionne sur 3 docs, timeline générée automatiquement
+**Validation** : TopicSegmenter analyse 10 docs, topics cohérents détectés
 
-#### Semaine 9-10 : Intégration Pipeline PDF
+#### Semaine 5-7 : Multilingual Concept Extraction (CRITIQUE)
+
+**Tasks** :
+- [ ] Implémenter `MultilingualConceptExtractor`
+- [ ] Triple extraction (NER + Semantic Clustering + LLM)
+- [ ] Language detection automatique (fasttext)
+- [ ] Concept typing (ENTITY, PRACTICE, STANDARD, TOOL, ROLE)
+- [ ] **Tests CRR Evolution** (use case killer - 3 docs, 3 définitions différentes)
+
+**Validation** : Concepts extraits avec haute précision, language-agnostic vérifié
+
+#### Semaine 8-9 : Semantic Indexing & Cross-Lingual Canonicalization
+
+**Tasks** :
+- [ ] Implémenter `SemanticIndexer`
+- [ ] Cross-lingual canonicalization (embeddings similarity >0.85)
+- [ ] Hierarchy construction automatique
+- [ ] Dual-storage routing (Proto-KG)
+
+**Validation** : FR "authentification" = EN "authentication" détecté, concepts canoniques créés
+
+#### Semaine 10 : Intégration Pipeline & Concept Linking
 
 **Tasks** :
 - [ ] Modifier `pdf_pipeline.py` avec mode SEMANTIC
-- [ ] `IntelligentSegmentationEngine` implémenté
-- [ ] Dual-storage routing (Proto-KG)
+- [ ] Implémenter `ConceptLinker` (relations cross-documents)
 - [ ] Feature flag SEMANTIC | LEGACY
+- [ ] Tests intégration 5 PDFs descriptifs
 
-**Validation** : Pipeline semantic traite 5 PDFs, entities en Proto-KG
+**Validation** : Pipeline semantic traite 5 PDFs, concepts + relations en Proto-KG
 
 #### Semaine 8-10 : Frontend Vague 1 - Amélioration Base (Parallèle)
 
@@ -379,13 +399,14 @@ KnowWhere:
 **Validation** : Dashboard affiche metrics real-time, tables interactives fonctionnelles
 
 **🎯 CHECKPOINT PHASE 1** :
-- ✅ Démo CRR Evolution fonctionne parfaitement
-- ✅ Différenciation vs Copilot évidente
-- ✅ 10+ documents testés avec succès
-- ✅ Performance acceptable (<45s/doc)
+- ✅ Démo CRR Evolution fonctionne parfaitement (3 définitions détectées, unifiées)
+- ✅ Différenciation vs Copilot évidente (cross-lingual, concept-based)
+- ✅ 10+ documents testés avec succès (FR, EN, DE mixés)
+- ✅ Performance acceptable (<30s/doc avec pipeline simplifié)
+- ✅ Language-agnostic prouvé (concepts FR ↔ EN unifiés automatiquement)
 - ✅ Dashboard frontend affiche metrics real-time
 
-**Livrable Phase 1** : Démo vidéo 5 min "Customer Retention Rate Evolution Tracker" + Dashboard metrics real-time
+**Livrable Phase 1** : Démo vidéo 5 min "Concept Evolution Tracker multilingue" + Dashboard metrics real-time
 
 ---
 
@@ -408,15 +429,16 @@ KnowWhere:
 **Tasks** :
 - [ ] `SemanticIntelligentGatekeeper` implémenté
 - [ ] Multi-criteria scoring engine
-- [ ] Narrative coherence assessment
-- [ ] Causal reasoning quality assessment
+- [ ] Concept semantic quality assessment
+- [ ] Cross-document relation quality assessment
+- [ ] Canonicalization quality verification
 - [ ] Seuils adaptatifs par domaine
 
 **Validation** :
 - Auto-promotion rate >85%
 - Human review 8-10%
 - Rejection 3-5%
-- Précision validée sur sample 50 entities
+- Précision validée sur sample 50 concepts
 
 #### Semaine 17-18 : Published-KG + Promotion Pipeline
 
@@ -444,13 +466,14 @@ KnowWhere:
 **Validation** : Quality Control UI fonctionnel (basique), bulk actions opérationnelles
 
 **🎯 CHECKPOINT PHASE 2** :
-- ✅ Proto-KG staging opérationnel
-- ✅ Gatekeeper qualité >85% précision
-- ✅ Published-KG contient données validées
+- ✅ Proto-KG staging opérationnel (concepts + relations)
+- ✅ Gatekeeper qualité >85% précision (concept quality + canonicalization)
+- ✅ Published-KG contient concepts validés (cross-lingual, unified)
 - ✅ Architecture dual-graph prouvée
 - ✅ Quality Control UI opérationnel (fonctionnalités basiques)
+- ✅ Validation cross-lingual unification dans Published-KG
 
-**Livrable Phase 2** : Dashboard Quality Control opérationnel, metrics gatekeeper visualisées
+**Livrable Phase 2** : Dashboard Quality Control opérationnel, metrics gatekeeper + canonicalization visualisées
 
 ---
 
@@ -511,14 +534,15 @@ KnowWhere:
 **Validation** : Quality Control UI complet, Budget Intelligence opérationnel, pipeline status visible
 
 **🎯 CHECKPOINT PHASE 3** :
-- ✅ Patterns découverts automatiquement
-- ✅ Ontologie évolue sans intervention
-- ✅ Volumétrie maîtrisée
-- ✅ Budget optimisé
+- ✅ Patterns conceptuels découverts automatiquement
+- ✅ Ontologie évolue sans intervention (concept types, hierarchies)
+- ✅ Volumétrie maîtrisée (<10k concepts canoniques)
+- ✅ Budget optimisé (cost tracking par étape pipeline)
 - ✅ Quality Control UI complet et opérationnel
 - ✅ Budget Intelligence Center déployé
+- ✅ Cross-lingual patterns détectés (ex: practice appliqué à travers langues)
 
-**Livrable Phase 3** : Démo "Living Ontology" - pattern émergent découvert automatiquement + Budget Intelligence Dashboard
+**Livrable Phase 3** : Démo "Living Ontology multilingue" - pattern émergent découvert automatiquement + Budget Intelligence Dashboard
 
 ---
 
@@ -529,11 +553,12 @@ KnowWhere:
 #### Semaine 27-32 : Frontend Vague 3 - Polish & Advanced Features (Parallèle)
 
 **Tasks Frontend** :
-- [ ] **Entity Constellation Explorer** (4j) 🎨
-  - Visualisation D3.js du Knowledge Graph
-  - Navigation interactive entities/relations
-  - Zoom, pan, filters par type
+- [ ] **Concept Constellation Explorer** (4j) 🎨
+  - Visualisation D3.js du Knowledge Graph (concepts + relations)
+  - Navigation interactive concepts/relations cross-lingual
+  - Zoom, pan, filters par type (ENTITY, PRACTICE, STANDARD, TOOL, ROLE)
   - Export SVG/PNG visualizations
+  - Highlight cross-lingual unified concepts
 - [ ] **Pattern Discovery Lab** (3j)
   - Interface exploration patterns découverts (Living Ontology)
   - Timeline émergence patterns
@@ -556,7 +581,7 @@ KnowWhere:
 
 **Effort** : 12 jours Phase 4 (fin Vague 3)
 
-**Validation** : Entity Explorer opérationnel, Pattern Lab utilisable, UX polie, documentation complète
+**Validation** : Concept Explorer opérationnel (cross-lingual), Pattern Lab utilisable, UX polie, documentation complète
 
 #### Semaine 27-32 : Backend Polish + Documentation
 
@@ -574,13 +599,14 @@ KnowWhere:
 
 **🎯 CHECKPOINT PHASE 4** :
 - ✅ MVP commercialisable fonctionnel
-- ✅ 3 use cases démontrables (démos automatisées)
-- ✅ Différenciation vs Copilot prouvée (benchmark)
+- ✅ 3 use cases démontrables (démos automatisées multilingues)
+- ✅ Différenciation vs Copilot prouvée (benchmark concept-based + cross-lingual)
 - ✅ Documentation complète (user + dev)
-- ✅ Frontend complet avec Entity Explorer et Pattern Lab
+- ✅ Frontend complet avec Concept Explorer cross-lingual et Pattern Lab
 - ✅ UX polie et production-ready
+- ✅ Language-agnostic prouvé sur documents réels (FR, EN, DE)
 
-**Livrable Phase 4** : **KnowWhere MVP 1.0** prêt pour premiers clients (backend + frontend intégré)
+**Livrable Phase 4** : **KnowWhere MVP 1.0** prêt pour premiers clients (backend + frontend intégré, multilingue)
 
 ---
 
@@ -589,44 +615,49 @@ KnowWhere:
 ```
 ┌────────────────────────────────────────────────────────────────────┐
 │ PHASE 1: Semantic Core (Semaines 1-10)                            │
-│ Backend:                                                           │
-│ ├─ Setup Infrastructure (2 sem)                                    │
-│ ├─ Semantic Profiler (2 sem)                                       │
-│ ├─ Narrative Detection (4 sem) ⚠️ CRITIQUE                         │
-│ └─ Pipeline Integration (2 sem)                                    │
+│ Backend - Pipeline 4 Étapes Simplifié:                            │
+│ ├─ Setup Infrastructure (2 sem) + NER/Embeddings multilingues     │
+│ ├─ TopicSegmenter (2 sem) ✅ Validé                               │
+│ ├─ MultilingualConceptExtractor (3 sem) ⚠️ CRITIQUE               │
+│ ├─ SemanticIndexer + Canonicalization (2 sem)                     │
+│ └─ ConceptLinker + Pipeline Integration (1 sem)                   │
 │ Frontend (8j, Sem 8-10): 🖥️ Vague 1                               │
 │ └─ WebSocket, Metrics real-time, react-table upgrade              │
-│ 🎯 Checkpoint: Démo CRR Evolution + Dashboard real-time           │
+│ 🎯 Checkpoint: Démo Concept Evolution multilingue + Dashboard     │
 ├────────────────────────────────────────────────────────────────────┤
 │ PHASE 2: Dual-Graph + Gatekeeper (Semaines 11-18)                 │
 │ Backend:                                                           │
-│ ├─ Proto-KG Storage (2 sem)                                        │
+│ ├─ Proto-KG Storage (2 sem) - Concepts + Relations                │
 │ ├─ Semantic Gatekeeper (4 sem) ⚠️ CRITIQUE                         │
+│ │   └─ Concept quality + Canonicalization quality                 │
 │ └─ Published-KG + Promotion (2 sem)                                │
 │ Frontend (6j, Sem 15-18): 🖥️ Vague 2 Phase 1                      │
 │ └─ Quality Control UI basique, Dashboard metrics enhanced         │
-│ 🎯 Checkpoint: Quality Control opérationnel                        │
+│ 🎯 Checkpoint: Quality Control + Cross-lingual validation         │
 ├────────────────────────────────────────────────────────────────────┤
 │ PHASE 3: Living Intelligence (Semaines 19-26)                     │
 │ Backend:                                                           │
-│ ├─ Living Ontology (4 sem)                                         │
+│ ├─ Living Ontology (4 sem) - Pattern discovery conceptuel         │
 │ ├─ Volumetry Management (2 sem)                                    │
 │ └─ Budget Intelligence (2 sem)                                     │
 │ Frontend (12j, Sem 22-26): 🖥️ Vague 2 Phase 2                     │
 │ └─ Quality Control UI complet, Budget Intelligence, Pipeline      │
-│ 🎯 Checkpoint: Pattern discovery + Budget Dashboard               │
+│ 🎯 Checkpoint: Pattern discovery multilingue + Budget Dashboard   │
 ├────────────────────────────────────────────────────────────────────┤
 │ PHASE 4: Enterprise Polish + GTM (Semaines 27-32)                 │
 │ Backend:                                                           │
 │ └─ Documentation, Benchmarks, Tests E2E, Error handling            │
 │ Frontend (12j): 🖥️ Vague 3                                        │
-│ └─ Entity Explorer D3, Pattern Lab, Polish UX, Docs, Démos        │
+│ └─ Concept Explorer D3, Pattern Lab, Polish UX, Docs, Démos       │
 │ 🎯 Livrable: MVP 1.0 Commercialisable (Backend + Frontend)         │
 └────────────────────────────────────────────────────────────────────┘
 
 Total Backend: 32 semaines (8 mois) @ 25-30h/semaine
 Total Frontend: 38 jours (parallèle) @ 6-8h/jour
 Effort combiné: 800-960h backend + 228-304h frontend = 1028-1264h total
+
+Architecture V2.1: Focus 100% documents descriptifs, language-agnostic
+Pipeline: TopicSegmenter → MultilingualConceptExtractor → SemanticIndexer → ConceptLinker
 ```
 
 ---
@@ -743,10 +774,11 @@ Decision Criteria:
 - MS Teams bot
 
 **Phase 6 : Advanced Features (Semaines 45-56)**
-- Multi-language support (EN, FR, DE, ES)
+- Extension support langues supplémentaires (IT, ES, PT, NL)
 - Custom ontology editor (visual)
 - Advanced analytics (knowledge gaps detection)
 - Recommendation engine ("documents you should read")
+- Temporal evolution tracking (pour cas d'usage narrative - optionnel)
 
 **Phase 7 : Enterprise Features (Semaines 57-68)**
 - SSO / SAML integration
@@ -765,20 +797,22 @@ Decision Criteria:
 
 | Métrique | Target | Measurement |
 |----------|--------|-------------|
-| **Narrative threads detected** | >80% precision | Manual validation sample 50 docs |
+| **Concept extraction precision** | >85% precision | Manual validation sample 50 docs |
+| **Cross-lingual unification accuracy** | >85% | FR/EN/DE concept pairs correctly unified |
 | **Gatekeeper auto-promotion rate** | >85% | Ratio auto-promoted / total candidates |
 | **Gatekeeper precision** | >90% | False positives + false negatives < 10% |
-| **Processing speed** | <45s/doc | Average time PDF pipeline semantic |
-| **Proto-KG volumetry** | <10k entities | Count CandidateEntity nodes HOT tier |
-| **Cost per document** | 0,40-0,80$ | Total LLM API costs / docs processed |
+| **Processing speed** | <30s/doc | Average time PDF pipeline semantic (simplifié) |
+| **Proto-KG volumetry** | <10k concepts | Count CanonicalConcept nodes HOT tier |
+| **Cost per document** | 0,30-0,50$ | Total LLM API costs / docs processed (optimisé) |
 
 **Phase 3-4 (MVP Commercialisable)** :
 
 | Métrique | Target | Measurement |
 |----------|--------|-------------|
-| **Living Ontology patterns discovered** | 3+ patterns/50 docs | Count validated patterns |
-| **Evolution timeline accuracy** | >85% | User validation "is this timeline correct?" |
-| **Cross-doc references precision** | >80% | Sample validation 30 doc pairs |
+| **Living Ontology patterns discovered** | 3+ patterns/50 docs | Count validated conceptual patterns |
+| **Concept relation accuracy** | >85% | User validation "are these concepts related?" |
+| **Cross-doc concept links precision** | >80% | Sample validation 30 doc pairs |
+| **Multilingual concept coverage** | 3+ languages | FR, EN, DE unified correctly |
 | **System uptime** | >99% | Monitoring (Prometheus) |
 | **Response time queries** | <2s | P95 latency semantic queries |
 
@@ -824,7 +858,7 @@ Decision Criteria:
 
 **Vision** : Devenir le **cortex documentaire** des organisations, la surcouche d'intelligence qui transforme la masse documentaire en connaissance gouvernée.
 
-**Différenciation** : Semantic Intelligence unique - narrative threads, evolution tracking, living ontology - capacités qu'aucun competitor ne possède.
+**Différenciation** : Semantic Intelligence unique - concept extraction multilingue, cross-lingual unification, concept-based knowledge graph, living ontology - capacités qu'aucun competitor ne possède.
 
 **Market Opportunity** : 100B€+ marché Knowledge Management, segment "Semantic Document Intelligence" largement non-adressé.
 
@@ -832,10 +866,10 @@ Decision Criteria:
 
 **Next Steps Immédiats** :
 
-1. **✅ Décision GO/NO-GO** : Valider commitment full pivot 8 mois
-2. **🚀 Démarrage Phase 1** : Setup infrastructure (Semaine 1-2)
-3. **🎯 Focus absolu** : Narrative Thread Detection (Semaine 5-8) = critique
-4. **📊 Checkpoint Sem 10** : Démo CRR Evolution fonctionne
+1. **✅ Décision GO/NO-GO** : Valider commitment full pivot 8 mois (V2.1 simplifié)
+2. **🚀 Démarrage Phase 1** : Setup infrastructure + NER/Embeddings multilingues (Semaine 1-2)
+3. **🎯 Focus absolu** : MultilingualConceptExtractor (Semaine 5-7) = critique
+4. **📊 Checkpoint Sem 10** : Démo Concept Evolution multilingue fonctionne
 
 ---
 
@@ -849,6 +883,15 @@ Decision Criteria:
 
 ---
 
-**Version:** 1.0 - 2025-10-13
+**Version:** 2.1 - 2025-10-14
+**Changelog V2.1:**
+- Pivot de "narrative threads" vers "concept extraction" (focus documents descriptifs)
+- Architecture simplifiée: 4 étapes (TopicSegmenter → MultilingualConceptExtractor → SemanticIndexer → ConceptLinker)
+- Language-agnostic core: NER multilingue + embeddings cross-lingual + canonicalization
+- USPs mis à jour: Concept Intelligence, Cross-Lingual Unification, Semantic Governance
+- Métriques ajustées: concept precision, cross-lingual accuracy
+- Timeline ajustée: Phase 1 focus MultilingualConceptExtractor (Sem 5-7)
+- Frontend: Entity → Concept Explorer, highlight cross-lingual concepts
+- Performance optimisée: <30s/doc (vs 45s), 0.30-0.50$/doc (vs 0.40-0.80$)
 **Auteur:** Solo Founder Journey
 **Contact:** [À compléter]
