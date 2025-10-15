@@ -1,0 +1,73 @@
+# 🤖 OSMOSE Agentique - Configuration Budget Limits
+#
+# Caps et quotas LLM pour BudgetManager.
+# Phase 1.5 V1.1
+
+budgets:
+  # Caps par document (hard limits)
+  document_caps:
+    SMALL: 120   # Max 120 calls gpt-4o-mini/doc
+    BIG: 8       # Max 8 calls gpt-4o/doc
+    VISION: 2    # Max 2 calls gpt-4o-vision/doc
+
+  # Quotas tenant/jour (rolling window)
+  daily_quotas:
+    SMALL: 10000   # 10k calls/jour/tenant
+    BIG: 500       # 500 calls/jour/tenant
+    VISION: 100    # 100 calls/jour/tenant
+
+  # Coûts estimés (pour tracking)
+  estimated_costs:
+    SMALL:
+      input_per_1k: 0.00015   # $0.15/1M tokens input
+      output_per_1k: 0.0006   # $0.60/1M tokens output
+      avg_tokens: 1000        # Tokens moyens/call
+      avg_cost_per_call: 0.002  # ~$0.002/call
+
+    BIG:
+      input_per_1k: 0.0025    # $2.50/1M tokens input
+      output_per_1k: 0.010    # $10/1M tokens output
+      avg_tokens: 1500        # Tokens moyens/call
+      avg_cost_per_call: 0.015  # ~$0.015/call
+
+    VISION:
+      input_per_1k: 0.005     # $5.00/1M tokens input (image)
+      output_per_1k: 0.015    # $15/1M tokens output
+      avg_tokens: 2000        # Tokens moyens/call
+      avg_cost_per_call: 0.030  # ~$0.030/call
+
+  # Objectifs coût/1000 pages (KPIs)
+  cost_targets:
+    SCENARIO_A:
+      name: "Textual PDFs (simple)"
+      cost_per_1000_pages: 1.00  # $1.00/1000p
+      budget_allocation:
+        SMALL: 0.90  # 90% budget SMALL
+        BIG: 0.10    # 10% budget BIG
+
+    SCENARIO_B:
+      name: "Complex PDFs (multi-column, tables)"
+      cost_per_1000_pages: 3.08  # $3.08/1000p
+      budget_allocation:
+        SMALL: 0.75
+        BIG: 0.25
+
+    SCENARIO_C:
+      name: "Mixed corpus (PPTX + complex PDF)"
+      cost_per_1000_pages: 7.88  # $7.88/1000p
+      budget_allocation:
+        SMALL: 0.60
+        BIG: 0.30
+        VISION: 0.10
+
+  # Redis keys for tracking
+  redis:
+    key_prefix: "budget:tenant"
+    key_format: "{prefix}:{tenant_id}:{model_tier}:{date}"
+    ttl_seconds: 86400  # 24h TTL
+
+  # Refund policy
+  refund:
+    enabled: true
+    refund_on_retry_failure: true  # Rembourse si retry échoue
+    refund_on_gate_rejection: false  # Ne rembourse pas si Gate rejette

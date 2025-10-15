@@ -1,0 +1,54 @@
+# 🤖 OSMOSE Agentique - Configuration Supervisor Agent
+#
+# FSM Master pour orchestration pipeline extraction.
+# Phase 1.5 V1.1
+
+supervisor:
+  # Timeouts et limites
+  max_steps: 50  # Max steps FSM (sécurité)
+  timeout_seconds: 300  # 5 min/doc timeout
+
+  # FSM transitions (état → états suivants autorisés)
+  fsm_transitions:
+    INIT:
+      - BUDGET_CHECK
+
+    BUDGET_CHECK:
+      - SEGMENT
+      - ERROR
+
+    SEGMENT:
+      - EXTRACT
+      - ERROR
+
+    EXTRACT:
+      - MINE_PATTERNS
+      - ERROR
+
+    MINE_PATTERNS:
+      - GATE_CHECK
+      - ERROR
+
+    GATE_CHECK:
+      - PROMOTE
+      - EXTRACT  # Retry avec BIG model
+      - ERROR
+
+    PROMOTE:
+      - FINALIZE
+      - ERROR
+
+    FINALIZE:
+      - DONE
+      - ERROR
+
+    ERROR:
+      - DONE
+
+    DONE: []
+
+  # Retry policy
+  retry:
+    enabled: true
+    max_retries: 1  # 1 retry max avec BIG model
+    retry_on_gate_failure: true  # Retry si Gate Check < 30% promoted
