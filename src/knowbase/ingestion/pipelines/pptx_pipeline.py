@@ -2227,7 +2227,7 @@ def process_pptx(
 
     try:
         logger.info("[DEBUG] 🎯 Checkpoint F: Dans try block, avant import")
-        from knowbase.ingestion.osmose_integration import process_document_with_osmose
+        from knowbase.ingestion.osmose_agentique import process_document_with_osmose_agentique
         import asyncio
         logger.info("[DEBUG] 🎯 Checkpoint G: Imports OK, avant condition")
 
@@ -2243,10 +2243,10 @@ def process_pptx(
                     "Extraction concepts canoniques cross-linguals",
                 )
 
-            # Appeler OSMOSE Pure de manière asynchrone
-            logger.info("[DEBUG] 🎯 Checkpoint I: Avant asyncio.run(process_document_with_osmose)")
+            # Appeler OSMOSE Agentique (SupervisorAgent FSM) de manière asynchrone
+            logger.info("[DEBUG] 🎯 Checkpoint I: Avant asyncio.run(process_document_with_osmose_agentique)")
             osmose_result = asyncio.run(
-                process_document_with_osmose(
+                process_document_with_osmose_agentique(
                     document_id=pptx_path.stem,
                     document_title=pptx_path.name,
                     document_path=pptx_path,
