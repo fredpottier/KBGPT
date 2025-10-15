@@ -217,51 +217,87 @@ concept_extraction:
 
 ### Phase 2: Améliorations Avancées (4-6h)
 
-#### 2.1 Ajouter Ontologie Domaine SAP
+#### 2.1 Utiliser Système Ontologie Auto-Apprenante Neo4j ⭐ **RECOMMANDÉ**
 
-**Fichier:** `config/sap_ontology.yaml`
+**⚠️ IMPORTANT** : Ne PAS créer de fichiers YAML statiques domain-spécifiques (incompatible philosophie OSMOSE).
 
-```yaml
-entities:
-  products:
-    - SAP S/4HANA
-    - SAP HANA
-    - SAP Fiori
-    - SAP BTP
-    - SAP Ariba
-    - SAP SuccessFactors
+**Système Existant à Réutiliser** (archivé dans `doc/archive/NEO4J_ONTOLOGY_RECAP.md`) :
 
-  modules:
-    - Financial Accounting (FI)
-    - Controlling (CO)
-    - Materials Management (MM)
-    - Sales & Distribution (SD)
+**Architecture Neo4j** :
+```cypher
+// Isolation complète du KG métier
+(:OntologyEntity {
+    entity_id: UUID,
+    canonical_name: String,
+    entity_type: String,      // SOLUTION, COMPONENT, TECHNOLOGY, etc.
+    category: String,
+    metadata: Map,
+    frequency: Int,            // Auto-incrémenté à chaque normalisation
+    confidence_score: Float,   // Augmente avec usage
+    created_at: Datetime,
+    last_used_at: Datetime
+})
 
-practices:
-  finance:
-    - Financial Closing
-    - Month-End Close
-    - Order-to-Cash
-    - Procure-to-Pay
-    - Record-to-Report
-
-standards:
-  - GDPR
-  - SOX (Sarbanes-Oxley)
-  - IFRS
-  - US GAAP
-
-tools:
-  partners:
-    - HighRadius (Collections)
-    - Kyriba (Treasury)
-    - BlackLine (Reconciliation)
+(:OntologyAlias {
+    alias_id: UUID,
+    alias: String,
+    normalized: String,
+    entity_type: String,
+    tenant_id: String
+})-[:HAS_ALIAS]->(:OntologyEntity)
 ```
 
-Utiliser cette ontologie pour :
-1. **Boosting** : Augmenter score confiance si match ontologie
-2. **Validation** : Rejeter concepts hors ontologie si confiance < 0.7
-3. **Auto-complétion** : Suggérer concepts manquants
+**Boucle Feedback Auto-Apprenante** :
+1. **Extraction** : NER détecte "S/4HANA Cloud", "SAP S4HANA", "S4"
+2. **Normalisation** : EntityNormalizer → "SAP S/4HANA" (canonical)
+3. **Auto-Save** : Si nouveau alias → Neo4j :OntologyAlias créé
+4. **Enrichissement LLM** : Si entity_id absent → LLM génère definition → :OntologyEntity créé
+5. **Frequency Tracking** : Incrémente frequency à chaque usage
+6. **Confidence Boost** : Entités fréquentes (frequency >10) → boost +0.1 confidence
+
+**Avantages vs YAML statique** :
+- ✅ **Auto-enrichissement** : Apprend nouveaux termes au fur et à mesure
+- ✅ **Domain-agnostic** : Pas limité à SAP (SOLUTION, COMPONENT, TECHNOLOGY, etc.)
+- ✅ **Scalabilité** : Illimitée (vs ~15K max YAML)
+- ✅ **Feedback loop** : Ontologies LLM persistées automatiquement
+- ✅ **Multi-tenant** : Isolation par tenant_id
+
+**Utilisation** :
+```python
+# Dans ExtractorOrchestrator ou GatekeeperDelegate
+from knowbase.common.entity_normalizer import get_entity_normalizer
+
+normalizer = get_entity_normalizer()  # Charge depuis Neo4j
+
+# Normaliser entité extraite
+entity_id, canonical_name = normalizer.normalize_entity_name(
+    "S4HANA Cloud",
+    "SOLUTION"
+)
+
+# Si entity_id trouvé → entité cataloguée → boost confidence
+if entity_id:
+    metadata = normalizer.get_entity_metadata(entity_id, "SOLUTION")
+    entity["confidence"] += 0.1  # Boost catalogué
+    entity["canonical_name"] = canonical_name
+    entity["category"] = metadata.get("category")
+else:
+    # Entité non cataloguée → loggée dans uncataloged_entities.log
+    # → Enrichissement futur via LLM
+    pass
+```
+
+**Migration YAML → Neo4j** (si besoin) :
+- Utiliser `src/knowbase/ontology/migrate_ontologies.py` (archivé)
+- Auto-save activé via `EntityNormalizerNeo4j.save_ontology_entity()`
+
+**Effort** : 0.5 jour (réactiver système existant)
+
+**Impact** : +10-15% précision (boost entités cataloguées), auto-enrichissement continu
+
+**Priorité** : P1 (après Jours 7-9)
+
+**Référence** : `doc/archive/NEO4J_ONTOLOGY_RECAP.md`, `doc/archive/ENTITY_NORMALIZATION_MIGRATION.md`
 
 #### 2.2 Implémenter Génération Définitions Multi-Sources
 
