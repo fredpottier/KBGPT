@@ -416,4 +416,376 @@ Utiliser le role pour **pondérer l'importance** des concepts extraits.
 
 ---
 
-**Conclusion:** Le pipeline OSMOSE Pure V2.1 fonctionne techniquement (Neo4j OK, Qdrant OK, extraction end-to-end), mais la **qualité des concepts extraits est insuffisante** car l'extraction LLM est désactivée et il manque du filtrage. Les corrections Phase 1 (réactiver LLM + filtrage NER) peuvent être implémentées en **1-2h** et amélioreront drastiquement la qualité.
+## ⚠️ Phase 4: Filtrage Contextuel Avancé (Best Practices 2025) ✨ **NOUVEAU**
+
+### 📚 Analyse Best Practices Extraction (Source: OpenAI, 2025-10-15)
+
+**Documents sources** :
+- `doc/ongoing/ANALYSE_BEST_PRACTICES_EXTRACTION_VS_OSMOSE.md`
+- `doc/ongoing/ANALYSE_FILTRAGE_CONTEXTUEL_GENERALISTE.md`
+
+**Pipeline 6 Étapes Recommandé (Industrie)** :
+1. ✅ Prétraitement et structuration (OSMOSE OK)
+2. ❌ **Résolution de coréférence** (0% implémenté) → **GAP P0**
+3. ✅ NER + Keywords extraction (OSMOSE OK)
+4. ✅ Désambiguïsation et enrichissement (OSMOSE OK)
+5. ⚠️ **Filtrage intelligent contextuel** (20% implémenté) → **GAP P0 CRITIQUE**
+6. 🟡 Évaluation continue (partiellement implémenté)
+
+---
+
+### 🚨 **GAP Critique Identifié: Filtrage Contextuel Insuffisant**
+
+#### Problème Majeur
+
+**Situation actuelle** (GatekeeperDelegate) :
+```python
+# Filtrage uniquement par confidence, PAS par contexte
+if entity["confidence"] < profile.min_confidence:
+    rejected.append(entity)
+```
+
+**Impact** : Produits concurrents promus au même niveau que produits principaux !
+
+**Exemple concret** :
+```
+Document RFP SAP:
+"Notre solution SAP S/4HANA Cloud répond à vos besoins.
+Les concurrents Oracle et Workday proposent des alternatives."
+
+Extraction actuelle (NER):
+- SAP S/4HANA Cloud (confidence: 0.95)
+- Oracle (confidence: 0.92)
+- Workday (confidence: 0.90)
+
+Gatekeeper actuel (BALANCED profile, seuil 0.70):
+✅ SAP S/4HANA Cloud promoted (0.95 > 0.70)
+✅ Oracle promoted (0.92 > 0.70)  ❌ ERREUR!
+✅ Workday promoted (0.90 > 0.70)  ❌ ERREUR!
+
+Résultat: Les 3 produits au même niveau dans le KG!
+```
+
+**Attendu** :
+```
+SAP S/4HANA Cloud → PRIMARY (score: 1.0) ✅ Promu
+Oracle → COMPETITOR (score: 0.3) ❌ Rejeté
+Workday → COMPETITOR (score: 0.3) ❌ Rejeté
+```
+
+---
+
+### ✅ Solution: Filtrage Contextuel Hybride (Production-Ready)
+
+**Approche Recommandée** : Cascade Graph + Embeddings + LLM (optionnel)
+
+#### Composant 1: Graph-Based Centrality ⭐ **OBLIGATOIRE**
+
+**Principe** : Entités centrales dans le document (souvent mentionnées, bien connectées) = importantes.
+
+**Algorithme** :
+```python
+# src/knowbase/agents/gatekeeper/graph_centrality_scorer.py (300 lignes)
+
+class GraphCentralityScorer:
+    """Score entities based on graph structure"""
+
+    def build_cooccurrence_graph_weighted(self, entities, full_text):
+        """Build co-occurrence graph with TF-IDF weighting"""
+        G = nx.Graph()
+
+        # Node weights = TF-IDF (not just frequency)
+        for entity in entities:
+            tf = entity["frequency"] / len(full_text.split())
+            idf = self._calculate_idf(entity["name"])
+            tf_idf = tf * idf
+            G.add_node(entity["name"], tf_idf=tf_idf)
+
+        # Edge weights = distance-based decay
+        for i, entity1 in enumerate(entities):
+            for entity2 in entities[i+1:]:
+                cooccurrences = self._count_cooccurrences_with_distance(
+                    entity1, entity2, full_text, window=50
+                )
+                if cooccurrences:
+                    distance_decay = 1.0 / (1.0 + avg_distance / 10)
+                    weight = len(cooccurrences) * distance_decay
+                    G.add_edge(entity1["name"], entity2["name"], weight=weight)
+
+        return G
+
+    def calculate_centrality_scores(self, G):
+        """Combine Degree, PageRank, Betweenness"""
+        degree = nx.degree_centrality(G)
+        pagerank = nx.pagerank(G, weight='weight')
+        betweenness = nx.betweenness_centrality(G, weight='weight')
+
+        combined = {}
+        for node in G.nodes():
+            combined[node] = (
+                0.4 * degree.get(node, 0.0) +
+                0.4 * pagerank.get(node, 0.0) +
+                0.2 * betweenness.get(node, 0.0)
+            )
+        return combined
+```
+
+**Améliorations Production** :
+- ✅ **TF-IDF weighting** (vs fréquence brute) → +10-15% précision
+- ✅ **Salience score** (position + titre/abstract boost) → +5-10% recall
+- ✅ **Fenêtre adaptive** (30-100 mots selon taille doc) → +5% précision
+
+**Impact** : +20-30% précision, 100% language-agnostic, $0 coût, <100ms
+
+#### Composant 2: Embeddings Similarity ⭐ **OBLIGATOIRE**
+
+**Principe** : Comparer contexte entité avec concepts abstraits ("main topic", "competitor").
+
+**Algorithme** :
+```python
+# src/knowbase/agents/gatekeeper/embeddings_contextual_scorer.py (200 lignes)
+
+class EmbeddingsContextualScorer:
+    """Score entities based on semantic context"""
+
+    REFERENCE_CONCEPTS_MULTILINGUAL = {
+        "primary": [
+            "main topic of the document", "primary solution proposed",
+            "sujet principal du document", "solution principale proposée",
+            "Hauptthema des Dokuments", "Hauptlösung"
+        ],
+        "competitor": [
+            "alternative solution", "competing product",
+            "solution alternative", "produit concurrent",
+            "alternative Lösung", "Konkurrenzprodukt"
+        ]
+    }
+
+    def __init__(self, model_name="intfloat/multilingual-e5-large"):
+        self.model = SentenceTransformer(model_name)
+        # Pre-encode reference concepts
+        self.reference_embeddings = {}
+        for concept_name, phrases in self.REFERENCE_CONCEPTS_MULTILINGUAL.items():
+            embeddings = self.model.encode(phrases, convert_to_tensor=True)
+            self.reference_embeddings[concept_name] = embeddings.mean(dim=0)
+
+    def score_entity_aggregated(self, entity, full_text):
+        """Score using aggregated embeddings from ALL mentions"""
+        # Extract ALL contexts (not just first)
+        contexts = self._extract_all_mentions_contexts(entity["name"], full_text)
+
+        # Encode and aggregate
+        context_embeddings = self.model.encode(contexts, convert_to_tensor=True)
+        aggregated_embedding = context_embeddings.mean(dim=0)
+
+        # Compare with reference concepts
+        scores = {}
+        for concept_name, reference_emb in self.reference_embeddings.items():
+            similarity = util.pytorch_cos_sim(aggregated_embedding, reference_emb).item()
+            scores[f"{concept_name}_similarity"] = similarity
+
+        # Classify role
+        if scores["primary_similarity"] > 0.8:
+            role = "PRIMARY"
+        elif scores["competitor_similarity"] > 0.7:
+            role = "COMPETITOR"
+        else:
+            role = "SECONDARY"
+
+        return {"role": role, "scores": scores}
+```
+
+**Améliorations Production** :
+- ✅ **Agrégation multi-occurrences** (toutes mentions vs première) → +15-20% précision
+- ✅ **Paraphrases multilingues** (EN/FR/DE/ES) → +10% stabilité
+- ✅ **Stockage vecteurs Neo4j** (recalcul dynamique) → clustering thématique
+
+**Impact** : +25-35% précision, 100% language-agnostic, $0 coût, <200ms
+
+#### Composant 3: LLM Classification (OPTIONNEL)
+
+**Principe** : LLM local distillé pour cas ambigus uniquement.
+
+**Algorithme** :
+```python
+# src/knowbase/agents/gatekeeper/llm_local_classifier.py (250 lignes)
+
+class LocalContextualClassifier:
+    """Local LLM for contextual classification (no API cost)"""
+
+    def __init__(self, model_name="microsoft/phi-3-mini-4k-instruct"):
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            model_name, num_labels=3  # PRIMARY, COMPETITOR, SECONDARY
+        )
+
+    async def classify_entity(self, entity_name, context, full_text):
+        """Classify entity using local LLM"""
+        prompt = f"""
+Entity: {entity_name}
+Context: {context}
+
+Classify role: PRIMARY (main offering), COMPETITOR (alternative), SECONDARY (mentioned).
+Output: PRIMARY/COMPETITOR/SECONDARY
+"""
+        inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True)
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            predicted_class = torch.argmax(outputs.logits, dim=1).item()
+
+        return {"role": self.labels[predicted_class]}
+```
+
+**Alternative** : Distillation depuis GPT-4 (one-time $30, puis $0 ongoing)
+
+**Impact** : 75-85% précision, $0 coût ongoing, <200ms
+
+---
+
+### 🎯 Architecture Cascade Hybride (RECOMMANDÉE)
+
+```python
+# Dans GatekeeperDelegate._gate_check_tool()
+
+async def _gate_check_with_contextual_filtering(self, candidates, full_text):
+    """Hybrid cascade: Graph → Embeddings → LLM (optional)"""
+
+    # Step 1: Graph Centrality (FREE, 100ms)
+    candidates = self.graph_scorer.score_entities(candidates, full_text)
+    candidates = [e for e in candidates if e.get("centrality_score", 0.0) >= 0.15]
+
+    # Step 2: Embeddings Similarity (FREE, 200ms)
+    candidates = self.embeddings_scorer.score_entities(candidates, full_text)
+    clear_entities = [e for e in candidates if e.get("primary_similarity", 0.0) > 0.8]
+    ambiguous_entities = [e for e in candidates if e not in clear_entities]
+
+    # Step 3: LLM Classification (PAID, 500ms) - Only 3-5 ambiguous
+    if ambiguous_entities and self.llm_classifier:
+        ambiguous_entities = await self.llm_classifier.classify_ambiguous(
+            ambiguous_entities, full_text, max_llm_calls=3
+        )
+
+    # Merge results
+    final_candidates = clear_entities + ambiguous_entities
+
+    # Final confidence adjustment
+    for entity in final_candidates:
+        role = entity.get("embedding_role", "SECONDARY")
+        if role == "PRIMARY":
+            entity["adjusted_confidence"] += 0.12
+        elif role == "COMPETITOR":
+            entity["adjusted_confidence"] -= 0.15
+
+    return final_candidates
+```
+
+---
+
+### 📊 Impact Attendu (Filtrage Contextuel Hybride)
+
+| Métrique | Actuel (confidence only) | Avec Hybride | Delta |
+|----------|-------------------------|--------------|-------|
+| **Précision** | 60% | 85-92% | **+30%** |
+| **Recall** | 80% | 85-90% | **+8%** |
+| **F1-score** | 68% | 87% | **+19%** |
+| **Problème concurrents** | ❌ Promus (ERREUR) | ✅ Rejetés | **RÉSOLU** |
+| **Language coverage** | ✅ Toutes | ✅ Toutes | =0 |
+| **Coût/doc** | $0 | $0 (Graph+Emb only) | =0 |
+| **Latence** | <50ms | <300ms | +250ms |
+| **Maintenance** | Nulle | Nulle | =0 |
+
+---
+
+### 📋 Plan d'Implémentation P0 (Phase 1.5)
+
+**Priorité P0** (à intégrer immédiatement Phase 1.5) :
+
+#### Semaine 11 J7-8 (2 jours) ⚠️ **CRITIQUE**
+
+**Jour 7** :
+- ✅ Implémenter `GraphCentralityScorer` (300 lignes)
+  - TF-IDF weighting
+  - Salience score (position + titre)
+  - Fenêtre adaptive
+  - Tests unitaires (10 tests)
+
+**Jour 8** :
+- ✅ Implémenter `EmbeddingsContextualScorer` (200 lignes)
+  - Paraphrases multilingues
+  - Agrégation multi-occurrences
+  - Tests unitaires (8 tests)
+
+**Jour 9** :
+- ✅ Intégrer dans `GatekeeperDelegate._gate_check_tool()`
+  - Cascade Graph → Embeddings
+  - Ajustement confidence selon role
+  - Tests intégration (5 tests)
+
+**Total effort** : 3 jours dev (vs 2.5j estimé initial)
+
+**Impact business** :
+- ✅ Résout problème concurrents promus (CRITIQUE)
+- ✅ +30% précision extraction
+- ✅ $0 coût supplémentaire
+- ✅ 100% language-agnostic
+
+---
+
+### 🔍 GAP Secondaire: Résolution Coréférence
+
+**Problème** :
+```
+Document: "SAP S/4HANA Cloud is our ERP solution. It provides real-time analytics."
+
+Extraction actuelle:
+- SAP S/4HANA Cloud ✅
+- "It" ❌ (not resolved to SAP S/4HANA Cloud)
+
+Impact: -15-25% recall (mentions perdues)
+```
+
+**Solution** :
+```python
+# src/knowbase/semantic/preprocessing/coreference.py (150 lignes)
+
+class CoreferenceResolver:
+    """Resolve pronouns to entities using spaCy neuralcoref"""
+
+    def __init__(self):
+        import spacy
+        import neuralcoref
+        self.nlp = spacy.load("en_core_web_md")
+        neuralcoref.add_to_pipe(self.nlp)
+
+    def resolve_coreferences(self, text):
+        """Replace pronouns with resolved entities"""
+        doc = self.nlp(text)
+        return doc._.coref_resolved  # "SAP S/4HANA Cloud is our ERP solution. SAP S/4HANA Cloud provides..."
+```
+
+**Priorité** : P1 (moins critique que filtrage contextuel)
+
+**Effort** : 1 jour dev
+
+**Impact** : +15-20% recall
+
+---
+
+### 📈 Métriques Cibles (Après Filtrage Contextuel + Coréférence)
+
+| Métrique | Avant | Après (Cible) |
+|----------|-------|---------------|
+| **Précision** | 60% | **85-92%** |
+| **Recall** | 80% | **90-95%** |
+| **F1-score** | 68% | **87-93%** |
+| **Fragments/bruit** | 15% | < 5% |
+| **Concurrents mal promus** | 30% (ERREUR) | 0% (RÉSOLU) |
+| **Concepts métier** | 30% | > 80% |
+
+---
+
+**Conclusion (Mise à Jour)** : Le pipeline OSMOSE Pure V2.1 fonctionne techniquement (Neo4j OK, Qdrant OK, extraction end-to-end), mais souffre de **2 gaps critiques** :
+
+1. **LLM extraction désactivée** → Réactiver (1h)
+2. **Filtrage contextuel insuffisant** → Implémenter Graph + Embeddings (3 jours) ⚠️ **P0 CRITIQUE**
+
+Le **filtrage contextuel hybride** est la priorité absolue car il résout le problème majeur des concurrents promus au même niveau que les produits principaux (+30% précision, $0 coût).

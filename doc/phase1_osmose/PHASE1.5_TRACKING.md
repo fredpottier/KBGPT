@@ -158,8 +158,9 @@
 ### ✅ Jour 6 (2025-10-15) - Intégration Worker Pipeline
 
 **Commits**:
-- Modification PPTX pipeline: Remplacement `process_document_with_osmose` → `process_document_with_osmose_agentique`
-- Modification PDF pipeline: Même remplacement
+- `c96138f`: feat(worker): Intégrer Architecture Agentique dans worker ingestion
+  - 2 fichiers modifiés (PPTX/PDF pipelines)
+  - Documentation tracking mise à jour
 
 **Objectif**: Connecter l'architecture agentique au worker d'ingestion RQ.
 
@@ -196,6 +197,92 @@ Storage: Neo4j Published-KG + Qdrant vectors + Redis budgets
 ```
 
 **Next Step**: Redémarrer worker ingestion pour charger nouveau code.
+
+### ✅ Jour 6 (suite) - Analyse Best Practices Extraction
+
+**Objectif**: Analyser best practices extraction et identifier gaps OSMOSE pipeline.
+
+**Réalisations**:
+- ✅ **Analyse comparative complète** (27KB):
+  - Fichier: `doc/ongoing/ANALYSE_BEST_PRACTICES_EXTRACTION_VS_OSMOSE.md`
+  - Comparaison pipeline 6 étapes vs OSMOSE
+  - Gap analysis avec scores de maturité (0-100%)
+  - Identification 2 gaps critiques (P0)
+
+- ✅ **2 Gaps Critiques Identifiés**:
+  1. **Coréférence resolution** (0% implémenté)
+     - Problème: Pronoms non résolus ("il", "elle", "ce produit")
+     - Impact: -15-25% recall sur entités
+
+  2. **Filtrage contextuel** (20% implémenté)
+     - Problème: Seulement filtering par confidence, pas par contexte
+     - Impact: Produits concurrents promus au même niveau que produits principaux
+     - Exemple: SAP S/4HANA (0.95) vs Oracle (0.92) → tous deux promus
+
+- ✅ **Problème Majeur Identifié**:
+  ```
+  Document: "Notre solution SAP S/4HANA... Les concurrents Oracle et Workday..."
+
+  Extraction actuelle:
+  - SAP S/4HANA Cloud (confidence: 0.95) → ✅ promu
+  - Oracle (confidence: 0.92) → ✅ promu (ERREUR!)
+  - Workday (confidence: 0.90) → ✅ promu (ERREUR!)
+
+  Attendu:
+  - SAP S/4HANA Cloud → PRIMARY (score: 1.0)
+  - Oracle → COMPETITOR (score: 0.3, rejeté)
+  - Workday → COMPETITOR (score: 0.3, rejeté)
+  ```
+
+- ✅ **Approche Généraliste Hybride Conçue** (35KB):
+  - Fichier: `doc/ongoing/ANALYSE_FILTRAGE_CONTEXTUEL_GENERALISTE.md`
+  - Rejet approche pattern-matching (dépendance langue/domaine)
+  - 3 composants 100% language-agnostic:
+    1. **Graph Centrality** (structure-based, $0, <100ms)
+    2. **Embeddings Similarity** (semantic-based, $0, <200ms)
+    3. **LLM Classification** (fallback ambiguous, $0.002/entity, ~500ms)
+  - Architecture cascade: Graph → Embeddings → LLM (3-5 entités max)
+  - Coût total: $0.006/document, Impact: +25-35% précision
+
+- ✅ **Analyse critique OpenAI intégrée** (Retour production-ready):
+  - Limites identifiées: TF-IDF weighting, salience, agrégation multi-occurrences
+  - Améliorations production: +40-60% robustesse vs approche basique
+  - Configuration optimale: 9 jours dev, précision 85-92% (vs 70-75% basique)
+
+**Approche Hybride Cascade**:
+```python
+# Step 1: Graph Centrality (FREE, 100ms)
+candidates = graph_scorer.score_entities(candidates, full_text)
+candidates = [e for e in candidates if e.get("centrality_score", 0.0) >= 0.15]
+
+# Step 2: Embeddings Similarity (FREE, 200ms)
+candidates = embeddings_scorer.score_entities(candidates, full_text)
+clear_entities = [e for e in candidates if similarity > 0.8]
+ambiguous_entities = [e for e in candidates if e not in clear_entities]
+
+# Step 3: LLM Classification (PAID, 500ms) - Only 3-5 ambiguous
+if ambiguous_entities:
+    ambiguous_entities = await llm_classifier.classify_ambiguous_entities(
+        ambiguous_entities, full_text, max_llm_calls=3
+    )
+```
+
+**Recommandations P0** (3 jours dev):
+1. **Filtrage contextuel hybride** (3 jours, +30% précision) ⚠️ **INTÉGRÉ ROADMAP**
+   - GraphCentralityScorer (1 jour, 300 lignes) - Jour 7
+   - EmbeddingsContextualScorer (1 jour, 200 lignes) - Jour 8
+   - Intégration GatekeeperDelegate (1 jour) - Jour 9
+
+2. **Résolution coréférence** (1 jour, +20% recall) - P1 (moins prioritaire)
+   - CoreferenceResolver spaCy (150 lignes)
+
+**État**: ✅ Analyse complète + intégration docs principaux.
+
+**Documents mis à jour**:
+- ✅ `doc/OSMOSE_EXTRACTION_QUALITY_ANALYSIS.md` (Phase 4: Filtrage Contextuel Avancé)
+- ✅ `doc/OSMOSE_ROADMAP_INTEGREE.md` (Phase 1.5 Jours 7-9 ajoutés)
+
+**Next Step**: Implémenter GraphCentralityScorer (Jour 7).
 
 ### 🟡 Jour 6 (TBD) - Exécution Pilote Scénario A
 

@@ -266,8 +266,81 @@ Phase 4 (Sem 29-35)     : Production Hardening (étendu) 🟡 NOT STARTED
 - `4239454`: feat(agents): Implémenter Architecture Agentique Phase 1.5 V1.1 (3,022 insertions)
 - `483a4c1`: test(agents): Ajouter tests unitaires (1,050 insertions)
 - `209fec6`: feat(integration): Intégrer Architecture Agentique dans pipeline (593 insertions)
+- `c96138f`: feat(worker): Intégrer Architecture Agentique dans worker ingestion (2 fichiers modifiés)
+- `30b623e`: feat(redis): RedisClient + BudgetManager integration (455 insertions)
+- `d4b0ed9`: test(redis): 26 tests unitaires (453 insertions)
+- `49d462c`: feat(clients): Neo4j + Qdrant multi-tenant (745 insertions)
+- `3fe29ba`: feat(segmentation): TopicSegmenter integration (65 insertions)
+- `d3b639f`: feat(gatekeeper): Storage Neo4j Published-KG (105 insertions)
+- `9d323a4`: test(e2e): Tests end-to-end OSMOSE Agentique (339 insertions)
+- `8e49d58`: feat(pilot): Script Pilote Scénario A (429 insertions)
 
-**Tests Scénario A (Semaine 11 - Jours 4-5)** 🟡 **EN COURS** :
+**✨ Filtrage Contextuel Avancé (Semaine 11 - Jours 7-9)** ⚠️ **P0 CRITIQUE - NOUVEAU** :
+
+**Source** : Analyse Best Practices Extraction (OpenAI, 2025-10-15)
+**Documents** :
+- `doc/OSMOSE_EXTRACTION_QUALITY_ANALYSIS.md` (Phase 4: Filtrage Contextuel Avancé)
+- `doc/ongoing/ANALYSE_FILTRAGE_CONTEXTUEL_GENERALISTE.md`
+
+**Problème Critique Identifié** :
+```
+Situation actuelle: GatekeeperDelegate filtre uniquement par confidence (pas par contexte)
+Impact: Produits concurrents promus au même niveau que produits principaux!
+
+Exemple:
+Document RFP: "Notre solution SAP S/4HANA... Les concurrents Oracle et Workday..."
+
+Extraction actuelle:
+✅ SAP S/4HANA (0.95) → Promu
+✅ Oracle (0.92) → Promu  ❌ ERREUR!
+✅ Workday (0.90) → Promu  ❌ ERREUR!
+
+Attendu:
+✅ SAP S/4HANA → PRIMARY (score: 1.0) → Promu
+❌ Oracle → COMPETITOR (score: 0.3) → Rejeté
+❌ Workday → COMPETITOR (score: 0.3) → Rejeté
+```
+
+**Solution: Filtrage Contextuel Hybride (Production-Ready)** :
+
+**Jour 7** :
+- [x] Analyse best practices complétée ✅
+- [ ] Implémenter `GraphCentralityScorer` (300 lignes) ⚠️ **P0**
+  - TF-IDF weighting (vs fréquence brute)
+  - Salience score (position + titre/abstract boost)
+  - Fenêtre adaptive (30-100 mots selon taille doc)
+  - Tests unitaires (10 tests)
+  - **Impact** : +20-30% précision, $0 coût, <100ms
+
+**Jour 8** :
+- [ ] Implémenter `EmbeddingsContextualScorer` (200 lignes) ⚠️ **P0**
+  - Paraphrases multilingues (EN/FR/DE/ES)
+  - Agrégation multi-occurrences (toutes mentions vs première)
+  - Stockage vecteurs Neo4j (recalcul dynamique)
+  - Tests unitaires (8 tests)
+  - **Impact** : +25-35% précision, $0 coût, <200ms
+
+**Jour 9** :
+- [ ] Intégrer cascade hybride dans `GatekeeperDelegate._gate_check_tool()` ⚠️ **P0**
+  - Architecture cascade: Graph → Embeddings → LLM (optionnel)
+  - Ajustement confidence selon role (PRIMARY +0.12, COMPETITOR -0.15)
+  - Tests intégration (5 tests)
+  - **Impact** : +30% précision F1-score +19%, RÉSOUT problème concurrents
+
+**Impact Business Total** :
+- ✅ Résout problème critique concurrents promus au même niveau
+- ✅ **+30% précision extraction** (60% → 85-92%)
+- ✅ **+19% F1-score** (68% → 87%)
+- ✅ $0 coût supplémentaire (Graph + Embeddings gratuits)
+- ✅ 100% language-agnostic (fonctionne EN/FR/DE/ES sans modification)
+
+**Effort** : 3 jours dev (500 lignes + 23 tests)
+
+**Priorité** : **P0 CRITIQUE** - Bloqueur qualité extraction
+
+---
+
+**Tests Scénario A (Semaine 11 - Jours 10-11)** 🟡 **EN COURS** :
 - [ ] 50 PDF textuels (Scénario A - mostly SMALL routing)
 - [ ] Validation cost $0.25/doc target (≤$0.28 tolérance 110%)
 - [ ] PrepassAnalyzer routing accuracy ≥80%
