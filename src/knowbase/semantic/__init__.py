@@ -14,28 +14,40 @@ Phase : 1 - Semantic Core
 """
 
 from .profiler import SemanticDocumentProfiler
-from .narrative_detector import NarrativeThreadDetector
-from .segmentation import IntelligentSegmentationEngine
-from .extractor import DualStorageExtractor
+# Modules Phase 1 non encore implémentés (TODO):
+# from .narrative_detector import NarrativeThreadDetector
+# from .segmentation import IntelligentSegmentationEngine
+# from .extractor import DualStorageExtractor
+
 from .models import (
     SemanticProfile,
-    NarrativeThread,
     ComplexityZone,
     CandidateEntity,
     CandidateRelation,
+    Concept,
+    CanonicalConcept,
+    Topic,
+    ConceptConnection,
+    ConceptType,
+    DocumentRole,
 )
 from .config import SemanticConfig
 
 __all__ = [
     "SemanticDocumentProfiler",
-    "NarrativeThreadDetector",
-    "IntelligentSegmentationEngine",
-    "DualStorageExtractor",
+    # "NarrativeThreadDetector",  # TODO Phase 1
+    # "IntelligentSegmentationEngine",  # TODO Phase 1
+    # "DualStorageExtractor",  # TODO Phase 1
     "SemanticProfile",
-    "NarrativeThread",
     "ComplexityZone",
     "CandidateEntity",
     "CandidateRelation",
+    "Concept",
+    "CanonicalConcept",
+    "Topic",
+    "ConceptConnection",
+    "ConceptType",
+    "DocumentRole",
     "SemanticConfig",
 ]
 
