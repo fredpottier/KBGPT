@@ -25,6 +25,8 @@ from knowbase.ingestion.osmose_integration import (
     OsmoseIntegrationConfig,
     OsmoseIntegrationResult
 )
+from knowbase.semantic.segmentation.topic_segmenter import get_topic_segmenter
+from knowbase.semantic.config import get_semantic_config
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,7 @@ class OsmoseAgentiqueService:
         self.config = config or OsmoseIntegrationConfig.from_env()
         self.supervisor_config = supervisor_config or {}
         self.supervisor: Optional[SupervisorAgent] = None
+        self.topic_segmenter = None  # Lazy init
 
         logger.info(
             f"[OSMOSE AGENTIQUE] Service initialized - OSMOSE enabled: {self.config.enable_osmose}"
@@ -72,6 +75,15 @@ class OsmoseAgentiqueService:
             logger.info("[OSMOSE AGENTIQUE] SupervisorAgent initialized")
 
         return self.supervisor
+
+    def _get_topic_segmenter(self):
+        """Lazy init du TopicSegmenter."""
+        if self.topic_segmenter is None:
+            semantic_config = get_semantic_config()
+            self.topic_segmenter = get_topic_segmenter(semantic_config)
+            logger.info("[OSMOSE AGENTIQUE] TopicSegmenter initialized")
+
+        return self.topic_segmenter
 
     def _should_process_with_osmose(
         self,
@@ -190,21 +202,60 @@ class OsmoseAgentiqueService:
                 f"budgets={initial_state.budget_remaining}"
             )
 
-            # Étape 2: Préparer segments (TODO: Intégrer TopicSegmenter)
-            # Pour l'instant: Mock avec un seul segment = tout le texte
-            initial_state.segments = [{
-                "topic_id": "seg-0",
-                "text": text_content,
-                "language": "en",  # TODO: Détecter langue via fasttext
-                "start_page": 0,
-                "end_page": 1,
-                "keywords": []
-            }]
+            # Étape 2: Segmentation sémantique avec TopicSegmenter
+            segmenter = self._get_topic_segmenter()
 
-            logger.info(
-                f"[OSMOSE AGENTIQUE] Prepared {len(initial_state.segments)} segments "
-                f"(mock: full document as single segment)"
-            )
+            try:
+                # Appel TopicSegmenter (async)
+                topics = await segmenter.segment_document(
+                    document_id=document_id,
+                    text=text_content,
+                    detect_language=True
+                )
+
+                # Convertir Topic objects → dicts pour AgentState.segments
+                initial_state.segments = []
+                for topic in topics:
+                    # Concaténer textes des windows pour obtenir le texte complet du segment
+                    segment_text = " ".join([w.text for w in topic.windows])
+
+                    # Déterminer langue (si détectée dans anchors ou windows)
+                    # Fallback: "en" si non détecté
+                    segment_language = "en"  # TODO: Extraire de topic metadata si disponible
+
+                    segment_dict = {
+                        "topic_id": topic.topic_id,
+                        "text": segment_text,
+                        "language": segment_language,
+                        "start_page": 0,  # TODO: Extraire de windows metadata
+                        "end_page": 1,    # TODO: Extraire de windows metadata
+                        "keywords": topic.anchors,  # NER entities + TF-IDF keywords
+                        "cohesion_score": topic.cohesion_score,
+                        "section_path": topic.section_path
+                    }
+
+                    initial_state.segments.append(segment_dict)
+
+                logger.info(
+                    f"[OSMOSE AGENTIQUE] TopicSegmenter: {len(initial_state.segments)} segments "
+                    f"(avg cohesion: {sum(t.cohesion_score for t in topics) / max(len(topics), 1):.2f})"
+                )
+
+            except Exception as e:
+                logger.error(f"[OSMOSE AGENTIQUE] TopicSegmenter failed: {e}")
+                logger.warning("[OSMOSE AGENTIQUE] Falling back to single-segment (full document)")
+
+                # Fallback: Document complet = 1 segment
+                initial_state.segments = [{
+                    "topic_id": "seg-fallback",
+                    "text": text_content,
+                    "language": "en",
+                    "start_page": 0,
+                    "end_page": 1,
+                    "keywords": [],
+                    "cohesion_score": 1.0,
+                    "section_path": "full_document"
+                }]
 
             # Étape 3: Lancer SupervisorAgent FSM
             supervisor = self._get_supervisor()
