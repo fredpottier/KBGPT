@@ -14,5 +14,6 @@ Phase 1.5 V1.1
 
 from .gatekeeper import GatekeeperDelegate
 from .graph_centrality_scorer import GraphCentralityScorer
+from .embeddings_contextual_scorer import EmbeddingsContextualScorer
 
-__all__ = ["GatekeeperDelegate", "GraphCentralityScorer"]
+__all__ = ["GatekeeperDelegate", "GraphCentralityScorer", "EmbeddingsContextualScorer"]
