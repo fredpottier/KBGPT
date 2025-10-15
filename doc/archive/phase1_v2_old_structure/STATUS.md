@@ -165,13 +165,54 @@ qdrant-client==1.7.0
 
 | Semaine | Composant | Status |
 |---------|-----------|--------|
-| **1-2** | Setup Infrastructure | 🟡 **TO START** |
-| **3-4** | TopicSegmenter | 🟡 **NOT STARTED** |
+| **1-2** | Setup Infrastructure | ✅ **COMPLETE** |
+| **3-4** | TopicSegmenter | ✅ **CODE COMPLETE** |
 | **5-7** | MultilingualConceptExtractor | 🟡 **NOT STARTED** ⚠️ CRITIQUE |
 | **8-9** | SemanticIndexer | 🟡 **NOT STARTED** |
 | **10** | ConceptLinker + Integration | 🟡 **NOT STARTED** |
 
-**Progrès Global:** 0% (0/10 semaines)
+**Progrès Global:** 40% (4/10 semaines)
+
+### ✅ Semaines 1-2 : Setup Infrastructure (COMPLETE)
+
+**Réalisations:**
+- ✅ Structure modules créée (segmentation, extraction, indexing, linking, utils)
+- ✅ models.py refactorisé (Concept, CanonicalConcept, Topic models)
+- ✅ Configuration YAML V2.1 créée (semantic_intelligence_v2.yaml)
+- ✅ config.py adapté pour V2.1 (10 classes configuration)
+- ✅ profiler.py adapté (suppression code narratif)
+- ✅ utils/ner_manager.py créé (MultilingualNER avec spaCy)
+- ✅ utils/embeddings.py créé (MultilingualEmbedder avec multilingual-e5-large)
+- ✅ utils/language_detector.py créé (LanguageDetector avec fasttext)
+- ✅ setup_infrastructure.py adapté (Neo4j + Qdrant V2.1)
+
+**À faire avant production:**
+- ⚠️ Installer modèles spaCy dans Docker (en/fr/de/xx) - ~2GB
+- ⚠️ Télécharger multilingual-e5-large - ~500MB
+- ⚠️ Télécharger fasttext lid.176.bin - ~130MB
+- ⚠️ Exécuter setup_infrastructure.py dans Docker
+
+### ✅ Semaines 3-4 : TopicSegmenter (CODE COMPLETE)
+
+**Réalisations:**
+- ✅ TopicSegmenter créé (650 lignes) avec pipeline complet
+- ✅ Structural segmentation (Markdown headers + numérotation)
+- ✅ Semantic windowing (3000 chars, 25% overlap)
+- ✅ Clustering robuste (HDBSCAN primary + Agglomerative fallback)
+- ✅ Anchor extraction multilingue (NER + TF-IDF)
+- ✅ Cohesion validation (threshold 0.65)
+- ✅ Tests complets (9 test cases, 280 lignes)
+
+**Features:**
+- 🌍 Support multilingue automatique (EN/FR/DE/+)
+- 🎯 Triple stratégie clustering (HDBSCAN → Agglomerative → Fallback 1 cluster)
+- 📊 Cohesion score intra-topic (cosine similarity)
+- 🔍 Anchor extraction hybride (NER entities + TF-IDF keywords)
+- 📐 Windowing configurable (size + overlap)
+
+**À faire:**
+- ⚠️ Installer HDBSCAN dans requirements.txt
+- ⚠️ Exécuter tests dans Docker avec modèles NER
 
 ---
 

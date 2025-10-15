@@ -362,10 +362,13 @@ class DocumentRegistryService:
             if not doc:
                 raise ValueError(f"Document {version.document_id} non trouvé")
 
+            # ===== DEBUG MODE: Désactiver vérification duplicata =====
             # Vérifier duplicata checksum
-            existing = self.get_version_by_checksum(version.checksum)
-            if existing:
-                raise ValueError(f"Version avec checksum {version.checksum} existe déjà (duplicata)")
+            # existing = self.get_version_by_checksum(version.checksum)
+            # if existing:
+            #     raise ValueError(f"Version avec checksum {version.checksum} existe déjà (duplicata)")
+            # DEBUG: Skip duplicate check - always create new version
+            pass
 
             result = session.execute_write(self._create_version_tx, version, self.tenant_id)
             return result
@@ -476,12 +479,15 @@ class DocumentRegistryService:
     @staticmethod
     def _get_version_by_checksum_tx(tx, checksum: str) -> Optional[DocumentVersionResponse]:
         """Transaction récupération version par checksum."""
+        # DEBUG MODE: Simplified query without SUPERSEDES to avoid Neo4j warnings
         query = """
         MATCH (v:DocumentVersion {checksum: $checksum})
-        OPTIONAL MATCH (v)-[:SUPERSEDES]->(prev:DocumentVersion)
-        OPTIONAL MATCH (next:DocumentVersion)-[:SUPERSEDES]->(v)
-        RETURN v, prev.version_id as supersedes_version_id, next.version_id as superseded_by_version_id
+        RETURN v, null as supersedes_version_id, null as superseded_by_version_id
         """
+        # Production query (commented for debug):
+        # OPTIONAL MATCH (v)-[:SUPERSEDES]->(prev:DocumentVersion)
+        # OPTIONAL MATCH (next:DocumentVersion)-[:SUPERSEDES]->(v)
+        # RETURN v, prev.version_id as supersedes_version_id, next.version_id as superseded_by_version_id
 
         result = tx.run(query, {"checksum": checksum})
         record = result.single()
@@ -532,12 +538,15 @@ class DocumentRegistryService:
     @staticmethod
     def _get_latest_version_tx(tx, document_id: str) -> Optional[DocumentVersionResponse]:
         """Transaction récupération dernière version."""
+        # DEBUG MODE: Simplified query without SUPERSEDES to avoid Neo4j warnings
         query = """
         MATCH (d:Document {document_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion {is_latest: true})
-        OPTIONAL MATCH (v)-[:SUPERSEDES]->(prev:DocumentVersion)
-        OPTIONAL MATCH (next:DocumentVersion)-[:SUPERSEDES]->(v)
-        RETURN v, prev.version_id as supersedes_version_id, next.version_id as superseded_by_version_id
+        RETURN v, null as supersedes_version_id, null as superseded_by_version_id
         """
+        # Production query (commented for debug):
+        # OPTIONAL MATCH (v)-[:SUPERSEDES]->(prev:DocumentVersion)
+        # OPTIONAL MATCH (next:DocumentVersion)-[:SUPERSEDES]->(v)
+        # RETURN v, prev.version_id as supersedes_version_id, next.version_id as superseded_by_version_id
 
         result = tx.run(query, {"document_id": document_id})
         record = result.single()

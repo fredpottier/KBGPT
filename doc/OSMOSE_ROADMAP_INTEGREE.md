@@ -62,11 +62,11 @@
 
 **Nouvelle structure** :
 ```
-Phase 1 (Sem 1-10)      : Semantic Core
-Phase 1.5 (Sem 11-13)   : ✨ PILOTE AGENTIQUE (nouveau)
-Phase 2 (Sem 14-22)     : Agentique Production + Living Ontology
-Phase 3 (Sem 23-28)     : Multi-Source & Enrichment
-Phase 4 (Sem 29-35)     : Production Hardening (étendu)
+Phase 1 (Sem 1-10)      : Semantic Core V2.1 🟢 40% (Sem 4/10)
+Phase 1.5 (Sem 11-13)   : ✨ PILOTE AGENTIQUE (nouveau) 🟡 NOT STARTED
+Phase 2 (Sem 14-22)     : Agentique Production + Living Ontology 🟡 NOT STARTED
+Phase 3 (Sem 23-28)     : Multi-Source & Enrichment 🟡 NOT STARTED
+Phase 4 (Sem 29-35)     : Production Hardening (étendu) 🟡 NOT STARTED
 ```
 
 ---
@@ -190,25 +190,58 @@ Phase 4 (Sem 29-35)     : Production Hardening (étendu)
 
 ## 4. Phases Détaillées
 
-### Phase 1: Semantic Core (Semaines 1-10) ✅ INCHANGÉE
+### Phase 1: Semantic Core V2.1 (Semaines 1-10) 🔄 **PIVOTÉ** - 40% Complete
 
-**Objectif** : Démontrer USP unique "CRR Evolution Tracker"
+**Status:** 🟢 **EN COURS** - Semaines 4/10 terminées
 
-**Composants** :
-- `SemanticDocumentProfiler` : Analyse intelligence document
-- `NarrativeThreadDetector` : Détection fils narratifs ⚠️ **CRITIQUE**
-- `IntelligentSegmentationEngine` : Clustering contextuel
-- `DualStorageExtractor` : Proto-KG staging
+**Objectif** : Implémenter extraction et unification concepts multilingues (Concept-First, Language-Agnostic)
+
+**Pivot Architectural (2025-10-14):**
+- ❌ Approche narrative abandonnée (hardcoded English keywords, non-scalable)
+- ✅ Pivot vers Concept-First avec cross-lingual unification automatique
+- ✅ Architecture V2.1 : 4 composants au lieu de 6+
+
+**Composants V2.1** :
+1. ✅ **Setup Infrastructure** (Sem 1-2) - COMPLETE
+   - MultilingualNER (spaCy en/fr/de/xx)
+   - MultilingualEmbedder (multilingual-e5-large 1024D)
+   - LanguageDetector (fasttext)
+   - Neo4j + Qdrant V2.1 schemas
+
+2. ✅ **TopicSegmenter** (Sem 3-4) - CODE COMPLETE
+   - Structural + semantic segmentation
+   - HDBSCAN + Agglomerative clustering
+   - Anchor extraction (NER + TF-IDF)
+   - Cohesion validation (650 lignes)
+
+3. 🟡 **MultilingualConceptExtractor** (Sem 5-7) - NOT STARTED ⚠️ CRITIQUE
+   - Triple méthode (NER + Clustering + LLM)
+   - Typage concepts (ENTITY, PRACTICE, STANDARD, TOOL, ROLE)
+   - Fusion + déduplication
+
+4. 🟡 **SemanticIndexer** (Sem 8-9) - NOT STARTED
+   - Cross-lingual canonicalization
+   - Hierarchy construction
+
+5. 🟡 **ConceptLinker** (Sem 10) - NOT STARTED
+   - Cross-document relations
+   - DocumentRole classification
 
 **Livrables Sem 10** :
-- ✅ Démo CRR Evolution fonctionne (3 versions détectées)
-- ✅ Timeline générée automatiquement
-- ✅ Query "What's current CRR formula?" répond correctement
-- ✅ Tests unitaires >80% coverage
+- ✅ Démo extraction concepts multilingues (EN/FR/DE)
+- ✅ Cross-lingual unification (FR "auth" = EN "auth")
+- ✅ 10+ documents testés (mixtes multilingues)
+- ✅ Performance <30s/doc
+- ✅ Tests >80% coverage
+
+**Progrès Actuel** :
+- Tasks: 46/120 (38%)
+- Code: ~2200 lignes (infrastructure + TopicSegmenter)
+- Tests: 9 test cases créés (nécessitent Docker)
 
 **Effort** : 25-30h/semaine × 10 semaines = **250-300h**
 
-**Documentation** : `doc/phase1_osmose/PHASE1_IMPLEMENTATION_PLAN.md`
+**Documentation** : [`doc/phases/PHASE1_SEMANTIC_CORE.md`](./phases/PHASE1_SEMANTIC_CORE.md) (1 seul fichier consolidé)
 
 ---
 
@@ -638,11 +671,11 @@ Phase 4 (Sem 29-35)     : Production Hardening (étendu)
 **Statut:** ✅ **VALIDATED** - Roadmap production-ready
 
 **Documents Associés** :
-- `doc/OSMOSE_ARCHITECTURE_TECHNIQUE.md` (architecture globale)
-- `doc/OSMOSE_REFACTORING_PLAN.md` (migration code existant)
-- `doc/phase1_osmose/PHASE1_IMPLEMENTATION_PLAN.md` (détails Phase 1)
-- `doc/etudes/ARCHITECTURE_AGENTIQUE_OSMOSE.md` (v1.1 - architecture agentique)
-- `doc/OSMOSE_AMBITION_PRODUIT_ROADMAP.md` (v1.0 - roadmap originale)
+- [`doc/README.md`](./README.md) (guide navigation documentation)
+- [`doc/OSMOSE_STATUS_ACTUEL.md`](./OSMOSE_STATUS_ACTUEL.md) (status actuel du projet)
+- [`doc/OSMOSE_ARCHITECTURE_TECHNIQUE.md`](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) (architecture globale)
+- [`doc/phases/PHASE1_SEMANTIC_CORE.md`](./phases/PHASE1_SEMANTIC_CORE.md) (Phase 1 complète - 1 seul fichier)
+- [`doc/OSMOSE_AMBITION_PRODUIT_ROADMAP.md`](./OSMOSE_AMBITION_PRODUIT_ROADMAP.md) (vision produit)
 
 ---
 

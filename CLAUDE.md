@@ -18,10 +18,77 @@
 - ❌ Ne plus utiliser "KnowBase" ou "SAP KB" (anciens noms)
 
 **Documentation OSMOSE Principale:**
-- `doc/OSMOSE_PROJECT_OVERVIEW.md` : Naming, conventions, overview projet
-- `doc/OSMOSE_ARCHITECTURE_TECHNIQUE.md` : Spécification technique complète
 - `doc/OSMOSE_AMBITION_PRODUIT_ROADMAP.md` : Vision produit, roadmap 32 semaines
-- `doc/phase1_osmose/` : Documentation Phase 1 en cours
+- `doc/OSMOSE_ARCHITECTURE_TECHNIQUE.md` : Spécification technique complète
+- `doc/OSMOSE_ROADMAP_INTEGREE.md` : Plan global 4 phases
+- `doc/phases/PHASE1_SEMANTIC_CORE.md` : Documentation Phase 1 COMPLETE
+- `doc/ongoing/` : Docs de travail, études, plans temporaires
+
+---
+
+## 📁 Documentation - RÈGLES STRICTES
+
+**⚠️ STRUCTURE DOCUMENTATION SIMPLIFIÉE - À RESPECTER ABSOLUMENT**
+
+### Structure UNIQUE Autorisée
+
+```
+doc/
+├── README.md                                 # Guide navigation UNIQUEMENT
+├── OSMOSE_AMBITION_PRODUIT_ROADMAP.md       # Vision produit
+├── OSMOSE_ARCHITECTURE_TECHNIQUE.md         # Architecture technique
+├── OSMOSE_ROADMAP_INTEGREE.md               # Roadmap globale
+│
+├── phases/                                  # 1 fichier par phase
+│   ├── PHASE1_SEMANTIC_CORE.md             # Phase 1 ✅ COMPLETE
+│   ├── PHASE2_INTELLIGENCE_AVANCEE.md      # (à créer)
+│   ├── PHASE3_PRODUCTION_KG.md             # (à créer)
+│   └── PHASE4_ADVANCED_FEATURES.md         # (à créer)
+│
+├── ongoing/                                 # Docs temporaires/études
+│   └── (tous les docs de travail)
+│
+└── archive/                                 # Archives historiques
+```
+
+### Règles ABSOLUES
+
+1. **À la racine de `doc/` :**
+   - ✅ UNIQUEMENT 4 fichiers permanents (README + 3 OSMOSE)
+   - ❌ **JAMAIS** créer d'autres .md à la racine
+   - ❌ **JAMAIS** créer de sous-dossiers à la racine sauf `phases/`, `ongoing/`, `archive/`
+
+2. **Dans `doc/phases/` :**
+   - ✅ EXACTEMENT 1 fichier par phase (4 max)
+   - ❌ PAS de sous-dossiers
+   - ❌ PAS de fichiers tracking/status/implementation séparés
+   - ✅ Tout regroupé dans LE fichier de la phase
+
+3. **Dans `doc/ongoing/` :**
+   - ✅ Plans d'implémentation temporaires
+   - ✅ Études exploratoires
+   - ✅ Snapshots status (ex: OSMOSE_STATUS_ACTUEL.md)
+   - ✅ Docs de migration (ex: OSMOSE_PURE_MIGRATION.md)
+   - ✅ Sous-dossiers autorisés (ex: `etudes/`)
+
+4. **Avant de créer un nouveau .md :**
+   - ❓ Est-ce une info sur une phase ? → **Modifier** le fichier phase existant
+   - ❓ Est-ce temporaire/en cours ? → Créer dans `ongoing/`
+   - ❓ Est-ce un fichier principal ? → **Modifier** un existant à la racine
+   - ❌ **JAMAIS** créer à la racine sans confirmation explicite
+
+### Application en Session
+
+Quand l'utilisateur demande de créer de la documentation :
+
+1. **Vérifier d'abord** où elle doit aller selon les règles
+2. **Si modification** → Modifier fichier existant approprié
+3. **Si création nécessaire** → **TOUJOURS** dans `ongoing/` (sauf autorisation)
+4. **Demander confirmation** si doute sur l'emplacement
+
+**Ne JAMAIS polluer la racine de `doc/` avec des fichiers temporaires.**
+
+---
 
 ## 🇫🇷 Préférences Linguistiques
 

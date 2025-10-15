@@ -1083,6 +1083,65 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
                     ingest_chunks(chunks_compat, doc_meta, pdf_path.stem, page_index)
                     total_chunks += len(chunks_compat)
 
+        # ===== OSMOSE Pure - Traitement sémantique UNIQUEMENT =====
+        # REMPLACE l'ingestion legacy (Qdrant "knowbase" + Neo4j entities/relations)
+        # Tout passe maintenant par le Proto-KG (concepts canoniques cross-linguals)
+        logger.info("=" * 80)
+        logger.info("[OSMOSE PURE] Lancement du traitement sémantique (remplace ingestion legacy)")
+        logger.info("=" * 80)
+
+        try:
+            from knowbase.ingestion.osmose_integration import process_document_with_osmose
+
+            # Récupérer le texte complet (disponible dans megaparse_text ou pdf_text)
+            full_text = None
+            if not use_vision and 'megaparse_text' in locals():
+                full_text = megaparse_text
+            elif pdf_text:
+                full_text = pdf_text
+
+            if full_text and len(full_text) >= 100:
+                # Appeler OSMOSE Pure de manière asynchrone
+                # AUCUN storage legacy (ni Qdrant "knowbase", ni Neo4j entities/relations)
+                import asyncio
+                osmose_result = asyncio.run(
+                    process_document_with_osmose(
+                        document_id=pdf_path.stem,
+                        document_title=pdf_path.name,
+                        document_path=pdf_path,
+                        text_content=full_text,
+                        tenant_id="default"
+                    )
+                )
+
+                if osmose_result.osmose_success:
+                    logger.info("=" * 80)
+                    logger.info(
+                        f"[OSMOSE PURE] ✅ Traitement réussi:\n"
+                        f"  - {osmose_result.canonical_concepts} concepts canoniques\n"
+                        f"  - {osmose_result.concept_connections} connexions cross-documents\n"
+                        f"  - {osmose_result.topics_segmented} topics segmentés\n"
+                        f"  - Proto-KG: {osmose_result.proto_kg_concepts_stored} concepts + {osmose_result.proto_kg_relations_stored} relations + {osmose_result.proto_kg_embeddings_stored} embeddings\n"
+                        f"  - Durée: {osmose_result.osmose_duration_seconds:.1f}s"
+                    )
+                    logger.info("=" * 80)
+                else:
+                    logger.error(f"[OSMOSE PURE] ❌ Traitement échoué: {osmose_result.osmose_error}")
+                    raise Exception(f"OSMOSE processing failed: {osmose_result.osmose_error}")
+
+            else:
+                error_msg = f"Text too short ({len(full_text) if full_text else 0} chars)"
+                logger.error(f"[OSMOSE PURE] ❌ {error_msg}")
+                raise Exception(error_msg)
+
+        except Exception as e:
+            # En mode OSMOSE Pure, une erreur OSMOSE = échec complet de l'ingestion
+            logger.error(f"[OSMOSE PURE] ❌ Erreur traitement sémantique: {e}", exc_info=True)
+            status_file.write_text("error")
+            raise  # Re-raise pour arrêter le traitement
+
+        # ===== Fin OSMOSE Pure =====
+
         try:
             DOCS_DONE.mkdir(parents=True, exist_ok=True)
             shutil.move(str(pdf_path), str(DOCS_DONE / f"{pdf_path.stem}.pdf"))
