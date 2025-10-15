@@ -14,11 +14,12 @@
 | **Semaine 11 J3** | Tests unitaires + Intégration pipeline | ✅ COMPLÉTÉ | 100% | 2025-10-15 |
 | **Semaine 11 J4** | Setup infra multi-tenant | ✅ COMPLÉTÉ | 100% | 2025-10-16 |
 | **Semaine 11 J5** | Storage Neo4j + Tests E2E + Pilote prep | ✅ COMPLÉTÉ | 100% | 2025-10-16 |
-| **Semaine 11 J5-6** | Exécution Pilote Scénario A | ⏳ EN ATTENTE | 0% | TBD (nécessite docs) |
+| **Semaine 11 J6** | Intégration Worker Pipeline (PPTX/PDF) | ✅ COMPLÉTÉ | 100% | 2025-10-15 |
+| **Semaine 11 J6** | Exécution Pilote Scénario A | ⏳ EN ATTENTE | 0% | TBD (nécessite docs) |
 | **Semaine 12** | Pilotes B&C + Dashboard Grafana | ⏳ À VENIR | 0% | 2025-10-21-25 |
 | **Semaine 13** | Analyse + GO/NO-GO | ⏳ À VENIR | 0% | 2025-10-28-31 |
 
-**Progression Globale**: **60%** (Jours 1-5 préparation/15 complétés)
+**Progression Globale**: **65%** (Jours 1-6 intégration complète/21 complétés)
 
 ---
 
@@ -154,7 +155,49 @@
 
 **Rapport**: `doc/phase1_osmose/PHASE1.5_DAY5_REPORT.md`
 
-### 🟡 Jour 5-6 (TBD) - Exécution Pilote Scénario A
+### ✅ Jour 6 (2025-10-15) - Intégration Worker Pipeline
+
+**Commits**:
+- Modification PPTX pipeline: Remplacement `process_document_with_osmose` → `process_document_with_osmose_agentique`
+- Modification PDF pipeline: Même remplacement
+
+**Objectif**: Connecter l'architecture agentique au worker d'ingestion RQ.
+
+**Réalisations**:
+- ✅ **PPTX pipeline** (pptx_pipeline.py lignes 2230, 2248-2256):
+  - Import: `osmose_integration` → `osmose_agentique`
+  - Fonction: `process_document_with_osmose` → `process_document_with_osmose_agentique`
+  - Commentaire mis à jour: "OSMOSE Agentique (SupervisorAgent FSM)"
+
+- ✅ **PDF pipeline** (pdf_pipeline.py lignes 1094, 1107-1115):
+  - Import: `osmose_integration` → `osmose_agentique`
+  - Fonction: `process_document_with_osmose` → `process_document_with_osmose_agentique`
+  - Commentaire mis à jour: "OSMOSE Agentique (SupervisorAgent FSM)"
+
+**État**: Code modifié, **nécessite redémarrage worker** pour application.
+
+**Pipeline End-to-End**:
+```
+Upload document (Frontend/API)
+  ↓
+RQ Job (dispatcher.py)
+  ↓
+Worker (jobs.py: ingest_pptx_job / ingest_pdf_job)
+  ↓
+Pipeline (pptx_pipeline.py / pdf_pipeline.py)
+  ↓
+process_document_with_osmose_agentique()
+  ↓
+OsmoseAgentiqueService.process_document_agentique()
+  ↓
+SupervisorAgent FSM (INIT → SEGMENT → EXTRACT → MINE → GATE → PROMOTE → DONE)
+  ↓
+Storage: Neo4j Published-KG + Qdrant vectors + Redis budgets
+```
+
+**Next Step**: Redémarrer worker ingestion pour charger nouveau code.
+
+### 🟡 Jour 6 (TBD) - Exécution Pilote Scénario A
 
 **Pré-requis**: Préparer 50 PDF textuels dans `data/pilot_docs/`
 

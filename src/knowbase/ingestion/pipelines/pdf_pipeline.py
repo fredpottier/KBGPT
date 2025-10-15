@@ -1091,7 +1091,7 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
         logger.info("=" * 80)
 
         try:
-            from knowbase.ingestion.osmose_integration import process_document_with_osmose
+            from knowbase.ingestion.osmose_agentique import process_document_with_osmose_agentique
 
             # Récupérer le texte complet (disponible dans megaparse_text ou pdf_text)
             full_text = None
@@ -1101,11 +1101,11 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
                 full_text = pdf_text
 
             if full_text and len(full_text) >= 100:
-                # Appeler OSMOSE Pure de manière asynchrone
+                # Appeler OSMOSE Agentique (SupervisorAgent FSM) de manière asynchrone
                 # AUCUN storage legacy (ni Qdrant "knowbase", ni Neo4j entities/relations)
                 import asyncio
                 osmose_result = asyncio.run(
-                    process_document_with_osmose(
+                    process_document_with_osmose_agentique(
                         document_id=pdf_path.stem,
                         document_title=pdf_path.name,
                         document_path=pdf_path,
