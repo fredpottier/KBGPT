@@ -13,5 +13,6 @@ Phase 1.5 V1.1
 """
 
 from .gatekeeper import GatekeeperDelegate
+from .graph_centrality_scorer import GraphCentralityScorer
 
-__all__ = ["GatekeeperDelegate"]
+__all__ = ["GatekeeperDelegate", "GraphCentralityScorer"]
