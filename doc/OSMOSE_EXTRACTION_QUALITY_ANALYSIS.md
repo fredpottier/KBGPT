@@ -770,6 +770,266 @@ class CoreferenceResolver:
 
 ---
 
+### 🚀 Améliorations Production-Ready (Phase 4 bis)
+
+**Source** : Retour critique OpenAI sur approche hybride (2025-10-15)
+
+#### Limites Approche Basique Identifiées
+
+1. **Pondérations arbitraires** (0.4/0.4/0.2) → Pas de justification empirique
+2. **Pas de calibration automatique** → Performance sous-optimale
+3. **Risque double comptage** → Contexte influence cooccurrence ET embeddings
+4. **Fenêtre fixe (50 mots)** → Inadaptée selon taille document
+
+#### Amélioration 1: Calibration Supervisée ⭐ **RECOMMANDÉ**
+
+**Problème** : Pondérations arbitraires (centrality 0.4, embeddings 0.4, etc.)
+
+**Solution** : Régression logistique sur corpus annoté (50 docs)
+
+```python
+# scripts/calibrate_scoring_weights.py
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score
+
+def calibrate_weights_on_annotated_corpus(annotated_docs):
+    """Learn optimal weights from annotated examples"""
+
+    X = []  # Features
+    y = []  # Labels (PRIMARY=1, other=0)
+
+    # Extract features from annotated docs
+    for doc in annotated_docs:
+        entities = extract_entities_with_all_scores(doc)
+
+        for entity in entities:
+            features = [
+                entity.get("centrality_score", 0.0),
+                entity.get("primary_similarity", 0.0),
+                entity.get("secondary_similarity", 0.0),
+                entity.get("competitor_similarity", 0.0),
+                entity.get("salience_score", 0.0),
+                entity.get("tf_idf_score", 0.0)
+            ]
+
+            label = 1 if entity["annotated_role"] == "PRIMARY" else 0
+
+            X.append(features)
+            y.append(label)
+
+    # Train logistic regression
+    clf = LogisticRegression()
+    clf.fit(X, y)
+
+    # Extract optimal coefficients
+    optimal_weights = {
+        "centrality": clf.coef_[0][0],
+        "primary_similarity": clf.coef_[0][1],
+        "salience": clf.coef_[0][4],
+        "tf_idf": clf.coef_[0][5]
+    }
+
+    # Evaluate
+    y_pred = clf.predict(X)
+    f1 = f1_score(y, y_pred)
+
+    print(f"Optimal weights: {optimal_weights}")
+    print(f"F1-score: {f1:.2f}")
+
+    return optimal_weights
+```
+
+**Impact** : +10-15% F1-score via optimisation empirique
+
+**Effort** : 1 jour dev + 2 jours annotation (50 docs)
+
+**Priorité** : P1 (après Jours 7-9)
+
+#### Amélioration 2: DocumentContextGraph Temporaire ⭐ **RECOMMANDÉ**
+
+**Problème** : Milliers de documents × centaines d'entités = millions d'arêtes Neo4j → explosion graphe
+
+**Solution** : Graphe document-level temporaire, promotion sélective vers KG global
+
+```python
+# src/knowbase/clients/neo4j_client.py
+
+def create_document_context_graph(self, document_id, entities, cooccurrences):
+    """Create temporary document-level graph"""
+
+    query = """
+    // Create document node
+    CREATE (doc:Document {
+        document_id: $document_id,
+        tenant_id: $tenant_id,
+        created_at: datetime()
+    })
+
+    // Create entity nodes (document-scoped)
+    UNWIND $entities AS entity
+    CREATE (e:DocumentEntity {
+        entity_id: entity.concept_id,
+        document_id: $document_id,
+        name: entity.name,
+        centrality_score: entity.centrality_score,
+        role: entity.role
+    })
+
+    // Create cooccurrence edges (document-scoped)
+    WITH doc
+    UNWIND $cooccurrences AS cooc
+    MATCH (e1:DocumentEntity {entity_id: cooc.source_id, document_id: $document_id})
+    MATCH (e2:DocumentEntity {entity_id: cooc.target_id, document_id: $document_id})
+    CREATE (e1)-[:COOCCURS_WITH {weight: cooc.weight}]->(e2)
+    """
+
+    self.session.run(query, params)
+
+def promote_core_entities_to_global_kg(self, document_id, min_centrality=0.3):
+    """Push only CORE entities to global KG"""
+
+    query = """
+    MATCH (de:DocumentEntity {document_id: $document_id, tenant_id: $tenant_id})
+    WHERE de.centrality_score >= $min_centrality
+      AND de.role IN ['PRIMARY', 'CORE']
+
+    // Link to or create CanonicalConcept
+    MERGE (canonical:CanonicalConcept {
+        canonical_name: de.name,
+        tenant_id: $tenant_id
+    })
+    ON CREATE SET canonical.canonical_id = randomUUID()
+
+    CREATE (de)-[:PROMOTED_TO]->(canonical)
+
+    RETURN count(canonical) AS promoted_count
+    """
+
+    result = self.session.run(query, params)
+    return result.single()["promoted_count"]
+```
+
+**Impact** : Scalabilité Neo4j illimitée (vs <1K docs actuellement)
+
+**Effort** : 0.5 jour dev
+
+**Priorité** : P1 (après Jours 7-9)
+
+#### Amélioration 3: Entity Linking Fuzzy ⭐ **RECOMMANDÉ**
+
+**Problème** : "SAP Cloud" vs "SAP Cloud Platform" → 2 entités distinctes fragmentent le graphe
+
+**Solution** : Fuzzy matching Levenshtein-based (threshold 85%)
+
+```python
+# src/knowbase/semantic/entity_linking.py
+
+from rapidfuzz import fuzz
+
+def link_entity_to_canonical(entity_name, existing_canonical_entities, threshold=85):
+    """Link entity to existing canonical concept (fuzzy matching)"""
+
+    best_match = None
+    best_score = 0.0
+
+    for canonical in existing_canonical_entities:
+        # Fuzzy matching (Levenshtein-based)
+        score = fuzz.ratio(
+            entity_name.lower(),
+            canonical["canonical_name"].lower()
+        )
+
+        if score > best_score and score >= threshold:
+            best_score = score
+            best_match = canonical
+
+    return best_match, best_score
+```
+
+**Impact** : +15% cohérence KG (unification variants)
+
+**Effort** : 0.5 jour dev
+
+**Priorité** : P1 (après Jours 7-9)
+
+#### Amélioration 4: Mini-Évaluation Semi-Automatique ⭐ **CRITIQUE**
+
+**Problème** : Pas de validation empirique des performances
+
+**Solution** : Jeu de test annoté (5-10 documents) avec métriques P/R/F1
+
+```python
+# scripts/evaluate_contextual_filtering.py
+
+from sklearn.metrics import precision_score, recall_score, f1_score
+
+def evaluate_on_annotated_corpus(test_docs):
+    """Evaluate filtering on hand-annotated test set"""
+
+    y_true = []
+    y_pred = []
+
+    for doc in test_docs:
+        # Ground truth (human-annotated)
+        ground_truth_roles = doc["annotations"]  # {entity_name: "PRIMARY"/"COMPETITOR"}
+
+        # Predict with hybrid filtering
+        predicted_entities = hybrid_filter.score_entities(doc["entities"], doc["text"])
+
+        for entity in predicted_entities:
+            true_role = ground_truth_roles.get(entity["name"], "SECONDARY")
+            pred_role = entity.get("embedding_role", "SECONDARY")
+
+            y_true.append(true_role)
+            y_pred.append(pred_role)
+
+    # Metrics
+    precision = precision_score(y_true, y_pred, average="weighted")
+    recall = recall_score(y_true, y_pred, average="weighted")
+    f1 = f1_score(y_true, y_pred, average="weighted")
+
+    print(f"Precision: {precision:.2f}")
+    print(f"Recall: {recall:.2f}")
+    print(f"F1-score: {f1:.2f}")
+
+    return {"precision": precision, "recall": recall, "f1": f1}
+```
+
+**Impact** : Validation empirique, ajustement seuils, confiance production
+
+**Effort** : 0.5 jour dev + 1 jour annotation (5-10 docs)
+
+**Priorité** : **P0** (critique pour validation)
+
+#### Tableau Synthétique Améliorations Production
+
+| Amélioration | Impact | Effort | Priorité | Coût |
+|--------------|--------|--------|----------|------|
+| **Calibration supervisée** | +10-15% F1 | 1j dev + 2j annot | P1 | 3j |
+| **DocumentContextGraph** | Scalabilité ∞ | 0.5j | P1 | 0.5j |
+| **Entity linking fuzzy** | +15% cohérence KG | 0.5j | P1 | 0.5j |
+| **Mini-évaluation** | Validation empirique | 0.5j dev + 1j annot | **P0** | 1.5j |
+| **Total** | **+25-40% robustesse** | **5.5j** | - | **5.5j** |
+
+#### Configuration Optimale vs Minimale
+
+**Configuration Minimale** (Jours 7-9 uniquement) :
+- Graph Centrality + Embeddings Similarity
+- Effort : 3 jours
+- Précision attendue : 80-85%
+- Coût : $0/doc
+
+**Configuration Optimale** (Jours 7-9 + Améliorations) :
+- Graph + Embeddings + Calibration + DocumentContextGraph + Entity linking + Évaluation
+- Effort : 3j + 5.5j = **8.5 jours**
+- Précision attendue : **85-92%** (production-grade)
+- Coût : $0/doc
+
+**Recommandation** : Configuration Minimale (Jours 7-9) en priorité, puis Configuration Optimale selon résultats pilote.
+
+---
+
 ### 📈 Métriques Cibles (Après Filtrage Contextuel + Coréférence)
 
 | Métrique | Avant | Après (Cible) |

@@ -284,7 +284,191 @@ if ambiguous_entities:
 
 **Next Step**: Implémenter GraphCentralityScorer (Jour 7).
 
-### 🟡 Jour 6 (TBD) - Exécution Pilote Scénario A
+---
+
+### ⏳ Jours 7-9 - Filtrage Contextuel Hybride (P0 CRITIQUE)
+
+**Objectif**: Implémenter filtrage contextuel hybride pour résoudre problème concurrents promus au même niveau que produits principaux.
+
+**Problème Critique**:
+```
+Document RFP: "Notre solution SAP S/4HANA... Les concurrents Oracle et Workday..."
+
+Situation actuelle:
+✅ SAP S/4HANA (0.95) → Promu
+✅ Oracle (0.92) → Promu  ❌ ERREUR!
+✅ Workday (0.90) → Promu  ❌ ERREUR!
+
+Attendu:
+✅ SAP S/4HANA → PRIMARY → Promu
+❌ Oracle → COMPETITOR → Rejeté
+❌ Workday → COMPETITOR → Rejeté
+```
+
+---
+
+#### ⏳ Jour 7 - GraphCentralityScorer
+
+**Objectif**: Implémenter scoring basé sur structure graphe (TF-IDF + Salience + Fenêtre adaptive).
+
+**Tâches**:
+- [ ] Créer `src/knowbase/agents/gatekeeper/graph_centrality_scorer.py` (300 lignes)
+  - [ ] `build_cooccurrence_graph_weighted()` : Graph avec TF-IDF weighting
+  - [ ] `_calculate_idf_scores()` : Inverse document frequency
+  - [ ] `_count_cooccurrences_with_distance()` : Distance-based decay
+  - [ ] `calculate_centrality_scores()` : Combine Degree, PageRank, Betweenness
+  - [ ] `calculate_salience_score()` : Position + titre/abstract boost
+  - [ ] `adaptive_cooccurrence_window()` : 30-100 mots selon taille doc
+- [ ] Tests unitaires `tests/agents/gatekeeper/test_graph_centrality_scorer.py` (10 tests)
+  - [ ] Test TF-IDF weighting
+  - [ ] Test salience score (position, titre)
+  - [ ] Test fenêtre adaptive
+  - [ ] Test centrality scores (Degree, PageRank, Betweenness)
+- [ ] Validation: +20-30% précision sur corpus test
+
+**Fonctions clés**:
+```python
+class GraphCentralityScorer:
+    def build_cooccurrence_graph_weighted(self, entities, full_text):
+        """Build co-occurrence graph with TF-IDF weighting"""
+        # Node weights = TF-IDF (not just frequency)
+        # Edge weights = distance-based decay
+        return G
+
+    def calculate_centrality_scores(self, G):
+        """Combine Degree, PageRank, Betweenness"""
+        # 0.4 * degree + 0.4 * pagerank + 0.2 * betweenness
+        return combined_scores
+
+    def calculate_salience_score(self, entity, full_text, document_metadata):
+        """Salience = position in doc + presence in title/abstract"""
+        # Position boost (early mentions = more important)
+        # Title/Abstract boost
+        return score
+```
+
+**Effort estimé**: 1 jour (6-8h)
+
+**Impact attendu**: +20-30% précision, $0 coût, <100ms
+
+---
+
+#### ⏳ Jour 8 - EmbeddingsContextualScorer
+
+**Objectif**: Implémenter scoring basé sur similarité sémantique (paraphrases multilingues + agrégation multi-occurrences).
+
+**Tâches**:
+- [ ] Créer `src/knowbase/agents/gatekeeper/embeddings_contextual_scorer.py` (200 lignes)
+  - [ ] `REFERENCE_CONCEPTS_MULTILINGUAL` : Paraphrases EN/FR/DE/ES
+  - [ ] `__init__()` : Initialiser SentenceTransformer (multilingual-e5-large)
+  - [ ] `_extract_all_mentions_contexts()` : Toutes occurrences (pas seulement première)
+  - [ ] `score_entity_aggregated()` : Agrégation embeddings (mean pooling)
+  - [ ] `_classify_role()` : PRIMARY/COMPETITOR/SECONDARY
+- [ ] Tests unitaires `tests/agents/gatekeeper/test_embeddings_contextual_scorer.py` (8 tests)
+  - [ ] Test paraphrases multilingues (EN/FR/DE/ES)
+  - [ ] Test agrégation multi-occurrences
+  - [ ] Test classification role (PRIMARY/COMPETITOR/SECONDARY)
+  - [ ] Test similarity scores
+- [ ] Validation: +25-35% précision sur corpus test
+
+**Fonctions clés**:
+```python
+class EmbeddingsContextualScorer:
+    REFERENCE_CONCEPTS_MULTILINGUAL = {
+        "primary": [
+            "main topic of the document", "primary solution proposed",
+            "sujet principal du document", "solution principale proposée",
+            "Hauptthema des Dokuments", "Hauptlösung"
+        ],
+        "competitor": [
+            "alternative solution", "competing product",
+            "solution alternative", "produit concurrent",
+            "alternative Lösung", "Konkurrenzprodukt"
+        ]
+    }
+
+    def score_entity_aggregated(self, entity, full_text):
+        """Score using aggregated embeddings from ALL mentions"""
+        # Extract ALL contexts (not just first)
+        # Encode and aggregate embeddings (mean pooling)
+        # Compare with reference concepts
+        # Classify role
+        return {"role": role, "scores": scores}
+```
+
+**Effort estimé**: 1 jour (6-8h)
+
+**Impact attendu**: +25-35% précision, $0 coût, <200ms
+
+---
+
+#### ⏳ Jour 9 - Intégration Cascade Hybride
+
+**Objectif**: Intégrer cascade Graph → Embeddings dans GatekeeperDelegate.
+
+**Tâches**:
+- [ ] Modifier `src/knowbase/agents/gatekeeper/gatekeeper.py`
+  - [ ] Initialiser `GraphCentralityScorer` et `EmbeddingsContextualScorer` dans `__init__`
+  - [ ] Modifier `_gate_check_tool()` : Ajouter cascade hybride
+    - [ ] Step 1: Graph Centrality (filter peripherals centrality <0.15)
+    - [ ] Step 2: Embeddings Similarity (classify clear entities)
+    - [ ] Step 3: Adjust confidence selon role (PRIMARY +0.12, COMPETITOR -0.15)
+  - [ ] Graceful degradation si scorers unavailable
+- [ ] Tests intégration `tests/agents/gatekeeper/test_gatekeeper_contextual.py` (5 tests)
+  - [ ] Test cascade Graph → Embeddings
+  - [ ] Test ajustement confidence selon role
+  - [ ] Test problème concurrents RÉSOLU
+  - [ ] Test graceful degradation
+- [ ] Validation end-to-end: Problème concurrents RÉSOLU
+
+**Architecture Cascade**:
+```python
+async def _gate_check_with_contextual_filtering(self, candidates, full_text):
+    """Hybrid cascade: Graph → Embeddings → LLM (optional)"""
+
+    # Step 1: Graph Centrality (FREE, 100ms)
+    candidates = self.graph_scorer.score_entities(candidates, full_text)
+    candidates = [e for e in candidates if e.get("centrality_score", 0.0) >= 0.15]
+
+    # Step 2: Embeddings Similarity (FREE, 200ms)
+    candidates = self.embeddings_scorer.score_entities(candidates, full_text)
+    clear_entities = [e for e in candidates if e.get("primary_similarity", 0.0) > 0.8]
+    ambiguous_entities = [e for e in candidates if e not in clear_entities]
+
+    # Step 3: LLM Classification (PAID, 500ms) - Only 3-5 ambiguous (OPTIONNEL)
+    # ...
+
+    # Final confidence adjustment
+    for entity in final_candidates:
+        role = entity.get("embedding_role", "SECONDARY")
+        if role == "PRIMARY":
+            entity["adjusted_confidence"] += 0.12
+        elif role == "COMPETITOR":
+            entity["adjusted_confidence"] -= 0.15
+
+    return final_candidates
+```
+
+**Effort estimé**: 1 jour (6-8h)
+
+**Impact attendu**: +30% précision totale, +19% F1-score, **RÉSOUT problème concurrents**
+
+---
+
+**Total Jours 7-9**:
+- **Effort**: 3 jours (500 lignes + 23 tests)
+- **Impact**: +30% précision (60% → 85-92%), +19% F1-score (68% → 87%)
+- **Coût**: $0 supplémentaire (Graph + Embeddings gratuits)
+- **Priorité**: **P0 CRITIQUE** - Bloqueur qualité extraction
+
+**Commits attendus**:
+1. Jour 7: `feat(gatekeeper): Implémenter GraphCentralityScorer`
+2. Jour 8: `feat(gatekeeper): Implémenter EmbeddingsContextualScorer`
+3. Jour 9: `feat(gatekeeper): Intégrer cascade hybride filtrage contextuel`
+
+---
+
+### 🟡 Jour 10-11 (TBD) - Exécution Pilote Scénario A
 
 **Pré-requis**: Préparer 50 PDF textuels dans `data/pilot_docs/`
 
