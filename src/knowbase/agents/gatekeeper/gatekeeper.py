@@ -2,6 +2,11 @@
 🤖 OSMOSE Agentique - Gatekeeper Delegate
 
 Quality control et promotion Proto→Published.
+
+Phase 1.5 Jours 7-9: Filtrage Contextuel Hybride
+- GraphCentralityScorer: TF-IDF + Salience + Fenêtre adaptive
+- EmbeddingsContextualScorer: Paraphrases multilingues + Agrégation
+- Cascade: Graph → Embeddings → Ajustement confidence
 """
 
 from typing import Dict, Any, Optional, List
@@ -10,6 +15,8 @@ import re
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
 from knowbase.common.clients.neo4j_client import get_neo4j_client
+from .graph_centrality_scorer import GraphCentralityScorer
+from .embeddings_contextual_scorer import EmbeddingsContextualScorer
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +77,7 @@ class GateCheckInput(ToolInput):
     """Input pour GateCheck tool."""
     candidates: List[Dict[str, Any]]
     profile_name: str = "BALANCED"
+    full_text: Optional[str] = None  # Texte complet pour filtrage contextuel
 
 
 class GateCheckOutput(ToolOutput):
@@ -131,6 +139,39 @@ class GatekeeperDelegate(BaseAgent):
             "ssn": re.compile(r"\d{3}-\d{2}-\d{4}")
         }
 
+        # Filtrage Contextuel Hybride (Phase 1.5 Jours 7-9)
+        # Activable/désactivable via config
+        enable_contextual_filtering = config.get("enable_contextual_filtering", True) if config else True
+
+        if enable_contextual_filtering:
+            try:
+                self.graph_scorer = GraphCentralityScorer(
+                    min_centrality=0.15,
+                    enable_tf_idf=True,
+                    enable_salience=True
+                )
+                logger.info("[GATEKEEPER] GraphCentralityScorer initialisé")
+            except Exception as e:
+                logger.warning(f"[GATEKEEPER] GraphCentralityScorer init failed: {e}, disabled")
+                self.graph_scorer = None
+
+            try:
+                self.embeddings_scorer = EmbeddingsContextualScorer(
+                    model_name="intfloat/multilingual-e5-large",
+                    context_window=100,
+                    similarity_threshold_primary=0.5,
+                    similarity_threshold_competitor=0.4,
+                    enable_multi_occurrence=True
+                )
+                logger.info("[GATEKEEPER] EmbeddingsContextualScorer initialisé")
+            except Exception as e:
+                logger.warning(f"[GATEKEEPER] EmbeddingsContextualScorer init failed: {e}, disabled")
+                self.embeddings_scorer = None
+        else:
+            self.graph_scorer = None
+            self.embeddings_scorer = None
+            logger.info("[GATEKEEPER] Filtrage contextuel désactivé (config)")
+
         # Neo4j client pour Published-KG
         if config:
             neo4j_uri = config.get("neo4j_uri", "bolt://localhost:7687")
@@ -158,7 +199,10 @@ class GatekeeperDelegate(BaseAgent):
             logger.error(f"[GATEKEEPER] Neo4j client initialization failed: {e}")
             self.neo4j_client = None
 
-        logger.info(f"[GATEKEEPER] Initialized with default profile '{self.default_profile}'")
+        logger.info(
+            f"[GATEKEEPER] Initialized with default profile '{self.default_profile}' "
+            f"(contextual_filtering={'ON' if (self.graph_scorer or self.embeddings_scorer) else 'OFF'})"
+        )
 
     def _register_tools(self):
         """Enregistre les tools de l'agent."""
@@ -235,11 +279,15 @@ class GatekeeperDelegate(BaseAgent):
 
         Algorithme:
         1. Hard rejection: Fragments, stopwords, PII
-        2. Profile check: Confidence + required fields
-        3. Promote si ≥ seuils
+        2. **Filtrage Contextuel Hybride (Phase 1.5 Jours 7-9)**:
+           - GraphCentralityScorer: TF-IDF + Salience + Fenêtre adaptive
+           - EmbeddingsContextualScorer: Paraphrases multilingues + Agrégation
+           - Ajustement confidence selon role (PRIMARY +0.12, COMPETITOR -0.15)
+        3. Profile check: Confidence ajustée + required fields
+        4. Promote si ≥ seuils
 
         Args:
-            tool_input: Candidates + profile_name
+            tool_input: Candidates + profile_name + full_text (optionnel)
 
         Returns:
             Promoted, rejected, retry_recommended
@@ -247,12 +295,68 @@ class GatekeeperDelegate(BaseAgent):
         try:
             candidates = tool_input.candidates
             profile_name = tool_input.profile_name
+            full_text = tool_input.full_text
 
             # Charger profil
             profile = GATE_PROFILES.get(profile_name)
             if not profile:
                 logger.warning(f"[GATEKEEPER:GateCheck] Unknown profile '{profile_name}', using BALANCED")
                 profile = GATE_PROFILES["BALANCED"]
+
+            # **Phase 1.5 Jours 7-9: Filtrage Contextuel Hybride**
+            # Cascade: Graph → Embeddings → Ajustement confidence
+            if full_text and (self.graph_scorer or self.embeddings_scorer):
+                logger.info(
+                    f"[GATEKEEPER:GateCheck] Applying contextual filtering "
+                    f"(graph={'ON' if self.graph_scorer else 'OFF'}, "
+                    f"embeddings={'ON' if self.embeddings_scorer else 'OFF'})"
+                )
+
+                # Étape 1: GraphCentralityScorer
+                if self.graph_scorer:
+                    candidates = self.graph_scorer.score_entities(candidates, full_text)
+                    logger.debug(
+                        f"[GATEKEEPER:GateCheck] GraphCentralityScorer applied "
+                        f"({len(candidates)} candidates)"
+                    )
+
+                # Étape 2: EmbeddingsContextualScorer
+                if self.embeddings_scorer:
+                    candidates = self.embeddings_scorer.score_entities(candidates, full_text)
+                    logger.debug(
+                        f"[GATEKEEPER:GateCheck] EmbeddingsContextualScorer applied "
+                        f"({len(candidates)} candidates)"
+                    )
+
+                # Étape 3: Ajustement confidence selon role
+                for candidate in candidates:
+                    role = candidate.get("embedding_role", "SECONDARY")
+                    original_confidence = candidate.get("confidence", 0.0)
+
+                    # Ajustements selon role
+                    if role == "PRIMARY":
+                        # Boost PRIMARY (+0.12)
+                        candidate["confidence"] = min(original_confidence + 0.12, 1.0)
+                        logger.debug(
+                            f"[GATEKEEPER:GateCheck] PRIMARY boost: "
+                            f"{candidate.get('name', '')} {original_confidence:.2f} → "
+                            f"{candidate['confidence']:.2f}"
+                        )
+                    elif role == "COMPETITOR":
+                        # Penalize COMPETITOR (-0.15)
+                        candidate["confidence"] = max(original_confidence - 0.15, 0.0)
+                        logger.debug(
+                            f"[GATEKEEPER:GateCheck] COMPETITOR penalty: "
+                            f"{candidate.get('name', '')} {original_confidence:.2f} → "
+                            f"{candidate['confidence']:.2f}"
+                        )
+                    # SECONDARY: pas d'ajustement
+
+                logger.info(
+                    f"[GATEKEEPER:GateCheck] Contextual filtering complete "
+                    f"({len([c for c in candidates if c.get('embedding_role') == 'PRIMARY'])} PRIMARY, "
+                    f"{len([c for c in candidates if c.get('embedding_role') == 'COMPETITOR'])} COMPETITOR)"
+                )
 
             promoted = []
             rejected = []
@@ -270,7 +374,7 @@ class GatekeeperDelegate(BaseAgent):
                     rejection_reasons[name] = [rejection_reason]
                     continue
 
-                # Profile checks
+                # Profile checks (utilise confidence ajustée)
                 if confidence < profile.min_confidence:
                     rejected.append(candidate)
                     rejection_reasons[name] = [f"Confidence {confidence:.2f} < {profile.min_confidence}"]
