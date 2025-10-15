@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
+from knowbase.common.clients.redis_client import get_redis_client, RedisClient
 
 logger = logging.getLogger(__name__)
 
@@ -101,12 +102,30 @@ class BudgetManager(BaseAgent):
         if config:
             self.daily_quotas = config.get("daily_quotas", self.DAILY_QUOTAS)
             self.document_caps = config.get("document_caps", self.DOCUMENT_CAPS)
+            redis_host = config.get("redis_host", "localhost")
+            redis_port = config.get("redis_port", 6379)
+            redis_db = config.get("redis_db", 0)
         else:
             self.daily_quotas = self.DAILY_QUOTAS
             self.document_caps = self.DOCUMENT_CAPS
+            redis_host = "localhost"
+            redis_port = 6379
+            redis_db = 0
 
-        # Redis client (TODO: Intégrer Redis)
-        self.redis_client = None
+        # Redis client pour quotas tracking
+        try:
+            self.redis_client = get_redis_client(
+                host=redis_host,
+                port=redis_port,
+                db=redis_db
+            )
+            if self.redis_client.is_connected():
+                logger.info("[BUDGET] Redis client connected for quotas tracking")
+            else:
+                logger.warning("[BUDGET] Redis client initialized but not connected (fallback mode)")
+        except Exception as e:
+            logger.error(f"[BUDGET] Redis client initialization failed: {e}")
+            self.redis_client = None
 
         logger.info(
             f"[BUDGET] Initialized with caps SMALL={self.document_caps['SMALL']}, "
@@ -201,9 +220,16 @@ class BudgetManager(BaseAgent):
             model_tier = tool_input.model_tier
             requested_calls = tool_input.requested_calls
 
-            # Vérifier quota tenant/jour (mock pour l'instant)
+            # Vérifier quota tenant/jour (Redis)
             daily_quota = self.daily_quotas.get(model_tier, 0)
-            daily_consumed = 0  # TODO: Redis GET budget:tenant:{tenant_id}:{tier}:{date}
+
+            # Récupérer consommation depuis Redis
+            if self.redis_client and self.redis_client.is_connected():
+                daily_consumed = self.redis_client.get_budget_consumed(tenant_id, model_tier)
+            else:
+                # Fallback si Redis non disponible: assume 0 (mode dégradé)
+                daily_consumed = 0
+                logger.warning(f"[BUDGET:CheckBudget] Redis unavailable, fallback mode (assume 0 consumed)")
 
             if daily_consumed + requested_calls > daily_quota:
                 return ToolOutput(
@@ -251,16 +277,31 @@ class BudgetManager(BaseAgent):
             cost = tool_input.cost
 
             # Consommer quota tenant (Redis INCR)
-            # TODO: Redis INCR budget:tenant:{tenant_id}:{tier}:{date}
+            if self.redis_client and self.redis_client.is_connected():
+                new_value = self.redis_client.increment_budget(
+                    tenant_id=tenant_id,
+                    model_tier=model_tier,
+                    calls=calls,
+                    cost=cost
+                )
+                daily_quota = self.daily_quotas.get(model_tier, 0)
+                new_remaining = daily_quota - new_value
 
-            logger.debug(f"[BUDGET:ConsumeBudget] {tenant_id}/{model_tier}: {calls} calls, ${cost:.3f}")
+                logger.debug(
+                    f"[BUDGET:ConsumeBudget] {tenant_id}/{model_tier}: {calls} calls, "
+                    f"${cost:.3f}, remaining {new_remaining}/{daily_quota}"
+                )
+            else:
+                # Fallback si Redis non disponible
+                logger.warning(f"[BUDGET:ConsumeBudget] Redis unavailable, skipping increment")
+                new_remaining = 0
 
             return ToolOutput(
                 success=True,
                 message="Budget consumed",
                 data={
                     "consumed": True,
-                    "new_remaining": 0  # TODO: Calculer depuis Redis
+                    "new_remaining": new_remaining
                 }
             )
 
@@ -288,16 +329,31 @@ class BudgetManager(BaseAgent):
             cost = tool_input.cost
 
             # Rembourser quota tenant (Redis DECR)
-            # TODO: Redis DECR budget:tenant:{tenant_id}:{tier}:{date}
+            if self.redis_client and self.redis_client.is_connected():
+                new_value = self.redis_client.decrement_budget(
+                    tenant_id=tenant_id,
+                    model_tier=model_tier,
+                    calls=calls,
+                    cost=cost
+                )
+                daily_quota = self.daily_quotas.get(model_tier, 0)
+                new_remaining = daily_quota - new_value
 
-            logger.debug(f"[BUDGET:RefundBudget] {tenant_id}/{model_tier}: {calls} calls refunded")
+                logger.debug(
+                    f"[BUDGET:RefundBudget] {tenant_id}/{model_tier}: {calls} calls refunded, "
+                    f"remaining {new_remaining}/{daily_quota}"
+                )
+            else:
+                # Fallback si Redis non disponible
+                logger.warning(f"[BUDGET:RefundBudget] Redis unavailable, skipping decrement")
+                new_remaining = 0
 
             return ToolOutput(
                 success=True,
                 message="Budget refunded",
                 data={
                     "refunded": True,
-                    "new_remaining": 0  # TODO: Calculer depuis Redis
+                    "new_remaining": new_remaining
                 }
             )
 
