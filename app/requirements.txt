@@ -76,6 +76,23 @@ pytesseract
 # === Lang / NLP util ===
 langdetect
 
+# === OSMOSE Semantic Intelligence V2.1 (Phase 1) ===
+# NER multilingue
+spacy>=3.7.2
+# Modèles spaCy à installer séparément:
+# python -m spacy download en_core_web_trf
+# python -m spacy download fr_core_news_trf
+# python -m spacy download de_core_news_trf
+# python -m spacy download xx_ent_wiki_sm
+
+# Clustering sémantique
+hdbscan>=0.8.33
+
+# Détection langue
+fasttext>=0.9.2
+# Modèle fasttext à télécharger:
+# wget https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin
+
 # === Debug ===
 debugpy
 redis>=5.0

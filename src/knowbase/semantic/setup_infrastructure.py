@@ -1,12 +1,14 @@
 """
-🌊 OSMOSE Semantic Intelligence - Infrastructure Setup
+🌊 OSMOSE Semantic Intelligence V2.1 - Infrastructure Setup
 
-Script d'initialisation de l'infrastructure Proto-KG:
-- Neo4j: Constraints + Indexes
-- Qdrant: Collection knowwhere_proto
+Script d'initialisation de l'infrastructure Proto-KG V2.1:
+- Neo4j: Constraints + Indexes (Concepts, pas narratives)
+- Qdrant: Collection concepts_proto (multilingual-e5-large 1024D)
 
 Exécution:
     python -m knowbase.semantic.setup_infrastructure
+
+Phase 1 V2.1 - Semaine 1
 """
 
 import asyncio
@@ -28,69 +30,146 @@ logger = logging.getLogger(__name__)
 
 async def setup_neo4j_proto_kg():
     """
-    Configure le schéma Neo4j Proto-KG.
+    Configure le schéma Neo4j Proto-KG V2.1.
+
+    Architecture V2.1 (Concept-First):
+    - Document → Topic → Concept → CanonicalConcept
+    - CandidateEntity / CandidateRelation (staging)
 
     Crée:
-    - Constraints d'unicité sur candidate_id
-    - Indexes sur tenant_id et status
+    - Constraints unicité sur IDs
+    - Indexes sur concept_name, canonical_name, concept_type, language
     """
     config = get_semantic_config()
     neo4j_config = config.neo4j_proto
 
-    logger.info("[OSMOSE] Setup Neo4j Proto-KG Schema...")
+    logger.info("[OSMOSE] Setup Neo4j Proto-KG Schema V2.1...")
 
     # Connexion Neo4j depuis variables d'environnement
-    neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
-    neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+    neo4j_uri = neo4j_config.uri
+    neo4j_user = neo4j_config.user
+    neo4j_password = neo4j_config.password
 
     driver = AsyncGraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
     try:
-        async with driver.session() as session:
-            # Constraint: CandidateEntity.candidate_id UNIQUE
+        async with driver.session(database=neo4j_config.database) as session:
+            # ===================================
+            # CONSTRAINTS UNICITÉ
+            # ===================================
+
+            # Document.document_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT document_id_unique IF NOT EXISTS
+                FOR (d:Document) REQUIRE d.document_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint Document.document_id créée")
+
+            # Topic.topic_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT topic_id_unique IF NOT EXISTS
+                FOR (t:Topic) REQUIRE t.topic_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint Topic.topic_id créée")
+
+            # Concept.concept_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT concept_id_unique IF NOT EXISTS
+                FOR (c:Concept) REQUIRE c.concept_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint Concept.concept_id créée")
+
+            # CanonicalConcept.canonical_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT canonical_concept_id_unique IF NOT EXISTS
+                FOR (cc:CanonicalConcept) REQUIRE cc.canonical_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint CanonicalConcept.canonical_id créée")
+
+            # CandidateEntity.candidate_id UNIQUE (staging)
             await session.run("""
                 CREATE CONSTRAINT candidate_entity_id IF NOT EXISTS
-                FOR (n:CandidateEntity) REQUIRE n.candidate_id IS UNIQUE
+                FOR (e:CandidateEntity) REQUIRE e.candidate_id IS UNIQUE
             """)
             logger.info("  ✅ Constraint CandidateEntity.candidate_id créée")
 
-            # Constraint: CandidateRelation.candidate_id UNIQUE
+            # CandidateRelation.candidate_id UNIQUE (staging)
             await session.run("""
                 CREATE CONSTRAINT candidate_relation_id IF NOT EXISTS
                 FOR (r:CandidateRelation) REQUIRE r.candidate_id IS UNIQUE
             """)
             logger.info("  ✅ Constraint CandidateRelation.candidate_id créée")
 
-            # Index: CandidateEntity.tenant_id
+            # ===================================
+            # INDEXES RECHERCHE
+            # ===================================
+
+            # Concept.name (recherche par nom)
+            await session.run("""
+                CREATE INDEX concept_name_idx IF NOT EXISTS
+                FOR (c:Concept) ON (c.name)
+            """)
+            logger.info("  ✅ Index Concept.name créé")
+
+            # Concept.type (filtrage par type)
+            await session.run("""
+                CREATE INDEX concept_type_idx IF NOT EXISTS
+                FOR (c:Concept) ON (c.type)
+            """)
+            logger.info("  ✅ Index Concept.type créé")
+
+            # Concept.language (filtrage par langue)
+            await session.run("""
+                CREATE INDEX concept_language_idx IF NOT EXISTS
+                FOR (c:Concept) ON (c.language)
+            """)
+            logger.info("  ✅ Index Concept.language créé")
+
+            # CanonicalConcept.canonical_name (recherche canonique)
+            await session.run("""
+                CREATE INDEX canonical_name_idx IF NOT EXISTS
+                FOR (cc:CanonicalConcept) ON (cc.canonical_name)
+            """)
+            logger.info("  ✅ Index CanonicalConcept.canonical_name créé")
+
+            # CanonicalConcept.type (filtrage par type)
+            await session.run("""
+                CREATE INDEX canonical_type_idx IF NOT EXISTS
+                FOR (cc:CanonicalConcept) ON (cc.type)
+            """)
+            logger.info("  ✅ Index CanonicalConcept.type créé")
+
+            # CandidateEntity.tenant_id (multi-tenancy)
             await session.run("""
                 CREATE INDEX candidate_entity_tenant IF NOT EXISTS
-                FOR (n:CandidateEntity) ON (n.tenant_id)
+                FOR (e:CandidateEntity) ON (e.tenant_id)
             """)
             logger.info("  ✅ Index CandidateEntity.tenant_id créé")
 
-            # Index: CandidateEntity.status
+            # CandidateEntity.status (gatekeeper workflow)
             await session.run("""
                 CREATE INDEX candidate_entity_status IF NOT EXISTS
-                FOR (n:CandidateEntity) ON (n.status)
+                FOR (e:CandidateEntity) ON (e.status)
             """)
             logger.info("  ✅ Index CandidateEntity.status créé")
 
-            # Index: CandidateRelation.tenant_id
+            # CandidateRelation.tenant_id (multi-tenancy)
             await session.run("""
                 CREATE INDEX candidate_relation_tenant IF NOT EXISTS
                 FOR (r:CandidateRelation) ON (r.tenant_id)
             """)
             logger.info("  ✅ Index CandidateRelation.tenant_id créé")
 
-            # Index: CandidateRelation.status
+            # CandidateRelation.status (gatekeeper workflow)
             await session.run("""
                 CREATE INDEX candidate_relation_status IF NOT EXISTS
                 FOR (r:CandidateRelation) ON (r.status)
             """)
             logger.info("  ✅ Index CandidateRelation.status créé")
 
-        logger.info("[OSMOSE] ✅ Neo4j Proto-KG Schema configuré avec succès")
+        logger.info("[OSMOSE] ✅ Neo4j Proto-KG Schema V2.1 configuré avec succès")
+        logger.info("  📊 Labels: Document, Topic, Concept, CanonicalConcept, CandidateEntity, CandidateRelation")
+        logger.info("  🔍 Total: 6 constraints + 11 indexes")
 
     except Exception as e:
         logger.error(f"[OSMOSE] ❌ Erreur setup Neo4j: {e}")
@@ -101,17 +180,18 @@ async def setup_neo4j_proto_kg():
 
 async def setup_qdrant_proto_collection():
     """
-    Configure la collection Qdrant Proto.
+    Configure la collection Qdrant Proto V2.1.
 
-    Crée la collection knowwhere_proto avec:
-    - Vecteurs 1536 dimensions (OpenAI text-embedding-3-small)
-    - Distance Cosine
+    Crée la collection concepts_proto avec:
+    - Vecteurs 1024 dimensions (multilingual-e5-large)
+    - Distance Cosine (cross-lingual similarity)
     - Configuration HNSW optimisée
+    - on_disk_payload pour économie RAM
     """
     config = get_semantic_config()
     qdrant_config = config.qdrant_proto
 
-    logger.info("[OSMOSE] Setup Qdrant Proto Collection...")
+    logger.info("[OSMOSE] Setup Qdrant Proto Collection V2.1...")
 
     qdrant_client = get_qdrant_client()
 
@@ -126,29 +206,35 @@ async def setup_qdrant_proto_collection():
             logger.info(f"  ⚠️  Collection '{collection_name}' existe déjà, skip création")
             return
 
-        # Créer la collection
+        # Créer la collection concepts_proto
         qdrant_client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(
-                size=qdrant_config.vector_size,
-                distance=Distance.COSINE
+                size=qdrant_config.vector_size,  # 1024 (multilingual-e5-large)
+                distance=Distance.COSINE,
+                on_disk=False  # Vecteurs en RAM pour performance
             ),
             hnsw_config=HnswConfigDiff(
-                m=16,
-                ef_construct=100,
+                m=qdrant_config.hnsw_config["m"],               # 16
+                ef_construct=qdrant_config.hnsw_config["ef_construct"],  # 100
                 full_scan_threshold=10000
             ),
             optimizers_config=OptimizersConfigDiff(
                 deleted_threshold=0.2,
                 vacuum_min_vector_number=1000,
-                default_segment_number=2
-            )
+                default_segment_number=2,
+                indexing_threshold=qdrant_config.optimization["indexing_threshold"]  # 10000
+            ),
+            on_disk_payload=qdrant_config.on_disk_payload  # Payload sur disque (économie RAM)
         )
 
         logger.info(f"  ✅ Collection '{collection_name}' créée")
-        logger.info(f"     - Vector size: {qdrant_config.vector_size}")
+        logger.info(f"     - Model: multilingual-e5-large")
+        logger.info(f"     - Vector size: {qdrant_config.vector_size}D")
         logger.info(f"     - Distance: {qdrant_config.distance}")
-        logger.info("[OSMOSE] ✅ Qdrant Proto Collection configurée avec succès")
+        logger.info(f"     - HNSW m={qdrant_config.hnsw_config['m']}, ef_construct={qdrant_config.hnsw_config['ef_construct']}")
+        logger.info(f"     - on_disk_payload: {qdrant_config.on_disk_payload}")
+        logger.info("[OSMOSE] ✅ Qdrant Proto Collection V2.1 configurée avec succès")
 
     except Exception as e:
         logger.error(f"[OSMOSE] ❌ Erreur setup Qdrant: {e}")
@@ -156,10 +242,11 @@ async def setup_qdrant_proto_collection():
 
 
 async def setup_all():
-    """Configure toute l'infrastructure Proto-KG"""
-    logger.info("=" * 60)
-    logger.info("🌊 OSMOSE Phase 1 - Infrastructure Setup")
-    logger.info("=" * 60)
+    """Configure toute l'infrastructure Proto-KG V2.1"""
+    logger.info("=" * 70)
+    logger.info("🌊 OSMOSE Phase 1 V2.1 - Infrastructure Setup")
+    logger.info("   Concept-First, Language-Agnostic Architecture")
+    logger.info("=" * 70)
 
     try:
         # Setup Neo4j

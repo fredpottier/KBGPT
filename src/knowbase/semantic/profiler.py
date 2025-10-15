@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple
 import logging
 import json
 import re
-from .models import SemanticProfile, ComplexityZone, NarrativeThread
+from .models import SemanticProfile, ComplexityZone
 from .config import get_semantic_config
 from knowbase.common.llm_router import LLMRouter, TaskType
 
@@ -31,10 +31,9 @@ class SemanticDocumentProfiler:
     def __init__(self):
         """Initialise le profiler avec la configuration"""
         self.config = get_semantic_config()
-        self.profiler_config = self.config.profiler
-        self.narrative_config = self.config.narrative_detection
+        self.profiler_config = self.config.profiling
         self.llm_router = LLMRouter()
-        logger.info("[OSMOSE] SemanticDocumentProfiler initialisé")
+        logger.info("[OSMOSE] SemanticDocumentProfiler V2.1 initialisé")
 
     async def profile_document(
         self,
@@ -65,10 +64,6 @@ class SemanticDocumentProfiler:
         domain, domain_confidence = self._classify_domain(text_content)
         logger.info(f"[OSMOSE] Domain: {domain} (confidence: {domain_confidence:.2f})")
 
-        # 3. Détection fils narratifs préliminaire
-        narrative_threads = self._detect_preliminary_narratives(text_content)
-        logger.info(f"[OSMOSE] Narrative threads: {len(narrative_threads)} detected")
-
         # Construire le profil sémantique
         profile = SemanticProfile(
             document_id=document_id,
@@ -78,7 +73,6 @@ class SemanticDocumentProfiler:
             domain=domain,
             domain_confidence=domain_confidence,
             complexity_zones=complexity_zones,
-            narrative_threads=narrative_threads,
         )
 
         logger.info(f"[OSMOSE] ✅ Profile complete: {document_id}")
@@ -237,70 +231,6 @@ JSON:"""
             return "medium"
         else:
             return "complex"
-
-    def _detect_preliminary_narratives(self, text: str) -> List[NarrativeThread]:
-        """
-        Détection préliminaire de fils narratifs.
-
-        Utilise des patterns simples (regex) pour détecter:
-        - Causal connectors (because, therefore, etc.)
-        - Temporal markers (revised, updated, etc.)
-        - Cross-references
-
-        Returns:
-            List[NarrativeThread]: Fils narratifs détectés
-        """
-        logger.info("[OSMOSE] Detecting preliminary narratives...")
-
-        threads = []
-
-        # Patterns à détecter
-        causal_connectors = self.narrative_config.causal_connectors
-        temporal_markers = self.narrative_config.temporal_markers
-
-        # Recherche de causal connectors
-        for connector in causal_connectors:
-            pattern = rf'\b{re.escape(connector)}\b'
-            matches = list(re.finditer(pattern, text, re.IGNORECASE))
-
-            if len(matches) >= 2:  # Au moins 2 occurrences
-                # Créer un thread narratif basique
-                first_match = matches[0]
-                last_match = matches[-1]
-
-                thread = NarrativeThread(
-                    description=f"Causal narrative with '{connector}' ({len(matches)} occurrences)",
-                    start_position=first_match.start(),
-                    end_position=last_match.end(),
-                    confidence=0.6,  # Confiance basse pour détection préliminaire
-                    keywords=[connector],
-                    causal_links=[connector],
-                    temporal_markers=[]
-                )
-                threads.append(thread)
-
-        # Recherche de temporal markers
-        temporal_found = []
-        for marker in temporal_markers:
-            pattern = rf'\b{re.escape(marker)}\b'
-            if re.search(pattern, text, re.IGNORECASE):
-                temporal_found.append(marker)
-
-        if len(temporal_found) >= 2:
-            # Créer un thread temporel
-            thread = NarrativeThread(
-                description=f"Temporal narrative ({len(temporal_found)} markers)",
-                start_position=0,
-                end_position=len(text),
-                confidence=0.65,
-                keywords=temporal_found,
-                causal_links=[],
-                temporal_markers=temporal_found
-            )
-            threads.append(thread)
-
-        logger.info(f"[OSMOSE] Detected {len(threads)} preliminary narrative threads")
-        return threads
 
     def _classify_domain(self, text: str) -> Tuple[str, float]:
         """

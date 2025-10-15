@@ -53,6 +53,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Pr??-t??l??chargement des packages NLTK pour ??viter les erreurs r??seau (unstructured dependencies)
 RUN python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True); nltk.download('averaged_perceptron_tagger', quiet=True); nltk.download('averaged_perceptron_tagger_eng', quiet=True)" || echo "NLTK download failed, will try at runtime"
 
+# Téléchargement modèles spaCy pour OSMOSE (Phase 1 V2.1)
+# Modèles medium (md) pour documents techniques SAP/RFP
+# Précision NER 85-90% vs 75-80% pour sm (+100 MB mais worth it pour RFP)
+RUN python -m spacy download en_core_web_md || echo "spaCy en model download failed"
+RUN python -m spacy download fr_core_news_md || echo "spaCy fr model download failed"
+RUN python -m spacy download xx_ent_wiki_sm || echo "spaCy xx model download failed"
+
+# Téléchargement modèle fasttext pour détection langue OSMOSE
+RUN mkdir -p /app/models && \
+    curl -L https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin -o /app/models/lid.176.bin || \
+    echo "fasttext language model download failed (will use fallback)"
+
 # Code application (à la fin pour optimiser cache Docker)
 COPY src/knowbase/ /app/knowbase/
 COPY app/main.py /app/main.py
