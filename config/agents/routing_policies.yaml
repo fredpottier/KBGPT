@@ -1,0 +1,49 @@
+# 🤖 OSMOSE Agentique - Configuration Routing Policies
+#
+# Policies pour ExtractorOrchestrator (NO_LLM/SMALL/BIG routing).
+# Phase 1.5 V1.1
+
+routing:
+  # Seuils routing basés sur densité entities (PrepassAnalyzer)
+  thresholds:
+    no_llm_threshold: 3  # < 3 entities → NO_LLM
+    small_threshold: 8   # 3-8 entities → SMALL
+    # > 8 entities → BIG
+
+  # Fallback chain
+  fallback_chain:
+    - BIG     # Si budget BIG épuisé → SMALL
+    - SMALL   # Si budget SMALL épuisé → NO_LLM
+    - NO_LLM  # Toujours disponible
+
+  # Model configurations
+  models:
+    SMALL:
+      provider: "openai"
+      model_name: "gpt-4o-mini"
+      temperature: 0.3
+      max_tokens: 1500
+      cost_per_1k_tokens: 0.00015  # $0.15/1M tokens
+
+    BIG:
+      provider: "openai"
+      model_name: "gpt-4o"
+      temperature: 0.2
+      max_tokens: 2000
+      cost_per_1k_tokens: 0.0025  # $2.50/1M tokens
+
+    VISION:
+      provider: "openai"
+      model_name: "gpt-4o-vision"
+      temperature: 0.2
+      max_tokens: 1500
+      cost_per_1k_tokens: 0.005  # $5.00/1M tokens
+
+  # PrepassAnalyzer NER config
+  prepass_analyzer:
+    ner_threshold: 0.7  # Min confidence pour NER entities
+    languages:
+      - en
+      - fr
+      - de
+      - es
