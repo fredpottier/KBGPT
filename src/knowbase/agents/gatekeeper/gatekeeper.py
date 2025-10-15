@@ -9,6 +9,7 @@ import logging
 import re
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
+from knowbase.common.clients.neo4j_client import get_neo4j_client
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,33 @@ class GatekeeperDelegate(BaseAgent):
             "phone": re.compile(r"\+?\d[\d\s\-\(\)]{7,}\d"),
             "ssn": re.compile(r"\d{3}-\d{2}-\d{4}")
         }
+
+        # Neo4j client pour Published-KG
+        if config:
+            neo4j_uri = config.get("neo4j_uri", "bolt://localhost:7687")
+            neo4j_user = config.get("neo4j_user", "neo4j")
+            neo4j_password = config.get("neo4j_password", "password")
+            neo4j_database = config.get("neo4j_database", "neo4j")
+        else:
+            neo4j_uri = "bolt://localhost:7687"
+            neo4j_user = "neo4j"
+            neo4j_password = "password"
+            neo4j_database = "neo4j"
+
+        try:
+            self.neo4j_client = get_neo4j_client(
+                uri=neo4j_uri,
+                user=neo4j_user,
+                password=neo4j_password,
+                database=neo4j_database
+            )
+            if self.neo4j_client.is_connected():
+                logger.info("[GATEKEEPER] Neo4j client connected for Published-KG storage")
+            else:
+                logger.warning("[GATEKEEPER] Neo4j client initialized but not connected (promotion disabled)")
+        except Exception as e:
+            logger.error(f"[GATEKEEPER] Neo4j client initialization failed: {e}")
+            self.neo4j_client = None
 
         logger.info(f"[GATEKEEPER] Initialized with default profile '{self.default_profile}'")
 
@@ -326,7 +354,7 @@ class GatekeeperDelegate(BaseAgent):
         Tool PromoteConcepts: Promeut concepts vers Neo4j Published.
 
         Args:
-            tool_input: Concepts à promouvoir
+            tool_input: Concepts à promouvoir (avec tenant_id dans state)
 
         Returns:
             Count promoted
@@ -334,17 +362,86 @@ class GatekeeperDelegate(BaseAgent):
         try:
             concepts = tool_input.concepts
 
-            # TODO: Implémenter promotion Neo4j
-            # Pour l'instant: mock
-            promoted_count = len(concepts)
+            # Si Neo4j non disponible, skip promotion (mode dégradé)
+            if not self.neo4j_client or not self.neo4j_client.is_connected():
+                logger.warning("[GATEKEEPER:PromoteConcepts] Neo4j unavailable, skipping promotion (degraded mode)")
+                return ToolOutput(
+                    success=True,
+                    message=f"Skipped promotion (Neo4j unavailable): {len(concepts)} concepts",
+                    data={
+                        "promoted_count": 0,
+                        "skipped_count": len(concepts)
+                    }
+                )
 
-            logger.debug(f"[GATEKEEPER:PromoteConcepts] {promoted_count} concepts promoted to Neo4j")
+            # Promouvoir chaque concept
+            promoted_count = 0
+            failed_count = 0
+            canonical_ids = []
+
+            for concept in concepts:
+                # Extraire champs du concept
+                concept_name = concept.get("name", "")
+                concept_type = concept.get("type", "Unknown")
+                definition = concept.get("definition", "")
+                confidence = concept.get("confidence", 0.0)
+                proto_concept_id = concept.get("proto_concept_id", "")  # Si concept Proto existe
+                tenant_id = concept.get("tenant_id", "default")
+
+                # Générer canonical_name (normalisé)
+                canonical_name = concept_name.strip().title()
+
+                # Générer unified_definition (si manquant, utiliser nom + type)
+                unified_definition = definition if definition else f"{concept_type}: {concept_name}"
+
+                # Quality score = confidence (ou calculé via autre logique)
+                quality_score = confidence
+
+                try:
+                    # Appel Neo4j promote_to_published()
+                    canonical_id = self.neo4j_client.promote_to_published(
+                        tenant_id=tenant_id,
+                        proto_concept_id=proto_concept_id or f"proto_{concept_name}_{concept_type}",
+                        canonical_name=canonical_name,
+                        unified_definition=unified_definition,
+                        quality_score=quality_score,
+                        metadata={
+                            "original_name": concept_name,
+                            "extracted_type": concept_type,
+                            "gate_profile": self.default_profile
+                        }
+                    )
+
+                    if canonical_id:
+                        promoted_count += 1
+                        canonical_ids.append(canonical_id)
+                        logger.debug(
+                            f"[GATEKEEPER:PromoteConcepts] Promoted '{canonical_name}' "
+                            f"(tenant={tenant_id}, quality={quality_score:.2f})"
+                        )
+                    else:
+                        failed_count += 1
+                        logger.warning(
+                            f"[GATEKEEPER:PromoteConcepts] Failed to promote '{concept_name}' "
+                            f"(Neo4j returned empty canonical_id)"
+                        )
+
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"[GATEKEEPER:PromoteConcepts] Error promoting '{concept_name}': {e}")
+
+            logger.info(
+                f"[GATEKEEPER:PromoteConcepts] Promotion complete: "
+                f"{promoted_count} promoted, {failed_count} failed"
+            )
 
             return ToolOutput(
                 success=True,
-                message=f"Promoted {promoted_count} concepts",
+                message=f"Promoted {promoted_count}/{len(concepts)} concepts to Published-KG",
                 data={
-                    "promoted_count": promoted_count
+                    "promoted_count": promoted_count,
+                    "failed_count": failed_count,
+                    "canonical_ids": canonical_ids
                 }
             )
 
