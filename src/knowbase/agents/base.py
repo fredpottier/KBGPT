@@ -32,6 +32,7 @@ class AgentState(BaseModel):
     """État partagé entre agents (passé via FSM)."""
     document_id: str
     tenant_id: str = "default"
+    full_text: Optional[str] = None  # Texte complet pour filtrage contextuel
 
     # Budget tracking
     budget_remaining: Dict[str, int] = Field(default_factory=lambda: {

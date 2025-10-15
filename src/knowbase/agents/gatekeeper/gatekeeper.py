@@ -238,7 +238,8 @@ class GatekeeperDelegate(BaseAgent):
         # Étape 1: Gate check
         gate_input = GateCheckInput(
             candidates=state.candidates,
-            profile_name=profile_name
+            profile_name=profile_name,
+            full_text=state.full_text  # Transmettre texte pour filtrage contextuel
         )
 
         gate_result = self.call_tool("gate_check", gate_input)

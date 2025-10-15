@@ -190,7 +190,8 @@ class OsmoseAgentiqueService:
 
             initial_state = AgentState(
                 document_id=document_id,
-                tenant_id=tenant
+                tenant_id=tenant,
+                full_text=text_content  # Stocker texte complet pour filtrage contextuel
             )
 
             # Stocker métadonnées document dans state (custom fields)
