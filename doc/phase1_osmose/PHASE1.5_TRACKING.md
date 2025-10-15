@@ -13,11 +13,12 @@
 | **Semaine 11 J1-2** | Implémentation 6 agents + 11 tools | ✅ COMPLÉTÉ | 100% | 2025-10-15 |
 | **Semaine 11 J3** | Tests unitaires + Intégration pipeline | ✅ COMPLÉTÉ | 100% | 2025-10-15 |
 | **Semaine 11 J4** | Setup infra multi-tenant | ✅ COMPLÉTÉ | 100% | 2025-10-16 |
-| **Semaine 11 J5** | Pilote Scénario A | ⏳ À VENIR | 0% | 2025-10-17 |
+| **Semaine 11 J5** | Storage Neo4j + Tests E2E + Pilote prep | ✅ COMPLÉTÉ | 100% | 2025-10-16 |
+| **Semaine 11 J5-6** | Exécution Pilote Scénario A | ⏳ EN ATTENTE | 0% | TBD (nécessite docs) |
 | **Semaine 12** | Pilotes B&C + Dashboard Grafana | ⏳ À VENIR | 0% | 2025-10-21-25 |
 | **Semaine 13** | Analyse + GO/NO-GO | ⏳ À VENIR | 0% | 2025-10-28-31 |
 
-**Progression Globale**: **53%** (Jours 1-4/15 complétés)
+**Progression Globale**: **60%** (Jours 1-5 préparation/15 complétés)
 
 ---
 
@@ -127,12 +128,40 @@
 
 **Rapport**: `doc/phase1_osmose/PHASE1.5_DAY4_INFRASTRUCTURE_REPORT.md`
 
-### 🟡 Jour 5 (2025-10-17) - Pilote Scénario A
+### ✅ Jour 5 (2025-10-16) - Storage Neo4j + Tests E2E + Pilote Prep
+
+**Commits**:
+- `d3b639f`: feat(gatekeeper) - Storage Neo4j Published-KG (105 insertions)
+- `9d323a4`: test(e2e) - Tests end-to-end OSMOSE Agentique (339 insertions)
+- `8e49d58`: feat(pilot) - Script Pilote Scénario A (429 insertions)
+- `7b74889`: docs(phase1.5) - Rapport Jour 5 (383 insertions)
+
+**Réalisations**:
+- ✅ Storage Neo4j Published-KG activé via GatekeeperDelegate
+  - Integration Neo4jClient avec graceful degradation
+  - Promotion Proto → Canonical fonctionnelle
+  - Metadata enrichies (original_name, gate_profile)
+
+- ✅ Tests end-to-end complets (5 tests, 287 lignes)
+  - Full pipeline test (FSM, segmentation, extraction, promotion)
+  - Tests filtrage, mode dégradé, métriques, performance
+
+- ✅ Script Pilote Scénario A (440 lignes)
+  - Batch processing 50 documents
+  - Collecte métriques + stats agrégées (P95, P99)
+  - Validation critères succès
+  - Output CSV
+
+**Rapport**: `doc/phase1_osmose/PHASE1.5_DAY5_REPORT.md`
+
+### 🟡 Jour 5-6 (TBD) - Exécution Pilote Scénario A
+
+**Pré-requis**: Préparer 50 PDF textuels dans `data/pilot_docs/`
 
 **Objectifs**:
-- [ ] Activer storage Neo4j Published via GatekeeperDelegate
-- [ ] Tests end-to-end avec 1 document réel
-- [ ] Pilote Scénario A: 50 PDF textuels simples
+- [ ] Préparer 50 PDF textuels simples (SAP docs, product docs, technical specs)
+- [ ] Exécuter: `python scripts/pilot_scenario_a.py data/pilot_docs --max-documents 50`
+- [ ] Analyser résultats CSV vs critères de succès
 
 **Critères Succès Pilote A**:
 - [ ] Cost target: $0.25/doc ($1.00/1000p)
