@@ -1,1 +1,1 @@
-# Tests d'intégration
+# Tests d'intégration OSMOSE
