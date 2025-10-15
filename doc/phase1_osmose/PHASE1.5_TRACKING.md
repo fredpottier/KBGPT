@@ -12,11 +12,12 @@
 |---------|----------|--------|------------|-------|
 | **Semaine 11 J1-2** | Implémentation 6 agents + 11 tools | ✅ COMPLÉTÉ | 100% | 2025-10-15 |
 | **Semaine 11 J3** | Tests unitaires + Intégration pipeline | ✅ COMPLÉTÉ | 100% | 2025-10-15 |
-| **Semaine 11 J4-5** | Setup infra + Pilote Scénario A | 🟡 EN COURS | 0% | 2025-10-16-17 |
+| **Semaine 11 J4** | Setup infra multi-tenant | ✅ COMPLÉTÉ | 100% | 2025-10-16 |
+| **Semaine 11 J5** | Pilote Scénario A | ⏳ À VENIR | 0% | 2025-10-17 |
 | **Semaine 12** | Pilotes B&C + Dashboard Grafana | ⏳ À VENIR | 0% | 2025-10-21-25 |
 | **Semaine 13** | Analyse + GO/NO-GO | ⏳ À VENIR | 0% | 2025-10-28-31 |
 
-**Progression Globale**: **40%** (Jours 1-3/15 complétés)
+**Progression Globale**: **53%** (Jours 1-4/15 complétés)
 
 ---
 
@@ -104,14 +105,33 @@
 - ✅ budget_remaining: Budgets restants après traitement
 - ✅ promotion_rate: % concepts promoted (promoted/candidates)
 
-### 🟡 Jours 4-5 (2025-10-16-17) - Infrastructure & Pilote A
+### ✅ Jour 4 (2025-10-16) - Infrastructure Multi-tenant
+
+**Commits**:
+- `30b623e`: feat(redis) - RedisClient + BudgetManager integration (455 insertions)
+- `d4b0ed9`: test(redis) - 26 tests unitaires (453 insertions)
+- `49d462c`: feat(clients) - Neo4j + Qdrant multi-tenant (745 insertions)
+- `3fe29ba`: feat(segmentation) - TopicSegmenter integration (65 insertions)
+
+**Infrastructure Complétée**:
+- ✅ Redis quotas tracking multi-tenant (347 lignes + 26 tests)
+- ✅ Neo4j namespaces isolation tenant (611 lignes)
+- ✅ Qdrant tenant isolation (134 lignes)
+- ✅ TopicSegmenter intégré dans AgentState.segments (65 lignes)
+
+**Détails**:
+- ✅ RedisClient: get_budget_consumed(), increment_budget(), decrement_budget()
+- ✅ Neo4j: Proto-KG + Published-KG avec tenant_id filtering
+- ✅ Qdrant: upsert_points_with_tenant(), search_with_tenant_filter()
+- ✅ TopicSegmenter: segment_document() avec fallback gracieux
+
+**Rapport**: `doc/phase1_osmose/PHASE1.5_DAY4_INFRASTRUCTURE_REPORT.md`
+
+### 🟡 Jour 5 (2025-10-17) - Pilote Scénario A
 
 **Objectifs**:
-- [ ] Setup Redis pour quotas tracking multi-tenant
-- [ ] Neo4j namespaces isolation tenant
-- [ ] Qdrant tenant isolation
-- [ ] Intégrer TopicSegmenter dans AgentState.segments (remplacer mock)
 - [ ] Activer storage Neo4j Published via GatekeeperDelegate
+- [ ] Tests end-to-end avec 1 document réel
 - [ ] Pilote Scénario A: 50 PDF textuels simples
 
 **Critères Succès Pilote A**:
