@@ -2,6 +2,10 @@
 EntityNormalizer basé sur Neo4j.
 
 Remplace EntityNormalizer YAML pour normalisation via ontologies Neo4j.
+
+P0.1 Sandbox Auto-Learning (2025-10-16):
+- Filtrage entités pending par défaut (status != 'auto_learned_pending')
+- Paramètre include_pending pour accès admin explicit
 """
 from typing import Tuple, Optional, Dict
 from neo4j import GraphDatabase
@@ -30,15 +34,19 @@ class EntityNormalizerNeo4j:
         self,
         raw_name: str,
         entity_type_hint: Optional[str] = None,
-        tenant_id: str = "default"
+        tenant_id: str = "default",
+        include_pending: bool = False
     ) -> Tuple[Optional[str], str, Optional[str], bool]:
         """
         Normalise nom d'entité via ontologie Neo4j.
+
+        P0.1 Sandbox: Exclut entités pending par défaut (sauf si include_pending=True).
 
         Args:
             raw_name: Nom brut extrait par LLM
             entity_type_hint: Type suggéré par LLM (optionnel, pas contrainte)
             tenant_id: Tenant ID
+            include_pending: Si True, inclut entités auto_learned_pending (défaut: False)
 
         Returns:
             Tuple (entity_id, canonical_name, entity_type, is_cataloged)
@@ -60,13 +68,23 @@ class EntityNormalizerNeo4j:
 
             params = {
                 "normalized": normalized_search,
-                "tenant_id": tenant_id
+                "tenant_id": tenant_id,
+                "include_pending": include_pending
             }
+
+            # P0.1 Sandbox: Filtrer entités pending par défaut
+            where_clauses = []
+
+            if not include_pending:
+                where_clauses.append("ont.status != 'auto_learned_pending'")
 
             # Filtrer par type si hint fourni (mais pas bloquer si pas trouvé)
             if entity_type_hint:
-                query += " WHERE ont.entity_type = $entity_type_hint"
+                where_clauses.append("ont.entity_type = $entity_type_hint")
                 params["entity_type_hint"] = entity_type_hint
+
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
 
             query += """
             RETURN
@@ -75,7 +93,8 @@ class EntityNormalizerNeo4j:
                 ont.entity_type AS entity_type,
                 ont.category AS category,
                 ont.vendor AS vendor,
-                ont.confidence AS confidence
+                ont.confidence AS confidence,
+                ont.status AS status
             LIMIT 1
             """
 
@@ -108,10 +127,18 @@ class EntityNormalizerNeo4j:
                     normalized: $normalized,
                     tenant_id: $tenant_id
                 })
+                """
+
+                # P0.1 Sandbox: Toujours filtrer pending (même en fallback)
+                if not include_pending:
+                    query_no_type += " WHERE ont.status != 'auto_learned_pending'"
+
+                query_no_type += """
                 RETURN
                     ont.entity_id AS entity_id,
                     ont.canonical_name AS canonical_name,
-                    ont.entity_type AS entity_type
+                    ont.entity_type AS entity_type,
+                    ont.status AS status
                 LIMIT 1
                 """
 
