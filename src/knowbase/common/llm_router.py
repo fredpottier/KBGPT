@@ -39,6 +39,7 @@ class TaskType(Enum):
     CANONICALIZATION = "canonicalization" # Normalisation de noms
     RFP_QUESTION_ANALYSIS = "rfp_question_analysis" # Analyse intelligente questions RFP
     TRANSLATION = "translation"           # Traduction de langues (tâche simple)
+    KNOWLEDGE_EXTRACTION = "knowledge_extraction" # Extraction structurée concepts/facts/entities/relations
 
 
 class LLMRouter:
@@ -254,12 +255,15 @@ class LLMRouter:
         **kwargs
     ) -> str:
         """Appel vers OpenAI."""
+        # Filtrer les paramètres internes qui ne doivent pas être passés à l'API
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
+
         response = self.openai_client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
-            **kwargs
+            **api_kwargs
         )
 
         # Log et tracking des métriques de tokens
@@ -284,6 +288,9 @@ class LLMRouter:
         **kwargs
     ) -> str:
         """Appel vers Anthropic Claude."""
+        # Filtrer les paramètres internes qui ne doivent pas être passés à l'API
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
+
         # Conversion du format OpenAI vers Anthropic
         system_message = ""
         user_messages = []
@@ -300,7 +307,8 @@ class LLMRouter:
             max_tokens=max_tokens,
             temperature=temperature,
             system=system_message,
-            messages=user_messages
+            messages=user_messages,
+            **api_kwargs
         )
 
         # Log et tracking des métriques de tokens

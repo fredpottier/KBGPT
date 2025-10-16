@@ -14,8 +14,11 @@ import {
   useBreakpointValue,
   HStack,
   Badge,
+  Button,
 } from '@chakra-ui/react'
 import { HamburgerIcon, BellIcon, ChevronDownIcon } from '@chakra-ui/icons'
+import { useAuth } from '@/contexts/AuthContext'
+import { useRouter } from 'next/navigation'
 
 interface HeaderProps {
   title?: string
@@ -24,7 +27,53 @@ interface HeaderProps {
 
 export default function Header({ title, onMenuClick }: HeaderProps) {
   const isMobile = useBreakpointValue({ base: true, md: false })
+  const { user, isAuthenticated, logout } = useAuth()
+  const router = useRouter()
 
+  const handleLogout = () => {
+    logout()
+  }
+
+  const handleLogin = () => {
+    router.push('/login')
+  }
+
+  // Si non authentifié, afficher bouton login simple
+  if (!isAuthenticated) {
+    return (
+      <Box
+        bg="white"
+        px={4}
+        h="16"
+        borderBottom="1px"
+        borderBottomColor="gray.200"
+        shadow="sm"
+      >
+        <Flex h="100%" alignItems="center" justifyContent="space-between">
+          <HStack spacing={4}>
+            <IconButton
+              display={{ base: 'flex', md: 'none' }}
+              onClick={onMenuClick}
+              variant="ghost"
+              aria-label="Open menu"
+              icon={<HamburgerIcon />}
+            />
+            {title && (
+              <Text fontSize="xl" fontWeight="semibold" color="gray.800">
+                {title}
+              </Text>
+            )}
+          </HStack>
+
+          <Button colorScheme="brand" size="sm" onClick={handleLogin}>
+            Sign In
+          </Button>
+        </Flex>
+      </Box>
+    )
+  }
+
+  // Utilisateur authentifié
   return (
     <Box
       bg="white"
@@ -87,25 +136,44 @@ export default function Header({ title, onMenuClick }: HeaderProps) {
               <HStack spacing={2}>
                 <Avatar
                   size="sm"
-                  name="John Doe"
+                  name={user?.full_name || user?.email}
                   bg="brand.500"
                 />
                 {!isMobile && (
                   <>
-                    <Text fontSize="sm" fontWeight="medium">
-                      John Doe
-                    </Text>
+                    <Box textAlign="left">
+                      <Text fontSize="sm" fontWeight="medium">
+                        {user?.full_name || user?.email?.split('@')[0]}
+                      </Text>
+                      <Text fontSize="xs" color="gray.500">
+                        {user?.role}
+                      </Text>
+                    </Box>
                     <ChevronDownIcon />
                   </>
                 )}
               </HStack>
             </MenuButton>
             <MenuList>
-              <MenuItem>Profile</MenuItem>
-              <MenuItem>Settings</MenuItem>
-              <MenuItem>Billing</MenuItem>
+              <Box px={3} py={2}>
+                <Text fontSize="sm" fontWeight="medium">
+                  {user?.email}
+                </Text>
+                <Badge colorScheme={
+                  user?.role === 'admin' ? 'purple' :
+                  user?.role === 'editor' ? 'blue' : 'gray'
+                } size="sm">
+                  {user?.role}
+                </Badge>
+              </Box>
               <MenuDivider />
-              <MenuItem>Sign out</MenuItem>
+              <MenuItem onClick={() => router.push('/admin/settings')}>
+                Settings
+              </MenuItem>
+              <MenuDivider />
+              <MenuItem onClick={handleLogout} color="red.500">
+                Sign out
+              </MenuItem>
             </MenuList>
           </Menu>
         </HStack>

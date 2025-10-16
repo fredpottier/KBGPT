@@ -1,6 +1,12 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
+// Determine if we're running on server or client
+const isServer = typeof window === 'undefined'
+
+// Use internal Docker URL for server-side calls, external URL for client-side
+const API_BASE_URL = isServer
+  ? (process.env.NEXT_PUBLIC_API_INTERNAL_URL || 'http://app:8000')
+  : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000')
 
 export interface ApiResponse<T = any> {
   success: boolean
@@ -14,7 +20,7 @@ class ApiClient {
 
   constructor() {
     this.client = axios.create({
-      baseURL: '/api',
+      baseURL: `${API_BASE_URL}/api`,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -115,9 +121,49 @@ export const apiClient = new ApiClient()
 
 // Helper functions for common API operations
 export const api = {
-  // Documents - Using the existing /dispatch endpoint
+  // Documents - Document Backbone API (Phase 1)
   documents: {
-    list: () => apiClient.get('/documents'), // Not implemented in backend yet
+    // List documents with filters (pagination, type, status)
+    list: (params?: {
+      document_type?: string
+      status?: string
+      limit?: number
+      offset?: number
+    }) => {
+      const queryParams = new URLSearchParams()
+      if (params?.document_type) queryParams.append('document_type', params.document_type)
+      if (params?.status) queryParams.append('status', params.status)
+      if (params?.limit) queryParams.append('limit', params.limit.toString())
+      if (params?.offset) queryParams.append('offset', params.offset.toString())
+      const query = queryParams.toString()
+      return apiClient.get(`/documents${query ? `?${query}` : ''}`)
+    },
+
+    // Get document by ID with versions
+    getById: (id: string) => apiClient.get(`/documents/${id}`),
+
+    // Get all versions of a document
+    getVersions: (documentId: string) => apiClient.get(`/documents/${documentId}/versions`),
+
+    // Get version lineage graph (for D3.js visualization)
+    getLineage: (documentId: string) => apiClient.get(`/documents/${documentId}/lineage`),
+
+    // Create new version of document
+    createVersion: (documentId: string, file: File, versionLabel: string, effectiveDate?: string, authorName?: string) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('version_label', versionLabel)
+      if (effectiveDate) formData.append('effective_date', effectiveDate)
+      if (authorName) formData.append('author_name', authorName)
+      return apiClient.post(`/documents/${documentId}/versions`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    },
+
+    // Resolve Episode to Document (provenance traceability)
+    getByEpisode: (episodeUuid: string) => apiClient.get(`/documents/by-episode/${episodeUuid}`),
+
+    // Legacy upload via dispatch
     upload: (file: File, documentType?: string) => {
       const formData = new FormData()
       formData.append('action_type', 'ingest')
@@ -127,8 +173,6 @@ export const api = {
       }
       return api.dispatch.action(formData)
     },
-    get: (id: string) => apiClient.get(`/documents/${id}`), // Not implemented in backend yet
-    delete: (id: string) => apiClient.delete(`/documents/${id}`), // Not implemented in backend yet
   },
 
   // Chat - Using the direct /search endpoint (more logical)
@@ -157,6 +201,40 @@ export const api = {
   // Status endpoint
   status: {
     get: (uid: string) => apiClient.get(`/status/${uid}`),
+  },
+
+  // Imports - Import tracking and history
+  imports: {
+    history: () => apiClient.get('/imports/history'),
+    active: () => apiClient.get('/imports/active'),
+    sync: () => apiClient.post('/imports/sync'),
+    delete: (uid: string) => apiClient.delete(`/imports/${uid}`),
+  },
+
+  // Entity Types - Dynamic entity types management
+  entityTypes: {
+    list: (status?: string) => apiClient.get(`/entity-types${status ? `?status=${status}` : ''}`),
+    get: (typeName: string) => apiClient.get(`/entity-types/${typeName}`),
+    approve: (typeName: string) => apiClient.post(`/entity-types/${typeName}/approve`),
+    reject: (typeName: string, reason?: string) => apiClient.post(`/entity-types/${typeName}/reject`, { reason }),
+    delete: (typeName: string) => apiClient.delete(`/entity-types/${typeName}`),
+    importYaml: (file: File) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      return apiClient.post('/entity-types/import-yaml', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    },
+    exportYaml: () => apiClient.get('/entity-types/export-yaml'),
+  },
+
+  // Document Types - Document type templates
+  documentTypes: {
+    list: () => apiClient.get('/document-types'),
+    get: (id: string) => apiClient.get(`/document-types/${id}`),
+    create: (data: any) => apiClient.post('/document-types', data),
+    update: (id: string, data: any) => apiClient.put(`/document-types/${id}`, data),
+    delete: (id: string) => apiClient.delete(`/document-types/${id}`),
   },
 
   // Admin

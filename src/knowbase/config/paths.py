@@ -9,7 +9,7 @@ from typing import Iterable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SRC_DIR = PROJECT_ROOT / "src"
-CONFIG_DIR = SRC_DIR / "knowbase" / "config"
+CONFIG_DIR = PROJECT_ROOT / "config"  # Config files are at project root, not in src/
 COMMON_DIR = SRC_DIR / "knowbase" / "common"
 DATA_DIR = Path(os.getenv("KNOWBASE_DATA_DIR", PROJECT_ROOT / "data")).expanduser()
 PUBLIC_FILES_DIR = DATA_DIR / "public"
@@ -22,6 +22,9 @@ STATUS_DIR = DATA_DIR / "status"
 PRESENTATIONS_DIR = DOCS_DONE_DIR
 SLIDES_DIR = PUBLIC_FILES_DIR / "slides"
 THUMBNAILS_DIR = PUBLIC_FILES_DIR / "thumbnails"
+
+# Phase 3 - Ontologies directory
+ONTOLOGIES_DIR = CONFIG_DIR / "ontologies"
 
 LEGACY_DIRECTORIES: dict[Path, Path] = {
     PROJECT_ROOT / "docs_in": DOCS_IN_DIR,

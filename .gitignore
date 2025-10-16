@@ -11,6 +11,11 @@ venv/
 dist/
 build/
 
+# Security (Phase 0)
+config/keys/
+*.pem
+*.key
+
 # Jupyter Notebooks
 .ipynb_checkpoints/
 
@@ -75,3 +80,4 @@ frontend/out/
 
 # Docker generated files
 app/patch_unstructured.py
+env.production

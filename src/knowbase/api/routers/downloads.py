@@ -2,10 +2,11 @@
 Router API pour le téléchargement des fichiers traités.
 """
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from pathlib import Path
 import logging
+from knowbase.api.dependencies import get_current_user, get_tenant_id
 from knowbase.config.settings import get_settings
 from knowbase.api.services.import_history_redis import get_redis_import_history_service
 
@@ -14,9 +15,15 @@ router = APIRouter(prefix="/api/downloads", tags=["Downloads"])
 
 
 @router.get("/filled-rfp/{uid}")
-async def download_filled_rfp(uid: str):
+async def download_filled_rfp(
+    uid: str,
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Télécharge un fichier Excel RFP complété par UID.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
 
     Args:
         uid: Identifiant unique de l'import RFP
@@ -89,9 +96,15 @@ async def download_filled_rfp(uid: str):
 
 
 @router.get("/import-files/{uid}")
-async def download_import_file(uid: str):
+async def download_import_file(
+    uid: str,
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Télécharge le fichier original d'un import par UID.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
 
     Args:
         uid: Identifiant unique de l'import

@@ -44,7 +44,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { RepeatIcon, DeleteIcon, WarningIcon } from '@chakra-ui/icons'
 import { FiDownload } from 'react-icons/fi'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import axios from 'axios'
+import { api } from '@/lib/api'
 
 interface ImportRecord {
   uid: string
@@ -93,7 +93,7 @@ export default function ImportStatusPage() {
   const { data: importHistory = [], isLoading, refetch } = useQuery({
     queryKey: ['import-history'], // Fixed key
     queryFn: async () => {
-      const response = await axios.get(`http://localhost:8000/api/imports/history?t=${Date.now()}`)
+      const response = await api.imports.history()
       return response.data
     },
     refetchInterval: 5000,
@@ -105,7 +105,7 @@ export default function ImportStatusPage() {
   const { data: apiActiveImports = [] } = useQuery({
     queryKey: ['active-imports'], // Fixed key
     queryFn: async () => {
-      const response = await axios.get(`http://localhost:8000/api/imports/active?t=${Date.now()}`)
+      const response = await api.imports.active()
       return response.data
     },
     refetchInterval: 10000,
@@ -164,7 +164,7 @@ export default function ImportStatusPage() {
   // Fonction pour vérifier le statut d'un import actif
   const checkImportStatus = async (uid: string) => {
     try {
-      const response = await axios.get(`/api/status/${uid}`)
+      const response = await api.status.get(uid)
       return response.data
     } catch (error) {
       console.error(`Erreur lors de la vérification du statut pour ${uid}:`, error)
@@ -257,9 +257,9 @@ export default function ImportStatusPage() {
     setDeletingUID(recordToDelete.uid)
 
     try {
-      const response = await axios.delete(`/api/imports/${recordToDelete.uid}/delete`)
+      const response = await api.imports.delete(recordToDelete.uid)
 
-      if (response.status === 200) {
+      if (response.success) {
         toast({
           title: 'Import supprimé',
           description: `L'import "${recordToDelete.filename}" a été supprimé complètement`,
@@ -552,7 +552,7 @@ export default function ImportStatusPage() {
                   variant="outline"
                   onClick={async () => {
                     try {
-                      await axios.post('http://localhost:8000/api/imports/sync')
+                      await api.imports.sync()
                       queryClient.invalidateQueries({ queryKey: ['import-history'] })
                       queryClient.invalidateQueries({ queryKey: ['active-imports'] })
                       toast({

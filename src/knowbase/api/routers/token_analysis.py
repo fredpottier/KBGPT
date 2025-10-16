@@ -3,9 +3,10 @@ API pour l'analyse des tokens et coûts LLM
 """
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from knowbase.api.dependencies import get_current_user, get_tenant_id, require_admin
 from knowbase.common.token_tracker import get_token_tracker
 
 router = APIRouter(prefix="/tokens", tags=["Token Analysis"])
@@ -31,8 +32,15 @@ class TokenStats(BaseModel):
 
 
 @router.get("/stats")
-def get_token_stats():
-    """Obtient les statistiques globales des tokens."""
+def get_token_stats(
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Obtient les statistiques globales des tokens.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
+    """
     tracker = get_token_tracker()
     stats_by_model = tracker.get_stats_by_model()
 
@@ -48,9 +56,15 @@ def estimate_deck_cost(
     num_slides: int = Query(..., description="Nombre de slides dans le deck"),
     model: str = Query("gpt-4o", description="Modèle LLM à utiliser"),
     avg_input_tokens: int = Query(2000, description="Tokens d'input moyen par slide"),
-    avg_output_tokens: int = Query(1500, description="Tokens d'output moyen par slide")
+    avg_output_tokens: int = Query(1500, description="Tokens d'output moyen par slide"),
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
 ) -> DeckCostEstimate:
-    """Estime le coût d'traitement d'un deck complet."""
+    """
+    Estime le coût d'traitement d'un deck complet.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
+    """
     if num_slides <= 0:
         raise HTTPException(status_code=400, detail="Le nombre de slides doit être positif")
 
@@ -67,9 +81,15 @@ def estimate_deck_cost(
 def compare_providers_cost(
     input_tokens: int = Query(..., description="Tokens d'input"),
     output_tokens: int = Query(..., description="Tokens d'output"),
-    base_model: str = Query("gpt-4o", description="Modèle de base pour comparaison")
+    base_model: str = Query("gpt-4o", description="Modèle de base pour comparaison"),
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
 ):
-    """Compare les coûts entre différents providers."""
+    """
+    Compare les coûts entre différents providers.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
+    """
     from knowbase.common.token_tracker import TokenUsage
     from datetime import datetime
 
@@ -108,8 +128,15 @@ def compare_providers_cost(
 
 
 @router.get("/cost-by-task")
-def get_cost_by_task_type():
-    """Analyse des coûts par type de tâche."""
+def get_cost_by_task_type(
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Analyse des coûts par type de tâche.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
+    """
     tracker = get_token_tracker()
 
     # Grouper par task_type
@@ -144,8 +171,15 @@ def get_cost_by_task_type():
 
 
 @router.get("/pricing")
-def get_model_pricing():
-    """Retourne les tarifs actuels des modèles."""
+def get_model_pricing(
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Retourne les tarifs actuels des modèles.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
+    """
     tracker = get_token_tracker()
 
     pricing_info = {}
@@ -161,8 +195,14 @@ def get_model_pricing():
 
 
 @router.post("/reset")
-def reset_token_tracking():
-    """Reset les données de tracking (pour tests)."""
+def reset_token_tracking(
+    admin: dict = Depends(require_admin),
+):
+    """
+    Reset les données de tracking (pour tests).
+
+    **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
+    """
     tracker = get_token_tracker()
     tracker.usage_history.clear()
 
@@ -174,9 +214,15 @@ def estimate_sagemaker_savings(
     num_slides: int = Query(..., description="Nombre de slides dans le deck"),
     current_model: str = Query("gpt-4o", description="Modèle actuellement utilisé"),
     avg_input_tokens: int = Query(2000, description="Tokens d'input moyen par slide"),
-    avg_output_tokens: int = Query(1500, description="Tokens d'output moyen par slide")
+    avg_output_tokens: int = Query(1500, description="Tokens d'output moyen par slide"),
+    current_user: dict = Depends(get_current_user),
+    tenant_id: str = Depends(get_tenant_id),
 ):
-    """Compare les coûts actuels vs migration SageMaker pour un deck."""
+    """
+    Compare les coûts actuels vs migration SageMaker pour un deck.
+
+    **Sécurité**: Requiert authentification JWT (tous rôles).
+    """
     tracker = get_token_tracker()
 
     # Estimation coût actuel

@@ -1,0 +1,198 @@
+# 🌊 OSMOSE Semantic Intelligence V2.1 - Configuration
+# Phase 1 V2.1: Concept-First, Language-Agnostic Architecture
+
+semantic:
+  # Topic Segmentation
+  segmentation:
+    enabled: true
+    window_size: 3000              # Taille fenêtre (chars)
+    overlap: 0.25                  # 25% overlap entre fenêtres
+    cohesion_threshold: 0.65       # Seuil similarité intra-topic
+    clustering_method: "HDBSCAN"   # Primary clustering
+    clustering_fallback: "Agglomerative"  # Fallback si HDBSCAN échoue
+    min_cluster_size: 2            # Taille minimale cluster
+    max_windows_per_topic: 10      # Limite fenêtres par topic
+
+  # Multilingual Concept Extraction
+  extraction:
+    enabled: true
+    methods:
+      - "NER"                      # Named Entity Recognition
+      - "CLUSTERING"               # Embeddings clustering
+      - "LLM"                      # LLM extraction (✅ RÉACTIVÉ pour qualité concepts)
+
+    min_concepts_per_topic: 2      # Minimum concepts à extraire
+    max_concepts_per_topic: 15     # Maximum concepts par topic
+
+    concept_types:
+      - "ENTITY"                   # SAP S/4HANA, ISO 27001, MFA
+      - "PRACTICE"                 # threat modeling, penetration testing
+      - "STANDARD"                 # GDPR, SOC2, NIST CSF
+      - "TOOL"                     # SAST, DAST, SIEM
+      - "ROLE"                     # BISO, CSO, Security Champion
+
+    confidence_threshold: 0.7      # Seuil confiance minimum
+
+    llm:
+      model: "gpt-4o-mini"
+      temperature: 0.3
+      max_tokens: 1500
+      retry_attempts: 3
+
+  # Semantic Indexing & Canonicalization
+  indexing:
+    enabled: true
+    similarity_threshold: 0.85     # Seuil unification cross-lingual
+    canonical_name_priority: "en"  # Priorité anglais pour nom canonique
+    fallback_language: "original"  # Si pas de traduction EN, garder original
+
+    hierarchy_construction: "LLM"  # Construction hiérarchie (LLM ou rules)
+    hierarchy_max_depth: 3         # Profondeur max hiérarchie
+
+    deduplication: true            # Dédupliquer concepts similaires
+    deduplication_threshold: 0.90  # Seuil déduplication (plus strict)
+
+  # Concept Linking (Cross-Document)
+  linking:
+    enabled: true
+    document_roles:
+      - "DEFINES"                  # Document définit le concept
+      - "IMPLEMENTS"               # Document implémente le concept
+      - "AUDITS"                   # Document audite le concept
+      - "PROVES"                   # Document prouve conformité
+      - "REFERENCES"               # Document mentionne le concept
+
+    similarity_threshold: 0.75     # Seuil similarité document-concept
+    max_connections_per_doc: 20    # Max connexions par document
+
+# NER Multilingue (spaCy)
+ner:
+  enabled: true
+  models:
+    en: "en_core_web_md"           # Anglais (medium, 85-90% précision NER)
+    fr: "fr_core_news_md"          # Français (medium, 85-90% précision NER)
+    xx: "xx_ent_wiki_sm"           # Multi-langue (fallback)
+
+  entity_types:                    # Types entités NER à extraire
+    - "ORG"                        # Organizations
+    - "PRODUCT"                    # Products
+    - "TECH"                       # Technologies (custom)
+    - "LAW"                        # Legal references
+    - "MISC"                       # Miscellaneous
+
+  batch_size: 16                   # Batch processing
+  n_process: 1                     # Nombre de processus parallèles
+
+# Embeddings Multilingues
+embeddings:
+  model: "intfloat/multilingual-e5-large"  # 1024 dimensions
+  dimension: 1024
+  device: "cpu"                    # cpu ou cuda
+  batch_size: 32                   # Batch size pour embeddings
+  normalize: true                  # Normaliser vecteurs (pour cosine)
+
+  cache_enabled: true              # Cache embeddings en mémoire
+  cache_size: 1000                 # Max concepts en cache
+  cache_ttl: 3600                  # TTL cache (secondes)
+
+# Détection Langue (fasttext)
+language_detection:
+  enabled: true
+  model_path: "/app/models/lid.176.bin"  # Modèle fasttext (chemin absolu Docker)
+  confidence_threshold: 0.8        # Seuil confiance détection
+  fallback_language: "en"          # Langue par défaut si détection échoue
+
+  supported_languages:             # Langues supportées (ISO 639-1)
+    - "en"  # Anglais
+    - "fr"  # Français
+    - "de"  # Allemand
+    - "es"  # Espagnol
+    - "it"  # Italien
+    - "pt"  # Portugais
+    - "nl"  # Néerlandais
+
+# Neo4j Proto-KG V2.1
+# Note: uri, user, password sont lus depuis variables d'environnement par Pydantic
+neo4j_proto:
+  database: "neo4j"
+
+  labels:
+    document: "Document"
+    topic: "Topic"
+    concept: "Concept"
+    canonical_concept: "CanonicalConcept"
+
+  relationships:
+    has_topic: "HAS_TOPIC"
+    extracts_concept: "EXTRACTS_CONCEPT"
+    unified_as: "UNIFIED_AS"
+    parent_of: "PARENT_OF"
+    child_of: "CHILD_OF"
+    relates_to: "RELATES_TO"
+    mentions_in: "MENTIONS_IN"
+
+  indexes:
+    - "concept_name"
+    - "canonical_name"
+    - "concept_type"
+    - "language"
+
+# Qdrant Proto (Concepts)
+# Note: host et port sont lus depuis variables d'environnement par Pydantic
+qdrant_proto:
+  collection_name: "concepts_proto"
+  vector_size: 1024                # multilingual-e5-large
+  distance: "Cosine"               # Cosine similarity
+
+  on_disk_payload: true            # Payload sur disque (économie RAM)
+  hnsw_config:
+    m: 16                          # Nombre de connexions HNSW
+    ef_construct: 100              # Construction HNSW
+
+  optimization:
+    indexing_threshold: 10000      # Seuil optimisation auto
+
+# Profiling (Conservé pour budget allocation)
+profiling:
+  enabled: true
+  complexity_zones: true           # Analyser zones complexité
+  complexity_levels:
+    simple: 0.33                   # Seuil simple (< 0.33)
+    medium: 0.66                   # Seuil medium (0.33-0.66)
+    complex: 1.0                   # Seuil complex (> 0.66)
+
+  domain_classification: true      # Classifier domaine document
+  supported_domains:
+    - "finance"
+    - "pharma"
+    - "consulting"
+    - "technology"
+    - "legal"
+    - "general"
+
+# Performance & Monitoring
+performance:
+  # Timeouts
+  topic_segmentation_timeout: 60   # Timeout segmentation (secondes)
+  concept_extraction_timeout: 120  # Timeout extraction (secondes)
+  indexing_timeout: 90             # Timeout indexing (secondes)
+  linking_timeout: 60              # Timeout linking (secondes)
+
+  # Targets
+  target_processing_time: 30       # Objectif temps traitement/doc (secondes)
+  target_cost_per_doc: 0.40        # Objectif coût/doc (USD)
+
+  # Metrics
+  track_metrics: true
+  metrics_retention_days: 30
+
+# Logging
+logging:
+  level: "DEBUG"                   # DEBUG, INFO, WARNING, ERROR (TEMPORAIRE pour diagnostic)
+  format: "[OSMOSE] %(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+  semantic_logger: "knowbase.semantic"
+
+  log_extraction_details: true     # Log détails extraction concepts
+  log_canonicalization: true       # Log unification cross-lingual
+  log_performance: true            # Log métriques performance

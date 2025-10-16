@@ -19,14 +19,18 @@ import {
   Spinner,
   Center,
   Divider,
+  Button,
+  SimpleGrid,
 } from '@chakra-ui/react'
 import {
   ViewIcon,
   ChatIcon,
   TimeIcon,
   WarningIcon,
+  SettingsIcon,
 } from '@chakra-ui/icons'
 import { useQuery } from '@tanstack/react-query'
+import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import { MonitoringStats } from '@/types/api'
 
@@ -65,6 +69,8 @@ const StatCard = ({
 )
 
 export default function AdminDashboard() {
+  const router = useRouter()
+
   const {
     data: statsResponse,
     isLoading,
@@ -125,9 +131,63 @@ export default function AdminDashboard() {
 
   return (
     <VStack spacing={6} align="stretch">
-      <Text fontSize="2xl" fontWeight="bold" mb={4}>
-        Dashboard Overview
-      </Text>
+      <Box>
+        <Text fontSize="2xl" fontWeight="bold">
+          Dashboard Administration
+        </Text>
+        <Text color="gray.600" mt={2}>
+          Vue d'ensemble du système SAP Knowledge Base
+        </Text>
+      </Box>
+
+      {/* Quick Access */}
+      <Card>
+        <CardHeader>
+          <Text fontSize="lg" fontWeight="semibold">
+            Accès Rapides
+          </Text>
+        </CardHeader>
+        <CardBody>
+          <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4}>
+            <Button
+              leftIcon={<ViewIcon />}
+              onClick={() => router.push('/admin/documents')}
+              colorScheme="blue"
+              variant="outline"
+              justifyContent="flex-start"
+            >
+              Gestion Documents
+            </Button>
+            <Button
+              leftIcon={<SettingsIcon />}
+              onClick={() => router.push('/admin/document-types')}
+              colorScheme="purple"
+              variant="outline"
+              justifyContent="flex-start"
+            >
+              Types de Documents
+            </Button>
+            <Button
+              leftIcon={<SettingsIcon />}
+              onClick={() => router.push('/admin/dynamic-types')}
+              colorScheme="orange"
+              variant="outline"
+              justifyContent="flex-start"
+            >
+              Types d'Entités
+            </Button>
+            <Button
+              leftIcon={<SettingsIcon />}
+              onClick={() => router.push('/admin/settings')}
+              colorScheme="gray"
+              variant="outline"
+              justifyContent="flex-start"
+            >
+              Paramètres
+            </Button>
+          </SimpleGrid>
+        </CardBody>
+      </Card>
 
       {/* Statistics Cards */}
       <Grid templateColumns="repeat(auto-fit, minmax(250px, 1fr))" gap={6}>

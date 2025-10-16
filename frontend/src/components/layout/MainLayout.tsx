@@ -1,7 +1,9 @@
 'use client'
 
-import { Box, Flex } from '@chakra-ui/react'
-import { usePathname } from 'next/navigation'
+import { Box, Flex, Center, Spinner, VStack, Text } from '@chakra-ui/react'
+import { usePathname, useRouter } from 'next/navigation'
+import { useEffect } from 'react'
+import { useAuth } from '@/contexts/AuthContext'
 import TopNavigation from './TopNavigation'
 import ContextualSidebar from './ContextualSidebar'
 
@@ -11,6 +13,54 @@ interface MainLayoutProps {
 
 export default function MainLayout({ children }: MainLayoutProps) {
   const pathname = usePathname()
+  const router = useRouter()
+  const { isAuthenticated, isLoading } = useAuth()
+
+  // Pages d'authentification (pas de navigation)
+  const isAuthPage = pathname === '/login' || pathname === '/register'
+
+  // Redirection si non authentifié
+  useEffect(() => {
+    console.log('[MainLayout] Auth Check:', {
+      pathname,
+      isLoading,
+      isAuthenticated,
+      isAuthPage,
+    })
+
+    if (!isLoading && !isAuthenticated && !isAuthPage) {
+      // Sauvegarder l'URL pour redirection après login
+      const redirectUrl = encodeURIComponent(pathname || '/')
+      console.log('[MainLayout] Not authenticated, redirecting to /login')
+      router.push(`/login?redirect=${redirectUrl}`)
+    }
+  }, [isLoading, isAuthenticated, isAuthPage, pathname, router])
+
+  // Si page d'authentification, afficher uniquement le contenu sans navigation
+  if (isAuthPage) {
+    return (
+      <Box minH="100vh" bg="gray.50">
+        {children}
+      </Box>
+    )
+  }
+
+  // Pendant le chargement de l'authentification
+  if (isLoading) {
+    return (
+      <Center h="100vh" bg="gray.50">
+        <VStack spacing={4}>
+          <Spinner size="xl" color="brand.500" thickness="4px" />
+          <Text color="gray.600">Vérification de l'authentification...</Text>
+        </VStack>
+      </Center>
+    )
+  }
+
+  // Si pas authentifié et pas sur page auth, ne rien afficher (redirection en cours)
+  if (!isAuthenticated) {
+    return null
+  }
 
   // Déterminer la section actuelle
   const getCurrentSection = (): 'chat' | 'documents' | 'admin' => {
@@ -24,7 +74,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const currentSection = getCurrentSection()
   const showSidebar = currentSection !== 'chat' && (
     currentSection === 'documents' ||
-    (currentSection === 'admin' && false) // Admin sidebar vide pour le moment
+    currentSection === 'admin' // Admin sidebar avec menu ontologies
   )
 
   return (
@@ -39,7 +89,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
         {/* Contenu principal */}
         <Box
           flex="1"
-          ml={showSidebar && currentSection === 'documents' ? '256px' : '0'} // 64 * 4 = 256px
+          ml={showSidebar ? '256px' : '0'} // 64 * 4 = 256px (sidebar documents ou admin)
           minH="calc(100vh - 64px)"
           bg="gray.50"
         >

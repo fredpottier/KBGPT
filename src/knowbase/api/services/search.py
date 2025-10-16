@@ -111,15 +111,31 @@ def get_available_solutions(
     settings: Settings,
 ) -> list[str]:
     """Récupère la liste des solutions disponibles dans la base Qdrant."""
+    # Vérifier si la collection existe
+    try:
+        collections = qdrant_client.get_collections()
+        collection_exists = any(
+            col.name == settings.qdrant_collection
+            for col in collections.collections
+        )
+        if not collection_exists:
+            return []
+    except Exception:
+        return []
+
     # Récupération de tous les points avec la propriété main_solution
     solutions = set()
 
-    # Utilisation de scroll pour récupérer tous les points avec solution.main
-    scroll_result = qdrant_client.scroll(
-        collection_name=settings.qdrant_collection,
-        limit=1000,  # Limite élevée pour récupérer beaucoup de points
-        with_payload=["solution"],
-    )
+    try:
+        # Utilisation de scroll pour récupérer tous les points avec solution.main
+        scroll_result = qdrant_client.scroll(
+            collection_name=settings.qdrant_collection,
+            limit=1000,  # Limite élevée pour récupérer beaucoup de points
+            with_payload=["solution"],
+        )
+    except Exception:
+        # Collection existe mais vide ou erreur de lecture
+        return []
 
     points, next_page_offset = scroll_result
 

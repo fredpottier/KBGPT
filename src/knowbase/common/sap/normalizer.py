@@ -1,8 +1,21 @@
 # -*- coding: utf-8 -*-
 """
+⚠️  DEPRECATED - Utiliser knowbase.common.entity_normalizer à la place
+
 Utilitaires pour normaliser les noms de solutions SAP
 a partir des documents ingeres (PPTX, PDF, Excel, etc.).
+
+Ce module est conservé pour compatibilité ascendante mais sera supprimé.
+Migration recommandée :
+
+    from knowbase.common.entity_normalizer import get_entity_normalizer
+    from knowbase.api.schemas.knowledge_graph import EntityType
+
+    normalizer = get_entity_normalizer()
+    entity_id, canonical = normalizer.normalize_entity_name(raw_name, EntityType.SOLUTION)
 """
+
+import warnings
 
 from typing import Iterable, Tuple
 
@@ -20,6 +33,8 @@ def _normalize_for_matching(text: str) -> str:
 
 def normalize_solution_name(raw_name: str, threshold: int = 80) -> Tuple[str, str]:
     """
+    ⚠️  DEPRECATED - Utiliser entity_normalizer.normalize_entity_name() à la place
+
     Normalise un nom de solution trouve dans un document en le mappant
     a un identifiant stable SAP et a son nom canonique.
 
@@ -33,6 +48,12 @@ def normalize_solution_name(raw_name: str, threshold: int = 80) -> Tuple[str, st
                canonical_name = nom canonique officiel (ex: "SAP S/4HANA Cloud, Private Edition")
                Si aucun match fiable -> ("UNMAPPED", raw_name)
     """
+    warnings.warn(
+        "normalize_solution_name() est déprécié. "
+        "Utiliser entity_normalizer.normalize_entity_name(raw_name, EntityType.SOLUTION) à la place.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     if not raw_name:
         return "UNMAPPED", ""
 

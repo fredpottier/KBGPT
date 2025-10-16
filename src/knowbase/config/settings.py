@@ -9,11 +9,13 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from .paths import (
+    CONFIG_DIR,
     DATA_DIR,
     DOCS_DONE_DIR,
     DOCS_IN_DIR,
     LOGS_DIR,
     MODELS_DIR,
+    ONTOLOGIES_DIR,
     PRESENTATIONS_DIR,
     PROJECT_ROOT,
     SLIDES_DIR,
@@ -38,12 +40,17 @@ class Settings(BaseSettings):
     model_fast: str = Field(default="gpt-4o-mini", alias="MODEL_FAST")
 
     # Modèles Anthropic
-    model_long_text: str = Field(default="claude-3-5-sonnet-20241022", alias="MODEL_LONG_TEXT")
-    model_enrichment: str = Field(default="claude-3-5-haiku-20241022", alias="MODEL_ENRICHMENT")
+    model_long_text: str = Field(default="claude-sonnet-4-20250514", alias="MODEL_LONG_TEXT")
+    model_enrichment: str = Field(default="claude-3-haiku-20240307", alias="MODEL_ENRICHMENT")
 
     # Configuration clients
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
+
+    # Configuration Neo4j
+    neo4j_uri: str = Field(default="bolt://graphiti-neo4j:7687", alias="NEO4J_URI")
+    neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
+    neo4j_password: str = Field(default="graphiti_neo4j_pass", alias="NEO4J_PASSWORD")
 
     embeddings_model: str = Field(
         default="intfloat/multilingual-e5-base", alias="EMB_MODEL_NAME"
@@ -54,6 +61,11 @@ class Settings(BaseSettings):
     qdrant_qa_collection: str = Field(default="rfp_qa", alias="QDRANT_QA_COLLECTION")
     hf_home: Path = Field(default=MODELS_DIR, alias="HF_HOME")
 
+    # Configuration Redis (pour RQ jobs async)
+    redis_host: str = Field(default="redis", alias="REDIS_HOST")
+    redis_port: int = Field(default=6379, alias="REDIS_PORT")
+
+    config_dir: Path = Field(default=CONFIG_DIR)
     data_dir: Path = Field(default=DATA_DIR, alias="DATA_DIR")
     docs_in_dir: Path = Field(default=DOCS_IN_DIR)
     docs_done_dir: Path = Field(default=DOCS_DONE_DIR)
@@ -63,6 +75,7 @@ class Settings(BaseSettings):
     presentations_dir: Path = Field(default=PRESENTATIONS_DIR)
     slides_dir: Path = Field(default=SLIDES_DIR)
     thumbnails_dir: Path = Field(default=THUMBNAILS_DIR)
+    ontologies_dir: Path = Field(default=ONTOLOGIES_DIR)  # Phase 3
 
     class Config:
         env_file = PROJECT_ROOT / ".env"

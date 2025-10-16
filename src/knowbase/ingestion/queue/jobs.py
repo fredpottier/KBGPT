@@ -14,10 +14,12 @@ from knowbase.ingestion.pipelines import (
     pdf_pipeline,
     pptx_pipeline,
 )
+from knowbase.common.logging import setup_logging
 
 
 SETTINGS = get_settings()
 PRESENTATIONS_DIR = SETTINGS.presentations_dir
+logger = setup_logging(SETTINGS.logs_dir, "jobs.log")
 
 
 def _ensure_exists(path: Path) -> Path:
@@ -73,11 +75,50 @@ def mark_job_as_processing():
         )
 
 
+def auto_deduplicate_entities(tenant_id: str = "default") -> None:
+    """
+    Dé-duplication automatique des entités après un import.
+
+    Cette fonction est appelée automatiquement à la fin de chaque import
+    pour nettoyer les entités en doublon dans Neo4j.
+
+    Si la dé-duplication échoue, cela ne fait pas échouer le job d'import
+    (c'est une opération de nettoyage optionnelle).
+    """
+    try:
+        logger.info("🧹 Démarrage de la dé-duplication automatique des entités...")
+
+        from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
+
+        kg_service = KnowledgeGraphService(tenant_id=tenant_id)
+        stats = kg_service.deduplicate_entities_by_name(
+            tenant_id=tenant_id,
+            dry_run=False  # Exécution réelle
+        )
+
+        if stats["duplicate_groups"] > 0:
+            logger.info(
+                f"✅ Dé-duplication automatique terminée: "
+                f"{stats['duplicate_groups']} groupes traités, "
+                f"{stats['entities_to_merge']} entités fusionnées, "
+                f"{stats['relations_updated']} relations réassignées"
+            )
+        else:
+            logger.info("✅ Aucun doublon détecté, base Neo4j déjà propre")
+
+    except Exception as e:
+        # Ne pas faire échouer le job si la dé-duplication échoue
+        logger.warning(f"⚠️ Échec de la dé-duplication automatique (non bloquant): {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+
+
 def ingest_pptx_job(
     *,
     pptx_path: str,
-    document_type: str = "default",
+    document_type_id: Optional[str] = None,
     meta_path: Optional[str] = None,
+    use_vision: bool = True,
 ) -> dict[str, Any]:
     try:
         # Marquer comme en cours de traitement
@@ -94,7 +135,7 @@ def ingest_pptx_job(
                     meta_file.replace(target)
 
         update_job_progress("Traitement", 2, 6, "Traitement du document PowerPoint")
-        result = pptx_pipeline.process_pptx(path, document_type=document_type, progress_callback=update_job_progress)
+        result = pptx_pipeline.process_pptx(path, document_type_id=document_type_id, use_vision=use_vision, progress_callback=update_job_progress)
 
         update_job_progress("Finalisation", 6, 6, "Import terminé avec succès")
         destination = pptx_pipeline.DOCS_DONE / f"{path.stem}.pptx"
@@ -112,6 +153,9 @@ def ingest_pptx_job(
                 status="completed",
                 chunks_inserted=chunks_inserted
             )
+
+        # Dé-duplication automatique des entités après l'import
+        auto_deduplicate_entities(tenant_id="default")
 
         return {
             "status": "completed",
@@ -147,7 +191,7 @@ def ingest_pptx_job(
         raise
 
 
-def ingest_pdf_job(*, pdf_path: str) -> dict[str, Any]:
+def ingest_pdf_job(*, pdf_path: str, document_type_id: Optional[str] = None, use_vision: bool = True) -> dict[str, Any]:
     try:
         # Marquer comme en cours de traitement
         mark_job_as_processing()
@@ -155,7 +199,7 @@ def ingest_pdf_job(*, pdf_path: str) -> dict[str, Any]:
         path = _ensure_exists(Path(pdf_path))
 
         update_job_progress("Traitement", 1, 3, "Traitement du document PDF")
-        result = pdf_pipeline.process_pdf(path)
+        result = pdf_pipeline.process_pdf(path, document_type_id=document_type_id, use_vision=use_vision)
         destination = pdf_pipeline.DOCS_DONE / f"{path.stem}.pdf"
 
         update_job_progress("Terminé", 3, 3, "Import PDF terminé avec succès")
@@ -173,6 +217,9 @@ def ingest_pdf_job(*, pdf_path: str) -> dict[str, Any]:
                 status="completed",
                 chunks_inserted=chunks_inserted
             )
+
+        # Dé-duplication automatique des entités après l'import
+        auto_deduplicate_entities(tenant_id="default")
 
         return {
             "status": "completed",
@@ -231,6 +278,9 @@ def ingest_excel_job(
                 status="completed",
                 chunks_inserted=chunks_inserted
             )
+
+        # Dé-duplication automatique des entités après l'import
+        auto_deduplicate_entities(tenant_id="default")
 
         return {
             "status": "completed",

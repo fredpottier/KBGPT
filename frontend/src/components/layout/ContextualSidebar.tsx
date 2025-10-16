@@ -15,7 +15,10 @@ import {
   AttachmentIcon,
   EditIcon,
   ViewIcon,
+  SettingsIcon,
+  CheckCircleIcon,
 } from '@chakra-ui/icons'
+import { FiDatabase, FiLayers } from 'react-icons/fi'
 
 interface SidebarItemProps {
   icon?: any
@@ -94,7 +97,31 @@ export default function ContextualSidebar({ section }: ContextualSidebarProps) {
         ]
       case 'admin':
         return [
-          // Menu vide pour le moment
+          {
+            icon: ViewIcon,
+            label: 'Dashboard',
+            href: '/admin',
+          },
+          {
+            icon: AttachmentIcon,
+            label: 'Gestion Documents',
+            href: '/admin/documents',
+          },
+          {
+            icon: FiLayers,
+            label: 'Types Entités',
+            href: '/admin/dynamic-types',
+          },
+          {
+            icon: FiDatabase,
+            label: 'Types de Documents',
+            href: '/admin/document-types',
+          },
+          {
+            icon: SettingsIcon,
+            label: 'Configuration',
+            href: '/admin/settings',
+          },
         ]
       default:
         return []
