@@ -244,7 +244,7 @@ class EntityNormalizerNeo4j:
 
         # Filtrer pending si nécessaire
         if not include_pending:
-            where_clauses.append("ont.status != 'auto_learned_pending'")
+            where_clauses.append("ont.status <> 'auto_learned_pending'")
 
         # Filtrer par type si fourni (mais ne pas bloquer)
         if entity_type_hint:
