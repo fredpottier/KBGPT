@@ -121,7 +121,11 @@ class Neo4jClient:
             logger.warning("[NEO4J] Not connected, skipping Proto concept creation")
             return ""
 
+        import json
+
         metadata = metadata or {}
+        # Convertir metadata en JSON string pour Neo4j (ne supporte pas les Maps)
+        metadata_json = json.dumps(metadata)
 
         query = """
         CREATE (c:ProtoConcept {
@@ -134,7 +138,7 @@ class Neo4jClient:
             extraction_method: $extraction_method,
             confidence: $confidence,
             created_at: datetime(),
-            metadata: $metadata
+            metadata_json: $metadata_json
         })
         RETURN c.concept_id AS concept_id
         """
@@ -150,7 +154,7 @@ class Neo4jClient:
                     document_id=document_id,
                     extraction_method=extraction_method,
                     confidence=confidence,
-                    metadata=metadata
+                    metadata_json=metadata_json
                 )
 
                 record = result.single()
@@ -263,7 +267,8 @@ class Neo4jClient:
         canonical_name: str,
         unified_definition: str,
         quality_score: float = 0.0,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        decision_trace_json: Optional[str] = None
     ) -> str:
         """
         Promouvoir concept Proto → Published (validation Gatekeeper).
@@ -275,6 +280,7 @@ class Neo4jClient:
             unified_definition: Définition sémantique unifiée
             quality_score: Score qualité Gatekeeper (0-1)
             metadata: Métadonnées additionnelles
+            decision_trace_json: JSON trace décision canonicalisation (P0.3)
 
         Returns:
             canonical_id créé (ou "" si échec)
@@ -283,7 +289,11 @@ class Neo4jClient:
             logger.warning("[NEO4J] Not connected, skipping promotion")
             return ""
 
+        import json
+
         metadata = metadata or {}
+        # Convertir metadata en JSON string pour Neo4j (ne supporte pas les Maps)
+        metadata_json = json.dumps(metadata)
 
         query = """
         MATCH (proto:ProtoConcept {concept_id: $proto_concept_id, tenant_id: $tenant_id})
@@ -297,7 +307,8 @@ class Neo4jClient:
             unified_definition: $unified_definition,
             quality_score: $quality_score,
             promoted_at: datetime(),
-            metadata: $metadata
+            metadata_json: $metadata_json,
+            decision_trace_json: $decision_trace_json
         })
 
         // Lien Proto → Canonical
@@ -316,7 +327,8 @@ class Neo4jClient:
                     canonical_name=canonical_name,
                     unified_definition=unified_definition,
                     quality_score=quality_score,
-                    metadata=metadata
+                    metadata_json=metadata_json,
+                    decision_trace_json=decision_trace_json
                 )
 
                 record = result.single()

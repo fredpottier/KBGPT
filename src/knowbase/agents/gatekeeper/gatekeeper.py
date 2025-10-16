@@ -12,11 +12,18 @@ Phase 1.5 Jours 7-9: Filtrage Contextuel Hybride
 from typing import Dict, Any, Optional, List
 import logging
 import re
+from pydantic import model_validator
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
 from knowbase.common.clients.neo4j_client import get_neo4j_client
 from .graph_centrality_scorer import GraphCentralityScorer
 from .embeddings_contextual_scorer import EmbeddingsContextualScorer
+from knowbase.ontology.decision_trace import (
+    DecisionTrace,
+    create_decision_trace,
+    NormalizationStrategy,
+    StrategyResult
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +94,19 @@ class GateCheckOutput(ToolOutput):
     retry_recommended: bool = False
     rejection_reasons: Dict[str, List[str]] = {}
 
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.promoted:
+            self.promoted = self.data.get("promoted", [])
+        if self.data and not self.rejected:
+            self.rejected = self.data.get("rejected", [])
+        if self.data and not self.retry_recommended:
+            self.retry_recommended = self.data.get("retry_recommended", False)
+        if self.data and not self.rejection_reasons:
+            self.rejection_reasons = self.data.get("rejection_reasons", {})
+        return self
+
 
 class PromoteConceptsInput(ToolInput):
     """Input pour PromoteConcepts tool."""
@@ -96,6 +116,13 @@ class PromoteConceptsInput(ToolInput):
 class PromoteConceptsOutput(ToolOutput):
     """Output pour PromoteConcepts tool."""
     promoted_count: int = 0
+
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.promoted_count:
+            self.promoted_count = self.data.get("promoted_count", 0)
+        return self
 
 
 class GatekeeperDelegate(BaseAgent):
@@ -174,14 +201,14 @@ class GatekeeperDelegate(BaseAgent):
 
         # Neo4j client pour Published-KG
         if config:
-            neo4j_uri = config.get("neo4j_uri", "bolt://localhost:7687")
+            neo4j_uri = config.get("neo4j_uri", "bolt://neo4j:7687")  # Docker service name
             neo4j_user = config.get("neo4j_user", "neo4j")
-            neo4j_password = config.get("neo4j_password", "password")
+            neo4j_password = config.get("neo4j_password", "graphiti_neo4j_pass")  # From docker-compose
             neo4j_database = config.get("neo4j_database", "neo4j")
         else:
-            neo4j_uri = "bolt://localhost:7687"
+            neo4j_uri = "bolt://neo4j:7687"  # Docker service name
             neo4j_user = "neo4j"
-            neo4j_password = "password"
+            neo4j_password = "graphiti_neo4j_pass"  # From docker-compose
             neo4j_database = "neo4j"
 
         try:
@@ -242,13 +269,14 @@ class GatekeeperDelegate(BaseAgent):
             full_text=state.full_text  # Transmettre texte pour filtrage contextuel
         )
 
-        gate_result = self.call_tool("gate_check", gate_input)
+        gate_result = await self.call_tool("gate_check", gate_input)
 
         if not gate_result.success:
             logger.error(f"[GATEKEEPER] GateCheck failed: {gate_result.message}")
             return state
 
-        gate_output = GateCheckOutput(**gate_result.data)
+        # gate_result est déjà un GateCheckOutput (hérite de ToolOutput)
+        gate_output = gate_result
 
         logger.info(
             f"[GATEKEEPER] Gate check complete: {len(gate_output.promoted)} promoted, "
@@ -261,7 +289,7 @@ class GatekeeperDelegate(BaseAgent):
         # Étape 2: Promouvoir concepts vers Neo4j (si promoted)
         if gate_output.promoted:
             promote_input = PromoteConceptsInput(concepts=gate_output.promoted)
-            promote_result = self.call_tool("promote_concepts", promote_input)
+            promote_result = await self.call_tool("promote_concepts", promote_input)
 
             if not promote_result.success:
                 logger.error(f"[GATEKEEPER] PromoteConcepts failed: {promote_result.message}")
@@ -404,9 +432,13 @@ class GatekeeperDelegate(BaseAgent):
                 f"promotion_rate={promotion_rate:.1%}, retry_recommended={retry_recommended}"
             )
 
-            return ToolOutput(
+            return GateCheckOutput(
                 success=True,
                 message=f"Gate check complete: {len(promoted)} promoted",
+                promoted=promoted,
+                rejected=rejected,
+                retry_recommended=retry_recommended,
+                rejection_reasons=rejection_reasons,
                 data={
                     "promoted": promoted,
                     "rejected": rejected,
@@ -470,9 +502,10 @@ class GatekeeperDelegate(BaseAgent):
             # Si Neo4j non disponible, skip promotion (mode dégradé)
             if not self.neo4j_client or not self.neo4j_client.is_connected():
                 logger.warning("[GATEKEEPER:PromoteConcepts] Neo4j unavailable, skipping promotion (degraded mode)")
-                return ToolOutput(
+                return PromoteConceptsOutput(
                     success=True,
                     message=f"Skipped promotion (Neo4j unavailable): {len(concepts)} concepts",
+                    promoted_count=0,
                     data={
                         "promoted_count": 0,
                         "skipped_count": len(concepts)
@@ -503,10 +536,79 @@ class GatekeeperDelegate(BaseAgent):
                 quality_score = confidence
 
                 try:
-                    # Appel Neo4j promote_to_published()
+                    # Étape 1: Créer ProtoConcept dans Neo4j (si pas déjà existant)
+                    if not proto_concept_id:
+                        # Créer ProtoConcept
+                        proto_concept_id = self.neo4j_client.create_proto_concept(
+                            tenant_id=tenant_id,
+                            concept_name=concept_name,
+                            concept_type=concept_type,
+                            segment_id=concept.get("segment_id", "unknown"),
+                            document_id=concept.get("document_id", "unknown"),
+                            extraction_method=concept.get("extraction_method", "NER"),
+                            confidence=confidence,
+                            metadata={
+                                "definition": definition,
+                                "original_name": concept_name,
+                                "gate_profile": self.default_profile
+                            }
+                        )
+
+                        if not proto_concept_id:
+                            failed_count += 1
+                            logger.warning(
+                                f"[GATEKEEPER:PromoteConcepts] Failed to create ProtoConcept for '{concept_name}'"
+                            )
+                            continue
+
+                        logger.debug(
+                            f"[GATEKEEPER:PromoteConcepts] Created ProtoConcept '{concept_name}' "
+                            f"(id={proto_concept_id[:8]})"
+                        )
+
+                    # P0.3: Créer DecisionTrace pour audit
+                    decision_trace = create_decision_trace(
+                        raw_name=concept_name,
+                        entity_type_hint=concept_type,
+                        tenant_id=tenant_id,
+                        document_id=concept.get("document_id"),
+                        segment_id=concept.get("segment_id")
+                    )
+
+                    # Ajouter stratégie HEURISTIC_RULES (gate check)
+                    decision_trace.add_strategy_result(StrategyResult(
+                        strategy=NormalizationStrategy.HEURISTIC_RULES,
+                        attempted=True,
+                        success=True,
+                        canonical_name=canonical_name,
+                        confidence=confidence,
+                        execution_time_ms=0.0,
+                        metadata={
+                            "gate_profile": self.default_profile,
+                            "quality_score": quality_score,
+                            "method": "gatekeeper_promotion"
+                        }
+                    ))
+
+                    # Finaliser trace
+                    decision_trace.finalize(
+                        canonical_name=canonical_name,
+                        strategy=NormalizationStrategy.HEURISTIC_RULES,
+                        confidence=confidence,
+                        is_cataloged=False  # Pas encore catalogué dans ontologie
+                    )
+
+                    decision_trace_json = decision_trace.to_json_string()
+
+                    logger.debug(
+                        f"[GATEKEEPER:DecisionTrace] Created trace for '{concept_name}' → '{canonical_name}' "
+                        f"(confidence={confidence:.2f}, requires_validation={decision_trace.requires_validation})"
+                    )
+
+                    # Étape 2: Promouvoir Proto → Canonical
                     canonical_id = self.neo4j_client.promote_to_published(
                         tenant_id=tenant_id,
-                        proto_concept_id=proto_concept_id or f"proto_{concept_name}_{concept_type}",
+                        proto_concept_id=proto_concept_id,
                         canonical_name=canonical_name,
                         unified_definition=unified_definition,
                         quality_score=quality_score,
@@ -514,7 +616,8 @@ class GatekeeperDelegate(BaseAgent):
                             "original_name": concept_name,
                             "extracted_type": concept_type,
                             "gate_profile": self.default_profile
-                        }
+                        },
+                        decision_trace_json=decision_trace_json
                     )
 
                     if canonical_id:
@@ -540,9 +643,10 @@ class GatekeeperDelegate(BaseAgent):
                 f"{promoted_count} promoted, {failed_count} failed"
             )
 
-            return ToolOutput(
+            return PromoteConceptsOutput(
                 success=True,
                 message=f"Promoted {promoted_count}/{len(concepts)} concepts to Published-KG",
+                promoted_count=promoted_count,
                 data={
                     "promoted_count": promoted_count,
                     "failed_count": failed_count,
