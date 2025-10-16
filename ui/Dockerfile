@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY . /app
 
 ENV KNOWBASE_DATA_DIR=/data
-ENV PYTHONPATH="/app/src:$PYTHONPATH"
+ENV PYTHONPATH="/app/src"
 EXPOSE 8501
 
 CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]

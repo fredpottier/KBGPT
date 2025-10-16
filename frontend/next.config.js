@@ -26,15 +26,17 @@ const nextConfig = {
     return config;
   },
 
-  async rewrites() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${apiUrl}/api/:path*`,
-      },
-    ]
-  },
+  // IMPORTANT: Ne PAS utiliser de rewrites pour /api/* car nous avons des routes API Next.js
+  // dans src/app/api/* qui doivent être utilisées comme proxy avec authentification
+  // async rewrites() {
+  //   const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
+  //   return [
+  //     {
+  //       source: '/api/:path*',
+  //       destination: `${apiUrl}/api/:path*`,
+  //     },
+  //   ]
+  // },
   // Disable caching for all API calls
   async headers() {
     return [

@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyJWT, createAuthHeaders } from '@/lib/jwt-helpers'
 
 export async function POST(request: NextRequest) {
+  // Verifier JWT token
+  const authResult = verifyJWT(request);
+  if (authResult instanceof NextResponse) {
+    return authResult;
+  }
+  const authHeader = authResult;
+
   try {
     const { solution_input } = await request.json();
 
@@ -14,6 +22,7 @@ export async function POST(request: NextRequest) {
     const response = await fetch('http://app:8000/api/sap-solutions/resolve', {
       method: 'POST',
       headers: {
+        'Authorization': authHeader,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ solution_input }),

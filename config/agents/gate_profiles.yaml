@@ -1,0 +1,113 @@
+# 🤖 OSMOSE Agentique - Configuration Gate Profiles
+#
+# Profils qualité pour GatekeeperDelegate (STRICT/BALANCED/PERMISSIVE).
+# Phase 1.5 V1.1
+
+gate_profiles:
+  # Profil STRICT: Production, haute qualité
+  STRICT:
+    name: "STRICT"
+    description: "Production-grade quality, requires full metadata"
+
+    # Seuils
+    min_confidence: 0.85
+    min_promotion_rate: 0.50  # ≥50% promoted sinon retry
+
+    # Champs obligatoires
+    required_fields:
+      - name
+      - type
+      - definition
+      - language
+
+    # Validation nom
+    min_name_length: 3
+    max_name_length: 100
+
+    # Hard rejections
+    reject_fragments: true
+    reject_stopwords: true
+    reject_pii: true
+
+  # Profil BALANCED: Par défaut, équilibré
+  BALANCED:
+    name: "BALANCED"
+    description: "Balanced quality for general usage"
+
+    min_confidence: 0.70
+    min_promotion_rate: 0.30  # ≥30% promoted sinon retry
+
+    required_fields:
+      - name
+      - type
+
+    min_name_length: 3
+    max_name_length: 100
+
+    reject_fragments: true
+    reject_stopwords: true
+    reject_pii: true
+
+  # Profil PERMISSIVE: Exploration, maximum coverage
+  PERMISSIVE:
+    name: "PERMISSIVE"
+    description: "Permissive quality for exploration and coverage"
+
+    min_confidence: 0.60
+    min_promotion_rate: 0.20  # ≥20% promoted sinon retry
+
+    required_fields:
+      - name
+
+    min_name_length: 2
+    max_name_length: 150
+
+    reject_fragments: false
+    reject_stopwords: true
+    reject_pii: true
+
+# Hard rejection patterns
+hard_rejections:
+  # Stopwords (toutes langues)
+  stopwords:
+    - the
+    - and
+    - or
+    - of
+    - in
+    - on
+    - at
+    - to
+    - a
+    - an
+    - for
+    - with
+    - le
+    - la
+    - les
+    - de
+    - du
+    - des
+    - un
+    - une
+    - et
+    - ou
+
+  # Fragments courants
+  fragments:
+    - ized
+    - ial
+    - ing
+    - tion
+    - ness
+    - ment
+    - able
+    - ful
+    - less
+
+  # PII patterns (regex)
+  pii_patterns:
+    email: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+    phone: '\+?\d[\d\s\-\(\)]{7,}\d'
+    ssn: '\d{3}-\d{2}-\d{4}'
+    credit_card: '\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}'

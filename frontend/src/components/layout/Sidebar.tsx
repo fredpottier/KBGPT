@@ -116,13 +116,50 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         >
           Documents
         </NavItem>
+
+        {/* Section Administration */}
+        <Text
+          fontSize="xs"
+          fontWeight="semibold"
+          color="gray.500"
+          textTransform="uppercase"
+          mt={6}
+          mb={2}
+          mx={4}
+        >
+          Administration
+        </Text>
         <NavItem
           icon={SettingsIcon}
           href="/admin"
-          isActive={pathname?.startsWith('/admin')}
+          isActive={pathname === '/admin'}
           onClick={isMobile ? onClose : undefined}
         >
-          Administration
+          Dashboard
+        </NavItem>
+        <NavItem
+          icon={ViewIcon}
+          href="/admin/dynamic-types"
+          isActive={pathname?.startsWith('/admin/dynamic-types')}
+          onClick={isMobile ? onClose : undefined}
+        >
+          Types Entités
+        </NavItem>
+        <NavItem
+          icon={ViewIcon}
+          href="/admin/document-types"
+          isActive={pathname?.startsWith('/admin/document-types')}
+          onClick={isMobile ? onClose : undefined}
+        >
+          Types de Documents
+        </NavItem>
+        <NavItem
+          icon={SettingsIcon}
+          href="/admin/settings"
+          isActive={pathname?.startsWith('/admin/settings')}
+          onClick={isMobile ? onClose : undefined}
+        >
+          Configuration
         </NavItem>
       </VStack>
 

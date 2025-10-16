@@ -14,13 +14,21 @@ import {
   Card,
   CardBody,
   Divider,
+  Spinner,
+  Switch,
+  HStack,
+  Alert,
+  AlertIcon,
+  AlertDescription,
 } from '@chakra-ui/react'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { AttachmentIcon, CheckIcon } from '@chakra-ui/icons'
 import { useMutation } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
+import { authService } from '@/lib/auth'
+import { fetchWithAuth } from '@/lib/fetchWithAuth'
 
 interface FileUploadProps {
   onFileSelect: (file: File) => void
@@ -95,9 +103,56 @@ export default function ImportPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [client, setClient] = useState('')
   const [documentType, setDocumentType] = useState('')
+  const [documentTypes, setDocumentTypes] = useState<any[]>([])
+  const [loadingTypes, setLoadingTypes] = useState(true)
+  const [useVision, setUseVision] = useState(false) // Vision désactivée par défaut
 
   const toast = useToast()
   const router = useRouter()
+
+  // Charger les types de documents depuis l'API
+  useEffect(() => {
+    async function fetchDocumentTypes() {
+      try {
+        const token = authService.getAccessToken()
+
+        if (!token) {
+          console.error('Pas de token d\'authentification disponible')
+          toast({
+            title: 'Erreur d\'authentification',
+            description: 'Veuillez vous reconnecter',
+            status: 'error',
+            duration: 3000,
+            isClosable: true,
+          })
+          setLoadingTypes(false)
+          return
+        }
+
+        const response = await fetchWithAuth('/api/document-types?is_active=true')
+
+        if (!response.ok) {
+          throw new Error(`Erreur ${response.status}`)
+        }
+
+        const data = await response.json()
+        console.log('Document types chargés:', data)
+        setDocumentTypes(data.document_types || [])
+      } catch (error) {
+        console.error('Erreur lors du chargement des types de documents:', error)
+        toast({
+          title: 'Erreur de chargement',
+          description: 'Impossible de charger les types de documents',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+      } finally {
+        setLoadingTypes(false)
+      }
+    }
+    fetchDocumentTypes()
+  }, [toast])
 
   // Fonction pour déterminer le type de document basé sur l'extension
   const getFileType = (file: File): 'pptx' | 'pdf' | 'xlsx' => {
@@ -110,9 +165,13 @@ export default function ImportPage() {
 
   const uploadMutation = useMutation({
     mutationFn: async (formData: FormData) => {
+      // Get JWT token from auth service
+      const token = authService.getAccessToken()
+
       const response = await axios.post('/api/dispatch', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${token}`,
         },
       })
       return response.data
@@ -172,10 +231,11 @@ export default function ImportPage() {
     const formData = new FormData()
     formData.append('action_type', 'ingest')
     formData.append('document_type', getFileType(selectedFile))
+    formData.append('document_type_id', documentType) // ID du document type sélectionné
+    formData.append('use_vision', useVision.toString()) // Activer/désactiver Vision
 
     const metadata = {
       client: client.trim(),
-      document_type: documentType,
     }
 
     formData.append('meta', JSON.stringify(metadata))
@@ -221,12 +281,61 @@ export default function ImportPage() {
 
               <FormControl isRequired>
                 <FormLabel>Type de document</FormLabel>
-                <Select value={documentType} onChange={(e) => setDocumentType(e.target.value)} placeholder="Sélectionnez un type">
-                  <option value="technical">Technique</option>
-                  <option value="functional">Fonctionnel</option>
-                  <option value="marketing">Marketing</option>
+                <Select
+                  value={documentType}
+                  onChange={(e) => setDocumentType(e.target.value)}
+                  placeholder={loadingTypes ? "Chargement..." : "Sélectionnez un type"}
+                  isDisabled={loadingTypes}
+                >
+                  {loadingTypes ? (
+                    <option disabled>Chargement des types...</option>
+                  ) : (
+                    documentTypes.map((dt) => (
+                      <option key={dt.id} value={dt.id}>
+                        {dt.name}
+                      </option>
+                    ))
+                  )}
                 </Select>
               </FormControl>
+            </VStack>
+
+            <Divider />
+
+            {/* Toggle Vision */}
+            <VStack spacing={4} align="stretch">
+              <Heading size="md">Mode d'analyse</Heading>
+
+              <FormControl display="flex" alignItems="center">
+                <HStack spacing={3} width="100%">
+                  <Switch
+                    id="vision-mode"
+                    colorScheme="blue"
+                    isChecked={useVision}
+                    onChange={(e) => setUseVision(e.target.checked)}
+                  />
+                  <FormLabel htmlFor="vision-mode" mb={0} fontWeight="semibold">
+                    Activer Vision (GPT-4 avec images)
+                  </FormLabel>
+                </HStack>
+              </FormControl>
+
+              <Alert status={useVision ? "info" : "success"} variant="left-accent">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">
+                  {useVision ? (
+                    <>
+                      <strong>Mode Vision activé :</strong> Utilise GPT-4 Vision pour analyser les images
+                      du document. Plus précis pour les diagrammes et contenus visuels complexes, mais plus coûteux.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Mode Texte activé (recommandé) :</strong> Analyse uniquement le texte extrait
+                      avec un LLM rapide. Plus économique et suffisant pour la plupart des documents.
+                    </>
+                  )}
+                </AlertDescription>
+              </Alert>
             </VStack>
 
             <Divider />

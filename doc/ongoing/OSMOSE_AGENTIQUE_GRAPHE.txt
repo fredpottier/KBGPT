@@ -1,0 +1,455 @@
+# Section à insérer dans le graphe ASCII principal
+# Insérer juste avant "OSMOSE CORE PIPELINE - 4 ÉTAPES SÉQUENTIELLES"
+
+        ╔════════════════════════════════════════════════════════════════╗
+        ║ 🤖 ARCHITECTURE AGENTIQUE - ORCHESTRATION FSM (Phase 1.5)      ║
+        ║    6 Agents Spécialisés + Supervisor FSM Master                ║
+        ╚════════════════════════════════════════════════════════════════╝
+                                     │
+                                     ▼
+              ┌──────────────────────────────────────────┐
+              │  🎯 SUPERVISOR AGENT (FSM Master)       │
+              │  File: agents/supervisor/supervisor.py  │
+              ├──────────────────────────────────────────┤
+              │ FSM States (10 états):                  │
+              │  INIT → BUDGET_CHECK → SEGMENT →        │
+              │  EXTRACT → MINE_PATTERNS → GATE_CHECK → │
+              │  PROMOTE → FINALIZE → DONE/ERROR        │
+              │                                          │
+              │ • Timeout: 5 min/doc                    │
+              │ • Max steps: 50                          │
+              │ • Retry logic automatique                │
+              └──────────────────────────────────────────┘
+                                     │
+      ┌──────────────┬──────────────┼──────────────┬──────────────┐
+      │              │              │              │              │
+      ▼              ▼              ▼              ▼              ▼
+┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+│ 💰 BUDGET│  │ 🔍 EXTRA │  │ ⛏️ PATTERN│  │ 🚪 GATE  │  │ 📡 LLM   │
+│  MANAGER │  │  CTOR    │  │  MINER   │  │  KEEPER  │  │DISPATCHER│
+├──────────┤  ├──────────┤  ├──────────┤  ├──────────┤  ├──────────┤
+│ Caps:    │  │ Routing: │  │ Cross-   │  │ Quality: │  │ Rate     │
+│ • SMALL  │  │ NO_LLM   │  │ segment  │  │ STRICT   │  │ Limits:  │
+│   120/doc│  │ SMALL    │  │ reasoning│  │ BALANCED │  │ 500 RPM  │
+│ • BIG    │  │ BIG      │  │          │  │PERMISSIVE│  │ 100 RPM  │
+│   8/doc  │  │          │  │ Pattern  │  │          │  │ 50 RPM   │
+│ • VISION │  │PrepassAn │  │ mining   │  │ Promo    │  │          │
+│   2/doc  │  │ alyzer   │  │          │  │Proto→Pub │  │Priority  │
+│          │  │ (NER     │  │Enrich    │  │          │  │ queue    │
+│ Quotas:  │  │density)  │  │ concepts │  │Reject:   │  │          │
+│ 10k/jour │  │          │  │          │  │fragments │  │Concur-   │
+│ 500/jour │  │Fallback  │  │          │  │stopwords │  │rency     │
+│ 100/jour │  │graceful  │  │          │  │PII       │  │control   │
+│          │  │          │  │          │  │          │  │          │
+│ Redis    │  │Budget    │  │          │  │Retry     │  │          │
+│ tracking │  │aware     │  │          │  │reco if   │  │          │
+│          │  │          │  │          │  │quality↓  │  │          │
+└──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘
+      │              │              │              │              │
+      └──────────────┴──────────────┴──────────────┴──────────────┘
+                                     │
+                   ÉTAT PARTAGÉ (AgentState)
+                   ┌──────────────────────────────┐
+                   │ • budget_remaining{}         │
+                   │ • segments[]                 │
+                   │ • candidates[]               │
+                   │ • promoted[]                 │
+                   │ • cost_incurred              │
+                   │ • llm_calls_count{}          │
+                   │ • current_step, steps_count  │
+                   │ • errors[]                   │
+                   └──────────────────────────────┘
+                                     │
+                                     ▼
+
+        ╔════════════════════════════════════════════════════════════╗
+        ║  🌊 OSMOSE CORE PIPELINE - 4 ÉTAPES SÉQUENTIELLES          ║
+        ║     (Orchestré par Extractor Agent via FSM Supervisor)     ║
+        ╚════════════════════════════════════════════════════════════╝
+
+
+# Description des Agents (nouvelle section à ajouter après "Description des Briques Logiques")
+
+---
+
+## 🤖 Description des Agents (Architecture Agentique Phase 1.5)
+
+### Contexte
+
+L'architecture agentique OSMOSE Phase 1.5 V1.1 ajoute une couche d'orchestration intelligente au-dessus du pipeline sémantique Phase 1. Cette architecture permet :
+
+- **Maîtrise des coûts LLM** : Routing NO_LLM/SMALL/BIG + caps durs
+- **Scalabilité production** : Rate limits, quotas tenant/jour
+- **Quality gates** : Validation avant promotion Proto→Published
+- **Retry logic** : Si qualité insuffisante, retry avec BIG model
+- **Budget awareness** : Fallback graceful si budget épuisé
+
+### Architecture FSM (Finite State Machine)
+
+Le **Supervisor Agent** orchestre tous les agents via une FSM à 10 états :
+
+```
+INIT → BUDGET_CHECK → SEGMENT → EXTRACT → MINE_PATTERNS → GATE_CHECK → PROMOTE → FINALIZE → DONE/ERROR
+```
+
+**Transitions conditionnelles :**
+- `BUDGET_CHECK` fail → `ERROR`
+- `GATE_CHECK` fail + budget BIG > 0 → `EXTRACT` (retry)
+- Timeout (5 min) → `ERROR`
+- Max steps (50) → `ERROR`
+
+---
+
+### Agent 1: 🎯 Supervisor Agent (FSM Master)
+
+**Fichier :** `src/knowbase/agents/supervisor/supervisor.py` (~230 lignes)
+
+**Rôle :** Orchestrateur principal de l'architecture agentique.
+
+**Responsabilités :**
+- Exécution de la FSM complète pour chaque document
+- Coordination des 5 agents spécialistes
+- Timeout enforcement (5 min/doc)
+- Max steps protection (50 steps)
+- Error handling et retry logic
+- Validation état à chaque step
+
+**États FSM :**
+1. **INIT** : Initialisation
+2. **BUDGET_CHECK** : Vérification budget disponible
+3. **SEGMENT** : Appel TopicSegmenter (OSMOSE Phase 1)
+4. **EXTRACT** : Appel Extractor Orchestrator
+5. **MINE_PATTERNS** : Appel Pattern Miner
+6. **GATE_CHECK** : Appel Gatekeeper
+7. **PROMOTE** : Promotion Proto→Published (Neo4j)
+8. **FINALIZE** : Finalisation métriques
+9. **DONE** : Terminaison réussie
+10. **ERROR** : Terminaison erreur
+
+**Tools :** Aucun (coordonne les autres agents)
+
+**Entrées :**
+- `AgentState` initial avec `document_id`, `tenant_id`
+
+**Sorties :**
+- `AgentState` final avec métriques complètes
+
+**Métriques suivies :**
+- `steps_count`, `cost_incurred`, `llm_calls_count{}`
+- `budget_remaining{}`, `promoted[]`, `errors[]`
+
+---
+
+### Agent 2: 💰 Budget Manager Agent
+
+**Fichier :** `src/knowbase/agents/budget/budget.py` (~150 lignes)
+
+**Rôle :** Gestion caps et quotas LLM pour maîtrise coûts.
+
+**Responsabilités :**
+- Enforce caps durs par document :
+  * **SMALL** : 120 calls/doc (gpt-4o-mini)
+  * **BIG** : 8 calls/doc (gpt-4o, Claude Sonnet)
+  * **VISION** : 2 calls/doc (gpt-4o vision)
+- Enforce quotas tenant/jour :
+  * **SMALL** : 10,000 calls/jour/tenant
+  * **BIG** : 500 calls/jour/tenant
+  * **VISION** : 100 calls/jour/tenant
+- Tracking temps-réel via Redis
+- Refund logic si retry échoue
+
+**Tools :**
+1. `check_budget` : Vérifie si budget disponible
+2. `consume_budget` : Consomme N calls
+3. `refund_budget` : Rembourse calls si retry failed
+
+**Storage Redis :**
+```
+budget:tenant:{tenant_id}:SMALL:{date} → count calls
+budget:tenant:{tenant_id}:BIG:{date} → count calls
+budget:tenant:{tenant_id}:VISION:{date} → count calls
+```
+
+**Entrées :**
+- `AgentState` avec `budget_remaining{}`, `tenant_id`
+
+**Sorties :**
+- `AgentState` avec `budget_remaining{}` mis à jour
+
+**Exemple flow :**
+```
+1. check_budget(tenant="acme", tier="SMALL", calls=5)
+   → budget_ok=True, remaining=115
+
+2. consume_budget(tenant="acme", tier="SMALL", calls=5, cost=0.001)
+   → consumed=True, new_remaining=115
+
+3. (si échec après) refund_budget(tenant="acme", tier="SMALL", calls=5)
+   → refunded=True, new_remaining=120
+```
+
+---
+
+### Agent 3: 🔍 Extractor Orchestrator Agent
+
+**Fichier :** `src/knowbase/agents/extractor/orchestrator.py` (~200 lignes)
+
+**Rôle :** Routing intelligent pour extraction concepts (cost optimization).
+
+**Responsabilités :**
+- Analyse densité entities via **PrepassAnalyzer** (NER spaCy rapide)
+- Route vers NO_LLM / SMALL / BIG selon densité
+- Budget awareness avec fallback graceful
+- Extraction concepts via méthode appropriée
+
+**Règles Routing :**
+- **NO_LLM** : < 3 entities détectées (NER + Clustering uniquement)
+- **SMALL** : 3-8 entities (+ gpt-4o-mini si budget permet)
+- **BIG** : > 8 entities (+ gpt-4o si budget permet)
+
+**Fallback Chain :**
+```
+BIG (budget épuisé) → SMALL → NO_LLM
+```
+
+**Tools :**
+1. `prepass_analyzer` : Analyse NER rapide pour densité entities
+2. `extract_concepts` : Extraction selon route choisie
+
+**Entrées :**
+- `AgentState` avec `segments[]`, `budget_remaining{}`
+
+**Sorties :**
+- `AgentState` avec `candidates[]` rempli
+- `llm_calls_count{}` et `cost_incurred` mis à jour
+
+**Exemple flow :**
+```
+Segment 1: "Introduction to SAP HANA Security..."
+↓
+PrepassAnalyzer (NER spaCy):
+- Entities detected: 2 (SAP HANA, Security)
+- Density: low
+- Recommended route: NO_LLM
+↓
+extract_concepts(route="NO_LLM"):
+- NER only: SAP HANA, Security
+- Clustering: Authentication, Encryption
+- Result: 4 concepts (no LLM call)
+
+Segment 2: "User management involves roles, privileges, LDAP, Kerberos, SAML, OAuth..."
+↓
+PrepassAnalyzer:
+- Entities detected: 10
+- Density: high
+- Recommended route: BIG
+↓
+check_budget(BIG): OK
+↓
+extract_concepts(route="BIG"):
+- NER: users, roles, LDAP, Kerberos, SAML, OAuth
+- LLM (gpt-4o): Extract + enrich with context
+- Result: 15 concepts (1 BIG call)
+```
+
+---
+
+### Agent 4: ⛏️ Pattern Miner Agent
+
+**Fichier :** `src/knowbase/agents/miner/miner.py` (~180 lignes)
+
+**Rôle :** Cross-segment reasoning et pattern detection.
+
+**Responsabilités :**
+- Analyse concepts sur TOUS les segments (vue globale)
+- Détection patterns récurrents (concepts mentionnés > N fois)
+- Enrichissement concepts avec co-occurrences
+- Scoring importance basé sur fréquence + distribution
+
+**Tools :**
+1. `mine_patterns` : Détecte patterns récurrents
+2. `enrich_candidates` : Enrichit avec co-occurrences
+
+**Entrées :**
+- `AgentState` avec `candidates[]` (tous les concepts extraits)
+
+**Sorties :**
+- `AgentState` avec `candidates[]` enrichis (patterns ajoutés)
+
+**Exemple patterns détectés :**
+```
+Pattern 1: "authentication" mentionné dans 4/5 segments
+→ Importance score: 0.90
+→ Co-occurrences: LDAP (3x), OAuth (2x), SAML (2x)
+
+Pattern 2: "ISO 27001" mentionné dans 3/5 segments
+→ Importance score: 0.75
+→ Co-occurrences: compliance (3x), audit (2x)
+```
+
+---
+
+### Agent 5: 🚪 Gatekeeper Delegate Agent
+
+**Fichier :** `src/knowbase/agents/gatekeeper/gatekeeper.py` (~220 lignes)
+
+**Rôle :** Quality control et promotion Proto→Published.
+
+**Responsabilités :**
+- Score chaque candidate selon **Gate Profile** (STRICT/BALANCED/PERMISSIVE)
+- Promeut concepts ≥ seuil vers `promoted[]`
+- Rejette fragments, stopwords, PII
+- Recommande retry avec BIG model si qualité insuffisante
+
+**Gate Profiles :**
+
+| Profile | Min Confidence | Required Fields | Description |
+|---------|---------------|-----------------|-------------|
+| **STRICT** | 0.85 | name, type, definition | Production quality |
+| **BALANCED** | 0.70 | name, type | Standard (default) |
+| **PERMISSIVE** | 0.60 | name | Exploration mode |
+
+**Règles Rejet :**
+- Nom < 3 chars (fragments)
+- Nom > 100 chars (trop long)
+- Stopwords (the, and, or, etc.)
+- PII detected (emails, phone numbers)
+- Confidence < threshold
+
+**Tools :**
+1. `gate_check` : Évalue tous les candidates
+2. `promote_concepts` : Promeut vers Neo4j Published
+
+**Entrées :**
+- `AgentState` avec `candidates[]`
+
+**Sorties :**
+- `AgentState` avec `promoted[]` rempli
+- `retry_recommended=True` si qualité < 50% promoted
+
+**Exemple flow :**
+```
+Input: 45 candidates
+
+Gate Check (BALANCED profile):
+- Passed: 18 concepts (confidence ≥ 0.70)
+- Rejected: 27 concepts
+  - 10 fragments (< 3 chars)
+  - 5 stopwords
+  - 8 low confidence (< 0.70)
+  - 2 PII (emails)
+  - 2 duplicates
+
+Output: promoted[] = 18 concepts
+
+Quality: 18/45 = 40% → retry_recommended=True
+(threshold: 50%)
+
+→ Supervisor FSM: GATE_CHECK → EXTRACT (retry avec BIG)
+```
+
+---
+
+### Agent 6: 📡 LLM Dispatcher Agent
+
+**Fichier :** `src/knowbase/agents/dispatcher/dispatcher.py` (~180 lignes)
+
+**Rôle :** Rate limiting et concurrency control pour LLM calls.
+
+**Responsabilités :**
+- Rate limits enforcement (500/100/50 RPM)
+- Concurrency control (max parallel calls)
+- Priority queue (VISION > BIG > SMALL)
+- Retry avec exponential backoff si rate limited
+
+**Rate Limits :**
+- **SMALL (gpt-4o-mini)** : 500 RPM
+- **BIG (gpt-4o, Claude Sonnet)** : 100 RPM
+- **VISION (gpt-4o vision)** : 50 RPM
+
+**Concurrency Limits :**
+- Max 10 parallel calls SMALL
+- Max 5 parallel calls BIG
+- Max 2 parallel calls VISION
+
+**Tools :**
+1. `dispatch_call` : Dispatche un LLM call avec rate limit
+2. `batch_dispatch` : Dispatche plusieurs calls avec priorité
+
+**Priority Queue :**
+```
+HIGH (VISION) → MEDIUM (BIG) → LOW (SMALL)
+```
+
+**Entrées :**
+- `AgentState` avec `llm_calls_count{}`
+
+**Sorties :**
+- `AgentState` avec `llm_calls_count{}` mis à jour
+
+**Exemple flow :**
+```
+Batch dispatch: 10 SMALL calls + 2 BIG calls
+
+Priority sorting:
+1. BIG call 1 (priority: MEDIUM)
+2. BIG call 2 (priority: MEDIUM)
+3-12. SMALL calls 1-10 (priority: LOW)
+
+Dispatching avec rate limits:
+- BIG call 1: dispatched (concurrency: 1/5)
+- BIG call 2: dispatched (concurrency: 2/5)
+- SMALL calls 1-10: dispatched batch (concurrency: 10/10, rate: 500 RPM)
+
+All calls completed in ~3s (vs ~8s sans rate limiting)
+```
+
+---
+
+### 🔗 Intégration Agents ↔ OSMOSE Pipeline Phase 1
+
+L'architecture agentique **orchestre** les composants OSMOSE Phase 1 :
+
+**TopicSegmenter** → Appelé par Supervisor dans état `SEGMENT`
+**ConceptExtractor** → Appelé par Extractor Orchestrator avec routing intelligent
+**SemanticIndexer** → Appelé après Pattern Miner (enrichissement)
+**ConceptLinker** → Appelé après Gatekeeper (promoted concepts uniquement)
+
+**Avantages :**
+- ✅ Réutilisation code Phase 1 (pas de réécriture)
+- ✅ Ajout couche intelligence (routing, budget, quality)
+- ✅ Migration progressive (feature flags par composant)
+- ✅ Scalabilité production (rate limits, quotas)
+
+---
+
+## 📊 Métriques Agentiques
+
+### Par Document
+
+```
+AgentState final:
+- steps_count: 12 (sur max 50)
+- cost_incurred: $0.45
+- llm_calls_count:
+  * SMALL: 8 calls
+  * BIG: 2 calls
+  * VISION: 0 calls
+- budget_remaining:
+  * SMALL: 112/120
+  * BIG: 6/8
+  * VISION: 2/2
+- promoted: 18 concepts
+- errors: []
+```
+
+### Par Tenant/Jour
+
+```
+Redis keys:
+budget:tenant:acme:SMALL:2025-10-15 → 2,450 calls (sur 10,000)
+budget:tenant:acme:BIG:2025-10-15 → 125 calls (sur 500)
+budget:tenant:acme:VISION:2025-10-15 → 18 calls (sur 100)
+```
+
+---

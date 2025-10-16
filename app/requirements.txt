@@ -2,8 +2,19 @@
 fastapi==0.116.1
 uvicorn==0.30.3
 
+# === Authentication & Security (Phase 0) ===
+PyJWT[crypto]==2.9.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1  # Version compatible avec passlib 1.7.4 (pas 5.x)
+python-jose[cryptography]==3.3.0
+slowapi==0.1.9  # Rate limiting
+email-validator>=2.0.0  # Pour Pydantic EmailStr
+
 # === Vector DB ===
 qdrant-client==1.15.1
+
+# === Graph DB ===
+neo4j>=5.14.0
 
 # === Embeddings et Reranking (CPU SEULEMENT) ===
 # Forcer versions CPU pour Ã©viter les 4GB NVIDIA
@@ -65,6 +76,23 @@ pytesseract
 # === Lang / NLP util ===
 langdetect
 
+# === OSMOSE Semantic Intelligence V2.1 (Phase 1) ===
+# NER multilingue
+spacy>=3.7.2
+# Modèles spaCy à installer séparément:
+# python -m spacy download en_core_web_trf
+# python -m spacy download fr_core_news_trf
+# python -m spacy download de_core_news_trf
+# python -m spacy download xx_ent_wiki_sm
+
+# Clustering sémantique
+hdbscan>=0.8.33
+
+# Détection langue
+fasttext>=0.9.2
+# Modèle fasttext à télécharger:
+# wget https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin
+
 # === Debug ===
 debugpy
 redis>=5.0
@@ -74,3 +102,11 @@ pydantic-settings
 # === Zep Integration ===
 zep-python>=2.0.2
 asyncpg>=0.29.0
+
+# === Fuzzy Matching (Phase 5B) ===
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.21.0
+
+# === Architecture Agentique OSMOSE (Phase 1.5) ===
+langgraph>=0.2.0
+networkx>=3.1
