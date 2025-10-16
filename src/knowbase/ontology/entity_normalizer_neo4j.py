@@ -77,6 +77,10 @@ class EntityNormalizerNeo4j:
 
             if not include_pending:
                 where_clauses.append("ont.status != 'auto_learned_pending'")
+                logger.debug(
+                    f"[ONTOLOGY:Sandbox] Filtering pending entities for '{raw_name}' "
+                    f"(include_pending={include_pending})"
+                )
 
             # Filtrer par type si hint fourni (mais pas bloquer si pas trouvé)
             if entity_type_hint:
@@ -85,6 +89,9 @@ class EntityNormalizerNeo4j:
 
             if where_clauses:
                 query += " WHERE " + " AND ".join(where_clauses)
+                logger.debug(
+                    f"[ONTOLOGY:Sandbox] Query filters: {where_clauses}"
+                )
 
             query += """
             RETURN
@@ -103,9 +110,9 @@ class EntityNormalizerNeo4j:
 
             if record:
                 # Trouvé dans ontologie
-                logger.debug(
-                    f"✅ Normalisé: '{raw_name}' → '{record['canonical_name']}' "
-                    f"(type={record['entity_type']}, id={record['entity_id']})"
+                logger.info(
+                    f"[ONTOLOGY:Sandbox] ✅ FOUND & NORMALIZED: '{raw_name}' → '{record['canonical_name']}' "
+                    f"(type={record['entity_type']}, id={record['entity_id']}, status={record.get('status', 'unknown')})"
                 )
 
                 return (
@@ -163,8 +170,9 @@ class EntityNormalizerNeo4j:
                     )
 
             # Vraiment pas trouvé → retourner brut
-            logger.debug(
-                f"⚠️ Entité non cataloguée: '{raw_name}' (type={entity_type_hint})"
+            logger.warning(
+                f"[ONTOLOGY:Sandbox] ❌ NOT FOUND in ontology: '{raw_name}' "
+                f"(type={entity_type_hint}, include_pending={include_pending}, tenant={tenant_id})"
             )
 
             return (

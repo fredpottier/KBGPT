@@ -77,6 +77,11 @@ def save_ontology_to_neo4j(
                 confidence = group.get("confidence", 0.95)
 
                 # P0.1 Sandbox Auto-Learning: Déterminer status et validation
+                logger.debug(
+                    f"[ONTOLOGY:Sandbox] Processing '{canonical_name}' "
+                    f"(source={source}, confidence={confidence:.2f})"
+                )
+
                 if source == "llm_generated":
                     created_by = "auto_learning"
                 elif source == "manual":
@@ -89,10 +94,20 @@ def save_ontology_to_neo4j(
                     status = "auto_learned_validated"
                     requires_admin_validation = False
                     validated_by = "auto_validated"
+
+                    logger.info(
+                        f"[ONTOLOGY:Sandbox] ✅ AUTO-VALIDATED '{canonical_name}' "
+                        f"(confidence={confidence:.2f} >= 0.95, status={status})"
+                    )
                 else:
                     status = "auto_learned_pending"
                     requires_admin_validation = True
                     validated_by = None
+
+                    logger.warning(
+                        f"[ONTOLOGY:Sandbox] ⏳ PENDING VALIDATION '{canonical_name}' "
+                        f"(confidence={confidence:.2f} < 0.95, requires_admin=True)"
+                    )
 
                     # Notification admin pour validation
                     notify_admin_validation_required(
@@ -107,6 +122,11 @@ def save_ontology_to_neo4j(
                     status = "manual"
                     requires_admin_validation = False
                     validated_by = "admin"
+
+                    logger.info(
+                        f"[ONTOLOGY:Sandbox] ✅ MANUAL CREATION '{canonical_name}' "
+                        f"(created_by=admin, status=manual)"
+                    )
 
                 # Créer/update OntologyEntity avec champs sandbox
                 session.run("""
