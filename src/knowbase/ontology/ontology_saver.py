@@ -1,5 +1,10 @@
 """
 Sauvegarde ontologies générées par LLM dans Neo4j.
+
+P0.1 Sandbox Auto-Learning (2025-10-16):
+- Auto-validation si confidence >= 0.95
+- Notification admin si requires_validation=True
+- Support status sandbox (pending/validated/manual)
 """
 from typing import List, Dict
 from datetime import datetime, timezone
@@ -8,6 +13,30 @@ import uuid
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def notify_admin_validation_required(
+    canonical_name: str,
+    entity_type: str,
+    confidence: float,
+    tenant_id: str
+):
+    """
+    Notifie admin qu'une entité nécessite validation (P0.1 Sandbox).
+
+    TODO Phase 2: Implémenter notification réelle (email, webhook, UI badge).
+
+    Args:
+        canonical_name: Nom entité
+        entity_type: Type entité
+        confidence: Score confidence
+        tenant_id: Tenant ID
+    """
+    logger.warning(
+        f"[ONTOLOGY:Sandbox] ⚠️  ADMIN VALIDATION REQUIRED: "
+        f"'{canonical_name}' (type={entity_type}, confidence={confidence:.2f}, tenant={tenant_id})"
+    )
+    # TODO: Envoyer notification réelle (email, webhook, UI badge)
 
 
 def save_ontology_to_neo4j(
@@ -47,7 +76,39 @@ def save_ontology_to_neo4j(
                 canonical_name = group["canonical_name"]
                 confidence = group.get("confidence", 0.95)
 
-                # Créer/update OntologyEntity
+                # P0.1 Sandbox Auto-Learning: Déterminer status et validation
+                if source == "llm_generated":
+                    created_by = "auto_learning"
+                elif source == "manual":
+                    created_by = "admin"
+                else:
+                    created_by = source
+
+                # Auto-validation si confidence >= 0.95
+                if confidence >= 0.95:
+                    status = "auto_learned_validated"
+                    requires_admin_validation = False
+                    validated_by = "auto_validated"
+                else:
+                    status = "auto_learned_pending"
+                    requires_admin_validation = True
+                    validated_by = None
+
+                    # Notification admin pour validation
+                    notify_admin_validation_required(
+                        canonical_name=canonical_name,
+                        entity_type=entity_type,
+                        confidence=confidence,
+                        tenant_id=tenant_id
+                    )
+
+                # Support création manuelle admin
+                if created_by == "admin":
+                    status = "manual"
+                    requires_admin_validation = False
+                    validated_by = "admin"
+
+                # Créer/update OntologyEntity avec champs sandbox
                 session.run("""
                     MERGE (ont:OntologyEntity {entity_id: $entity_id})
                     SET ont.canonical_name = $canonical_name,
@@ -57,15 +118,33 @@ def save_ontology_to_neo4j(
                         ont.tenant_id = $tenant_id,
                         ont.created_at = coalesce(ont.created_at, datetime()),
                         ont.updated_at = datetime(),
-                        ont.version = coalesce(ont.version, '1.0.0')
+                        ont.version = coalesce(ont.version, '1.0.0'),
+
+                        ont.status = $status,
+                        ont.requires_admin_validation = $requires_admin_validation,
+                        ont.created_by = $created_by,
+                        ont.validated_by = $validated_by,
+                        ont.validated_at = CASE
+                            WHEN $validated_by IS NOT NULL THEN datetime()
+                            ELSE null
+                        END
                 """, {
                     "entity_id": entity_id,
                     "canonical_name": canonical_name,
                     "entity_type": entity_type,
                     "source": source,
                     "confidence": confidence,
-                    "tenant_id": tenant_id
+                    "tenant_id": tenant_id,
+                    "status": status,
+                    "requires_admin_validation": requires_admin_validation,
+                    "created_by": created_by,
+                    "validated_by": validated_by
                 })
+
+                logger.debug(
+                    f"[ONTOLOGY:Sandbox] Saved '{canonical_name}' "
+                    f"(status={status}, confidence={confidence:.2f}, requires_validation={requires_admin_validation})"
+                )
 
                 # Créer aliases depuis entités mergées
                 for entity in group["entities"]:
