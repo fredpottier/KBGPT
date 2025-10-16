@@ -6,10 +6,16 @@ Remplace EntityNormalizer YAML pour normalisation via ontologies Neo4j.
 P0.1 Sandbox Auto-Learning (2025-10-16):
 - Filtrage entités pending par défaut (status != 'auto_learned_pending')
 - Paramètre include_pending pour accès admin explicit
+
+P1.2 Similarité Structurelle (2025-10-16):
+- Fallback matching structurel si exact match échoue
+- Analyse composants, acronymes, variantes typo
 """
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional, Dict, List
 from neo4j import GraphDatabase
 import logging
+
+from knowbase.ontology.structural_similarity import enhanced_fuzzy_match
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +175,29 @@ class EntityNormalizerNeo4j:
                         True
                     )
 
+            # P1.2: Fallback matching structurel
+            # Si exact match échoue, tenter matching structurel sur toutes les entités
+            logger.debug(
+                f"[ONTOLOGY:StructuralSimilarity] Exact match failed for '{raw_name}', "
+                f"trying structural matching..."
+            )
+
+            structural_match = self._try_structural_match(
+                raw_name=raw_name,
+                entity_type_hint=entity_type_hint,
+                tenant_id=tenant_id,
+                include_pending=include_pending,
+                session=session
+            )
+
+            if structural_match:
+                entity_id, canonical_name, entity_type, match_score = structural_match
+                logger.info(
+                    f"[ONTOLOGY:StructuralSimilarity] ✅ STRUCTURAL MATCH: '{raw_name}' → '{canonical_name}' "
+                    f"(score={match_score:.2f}, type={entity_type}, id={entity_id})"
+                )
+                return (entity_id, canonical_name, entity_type, True)
+
             # Vraiment pas trouvé → retourner brut
             logger.warning(
                 f"[ONTOLOGY:Sandbox] ❌ NOT FOUND in ontology: '{raw_name}' "
@@ -181,6 +210,117 @@ class EntityNormalizerNeo4j:
                 entity_type_hint,
                 False  # is_cataloged
             )
+
+    def _try_structural_match(
+        self,
+        raw_name: str,
+        entity_type_hint: Optional[str],
+        tenant_id: str,
+        include_pending: bool,
+        session
+    ) -> Optional[Tuple[str, str, str, float]]:
+        """
+        Tente matching structurel sur toutes les entités cataloguées (P1.2).
+
+        Utilisé en fallback quand exact match échoue.
+        Récupère toutes les entités et compare structurellement.
+
+        Args:
+            raw_name: Nom brut à matcher
+            entity_type_hint: Type suggéré (optionnel)
+            tenant_id: Tenant ID
+            include_pending: Inclure entités pending
+            session: Session Neo4j
+
+        Returns:
+            Tuple (entity_id, canonical_name, entity_type, match_score) ou None
+        """
+        # Construire query pour récupérer candidats
+        query = """
+        MATCH (ont:OntologyEntity {tenant_id: $tenant_id})
+        """
+
+        where_clauses = []
+
+        # Filtrer pending si nécessaire
+        if not include_pending:
+            where_clauses.append("ont.status != 'auto_learned_pending'")
+
+        # Filtrer par type si fourni (mais ne pas bloquer)
+        if entity_type_hint:
+            where_clauses.append("ont.entity_type = $entity_type_hint")
+
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+
+        query += """
+        RETURN
+            ont.entity_id AS entity_id,
+            ont.canonical_name AS canonical_name,
+            ont.entity_type AS entity_type
+        LIMIT 100
+        """
+
+        params = {"tenant_id": tenant_id}
+        if entity_type_hint:
+            params["entity_type_hint"] = entity_type_hint
+
+        result = session.run(query, params)
+        candidates = list(result)
+
+        if not candidates:
+            logger.debug(
+                f"[ONTOLOGY:StructuralSimilarity] No candidates found for structural matching "
+                f"(tenant={tenant_id}, type={entity_type_hint})"
+            )
+            return None
+
+        logger.debug(
+            f"[ONTOLOGY:StructuralSimilarity] Comparing '{raw_name}' against {len(candidates)} candidates..."
+        )
+
+        # Comparer structurellement avec tous les candidats
+        best_match = None
+        best_score = 0.0
+
+        for candidate in candidates:
+            canonical_name = candidate["canonical_name"]
+
+            # Matching structurel hybride
+            is_match, score, method = enhanced_fuzzy_match(
+                raw_name,
+                canonical_name,
+                textual_threshold=0.85,
+                structural_threshold=0.75
+            )
+
+            if is_match and score > best_score:
+                best_score = score
+                best_match = (
+                    candidate["entity_id"],
+                    candidate["canonical_name"],
+                    candidate["entity_type"],
+                    score
+                )
+
+                logger.debug(
+                    f"[ONTOLOGY:StructuralSimilarity] New best match: '{raw_name}' → '{canonical_name}' "
+                    f"(score={score:.2f}, method={method})"
+                )
+
+        if best_match:
+            logger.info(
+                f"[ONTOLOGY:StructuralSimilarity] Best structural match found: "
+                f"'{raw_name}' → '{best_match[1]}' (score={best_match[3]:.2f})"
+            )
+            return best_match
+
+        logger.debug(
+            f"[ONTOLOGY:StructuralSimilarity] No structural match found for '{raw_name}' "
+            f"(checked {len(candidates)} candidates)"
+        )
+
+        return None
 
     def get_entity_metadata(
         self,
