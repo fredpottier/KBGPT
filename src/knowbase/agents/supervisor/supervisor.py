@@ -95,6 +95,17 @@ class SupervisorAgent(BaseAgent):
         """
         logger.info(f"[SUPERVISOR] Starting FSM for document {state.document_id}")
 
+        # DEBUG: Vérifier réception des segments
+        logger.info(
+            f"[SUPERVISOR] 🔍 DEBUG: Received {len(state.segments)} segments from osmose_agentique"
+        )
+        if state.segments:
+            logger.info(
+                f"[SUPERVISOR] 🔍 DEBUG: First segment keys: {list(state.segments[0].keys())}"
+            )
+        else:
+            logger.error("[SUPERVISOR] 🔍 DEBUG: WARNING - No segments received!")
+
         # Initialiser FSM
         current_fsm_state = FSMState.INIT
         state.current_step = current_fsm_state.value
@@ -102,10 +113,12 @@ class SupervisorAgent(BaseAgent):
         while current_fsm_state != FSMState.DONE:
             # Vérifications globales
             if not self.validate_state(state):
-                logger.error("[SUPERVISOR] State validation failed, transitioning to ERROR")
+                logger.error("[SUPERVISOR] State validation failed, forcing ERROR → DONE transition")
                 current_fsm_state = FSMState.ERROR
                 state.current_step = current_fsm_state.value
-                continue
+                state.errors.append("Timeout or max steps reached")
+                # Forcer transition vers DONE immédiatement (ne pas continuer la boucle)
+                break
 
             # Incrémenter compteur steps
             state.steps_count += 1
@@ -179,8 +192,15 @@ class SupervisorAgent(BaseAgent):
         elif fsm_state == FSMState.SEGMENT:
             # Segmentation (utilise SemanticPipeline existant)
             logger.debug("[SUPERVISOR] SEGMENT: Calling TopicSegmenter")
-            # TODO: Intégrer TopicSegmenter
-            state.segments = []  # Placeholder
+
+            # Si segments déjà présents (passés par osmose_agentique), les garder
+            if len(state.segments) > 0:
+                logger.info(f"[SUPERVISOR] SEGMENT: Segments already present ({len(state.segments)}), skipping segmentation")
+                return FSMState.EXTRACT
+
+            # TODO: Intégrer TopicSegmenter si segments vides
+            logger.warning("[SUPERVISOR] SEGMENT: No segments found, should call TopicSegmenter here (TODO)")
+            state.segments = []  # Placeholder pour éviter erreur
             return FSMState.EXTRACT
 
         elif fsm_state == FSMState.EXTRACT:
@@ -198,10 +218,10 @@ class SupervisorAgent(BaseAgent):
         elif fsm_state == FSMState.GATE_CHECK:
             # Quality gate check
             logger.debug("[SUPERVISOR] GATE_CHECK: Calling GatekeeperDelegate")
-            gate_result = await self.gatekeeper.execute(state)
+            state = await self.gatekeeper.execute(state)
 
             # Si qualité insuffisante et budget permet, retry avec BIG model
-            if len(gate_result.promoted) == 0 and gate_result.budget_remaining["BIG"] > 0:
+            if len(state.promoted) == 0 and state.budget_remaining["BIG"] > 0:
                 logger.warning("[SUPERVISOR] GATE_CHECK: Quality low, retrying with BIG")
                 return FSMState.EXTRACT  # Retry
             else:

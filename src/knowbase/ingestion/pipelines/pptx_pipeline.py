@@ -721,7 +721,11 @@ def extract_with_python_pptx(pptx_path: Path) -> List[Dict[str, Any]]:
                         for row in table.rows:
                             row_text = []
                             for cell in row.cells:
-                                cell_text = cell.text_frame.text.strip() if cell.text_frame else ""
+                                cell_text = (
+                                    cell.text_frame.text.strip()
+                                    if cell.text_frame
+                                    else ""
+                                )
                                 if cell_text:
                                     row_text.append(cell_text)
                             if row_text:
@@ -739,7 +743,11 @@ def extract_with_python_pptx(pptx_path: Path) -> List[Dict[str, Any]]:
                         if hasattr(shape, "chart") and shape.chart:
                             chart = shape.chart
                             if hasattr(chart, "chart_title") and chart.chart_title:
-                                title_text = chart.chart_title.text_frame.text if hasattr(chart.chart_title, "text_frame") else ""
+                                title_text = (
+                                    chart.chart_title.text_frame.text
+                                    if hasattr(chart.chart_title, "text_frame")
+                                    else ""
+                                )
                                 if title_text:
                                     chart_info.append(f"Chart Title: {title_text}")
                         if chart_info:
@@ -1622,8 +1630,8 @@ Your summary should include:
                 logger.info(
                     f"Slide {slide_index} [VISION SUMMARY]: {len(summary)} chars generated"
                 )
-                logger.info(f"Slide {slide_index} [VISION SUMMARY CONTENT]:\n{summary}")
-                logger.info("=" * 80)
+                # logger.info(f"Slide {slide_index} [VISION SUMMARY CONTENT]:\n{summary}")
+                # logger.info("=" * 80)
                 return summary
             else:
                 logger.warning(
@@ -2197,7 +2205,9 @@ def process_pptx(
     )
 
     # 🔍 DEBUG: Confirmer que le code continue après construction texte enrichi
-    logger.info("[DEBUG] 🎯 Checkpoint A: Après construction texte enrichi, avant aperçu")
+    logger.info(
+        "[DEBUG] 🎯 Checkpoint A: Après construction texte enrichi, avant aperçu"
+    )
 
     # Afficher aperçu du texte enrichi pour validation
     preview_length = min(1000, len(full_text_enriched))
@@ -2227,14 +2237,21 @@ def process_pptx(
 
     try:
         logger.info("[DEBUG] 🎯 Checkpoint F: Dans try block, avant import")
-        from knowbase.ingestion.osmose_agentique import process_document_with_osmose_agentique
+        from knowbase.ingestion.osmose_agentique import (
+            process_document_with_osmose_agentique,
+        )
         import asyncio
+
         logger.info("[DEBUG] 🎯 Checkpoint G: Imports OK, avant condition")
 
-        logger.info(f"[DEBUG] 🔍 full_text_enriched type: {type(full_text_enriched)}, len: {len(full_text_enriched) if full_text_enriched else 'None'}")
+        logger.info(
+            f"[DEBUG] 🔍 full_text_enriched type: {type(full_text_enriched)}, len: {len(full_text_enriched) if full_text_enriched else 'None'}"
+        )
 
         if full_text_enriched and len(full_text_enriched) >= 100:
-            logger.info("[DEBUG] 🎯 Checkpoint H: Condition OSMOSE validée, entrée dans bloc")
+            logger.info(
+                "[DEBUG] 🎯 Checkpoint H: Condition OSMOSE validée, entrée dans bloc"
+            )
             if progress_callback:
                 progress_callback(
                     "OSMOSE Semantic",
@@ -2244,7 +2261,9 @@ def process_pptx(
                 )
 
             # Appeler OSMOSE Agentique (SupervisorAgent FSM) de manière asynchrone
-            logger.info("[DEBUG] 🎯 Checkpoint I: Avant asyncio.run(process_document_with_osmose_agentique)")
+            logger.info(
+                "[DEBUG] 🎯 Checkpoint I: Avant asyncio.run(process_document_with_osmose_agentique)"
+            )
             osmose_result = asyncio.run(
                 process_document_with_osmose_agentique(
                     document_id=pptx_path.stem,
@@ -2254,10 +2273,14 @@ def process_pptx(
                     tenant_id="default",
                 )
             )
-            logger.info(f"[DEBUG] 🎯 Checkpoint J: Après asyncio.run, osmose_result.osmose_success={osmose_result.osmose_success}")
+            logger.info(
+                f"[DEBUG] 🎯 Checkpoint J: Après asyncio.run, osmose_result.osmose_success={osmose_result.osmose_success}"
+            )
 
             if osmose_result.osmose_success:
-                logger.info("[DEBUG] 🎯 Checkpoint K: OSMOSE Success, affichage résultats")
+                logger.info(
+                    "[DEBUG] 🎯 Checkpoint K: OSMOSE Success, affichage résultats"
+                )
                 logger.info("=" * 80)
                 logger.info(
                     f"[OSMOSE PURE] ✅ Traitement réussi:\n"
@@ -2296,7 +2319,9 @@ def process_pptx(
 
     except Exception as e:
         # En mode OSMOSE Pure, une erreur OSMOSE = échec complet de l'ingestion
-        logger.info(f"[DEBUG] 🎯 Checkpoint Z: EXCEPTION catchée: {type(e).__name__}: {str(e)[:100]}")
+        logger.info(
+            f"[DEBUG] 🎯 Checkpoint Z: EXCEPTION catchée: {type(e).__name__}: {str(e)[:100]}"
+        )
         logger.error(
             f"[OSMOSE PURE] ❌ Erreur traitement sémantique: {e}", exc_info=True
         )

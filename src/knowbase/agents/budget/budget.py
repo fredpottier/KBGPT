@@ -7,6 +7,7 @@ Gestion caps et quotas LLM.
 from typing import Dict, Any, Optional
 import logging
 from datetime import datetime, timedelta
+from pydantic import model_validator
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
 from knowbase.common.clients.redis_client import get_redis_client, RedisClient
@@ -27,6 +28,17 @@ class CheckBudgetOutput(ToolOutput):
     remaining: int = 0
     reason: str = ""
 
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.budget_ok:
+            self.budget_ok = self.data.get("budget_ok", False)
+        if self.data and not self.remaining:
+            self.remaining = self.data.get("remaining", 0)
+        if self.data and not self.reason:
+            self.reason = self.data.get("reason", "")
+        return self
+
 
 class ConsumeBudgetInput(ToolInput):
     """Input pour ConsumeBudget tool."""
@@ -41,6 +53,15 @@ class ConsumeBudgetOutput(ToolOutput):
     consumed: bool = False
     new_remaining: int = 0
 
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.consumed:
+            self.consumed = self.data.get("consumed", False)
+        if self.data and not self.new_remaining:
+            self.new_remaining = self.data.get("new_remaining", 0)
+        return self
+
 
 class RefundBudgetInput(ToolInput):
     """Input pour RefundBudget tool."""
@@ -54,6 +75,15 @@ class RefundBudgetOutput(ToolOutput):
     """Output pour RefundBudget tool."""
     refunded: bool = False
     new_remaining: int = 0
+
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.refunded:
+            self.refunded = self.data.get("refunded", False)
+        if self.data and not self.new_remaining:
+            self.new_remaining = self.data.get("new_remaining", 0)
+        return self
 
 
 class BudgetManager(BaseAgent):
@@ -102,13 +132,13 @@ class BudgetManager(BaseAgent):
         if config:
             self.daily_quotas = config.get("daily_quotas", self.DAILY_QUOTAS)
             self.document_caps = config.get("document_caps", self.DOCUMENT_CAPS)
-            redis_host = config.get("redis_host", "localhost")
+            redis_host = config.get("redis_host", "redis")  # Docker service name
             redis_port = config.get("redis_port", 6379)
             redis_db = config.get("redis_db", 0)
         else:
             self.daily_quotas = self.DAILY_QUOTAS
             self.document_caps = self.DOCUMENT_CAPS
-            redis_host = "localhost"
+            redis_host = "redis"  # Docker service name
             redis_port = 6379
             redis_db = 0
 
@@ -165,14 +195,15 @@ class BudgetManager(BaseAgent):
                 requested_calls=1
             )
 
-            check_result = self.call_tool("check_budget", check_input)
+            check_result = await self.call_tool("check_budget", check_input)
 
             if not check_result.success:
                 logger.error(f"[BUDGET] Budget check failed for {tier}: {check_result.message}")
                 state.errors.append(f"Budget check failed for {tier}")
                 continue
 
-            check_output = CheckBudgetOutput(**check_result.data)
+            # check_result est déjà un CheckBudgetOutput (hérite de ToolOutput)
+            check_output = check_result
 
             if not check_output.budget_ok:
                 logger.warning(f"[BUDGET] Budget insufficient for {tier}: {check_output.reason}")
@@ -232,9 +263,12 @@ class BudgetManager(BaseAgent):
                 logger.warning(f"[BUDGET:CheckBudget] Redis unavailable, fallback mode (assume 0 consumed)")
 
             if daily_consumed + requested_calls > daily_quota:
-                return ToolOutput(
+                return CheckBudgetOutput(
                     success=True,
                     message="Budget check complete",
+                    budget_ok=False,
+                    remaining=daily_quota - daily_consumed,
+                    reason=f"Daily quota exhausted for {model_tier} (limit {daily_quota})",
                     data={
                         "budget_ok": False,
                         "remaining": daily_quota - daily_consumed,
@@ -243,9 +277,12 @@ class BudgetManager(BaseAgent):
                 )
 
             # Budget OK
-            return ToolOutput(
+            return CheckBudgetOutput(
                 success=True,
                 message="Budget check complete",
+                budget_ok=True,
+                remaining=daily_quota - daily_consumed,
+                reason="",
                 data={
                     "budget_ok": True,
                     "remaining": daily_quota - daily_consumed,
@@ -296,9 +333,11 @@ class BudgetManager(BaseAgent):
                 logger.warning(f"[BUDGET:ConsumeBudget] Redis unavailable, skipping increment")
                 new_remaining = 0
 
-            return ToolOutput(
+            return ConsumeBudgetOutput(
                 success=True,
                 message="Budget consumed",
+                consumed=True,
+                new_remaining=new_remaining,
                 data={
                     "consumed": True,
                     "new_remaining": new_remaining
@@ -348,9 +387,11 @@ class BudgetManager(BaseAgent):
                 logger.warning(f"[BUDGET:RefundBudget] Redis unavailable, skipping decrement")
                 new_remaining = 0
 
-            return ToolOutput(
+            return RefundBudgetOutput(
                 success=True,
                 message="Budget refunded",
+                refunded=True,
+                new_remaining=new_remaining,
                 data={
                     "refunded": True,
                     "new_remaining": new_remaining

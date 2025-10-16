@@ -24,6 +24,7 @@ from knowbase.ontology.decision_trace import (
     NormalizationStrategy,
     StrategyResult
 )
+from knowbase.ontology.entity_normalizer_neo4j import EntityNormalizerNeo4j
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,24 @@ class GatekeeperDelegate(BaseAgent):
             logger.error(f"[GATEKEEPER] Neo4j client initialization failed: {e}")
             self.neo4j_client = None
 
+        # P0.1 + P1.2: Initialiser EntityNormalizerNeo4j pour canonicalisation avancée
+        try:
+            if self.neo4j_client and self.neo4j_client.driver:
+                self.entity_normalizer = EntityNormalizerNeo4j(self.neo4j_client.driver)
+                logger.info(
+                    "[GATEKEEPER] EntityNormalizerNeo4j initialized "
+                    "(P0.1 Sandbox + P1.2 Structural Similarity enabled)"
+                )
+            else:
+                logger.warning(
+                    "[GATEKEEPER] EntityNormalizerNeo4j disabled (Neo4j client unavailable), "
+                    "falling back to naive canonicalization"
+                )
+                self.entity_normalizer = None
+        except Exception as e:
+            logger.error(f"[GATEKEEPER] EntityNormalizerNeo4j initialization failed: {e}")
+            self.entity_normalizer = None
+
         logger.info(
             f"[GATEKEEPER] Initialized with default profile '{self.default_profile}' "
             f"(contextual_filtering={'ON' if (self.graph_scorer or self.embeddings_scorer) else 'OFF'})"
@@ -293,6 +312,71 @@ class GatekeeperDelegate(BaseAgent):
 
             if not promote_result.success:
                 logger.error(f"[GATEKEEPER] PromoteConcepts failed: {promote_result.message}")
+            else:
+                # Problème 1: Persister relations sémantiques dans Neo4j
+                if state.relations:
+                    concept_mapping = promote_result.data.get("concept_name_to_canonical_id", {})
+                    persisted_count = 0
+                    skipped_count = 0
+
+                    logger.info(
+                        f"[GATEKEEPER:Relations] Starting persistence of {len(state.relations)} relations "
+                        f"with {len(concept_mapping)} canonical concepts"
+                    )
+
+                    for relation in state.relations:
+                        source_name = relation.get("source")
+                        target_name = relation.get("target")
+
+                        # Map concept names to canonical_ids
+                        source_id = concept_mapping.get(source_name)
+                        target_id = concept_mapping.get(target_name)
+
+                        if source_id and target_id:
+                            # Persister la relation dans Neo4j
+                            try:
+                                success = self.neo4j_client.create_concept_link(
+                                    tenant_id=state.tenant_id,
+                                    source_concept_id=source_id,
+                                    target_concept_id=target_id,
+                                    relationship_type=relation.get("type", "RELATED_TO"),
+                                    weight=relation.get("confidence", 0.7),  # weight au lieu de confidence
+                                    metadata={
+                                        "segment_id": relation.get("segment_id"),
+                                        "created_by": "pattern_miner",
+                                        "confidence": relation.get("confidence", 0.7)  # Stocker aussi dans metadata
+                                    }
+                                )
+                                if success:
+                                    persisted_count += 1
+                                    logger.debug(
+                                        f"[GATEKEEPER:Relations] Persisted {relation.get('type')} "
+                                        f"relation: {source_name} → {target_name}"
+                                    )
+                                else:
+                                    skipped_count += 1
+                                    logger.warning(
+                                        f"[GATEKEEPER:Relations] Failed to persist relation: "
+                                        f"{source_name} → {target_name}"
+                                    )
+                            except Exception as e:
+                                skipped_count += 1
+                                logger.error(
+                                    f"[GATEKEEPER:Relations] Error persisting relation "
+                                    f"{source_name} → {target_name}: {e}"
+                                )
+                        else:
+                            skipped_count += 1
+                            logger.debug(
+                                f"[GATEKEEPER:Relations] Skipped relation (concepts not promoted): "
+                                f"{source_name} → {target_name} "
+                                f"(source_id={source_id}, target_id={target_id})"
+                            )
+
+                    logger.info(
+                        f"[GATEKEEPER:Relations] Persistence complete: {persisted_count} relations persisted, "
+                        f"{skipped_count} skipped"
+                    )
 
         # Log final
         logger.info(
@@ -516,6 +600,7 @@ class GatekeeperDelegate(BaseAgent):
             promoted_count = 0
             failed_count = 0
             canonical_ids = []
+            concept_name_to_canonical_id = {}  # Problème 1: Map pour relations
 
             for concept in concepts:
                 # Extraire champs du concept
@@ -526,8 +611,52 @@ class GatekeeperDelegate(BaseAgent):
                 proto_concept_id = concept.get("proto_concept_id", "")  # Si concept Proto existe
                 tenant_id = concept.get("tenant_id", "default")
 
-                # Générer canonical_name (normalisé)
-                canonical_name = concept_name.strip().title()
+                # P0.1 + P1.2: Normalisation via EntityNormalizerNeo4j (ontologie + fuzzy structurel)
+                entity_id = None
+                normalized_type = concept_type
+                is_cataloged = False
+
+                if self.entity_normalizer:
+                    try:
+                        import time
+                        start_time = time.time()
+
+                        entity_id, canonical_name, normalized_type, is_cataloged = self.entity_normalizer.normalize_entity_name(
+                            raw_name=concept_name,
+                            entity_type_hint=concept_type,
+                            tenant_id=tenant_id,
+                            include_pending=False  # P0.1 Sandbox: Exclure entités pending
+                        )
+
+                        normalization_time_ms = (time.time() - start_time) * 1000
+
+                        if is_cataloged:
+                            logger.info(
+                                f"[GATEKEEPER:Canonicalization] ✅ Normalized via ontology: '{concept_name}' → '{canonical_name}' "
+                                f"(entity_id={entity_id}, type={normalized_type}, time={normalization_time_ms:.2f}ms)"
+                            )
+                        else:
+                            # Fallback heuristique si non trouvé
+                            canonical_name = concept_name.strip().title()
+                            logger.debug(
+                                f"[GATEKEEPER:Canonicalization] Fallback heuristic for '{concept_name}' → '{canonical_name}' "
+                                f"(not found in ontology, time={normalization_time_ms:.2f}ms)"
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"[GATEKEEPER:Canonicalization] EntityNormalizerNeo4j failed for '{concept_name}': {e}, "
+                            f"falling back to naive canonicalization"
+                        )
+                        canonical_name = concept_name.strip().title()
+                        normalization_time_ms = 0.0
+                else:
+                    # Fallback naïf si EntityNormalizerNeo4j indisponible
+                    canonical_name = concept_name.strip().title()
+                    normalization_time_ms = 0.0
+                    logger.debug(
+                        f"[GATEKEEPER:Canonicalization] Naive canonicalization for '{concept_name}' → '{canonical_name}' "
+                        f"(EntityNormalizerNeo4j unavailable)"
+                    )
 
                 # Générer unified_definition (si manquant, utiliser nom + type)
                 unified_definition = definition if definition else f"{concept_type}: {concept_name}"
@@ -575,27 +704,46 @@ class GatekeeperDelegate(BaseAgent):
                         segment_id=concept.get("segment_id")
                     )
 
-                    # Ajouter stratégie HEURISTIC_RULES (gate check)
-                    decision_trace.add_strategy_result(StrategyResult(
-                        strategy=NormalizationStrategy.HEURISTIC_RULES,
-                        attempted=True,
-                        success=True,
-                        canonical_name=canonical_name,
-                        confidence=confidence,
-                        execution_time_ms=0.0,
-                        metadata={
-                            "gate_profile": self.default_profile,
-                            "quality_score": quality_score,
-                            "method": "gatekeeper_promotion"
-                        }
-                    ))
+                    # P0.3: Enregistrer stratégie réellement utilisée
+                    if is_cataloged:
+                        # Stratégie ONTOLOGY_LOOKUP réussie
+                        decision_trace.add_strategy_result(StrategyResult(
+                            strategy=NormalizationStrategy.ONTOLOGY_LOOKUP,
+                            attempted=True,
+                            success=True,
+                            canonical_name=canonical_name,
+                            confidence=1.0,  # Exact match ontologie
+                            execution_time_ms=normalization_time_ms,
+                            metadata={
+                                "entity_id": entity_id,
+                                "normalized_type": normalized_type,
+                                "match_method": "ontology_exact_or_structural",
+                                "is_cataloged": True
+                            }
+                        ))
+                    else:
+                        # Fallback HEURISTIC_RULES
+                        decision_trace.add_strategy_result(StrategyResult(
+                            strategy=NormalizationStrategy.HEURISTIC_RULES,
+                            attempted=True,
+                            success=True,
+                            canonical_name=canonical_name,
+                            confidence=confidence,
+                            execution_time_ms=normalization_time_ms,
+                            metadata={
+                                "gate_profile": self.default_profile,
+                                "quality_score": quality_score,
+                                "method": "naive_title_case",
+                                "fallback_reason": "not_in_ontology"
+                            }
+                        ))
 
                     # Finaliser trace
                     decision_trace.finalize(
                         canonical_name=canonical_name,
-                        strategy=NormalizationStrategy.HEURISTIC_RULES,
-                        confidence=confidence,
-                        is_cataloged=False  # Pas encore catalogué dans ontologie
+                        strategy=NormalizationStrategy.ONTOLOGY_LOOKUP if is_cataloged else NormalizationStrategy.HEURISTIC_RULES,
+                        confidence=1.0 if is_cataloged else confidence,
+                        is_cataloged=is_cataloged
                     )
 
                     decision_trace_json = decision_trace.to_json_string()
@@ -624,6 +772,10 @@ class GatekeeperDelegate(BaseAgent):
                     if canonical_id:
                         promoted_count += 1
                         canonical_ids.append(canonical_id)
+
+                        # Problème 1: Stocker mapping concept_name → canonical_id
+                        concept_name_to_canonical_id[concept_name] = canonical_id
+
                         logger.debug(
                             f"[GATEKEEPER:PromoteConcepts] Promoted '{canonical_name}' "
                             f"(tenant={tenant_id}, quality={quality_score:.2f})"
@@ -644,6 +796,7 @@ class GatekeeperDelegate(BaseAgent):
                 f"{promoted_count} promoted, {failed_count} failed"
             )
 
+            # Problème 1: Retourner mapping pour persistance relations
             return PromoteConceptsOutput(
                 success=True,
                 message=f"Promoted {promoted_count}/{len(concepts)} concepts to Published-KG",
@@ -651,7 +804,8 @@ class GatekeeperDelegate(BaseAgent):
                 data={
                     "promoted_count": promoted_count,
                     "failed_count": failed_count,
-                    "canonical_ids": canonical_ids
+                    "canonical_ids": canonical_ids,
+                    "concept_name_to_canonical_id": concept_name_to_canonical_id  # Problème 1
                 }
             )
 

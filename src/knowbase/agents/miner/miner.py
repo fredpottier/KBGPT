@@ -7,6 +7,7 @@ Cross-segment reasoning et pattern detection.
 from typing import Dict, Any, Optional, List
 import logging
 from collections import defaultdict
+from pydantic import model_validator
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
 
@@ -24,6 +25,15 @@ class DetectPatternsOutput(ToolOutput):
     patterns: List[Dict[str, Any]] = []
     enriched_candidates: List[Dict[str, Any]] = []
 
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.patterns:
+            self.patterns = self.data.get("patterns", [])
+        if self.data and not self.enriched_candidates:
+            self.enriched_candidates = self.data.get("enriched_candidates", [])
+        return self
+
 
 class LinkConceptsInput(ToolInput):
     """Input pour LinkConcepts tool."""
@@ -33,6 +43,13 @@ class LinkConceptsInput(ToolInput):
 class LinkConceptsOutput(ToolOutput):
     """Output pour LinkConcepts tool."""
     relations: List[Dict[str, Any]] = []
+
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.relations:
+            self.relations = self.data.get("relations", [])
+        return self
 
 
 class PatternMiner(BaseAgent):
@@ -103,13 +120,14 @@ class PatternMiner(BaseAgent):
             min_frequency=self.min_frequency
         )
 
-        patterns_result = self.call_tool("detect_patterns", patterns_input)
+        patterns_result = await self.call_tool("detect_patterns", patterns_input)
 
         if not patterns_result.success:
             logger.error(f"[MINER] DetectPatterns failed: {patterns_result.message}")
             return state
 
-        patterns_output = DetectPatternsOutput(**patterns_result.data)
+        # patterns_result est déjà un DetectPatternsOutput (hérite de ToolOutput)
+        patterns_output = patterns_result
 
         logger.info(f"[MINER] Detected {len(patterns_output.patterns)} patterns")
 
@@ -119,15 +137,20 @@ class PatternMiner(BaseAgent):
         # Étape 2: Lier concepts cross-segments
         link_input = LinkConceptsInput(candidates=state.candidates)
 
-        link_result = self.call_tool("link_concepts", link_input)
+        link_result = await self.call_tool("link_concepts", link_input)
 
         if not link_result.success:
             logger.error(f"[MINER] LinkConcepts failed: {link_result.message}")
             return state
 
-        link_output = LinkConceptsOutput(**link_result.data)
+        # link_result est déjà un LinkConceptsOutput (hérite de ToolOutput)
+        link_output = link_result
 
         logger.info(f"[MINER] Created {len(link_output.relations)} cross-segment relations")
+
+        # Problème 1: Stocker relations dans state pour persistance ultérieure
+        state.relations = link_output.relations
+        logger.debug(f"[MINER] Stored {len(state.relations)} relations in state for Gatekeeper persistence")
 
         # Log final
         logger.info(
@@ -197,9 +220,11 @@ class PatternMiner(BaseAgent):
 
             logger.debug(f"[MINER:DetectPatterns] {len(patterns)} patterns detected")
 
-            return ToolOutput(
+            return DetectPatternsOutput(
                 success=True,
                 message=f"Detected {len(patterns)} patterns",
+                patterns=patterns,
+                enriched_candidates=enriched_candidates,
                 data={
                     "patterns": patterns,
                     "enriched_candidates": enriched_candidates
@@ -208,9 +233,11 @@ class PatternMiner(BaseAgent):
 
         except Exception as e:
             logger.error(f"[MINER:DetectPatterns] Error: {e}")
-            return ToolOutput(
+            return DetectPatternsOutput(
                 success=False,
-                message=f"DetectPatterns failed: {str(e)}"
+                message=f"DetectPatterns failed: {str(e)}",
+                patterns=[],
+                enriched_candidates=[]
             )
 
     def _link_concepts_tool(self, tool_input: LinkConceptsInput) -> ToolOutput:
@@ -258,9 +285,14 @@ class PatternMiner(BaseAgent):
 
             logger.debug(f"[MINER:LinkConcepts] {len(relations)} relations created")
 
-            return ToolOutput(
+            # Problème 1: Stocker relations dans state pour persistance ultérieure
+            # (Les relations seront persistées après promotion des concepts dans Gatekeeper)
+            logger.debug(f"[MINER:LinkConcepts] Storing {len(relations)} relations in state for later persistence")
+
+            return LinkConceptsOutput(
                 success=True,
                 message=f"Created {len(relations)} relations",
+                relations=relations,
                 data={
                     "relations": relations
                 }
@@ -268,7 +300,8 @@ class PatternMiner(BaseAgent):
 
         except Exception as e:
             logger.error(f"[MINER:LinkConcepts] Error: {e}")
-            return ToolOutput(
+            return LinkConceptsOutput(
                 success=False,
-                message=f"LinkConcepts failed: {str(e)}"
+                message=f"LinkConcepts failed: {str(e)}",
+                relations=[]
             )
