@@ -106,3 +106,7 @@ asyncpg>=0.29.0
 # === Fuzzy Matching (Phase 5B) ===
 fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.21.0
+
+# === Architecture Agentique OSMOSE (Phase 1.5) ===
+langgraph>=0.2.0
+networkx>=3.1

@@ -45,6 +45,7 @@ class AgentState(BaseModel):
     segments: List[Dict[str, Any]] = Field(default_factory=list)
     candidates: List[Dict[str, Any]] = Field(default_factory=list)
     promoted: List[Dict[str, Any]] = Field(default_factory=list)
+    relations: List[Dict[str, Any]] = Field(default_factory=list)  # Problème 1: Relations sémantiques
 
     # Metrics
     cost_incurred: float = 0.0
@@ -59,7 +60,7 @@ class AgentState(BaseModel):
     steps_count: int = 0
     max_steps: int = 50
     started_at: float = Field(default_factory=time.time)
-    timeout_seconds: int = 300  # 5 min/doc
+    timeout_seconds: int = 600  # 10 min/doc (suffisant pour 10 segments + LLM calls)
 
     # Errors
     errors: List[str] = Field(default_factory=list)
@@ -156,13 +157,13 @@ class BaseAgent(ABC):
 
         return True
 
-    def call_tool(
+    async def call_tool(
         self,
         tool_name: str,
         tool_input: ToolInput
     ) -> ToolOutput:
         """
-        Appelle un tool de l'agent.
+        Appelle un tool de l'agent (supporte async et sync tools).
 
         Args:
             tool_name: Nom du tool
@@ -171,6 +172,8 @@ class BaseAgent(ABC):
         Returns:
             Output JSON du tool
         """
+        import inspect
+
         if tool_name not in self.tools:
             logger.error(f"[AGENTS] {self.role.value}: Tool '{tool_name}' not found")
             return ToolOutput(
@@ -181,11 +184,18 @@ class BaseAgent(ABC):
         tool_func = self.tools[tool_name]
 
         try:
-            result = tool_func(tool_input)
+            # Détecter si le tool est async et appeler en conséquence
+            if inspect.iscoroutinefunction(tool_func):
+                # Tool async : utiliser await
+                result = await tool_func(tool_input)
+            else:
+                # Tool synchrone : appel direct
+                result = tool_func(tool_input)
+
             logger.debug(f"[AGENTS] {self.role.value}: Tool '{tool_name}' executed successfully")
             return result
         except Exception as e:
-            logger.error(f"[AGENTS] {self.role.value}: Tool '{tool_name}' failed: {e}")
+            logger.error(f"[AGENTS] {self.role.value}: Tool '{tool_name}' failed: {e}", exc_info=True)
             return ToolOutput(
                 success=False,
                 message=f"Tool execution failed: {str(e)}"

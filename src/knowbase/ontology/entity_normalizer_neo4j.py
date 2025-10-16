@@ -82,7 +82,7 @@ class EntityNormalizerNeo4j:
             where_clauses = []
 
             if not include_pending:
-                where_clauses.append("ont.status != 'auto_learned_pending'")
+                where_clauses.append("ont.status <> 'auto_learned_pending'")
                 logger.debug(
                     f"[ONTOLOGY:Sandbox] Filtering pending entities for '{raw_name}' "
                     f"(include_pending={include_pending})"
@@ -144,7 +144,7 @@ class EntityNormalizerNeo4j:
 
                 # P0.1 Sandbox: Toujours filtrer pending (même en fallback)
                 if not include_pending:
-                    query_no_type += " WHERE ont.status != 'auto_learned_pending'"
+                    query_no_type += " WHERE ont.status <> 'auto_learned_pending'"
 
                 query_no_type += """
                 RETURN

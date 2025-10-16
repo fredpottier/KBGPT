@@ -28,6 +28,36 @@ from knowbase.ingestion.osmose_integration import (
 from knowbase.semantic.segmentation.topic_segmenter import get_topic_segmenter
 from knowbase.semantic.config import get_semantic_config
 
+# Configuration du root logger pour que tous les loggers enfants (agents) héritent des handlers
+# IMPORTANT: Récupérer les handlers du logger parent (pptx_pipeline) pour les copier au root logger
+# Cela permet aux loggers enfants (agents) d'écrire dans le même fichier de log
+root_logger = logging.getLogger()
+
+# Trouver le handler du fichier ingest_debug.log depuis n'importe quel logger parent
+parent_handlers_found = False
+for parent_name in ["knowbase.ingestion.pipelines.pptx_pipeline", "knowbase.ingestion"]:
+    parent_logger = logging.getLogger(parent_name)
+    if parent_logger.handlers:
+        for handler in parent_logger.handlers:
+            # Copier le handler au root logger s'il n'est pas déjà présent
+            if handler not in root_logger.handlers:
+                root_logger.addHandler(handler)
+                parent_handlers_found = True
+        break
+
+# Si aucun handler parent trouvé, ajouter au moins un StreamHandler pour debug
+if not parent_handlers_found and not root_logger.hasHandlers():
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s [%(name)s]: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    root_logger.addHandler(console_handler)
+
+# S'assurer que le root logger a le bon niveau
+root_logger.setLevel(logging.INFO)
+
 logger = logging.getLogger(__name__)
 
 
@@ -122,6 +152,42 @@ class OsmoseAgentiqueService:
 
         return True, None
 
+    def _calculate_adaptive_timeout(self, num_segments: int) -> int:
+        """
+        Calcule un timeout adaptatif basé sur la complexité du document.
+
+        Formule :
+        - Temps de base : 120s (2 min)
+        - Temps par segment : 60s (1 min) (extraction NER + potentiel LLM)
+        - Temps FSM overhead : 60s (mining, gatekeeper, promotion)
+        - Min : 180s (3 min), Max : 1800s (30 min)
+
+        Exemples :
+        - 1 segment : 120 + 60*1 + 60 = 240s (4 min)
+        - 10 segments : 120 + 60*10 + 60 = 780s (13 min)
+        - 20 segments : 120 + 60*20 + 60 = 1380s (23 min)
+        - 30+ segments : 120 + 60*30 + 60 = 1980s → capped à 1800s (30 min)
+
+        Args:
+            num_segments: Nombre de segments détectés
+
+        Returns:
+            Timeout en secondes
+        """
+        base_time = 120  # 2 min base
+        time_per_segment = 60  # 60s (1 min) par segment
+        fsm_overhead = 60  # 1 min pour mining, gatekeeper, promotion
+
+        calculated_timeout = base_time + (time_per_segment * num_segments) + fsm_overhead
+
+        # Bornes: min 180s (3 min), max 1800s (30 min)
+        min_timeout = 180
+        max_timeout = 1800
+
+        adaptive_timeout = max(min_timeout, min(calculated_timeout, max_timeout))
+
+        return adaptive_timeout
+
     async def process_document_agentique(
         self,
         document_id: str,
@@ -185,6 +251,28 @@ class OsmoseAgentiqueService:
         osmose_start = asyncio.get_event_loop().time()
 
         try:
+            # Configuration logging pour agents : copier tous les handlers actifs au root logger
+            # IMPORTANT: Ceci doit être fait ICI (au runtime) et non au niveau module
+            root_logger = logging.getLogger()
+            current_handlers = []
+
+            # Récupérer TOUS les handlers de TOUS les loggers actifs
+            for logger_name in logging.Logger.manager.loggerDict:
+                active_logger = logging.getLogger(logger_name)
+                if active_logger.handlers:
+                    for handler in active_logger.handlers:
+                        if handler not in root_logger.handlers:
+                            root_logger.addHandler(handler)
+                            current_handlers.append(f"{logger_name}:{type(handler).__name__}")
+
+            # S'assurer que le root logger a le bon niveau
+            root_logger.setLevel(logging.INFO)
+
+            logger.info(
+                f"[OSMOSE AGENTIQUE] 🔧 Logger configured: root has {len(root_logger.handlers)} handlers "
+                f"(copied from: {', '.join(current_handlers[:3]) if current_handlers else 'none'})"
+            )
+
             # Étape 1: Créer AgentState initial
             tenant = tenant_id or self.config.default_tenant_id
 
@@ -242,6 +330,14 @@ class OsmoseAgentiqueService:
                     f"(avg cohesion: {sum(t.cohesion_score for t in topics) / max(len(topics), 1):.2f})"
                 )
 
+                # Calculer timeout adaptatif basé sur nombre de segments
+                adaptive_timeout = self._calculate_adaptive_timeout(len(initial_state.segments))
+                initial_state.timeout_seconds = adaptive_timeout
+                logger.info(
+                    f"[OSMOSE AGENTIQUE] Adaptive timeout: {adaptive_timeout}s "
+                    f"({len(initial_state.segments)} segments)"
+                )
+
             except Exception as e:
                 logger.error(f"[OSMOSE AGENTIQUE] TopicSegmenter failed: {e}")
                 logger.warning("[OSMOSE AGENTIQUE] Falling back to single-segment (full document)")
@@ -258,8 +354,24 @@ class OsmoseAgentiqueService:
                     "section_path": "full_document"
                 }]
 
+                # Calculer timeout adaptatif même pour fallback
+                adaptive_timeout = self._calculate_adaptive_timeout(1)
+                initial_state.timeout_seconds = adaptive_timeout
+                logger.info(
+                    f"[OSMOSE AGENTIQUE] Adaptive timeout (fallback): {adaptive_timeout}s (1 segment)"
+                )
+
             # Étape 3: Lancer SupervisorAgent FSM
             supervisor = self._get_supervisor()
+
+            # DEBUG: Vérifier que les segments sont bien présents
+            logger.info(
+                f"[OSMOSE AGENTIQUE] 🔍 DEBUG: Passing {len(initial_state.segments)} segments to SupervisorAgent"
+            )
+            if initial_state.segments:
+                logger.info(
+                    f"[OSMOSE AGENTIQUE] 🔍 DEBUG: First segment keys: {list(initial_state.segments[0].keys())}"
+                )
 
             final_state = await asyncio.wait_for(
                 supervisor.execute(initial_state),

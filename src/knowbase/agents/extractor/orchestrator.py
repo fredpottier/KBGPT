@@ -7,6 +7,7 @@ Routing intelligent pour extraction concepts.
 from typing import Dict, Any, Optional, List
 import logging
 from enum import Enum
+from pydantic import model_validator
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
 
@@ -33,6 +34,19 @@ class PrepassAnalyzerOutput(ToolOutput):
     recommended_route: str = "NO_LLM"
     reasoning: str = ""
 
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.entity_count:
+            self.entity_count = self.data.get("entity_count", 0)
+        if self.data and not self.entity_density:
+            self.entity_density = self.data.get("entity_density", 0.0)
+        if self.data and self.recommended_route == "NO_LLM":
+            self.recommended_route = self.data.get("recommended_route", "NO_LLM")
+        if self.data and not self.reasoning:
+            self.reasoning = self.data.get("reasoning", "")
+        return self
+
 
 class ExtractConceptsInput(ToolInput):
     """Input pour ExtractConcepts tool."""
@@ -46,6 +60,17 @@ class ExtractConceptsOutput(ToolOutput):
     concepts: List[Dict[str, Any]] = []
     cost_incurred: float = 0.0
     llm_calls: int = 0
+
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.concepts:
+            self.concepts = self.data.get("concepts", [])
+        if self.data and not self.cost_incurred:
+            self.cost_incurred = self.data.get("cost_incurred", 0.0)
+        if self.data and not self.llm_calls:
+            self.llm_calls = self.data.get("llm_calls", 0)
+        return self
 
 
 class ExtractorOrchestrator(BaseAgent):
@@ -75,7 +100,34 @@ class ExtractorOrchestrator(BaseAgent):
         self.no_llm_threshold = config.get("no_llm_threshold", 3) if config else 3
         self.small_threshold = config.get("small_threshold", 8) if config else 8
 
+        # Lazy-init pour MultilingualConceptExtractor (créé au premier appel)
+        self._concept_extractor = None
+        self._llm_router = None
+        self._semantic_config = None
+
         logger.info("[EXTRACTOR] Initialized with routing thresholds (NO_LLM<3, SMALL≤8, BIG>8)")
+
+    def _get_concept_extractor(self):
+        """
+        Lazy-init du MultilingualConceptExtractor.
+
+        Returns:
+            MultilingualConceptExtractor configuré
+        """
+        if self._concept_extractor is None:
+            from ...semantic.extraction.concept_extractor import MultilingualConceptExtractor
+            from ...semantic.config import get_semantic_config
+            from ...common.llm_router import get_llm_router
+
+            self._semantic_config = get_semantic_config()
+            self._llm_router = get_llm_router()
+            self._concept_extractor = MultilingualConceptExtractor(
+                self._llm_router,
+                self._semantic_config
+            )
+            logger.debug("[EXTRACTOR] MultilingualConceptExtractor initialized")
+
+        return self._concept_extractor
 
     def _register_tools(self):
         """Enregistre les tools de l'agent."""
@@ -118,13 +170,14 @@ class ExtractorOrchestrator(BaseAgent):
                 language=segment.get("language", "en")
             )
 
-            prepass_result = self.call_tool("prepass_analyzer", prepass_input)
+            prepass_result = await self.call_tool("prepass_analyzer", prepass_input)
 
             if not prepass_result.success:
                 logger.error(f"[EXTRACTOR] PrepassAnalyzer failed for segment {idx}: {prepass_result.message}")
                 continue
 
-            prepass_output = PrepassAnalyzerOutput(**prepass_result.data)
+            # prepass_result est déjà un PrepassAnalyzerOutput (hérite de ToolOutput)
+            prepass_output = prepass_result
             recommended_route = prepass_output.recommended_route
 
             logger.info(
@@ -147,13 +200,14 @@ class ExtractorOrchestrator(BaseAgent):
                 use_llm=(final_route != ExtractionRoute.NO_LLM)
             )
 
-            extract_result = self.call_tool("extract_concepts", extract_input)
+            extract_result = await self.call_tool("extract_concepts", extract_input)
 
             if not extract_result.success:
                 logger.error(f"[EXTRACTOR] Extraction failed for segment {idx}: {extract_result.message}")
                 continue
 
-            extract_output = ExtractConceptsOutput(**extract_result.data)
+            # extract_result est déjà un ExtractConceptsOutput (hérite de ToolOutput)
+            extract_output = extract_result
 
             # Mettre à jour état
             state.candidates.extend(extract_output.concepts)
@@ -230,13 +284,15 @@ class ExtractorOrchestrator(BaseAgent):
         """
         try:
             # Import local pour éviter dépendance circulaire
-            from ...semantic.utils.ner_manager import NERManager
+            from ...semantic.utils.ner_manager import MultilingualNER
+            from ...semantic.config import get_semantic_config
 
             segment_text = tool_input.segment_text
             language = tool_input.language
 
             # NER spaCy
-            ner_manager = NERManager()
+            semantic_config = get_semantic_config()
+            ner_manager = MultilingualNER(semantic_config)
             entities = ner_manager.extract_entities(segment_text, language)
 
             entity_count = len(entities)
@@ -256,9 +312,13 @@ class ExtractorOrchestrator(BaseAgent):
 
             logger.debug(f"[EXTRACTOR:PrepassAnalyzer] {entity_count} entities, density {entity_density:.2f}, route={route}")
 
-            return ToolOutput(
+            return PrepassAnalyzerOutput(
                 success=True,
                 message="PrepassAnalyzer completed",
+                entity_count=entity_count,
+                entity_density=entity_density,
+                recommended_route=route,
+                reasoning=reasoning,
                 data={
                     "entity_count": entity_count,
                     "entity_density": entity_density,
@@ -269,12 +329,16 @@ class ExtractorOrchestrator(BaseAgent):
 
         except Exception as e:
             logger.error(f"[EXTRACTOR:PrepassAnalyzer] Error: {e}")
-            return ToolOutput(
+            return PrepassAnalyzerOutput(
                 success=False,
-                message=f"PrepassAnalyzer failed: {str(e)}"
+                message=f"PrepassAnalyzer failed: {str(e)}",
+                entity_count=0,
+                entity_density=0.0,
+                recommended_route="NO_LLM",
+                reasoning=f"Error: {str(e)}"
             )
 
-    def _extract_concepts_tool(self, tool_input: ExtractConceptsInput) -> ToolOutput:
+    async def _extract_concepts_tool(self, tool_input: ExtractConceptsInput) -> ToolOutput:
         """
         Tool ExtractConcepts: Extrait concepts selon route choisie.
 
@@ -286,71 +350,98 @@ class ExtractorOrchestrator(BaseAgent):
         """
         try:
             # Import local pour éviter dépendance circulaire
-            from ...semantic.extraction.concept_extractor import ConceptExtractor
-            from ...semantic.models.semantic_types import Topic
+            from ...semantic.models import Topic, Window
+            import asyncio
 
             segment = tool_input.segment
             route = tool_input.route
             use_llm = tool_input.use_llm
 
-            # Créer Topic object pour ConceptExtractor
-            topic = Topic(
-                topic_id=segment.get("topic_id", "unknown"),
-                text=segment.get("text", ""),
-                language=segment.get("language", "en"),
-                start_page=segment.get("start_page", 0),
-                end_page=segment.get("end_page", 0),
-                keywords=segment.get("keywords", [])
+            # Créer Topic object pour MultilingualConceptExtractor
+            # Note: Topic attend des attributs spécifiques (document_id, section_path, windows, anchors)
+            segment_text = segment.get("text", "")
+
+            # Créer une Window à partir du texte du segment
+            window = Window(
+                text=segment_text,
+                start=0,
+                end=len(segment_text)
             )
 
-            # Instancier ConceptExtractor
-            extractor = ConceptExtractor()
+            topic = Topic(
+                topic_id=segment.get("topic_id", "unknown"),
+                document_id=segment.get("document_id", "unknown"),  # Devra être passé par le state
+                section_path=segment.get("section_path", "unknown"),
+                windows=[window],
+                anchors=segment.get("keywords", []),  # keywords du segment = anchors
+                cohesion_score=segment.get("cohesion_score", 0.8)
+            )
 
-            # Extraire concepts (synchrone pour simplifier, TODO: async)
-            # Note: Utilise methods=['NER', 'CLUSTERING'] ou ['NER', 'CLUSTERING', 'LLM']
-            # TODO: Implémenter logique route SMALL vs BIG (model selection)
+            # Obtenir MultilingualConceptExtractor (lazy-init)
+            extractor = self._get_concept_extractor()
 
-            # Pour l'instant: mock simple
-            concepts = []
+            # Extraire concepts avec MultilingualConceptExtractor
+            # Note: La méthode extract_concepts est async
+            concepts_list = await extractor.extract_concepts(topic, enable_llm=use_llm)
+
+            # Convertir List[Concept] en List[Dict] pour JSON serialization
+            concepts_dicts = []
+            for concept in concepts_list:
+                concepts_dicts.append({
+                    "concept_id": concept.concept_id,
+                    "name": concept.name,
+                    "type": concept.type.value if hasattr(concept.type, 'value') else str(concept.type),
+                    "definition": concept.definition,
+                    "context": concept.context,
+                    "language": concept.language,
+                    "confidence": concept.confidence,
+                    "source_topic_id": concept.source_topic_id,
+                    "extraction_method": concept.extraction_method,
+                    "related_concepts": concept.related_concepts
+                })
+
+            # Estimer cost et llm_calls selon route
+            # TODO: Récupérer les vrais coûts depuis LLMRouter
             cost = 0.0
             llm_calls = 0
 
-            if route == ExtractionRoute.NO_LLM:
-                # NER + Clustering uniquement
-                # TODO: Appeler ConceptExtractor avec enable_llm=False
-                concepts = []  # Mock
-                cost = 0.0
-                llm_calls = 0
-
-            elif route == ExtractionRoute.SMALL:
-                # NER + Clustering + LLM (gpt-4o-mini)
-                # TODO: Appeler ConceptExtractor avec enable_llm=True, model=SMALL
-                concepts = []  # Mock
-                cost = 0.002  # Mock: ~$0.002/segment pour SMALL
+            if route == ExtractionRoute.SMALL and use_llm:
+                cost = 0.002  # Estimation: ~$0.002/segment pour SMALL (gpt-4o-mini)
                 llm_calls = 1
-
-            elif route == ExtractionRoute.BIG:
-                # NER + Clustering + LLM (gpt-4o)
-                # TODO: Appeler ConceptExtractor avec enable_llm=True, model=BIG
-                concepts = []  # Mock
-                cost = 0.015  # Mock: ~$0.015/segment pour BIG
+            elif route == ExtractionRoute.BIG and use_llm:
+                cost = 0.015  # Estimation: ~$0.015/segment pour BIG (gpt-4o)
                 llm_calls = 1
+            # NO_LLM: cost=0, llm_calls=0
 
-            logger.debug(f"[EXTRACTOR:ExtractConcepts] {len(concepts)} concepts extracted, route={route}, cost=${cost:.3f}")
+            logger.debug(
+                f"[EXTRACTOR:ExtractConcepts] {len(concepts_dicts)} concepts extracted, "
+                f"route={route}, use_llm={use_llm}, cost=${cost:.3f}"
+            )
 
-            return ToolOutput(
+            return ExtractConceptsOutput(
                 success=True,
                 message="Concepts extracted successfully",
+                concepts=concepts_dicts,
+                cost_incurred=cost,
+                llm_calls=llm_calls,
                 data={
-                    "concepts": concepts,
+                    "concepts": concepts_dicts,
                     "cost_incurred": cost,
                     "llm_calls": llm_calls
                 }
             )
 
         except Exception as e:
-            logger.error(f"[EXTRACTOR:ExtractConcepts] Error: {e}")
-            return ToolOutput(
+            logger.error(f"[EXTRACTOR:ExtractConcepts] Error: {e}", exc_info=True)
+            return ExtractConceptsOutput(
                 success=False,
-                message=f"Extraction failed: {str(e)}"
+                message=f"Extraction failed: {str(e)}",
+                concepts=[],
+                cost_incurred=0.0,
+                llm_calls=0,
+                data={
+                    "concepts": [],
+                    "cost_incurred": 0.0,
+                    "llm_calls": 0
+                }
             )

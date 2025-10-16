@@ -9,6 +9,7 @@ import logging
 import time
 from enum import Enum
 from collections import deque
+from pydantic import model_validator
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
 
@@ -37,6 +38,17 @@ class DispatchLLMOutput(ToolOutput):
     cost: float = 0.0
     latency_ms: int = 0
 
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.response:
+            self.response = self.data.get("response", "")
+        if self.data and not self.cost:
+            self.cost = self.data.get("cost", 0.0)
+        if self.data and not self.latency_ms:
+            self.latency_ms = self.data.get("latency_ms", 0)
+        return self
+
 
 class GetQueueStatsInput(ToolInput):
     """Input pour GetQueueStats tool."""
@@ -49,6 +61,19 @@ class GetQueueStatsOutput(ToolOutput):
     active_calls: int = 0
     total_calls: int = 0
     error_rate: float = 0.0
+
+    @model_validator(mode='after')
+    def sync_from_data(self):
+        """Synchronise les attributs depuis data si data est fourni."""
+        if self.data and not self.queue_sizes:
+            self.queue_sizes = self.data.get("queue_sizes", {})
+        if self.data and not self.active_calls:
+            self.active_calls = self.data.get("active_calls", 0)
+        if self.data and not self.total_calls:
+            self.total_calls = self.data.get("total_calls", 0)
+        if self.data and not self.error_rate:
+            self.error_rate = self.data.get("error_rate", 0.0)
+        return self
 
 
 class CircuitBreakerState(str, Enum):
@@ -164,10 +189,11 @@ class LLMDispatcher(BaseAgent):
         logger.info("[DISPATCHER] Monitoring LLM queue...")
 
         # Get stats
-        stats_result = self.call_tool("get_queue_stats", GetQueueStatsInput())
+        stats_result = await self.call_tool("get_queue_stats", GetQueueStatsInput())
 
         if stats_result.success:
-            stats = GetQueueStatsOutput(**stats_result.data)
+            # stats_result est déjà un GetQueueStatsOutput (hérite de ToolOutput)
+            stats = stats_result
             logger.info(
                 f"[DISPATCHER] Queue stats: active={stats.active_calls}, "
                 f"total={stats.total_calls}, error_rate={stats.error_rate:.1%}"
@@ -239,9 +265,12 @@ class LLMDispatcher(BaseAgent):
                 f"latency={latency_ms}ms, cost=${cost:.3f}"
             )
 
-            return ToolOutput(
+            return DispatchLLMOutput(
                 success=True,
                 message="LLM call completed",
+                response=response,
+                cost=cost,
+                latency_ms=latency_ms,
                 data={
                     "response": response,
                     "cost": cost,
@@ -354,9 +383,13 @@ class LLMDispatcher(BaseAgent):
 
             error_rate = sum(self.recent_errors) / len(self.recent_errors) if self.recent_errors else 0.0
 
-            return ToolOutput(
+            return GetQueueStatsOutput(
                 success=True,
                 message="Queue stats retrieved",
+                queue_sizes=queue_sizes,
+                active_calls=self.active_calls,
+                total_calls=self.total_calls,
+                error_rate=error_rate,
                 data={
                     "queue_sizes": queue_sizes,
                     "active_calls": self.active_calls,

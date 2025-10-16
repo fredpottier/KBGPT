@@ -260,6 +260,54 @@ class Neo4jClient:
     # Published-KG: Concepts validés (promus par Gatekeeper)
     # ========================================================================
 
+    def find_canonical_concept(
+        self,
+        tenant_id: str,
+        canonical_name: str
+    ) -> Optional[str]:
+        """
+        Chercher un CanonicalConcept existant par nom canonique et tenant.
+
+        Args:
+            tenant_id: ID tenant
+            canonical_name: Nom canonique à chercher
+
+        Returns:
+            canonical_id si trouvé, None sinon
+        """
+        if not self.is_connected():
+            return None
+
+        query = """
+        MATCH (c:CanonicalConcept {tenant_id: $tenant_id, canonical_name: $canonical_name})
+        RETURN c.canonical_id AS canonical_id
+        LIMIT 1
+        """
+
+        try:
+            with self.driver.session(database=self.database) as session:
+                result = session.run(
+                    query,
+                    tenant_id=tenant_id,
+                    canonical_name=canonical_name
+                )
+
+                record = result.single()
+
+                if record:
+                    canonical_id = record["canonical_id"]
+                    logger.debug(
+                        f"[NEO4J:Dedup] Found existing CanonicalConcept '{canonical_name}' "
+                        f"(id={canonical_id[:8]})"
+                    )
+                    return canonical_id
+                else:
+                    return None
+
+        except Exception as e:
+            logger.error(f"[NEO4J:Dedup] Error finding canonical concept: {e}")
+            return None
+
     def promote_to_published(
         self,
         tenant_id: str,
@@ -269,10 +317,15 @@ class Neo4jClient:
         quality_score: float = 0.0,
         metadata: Optional[Dict[str, Any]] = None,
         decision_trace_json: Optional[str] = None,
-        surface_form: Optional[str] = None
+        surface_form: Optional[str] = None,
+        deduplicate: bool = True
     ) -> str:
         """
         Promouvoir concept Proto → Published (validation Gatekeeper).
+
+        Problème 2 (Déduplication): Si deduplicate=True (défaut), vérifie si
+        un CanonicalConcept existe déjà avec ce canonical_name. Si oui, lie
+        le ProtoConcept à l'existant au lieu de créer un doublon.
 
         Args:
             tenant_id: ID tenant
@@ -283,9 +336,10 @@ class Neo4jClient:
             metadata: Métadonnées additionnelles
             decision_trace_json: JSON trace décision canonicalisation (P0.3)
             surface_form: Nom brut extrait avant canonicalisation (P1.3)
+            deduplicate: Si True, vérifier existence avant création (défaut: True)
 
         Returns:
-            canonical_id créé (ou "" si échec)
+            canonical_id créé ou existant (ou "" si échec)
         """
         if not self.is_connected():
             logger.warning("[NEO4J] Not connected, skipping promotion")
@@ -297,6 +351,55 @@ class Neo4jClient:
         # Convertir metadata en JSON string pour Neo4j (ne supporte pas les Maps)
         metadata_json = json.dumps(metadata)
 
+        # Problème 2: Déduplication - chercher concept existant
+        if deduplicate:
+            existing_canonical_id = self.find_canonical_concept(tenant_id, canonical_name)
+
+            if existing_canonical_id:
+                # Lier ProtoConcept à CanonicalConcept existant
+                link_query = """
+                MATCH (proto:ProtoConcept {concept_id: $proto_concept_id, tenant_id: $tenant_id})
+                MATCH (canonical:CanonicalConcept {canonical_id: $existing_canonical_id, tenant_id: $tenant_id})
+
+                // Créer lien Proto → Canonical existant
+                MERGE (proto)-[:PROMOTED_TO {
+                    promoted_at: datetime(),
+                    deduplication: true
+                }]->(canonical)
+
+                RETURN canonical.canonical_id AS canonical_id,
+                       canonical.canonical_name AS canonical_name
+                """
+
+                try:
+                    with self.driver.session(database=self.database) as session:
+                        result = session.run(
+                            link_query,
+                            proto_concept_id=proto_concept_id,
+                            tenant_id=tenant_id,
+                            existing_canonical_id=existing_canonical_id
+                        )
+
+                        record = result.single()
+
+                        if record:
+                            logger.info(
+                                f"[NEO4J:Dedup] Linked ProtoConcept to existing CanonicalConcept '{canonical_name}' "
+                                f"(proto={proto_concept_id[:8]}, canonical={existing_canonical_id[:8]})"
+                            )
+                            return existing_canonical_id
+                        else:
+                            logger.warning(
+                                f"[NEO4J:Dedup] Failed to link Proto to existing Canonical: {proto_concept_id}"
+                            )
+                            return ""
+
+                except Exception as e:
+                    logger.error(f"[NEO4J:Dedup] Error linking to existing concept: {e}")
+                    # Fallback: continuer avec création normale
+                    logger.info(f"[NEO4J:Dedup] Fallback to normal creation")
+
+        # Créer nouveau CanonicalConcept (si pas de déduplication ou échec)
         query = """
         MATCH (proto:ProtoConcept {concept_id: $proto_concept_id, tenant_id: $tenant_id})
 
@@ -345,7 +448,7 @@ class Neo4jClient:
                     surface_info = f", surface='{surface_form}'" if surface_form else ""
 
                     logger.info(
-                        f"[NEO4J:Published] Promoted '{canonical_name}' "
+                        f"[NEO4J:Published] Created NEW CanonicalConcept '{canonical_name}' "
                         f"(proto={proto_concept_id[:8]}, quality={quality_score:.2f}{surface_info})"
                     )
 
@@ -469,28 +572,43 @@ class Neo4jClient:
 
         metadata = metadata or {}
 
+        # Aplatir metadata en propriétés individuelles (Neo4j n'accepte pas Map comme valeur)
+        metadata_set_clauses = []
+        metadata_params = {}
+
+        for key, value in metadata.items():
+            # Convertir clés metadata en propriétés rel.metadata_<key>
+            safe_key = f"metadata_{key}"
+            metadata_set_clauses.append(f"rel.{safe_key} = ${safe_key}")
+            metadata_params[safe_key] = value
+
+        metadata_set_str = ", ".join(metadata_set_clauses) if metadata_set_clauses else ""
+
         query = f"""
         MATCH (source:CanonicalConcept {{canonical_id: $source_concept_id, tenant_id: $tenant_id}})
         MATCH (target:CanonicalConcept {{canonical_id: $target_concept_id, tenant_id: $tenant_id}})
 
         MERGE (source)-[rel:{relationship_type}]->(target)
         SET rel.weight = $weight,
-            rel.created_at = datetime(),
-            rel.metadata = $metadata
-
-        RETURN rel
+            rel.created_at = datetime()
         """
+
+        if metadata_set_str:
+            query += f", {metadata_set_str}"
+
+        query += " RETURN rel"
 
         try:
             with self.driver.session(database=self.database) as session:
-                result = session.run(
-                    query,
-                    source_concept_id=source_concept_id,
-                    target_concept_id=target_concept_id,
-                    tenant_id=tenant_id,
-                    weight=weight,
-                    metadata=metadata
-                )
+                params = {
+                    "source_concept_id": source_concept_id,
+                    "target_concept_id": target_concept_id,
+                    "tenant_id": tenant_id,
+                    "weight": weight
+                }
+                params.update(metadata_params)
+
+                result = session.run(query, **params)
 
                 if result.single():
                     logger.debug(
