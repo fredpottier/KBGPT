@@ -416,7 +416,74 @@ Attendu:
 - [ ] API endpoints ontology management
 - [ ] Versioning ontologie (rollback possible)
 
-#### 2.3 Lifecycle Management (Sem 20-22)
+#### 2.3 Canonicalisation Robuste & Auto-Apprentissage (Sem 17-19) ✨ **NOUVEAU P0**
+
+**Contexte**: Suite à l'analyse OpenAI (2025-10-16), la stratégie de canonicalisation automatique présente 3 risques critiques P0 nécessitant des mécanismes de robustesse avant scale-up production.
+
+**Référence**: `doc/phase1_osmose/LIMITES_ET_EVOLUTIONS_STRATEGIE.md` + `doc/phase1_osmose/PLAN_IMPLEMENTATION_CANONICALISATION.md`
+
+**P0 - Sécurité Ontologie (7 jours, Sem 17-18)** :
+
+- [ ] **Jour 17-18: Sandbox Auto-Learning** (2j, P0.1)
+  - [ ] Ajout champs sandbox OntologyEntity: `status`, `confidence`, `requires_admin_validation`
+  - [ ] Auto-validation si confidence ≥ 0.95 → `status="auto_learned_validated"`
+  - [ ] Sinon → `status="auto_learned_pending"` + notification admin
+  - [ ] Filtrer entités pending par défaut dans `EntityNormalizerNeo4j`
+  - [ ] Tests unitaires (10 tests)
+  - **Fichiers**: `neo4j_schema.py` (50L), `ontology_saver.py` (80L), `entity_normalizer_neo4j.py` (40L)
+  - **Impact**: Protège ontologie contre pollution auto-learning
+
+- [ ] **Jour 19-21: Mécanisme Rollback** (3j, P0.2)
+  - [ ] Relation Neo4j `DEPRECATED_BY` avec timestamp + reason
+  - [ ] API endpoint `/admin/ontology/deprecate` (POST)
+  - [ ] Migration automatique CanonicalConcept → nouveau canonical
+  - [ ] Frontend admin UI pour deprecation (Mantine modal)
+  - [ ] Tests unitaires (15 tests)
+  - **Fichiers**: `neo4j_schema.py` (80L), `ontology_admin.py` (200L), `OntologyAdminPanel.tsx` (150L)
+  - **Impact**: Corrections ontologie sans casser consistance graphe
+
+- [ ] **Jour 22-23: Decision Trace** (2j, P0.3)
+  - [ ] Pydantic model `DecisionTrace` (stratégies + scores + timestamp)
+  - [ ] Logger decision trace complète dans Gatekeeper
+  - [ ] Stocker `decision_trace_json` dans Neo4j CanonicalConcept
+  - [ ] Frontend audit UI avec filtres (par stratégie, date, confidence)
+  - [ ] Tests unitaires (10 tests)
+  - **Fichiers**: `decision_trace.py` (100L), `gatekeeper.py` (60L), `AuditPanel.tsx` (180L)
+  - **Impact**: Audit trail complet, debug décisions canonicalisation
+
+**P1 - Amélioration Qualité (4 jours, Sem 18-19)** :
+
+- [ ] **Jour 24: Seuils Adaptatifs** (1j, P1.1)
+  - [ ] Seuils fuzzy matching par type: COMPANY (85%), SOLUTION (90%), CONCEPT (80%)
+  - [ ] Configuration YAML `canonicalization_thresholds.yaml`
+  - [ ] Tests A/B sur 100 documents (baseline vs adaptatif)
+  - **Impact**: +10-15% précision canonicalisation
+
+- [ ] **Jour 25-26: Similarité Structurelle** (2j, P1.2)
+  - [ ] Jaccard similarity sur voisins Neo4j (RELATED_TO, DEPENDS_ON)
+  - [ ] Boost +0.1 si overlap voisins > 30%
+  - [ ] Tests unitaires (12 tests)
+  - **Impact**: +12% recall entités liées
+
+- [ ] **Jour 27: Séparation Surface/Canonical** (1j, P1.3)
+  - [ ] Distinction `surface_form` (texte brut) vs `canonical_name` (normalisé)
+  - [ ] Index Neo4j sur `surface_form` pour recherche alias
+  - [ ] Migration données existantes (script batch)
+  - **Impact**: Préserve formes originales, améliore flexibilité recherche
+
+**Effort Total Canonicalisation**: 11 jours (P0: 7j + P1: 4j)
+
+**Checkpoint Sem 19**:
+- ✅ Auto-learning sécurisé (sandbox + rollback + trace)
+- ✅ Qualité canonicalisation +25% (seuils adaptatifs + similarité)
+- ✅ Audit trail complet (decision trace UI opérationnelle)
+
+**Documents Créés**:
+- `doc/phase1_osmose/STRATEGIE_CANONICALISATION_AUTO_APPRENTISSAGE.md` (1,090L)
+- `doc/phase1_osmose/LIMITES_ET_EVOLUTIONS_STRATEGIE.md` (900L)
+- `doc/phase1_osmose/PLAN_IMPLEMENTATION_CANONICALISATION.md` (750L)
+
+#### 2.4 Lifecycle Management (Sem 20-22)
 
 **Tiers HOT/WARM/COLD/FROZEN** :
 - [ ] HOT: Proto-KG (0-7 jours, full access)

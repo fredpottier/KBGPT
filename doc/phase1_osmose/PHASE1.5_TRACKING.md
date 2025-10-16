@@ -22,7 +22,26 @@
 | **Semaine 12** | Pilotes B&C + Dashboard Grafana | ⏳ À VENIR | 0% | 2025-10-21-25 |
 | **Semaine 13** | Analyse + GO/NO-GO | ⏳ À VENIR | 0% | 2025-10-28-31 |
 
-**Progression Globale**: **80%** (Jours 7-9 complétés ✅ - Filtrage Contextuel Hybride opérationnel)
+**Progression Globale Phase 1.5**: **80%** (Jours 7-9 complétés ✅ - Filtrage Contextuel Hybride opérationnel)
+
+---
+
+## 🔄 Phase 2 - Canonicalisation Robuste (Semaines 17-19)
+
+**Contexte**: Suite à l'analyse OpenAI (2025-10-16), intégration tâches canonicalisation P0/P1/P2 dans Phase 2.
+
+**Référence**: `doc/phase1_osmose/LIMITES_ET_EVOLUTIONS_STRATEGIE.md` + `doc/phase1_osmose/PLAN_IMPLEMENTATION_CANONICALISATION.md`
+
+| Semaine/Jour | Objectif | Status | Avancement | Dates |
+|--------------|----------|--------|------------|-------|
+| **Sem 17 J17-18** | P0.1: Sandbox Auto-Learning | 🟡 À VENIR | 0% | TBD |
+| **Sem 17-18 J19-21** | P0.2: Mécanisme Rollback | 🟡 À VENIR | 0% | TBD |
+| **Sem 18 J22-23** | P0.3: Decision Trace | 🟡 À VENIR | 0% | TBD |
+| **Sem 18 J24** | P1.1: Seuils Adaptatifs | 🟡 À VENIR | 0% | TBD |
+| **Sem 19 J25-26** | P1.2: Similarité Structurelle | 🟡 À VENIR | 0% | TBD |
+| **Sem 19 J27** | P1.3: Séparation Surface/Canonical | 🟡 À VENIR | 0% | TBD |
+
+**Progression Canonicalisation**: **0%** (11 jours planifiés)
 
 ---
 
