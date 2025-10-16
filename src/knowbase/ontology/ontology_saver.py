@@ -2,15 +2,27 @@
 Sauvegarde ontologies générées par LLM dans Neo4j.
 
 P0.1 Sandbox Auto-Learning (2025-10-16):
-- Auto-validation si confidence >= 0.95
+- Auto-validation si confidence >= seuil adaptatif
 - Notification admin si requires_validation=True
 - Support status sandbox (pending/validated/manual)
+
+P1.1 Seuils Adaptatifs (2025-10-16):
+- Seuils ajustés selon contexte (domaine, source, langue)
+- Profils: SAP_OFFICIAL_DOCS, INTERNAL_DOCS, COMMUNITY_CONTENT, etc.
 """
-from typing import List, Dict
+from typing import List, Dict, Optional
 from datetime import datetime, timezone
 from neo4j import GraphDatabase
 import uuid
 import logging
+
+from knowbase.ontology.adaptive_thresholds import (
+    get_adaptive_threshold_selector,
+    DomainContext,
+    SourceContext,
+    LanguageContext,
+    EntityTypeContext
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +58,10 @@ def save_ontology_to_neo4j(
     source: str = "llm_generated",
     neo4j_uri: str = None,
     neo4j_user: str = None,
-    neo4j_password: str = None
+    neo4j_password: str = None,
+    domain: Optional[str] = None,
+    source_context: Optional[str] = None,
+    language: Optional[str] = None
 ):
     """
     Sauvegarde ontologie générée dans Neo4j.
@@ -59,6 +74,9 @@ def save_ontology_to_neo4j(
         neo4j_uri: URI Neo4j (optionnel)
         neo4j_user: User (optionnel)
         neo4j_password: Password (optionnel)
+        domain: Domaine technique (P1.1 - sap_ecosystem, cloud_computing, etc.)
+        source_context: Contexte source (P1.1 - official_documentation, internal_documentation, etc.)
+        language: Contexte linguistique (P1.1 - french, english, multilingual, etc.)
     """
     if not neo4j_uri:
         from knowbase.config.settings import get_settings
@@ -68,6 +86,29 @@ def save_ontology_to_neo4j(
         neo4j_password = settings.neo4j_password
 
     driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+    # P1.1: Initialiser sélecteur seuils adaptatifs
+    threshold_selector = get_adaptive_threshold_selector()
+
+    # Convertir contextes en enums (si fournis)
+    domain_ctx = DomainContext(domain) if domain else None
+    source_ctx = SourceContext(source_context) if source_context else None
+    lang_ctx = LanguageContext(language) if language else None
+    entity_type_ctx = EntityTypeContext(entity_type) if entity_type in [e.value for e in EntityTypeContext] else None
+
+    # Sélectionner profil de seuils
+    threshold_profile = threshold_selector.select_profile(
+        domain=domain_ctx,
+        source=source_ctx,
+        language=lang_ctx,
+        entity_type=entity_type_ctx
+    )
+
+    logger.info(
+        f"[ONTOLOGY:AdaptiveThresholds] Selected threshold profile: {threshold_profile.name} "
+        f"(auto_validation={threshold_profile.auto_validation_threshold:.2f}, "
+        f"require_human_below={threshold_profile.require_human_validation_below:.2f})"
+    )
 
     try:
         with driver.session() as session:
@@ -79,7 +120,7 @@ def save_ontology_to_neo4j(
                 # P0.1 Sandbox Auto-Learning: Déterminer status et validation
                 logger.debug(
                     f"[ONTOLOGY:Sandbox] Processing '{canonical_name}' "
-                    f"(source={source}, confidence={confidence:.2f})"
+                    f"(source={source}, confidence={confidence:.2f}, profile={threshold_profile.name})"
                 )
 
                 if source == "llm_generated":
@@ -89,24 +130,48 @@ def save_ontology_to_neo4j(
                 else:
                     created_by = source
 
-                # Auto-validation si confidence >= 0.95
-                if confidence >= 0.95:
+                # P1.1: Auto-validation avec seuil adaptatif (au lieu de 0.95 fixe)
+                auto_validation_threshold = threshold_profile.auto_validation_threshold
+                require_human_threshold = threshold_profile.require_human_validation_below
+
+                if confidence >= auto_validation_threshold:
                     status = "auto_learned_validated"
                     requires_admin_validation = False
                     validated_by = "auto_validated"
 
                     logger.info(
-                        f"[ONTOLOGY:Sandbox] ✅ AUTO-VALIDATED '{canonical_name}' "
-                        f"(confidence={confidence:.2f} >= 0.95, status={status})"
+                        f"[ONTOLOGY:AdaptiveThresholds] ✅ AUTO-VALIDATED '{canonical_name}' "
+                        f"(confidence={confidence:.2f} >= {auto_validation_threshold:.2f}, "
+                        f"profile={threshold_profile.name}, status={status})"
                     )
-                else:
+                elif confidence >= require_human_threshold:
                     status = "auto_learned_pending"
                     requires_admin_validation = True
                     validated_by = None
 
                     logger.warning(
-                        f"[ONTOLOGY:Sandbox] ⏳ PENDING VALIDATION '{canonical_name}' "
-                        f"(confidence={confidence:.2f} < 0.95, requires_admin=True)"
+                        f"[ONTOLOGY:AdaptiveThresholds] ⏳ PENDING VALIDATION '{canonical_name}' "
+                        f"(confidence={confidence:.2f} in [{require_human_threshold:.2f}, {auto_validation_threshold:.2f}), "
+                        f"profile={threshold_profile.name}, requires_admin=True)"
+                    )
+
+                    # Notification admin pour validation
+                    notify_admin_validation_required(
+                        canonical_name=canonical_name,
+                        entity_type=entity_type,
+                        confidence=confidence,
+                        tenant_id=tenant_id
+                    )
+                else:
+                    # Confidence trop basse: rejeter ou marquer comme très faible confiance
+                    status = "auto_learned_pending"
+                    requires_admin_validation = True
+                    validated_by = None
+
+                    logger.error(
+                        f"[ONTOLOGY:AdaptiveThresholds] ⚠️  LOW CONFIDENCE '{canonical_name}' "
+                        f"(confidence={confidence:.2f} < {require_human_threshold:.2f}, "
+                        f"profile={threshold_profile.name}, requires_admin=True, consider_rejection=True)"
                     )
 
                     # Notification admin pour validation
