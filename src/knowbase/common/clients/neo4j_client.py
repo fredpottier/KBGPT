@@ -268,7 +268,8 @@ class Neo4jClient:
         unified_definition: str,
         quality_score: float = 0.0,
         metadata: Optional[Dict[str, Any]] = None,
-        decision_trace_json: Optional[str] = None
+        decision_trace_json: Optional[str] = None,
+        surface_form: Optional[str] = None
     ) -> str:
         """
         Promouvoir concept Proto → Published (validation Gatekeeper).
@@ -281,6 +282,7 @@ class Neo4jClient:
             quality_score: Score qualité Gatekeeper (0-1)
             metadata: Métadonnées additionnelles
             decision_trace_json: JSON trace décision canonicalisation (P0.3)
+            surface_form: Nom brut extrait avant canonicalisation (P1.3)
 
         Returns:
             canonical_id créé (ou "" si échec)
@@ -298,11 +300,12 @@ class Neo4jClient:
         query = """
         MATCH (proto:ProtoConcept {concept_id: $proto_concept_id, tenant_id: $tenant_id})
 
-        // Créer CanonicalConcept
+        // Créer CanonicalConcept (P1.3: ajout surface_form)
         CREATE (canonical:CanonicalConcept {
             canonical_id: randomUUID(),
             tenant_id: $tenant_id,
             canonical_name: $canonical_name,
+            surface_form: $surface_form,
             concept_type: proto.concept_type,
             unified_definition: $unified_definition,
             quality_score: $quality_score,
@@ -315,7 +318,8 @@ class Neo4jClient:
         CREATE (proto)-[:PROMOTED_TO {promoted_at: datetime()}]->(canonical)
 
         RETURN canonical.canonical_id AS canonical_id,
-               canonical.canonical_name AS canonical_name
+               canonical.canonical_name AS canonical_name,
+               canonical.surface_form AS surface_form
         """
 
         try:
@@ -325,6 +329,7 @@ class Neo4jClient:
                     proto_concept_id=proto_concept_id,
                     tenant_id=tenant_id,
                     canonical_name=canonical_name,
+                    surface_form=surface_form,
                     unified_definition=unified_definition,
                     quality_score=quality_score,
                     metadata_json=metadata_json,
@@ -336,9 +341,12 @@ class Neo4jClient:
                 if record:
                     canonical_id = record["canonical_id"]
 
+                    # P1.3: Log surface_form si présent
+                    surface_info = f", surface='{surface_form}'" if surface_form else ""
+
                     logger.info(
                         f"[NEO4J:Published] Promoted '{canonical_name}' "
-                        f"(proto={proto_concept_id[:8]}, quality={quality_score:.2f})"
+                        f"(proto={proto_concept_id[:8]}, quality={quality_score:.2f}{surface_info})"
                     )
 
                     return canonical_id
