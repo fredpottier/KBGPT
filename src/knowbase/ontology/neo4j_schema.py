@@ -18,17 +18,34 @@ logger = logging.getLogger(__name__)
 
 class OntologyStatus(str, Enum):
     """
-    Statut entité ontologie (P0.1 Sandbox Auto-Learning).
+    Statut entité ontologie (P0.1 Sandbox Auto-Learning + P0.2 Rollback).
 
     - AUTO_LEARNED_PENDING: Créé par auto-learning, confidence < 0.95, attend validation admin
     - AUTO_LEARNED_VALIDATED: Créé par auto-learning, confidence >= 0.95, auto-validé
     - MANUAL: Créé manuellement par admin (toujours validé)
-    - DEPRECATED: Remplacé par nouvelle entité (P0.2 Rollback)
+    - DEPRECATED: Remplacé par nouvelle entité (P0.2 Rollback), ne doit plus être utilisé
     """
     AUTO_LEARNED_PENDING = "auto_learned_pending"
     AUTO_LEARNED_VALIDATED = "auto_learned_validated"
     MANUAL = "manual"
     DEPRECATED = "deprecated"
+
+
+class DeprecationReason(str, Enum):
+    """
+    Raisons de deprecation d'une entité (P0.2 Rollback).
+
+    - INCORRECT_FUSION: Fusion incorrecte détectée (ex: SAP + Oracle fusionnés à tort)
+    - WRONG_CANONICAL: Nom canonique incorrect (ex: typo, mauvaise casse)
+    - DUPLICATE: Doublon détecté (ex: "SAP S/4HANA" et "S4HANA" doivent fusionner)
+    - ADMIN_CORRECTION: Correction manuelle admin sans raison spécifique
+    - DATA_QUALITY: Problème qualité données source
+    """
+    INCORRECT_FUSION = "incorrect_fusion"
+    WRONG_CANONICAL = "wrong_canonical"
+    DUPLICATE = "duplicate"
+    ADMIN_CORRECTION = "admin_correction"
+    DATA_QUALITY = "data_quality"
 
 
 class OntologySchema:
@@ -292,6 +309,167 @@ def create_ontology_entity_with_sandbox(
         )
 
         return entity_id
+
+
+def deprecate_ontology_entity(
+    driver: GraphDatabase.driver,
+    old_entity_id: str,
+    new_entity_id: str,
+    reason: str,
+    deprecated_by: str = "admin",
+    tenant_id: str = "default",
+    comment: str = None
+) -> bool:
+    """
+    Déprécier une entité ontologie et migrer vers nouvelle (P0.2 Rollback).
+
+    Opérations atomiques:
+    1. Marquer old_entity status=DEPRECATED
+    2. Créer relation DEPRECATED_BY vers new_entity
+    3. Migrer tous les CanonicalConcept qui pointaient vers old_entity
+
+    Args:
+        driver: Neo4j driver
+        old_entity_id: ID entité à déprécier
+        new_entity_id: ID nouvelle entité de remplacement
+        reason: Raison deprecation (voir DeprecationReason enum)
+        deprecated_by: Qui a fait la deprecation (user_id ou "admin")
+        tenant_id: Tenant ID (multi-tenancy)
+        comment: Commentaire optionnel admin
+
+    Returns:
+        True si deprecation réussie, False sinon
+    """
+    import json
+    from datetime import datetime
+
+    # Validation
+    if old_entity_id == new_entity_id:
+        logger.error(f"[ONTOLOGY:Rollback] Cannot deprecate entity to itself: {old_entity_id}")
+        return False
+
+    logger.info(
+        f"[ONTOLOGY:Rollback] Deprecating '{old_entity_id}' → '{new_entity_id}' "
+        f"(reason={reason}, by={deprecated_by})"
+    )
+
+    with driver.session() as session:
+        # Transaction atomique
+        def deprecate_tx(tx):
+            # 1. Vérifier que les deux entités existent
+            check_query = """
+            MATCH (old:OntologyEntity {entity_id: $old_entity_id, tenant_id: $tenant_id})
+            MATCH (new:OntologyEntity {entity_id: $new_entity_id, tenant_id: $tenant_id})
+            RETURN old.canonical_name AS old_name, new.canonical_name AS new_name
+            """
+            result = tx.run(check_query, {
+                "old_entity_id": old_entity_id,
+                "new_entity_id": new_entity_id,
+                "tenant_id": tenant_id
+            })
+            record = result.single()
+
+            if not record:
+                logger.error(
+                    f"[ONTOLOGY:Rollback] Entity not found: old={old_entity_id}, new={new_entity_id}"
+                )
+                return False
+
+            old_name = record["old_name"]
+            new_name = record["new_name"]
+
+            logger.info(
+                f"[ONTOLOGY:Rollback] Migrating '{old_name}' → '{new_name}'"
+            )
+
+            # 2. Marquer old_entity comme DEPRECATED + créer relation DEPRECATED_BY
+            deprecate_query = """
+            MATCH (old:OntologyEntity {entity_id: $old_entity_id, tenant_id: $tenant_id})
+            MATCH (new:OntologyEntity {entity_id: $new_entity_id, tenant_id: $tenant_id})
+
+            SET old.status = 'deprecated',
+                old.deprecated_at = datetime(),
+                old.deprecated_by = $deprecated_by,
+                old.updated_at = datetime()
+
+            MERGE (old)-[rel:DEPRECATED_BY]->(new)
+            SET rel.reason = $reason,
+                rel.deprecated_at = datetime(),
+                rel.deprecated_by = $deprecated_by,
+                rel.comment = $comment
+
+            RETURN count(rel) AS deprecated_count
+            """
+            result = tx.run(deprecate_query, {
+                "old_entity_id": old_entity_id,
+                "new_entity_id": new_entity_id,
+                "tenant_id": tenant_id,
+                "reason": reason,
+                "deprecated_by": deprecated_by,
+                "comment": comment
+            })
+            record = result.single()
+
+            if record["deprecated_count"] == 0:
+                logger.error("[ONTOLOGY:Rollback] Failed to create DEPRECATED_BY relation")
+                return False
+
+            logger.info(
+                f"[ONTOLOGY:Rollback] ✅ Marked '{old_name}' as DEPRECATED "
+                f"(DEPRECATED_BY → '{new_name}')"
+            )
+
+            # 3. Migrer tous les CanonicalConcept qui pointaient vers old_entity
+            migrate_query = """
+            MATCH (old:OntologyEntity {entity_id: $old_entity_id, tenant_id: $tenant_id})
+            MATCH (new:OntologyEntity {entity_id: $new_entity_id, tenant_id: $tenant_id})
+            MATCH (canonical:CanonicalConcept)-[rel:NORMALIZED_AS]->(old)
+
+            // Créer nouvelle relation vers new
+            MERGE (canonical)-[new_rel:NORMALIZED_AS]->(new)
+            SET new_rel.migrated_from = $old_entity_id,
+                new_rel.migrated_at = datetime(),
+                new_rel.migration_reason = $reason
+
+            // Supprimer ancienne relation
+            DELETE rel
+
+            RETURN count(canonical) AS migrated_count
+            """
+            result = tx.run(migrate_query, {
+                "old_entity_id": old_entity_id,
+                "new_entity_id": new_entity_id,
+                "tenant_id": tenant_id,
+                "reason": reason
+            })
+            record = result.single()
+            migrated_count = record["migrated_count"]
+
+            logger.info(
+                f"[ONTOLOGY:Rollback] ✅ Migrated {migrated_count} CanonicalConcept(s) "
+                f"from '{old_name}' → '{new_name}'"
+            )
+
+            return True
+
+        try:
+            success = session.execute_write(deprecate_tx)
+
+            if success:
+                logger.info(
+                    f"[ONTOLOGY:Rollback] ✅ ROLLBACK COMPLETED: '{old_entity_id}' → '{new_entity_id}' "
+                    f"(reason={reason})"
+                )
+            else:
+                logger.error(
+                    f"[ONTOLOGY:Rollback] ❌ ROLLBACK FAILED: '{old_entity_id}' → '{new_entity_id}'"
+                )
+
+            return success
+
+        except Exception as e:
+            logger.error(f"[ONTOLOGY:Rollback] Exception during deprecation: {e}")
+            return False
 
 
 def apply_ontology_schema(neo4j_uri: str, neo4j_user: str, neo4j_password: str):
