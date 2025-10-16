@@ -7,6 +7,11 @@ P0.1 Sandbox Auto-Learning (2025-10-16):
 - Ajout champs status, confidence, requires_admin_validation
 - Index sur status pour filtrage efficace entités pending
 - Support auto-validation (confidence >= 0.95)
+
+P1.3 Séparation Surface/Canonical (2025-10-16):
+- Ajout champ surface_form dans CanonicalConcept
+- Préserve nom brut extrait séparé du nom canonique
+- Permet rollback et debug (traçabilité origin → canonical)
 """
 from neo4j import GraphDatabase
 from typing import List

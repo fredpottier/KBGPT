@@ -605,7 +605,7 @@ class GatekeeperDelegate(BaseAgent):
                         f"(confidence={confidence:.2f}, requires_validation={decision_trace.requires_validation})"
                     )
 
-                    # Étape 2: Promouvoir Proto → Canonical
+                    # Étape 2: Promouvoir Proto → Canonical (P1.3: ajout surface_form)
                     canonical_id = self.neo4j_client.promote_to_published(
                         tenant_id=tenant_id,
                         proto_concept_id=proto_concept_id,
@@ -617,7 +617,8 @@ class GatekeeperDelegate(BaseAgent):
                             "extracted_type": concept_type,
                             "gate_profile": self.default_profile
                         },
-                        decision_trace_json=decision_trace_json
+                        decision_trace_json=decision_trace_json,
+                        surface_form=concept_name  # P1.3: Préserver nom brut extrait
                     )
 
                     if canonical_id:
