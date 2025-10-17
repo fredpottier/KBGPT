@@ -930,161 +930,77 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
                 logger.warning(f"⚠️ Impossible de générer le prompt contextualisé: {e}")
                 custom_prompt = None
 
-        total_chunks = 0
+        # ===== OSMOSE PURE : Extraction texte UNIQUEMENT (pas d'analyse LLM) =====
+        # Comme PPTX : Texte brut → OSMOSE fait toute l'analyse sémantique
+
+        full_text = None
 
         if use_vision:
-            # ===== MODE VISION : Traitement page par page avec images =====
-            logger.info("🖼️ Mode VISION: Génération PNG des pages")
+            # ===== MODE VISION : Génération PNG + extraction texte basique =====
+            logger.info("🖼️ [OSMOSE PURE] Mode VISION: Génération PNG des pages")
             images = convert_from_path(str(pdf_path))
-            image_paths = {}
+            logger.info(f"✅ {len(images)} pages converties en images")
+
+            # Sauvegarder images (pour futur usage Vision si nécessaire)
             for i, img in enumerate(images, start=1):
                 img_path = SLIDES_PNG / f"{pdf_path.stem}_page_{i}.png"
                 img.save(img_path, "PNG")
-                image_paths[i] = img_path
 
-            for page_index, img_path in image_paths.items():
-                logger.info(f"Page {page_index}/{len(image_paths)} [VISION]")
-
-                # Utiliser GPT-4 Vision avec l'image
-                chunks = ask_gpt_slide_analysis(
-                    img_path, pdf_text, pdf_path.name, page_index, custom_prompt
-                )
-                logger.info(f"Page {page_index} [VISION]: chunks = {len(chunks)}")
-                # OSMOSE PURE: Désactiver ingestion directe Qdrant (tout passe par OSMOSE)
-                # ingest_chunks(chunks, doc_meta, pdf_path.stem, page_index)
-                total_chunks += len(chunks)
-
-                # Envoyer heartbeat toutes les 3 pages (pour documents longs)
-                if page_index % 3 == 0:
+                if i % 10 == 0:
                     try:
                         from knowbase.ingestion.queue.jobs import send_worker_heartbeat
                         send_worker_heartbeat()
                     except Exception:
-                        pass  # Ignorer si pas dans un contexte RQ
+                        pass
+
+            # Extraire texte complet via pdftotext (sans analyse LLM)
+            if not pdf_text:
+                pdf_text = extract_text_from_pdf(pdf_path)
+
+            full_text = pdf_text
+
+            # Extraction métadonnées uniquement
+            if full_text and len(full_text) > 100:
+                gpt_meta = analyze_pdf_metadata(full_text[:8000], pdf_path.name)
+                doc_meta = {**user_meta, **gpt_meta}
+            else:
+                doc_meta = user_meta
+
+            logger.info(f"✅ [OSMOSE PURE] Texte extrait: {len(full_text) if full_text else 0} chars (AUCUNE analyse LLM)")
 
         else:
-            # ===== MODE TEXT-ONLY : Découpage intelligent avec MegaParse =====
+            # ===== MODE TEXT-ONLY : MegaParse extraction uniquement =====
             from knowbase.ingestion.parsers.megaparse_pdf import parse_pdf_with_megaparse
 
-            logger.info("📚 Mode TEXT-ONLY: Découpage MegaParse en blocs sémantiques")
+            logger.info("📚 [OSMOSE PURE] Mode TEXT-ONLY: MegaParse extraction (pas d'analyse LLM)")
 
             try:
                 semantic_blocks = parse_pdf_with_megaparse(pdf_path, use_vision=False)
                 logger.info(f"✅ MegaParse: {len(semantic_blocks)} blocs sémantiques extraits")
 
-                # Extraire le texte complet depuis les blocs pour les métadonnées
-                megaparse_text = "\n\n".join(block.get('content', '') for block in semantic_blocks)
-                gpt_meta = analyze_pdf_metadata(megaparse_text[:8000], pdf_path.name)  # Limiter à 8000 chars
+                # Extraire le texte complet depuis les blocs (SANS analyse LLM)
+                full_text = "\n\n".join(
+                    f"--- {block.get('block_type', 'text')} ---\n{block.get('content', '')}"
+                    for block in semantic_blocks
+                    if block.get('content')
+                )
+
+                # Extraction métadonnées uniquement
+                gpt_meta = analyze_pdf_metadata(full_text[:8000], pdf_path.name)
                 doc_meta = {**user_meta, **gpt_meta}
-                logger.info(f"✅ Métadonnées extraites depuis MegaParse")
+                logger.info(f"✅ [OSMOSE PURE] Texte structuré extrait: {len(full_text)} chars (AUCUNE analyse LLM)")
 
             except Exception as e:
                 logger.error(f"❌ MegaParse échoué: {e}")
-                logger.warning("⚠️ Fallback: utilisation de l'ancienne méthode page par page")
-                # Fallback sur l'ancienne méthode si MegaParse échoue
-                semantic_blocks = []
+                logger.warning("⚠️ Fallback: extraction texte via pdftotext")
 
-            if semantic_blocks:
-                # Traiter chaque bloc sémantique (au lieu de chaque page)
-                for block_index, block in enumerate(semantic_blocks, start=1):
-                    # Garbage collection périodique pour libérer la mémoire
-                    if block_index % 100 == 0:
-                        import gc
-                        gc.collect()
-                        logger.info(f"🧹 Garbage collection effectué après {block_index} blocs")
-
-                    block_type = block.get('block_type', 'text')
-                    block_title = block.get('title')
-                    block_content = block.get('content', '')
-
-                    if not block_content or len(block_content) < 20:
-                        logger.debug(f"Bloc {block_index} ignoré (trop court: {len(block_content)} chars)")
-                        continue
-
-                    logger.info(
-                        f"Bloc {block_index}/{len(semantic_blocks)} [{block_type}]: "
-                        f"{block_title or 'Sans titre'[:50]}"
-                    )
-
-                    # Analyser chaque bloc sémantique avec Claude Haiku
-                    result = ask_gpt_block_analysis_text_only(
-                        block_content=block_content,
-                        block_type=block_type,
-                        block_title=block_title,
-                        source_name=pdf_path.name,
-                        block_index=block_index,
-                        custom_prompt=custom_prompt
-                    )
-
-                    concepts = result.get("concepts", [])
-                    facts = result.get("facts", [])
-                    entities = result.get("entities", [])
-                    relations = result.get("relations", [])
-
-                    logger.info(
-                        f"Bloc {block_index} [TEXT-ONLY]: {len(concepts)} concepts + "
-                        f"{len(facts)} facts + {len(entities)} entities + {len(relations)} relations"
-                    )
-
-                    # Ingest concepts dans Qdrant (comme avant)
-                    # Ajouter métadonnées du bloc sémantique
-                    chunks_compat = [
-                        {
-                            "text": c.get("full_explanation", ""),
-                            "meta": {
-                                **c.get("meta", {}),
-                                "block_type": block_type,
-                                "block_title": block_title,
-                                "block_index": block_index,
-                                "page_range": block.get('page_range', (1, 1)),
-                            }
-                        }
-                        for c in concepts
-                    ]
-                    # OSMOSE PURE: Désactiver ingestion directe Qdrant (tout passe par OSMOSE)
-                    # ingest_chunks(chunks_compat, doc_meta, pdf_path.stem, block_index)
-                    total_chunks += len(chunks_compat)
-
-                    # OSMOSE PURE: Désactiver ingestion directe Neo4j (tout passe par OSMOSE + Gatekeeper)
-                    # if facts or entities or relations:
-                    #     ingest_knowledge_to_neo4j(
-                    #         facts=facts,
-                    #         entities=entities,
-                    #         relations=relations,
-                    #         document_id=pdf_path.stem,
-                    #         source_name=pdf_path.name
-                    #     )
-
-                    # Heartbeat tous les 5 blocs (au lieu de 3 pages)
-                    if block_index % 5 == 0:
-                        try:
-                            from knowbase.ingestion.queue.jobs import send_worker_heartbeat
-                            send_worker_heartbeat()
-                        except Exception:
-                            pass
-
-            else:
-                # Fallback sur l'ancienne méthode page par page si MegaParse a échoué
-                logger.warning("⚠️ Utilisation méthode page par page (fallback)")
-
-                # Extraire le texte avec pdftotext pour le fallback
-                if pdf_text is None:
-                    pdf_text = extract_text_from_pdf(pdf_path)
-                    gpt_meta = analyze_pdf_metadata(pdf_text, pdf_path.name)
+                # Fallback pdftotext
+                full_text = extract_text_from_pdf(pdf_path)
+                if full_text and len(full_text) > 100:
+                    gpt_meta = analyze_pdf_metadata(full_text[:8000], pdf_path.name)
                     doc_meta = {**user_meta, **gpt_meta}
-
-                for page_index in range(1, 100):  # Limite arbitraire
-                    result = ask_gpt_page_analysis_text_only(
-                        pdf_text, pdf_path.name, page_index, custom_prompt
-                    )
-                    concepts = result.get("concepts", [])
-                    if not concepts:
-                        break
-                    logger.info(f"Page {page_index} [TEXT-ONLY FALLBACK]: {len(concepts)} concepts")
-                    chunks_compat = [{"text": c.get("full_explanation", ""), "meta": c.get("meta", {})} for c in concepts]
-                    # OSMOSE PURE: Désactiver ingestion directe Qdrant (tout passe par OSMOSE)
-                    # ingest_chunks(chunks_compat, doc_meta, pdf_path.stem, page_index)
-                    total_chunks += len(chunks_compat)
+                else:
+                    doc_meta = user_meta
 
         # ===== OSMOSE Pure - Traitement sémantique UNIQUEMENT =====
         # REMPLACE l'ingestion legacy (Qdrant "knowbase" + Neo4j entities/relations)
@@ -1094,21 +1010,13 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
         logger.info("=" * 80)
 
         try:
-            from knowbase.ingestion.osmose_agentique import process_document_with_osmose_agentique
-
-            # Récupérer le texte complet (disponible dans megaparse_text ou pdf_text)
-            full_text = None
-            if not use_vision and 'megaparse_text' in locals():
-                full_text = megaparse_text
-            elif pdf_text:
-                full_text = pdf_text
+            from knowbase.ingestion.osmose_integration import process_document_with_osmose
+            import asyncio
 
             if full_text and len(full_text) >= 100:
-                # Appeler OSMOSE Agentique (SupervisorAgent FSM) de manière asynchrone
-                # AUCUN storage legacy (ni Qdrant "knowbase", ni Neo4j entities/relations)
-                import asyncio
+                # Appeler OSMOSE (même fonction que PPTX) de manière asynchrone
                 osmose_result = asyncio.run(
-                    process_document_with_osmose_agentique(
+                    process_document_with_osmose(
                         document_id=pdf_path.stem,
                         document_title=pdf_path.name,
                         document_path=pdf_path,
@@ -1124,13 +1032,16 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
                         f"  - {osmose_result.canonical_concepts} concepts canoniques\n"
                         f"  - {osmose_result.concept_connections} connexions cross-documents\n"
                         f"  - {osmose_result.topics_segmented} topics segmentés\n"
-                        f"  - Proto-KG: {osmose_result.proto_kg_concepts_stored} concepts + {osmose_result.proto_kg_relations_stored} relations + {osmose_result.proto_kg_embeddings_stored} embeddings\n"
+                        f"  - Proto-KG: {osmose_result.proto_kg_concepts_stored} concepts + "
+                        f"{osmose_result.proto_kg_relations_stored} relations + "
+                        f"{osmose_result.proto_kg_embeddings_stored} embeddings\n"
                         f"  - Durée: {osmose_result.osmose_duration_seconds:.1f}s"
                     )
                     logger.info("=" * 80)
                 else:
-                    logger.error(f"[OSMOSE PURE] ❌ Traitement échoué: {osmose_result.osmose_error}")
-                    raise Exception(f"OSMOSE processing failed: {osmose_result.osmose_error}")
+                    error_msg = f"OSMOSE processing failed: {osmose_result.osmose_error}"
+                    logger.error(f"[OSMOSE PURE] ❌ {error_msg}")
+                    raise Exception(error_msg)
 
             else:
                 error_msg = f"Text too short ({len(full_text) if full_text else 0} chars)"
@@ -1156,7 +1067,21 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
             logger.warning(f"⚠️ Déplacement terminé avec avertissement: {e}")
 
         status_file.write_text("done")
-        logger.info(f"✅ Terminé: {pdf_path.name} — total chunks: {total_chunks}")
+        logger.info(f"🎉 INGESTION TERMINÉE - {pdf_path.name} - OSMOSE Pure")
+        logger.info(
+            f"📊 Métriques: {osmose_result.canonical_concepts} concepts canoniques, "
+            f"{osmose_result.proto_kg_concepts_stored} stockés dans Proto-KG"
+        )
+        logger.info(f"Done {pdf_path.name} — OSMOSE Pure mode")
+
+        return {
+            "osmose_pure": True,
+            "canonical_concepts": osmose_result.canonical_concepts,
+            "concept_connections": osmose_result.concept_connections,
+            "proto_kg_concepts_stored": osmose_result.proto_kg_concepts_stored,
+            "proto_kg_relations_stored": osmose_result.proto_kg_relations_stored,
+            "proto_kg_embeddings_stored": osmose_result.proto_kg_embeddings_stored
+        }
 
     except Exception as e:
         logger.error(f"❌ Erreur durant {pdf_path.name}: {e}")
@@ -1164,6 +1089,7 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
             status_file.write_text("error")
         except Exception:
             pass
+        raise  # Re-raise pour propager l'erreur
 
 
 def main():
