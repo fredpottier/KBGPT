@@ -380,16 +380,19 @@ class Neo4jClient:
                      COALESCE(proto.chunk_ids, []) AS proto_chunks,
                      $new_chunk_ids AS new_chunks
 
-                // Agréger tous chunk_ids (dédupliqués)
+                // Agréger tous chunk_ids
                 WITH proto, canonical,
                      existing_chunks + proto_chunks + new_chunks AS all_chunks_raw
 
-                // Dédupliquer chunk_ids
+                // Dédupliquer avec REDUCE (évite UNWIND qui échoue sur liste vide)
                 WITH proto, canonical,
-                     [chunk IN all_chunks_raw WHERE chunk IS NOT NULL] AS all_chunks_filtered
-
-                UNWIND all_chunks_filtered AS chunk
-                WITH proto, canonical, COLLECT(DISTINCT chunk) AS aggregated_chunks
+                     REDUCE(acc = [], chunk IN all_chunks_raw |
+                         CASE
+                             WHEN chunk IS NULL THEN acc
+                             WHEN chunk IN acc THEN acc
+                             ELSE acc + chunk
+                         END
+                     ) AS aggregated_chunks
 
                 // Mettre à jour CanonicalConcept.chunk_ids
                 SET canonical.chunk_ids = aggregated_chunks
@@ -444,9 +447,18 @@ class Neo4jClient:
         WITH proto,
              COALESCE(proto.chunk_ids, []) + $chunk_ids AS all_chunks
 
-        // Dédupliquer
-        UNWIND all_chunks AS chunk
-        WITH proto, COLLECT(DISTINCT chunk) AS aggregated_chunks
+        // Dédupliquer (IMPORTANT: gérer cas liste vide avec CASE)
+        WITH proto,
+             CASE
+                 WHEN SIZE(all_chunks) = 0 THEN []
+                 ELSE [chunk IN all_chunks WHERE chunk IS NOT NULL]
+             END AS aggregated_chunks_raw
+
+        // Dédupliquer avec REDUCE (évite UNWIND qui échoue sur liste vide)
+        WITH proto,
+             REDUCE(acc = [], chunk IN aggregated_chunks_raw |
+                 CASE WHEN chunk IN acc THEN acc ELSE acc + chunk END
+             ) AS aggregated_chunks
 
         // Créer CanonicalConcept (P1.3: ajout surface_form, P1.6: ajout chunk_ids)
         CREATE (canonical:CanonicalConcept {
