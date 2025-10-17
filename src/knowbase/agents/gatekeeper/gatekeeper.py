@@ -113,6 +113,7 @@ class GateCheckOutput(ToolOutput):
 class PromoteConceptsInput(ToolInput):
     """Input pour PromoteConcepts tool."""
     concepts: List[Dict[str, Any]]
+    concept_to_chunk_ids: Dict[str, List[str]] = {}  # Phase 1.6: Mapping proto_id → chunk_ids
 
 
 class PromoteConceptsOutput(ToolOutput):
@@ -308,7 +309,10 @@ class GatekeeperDelegate(BaseAgent):
 
         # Étape 2: Promouvoir concepts vers Neo4j (si promoted)
         if gate_output.promoted:
-            promote_input = PromoteConceptsInput(concepts=gate_output.promoted)
+            promote_input = PromoteConceptsInput(
+                concepts=gate_output.promoted,
+                concept_to_chunk_ids=state.concept_to_chunk_ids  # Phase 1.6
+            )
             promote_result = await self.call_tool("promote_concepts", promote_input)
 
             if not promote_result.success:
@@ -755,7 +759,7 @@ class GatekeeperDelegate(BaseAgent):
                     )
 
                     # Phase 1.6: Récupérer chunk_ids pour ce concept (si disponibles)
-                    chunk_ids = state.concept_to_chunk_ids.get(proto_concept_id, [])
+                    chunk_ids = tool_input.concept_to_chunk_ids.get(proto_concept_id, [])
 
                     # Étape 2: Promouvoir Proto → Canonical (P1.3: surface_form, P1.6: chunk_ids)
                     canonical_id = self.neo4j_client.promote_to_published(
