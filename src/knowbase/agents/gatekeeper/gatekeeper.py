@@ -307,6 +307,38 @@ class GatekeeperDelegate(BaseAgent):
         # Mettre à jour état
         state.promoted = gate_output.promoted
 
+        # Étape 1.5: Créer ProtoConcepts dans Neo4j (Phase 1.6 fix)
+        # IMPORTANT: Créer ProtoConcepts AVANT chunking pour avoir les vrais IDs Neo4j
+        if gate_output.promoted and self.neo4j_client and self.neo4j_client.is_connected():
+            for concept in gate_output.promoted:
+                # Si proto_concept_id déjà existant, skip
+                if concept.get("proto_concept_id"):
+                    continue
+
+                # Créer ProtoConcept maintenant
+                proto_concept_id = self.neo4j_client.create_proto_concept(
+                    tenant_id=state.tenant_id,
+                    concept_name=concept.get("name", ""),
+                    concept_type=concept.get("type", "Unknown"),
+                    segment_id=concept.get("segment_id", "unknown"),
+                    document_id=state.document_id,
+                    extraction_method=concept.get("extraction_method", "NER"),
+                    confidence=concept.get("confidence", 0.0),
+                    metadata={
+                        "definition": concept.get("definition", ""),
+                        "original_name": concept.get("name", ""),
+                        "gate_profile": self.default_profile
+                    }
+                )
+
+                # Ajouter proto_concept_id au concept pour utilisation ultérieure
+                concept["proto_concept_id"] = proto_concept_id
+
+                logger.debug(
+                    f"[GATEKEEPER:PreProto] Created ProtoConcept '{concept.get('name')}' "
+                    f"(id={proto_concept_id[:8] if proto_concept_id else 'FAILED'})"
+                )
+
         # Étape 2: Promouvoir concepts vers Neo4j (si promoted)
         if gate_output.promoted:
             promote_input = PromoteConceptsInput(
@@ -613,7 +645,10 @@ class GatekeeperDelegate(BaseAgent):
                 concept_type = concept.get("type", "Unknown")
                 definition = concept.get("definition", "")
                 confidence = concept.get("confidence", 0.0)
-                proto_concept_id = concept.get("proto_concept_id", "")  # Si concept Proto existe
+
+                # IMPORTANT: Ne PAS confondre concept_id (Extractor) avec proto_concept_id (Neo4j)
+                # Seul proto_concept_id indique qu'un ProtoConcept existe déjà dans Neo4j
+                proto_concept_id = concept.get("proto_concept_id", "")  # Neo4j ID uniquement
                 tenant_id = concept.get("tenant_id", "default")
 
                 # P0.1 + P1.2: Normalisation via EntityNormalizerNeo4j (ontologie + fuzzy structurel)
@@ -670,35 +705,14 @@ class GatekeeperDelegate(BaseAgent):
                 quality_score = confidence
 
                 try:
-                    # Étape 1: Créer ProtoConcept dans Neo4j (si pas déjà existant)
+                    # Étape 1: Vérifier que ProtoConcept existe (doit être créé dans execute() maintenant)
                     if not proto_concept_id:
-                        # Créer ProtoConcept
-                        proto_concept_id = self.neo4j_client.create_proto_concept(
-                            tenant_id=tenant_id,
-                            concept_name=concept_name,
-                            concept_type=concept_type,
-                            segment_id=concept.get("segment_id", "unknown"),
-                            document_id=concept.get("document_id", "unknown"),
-                            extraction_method=concept.get("extraction_method", "NER"),
-                            confidence=confidence,
-                            metadata={
-                                "definition": definition,
-                                "original_name": concept_name,
-                                "gate_profile": self.default_profile
-                            }
+                        failed_count += 1
+                        logger.error(
+                            f"[GATEKEEPER:PromoteConcepts] Missing proto_concept_id for '{concept_name}' "
+                            f"(should have been created in execute() step)"
                         )
-
-                        if not proto_concept_id:
-                            failed_count += 1
-                            logger.warning(
-                                f"[GATEKEEPER:PromoteConcepts] Failed to create ProtoConcept for '{concept_name}'"
-                            )
-                            continue
-
-                        logger.debug(
-                            f"[GATEKEEPER:PromoteConcepts] Created ProtoConcept '{concept_name}' "
-                            f"(id={proto_concept_id[:8]})"
-                        )
+                        continue
 
                     # P0.3: Créer DecisionTrace pour audit
                     decision_trace = create_decision_trace(

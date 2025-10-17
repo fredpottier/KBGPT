@@ -300,22 +300,24 @@ class TextChunker:
 
         Args:
             chunk_text: Texte du chunk
-            concepts: Liste concepts [{"id": "proto-123", "name": "SAP S/4HANA"}]
+            concepts: Liste concepts avec proto_concept_id Neo4j [{"proto_concept_id": "uuid", "name": "SAP"}]
 
         Returns:
-            Liste concept IDs mentionnés: ["proto-123", "proto-124"]
+            Liste proto_concept_ids Neo4j mentionnés: ["uuid-1", "uuid-2"]
         """
         mentioned_ids = []
         chunk_lower = chunk_text.lower()
 
         for concept in concepts:
             concept_name = concept.get("name", "").lower()
-            if not concept_name:
+            proto_concept_id = concept.get("proto_concept_id")  # ID Neo4j (UUID)
+
+            if not concept_name or not proto_concept_id:
                 continue
 
             # Recherche exacte
             if concept_name in chunk_lower:
-                mentioned_ids.append(concept["id"])
+                mentioned_ids.append(proto_concept_id)
                 continue
 
             # Recherche variantes (avec/sans tirets, espaces)
@@ -324,7 +326,7 @@ class TextChunker:
             chunk_normalized = re.sub(r'[/\-\s]+', '', chunk_lower)
 
             if concept_normalized in chunk_normalized:
-                mentioned_ids.append(concept["id"])
+                mentioned_ids.append(proto_concept_id)
 
         return mentioned_ids
 
@@ -363,10 +365,10 @@ class TextChunker:
         chunk_index = start_index
 
         for concept in concepts:
-            concept_id = concept.get("id")
+            proto_concept_id = concept.get("proto_concept_id")  # ID Neo4j
             concept_name = concept.get("name", "")
 
-            if not concept_name:
+            if not concept_name or not proto_concept_id:
                 continue
 
             # Trouver toutes les mentions du concept dans le texte
@@ -404,8 +406,8 @@ class TextChunker:
                     "segment_id": segment_id,
                     "chunk_index": chunk_index,
                     "chunk_type": "concept_focused",  # Type: concept_focused
-                    "primary_concept_id": concept_id,  # Concept principal
-                    "proto_concept_ids": mentioned_concept_ids,  # Tous les concepts mentionnés
+                    "primary_concept_id": proto_concept_id,  # Concept principal (Proto ID Neo4j)
+                    "proto_concept_ids": mentioned_concept_ids,  # Tous les concepts mentionnés (Proto IDs Neo4j)
                     "canonical_concept_ids": [],
                     "tenant_id": tenant_id,
                     "char_start": char_start,

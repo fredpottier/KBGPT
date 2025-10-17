@@ -401,17 +401,19 @@ class OsmoseAgentiqueService:
             )
 
             # Étape 3.5: Phase 1.6 - Créer chunks dans Qdrant avec cross-référence
-            if final_state.candidates:  # Seulement si concepts extraits
+            # IMPORTANT: Utiliser final_state.promoted (avec proto_concept_id Neo4j) au lieu de candidates
+            if final_state.promoted:  # Seulement si concepts promus (avec proto_concept_id)
                 try:
                     text_chunker = self._get_text_chunker()
 
                     # Créer chunks avec embeddings + attribution concepts
+                    # NOTE: final_state.promoted contient maintenant proto_concept_id Neo4j
                     chunks = text_chunker.chunk_document(
                         text=text_content,
                         document_id=document_id,
                         document_name=document_title,
                         segment_id=initial_state.segments[0]["topic_id"] if initial_state.segments else "seg-0",
-                        concepts=final_state.candidates,  # Concepts extraits par Extractor
+                        concepts=final_state.promoted,  # Concepts promus avec proto_concept_id Neo4j
                         tenant_id=tenant
                     )
 
