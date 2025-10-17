@@ -18,6 +18,7 @@ from ..models import Concept, Topic, ConceptType
 from ..utils.embeddings import get_embedder
 from ..utils.ner_manager import get_ner_manager
 from ..utils.language_detector import get_language_detector
+from .concept_density_detector import ConceptDensityDetector, ExtractionMethod
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +56,12 @@ class MultilingualConceptExtractor:
         self.embedder = get_embedder(config)
         self.language_detector = get_language_detector(config)
 
+        # V2.2: Density Detector pour optimisation méthode extraction
+        self.density_detector = ConceptDensityDetector(ner_manager=self.ner)
+
         logger.info(
             f"[OSMOSE] MultilingualConceptExtractor initialisé "
-            f"(methods={self.extraction_config.methods})"
+            f"(methods={self.extraction_config.methods}, density_detection=enabled)"
         )
 
     async def extract_concepts(
@@ -66,12 +70,13 @@ class MultilingualConceptExtractor:
         enable_llm: bool = True
     ) -> List[Concept]:
         """
-        Extrait concepts d'un topic via triple méthode.
+        Extrait concepts d'un topic via méthode optimisée (V2.2 Density-Aware).
 
-        Pipeline:
-        1. NER Multilingue
-        2. Semantic Clustering
-        3. LLM (si insuffisant et enable_llm=True)
+        Pipeline V2.2:
+        0. Analyse densité conceptuelle → Sélection méthode optimale
+        1. NER Multilingue (si recommandé)
+        2. Semantic Clustering (si recommandé)
+        3. LLM (si insuffisant OU texte dense)
         4. Fusion + Déduplication
         5. Typage automatique
 
@@ -91,26 +96,65 @@ class MultilingualConceptExtractor:
         topic_language = self.language_detector.detect(topic_text[:2000])
         logger.debug(f"[OSMOSE] Topic language: {topic_language}")
 
-        # Méthode 1: NER Multilingue
-        if "NER" in self.extraction_config.methods:
-            concepts_ner = await self._extract_via_ner(topic, topic_language)
-            concepts.extend(concepts_ner)
-            logger.info(f"[OSMOSE] NER: {len(concepts_ner)} concepts")
+        # V2.2: Analyse densité conceptuelle pour optimisation
+        density_profile = self.density_detector.analyze_density(
+            text=topic_text,
+            sample_size=min(len(topic_text), 2000),
+            language=topic_language
+        )
 
-        # Méthode 2: Semantic Clustering
-        if "CLUSTERING" in self.extraction_config.methods:
-            concepts_clustering = await self._extract_via_clustering(topic, topic_language)
-            concepts.extend(concepts_clustering)
-            logger.info(f"[OSMOSE] Clustering: {len(concepts_clustering)} concepts")
+        logger.info(
+            f"[OSMOSE] Density Analysis: {density_profile.recommended_method.value} "
+            f"(score={density_profile.density_score:.2f}, confidence={density_profile.confidence:.2f})"
+        )
 
-        # Méthode 3: LLM (si insuffisant)
-        if enable_llm and "LLM" in self.extraction_config.methods:
-            if len(concepts) < self.extraction_config.min_concepts_per_topic:
+        # Stratégie selon densité détectée
+        if density_profile.recommended_method == ExtractionMethod.LLM_FIRST:
+            # Texte dense → LLM d'emblée (skip NER inefficace)
+            logger.info("[OSMOSE] Dense text detected → LLM-first strategy")
+            if enable_llm and "LLM" in self.extraction_config.methods:
                 concepts_llm = await self._extract_via_llm(topic, topic_language)
                 concepts.extend(concepts_llm)
                 logger.info(f"[OSMOSE] LLM: {len(concepts_llm)} concepts")
             else:
-                logger.debug("[OSMOSE] LLM skipped (enough concepts from NER+Clustering)")
+                logger.warning("[OSMOSE] LLM disabled but recommended for dense text, falling back to NER")
+                # Fallback NER si LLM désactivé
+                if "NER" in self.extraction_config.methods:
+                    concepts_ner = await self._extract_via_ner(topic, topic_language)
+                    concepts.extend(concepts_ner)
+
+        elif density_profile.recommended_method == ExtractionMethod.NER_ONLY:
+            # Texte simple → NER suffit
+            logger.info("[OSMOSE] Simple text detected → NER-only strategy")
+            if "NER" in self.extraction_config.methods:
+                concepts_ner = await self._extract_via_ner(topic, topic_language)
+                concepts.extend(concepts_ner)
+                logger.info(f"[OSMOSE] NER: {len(concepts_ner)} concepts")
+
+        else:  # NER_LLM_HYBRID (standard flow)
+            # Pipeline standard: NER + Clustering + LLM si insuffisant
+            logger.info("[OSMOSE] Standard text → Hybrid NER+LLM strategy")
+
+            # Méthode 1: NER Multilingue
+            if "NER" in self.extraction_config.methods:
+                concepts_ner = await self._extract_via_ner(topic, topic_language)
+                concepts.extend(concepts_ner)
+                logger.info(f"[OSMOSE] NER: {len(concepts_ner)} concepts")
+
+            # Méthode 2: Semantic Clustering
+            if "CLUSTERING" in self.extraction_config.methods:
+                concepts_clustering = await self._extract_via_clustering(topic, topic_language)
+                concepts.extend(concepts_clustering)
+                logger.info(f"[OSMOSE] Clustering: {len(concepts_clustering)} concepts")
+
+            # Méthode 3: LLM (si insuffisant)
+            if enable_llm and "LLM" in self.extraction_config.methods:
+                if len(concepts) < self.extraction_config.min_concepts_per_topic:
+                    concepts_llm = await self._extract_via_llm(topic, topic_language)
+                    concepts.extend(concepts_llm)
+                    logger.info(f"[OSMOSE] LLM: {len(concepts_llm)} concepts")
+                else:
+                    logger.debug("[OSMOSE] LLM skipped (enough concepts from NER+Clustering)")
 
         # Fusion + Déduplication
         concepts_deduplicated = self._deduplicate_concepts(concepts)
