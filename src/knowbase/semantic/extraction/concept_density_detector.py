@@ -352,9 +352,9 @@ class ConceptDensityDetector:
         Recommande méthode extraction basée sur density score.
 
         Seuils:
-        - 0.0-0.35: NER_ONLY (texte simple)
-        - 0.35-0.65: NER_LLM_HYBRID (standard)
-        - 0.65-1.0: LLM_FIRST (texte dense)
+        - 0.0-0.30: NER_ONLY (texte simple)
+        - 0.30-0.55: NER_LLM_HYBRID (standard)
+        - 0.55-1.0: LLM_FIRST (texte dense) ← ABAISSÉ pour docs techniques
 
         Returns:
             (method, confidence)
