@@ -1,8 +1,8 @@
 # Adaptive Ontology - Status Implémentation
 
 **Date** : 2025-10-17
-**Commit** : `bdc2ccd`
-**Statut** : Phases 1-2 COMPLÈTES ✅, Phase 3 EN COURS
+**Commit** : `31e8e05`
+**Statut** : Phases 1-3 COMPLÈTES ✅, Phase 4 PRÊTE
 
 ---
 
@@ -86,9 +86,9 @@ print('✅ Stored in ontology')
 
 ---
 
-## 🚧 EN COURS - Phase 3: Intégration Gatekeeper
+## ✅ COMPLÉTÉ - Phase 3: Intégration Gatekeeper
 
-**Status** : NON COMMENCÉ (code préparé mais non intégré)
+**Status** : COMPLET ✅ (Commit `31e8e05`)
 
 **Objectif** : Modifier Gatekeeper pour utiliser LLM Canonicalizer au lieu de `.title()`
 
@@ -96,10 +96,11 @@ print('✅ Stored in ontology')
 
 `src/knowbase/agents/gatekeeper/gatekeeper.py`
 
-**Lignes critiques à remplacer** :
-- Ligne 680 : `canonical_name = concept_name.strip().title()`
-- Ligne 690 : `canonical_name = concept_name.strip().title()`
-- Ligne 694 : `canonical_name = concept_name.strip().title()`
+**Modifications réalisées** :
+- ✅ Ajout imports (lignes 29-31)
+- ✅ Init LLM Canonicalizer + Adaptive Ontology dans `__init__` (lignes 253-265)
+- ✅ Ajout méthode `_canonicalize_concept_name()` (lignes 627-705)
+- ✅ Remplacement 3 occurrences `.title()` → LLM canonicalization (lignes 777, 792, 800)
 
 ### Code d'intégration préparé
 
@@ -186,12 +187,26 @@ canonical_name, confidence = self._canonicalize_concept_name(
 )
 ```
 
-### Actions requises
+### Workflow Canonicalisation (Cascade Intelligente)
 
-1. **Ajouter imports** dans `gatekeeper.py`
-2. **Modifier `__init__()`** pour initialiser canonicalizer + ontology
-3. **Ajouter méthode `_canonicalize_concept_name()`**
-4. **Remplacer 3 occurrences `.title()`** par appel à `_canonicalize_concept_name()`
+```
+1. EntityNormalizerNeo4j (P0.1 Ontologie)
+   ↓ si non trouvé ou indisponible
+2. LLM Canonicalizer + Adaptive Ontology (Phase 1.6+)
+   ↓ Lookup cache Neo4j
+   ↓ Cache MISS → Appel LLM (gpt-4o-mini)
+   ↓ Store résultat dans AdaptiveOntology
+   ↓ Return (canonical_name, confidence)
+   ↓ si erreur LLM
+3. Fallback .title() (ultime secours)
+```
+
+**Bénéfices** :
+- ✅ Intelligence LLM pour noms canoniques officiels
+- ✅ Auto-apprentissage via cache (0% → 95% cache hit)
+- ✅ Réduction coût LLM (60x sur 1 an)
+- ✅ Zero-Config (ontologie se construit seule)
+- ✅ Fallback gracieux si services indisponibles
 
 ---
 
@@ -309,13 +324,20 @@ ORDER BY o.usage_count DESC
 - `7a365a3` : docs: Architecture LLM Canonicalizer + Adaptive Ontology
 - `bfbf0db` : fix(neo4j): Corriger bug UNWIND liste vide dans promote_to_published
 - `bdc2ccd` : feat(ontology): Implémenter LLM Canonicalizer + Adaptive Ontology (Phases 1-2)
+- `31e8e05` : feat(ontology): Intégrer LLM Canonicalizer dans Gatekeeper (Phase 3) ✅
 
 ---
 
-## 🎯 Prochaine Session - Quick Start
+## 🎯 Prochaine Session - Phase 4 : Tests Validation
+
+**STATUS ACTUEL** : Phase 3 COMPLÈTE ✅ (Commit `31e8e05`)
+**Worker rebuilt et redémarré** : ✅
+**Prêt pour tests** : ✅
+
+### Quick Start Phase 4
 
 ```bash
-# 1. Vérifier infrastructure Neo4j
+# 1. Vérifier infrastructure AdaptiveOntology
 docker-compose exec app python -c "
 from knowbase.common.clients.neo4j_client import get_neo4j_client
 neo4j = get_neo4j_client(uri='bolt://neo4j:7687', user='neo4j', password='graphiti_neo4j_pass')
@@ -325,15 +347,32 @@ with neo4j.driver.session() as s:
     print('✅ Indexes:', indexes)
 "
 
-# 2. Intégrer Gatekeeper (Phase 3)
-# → Voir code ci-dessus dans section "Code d'intégration préparé"
-
-# 3. Rebuild + test
-docker-compose build ingestion-worker
-docker-compose restart ingestion-worker
-
-# 4. Import document test
+# 2. Import document test
 # → http://localhost:3000/documents/import
+
+# 3. Surveiller logs
+docker-compose logs ingestion-worker -f --tail=50 | grep -E "LLMCanonicalizer|AdaptiveOntology|GATEKEEPER:Canonicalization"
+
+# 4. Vérifier Neo4j AdaptiveOntology
+docker exec knowbase-neo4j cypher-shell -u neo4j -p graphiti_neo4j_pass --format plain "
+MATCH (o:AdaptiveOntology {tenant_id: 'default'})
+RETURN o.canonical_name, o.aliases, o.usage_count
+ORDER BY o.usage_count DESC
+LIMIT 20
+"
+
+# 5. Vérifier CanonicalConcepts
+docker exec knowbase-neo4j cypher-shell -u neo4j -p graphiti_neo4j_pass --format plain "
+MATCH (c:CanonicalConcept {tenant_id: 'default'})
+RETURN c.canonical_name, c.surface_form
+LIMIT 20
+"
 ```
 
-**Dernière mise à jour** : 2025-10-17 12:00 UTC
+**Logs attendus** :
+- `[GATEKEEPER] LLM Canonicalizer + Adaptive Ontology initialized`
+- `[GATEKEEPER:Canonicalization] 🔍 Cache MISS '...'`
+- `[LLMCanonicalizer] ✅ '...' → '...'`
+- `[AdaptiveOntology:Store] Created ontology entry '...'`
+
+**Dernière mise à jour** : 2025-10-17 (Phase 3 complète)
