@@ -77,10 +77,15 @@ class TextChunker:
         document_name: str,
         segment_id: str,
         concepts: List[Dict[str, Any]],
-        tenant_id: str = "default"
+        tenant_id: str = "default",
+        use_hybrid: bool = True
     ) -> List[Dict[str, Any]]:
         """
-        Découpe document en chunks avec embeddings et attribution concepts.
+        Découpe document en chunks avec stratégie HYBRIDE.
+
+        Stratégie Hybride (use_hybrid=True):
+        1. Chunks génériques: Coverage complète (512 tokens, overlap 128)
+        2. Chunks concept-focused: Contexte autour de chaque mention concept (±256 tokens)
 
         Args:
             text: Texte complet du document/segment
@@ -90,6 +95,7 @@ class TextChunker:
             concepts: Liste concepts extraits par Extractor
                       Format: [{"id": "proto-123", "name": "SAP S/4HANA", ...}]
             tenant_id: ID tenant (multi-tenant isolation)
+            use_hybrid: Si True, génère chunks génériques + concept-focused (default: True)
 
         Returns:
             List of chunks ready for Qdrant:
@@ -102,8 +108,10 @@ class TextChunker:
                     "document_name": "SAP Overview.pdf",
                     "segment_id": "segment-1",
                     "chunk_index": 0,
+                    "chunk_type": "generic" | "concept_focused",  # Type chunk
+                    "primary_concept_id": "proto-123" | None,  # Concept principal si focused
                     "proto_concept_ids": ["proto-123", "proto-124"],
-                    "canonical_concept_ids": [],  # Vide initialement, rempli après promotion
+                    "canonical_concept_ids": [],  # Vide initialement
                     "tenant_id": "default",
                     "char_start": 0,
                     "char_end": 512
@@ -115,45 +123,67 @@ class TextChunker:
             return []
 
         try:
-            # 1. Découper texte en chunks
-            text_chunks = self._split_text_into_chunks(text)
-            logger.debug(f"[TextChunker] Created {len(text_chunks)} chunks for document {document_id}")
+            all_chunks = []
 
-            # 2. Générer embeddings batch (plus efficace)
-            chunk_texts = [chunk["text"] for chunk in text_chunks]
-            embeddings = self._generate_embeddings_batch(chunk_texts)
+            # ===== PARTIE 1: Chunks Génériques (Coverage Complète) =====
+            generic_chunks = self._split_text_into_chunks(text)
+            logger.debug(
+                f"[TextChunker:Generic] Created {len(generic_chunks)} generic chunks "
+                f"for document {document_id}"
+            )
 
-            # 3. Attribution concepts (détection mentions)
-            chunks_with_concepts = []
-            for i, (chunk_data, embedding) in enumerate(zip(text_chunks, embeddings)):
+            # Générer embeddings pour chunks génériques
+            generic_texts = [chunk["text"] for chunk in generic_chunks]
+            generic_embeddings = self._generate_embeddings_batch(generic_texts)
+
+            # Créer chunks génériques avec attribution concepts
+            for i, (chunk_data, embedding) in enumerate(zip(generic_chunks, generic_embeddings)):
                 chunk_text = chunk_data["text"]
-
-                # Trouver concepts mentionnés dans ce chunk
                 mentioned_concept_ids = self._find_mentioned_concepts(chunk_text, concepts)
 
-                chunk_id = str(uuid.uuid4())
-
-                chunks_with_concepts.append({
-                    "id": chunk_id,
+                all_chunks.append({
+                    "id": str(uuid.uuid4()),
                     "text": chunk_text,
-                    "embedding": embedding.tolist(),  # Convertir numpy array → list
+                    "embedding": embedding.tolist(),
                     "document_id": document_id,
                     "document_name": document_name,
                     "segment_id": segment_id,
                     "chunk_index": i,
+                    "chunk_type": "generic",  # Type: generic
+                    "primary_concept_id": None,  # Pas de concept principal
                     "proto_concept_ids": mentioned_concept_ids,
-                    "canonical_concept_ids": [],  # Rempli après promotion par Gatekeeper
+                    "canonical_concept_ids": [],
                     "tenant_id": tenant_id,
                     "char_start": chunk_data["char_start"],
                     "char_end": chunk_data["char_end"]
                 })
 
-            logger.info(
-                f"[TextChunker] Generated {len(chunks_with_concepts)} chunks "
-                f"({sum(len(c['proto_concept_ids']) for c in chunks_with_concepts)} concept mentions)"
-            )
+            # ===== PARTIE 2: Chunks Concept-Focused (Si Hybride Activé) =====
+            if use_hybrid and concepts:
+                concept_focused_chunks = self._create_concept_focused_chunks(
+                    text=text,
+                    document_id=document_id,
+                    document_name=document_name,
+                    segment_id=segment_id,
+                    concepts=concepts,
+                    tenant_id=tenant_id,
+                    start_index=len(all_chunks)  # Continuer numérotation après generics
+                )
 
-            return chunks_with_concepts
+                all_chunks.extend(concept_focused_chunks)
+
+                logger.info(
+                    f"[TextChunker:Hybrid] Generated {len(generic_chunks)} generic + "
+                    f"{len(concept_focused_chunks)} concept-focused chunks "
+                    f"({len(all_chunks)} total)"
+                )
+            else:
+                logger.info(
+                    f"[TextChunker:Generic] Generated {len(all_chunks)} generic chunks "
+                    f"(hybrid disabled or no concepts)"
+                )
+
+            return all_chunks
 
         except Exception as e:
             logger.error(f"[TextChunker] Error chunking document {document_id}: {e}", exc_info=True)
@@ -297,6 +327,249 @@ class TextChunker:
                 mentioned_ids.append(concept["id"])
 
         return mentioned_ids
+
+    def _create_concept_focused_chunks(
+        self,
+        text: str,
+        document_id: str,
+        document_name: str,
+        segment_id: str,
+        concepts: List[Dict[str, Any]],
+        tenant_id: str,
+        start_index: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Créer chunks concept-focused (contexte autour de mentions).
+
+        Stratégie:
+        1. Pour chaque concept, trouver toutes ses mentions dans le texte
+        2. Extraire contexte autour de chaque mention (±256 tokens)
+        3. Générer embeddings pour chunks focused
+        4. Retourner chunks avec chunk_type="concept_focused" et primary_concept_id set
+
+        Args:
+            text: Texte complet du document
+            document_id: ID document
+            document_name: Nom document
+            segment_id: ID segment
+            concepts: Liste concepts extraits
+            tenant_id: ID tenant
+            start_index: Index de départ pour numérotation chunks
+
+        Returns:
+            Liste chunks concept-focused
+        """
+        concept_focused_chunks = []
+        chunk_index = start_index
+
+        for concept in concepts:
+            concept_id = concept.get("id")
+            concept_name = concept.get("name", "")
+
+            if not concept_name:
+                continue
+
+            # Trouver toutes les mentions du concept dans le texte
+            mentions = self._find_concept_mentions(text, concept_name)
+
+            if not mentions:
+                continue
+
+            # Pour chaque mention, créer un chunk focused
+            for mention_start, mention_end in mentions:
+                # Extraire contexte autour de la mention (±256 tokens)
+                chunk_text, char_start, char_end = self._extract_context_window(
+                    text=text,
+                    mention_start=mention_start,
+                    mention_end=mention_end,
+                    context_tokens=256
+                )
+
+                if not chunk_text or not chunk_text.strip():
+                    continue
+
+                # Générer embedding pour ce chunk focused
+                embedding = self._generate_embeddings_batch([chunk_text])[0]
+
+                # Trouver tous les concepts mentionnés dans ce chunk (pas seulement le principal)
+                mentioned_concept_ids = self._find_mentioned_concepts(chunk_text, concepts)
+
+                # Créer chunk concept-focused
+                concept_focused_chunks.append({
+                    "id": str(uuid.uuid4()),
+                    "text": chunk_text.strip(),
+                    "embedding": embedding.tolist(),
+                    "document_id": document_id,
+                    "document_name": document_name,
+                    "segment_id": segment_id,
+                    "chunk_index": chunk_index,
+                    "chunk_type": "concept_focused",  # Type: concept_focused
+                    "primary_concept_id": concept_id,  # Concept principal
+                    "proto_concept_ids": mentioned_concept_ids,  # Tous les concepts mentionnés
+                    "canonical_concept_ids": [],
+                    "tenant_id": tenant_id,
+                    "char_start": char_start,
+                    "char_end": char_end
+                })
+
+                chunk_index += 1
+
+        logger.debug(
+            f"[TextChunker:ConceptFocused] Created {len(concept_focused_chunks)} "
+            f"concept-focused chunks for {len(concepts)} concepts"
+        )
+
+        return concept_focused_chunks
+
+    def _find_concept_mentions(
+        self,
+        text: str,
+        concept_name: str
+    ) -> List[tuple]:
+        """
+        Trouver toutes les positions des mentions d'un concept dans le texte.
+
+        Stratégie:
+        - Recherche case-insensitive
+        - Support variantes (avec/sans tirets, espaces)
+        - Retourne positions (char_start, char_end)
+
+        Args:
+            text: Texte complet
+            concept_name: Nom du concept
+
+        Returns:
+            Liste de tuples (char_start, char_end) pour chaque mention
+        """
+        mentions = []
+        text_lower = text.lower()
+        concept_lower = concept_name.lower()
+
+        # Recherche exacte (case-insensitive)
+        start_pos = 0
+        while True:
+            pos = text_lower.find(concept_lower, start_pos)
+            if pos == -1:
+                break
+            mentions.append((pos, pos + len(concept_lower)))
+            start_pos = pos + 1
+
+        # Si aucune mention exacte, chercher variantes normalisées
+        if not mentions:
+            # Normaliser concept (supprimer tirets/espaces/slashes)
+            concept_normalized = re.sub(r'[/\-\s]+', '', concept_lower)
+
+            # Créer pattern pour matcher variantes
+            # Ex: "S/4HANA" → pattern qui match "S4HANA", "S 4 HANA", etc.
+            pattern_parts = []
+            for char in concept_normalized:
+                if char.isalnum():
+                    pattern_parts.append(char)
+                    pattern_parts.append(r'[/\-\s]*')  # Caractères optionnels entre chaque lettre/chiffre
+
+            if pattern_parts:
+                # Retirer dernier séparateur optionnel
+                pattern_parts = pattern_parts[:-1]
+                pattern = ''.join(pattern_parts)
+
+                try:
+                    for match in re.finditer(pattern, text_lower, re.IGNORECASE):
+                        mentions.append((match.start(), match.end()))
+                except re.error:
+                    # Si pattern invalide, ignorer
+                    pass
+
+        return mentions
+
+    def _extract_context_window(
+        self,
+        text: str,
+        mention_start: int,
+        mention_end: int,
+        context_tokens: int = 256
+    ) -> tuple:
+        """
+        Extraire fenêtre de contexte autour d'une mention.
+
+        Stratégie:
+        - Centrer sur la mention
+        - Étendre de ±context_tokens (ou chars si tokenizer indisponible)
+        - Respecter limites de phrases si possible
+
+        Args:
+            text: Texte complet
+            mention_start: Position début mention (chars)
+            mention_end: Position fin mention (chars)
+            context_tokens: Nombre tokens de contexte de chaque côté (default: 256)
+
+        Returns:
+            (chunk_text, char_start, char_end)
+        """
+        if self.tokenizer:
+            # Token-based context extraction (plus précis)
+            # Encoder texte complet pour connaître positions tokens
+            tokens = self.tokenizer.encode(text)
+
+            # Approximer position token de la mention
+            # (simple approximation: compter tokens avant mention_start)
+            text_before = text[:mention_start]
+            tokens_before = self.tokenizer.encode(text_before)
+            mention_token_start = len(tokens_before)
+
+            # Calculer fenêtre token
+            window_start_token = max(0, mention_token_start - context_tokens)
+            window_end_token = min(len(tokens), mention_token_start + context_tokens)
+
+            # Extraire tokens de la fenêtre
+            window_tokens = tokens[window_start_token:window_end_token]
+
+            # Décoder chunk
+            chunk_text = self.tokenizer.decode(window_tokens)
+
+            # Approximer positions char (pas parfait mais suffisant)
+            char_start = max(0, len(self.tokenizer.decode(tokens[:window_start_token])))
+            char_end = min(len(text), len(self.tokenizer.decode(tokens[:window_end_token])))
+
+        else:
+            # Fallback: char-based context extraction
+            # Approximation: 1 token ≈ 4 chars
+            context_chars = context_tokens * 4
+
+            char_start = max(0, mention_start - context_chars)
+            char_end = min(len(text), mention_end + context_chars)
+
+            chunk_text = text[char_start:char_end]
+
+        # Essayer de couper aux limites de phrases
+        if char_start > 0:
+            # Chercher début de phrase avant
+            sentence_starts = [
+                chunk_text.find('. ') + 2,
+                chunk_text.find('.\n') + 2,
+                chunk_text.find('! ') + 2,
+                chunk_text.find('? ') + 2
+            ]
+            valid_starts = [s for s in sentence_starts if s > 1]
+            if valid_starts:
+                first_sentence = min(valid_starts)
+                chunk_text = chunk_text[first_sentence:]
+                char_start += first_sentence
+
+        if char_end < len(text):
+            # Chercher fin de phrase après
+            sentence_ends = [
+                chunk_text.rfind('. ') + 1,
+                chunk_text.rfind('.\n') + 1,
+                chunk_text.rfind('! ') + 1,
+                chunk_text.rfind('? ') + 1
+            ]
+            valid_ends = [e for e in sentence_ends if e > 0]
+            if valid_ends:
+                last_sentence = max(valid_ends)
+                chunk_text = chunk_text[:last_sentence]
+                char_end = char_start + last_sentence
+
+        return (chunk_text, char_start, char_end)
 
 
 # Singleton instance pour réutilisation (model loading coûteux)
