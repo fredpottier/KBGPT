@@ -208,3 +208,234 @@ def delete_tenant_data(
     except Exception as e:
         logger.error(f"[QDRANT] Error deleting tenant data: {e}")
         return False
+
+
+# ==================================================
+# Phase 1.6 - Cross-Référence Neo4j ↔ Qdrant
+# ==================================================
+
+
+def upsert_chunks(
+    chunks: List[Dict[str, Any]],
+    collection_name: str = "knowbase",
+    tenant_id: str = "default"
+) -> List[str]:
+    """
+    Insérer chunks dans Qdrant avec proto_concept_ids (cross-référence Neo4j).
+
+    Args:
+        chunks: Liste chunks avec embeddings et metadata
+            [
+                {
+                    "id": "chunk-uuid",  # Optionnel, généré si absent
+                    "text": "SAP S/4HANA est...",
+                    "embedding": [0.123, ...],  # 1024D
+                    "document_id": "doc-123",
+                    "document_name": "SAP Overview.pdf",
+                    "segment_id": "segment-1",
+                    "chunk_index": 0,
+                    "proto_concept_ids": ["proto-123"],
+                    "canonical_concept_ids": [],  # Vide initialement
+                    "tenant_id": "default",
+                    "char_start": 0,
+                    "char_end": 512
+                }
+            ]
+        collection_name: Nom collection (default: "knowbase")
+        tenant_id: ID tenant (isolation multi-tenant)
+
+    Returns:
+        Liste chunk_ids créés (UUIDs)
+    """
+    client = get_qdrant_client()
+
+    # Vérifier/créer collection
+    if not client.collection_exists(collection_name):
+        logger.warning(f"[QDRANT:Chunks] Collection {collection_name} doesn't exist, creating...")
+        ensure_qdrant_collection(collection_name, vector_size=1024)
+
+    chunk_ids = []
+    points = []
+
+    for chunk in chunks:
+        # Utiliser ID fourni ou générer nouveau UUID
+        chunk_id = chunk.get("id") or str(__import__('uuid').uuid4())
+        chunk_ids.append(chunk_id)
+
+        # Construire payload (tout sauf embedding et id)
+        payload = {
+            "text": chunk.get("text", ""),
+            "document_id": chunk.get("document_id", ""),
+            "document_name": chunk.get("document_name", ""),
+            "segment_id": chunk.get("segment_id", ""),
+            "chunk_index": chunk.get("chunk_index", 0),
+            "proto_concept_ids": chunk.get("proto_concept_ids", []),
+            "canonical_concept_ids": chunk.get("canonical_concept_ids", []),
+            "tenant_id": tenant_id,
+            "char_start": chunk.get("char_start", 0),
+            "char_end": chunk.get("char_end", 0),
+            "created_at": chunk.get("created_at", "")
+        }
+
+        # Créer point Qdrant
+        point = PointStruct(
+            id=chunk_id,
+            vector=chunk["embedding"],
+            payload=payload
+        )
+        points.append(point)
+
+    try:
+        # Batch upsert pour performance
+        client.upsert(
+            collection_name=collection_name,
+            points=points
+        )
+
+        logger.info(
+            f"[QDRANT:Chunks] Upserted {len(points)} chunks "
+            f"(tenant={tenant_id}, collection={collection_name})"
+        )
+
+        return chunk_ids
+
+    except Exception as e:
+        logger.error(f"[QDRANT:Chunks] Error upserting chunks: {e}")
+        return []
+
+
+def update_chunks_with_canonical_ids(
+    chunk_ids: List[str],
+    canonical_concept_id: str,
+    collection_name: str = "knowbase"
+) -> bool:
+    """
+    Mettre à jour chunks avec canonical_concept_id après promotion Gatekeeper.
+
+    Appelé par Gatekeeper après promotion ProtoConcept → CanonicalConcept
+    pour enrichir chunks Qdrant avec reference au concept publié.
+
+    Args:
+        chunk_ids: IDs des chunks à mettre à jour
+        canonical_concept_id: ID du CanonicalConcept promu
+        collection_name: Nom collection (default: "knowbase")
+
+    Returns:
+        True si mise à jour OK
+    """
+    client = get_qdrant_client()
+
+    if not chunk_ids:
+        logger.debug("[QDRANT:Chunks] No chunk_ids to update")
+        return True
+
+    try:
+        # Récupérer chunks existants
+        points = client.retrieve(
+            collection_name=collection_name,
+            ids=chunk_ids
+        )
+
+        updated_points = []
+        for point in points:
+            # Ajouter canonical_concept_id (sans doublon)
+            canonical_ids = point.payload.get("canonical_concept_ids", [])
+            if canonical_concept_id not in canonical_ids:
+                canonical_ids.append(canonical_concept_id)
+
+            # Mettre à jour payload
+            updated_payload = point.payload
+            updated_payload["canonical_concept_ids"] = canonical_ids
+
+            updated_point = PointStruct(
+                id=point.id,
+                vector=point.vector,
+                payload=updated_payload
+            )
+            updated_points.append(updated_point)
+
+        # Upsert chunks mis à jour
+        client.upsert(
+            collection_name=collection_name,
+            points=updated_points
+        )
+
+        logger.info(
+            f"[QDRANT:Chunks] Updated {len(updated_points)} chunks with "
+            f"canonical_id={canonical_concept_id[:8]}"
+        )
+
+        return True
+
+    except Exception as e:
+        logger.error(f"[QDRANT:Chunks] Error updating chunks: {e}")
+        return False
+
+
+def get_chunks_by_concept(
+    canonical_concept_id: str,
+    collection_name: str = "knowbase",
+    tenant_id: Optional[str] = None,
+    limit: int = 100
+) -> List[Dict[str, Any]]:
+    """
+    Récupérer chunks associés à un concept (cross-référence Neo4j → Qdrant).
+
+    Use case: Enrichir concept avec contexte textuel complet.
+
+    Args:
+        canonical_concept_id: ID CanonicalConcept Neo4j
+        collection_name: Nom collection (default: "knowbase")
+        tenant_id: Filtrer par tenant (optionnel)
+        limit: Max chunks à retourner
+
+    Returns:
+        Liste chunks avec payload complet
+    """
+    client = get_qdrant_client()
+
+    # Construire filtres
+    must_conditions = [
+        FieldCondition(
+            key="canonical_concept_ids",
+            match=MatchValue(value=canonical_concept_id)
+        )
+    ]
+
+    if tenant_id:
+        must_conditions.append(
+            FieldCondition(
+                key="tenant_id",
+                match=MatchValue(value=tenant_id)
+            )
+        )
+
+    query_filter = Filter(must=must_conditions)
+
+    try:
+        # Scroll pour récupérer tous chunks
+        scroll_result = client.scroll(
+            collection_name=collection_name,
+            scroll_filter=query_filter,
+            limit=limit,
+            with_payload=True,
+            with_vectors=False  # Pas besoin des vecteurs
+        )
+
+        chunks = []
+        for point in scroll_result[0]:  # scroll_result = (points, next_page_offset)
+            chunks.append({
+                "id": point.id,
+                "payload": point.payload
+            })
+
+        logger.debug(
+            f"[QDRANT:Chunks] Found {len(chunks)} chunks for concept "
+            f"{canonical_concept_id[:8]}"
+        )
+
+        return chunks
+
+    except Exception as e:
+        logger.error(f"[QDRANT:Chunks] Error retrieving chunks: {e}")
+        return []

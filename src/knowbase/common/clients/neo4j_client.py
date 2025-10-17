@@ -99,7 +99,8 @@ class Neo4jClient:
         document_id: str,
         extraction_method: str = "NER",
         confidence: float = 0.0,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        chunk_ids: Optional[List[str]] = None
     ) -> str:
         """
         Crée concept Proto-KG (extrait, non validé).
@@ -113,6 +114,7 @@ class Neo4jClient:
             extraction_method: NER, Regex, LLM, etc.
             confidence: Score confiance extraction (0-1)
             metadata: Métadonnées additionnelles
+            chunk_ids: IDs chunks Qdrant mentionnant ce concept (cross-référence)
 
         Returns:
             concept_id créé
@@ -124,6 +126,8 @@ class Neo4jClient:
         import json
 
         metadata = metadata or {}
+        chunk_ids = chunk_ids or []
+
         # Convertir metadata en JSON string pour Neo4j (ne supporte pas les Maps)
         metadata_json = json.dumps(metadata)
 
@@ -137,6 +141,7 @@ class Neo4jClient:
             document_id: $document_id,
             extraction_method: $extraction_method,
             confidence: $confidence,
+            chunk_ids: $chunk_ids,
             created_at: datetime(),
             metadata_json: $metadata_json
         })
@@ -154,6 +159,7 @@ class Neo4jClient:
                     document_id=document_id,
                     extraction_method=extraction_method,
                     confidence=confidence,
+                    chunk_ids=chunk_ids,
                     metadata_json=metadata_json
                 )
 
@@ -318,7 +324,8 @@ class Neo4jClient:
         metadata: Optional[Dict[str, Any]] = None,
         decision_trace_json: Optional[str] = None,
         surface_form: Optional[str] = None,
-        deduplicate: bool = True
+        deduplicate: bool = True,
+        chunk_ids: Optional[List[str]] = None
     ) -> str:
         """
         Promouvoir concept Proto → Published (validation Gatekeeper).
@@ -326,6 +333,9 @@ class Neo4jClient:
         Problème 2 (Déduplication): Si deduplicate=True (défaut), vérifie si
         un CanonicalConcept existe déjà avec ce canonical_name. Si oui, lie
         le ProtoConcept à l'existant au lieu de créer un doublon.
+
+        Phase 1.6 (Cross-Référence): Stocke chunk_ids pour lien Neo4j ↔ Qdrant.
+        Lors déduplication, agrège chunk_ids de tous ProtoConcepts.
 
         Args:
             tenant_id: ID tenant
@@ -337,6 +347,7 @@ class Neo4jClient:
             decision_trace_json: JSON trace décision canonicalisation (P0.3)
             surface_form: Nom brut extrait avant canonicalisation (P1.3)
             deduplicate: Si True, vérifier existence avant création (défaut: True)
+            chunk_ids: IDs chunks Qdrant pour cross-référence (Phase 1.6)
 
         Returns:
             canonical_id créé ou existant (ou "" si échec)
@@ -348,6 +359,8 @@ class Neo4jClient:
         import json
 
         metadata = metadata or {}
+        chunk_ids = chunk_ids or []
+
         # Convertir metadata en JSON string pour Neo4j (ne supporte pas les Maps)
         metadata_json = json.dumps(metadata)
 
@@ -356,10 +369,30 @@ class Neo4jClient:
             existing_canonical_id = self.find_canonical_concept(tenant_id, canonical_name)
 
             if existing_canonical_id:
-                # Lier ProtoConcept à CanonicalConcept existant
-                link_query = """
+                # Phase 1.6: Agréger chunk_ids (existants + nouveaux)
+                aggregate_query = """
                 MATCH (proto:ProtoConcept {concept_id: $proto_concept_id, tenant_id: $tenant_id})
                 MATCH (canonical:CanonicalConcept {canonical_id: $existing_canonical_id, tenant_id: $tenant_id})
+
+                // Récupérer chunk_ids existants
+                WITH proto, canonical,
+                     COALESCE(canonical.chunk_ids, []) AS existing_chunks,
+                     COALESCE(proto.chunk_ids, []) AS proto_chunks,
+                     $new_chunk_ids AS new_chunks
+
+                // Agréger tous chunk_ids (dédupliqués)
+                WITH proto, canonical,
+                     existing_chunks + proto_chunks + new_chunks AS all_chunks_raw
+
+                // Dédupliquer chunk_ids
+                WITH proto, canonical,
+                     [chunk IN all_chunks_raw WHERE chunk IS NOT NULL] AS all_chunks_filtered
+
+                UNWIND all_chunks_filtered AS chunk
+                WITH proto, canonical, COLLECT(DISTINCT chunk) AS aggregated_chunks
+
+                // Mettre à jour CanonicalConcept.chunk_ids
+                SET canonical.chunk_ids = aggregated_chunks
 
                 // Créer lien Proto → Canonical existant
                 MERGE (proto)-[:PROMOTED_TO {
@@ -368,24 +401,28 @@ class Neo4jClient:
                 }]->(canonical)
 
                 RETURN canonical.canonical_id AS canonical_id,
-                       canonical.canonical_name AS canonical_name
+                       canonical.canonical_name AS canonical_name,
+                       SIZE(aggregated_chunks) AS chunk_count
                 """
 
                 try:
                     with self.driver.session(database=self.database) as session:
                         result = session.run(
-                            link_query,
+                            aggregate_query,
                             proto_concept_id=proto_concept_id,
                             tenant_id=tenant_id,
-                            existing_canonical_id=existing_canonical_id
+                            existing_canonical_id=existing_canonical_id,
+                            new_chunk_ids=chunk_ids
                         )
 
                         record = result.single()
 
                         if record:
+                            chunk_count = record.get("chunk_count", 0)
                             logger.info(
                                 f"[NEO4J:Dedup] Linked ProtoConcept to existing CanonicalConcept '{canonical_name}' "
-                                f"(proto={proto_concept_id[:8]}, canonical={existing_canonical_id[:8]})"
+                                f"(proto={proto_concept_id[:8]}, canonical={existing_canonical_id[:8]}, "
+                                f"aggregated {chunk_count} chunks)"
                             )
                             return existing_canonical_id
                         else:
@@ -403,7 +440,15 @@ class Neo4jClient:
         query = """
         MATCH (proto:ProtoConcept {concept_id: $proto_concept_id, tenant_id: $tenant_id})
 
-        // Créer CanonicalConcept (P1.3: ajout surface_form)
+        // Agréger chunk_ids (proto + nouveaux)
+        WITH proto,
+             COALESCE(proto.chunk_ids, []) + $chunk_ids AS all_chunks
+
+        // Dédupliquer
+        UNWIND all_chunks AS chunk
+        WITH proto, COLLECT(DISTINCT chunk) AS aggregated_chunks
+
+        // Créer CanonicalConcept (P1.3: ajout surface_form, P1.6: ajout chunk_ids)
         CREATE (canonical:CanonicalConcept {
             canonical_id: randomUUID(),
             tenant_id: $tenant_id,
@@ -412,6 +457,7 @@ class Neo4jClient:
             concept_type: proto.concept_type,
             unified_definition: $unified_definition,
             quality_score: $quality_score,
+            chunk_ids: aggregated_chunks,
             promoted_at: datetime(),
             metadata_json: $metadata_json,
             decision_trace_json: $decision_trace_json
@@ -422,7 +468,8 @@ class Neo4jClient:
 
         RETURN canonical.canonical_id AS canonical_id,
                canonical.canonical_name AS canonical_name,
-               canonical.surface_form AS surface_form
+               canonical.surface_form AS surface_form,
+               SIZE(aggregated_chunks) AS chunk_count
         """
 
         try:
@@ -435,6 +482,7 @@ class Neo4jClient:
                     surface_form=surface_form,
                     unified_definition=unified_definition,
                     quality_score=quality_score,
+                    chunk_ids=chunk_ids,
                     metadata_json=metadata_json,
                     decision_trace_json=decision_trace_json
                 )
@@ -443,13 +491,17 @@ class Neo4jClient:
 
                 if record:
                     canonical_id = record["canonical_id"]
+                    chunk_count = record.get("chunk_count", 0)
 
                     # P1.3: Log surface_form si présent
                     surface_info = f", surface='{surface_form}'" if surface_form else ""
 
+                    # P1.6: Log chunk_count si présent
+                    chunk_info = f", chunks={chunk_count}" if chunk_count > 0 else ""
+
                     logger.info(
                         f"[NEO4J:Published] Created NEW CanonicalConcept '{canonical_name}' "
-                        f"(proto={proto_concept_id[:8]}, quality={quality_score:.2f}{surface_info})"
+                        f"(proto={proto_concept_id[:8]}, quality={quality_score:.2f}{surface_info}{chunk_info})"
                     )
 
                     return canonical_id
