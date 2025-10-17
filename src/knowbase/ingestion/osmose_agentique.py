@@ -27,6 +27,8 @@ from knowbase.ingestion.osmose_integration import (
 )
 from knowbase.semantic.segmentation.topic_segmenter import get_topic_segmenter
 from knowbase.semantic.config import get_semantic_config
+from knowbase.ingestion.text_chunker import get_text_chunker  # Phase 1.6: Chunking
+from knowbase.common.clients.qdrant_client import upsert_chunks  # Phase 1.6: Qdrant
 
 # Configuration du root logger pour que tous les loggers enfants (agents) héritent des handlers
 # IMPORTANT: Récupérer les handlers du logger parent (pptx_pipeline) pour les copier au root logger
@@ -93,6 +95,7 @@ class OsmoseAgentiqueService:
         self.supervisor_config = supervisor_config or {}
         self.supervisor: Optional[SupervisorAgent] = None
         self.topic_segmenter = None  # Lazy init
+        self.text_chunker = None  # Lazy init (Phase 1.6)
 
         logger.info(
             f"[OSMOSE AGENTIQUE] Service initialized - OSMOSE enabled: {self.config.enable_osmose}"
@@ -114,6 +117,18 @@ class OsmoseAgentiqueService:
             logger.info("[OSMOSE AGENTIQUE] TopicSegmenter initialized")
 
         return self.topic_segmenter
+
+    def _get_text_chunker(self):
+        """Lazy init du TextChunker (Phase 1.6)."""
+        if self.text_chunker is None:
+            self.text_chunker = get_text_chunker(
+                model_name="intfloat/multilingual-e5-large",
+                chunk_size=512,
+                overlap=128
+            )
+            logger.info("[OSMOSE AGENTIQUE] TextChunker initialized (512 tokens, overlap 128)")
+
+        return self.text_chunker
 
     def _should_process_with_osmose(
         self,
@@ -384,6 +399,53 @@ class OsmoseAgentiqueService:
                 f"cost=${final_state.cost_incurred:.3f}, "
                 f"promoted={len(final_state.promoted)}"
             )
+
+            # Étape 3.5: Phase 1.6 - Créer chunks dans Qdrant avec cross-référence
+            if final_state.candidates:  # Seulement si concepts extraits
+                try:
+                    text_chunker = self._get_text_chunker()
+
+                    # Créer chunks avec embeddings + attribution concepts
+                    chunks = text_chunker.chunk_document(
+                        text=text_content,
+                        document_id=document_id,
+                        document_name=document_title,
+                        segment_id=initial_state.segments[0]["topic_id"] if initial_state.segments else "seg-0",
+                        concepts=final_state.candidates,  # Concepts extraits par Extractor
+                        tenant_id=tenant
+                    )
+
+                    if chunks:
+                        # Insérer chunks dans Qdrant
+                        chunk_ids = upsert_chunks(
+                            chunks=chunks,
+                            collection_name="knowbase",
+                            tenant_id=tenant
+                        )
+
+                        # Construire mapping concept_id → chunk_ids pour Gatekeeper
+                        concept_to_chunk_ids = {}
+                        for chunk, chunk_id in zip(chunks, chunk_ids):
+                            for proto_id in chunk.get("proto_concept_ids", []):
+                                if proto_id not in concept_to_chunk_ids:
+                                    concept_to_chunk_ids[proto_id] = []
+                                concept_to_chunk_ids[proto_id].append(chunk_id)
+
+                        # Stocker dans state pour utilisation par Gatekeeper
+                        final_state.concept_to_chunk_ids = concept_to_chunk_ids
+
+                        logger.info(
+                            f"[OSMOSE AGENTIQUE:Chunks] Created {len(chunks)} chunks in Qdrant "
+                            f"({len(concept_to_chunk_ids)} concepts referenced)"
+                        )
+                    else:
+                        logger.warning(
+                            f"[OSMOSE AGENTIQUE:Chunks] No chunks created for document {document_id}"
+                        )
+
+                except Exception as e:
+                    logger.error(f"[OSMOSE AGENTIQUE:Chunks] Error creating chunks: {e}", exc_info=True)
+                    # Non-bloquant : continuer sans chunks
 
             # Étape 4: Mapper résultats vers OsmoseIntegrationResult
             osmose_duration = asyncio.get_event_loop().time() - osmose_start

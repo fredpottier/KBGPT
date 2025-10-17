@@ -16,6 +16,7 @@ from pydantic import model_validator
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
 from knowbase.common.clients.neo4j_client import get_neo4j_client
+from knowbase.common.clients.qdrant_client import update_chunks_with_canonical_ids  # Phase 1.6
 from .graph_centrality_scorer import GraphCentralityScorer
 from .embeddings_contextual_scorer import EmbeddingsContextualScorer
 from knowbase.ontology.decision_trace import (
@@ -753,7 +754,10 @@ class GatekeeperDelegate(BaseAgent):
                         f"(confidence={confidence:.2f}, requires_validation={decision_trace.requires_validation})"
                     )
 
-                    # Étape 2: Promouvoir Proto → Canonical (P1.3: ajout surface_form)
+                    # Phase 1.6: Récupérer chunk_ids pour ce concept (si disponibles)
+                    chunk_ids = state.concept_to_chunk_ids.get(proto_concept_id, [])
+
+                    # Étape 2: Promouvoir Proto → Canonical (P1.3: surface_form, P1.6: chunk_ids)
                     canonical_id = self.neo4j_client.promote_to_published(
                         tenant_id=tenant_id,
                         proto_concept_id=proto_concept_id,
@@ -766,7 +770,8 @@ class GatekeeperDelegate(BaseAgent):
                             "gate_profile": self.default_profile
                         },
                         decision_trace_json=decision_trace_json,
-                        surface_form=concept_name  # P1.3: Préserver nom brut extrait
+                        surface_form=concept_name,  # P1.3: Préserver nom brut extrait
+                        chunk_ids=chunk_ids  # P1.6: Cross-référence Neo4j → Qdrant
                     )
 
                     if canonical_id:
@@ -776,9 +781,27 @@ class GatekeeperDelegate(BaseAgent):
                         # Problème 1: Stocker mapping concept_name → canonical_id
                         concept_name_to_canonical_id[concept_name] = canonical_id
 
+                        # Phase 1.6: Mettre à jour chunks Qdrant avec canonical_id
+                        if chunk_ids:
+                            try:
+                                update_chunks_with_canonical_ids(
+                                    chunk_ids=chunk_ids,
+                                    canonical_concept_id=canonical_id,
+                                    collection_name="knowbase"
+                                )
+                                logger.debug(
+                                    f"[GATEKEEPER:Chunks] Updated {len(chunk_ids)} chunks with "
+                                    f"canonical_id={canonical_id[:8]}"
+                                )
+                            except Exception as e:
+                                logger.error(
+                                    f"[GATEKEEPER:Chunks] Failed to update chunks for {canonical_id[:8]}: {e}"
+                                )
+                                # Non-bloquant : continuer
+
                         logger.debug(
                             f"[GATEKEEPER:PromoteConcepts] Promoted '{canonical_name}' "
-                            f"(tenant={tenant_id}, quality={quality_score:.2f})"
+                            f"(tenant={tenant_id}, quality={quality_score:.2f}, chunks={len(chunk_ids)})"
                         )
                     else:
                         failed_count += 1

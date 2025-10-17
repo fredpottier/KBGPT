@@ -47,6 +47,9 @@ class AgentState(BaseModel):
     promoted: List[Dict[str, Any]] = Field(default_factory=list)
     relations: List[Dict[str, Any]] = Field(default_factory=list)  # Problème 1: Relations sémantiques
 
+    # Phase 1.6: Cross-référence Neo4j ↔ Qdrant
+    concept_to_chunk_ids: Dict[str, List[str]] = Field(default_factory=dict)  # {"proto-123": ["chunk-456"]}
+
     # Metrics
     cost_incurred: float = 0.0
     llm_calls_count: Dict[str, int] = Field(default_factory=lambda: {
