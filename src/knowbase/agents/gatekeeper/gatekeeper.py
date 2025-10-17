@@ -26,6 +26,9 @@ from knowbase.ontology.decision_trace import (
     StrategyResult
 )
 from knowbase.ontology.entity_normalizer_neo4j import EntityNormalizerNeo4j
+from knowbase.ontology.llm_canonicalizer import LLMCanonicalizer  # Phase 1.6+
+from knowbase.ontology.adaptive_ontology_manager import AdaptiveOntologyManager  # Phase 1.6+
+from knowbase.common.llm_router import get_llm_router  # Phase 1.6+
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +249,20 @@ class GatekeeperDelegate(BaseAgent):
         except Exception as e:
             logger.error(f"[GATEKEEPER] EntityNormalizerNeo4j initialization failed: {e}")
             self.entity_normalizer = None
+
+        # Phase 1.6+: LLM Canonicalizer + Adaptive Ontology (Zero-Config Intelligence)
+        try:
+            self.llm_router = get_llm_router()
+            self.llm_canonicalizer = LLMCanonicalizer(self.llm_router)
+            self.adaptive_ontology = AdaptiveOntologyManager(self.neo4j_client)
+            logger.info(
+                "[GATEKEEPER] LLM Canonicalizer + Adaptive Ontology initialized "
+                "(Phase 1.6+ Zero-Config Intelligence enabled)"
+            )
+        except Exception as e:
+            logger.error(f"[GATEKEEPER] LLM Canonicalizer initialization failed: {e}")
+            self.llm_canonicalizer = None
+            self.adaptive_ontology = None
 
         logger.info(
             f"[GATEKEEPER] Initialized with default profile '{self.default_profile}' "
@@ -607,6 +624,86 @@ class GatekeeperDelegate(BaseAgent):
 
         return None
 
+    def _canonicalize_concept_name(
+        self,
+        raw_name: str,
+        context: Optional[str] = None,
+        tenant_id: str = "default"
+    ) -> tuple[str, float]:
+        """
+        Canonicalise nom concept via Adaptive Ontology (Phase 1.6+).
+
+        Workflow:
+        1. Lookup cache ontologie
+        2. Si non trouvé → LLM canonicalization
+        3. Store résultat dans ontologie
+
+        Args:
+            raw_name: Nom brut du concept
+            context: Contexte textuel (optionnel)
+            tenant_id: ID tenant
+
+        Returns:
+            (canonical_name, confidence)
+        """
+        # Vérifier disponibilité des services
+        if not self.llm_canonicalizer or not self.adaptive_ontology:
+            logger.debug(
+                f"[GATEKEEPER:Canonicalization] LLM Canonicalizer unavailable, "
+                f"skipping adaptive canonicalization for '{raw_name}'"
+            )
+            return raw_name.strip().title(), 0.5
+
+        # 1. Lookup cache ontologie
+        cached = self.adaptive_ontology.lookup(raw_name, tenant_id)
+
+        if cached:
+            # Cache HIT
+            logger.debug(
+                f"[GATEKEEPER:Canonicalization] ✅ Cache HIT '{raw_name}' → '{cached['canonical_name']}' "
+                f"(confidence={cached['confidence']:.2f}, source={cached.get('source', 'unknown')})"
+            )
+
+            # Incrémenter usage stats
+            self.adaptive_ontology.increment_usage(cached["canonical_name"], tenant_id)
+
+            return cached["canonical_name"], cached["confidence"]
+
+        # 2. Cache MISS → LLM canonicalization
+        logger.info(
+            f"[GATEKEEPER:Canonicalization] 🔍 Cache MISS '{raw_name}', calling LLM canonicalizer..."
+        )
+
+        try:
+            llm_result = self.llm_canonicalizer.canonicalize(
+                raw_name=raw_name,
+                context=context,
+                domain_hint=None  # Auto-détection par LLM
+            )
+
+            logger.info(
+                f"[GATEKEEPER:Canonicalization] ✅ LLM canonicalized '{raw_name}' → '{llm_result.canonical_name}' "
+                f"(confidence={llm_result.confidence:.2f}, type={llm_result.concept_type})"
+            )
+
+            # 3. Store dans ontologie adaptive
+            self.adaptive_ontology.store(
+                tenant_id=tenant_id,
+                canonical_name=llm_result.canonical_name,
+                raw_name=raw_name,
+                canonicalization_result=llm_result.model_dump(),
+                context=context
+            )
+
+            return llm_result.canonical_name, llm_result.confidence
+
+        except Exception as e:
+            logger.error(
+                f"[GATEKEEPER:Canonicalization] ❌ LLM canonicalization failed for '{raw_name}': {e}, "
+                f"falling back to title case"
+            )
+            return raw_name.strip().title(), 0.5
+
     def _promote_concepts_tool(self, tool_input: PromoteConceptsInput) -> ToolOutput:
         """
         Tool PromoteConcepts: Promeut concepts vers Neo4j Published.
@@ -676,26 +773,39 @@ class GatekeeperDelegate(BaseAgent):
                                 f"(entity_id={entity_id}, type={normalized_type}, time={normalization_time_ms:.2f}ms)"
                             )
                         else:
-                            # Fallback heuristique si non trouvé
-                            canonical_name = concept_name.strip().title()
+                            # Phase 1.6+: Fallback LLM Canonicalizer si non trouvé dans ontologie
+                            canonical_name, llm_confidence = self._canonicalize_concept_name(
+                                raw_name=concept_name,
+                                context=definition,  # Utiliser definition comme contexte
+                                tenant_id=tenant_id
+                            )
                             logger.debug(
-                                f"[GATEKEEPER:Canonicalization] Fallback heuristic for '{concept_name}' → '{canonical_name}' "
-                                f"(not found in ontology, time={normalization_time_ms:.2f}ms)"
+                                f"[GATEKEEPER:Canonicalization] LLM fallback for '{concept_name}' → '{canonical_name}' "
+                                f"(confidence={llm_confidence:.2f}, not found in ontology, time={normalization_time_ms:.2f}ms)"
                             )
                     except Exception as e:
                         logger.warning(
                             f"[GATEKEEPER:Canonicalization] EntityNormalizerNeo4j failed for '{concept_name}': {e}, "
-                            f"falling back to naive canonicalization"
+                            f"falling back to LLM canonicalization"
                         )
-                        canonical_name = concept_name.strip().title()
+                        # Phase 1.6+: Fallback LLM Canonicalizer si exception
+                        canonical_name, llm_confidence = self._canonicalize_concept_name(
+                            raw_name=concept_name,
+                            context=definition,
+                            tenant_id=tenant_id
+                        )
                         normalization_time_ms = 0.0
                 else:
-                    # Fallback naïf si EntityNormalizerNeo4j indisponible
-                    canonical_name = concept_name.strip().title()
+                    # Phase 1.6+: Fallback LLM Canonicalizer si EntityNormalizerNeo4j indisponible
+                    canonical_name, llm_confidence = self._canonicalize_concept_name(
+                        raw_name=concept_name,
+                        context=definition,
+                        tenant_id=tenant_id
+                    )
                     normalization_time_ms = 0.0
                     logger.debug(
-                        f"[GATEKEEPER:Canonicalization] Naive canonicalization for '{concept_name}' → '{canonical_name}' "
-                        f"(EntityNormalizerNeo4j unavailable)"
+                        f"[GATEKEEPER:Canonicalization] LLM canonicalization for '{concept_name}' → '{canonical_name}' "
+                        f"(confidence={llm_confidence:.2f}, EntityNormalizerNeo4j unavailable)"
                     )
 
                 # Générer unified_definition (si manquant, utiliser nom + type)
