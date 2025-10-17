@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     thumbnails_dir: Path = Field(default=THUMBNAILS_DIR)
     ontologies_dir: Path = Field(default=ONTOLOGIES_DIR)  # Phase 3
 
+    # === Extraction Cache System (V2.2) ===
+    enable_extraction_cache: bool = Field(default=True, alias="ENABLE_EXTRACTION_CACHE")
+    extraction_cache_dir: Path = Field(default=DATA_DIR / "extraction_cache", alias="EXTRACTION_CACHE_DIR")
+    cache_expiry_days: int = Field(default=30, alias="CACHE_EXPIRY_DAYS")
+    allow_cache_upload: bool = Field(default=True, alias="ALLOW_CACHE_UPLOAD")
+
     class Config:
         env_file = PROJECT_ROOT / ".env"
         env_file_encoding = "utf-8"
@@ -95,6 +101,7 @@ class Settings(BaseSettings):
                 self.presentations_dir,
                 self.slides_dir,
                 self.thumbnails_dir,
+                self.extraction_cache_dir,  # V2.2: Cache extraction
             ]
         )
         os.environ.setdefault("HF_HOME", str(self.hf_home))
