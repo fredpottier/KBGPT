@@ -152,41 +152,81 @@ Qualité
 
 ### 4.1 AutoDomainDetector
 
-**Responsabilité:** Détecter automatiquement le domaine métier d'un document sans configuration préalable.
+**Responsabilité:** Détecter automatiquement le domaine métier d'un document sans configuration préalable, avec apprentissage continu.
+
+#### 🎛️ Configuration (.env)
+
+```bash
+# Mode détection domaine
+# - "self_learning" (défaut, Option C) : Apprentissage pur, zero config, universel
+# - "bootstrap" (Option C+) : Signatures minimales + apprentissage (tests/dev rapide)
+DOMAIN_DETECTION_MODE=self_learning
+
+# Seuil similarité cluster matching (default: 0.75)
+DOMAIN_CLUSTER_SIMILARITY_THRESHOLD=0.75
+
+# Nombre minimum de documents avant cluster matching (default: 5)
+DOMAIN_BOOTSTRAP_MIN_DOCS=5
+```
+
+**Recommandations** :
+- **Prod / Client** : `DOMAIN_DETECTION_MODE=self_learning` (universel, adaptatif)
+- **Dev / Tests** : `DOMAIN_DETECTION_MODE=bootstrap` (bootstrap rapide avec 5 domaines)
+
+---
 
 #### Interface
 
 ```python
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from dataclasses import dataclass
+import numpy as np
 
 @dataclass
 class DomainDetectionResult:
     """Résultat détection domaine"""
-    domain: str                    # Ex: "pharmaceutical", "finance", "technology"
+    domain: str                    # Ex: "retail", "pharmaceutical", "energy"
     confidence: float              # 0.0 - 1.0
-    method: str                    # "keyword", "ner", "llm"
-    signals: Dict[str, float]      # Scores détaillés par domaine
+    method: str                    # "cluster_match", "llm_bootstrap", "keyword_bootstrap"
+    is_new_domain: bool           # True si nouveau domaine découvert
+    cluster_id: Optional[str]     # ID cluster Neo4j (si existe)
+    signals: Dict[str, float]     # Scores détaillés par domaine/cluster
     execution_time_ms: float
 
 class AutoDomainDetector:
     """
-    Détecte le domaine métier d'un document via approche multi-méthodes.
+    Détecte le domaine métier d'un document via Self-Learning.
 
-    Méthodes (ordre d'exécution):
-    1. Keyword density analysis (rapide, 0 cost)
-    2. NER distribution analysis (medium cost)
-    3. LLM zero-shot classification (high cost, si ambiguïté)
+    🌟 Option C (self_learning) - Défaut Prod:
+    - Zéro signature hard-codée
+    - Apprentissage pur via clustering sémantique
+    - Universel (retail, energy, legal, etc.)
+    - Coût décroissant (95% gratuit après 200 docs)
 
-    Avantages:
-    - Zéro configuration initiale
-    - Extensible dynamiquement (nouveaux domaines)
-    - Coût LLM optimisé (seulement si nécessaire)
+    ⚡ Option C+ (bootstrap) - Tests/Dev:
+    - 5 signatures minimales (pharma, finance, tech, manufacturing, consulting)
+    - Accélère bootstrap phase (docs 1-10)
+    - Switch automatique vers self-learning après MIN_DOCS
+
+    Workflow (Mode self_learning):
+    1. Générer embedding document (1024D)
+    2. Chercher match dans clusters existants (Neo4j)
+    3. Si match > threshold → Domaine détecté (gratuit, 5ms)
+    4. Si pas de match → LLM classifie + crée cluster
+    5. Enrichir cluster avec keywords/entities
+
+    Workflow (Mode bootstrap):
+    1. Keyword density sur signatures (rapide, gratuit)
+    2. Si confidence < 0.70 → LLM classification
+    3. Parallèlement : apprentissage clusters en arrière-plan
+    4. Après MIN_DOCS → switch auto vers clusters
     """
 
     def __init__(
         self,
         llm_router: LLMRouter,
+        neo4j_client: Neo4jClient,
+        embeddings_model,  # SentenceTransformer("multilingual-e5-large")
         config: Optional[Dict[str, Any]] = None
     ):
         """
@@ -194,116 +234,227 @@ class AutoDomainDetector:
 
         Args:
             llm_router: Router LLM pour classification zero-shot
-            config: Configuration optionnelle (domain signatures custom)
+            neo4j_client: Client Neo4j pour storage clusters
+            embeddings_model: Modèle embeddings (1024D)
+            config: Configuration optionnelle
         """
         self.llm_router = llm_router
+        self.neo4j_client = neo4j_client
+        self.embeddings_model = embeddings_model
         self.config = config or {}
 
-        # Signatures domaines (extensibles dynamiquement)
-        self.domain_signatures = self._load_domain_signatures()
+        # Mode détection (via .env)
+        self.mode = os.getenv("DOMAIN_DETECTION_MODE", "self_learning")
+        self.cluster_threshold = float(os.getenv("DOMAIN_CLUSTER_SIMILARITY_THRESHOLD", "0.75"))
+        self.bootstrap_min_docs = int(os.getenv("DOMAIN_BOOTSTRAP_MIN_DOCS", "5"))
 
-        # NER manager pour extraction entities
-        self.ner_manager = get_ner_manager()
+        # Signatures bootstrap (seulement si mode=bootstrap)
+        self.bootstrap_signatures = self._load_bootstrap_signatures() if self.mode == "bootstrap" else {}
+
+        logger.info(
+            f"[AutoDomainDetector] Initialized with mode={self.mode}, "
+            f"cluster_threshold={self.cluster_threshold}, bootstrap_min_docs={self.bootstrap_min_docs}"
+        )
 
     def detect(
         self,
         document_text: str,
-        confidence_threshold: float = 0.70
+        document_id: str,
+        tenant_id: str = "default"
     ) -> DomainDetectionResult:
         """
-        Détecte le domaine d'un document.
+        Détecte le domaine d'un document (mode auto selon config).
 
         Args:
             document_text: Texte complet du document
-            confidence_threshold: Seuil minimum pour éviter LLM (default: 0.70)
+            document_id: ID document pour storage cluster
+            tenant_id: ID tenant pour isolation
 
         Returns:
             DomainDetectionResult avec domaine détecté
 
-        Workflow:
-        1. Keyword analysis (rapide, gratuit)
-        2. Si confidence < threshold → NER analysis
-        3. Si toujours < threshold → LLM arbitrage
-        4. Si toujours < threshold → "general" (fallback)
+        Workflow dépend du mode (.env):
+        - self_learning: Cluster matching → LLM bootstrap si besoin
+        - bootstrap: Keyword signatures → LLM si besoin → apprentissage parallèle
         """
         import time
         start_time = time.time()
 
-        # Méthode 1: Keyword Density Analysis
-        keyword_scores = self._compute_keyword_scores(document_text)
-        top_domain_kw = max(keyword_scores, key=keyword_scores.get)
+        if self.mode == "self_learning":
+            return self._detect_self_learning(document_text, document_id, tenant_id, start_time)
+        elif self.mode == "bootstrap":
+            return self._detect_bootstrap(document_text, document_id, tenant_id, start_time)
+        else:
+            raise ValueError(f"Invalid DOMAIN_DETECTION_MODE: {self.mode}")
 
-        if keyword_scores[top_domain_kw] >= confidence_threshold:
-            # Confidence suffisante, pas besoin NER/LLM
-            execution_time = (time.time() - start_time) * 1000
-            return DomainDetectionResult(
-                domain=top_domain_kw,
-                confidence=keyword_scores[top_domain_kw],
-                method="keyword_density",
-                signals=keyword_scores,
-                execution_time_ms=execution_time
-            )
+    def _detect_self_learning(
+        self,
+        document_text: str,
+        document_id: str,
+        tenant_id: str,
+        start_time: float
+    ) -> DomainDetectionResult:
+        """
+        Détection pure Self-Learning (Option C).
 
-        # Méthode 2: NER Distribution Analysis
-        ner_scores = self._compute_ner_scores(document_text)
-        combined_scores = self._combine_scores(keyword_scores, ner_scores)
-        top_domain_ner = max(combined_scores, key=combined_scores.get)
+        Workflow:
+        1. Générer embedding document (1024D)
+        2. Chercher clusters existants dans Neo4j
+        3. Si match > threshold → Return domaine (gratuit, ~5ms)
+        4. Si pas de match → LLM classifie + crée cluster
+        5. Enrichir cluster avec document
+        """
+        # Étape 1: Générer embedding document
+        doc_embedding = self.embeddings_model.encode(document_text)
 
-        if combined_scores[top_domain_ner] >= confidence_threshold:
-            execution_time = (time.time() - start_time) * 1000
-            return DomainDetectionResult(
-                domain=top_domain_ner,
-                confidence=combined_scores[top_domain_ner],
-                method="ner_distribution",
-                signals=combined_scores,
-                execution_time_ms=execution_time
-            )
+        # Étape 2: Chercher clusters existants
+        existing_clusters = self._get_domain_clusters(tenant_id)
 
-        # Méthode 3: LLM Zero-Shot Classification (arbitrage)
-        llm_domain, llm_confidence = self._llm_classify(
-            document_text[:3000]  # Limiter à 3000 chars pour coût
+        if existing_clusters:
+            # Calculer similarité avec chaque cluster
+            best_match = self._find_best_cluster_match(doc_embedding, existing_clusters)
+
+            if best_match and best_match.similarity >= self.cluster_threshold:
+                # Match trouvé ! Pas besoin LLM
+                self._enrich_cluster(
+                    cluster_id=best_match.cluster_id,
+                    document_id=document_id,
+                    document_text=document_text,
+                    document_embedding=doc_embedding,
+                    tenant_id=tenant_id
+                )
+
+                execution_time = (time.time() - start_time) * 1000
+
+                logger.info(
+                    f"[DomainDetector:SelfLearning] Matched cluster '{best_match.domain_name}' "
+                    f"(similarity={best_match.similarity:.3f}, time={execution_time:.1f}ms)"
+                )
+
+                return DomainDetectionResult(
+                    domain=best_match.domain_name,
+                    confidence=best_match.similarity,
+                    method="cluster_match",
+                    is_new_domain=False,
+                    cluster_id=best_match.cluster_id,
+                    signals={"cluster_similarity": best_match.similarity},
+                    execution_time_ms=execution_time
+                )
+
+        # Étape 3: Pas de match → LLM bootstrap
+        llm_result = self._llm_classify_domain(document_text[:3000])
+
+        # Étape 4: Créer ou attacher à cluster
+        cluster_id = self._create_or_attach_cluster(
+            domain_name=llm_result.domain,
+            document_id=document_id,
+            document_text=document_text,
+            document_embedding=doc_embedding,
+            tenant_id=tenant_id
         )
 
         execution_time = (time.time() - start_time) * 1000
 
-        if llm_confidence >= confidence_threshold:
-            return DomainDetectionResult(
-                domain=llm_domain,
-                confidence=llm_confidence,
-                method="llm_zero_shot",
-                signals={llm_domain: llm_confidence},
-                execution_time_ms=execution_time
-            )
+        logger.info(
+            f"[DomainDetector:SelfLearning] Bootstrapped new domain '{llm_result.domain}' "
+            f"via LLM (confidence={llm_result.confidence:.3f}, time={execution_time:.1f}ms)"
+        )
 
-        # Fallback: "general" si aucune méthode n'est confiante
         return DomainDetectionResult(
-            domain="general",
-            confidence=0.5,
-            method="fallback",
-            signals=combined_scores,
+            domain=llm_result.domain,
+            confidence=llm_result.confidence,
+            method="llm_bootstrap",
+            is_new_domain=True,
+            cluster_id=cluster_id,
+            signals={"llm_confidence": llm_result.confidence},
             execution_time_ms=execution_time
         )
 
-    def _load_domain_signatures(self) -> Dict[str, Dict]:
+    def _detect_bootstrap(
+        self,
+        document_text: str,
+        document_id: str,
+        tenant_id: str,
+        start_time: float
+    ) -> DomainDetectionResult:
         """
-        Charge signatures domaines (keywords, org patterns).
+        Détection Bootstrap (Option C+) avec signatures minimales.
+
+        Workflow:
+        1. Vérifier nombre documents → Si >= MIN_DOCS, switch vers self_learning
+        2. Sinon: Keyword density sur signatures
+        3. Si confidence < 0.70 → LLM classification
+        4. Parallèlement: apprendre clusters en arrière-plan
+        """
+        # Check si on doit switcher vers self_learning
+        doc_count = self._get_tenant_document_count(tenant_id)
+
+        if doc_count >= self.bootstrap_min_docs:
+            # Assez de docs → Passer en self_learning auto
+            logger.info(
+                f"[DomainDetector:Bootstrap] Switching to self_learning mode "
+                f"({doc_count} >= {self.bootstrap_min_docs} docs)"
+            )
+            return self._detect_self_learning(document_text, document_id, tenant_id, start_time)
+
+        # Étape 1: Keyword density sur signatures
+        keyword_scores = self._compute_keyword_scores_bootstrap(document_text)
+        top_domain = max(keyword_scores, key=keyword_scores.get) if keyword_scores else None
+
+        if top_domain and keyword_scores[top_domain] >= 0.70:
+            # Confidence suffisante
+            # Apprendre cluster en parallèle (non-bloquant)
+            self._learn_cluster_async(document_text, document_id, top_domain, tenant_id)
+
+            execution_time = (time.time() - start_time) * 1000
+
+            return DomainDetectionResult(
+                domain=top_domain,
+                confidence=keyword_scores[top_domain],
+                method="keyword_bootstrap",
+                is_new_domain=False,
+                cluster_id=None,
+                signals=keyword_scores,
+                execution_time_ms=execution_time
+            )
+
+        # Étape 2: LLM fallback
+        llm_result = self._llm_classify_domain(document_text[:3000])
+
+        # Apprendre cluster en parallèle
+        self._learn_cluster_async(document_text, document_id, llm_result.domain, tenant_id)
+
+        execution_time = (time.time() - start_time) * 1000
+
+        return DomainDetectionResult(
+            domain=llm_result.domain,
+            confidence=llm_result.confidence,
+            method="llm_bootstrap",
+            is_new_domain=True,
+            cluster_id=None,
+            signals={"llm_confidence": llm_result.confidence},
+            execution_time_ms=execution_time
+        )
+
+    def _load_bootstrap_signatures(self) -> Dict[str, Dict]:
+        """
+        Charge signatures bootstrap (MODE bootstrap uniquement).
+
+        Signatures MINIMALES pour 5 domaines courants.
+        Utilisé seulement en mode C+ (bootstrap) pour accélérer les 5 premiers docs.
 
         Format:
         {
             "pharmaceutical": {
                 "keywords": ["FDA", "GMP", "clinical trial", ...],
-                "org_patterns": ["Pharma", "Biotech", "Laboratories"],
                 "weight": 1.0
             },
             ...
         }
 
-        Sources:
-        1. Fichier config (si fourni)
-        2. Sinon: Signatures par défaut (hardcodées)
-        3. Extensible dynamiquement via learn_domain()
+        Note: En mode self_learning (C), cette méthode n'est PAS appelée.
         """
-        # Signatures par défaut
+        # Signatures minimales (5 domaines courants)
         default_signatures = {
             "pharmaceutical": {
                 "keywords": [
@@ -1447,6 +1598,131 @@ Semaine 4: Testing & Validation
 
 TOTAL: 18 jours développement + 2 jours validation = 4 semaines
 ```
+
+---
+
+## 5️⃣ Comparaison Option C vs C+
+
+### 📊 Tableau Comparatif
+
+| Aspect | **Option C (self_learning)** | **Option C+ (bootstrap)** |
+|--------|------------------------------|---------------------------|
+| **Configuration** | ✅ Zero (défaut `.env`) | ✅ Zero (défaut `.env`) |
+| **Signatures hard-codées** | ❌ Aucune | ⚡ 5 domaines minimaux |
+| **Universel (tous domaines)** | ✅ 100% (retail, energy, legal...) | ⚠️ 90% (biais vers 5 domaines) |
+| **Coût LLM (5 premiers docs)** | $0.06 (5 × $0.012) | $0.02 (1-2 LLM calls) |
+| **Coût LLM (50 docs)** | $0.25 (5 LLM + 45 clusters) | $0.20 (5 signatures + auto-switch) |
+| **Coût LLM (200 docs)** | $0.40 (bootstrap + 95% clusters) | $0.35 (bootstrap + switch rapide) |
+| **Latence moyenne (docs 1-5)** | 500ms (LLM) | 50ms (keywords) |
+| **Latence moyenne (docs 50+)** | 8ms (cluster match) | 8ms (cluster match) |
+| **Qualité (200 docs)** | 95% | 94% (biais signatures) |
+| **Adaptabilité** | ✅ Auto-découverte | ⚠️ Biais initial |
+| **Multi-tenant intelligent** | ✅ Clusters par tenant | ✅ Clusters par tenant |
+
+### 🎯 Recommandations d'Usage
+
+#### Option C (`self_learning`) - **DÉFAUT PROD**
+
+**Quand l'utiliser** :
+- ✅ **Production client** : Garantit universalité totale
+- ✅ **Domaines inconnus** : Retail, energy, legal, education, etc.
+- ✅ **Multi-tenant SaaS** : Chaque tenant a son propre domaine
+- ✅ **Scalabilité long terme** : Coût décroissant avec usage
+
+**Exemple .env** :
+```bash
+# Production - Self-Learning pur (universel)
+DOMAIN_DETECTION_MODE=self_learning
+DOMAIN_CLUSTER_SIMILARITY_THRESHOLD=0.75
+```
+
+**Comportement** :
+- Document 1 → LLM détecte "retail" ($0.012) → Crée cluster
+- Documents 2-5 → Match cluster "retail" (gratuit, 5ms)
+- Document 50 (nouveau) → LLM détecte "energy" → Nouveau cluster
+- Document 100+ → 95% cluster matching (gratuit)
+
+---
+
+#### Option C+ (`bootstrap`) - **TESTS / DEV**
+
+**Quand l'utiliser** :
+- ✅ **Développement local** : Bootstrap rapide avec données SAP/Pharma/Finance
+- ✅ **Tests unitaires** : Latence faible sans attente LLM
+- ✅ **Démos commerciales** : Détection immédiate sur domaines courants
+- ✅ **Environnement CI/CD** : Coût LLM réduit
+
+**Exemple .env** :
+```bash
+# Dev/Tests - Bootstrap rapide
+DOMAIN_DETECTION_MODE=bootstrap
+DOMAIN_CLUSTER_SIMILARITY_THRESHOLD=0.75
+DOMAIN_BOOTSTRAP_MIN_DOCS=5  # Switch auto après 5 docs
+```
+
+**Comportement** :
+- Documents 1-5 → Keyword matching sur signatures (gratuit, 50ms)
+- Parallèlement → Apprentissage clusters en arrière-plan
+- Document 6+ → **Auto-switch** vers mode self_learning
+- Document 50+ → Identique à Option C (clusters uniquement)
+
+### 💡 Exemple Concret : Client Retailer
+
+#### Avec Option C (self_learning)
+```
+Doc 1 "Walmart_Inventory.pdf" → LLM: "retail" ($0.012, 480ms) → Cluster créé
+Doc 2 "Target_Supply.pdf"      → Cluster match (gratuit, 6ms) ✅
+Doc 3 "Amazon_Logistics.pdf"   → Cluster match (gratuit, 5ms) ✅
+Doc 4 "Nike_Merchandising.pdf" → Cluster match (gratuit, 7ms) ✅
+Doc 5 "Tesla_Battery.pdf"      → LLM: "automotive" ($0.012, 490ms) → Nouveau cluster
+
+Total coût : $0.024
+Total latence moyenne : 120ms/doc
+Domaines découverts : retail, automotive (✅ universel)
+```
+
+#### Avec Option C+ (bootstrap)
+```
+Doc 1 "Walmart_Inventory.pdf" → Keywords: ❌ Pas match signatures → LLM: "retail" ($0.012, 480ms)
+Doc 2 "Target_Supply.pdf"      → Keywords: ❌ Pas match → Cluster (learning BG, 8ms)
+Doc 3-5 similaire
+Doc 6+                         → Auto-switch vers clusters → Gratuit
+
+Total coût : $0.012-0.024 (selon matching)
+Total latence moyenne : 100ms/doc
+Domaines découverts : retail, automotive (✅ mais détour initial)
+```
+
+**Verdict** : Option C plus cohérente pour client retailer (domaine non couvert par signatures).
+
+---
+
+### ⚙️ Migration Entre Modes
+
+**Mode dynamique possible** :
+```python
+# Dans osmose_agentique.py
+detector = AutoDomainDetector(
+    llm_router=llm_router,
+    neo4j_client=neo4j_client,
+    embeddings_model=embeddings_model
+)
+
+# Mode auto-détecté via .env
+result = detector.detect(
+    document_text=text,
+    document_id=doc_id,
+    tenant_id=tenant
+)
+
+logger.info(
+    f"Domain detected: {result.domain} "
+    f"(method={result.method}, confidence={result.confidence:.2f}, "
+    f"time={result.execution_time_ms:.1f}ms)"
+)
+```
+
+**Pas de code à changer** : Switch entre C et C+ via `.env` uniquement.
 
 ---
 
