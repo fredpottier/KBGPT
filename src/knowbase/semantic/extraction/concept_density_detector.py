@@ -359,19 +359,19 @@ class ConceptDensityDetector:
         Returns:
             (method, confidence)
         """
-        if density_score < 0.35:
+        if density_score < 0.30:  # Changed from 0.35
             # Faible densité → NER efficace
-            confidence = 0.8 + (0.35 - density_score) * 0.5  # 0.8-1.0
+            confidence = 0.8 + (0.30 - density_score) * 0.5  # Changed from 0.35
             return ExtractionMethod.NER_ONLY, confidence
 
-        elif density_score < 0.65:
+        elif density_score < 0.55:  # Changed from 0.65 - LOWERED for technical docs
             # Densité moyenne → Hybrid standard
             # Confiance plus faible au milieu de la zone
-            distance_from_center = abs(density_score - 0.5)
+            distance_from_center = abs(density_score - 0.425)  # Center of 0.30-0.55
             confidence = 0.6 + distance_from_center  # 0.6-0.75
             return ExtractionMethod.NER_LLM_HYBRID, confidence
 
         else:
             # Haute densité → LLM first
-            confidence = 0.7 + (density_score - 0.65) * 0.85  # 0.7-1.0
+            confidence = 0.7 + (density_score - 0.55) * 0.85  # Changed from 0.65
             return ExtractionMethod.LLM_FIRST, confidence
