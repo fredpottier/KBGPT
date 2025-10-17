@@ -16,6 +16,7 @@ from pydantic import model_validator
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
 from knowbase.common.clients.neo4j_client import get_neo4j_client
+from knowbase.common.clients.redis_client import get_redis_client  # P0.2 Rate limiting
 from knowbase.common.clients.qdrant_client import update_chunks_with_canonical_ids  # Phase 1.6
 from .graph_centrality_scorer import GraphCentralityScorer
 from .embeddings_contextual_scorer import EmbeddingsContextualScorer
@@ -254,15 +255,30 @@ class GatekeeperDelegate(BaseAgent):
         try:
             self.llm_router = get_llm_router()
             self.llm_canonicalizer = LLMCanonicalizer(self.llm_router)
-            self.adaptive_ontology = AdaptiveOntologyManager(self.neo4j_client)
+
+            # P0.2: Get Redis client pour rate limiting
+            try:
+                self.redis_client = get_redis_client()
+                logger.debug("[GATEKEEPER] Redis client initialized for rate limiting")
+            except Exception as redis_err:
+                logger.warning(f"[GATEKEEPER] Redis client init failed, rate limiting disabled: {redis_err}")
+                self.redis_client = None
+
+            # Init AdaptiveOntology avec Redis (optionnel)
+            self.adaptive_ontology = AdaptiveOntologyManager(
+                neo4j_client=self.neo4j_client,
+                redis_client=self.redis_client
+            )
+
             logger.info(
                 "[GATEKEEPER] LLM Canonicalizer + Adaptive Ontology initialized "
-                "(Phase 1.6+ Zero-Config Intelligence enabled)"
+                f"(Phase 1.6+ Zero-Config Intelligence, rate_limiting={'ON' if self.redis_client else 'OFF'})"
             )
         except Exception as e:
             logger.error(f"[GATEKEEPER] LLM Canonicalizer initialization failed: {e}")
             self.llm_canonicalizer = None
             self.adaptive_ontology = None
+            self.redis_client = None
 
         logger.info(
             f"[GATEKEEPER] Initialized with default profile '{self.default_profile}' "
@@ -628,20 +644,23 @@ class GatekeeperDelegate(BaseAgent):
         self,
         raw_name: str,
         context: Optional[str] = None,
-        tenant_id: str = "default"
+        tenant_id: str = "default",
+        document_id: Optional[str] = None
     ) -> tuple[str, float]:
         """
         Canonicalise nom concept via Adaptive Ontology (Phase 1.6+).
 
         Workflow:
         1. Lookup cache ontologie
-        2. Si non trouvé → LLM canonicalization
-        3. Store résultat dans ontologie
+        2. Si non trouvé → Check budget LLM (P0.2)
+        3. Si budget OK → LLM canonicalization
+        4. Store résultat dans ontologie
 
         Args:
             raw_name: Nom brut du concept
             context: Contexte textuel (optionnel)
             tenant_id: ID tenant
+            document_id: ID du document (pour rate limiting P0.2)
 
         Returns:
             (canonical_name, confidence)
@@ -669,12 +688,26 @@ class GatekeeperDelegate(BaseAgent):
 
             return cached["canonical_name"], cached["confidence"]
 
-        # 2. Cache MISS → LLM canonicalization
+        # 2. Cache MISS → Check budget LLM (P0.2)
+        if document_id:
+            budget_ok = self.adaptive_ontology.check_llm_budget(
+                document_id=document_id,
+                max_llm_calls_per_doc=50
+            )
+
+            if not budget_ok:
+                logger.warning(
+                    f"[GATEKEEPER:Canonicalization] ❌ Budget EXCEEDED for doc '{document_id}', "
+                    f"fallback to title case for '{raw_name}'"
+                )
+                return raw_name.strip().title(), 0.5
+
         logger.info(
             f"[GATEKEEPER:Canonicalization] 🔍 Cache MISS '{raw_name}', calling LLM canonicalizer..."
         )
 
         try:
+            # 3. LLM canonicalization
             llm_result = self.llm_canonicalizer.canonicalize(
                 raw_name=raw_name,
                 context=context,
@@ -686,13 +719,14 @@ class GatekeeperDelegate(BaseAgent):
                 f"(confidence={llm_result.confidence:.2f}, type={llm_result.concept_type})"
             )
 
-            # 3. Store dans ontologie adaptive
+            # 4. Store dans ontologie adaptive
             self.adaptive_ontology.store(
                 tenant_id=tenant_id,
                 canonical_name=llm_result.canonical_name,
                 raw_name=raw_name,
                 canonicalization_result=llm_result.model_dump(),
-                context=context
+                context=context,
+                document_id=document_id
             )
 
             return llm_result.canonical_name, llm_result.confidence
@@ -777,7 +811,8 @@ class GatekeeperDelegate(BaseAgent):
                             canonical_name, llm_confidence = self._canonicalize_concept_name(
                                 raw_name=concept_name,
                                 context=definition,  # Utiliser definition comme contexte
-                                tenant_id=tenant_id
+                                tenant_id=tenant_id,
+                                document_id=concept.get("document_id")  # P0.2: Rate limiting
                             )
                             logger.debug(
                                 f"[GATEKEEPER:Canonicalization] LLM fallback for '{concept_name}' → '{canonical_name}' "
@@ -792,7 +827,8 @@ class GatekeeperDelegate(BaseAgent):
                         canonical_name, llm_confidence = self._canonicalize_concept_name(
                             raw_name=concept_name,
                             context=definition,
-                            tenant_id=tenant_id
+                            tenant_id=tenant_id,
+                            document_id=concept.get("document_id")  # P0.2: Rate limiting
                         )
                         normalization_time_ms = 0.0
                 else:
@@ -800,7 +836,8 @@ class GatekeeperDelegate(BaseAgent):
                     canonical_name, llm_confidence = self._canonicalize_concept_name(
                         raw_name=concept_name,
                         context=definition,
-                        tenant_id=tenant_id
+                        tenant_id=tenant_id,
+                        document_id=concept.get("document_id")  # P0.2: Rate limiting
                     )
                     normalization_time_ms = 0.0
                     logger.debug(

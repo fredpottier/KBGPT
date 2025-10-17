@@ -11,8 +11,100 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 import json
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════
+# SIMPLE CIRCUIT BREAKER (P0 - DoS Protection)
+# ═══════════════════════════════════════════════════
+
+class CircuitBreakerOpenError(Exception):
+    """Exception when circuit breaker is open."""
+    pass
+
+
+class SimpleCircuitBreaker:
+    """
+    Circuit breaker simple pour LLM calls (P0 - DoS protection).
+
+    États:
+    - CLOSED: Normal, appels passent
+    - OPEN: Circuit ouvert, appels bloqués (fallback)
+    - HALF_OPEN: Test si service récupéré
+
+    Transitions:
+    - CLOSED → OPEN: après failure_threshold échecs consécutifs
+    - OPEN → HALF_OPEN: après recovery_timeout secondes
+    - HALF_OPEN → CLOSED: après 1 succès
+    - HALF_OPEN → OPEN: après 1 échec
+    """
+
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 60):
+        """
+        Args:
+            failure_threshold: Nombre d'échecs avant ouverture circuit
+            recovery_timeout: Secondes avant tentative récupération
+        """
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.failure_count = 0
+        self.last_failure_time = None
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+
+    def call(self, func, *args, **kwargs):
+        """Execute function avec circuit breaker protection."""
+
+        # Si circuit OPEN, vérifier si on peut passer à HALF_OPEN
+        if self.state == "OPEN":
+            if self.last_failure_time and \
+               (datetime.now() - self.last_failure_time).total_seconds() >= self.recovery_timeout:
+                logger.info("[CircuitBreaker] OPEN → HALF_OPEN (recovery timeout elapsed)")
+                self.state = "HALF_OPEN"
+            else:
+                remaining = self.recovery_timeout - (datetime.now() - self.last_failure_time).total_seconds()
+                raise CircuitBreakerOpenError(
+                    f"Circuit breaker OPEN (failures={self.failure_count}, "
+                    f"recovery in {remaining:.0f}s)"
+                )
+
+        # Tenter appel
+        try:
+            result = func(*args, **kwargs)
+
+            # Succès → reset failure count
+            if self.state == "HALF_OPEN":
+                logger.info("[CircuitBreaker] HALF_OPEN → CLOSED (call succeeded)")
+                self.state = "CLOSED"
+
+            self.failure_count = 0
+            return result
+
+        except Exception as e:
+            self.failure_count += 1
+            self.last_failure_time = datetime.now()
+
+            logger.warning(
+                f"[CircuitBreaker] Call failed ({self.failure_count}/{self.failure_threshold}): {e}"
+            )
+
+            # Si HALF_OPEN, échec immédiat → OPEN
+            if self.state == "HALF_OPEN":
+                logger.error("[CircuitBreaker] HALF_OPEN → OPEN (call failed)")
+                self.state = "OPEN"
+                raise CircuitBreakerOpenError("Circuit breaker re-opened after test failure")
+
+            # Si seuil atteint → OPEN
+            if self.failure_count >= self.failure_threshold:
+                logger.error(
+                    f"[CircuitBreaker] CLOSED → OPEN (failures={self.failure_count} >= {self.failure_threshold})"
+                )
+                self.state = "OPEN"
+                raise CircuitBreakerOpenError(f"Circuit breaker opened after {self.failure_count} failures")
+
+            # Re-raise erreur originale
+            raise
 
 
 class CanonicalizationResult(BaseModel):
@@ -40,13 +132,24 @@ class LLMCanonicalizer:
         self.llm_router = llm_router
         self.model = "gpt-4o-mini"  # Modèle léger (~$0.0001/concept)
 
-        logger.info(f"[LLMCanonicalizer] Initialized with model={self.model}")
+        # P0: Circuit breaker (5 échecs → ouvert 60s)
+        self.circuit_breaker = SimpleCircuitBreaker(
+            failure_threshold=5,
+            recovery_timeout=60
+        )
+
+        logger.info(
+            f"[LLMCanonicalizer] Initialized with model={self.model}, "
+            f"circuit_breaker(failures={self.circuit_breaker.failure_threshold}, "
+            f"recovery={self.circuit_breaker.recovery_timeout}s)"
+        )
 
     def canonicalize(
         self,
         raw_name: str,
         context: Optional[str] = None,
-        domain_hint: Optional[str] = None
+        domain_hint: Optional[str] = None,
+        timeout: int = 10
     ) -> CanonicalizationResult:
         """
         Canonicalise un nom via LLM.
@@ -55,6 +158,7 @@ class LLMCanonicalizer:
             raw_name: Nom brut extrait (ex: "S/4HANA Cloud's")
             context: Contexte textuel autour de la mention (optionnel)
             domain_hint: Indice domaine (ex: "enterprise_software")
+            timeout: Timeout max LLM call en secondes (P0 - DoS protection)
 
         Returns:
             CanonicalizationResult avec canonical_name et métadonnées
@@ -82,24 +186,28 @@ class LLMCanonicalizer:
         )
 
         try:
-            # Import TaskType
-            from knowbase.common.llm_router import TaskType
+            # P0: Appel LLM via circuit breaker avec protection DoS
+            def _llm_call():
+                # Import TaskType
+                from knowbase.common.llm_router import TaskType
 
-            # Appel LLM via router (synchrone)
-            response_content = self.llm_router.complete(
-                task_type=TaskType.CANONICALIZATION,
-                messages=[
-                    {"role": "system", "content": CANONICALIZATION_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.0,  # Déterministe
-                response_format={"type": "json_object"}
-            )
+                # Appel LLM via router (synchrone)
+                response_content = self.llm_router.complete(
+                    task_type=TaskType.CANONICALIZATION,
+                    messages=[
+                        {"role": "system", "content": CANONICALIZATION_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.0,  # Déterministe
+                    response_format={"type": "json_object"}
+                )
 
-            # Parse résultat JSON
-            result_json = json.loads(response_content)
+                # Parse résultat JSON
+                result_json = json.loads(response_content)
+                return CanonicalizationResult(**result_json)
 
-            result = CanonicalizationResult(**result_json)
+            # Appel via circuit breaker
+            result = self.circuit_breaker.call(_llm_call)
 
             logger.info(
                 f"[LLMCanonicalizer] ✅ '{raw_name}' → '{result.canonical_name}' "
@@ -107,6 +215,25 @@ class LLMCanonicalizer:
             )
 
             return result
+
+        except CircuitBreakerOpenError as cb_err:
+            # Circuit breaker ouvert → fallback immédiat
+            logger.warning(
+                f"[LLMCanonicalizer] ⚠️ Circuit breaker OPEN for '{raw_name}': {cb_err}, "
+                f"falling back to title case"
+            )
+
+            return CanonicalizationResult(
+                canonical_name=raw_name.strip().title(),
+                confidence=0.5,
+                reasoning=f"Circuit breaker open, fallback to title case: {str(cb_err)}",
+                aliases=[],
+                concept_type="Unknown",
+                domain=None,
+                ambiguity_warning="LLM service temporarily unavailable (circuit breaker open)",
+                possible_matches=[],
+                metadata={"error": "circuit_breaker_open", "state": self.circuit_breaker.state}
+            )
 
         except Exception as e:
             logger.error(f"[LLMCanonicalizer] ❌ Error canonicalizing '{raw_name}': {e}")

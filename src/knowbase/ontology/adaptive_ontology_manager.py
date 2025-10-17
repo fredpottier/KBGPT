@@ -70,14 +70,19 @@ def _validate_tenant_id(tenant_id: str) -> str:
 class AdaptiveOntologyManager:
     """Gestionnaire ontologie adaptive Neo4j."""
 
-    def __init__(self, neo4j_client):
+    def __init__(self, neo4j_client, redis_client=None):
         """
         Args:
             neo4j_client: Instance Neo4jClient
+            redis_client: Instance Redis pour rate limiting (optionnel)
         """
         self.neo4j = neo4j_client
+        self.redis = redis_client
 
-        logger.info("[AdaptiveOntology] Manager initialized")
+        logger.info(
+            f"[AdaptiveOntology] Manager initialized "
+            f"(redis_enabled={redis_client is not None})"
+        )
 
     def lookup(
         self,
@@ -405,6 +410,67 @@ class AdaptiveOntologyManager:
 
         except Exception as e:
             logger.error(f"[AdaptiveOntology:Usage] Error incrementing usage: {e}")
+
+    def check_llm_budget(
+        self,
+        document_id: str,
+        max_llm_calls_per_doc: int = 50
+    ) -> bool:
+        """
+        Vérifie si budget LLM disponible pour document (P0 - Rate limiting).
+
+        Args:
+            document_id: ID du document en traitement
+            max_llm_calls_per_doc: Limite max appels LLM par document
+
+        Returns:
+            True si budget disponible, False si dépassé
+
+        Example:
+            >>> if ontology.check_llm_budget(doc_id):
+            ...     llm_result = canonicalizer.canonicalize(...)
+            ... else:
+            ...     # Fallback sans LLM
+        """
+
+        if not self.redis:
+            # Si Redis indisponible → autoriser (dégradation gracieuse)
+            logger.warning(
+                "[AdaptiveOntology:Budget] Redis not available, allowing LLM call (no rate limit)"
+            )
+            return True
+
+        # Clé Redis : llm_budget:{document_id}
+        budget_key = f"llm_budget:{document_id}"
+
+        try:
+            # Incrémenter compteur (TTL 1h)
+            current_count = self.redis.incr(budget_key)
+
+            # Si première incrémentation, définir TTL 1h
+            if current_count == 1:
+                self.redis.expire(budget_key, 3600)
+
+            if current_count > max_llm_calls_per_doc:
+                logger.warning(
+                    f"[AdaptiveOntology:Budget] ❌ Budget EXCEEDED for doc '{document_id}': "
+                    f"{current_count}/{max_llm_calls_per_doc} LLM calls"
+                )
+                return False
+
+            logger.debug(
+                f"[AdaptiveOntology:Budget] ✅ Budget OK for doc '{document_id}': "
+                f"{current_count}/{max_llm_calls_per_doc} LLM calls"
+            )
+
+            return True
+
+        except Exception as e:
+            # Erreur Redis → autoriser (dégradation gracieuse)
+            logger.error(
+                f"[AdaptiveOntology:Budget] Redis error, allowing LLM call: {e}"
+            )
+            return True
 
     def get_stats(self, tenant_id: str) -> Dict[str, Any]:
         """

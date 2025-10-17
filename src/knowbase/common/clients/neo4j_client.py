@@ -36,7 +36,8 @@ class Neo4jClient:
         uri: str = "bolt://localhost:7687",
         user: str = "neo4j",
         password: str = "password",
-        database: str = "neo4j"
+        database: str = "neo4j",
+        redis_client=None
     ):
         """
         Initialise client Neo4j.
@@ -46,10 +47,12 @@ class Neo4jClient:
             user: Neo4j username
             password: Neo4j password
             database: Database name (default: neo4j)
+            redis_client: Instance Redis pour distributed locks (optionnel, P1.1)
         """
         self.uri = uri
         self.user = user
         self.database = database
+        self.redis_client = redis_client
 
         try:
             self.driver: Driver = GraphDatabase.driver(
@@ -63,7 +66,10 @@ class Neo4jClient:
             # Test connexion
             self.driver.verify_connectivity()
 
-            logger.info(f"[NEO4J] Connected to {uri} (database: {database})")
+            logger.info(
+                f"[NEO4J] Connected to {uri} (database: {database}, "
+                f"distributed_locks={'ON' if redis_client else 'OFF'})"
+            )
 
         except Exception as e:
             logger.error(f"[NEO4J] Connection failed: {e}")
@@ -79,6 +85,59 @@ class Neo4jClient:
             return True
         except:
             return False
+
+    def _acquire_lock(self, lock_key: str, timeout_sec: int = 5) -> bool:
+        """
+        Acquérir distributed lock Redis (P1.1 - Race condition protection).
+
+        Args:
+            lock_key: Clé unique du lock (ex: "canonical:SAP S/4HANA Cloud")
+            timeout_sec: Durée max du lock (auto-release si process meurt)
+
+        Returns:
+            True si lock acquis, False sinon
+        """
+        if not self.redis_client:
+            # Si Redis indisponible, autoriser (dégradation gracieuse)
+            logger.warning(f"[NEO4J:Lock] Redis not available, skipping lock for '{lock_key}'")
+            return True
+
+        try:
+            # SET NX EX : SET si clé n'existe pas (NX), avec TTL (EX)
+            acquired = self.redis_client.set(
+                lock_key,
+                "locked",
+                nx=True,  # Only set if not exists
+                ex=timeout_sec  # Auto-expire après N secondes
+            )
+
+            if acquired:
+                logger.debug(f"[NEO4J:Lock] ✅ Acquired lock '{lock_key}' (ttl={timeout_sec}s)")
+                return True
+            else:
+                logger.warning(f"[NEO4J:Lock] ❌ Lock '{lock_key}' already held by another process")
+                return False
+
+        except Exception as e:
+            # Erreur Redis → autoriser (dégradation gracieuse)
+            logger.error(f"[NEO4J:Lock] Redis error acquiring lock '{lock_key}': {e}")
+            return True
+
+    def _release_lock(self, lock_key: str) -> None:
+        """
+        Libérer distributed lock Redis (P1.1).
+
+        Args:
+            lock_key: Clé unique du lock
+        """
+        if not self.redis_client:
+            return
+
+        try:
+            self.redis_client.delete(lock_key)
+            logger.debug(f"[NEO4J:Lock] Released lock '{lock_key}'")
+        except Exception as e:
+            logger.error(f"[NEO4J:Lock] Error releasing lock '{lock_key}': {e}")
 
     def close(self):
         """Ferme connexion Neo4j."""
@@ -364,13 +423,39 @@ class Neo4jClient:
         # Convertir metadata en JSON string pour Neo4j (ne supporte pas les Maps)
         metadata_json = json.dumps(metadata)
 
-        # Problème 2: Déduplication - chercher concept existant
-        if deduplicate:
-            existing_canonical_id = self.find_canonical_concept(tenant_id, canonical_name)
+        # P1.1: Distributed lock pour éviter race conditions (2 workers créent même CanonicalConcept)
+        lock_key = f"canonical_lock:{tenant_id}:{canonical_name}"
 
-            if existing_canonical_id:
-                # Phase 1.6: Agréger chunk_ids (existants + nouveaux)
-                aggregate_query = """
+        lock_acquired = self._acquire_lock(lock_key, timeout_sec=5)
+
+        if not lock_acquired:
+            logger.warning(
+                f"[NEO4J:Lock] Could not acquire lock for '{canonical_name}', "
+                f"retrying find_canonical_concept..."
+            )
+            # Retry find après wait
+            import time
+            time.sleep(0.1)  # Attendre 100ms
+            existing = self.find_canonical_concept(tenant_id, canonical_name)
+            if existing:
+                logger.info(
+                    f"[NEO4J:Lock] Found existing concept after lock wait: '{canonical_name}'"
+                )
+                return existing
+            else:
+                logger.warning(
+                    f"[NEO4J:Lock] Lock acquisition failed and no existing concept found, "
+                    f"proceeding without lock (risk of duplicate)"
+                )
+
+        try:
+            # Problème 2: Déduplication - chercher concept existant
+            if deduplicate:
+                existing_canonical_id = self.find_canonical_concept(tenant_id, canonical_name)
+
+                if existing_canonical_id:
+                    # Phase 1.6: Agréger chunk_ids (existants + nouveaux)
+                    aggregate_query = """
                 MATCH (proto:ProtoConcept {concept_id: $proto_concept_id, tenant_id: $tenant_id})
                 MATCH (canonical:CanonicalConcept {canonical_id: $existing_canonical_id, tenant_id: $tenant_id})
 
@@ -526,6 +611,11 @@ class Neo4jClient:
         except Exception as e:
             logger.error(f"[NEO4J:Published] Error promoting concept: {e}")
             return ""
+
+        finally:
+            # P1.1: Release lock (même si erreur)
+            if lock_acquired:
+                self._release_lock(lock_key)
 
     def get_published_concepts(
         self,
