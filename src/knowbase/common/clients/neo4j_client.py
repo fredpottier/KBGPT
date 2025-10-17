@@ -493,83 +493,82 @@ class Neo4jClient:
                        SIZE(aggregated_chunks) AS chunk_count
                 """
 
-                try:
-                    with self.driver.session(database=self.database) as session:
-                        result = session.run(
-                            aggregate_query,
-                            proto_concept_id=proto_concept_id,
-                            tenant_id=tenant_id,
-                            existing_canonical_id=existing_canonical_id,
-                            new_chunk_ids=chunk_ids
-                        )
-
-                        record = result.single()
-
-                        if record:
-                            chunk_count = record.get("chunk_count", 0)
-                            logger.info(
-                                f"[NEO4J:Dedup] Linked ProtoConcept to existing CanonicalConcept '{canonical_name}' "
-                                f"(proto={proto_concept_id[:8]}, canonical={existing_canonical_id[:8]}, "
-                                f"aggregated {chunk_count} chunks)"
+                    try:
+                        with self.driver.session(database=self.database) as session:
+                            result = session.run(
+                                aggregate_query,
+                                proto_concept_id=proto_concept_id,
+                                tenant_id=tenant_id,
+                                existing_canonical_id=existing_canonical_id,
+                                new_chunk_ids=chunk_ids
                             )
-                            return existing_canonical_id
-                        else:
-                            logger.warning(
-                                f"[NEO4J:Dedup] Failed to link Proto to existing Canonical: {proto_concept_id}"
-                            )
-                            return ""
 
-                except Exception as e:
-                    logger.error(f"[NEO4J:Dedup] Error linking to existing concept: {e}")
-                    # Fallback: continuer avec création normale
-                    logger.info(f"[NEO4J:Dedup] Fallback to normal creation")
+                            record = result.single()
 
-        # Créer nouveau CanonicalConcept (si pas de déduplication ou échec)
-        query = """
-        MATCH (proto:ProtoConcept {concept_id: $proto_concept_id, tenant_id: $tenant_id})
+                            if record:
+                                chunk_count = record.get("chunk_count", 0)
+                                logger.info(
+                                    f"[NEO4J:Dedup] Linked ProtoConcept to existing CanonicalConcept '{canonical_name}' "
+                                    f"(proto={proto_concept_id[:8]}, canonical={existing_canonical_id[:8]}, "
+                                    f"aggregated {chunk_count} chunks)"
+                                )
+                                return existing_canonical_id
+                            else:
+                                logger.warning(
+                                    f"[NEO4J:Dedup] Failed to link Proto to existing Canonical: {proto_concept_id}"
+                                )
+                                return ""
 
-        // Agréger chunk_ids (proto + nouveaux)
-        WITH proto,
-             COALESCE(proto.chunk_ids, []) + $chunk_ids AS all_chunks
+                    except Exception as e:
+                        logger.error(f"[NEO4J:Dedup] Error linking to existing concept: {e}")
+                        # Fallback: continuer avec création normale
+                        logger.info(f"[NEO4J:Dedup] Fallback to normal creation")
 
-        // Dédupliquer (IMPORTANT: gérer cas liste vide avec CASE)
-        WITH proto,
-             CASE
-                 WHEN SIZE(all_chunks) = 0 THEN []
-                 ELSE [chunk IN all_chunks WHERE chunk IS NOT NULL]
-             END AS aggregated_chunks_raw
+            # Créer nouveau CanonicalConcept (si pas de déduplication ou échec)
+            query = """
+            MATCH (proto:ProtoConcept {concept_id: $proto_concept_id, tenant_id: $tenant_id})
 
-        // Dédupliquer avec REDUCE (évite UNWIND qui échoue sur liste vide)
-        WITH proto,
-             REDUCE(acc = [], chunk IN aggregated_chunks_raw |
-                 CASE WHEN chunk IN acc THEN acc ELSE acc + chunk END
-             ) AS aggregated_chunks
+            // Agréger chunk_ids (proto + nouveaux)
+            WITH proto,
+                 COALESCE(proto.chunk_ids, []) + $chunk_ids AS all_chunks
 
-        // Créer CanonicalConcept (P1.3: ajout surface_form, P1.6: ajout chunk_ids)
-        CREATE (canonical:CanonicalConcept {
-            canonical_id: randomUUID(),
-            tenant_id: $tenant_id,
-            canonical_name: $canonical_name,
-            surface_form: $surface_form,
-            concept_type: proto.concept_type,
-            unified_definition: $unified_definition,
-            quality_score: $quality_score,
-            chunk_ids: aggregated_chunks,
-            promoted_at: datetime(),
-            metadata_json: $metadata_json,
-            decision_trace_json: $decision_trace_json
-        })
+            // Dédupliquer (IMPORTANT: gérer cas liste vide avec CASE)
+            WITH proto,
+                 CASE
+                     WHEN SIZE(all_chunks) = 0 THEN []
+                     ELSE [chunk IN all_chunks WHERE chunk IS NOT NULL]
+                 END AS aggregated_chunks_raw
 
-        // Lien Proto → Canonical
-        CREATE (proto)-[:PROMOTED_TO {promoted_at: datetime()}]->(canonical)
+            // Dédupliquer avec REDUCE (évite UNWIND qui échoue sur liste vide)
+            WITH proto,
+                 REDUCE(acc = [], chunk IN aggregated_chunks_raw |
+                     CASE WHEN chunk IN acc THEN acc ELSE acc + chunk END
+                 ) AS aggregated_chunks
 
-        RETURN canonical.canonical_id AS canonical_id,
-               canonical.canonical_name AS canonical_name,
-               canonical.surface_form AS surface_form,
-               SIZE(aggregated_chunks) AS chunk_count
-        """
+            // Créer CanonicalConcept (P1.3: ajout surface_form, P1.6: ajout chunk_ids)
+            CREATE (canonical:CanonicalConcept {
+                canonical_id: randomUUID(),
+                tenant_id: $tenant_id,
+                canonical_name: $canonical_name,
+                surface_form: $surface_form,
+                concept_type: proto.concept_type,
+                unified_definition: $unified_definition,
+                quality_score: $quality_score,
+                chunk_ids: aggregated_chunks,
+                promoted_at: datetime(),
+                metadata_json: $metadata_json,
+                decision_trace_json: $decision_trace_json
+            })
 
-        try:
+            // Lien Proto → Canonical
+            CREATE (proto)-[:PROMOTED_TO {promoted_at: datetime()}]->(canonical)
+
+            RETURN canonical.canonical_id AS canonical_id,
+                   canonical.canonical_name AS canonical_name,
+                   canonical.surface_form AS surface_form,
+                   SIZE(aggregated_chunks) AS chunk_count
+            """
+
             with self.driver.session(database=self.database) as session:
                 result = session.run(
                     query,
