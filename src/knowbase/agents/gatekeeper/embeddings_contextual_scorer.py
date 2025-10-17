@@ -22,11 +22,11 @@ import re
 from collections import defaultdict
 import numpy as np
 
-# SentenceTransformer pour embeddings multilingues
+# P1.2: Import singleton SentenceTransformer (évite memory leak 4.2GB → 1GB)
 try:
-    from sentence_transformers import SentenceTransformer
+    from knowbase.common.clients.shared_clients import get_sentence_transformer
 except ImportError:
-    SentenceTransformer = None
+    get_sentence_transformer = None
     logging.warning(
         "[OSMOSE] sentence-transformers non installé. "
         "Installer avec: pip install sentence-transformers"
@@ -171,15 +171,15 @@ class EmbeddingsContextualScorer:
         self.enable_multi_occurrence = enable_multi_occurrence
         self.languages = languages or ["en", "fr", "de", "es"]
 
-        # Initialiser SentenceTransformer
-        if SentenceTransformer is None:
+        # P1.2: Initialiser SentenceTransformer via singleton (memory leak protection)
+        if get_sentence_transformer is None:
             raise ImportError(
                 "sentence-transformers non installé. "
                 "Installer avec: pip install sentence-transformers"
             )
 
-        logger.info(f"[OSMOSE] Initialisation EmbeddingsContextualScorer (model={model_name})")
-        self.model = SentenceTransformer(model_name)
+        logger.info(f"[OSMOSE] Initialisation EmbeddingsContextualScorer (model={model_name}, P1.2 singleton)")
+        self.model = get_sentence_transformer(model_name=model_name)
 
         # Encoder concepts de référence (cache)
         self.reference_embeddings = self._encode_reference_concepts()

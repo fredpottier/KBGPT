@@ -98,6 +98,15 @@ class GraphCentralityScorer:
                 entity["graph_score"] = 0.5  # Score neutre
             return candidates
 
+        # P1.3: Limite max entities pour éviter O(n²) explosion (300 max)
+        MAX_ENTITIES = 300
+        if len(candidates) > MAX_ENTITIES:
+            logger.warning(
+                f"[OSMOSE] GraphCentralityScorer: Trop de candidats ({len(candidates)} > {MAX_ENTITIES}), "
+                f"utilisation des {MAX_ENTITIES} premiers uniquement (P1.3 protection)"
+            )
+            candidates = candidates[:MAX_ENTITIES]
+
         logger.info(
             f"[OSMOSE] GraphCentralityScorer: Scoring {len(candidates)} candidats "
             f"(doc_length={len(full_text)} chars)"
@@ -338,8 +347,32 @@ class GraphCentralityScorer:
             return scores
 
         # 1. PageRank (importance globale)
+        # P1.3: Timeout 10s pour éviter PageRank infini sur graphes complexes
         try:
-            pagerank = nx.pagerank(graph, weight="weight", max_iter=100)
+            import signal
+
+            def timeout_handler(signum, frame):
+                raise TimeoutError("PageRank timeout après 10s")
+
+            # Activer timeout (UNIX uniquement, skip sur Windows)
+            try:
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(10)  # 10 secondes max
+            except AttributeError:
+                # Windows n'a pas SIGALRM, skip timeout
+                pass
+
+            try:
+                pagerank = nx.pagerank(graph, weight="weight", max_iter=100)
+            finally:
+                try:
+                    signal.alarm(0)  # Désactiver timeout
+                except AttributeError:
+                    pass
+
+        except TimeoutError as te:
+            logger.warning(f"[OSMOSE] PageRank timeout (P1.3 protection): {te}, fallback degree centrality")
+            pagerank = {node: 0.0 for node in graph.nodes()}
         except Exception as e:
             logger.warning(f"[OSMOSE] PageRank échoué: {e}, utilisation degree centrality")
             pagerank = {node: 0.0 for node in graph.nodes()}

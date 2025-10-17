@@ -251,6 +251,38 @@ class LLMCanonicalizer:
                 metadata={"error": str(e)}
             )
 
+    def _truncate_context(self, context: str, max_length: int = 500) -> str:
+        """
+        Tronque contexte intelligemment sans couper mots (P2.3).
+
+        Args:
+            context: Contexte original
+            max_length: Longueur max caractères
+
+        Returns:
+            Contexte tronqué sans mots coupés
+        """
+        if len(context) <= max_length:
+            return context
+
+        # Tronquer à max_length, puis chercher dernier espace pour ne pas couper mot
+        truncated = context[:max_length]
+
+        # Trouver dernier espace/ponctuation
+        last_space = max(
+            truncated.rfind(' '),
+            truncated.rfind('.'),
+            truncated.rfind(','),
+            truncated.rfind(';')
+        )
+
+        if last_space > 0:
+            # Couper au dernier espace trouvé
+            return truncated[:last_space] + "..."
+        else:
+            # Aucun espace trouvé, garder brut avec ...
+            return truncated + "..."
+
     def _build_canonicalization_prompt(
         self,
         raw_name: str,
@@ -264,8 +296,8 @@ class LLMCanonicalizer:
         ]
 
         if context:
-            # Limiter contexte à 500 chars
-            context_snippet = context[:500]
+            # P2.3: Limiter contexte à 500 chars SANS couper mots
+            context_snippet = self._truncate_context(context, max_length=500)
             parts.append(f"**Context:** {context_snippet}")
 
         if domain_hint:
