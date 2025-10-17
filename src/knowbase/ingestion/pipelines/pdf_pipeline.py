@@ -20,7 +20,7 @@ from knowbase.common.clients import (
     get_sentence_transformer,
 )
 from knowbase.common.llm_router import LLMRouter, TaskType
-
+from knowbase.ingestion.extraction_cache import get_cache_manager
 
 from knowbase.config.paths import ensure_directories
 from knowbase.config.settings import get_settings
@@ -897,16 +897,59 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
         if document_type_id:
             user_meta["document_type_id"] = document_type_id
 
-        # En mode TEXT-ONLY, MegaParse extrait le texte (comme PPTX)
-        # En mode VISION, on utilise pdftotext pour avoir le texte complet
-        pdf_text = None
-        if use_vision:
-            pdf_text = extract_text_from_pdf(pdf_path)
-            gpt_meta = analyze_pdf_metadata(pdf_text, pdf_path.name)
-            doc_meta = {**user_meta, **gpt_meta}
-        else:
-            # En TEXT-ONLY, on extrait les métadonnées après MegaParse
-            doc_meta = user_meta
+        # ===== V2.2: EXTRACTION CACHE SYSTEM =====
+        # Détecter si fichier est un cache (.knowcache.json)
+        cache_manager = get_cache_manager()
+        loaded_from_cache = False
+        extraction_start_time = datetime.now()
+
+        if pdf_path.suffix == ".json" and pdf_path.name.endswith(".knowcache.json"):
+            # Fichier est un cache → charger et skip extraction
+            logger.info("🔄 [CACHE] Fichier .knowcache.json détecté, tentative chargement...")
+
+            cache = cache_manager.load_cache(pdf_path)
+
+            if cache:
+                # Cache valide → utiliser texte cached
+                full_text = cache.extracted_text.full_text
+                doc_meta = {**user_meta, **{
+                    "title": cache.document_metadata.title,
+                    "pages": cache.document_metadata.pages,
+                    "language": cache.document_metadata.language,
+                    "author": cache.document_metadata.author,
+                    "keywords": cache.document_metadata.keywords,
+                    **cache.document_metadata.custom_metadata
+                }}
+
+                loaded_from_cache = True
+
+                logger.info(
+                    f"✅ [CACHE] Cache chargé: {len(full_text)} chars "
+                    f"(économie: {cache.extraction_stats.duration_seconds:.1f}s, "
+                    f"${cache.extraction_stats.cost_usd:.3f})"
+                )
+
+                # Skip toute la section extraction ci-dessous
+            else:
+                # Cache invalide/expiré
+                logger.error("❌ [CACHE] Cache invalide ou expiré, import annulé")
+                status_file.write_text("error")
+                raise Exception("Cache invalide ou expiré")
+
+        # Si pas de cache, continuer extraction normale
+        if not loaded_from_cache:
+            logger.info("📄 [EXTRACTION] Mode normal (pas de cache)")
+
+            # En mode TEXT-ONLY, MegaParse extrait le texte (comme PPTX)
+            # En mode VISION, on utilise pdftotext pour avoir le texte complet
+            pdf_text = None
+            if use_vision:
+                pdf_text = extract_text_from_pdf(pdf_path)
+                gpt_meta = analyze_pdf_metadata(pdf_text, pdf_path.name)
+                doc_meta = {**user_meta, **gpt_meta}
+            else:
+                # En TEXT-ONLY, on extrait les métadonnées après MegaParse
+                doc_meta = user_meta
 
         # Générer prompt contextualisé si document_type_id fourni
         custom_prompt = None
@@ -1001,6 +1044,41 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
                     doc_meta = {**user_meta, **gpt_meta}
                 else:
                     doc_meta = user_meta
+
+        # ===== V2.2: SAUVEGARDE CACHE (si extraction normale) =====
+        if not loaded_from_cache and cache_manager.enabled:
+            try:
+                extraction_duration = (datetime.now() - extraction_start_time).total_seconds()
+
+                # Estimer coût (approximation: Vision calls ou 0)
+                vision_calls = doc_meta.get("pages", 0) if use_vision else 0
+                estimated_cost = vision_calls * 0.015  # ~$0.015 par appel Vision
+
+                cache_path = cache_manager.save_cache(
+                    source_file_path=pdf_path,
+                    extracted_text=full_text or "",
+                    document_metadata=doc_meta,
+                    extraction_config={
+                        "use_vision": use_vision,
+                        "vision_model": GPT_MODEL if use_vision else None,
+                        "megaparse_version": "0.3.1"
+                    },
+                    extraction_stats={
+                        "duration_seconds": extraction_duration,
+                        "vision_calls": vision_calls,
+                        "cost_usd": estimated_cost,
+                        "megaparse_blocks": 0  # À enrichir si besoin
+                    },
+                    page_texts=None  # À enrichir avec page_texts si disponibles
+                )
+
+                if cache_path:
+                    logger.info(
+                        f"💾 [CACHE] Cache sauvegardé: {cache_path.name} "
+                        f"(économisera {extraction_duration:.1f}s, ${estimated_cost:.3f} aux prochains imports)"
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ [CACHE] Échec sauvegarde cache: {e}")
 
         # ===== OSMOSE Pure - Traitement sémantique UNIQUEMENT =====
         # REMPLACE l'ingestion legacy (Qdrant "knowbase" + Neo4j entities/relations)
