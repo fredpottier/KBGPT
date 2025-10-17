@@ -950,7 +950,8 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
                     img_path, pdf_text, pdf_path.name, page_index, custom_prompt
                 )
                 logger.info(f"Page {page_index} [VISION]: chunks = {len(chunks)}")
-                ingest_chunks(chunks, doc_meta, pdf_path.stem, page_index)
+                # OSMOSE PURE: Désactiver ingestion directe Qdrant (tout passe par OSMOSE)
+                # ingest_chunks(chunks, doc_meta, pdf_path.stem, page_index)
                 total_chunks += len(chunks)
 
                 # Envoyer heartbeat toutes les 3 pages (pour documents longs)
@@ -1040,18 +1041,19 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
                         }
                         for c in concepts
                     ]
-                    ingest_chunks(chunks_compat, doc_meta, pdf_path.stem, block_index)
+                    # OSMOSE PURE: Désactiver ingestion directe Qdrant (tout passe par OSMOSE)
+                    # ingest_chunks(chunks_compat, doc_meta, pdf_path.stem, block_index)
                     total_chunks += len(chunks_compat)
 
-                    # Ingérer facts, entities, relations dans Neo4j
-                    if facts or entities or relations:
-                        ingest_knowledge_to_neo4j(
-                            facts=facts,
-                            entities=entities,
-                            relations=relations,
-                            document_id=pdf_path.stem,
-                            source_name=pdf_path.name
-                        )
+                    # OSMOSE PURE: Désactiver ingestion directe Neo4j (tout passe par OSMOSE + Gatekeeper)
+                    # if facts or entities or relations:
+                    #     ingest_knowledge_to_neo4j(
+                    #         facts=facts,
+                    #         entities=entities,
+                    #         relations=relations,
+                    #         document_id=pdf_path.stem,
+                    #         source_name=pdf_path.name
+                    #     )
 
                     # Heartbeat tous les 5 blocs (au lieu de 3 pages)
                     if block_index % 5 == 0:
@@ -1080,7 +1082,8 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
                         break
                     logger.info(f"Page {page_index} [TEXT-ONLY FALLBACK]: {len(concepts)} concepts")
                     chunks_compat = [{"text": c.get("full_explanation", ""), "meta": c.get("meta", {})} for c in concepts]
-                    ingest_chunks(chunks_compat, doc_meta, pdf_path.stem, page_index)
+                    # OSMOSE PURE: Désactiver ingestion directe Qdrant (tout passe par OSMOSE)
+                    # ingest_chunks(chunks_compat, doc_meta, pdf_path.stem, page_index)
                     total_chunks += len(chunks_compat)
 
         # ===== OSMOSE Pure - Traitement sémantique UNIQUEMENT =====
