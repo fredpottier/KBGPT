@@ -210,8 +210,10 @@ class ExtractionCacheManager:
                 )
             )
 
-            # Chemin cache: source_file.knowcache.json
-            cache_path = self.cache_dir / f"{source_file_path.stem}.knowcache.json"
+            # Chemin cache: hash du fichier pour éviter collision avec timestamps
+            # Ex: RISE_with_SAP__20251019_152039.pptx et RISE_with_SAP__20251019_203406.pptx
+            # auront le MEME hash si c'est le même contenu → réutilisation cache
+            cache_path = self.cache_dir / f"{source_hash[:16]}.knowcache.json"
 
             # Sauvegarder JSON
             with open(cache_path, 'w', encoding='utf-8') as f:
@@ -280,6 +282,35 @@ class ExtractionCacheManager:
             logger.error(f"[CACHE] ❌ Failed to load cache {cache_file_path.name}: {e}")
             return None
 
+    def get_cache_for_file(self, source_file_path: Path) -> Optional[ExtractionCache]:
+        """
+        Récupère le cache pour un fichier source (si disponible).
+
+        Args:
+            source_file_path: Chemin fichier source
+
+        Returns:
+            ExtractionCache ou None si pas disponible
+        """
+        if not self.enabled:
+            return None
+
+        # Calculer hash du fichier pour trouver le cache
+        source_hash = self._calculate_file_hash(source_file_path)
+        cache_path = self.cache_dir / f"{source_hash[:16]}.knowcache.json"
+
+        if not cache_path.exists():
+            logger.info(f"[CACHE] No cache found for {source_file_path.name} (hash: {source_hash[:16]})")
+            return None
+
+        # Charger et valider
+        cache = self.load_cache(cache_path)
+
+        if cache:
+            logger.info(f"[CACHE] ✅ Cache HIT for {source_file_path.name} (hash: {source_hash[:16]})")
+
+        return cache
+
     def is_cache_available(self, source_file_path: Path) -> bool:
         """
         Vérifie si cache valide existe pour un fichier source.
@@ -290,18 +321,7 @@ class ExtractionCacheManager:
         Returns:
             True si cache valide disponible
         """
-        if not self.enabled:
-            return False
-
-        cache_path = self.cache_dir / f"{source_file_path.stem}.knowcache.json"
-
-        if not cache_path.exists():
-            return False
-
-        # Charger et valider
-        cache = self.load_cache(cache_path)
-
-        return cache is not None
+        return self.get_cache_for_file(source_file_path) is not None
 
     def purge_expired_caches(self) -> int:
         """

@@ -1848,12 +1848,69 @@ def process_pptx(
         logger.error(f"Erreur vérification duplicatas: {e}")
         logger.info(f"Poursuite de l'ingestion par sécurité")
 
-    if progress_callback:
-        progress_callback("Conversion PDF", 5, 100, "Conversion du PowerPoint en PDF")
+    # ===== CACHE CHECK - Skip extraction si cache disponible =====
+    logger.info("[CACHE] Vérification cache extraction...")
 
-    ensure_dirs()
-    pdf_path = convert_pptx_to_pdf(pptx_path, SLIDES_PNG)
-    slides_data = extract_notes_and_text(pptx_path)
+    from knowbase.ingestion.extraction_cache import get_cache_manager
+    cache_manager = get_cache_manager()
+
+    cached_extraction = cache_manager.get_cache_for_file(pptx_path)
+
+    if cached_extraction:
+        logger.info("[CACHE] ✅ CACHE HIT - Skip extraction (PDF conversion + Vision)")
+        logger.info(f"[CACHE]    Texte: {cached_extraction.extracted_text.length_chars} chars")
+        logger.info(f"[CACHE]    Économie: ${cached_extraction.extraction_stats.cost_usd:.3f}")
+        logger.info(f"[CACHE]    Vision calls évités: {cached_extraction.extraction_stats.vision_calls}")
+
+        # Charger données depuis cache
+        full_text_enriched = cached_extraction.extracted_text.full_text
+        metadata = {
+            "title": cached_extraction.document_metadata.title,
+            "pages": cached_extraction.document_metadata.pages,
+            "language": cached_extraction.document_metadata.language,
+            "author": cached_extraction.document_metadata.author,
+            "keywords": cached_extraction.document_metadata.keywords,
+        }
+
+        if progress_callback:
+            progress_callback("Cache loaded", 60, 100, "Extraction chargée depuis cache")
+
+        # Sauter directement à OSMOSE (après la ligne 2252 où cache est normalement sauvegardé)
+        logger.info("[CACHE] Skip vers OSMOSE Pipeline...")
+
+        # IMPORTANT: On a besoin de slides_data minimal pour la suite
+        # On peut le reconstituer depuis cache.extracted_text.pages
+        slides_data = []
+        slide_summaries = []
+
+        for page_data in cached_extraction.extracted_text.pages:
+            slide_idx = page_data.get("slide_index", 0)
+            text = page_data.get("text", "")
+
+            slides_data.append({
+                "slide_index": slide_idx,
+                "text": text,
+                "megaparse_content": None  # Pas besoin pour OSMOSE
+            })
+
+            slide_summaries.append({
+                "slide_index": slide_idx,
+                "summary": text
+            })
+
+        # Skip conversion PDF et extraction (économie temps + $$$)
+        pdf_path = None  # Pas généré si cache
+
+    else:
+        # PAS DE CACHE - Faire extraction normale
+        logger.info("[CACHE] CACHE MISS - Extraction normale (PDF + Vision)")
+
+        if progress_callback:
+            progress_callback("Conversion PDF", 5, 100, "Conversion du PowerPoint en PDF")
+
+        ensure_dirs()
+        pdf_path = convert_pptx_to_pdf(pptx_path, SLIDES_PNG)
+        slides_data = extract_notes_and_text(pptx_path)
 
     if progress_callback:
         progress_callback(
@@ -1963,253 +2020,271 @@ def process_pptx(
         document_id = None
         document_version_id = None
 
-    if progress_callback:
-        progress_callback(
-            "Génération des miniatures", 15, 100, "Conversion PDF → images en cours"
-        )
+    # ===== IMAGE GENERATION & VISION (Skip si cache) =====
+    if pdf_path:
+        # PDF disponible → Génération images + Vision
+        if progress_callback:
+            progress_callback(
+                "Génération des miniatures", 15, 100, "Conversion PDF → images en cours"
+            )
 
-    # Génération d'images avec DPI adaptatif selon la taille du document
-    if len(slides_data) > 400:
-        # Gros documents : DPI réduit pour économiser la mémoire
-        dpi = 120
-        logger.info(
-            f"📊 Gros document ({len(slides_data)} slides) - DPI réduit à {dpi} pour économiser la mémoire"
-        )
-    elif len(slides_data) > 200:
-        dpi = 150
-        logger.info(f"📊 Document moyen ({len(slides_data)} slides) - DPI à {dpi}")
+        # Génération d'images avec DPI adaptatif selon la taille du document
+        if len(slides_data) > 400:
+            # Gros documents : DPI réduit pour économiser la mémoire
+            dpi = 120
+            logger.info(
+                f"📊 Gros document ({len(slides_data)} slides) - DPI réduit à {dpi} pour économiser la mémoire"
+            )
+        elif len(slides_data) > 200:
+            dpi = 150
+            logger.info(f"📊 Document moyen ({len(slides_data)} slides) - DPI à {dpi}")
+        else:
+            dpi = 200
+            logger.info(
+                f"📊 Document normal ({len(slides_data)} slides) - DPI standard à {dpi}"
+            )
+
+        # Méthode unifiée avec PyMuPDF : toujours convertir tout d'un coup (plus efficace)
+        try:
+            images = convert_pdf_to_images_pymupdf(str(pdf_path), dpi=dpi, rq_job=rq_job)
+            image_paths = {}
+
+            for i, img in enumerate(images, start=1):
+                img_path = THUMBNAILS_DIR / f"{pptx_path.stem}_slide_{i}.jpg"
+
+                # Sauvegarder l'image pour le LLM
+                if img.mode == "RGBA":
+                    rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+                    rgb_img.paste(img, mask=img.split()[-1])
+                    rgb_img.save(img_path, "JPEG", quality=60, optimize=True)
+                else:
+                    img.save(img_path, "JPEG", quality=60, optimize=True)
+
+                image_paths[i] = img_path
+
+                # Heartbeat périodique pour gros documents + libération mémoire
+                if len(slides_data) > 200 and i % 100 == 0:
+                    try:
+                        from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+
+                        send_worker_heartbeat()
+                        logger.debug(
+                            f"Heartbeat envoyé après génération de {i}/{len(images)} images"
+                        )
+                    except Exception:
+                        pass
+
+            # Libérer la liste d'images après traitement
+            del images
+            logger.info(f"✅ {len(image_paths)} images générées avec succès")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur génération d'images: {e}")
+            raise
+
+        logger.info(f"🔄 Début traitement LLM des slides...")
+
     else:
-        dpi = 200
-        logger.info(
-            f"📊 Document normal ({len(slides_data)} slides) - DPI standard à {dpi}"
-        )
-
-    # Méthode unifiée avec PyMuPDF : toujours convertir tout d'un coup (plus efficace)
-    try:
-        images = convert_pdf_to_images_pymupdf(str(pdf_path), dpi=dpi, rq_job=rq_job)
+        # Cache HIT - Pas d'images générées
+        logger.info("[CACHE] Skip image generation (cache loaded)")
         image_paths = {}
 
-        for i, img in enumerate(images, start=1):
-            img_path = THUMBNAILS_DIR / f"{pptx_path.stem}_slide_{i}.jpg"
+    # === VISION PROCESSING (Skip si cache) ===
+    if pdf_path:
+        # PDF disponible → Vision processing
+        actual_slide_count = len(image_paths)
+        total_slides = len(slides_data)  # Corriger la variable manquante
+        MAX_WORKERS = 3  # Valeur par défaut, peut être configurée
 
-            # Sauvegarder l'image pour le LLM
-            if img.mode == "RGBA":
-                rgb_img = Image.new("RGB", img.size, (255, 255, 255))
-                rgb_img.paste(img, mask=img.split()[-1])
-                rgb_img.save(img_path, "JPEG", quality=60, optimize=True)
-            else:
-                img.save(img_path, "JPEG", quality=60, optimize=True)
-
-            image_paths[i] = img_path
-
-            # Heartbeat périodique pour gros documents + libération mémoire
-            if len(slides_data) > 200 and i % 100 == 0:
-                try:
-                    from knowbase.ingestion.queue.jobs import send_worker_heartbeat
-
-                    send_worker_heartbeat()
-                    logger.debug(
-                        f"Heartbeat envoyé après génération de {i}/{len(images)} images"
-                    )
-                except Exception:
-                    pass
-
-        # Libérer la liste d'images après traitement
-        del images
-        logger.info(f"✅ {len(image_paths)} images générées avec succès")
-
-    except Exception as e:
-        logger.error(f"❌ Erreur génération d'images: {e}")
-        raise
-
-    logger.info(f"🔄 Début traitement LLM des slides...")
-
-    actual_slide_count = len(image_paths)
-    total_slides = len(slides_data)  # Corriger la variable manquante
-    MAX_WORKERS = 3  # Valeur par défaut, peut être configurée
-
-    if progress_callback:
-        progress_callback(
-            "Génération des miniatures",
-            18,
-            100,
-            f"Création de {actual_slide_count} miniatures",
+        if progress_callback:
+            progress_callback(
+                "Génération des miniatures",
+                18,
+                100,
+                f"Création de {actual_slide_count} miniatures",
+            )
+    
+        # ===== OSMOSE PURE : Vision génère résumés riches =====
+        # Au lieu d'extraire entities/relations, Vision décrit visuellement chaque slide
+        # OSMOSE fera ensuite l'analyse sémantique sur ces résumés
+    
+        actual_workers = 1 if total_slides > 400 else MAX_WORKERS
+        logger.info(
+            f"📊 [OSMOSE PURE] Utilisation de {actual_workers} workers pour {total_slides} slides"
         )
-
-    # ===== OSMOSE PURE : Vision génère résumés riches =====
-    # Au lieu d'extraire entities/relations, Vision décrit visuellement chaque slide
-    # OSMOSE fera ensuite l'analyse sémantique sur ces résumés
-
-    actual_workers = 1 if total_slides > 400 else MAX_WORKERS
-    logger.info(
-        f"📊 [OSMOSE PURE] Utilisation de {actual_workers} workers pour {total_slides} slides"
-    )
-    logger.info(f"📊 [OSMOSE PURE] use_vision = {use_vision}")
-    logger.info(f"📊 [OSMOSE PURE] image_paths count = {len(image_paths)}")
-    logger.info(f"📊 [OSMOSE PURE] slides_data count = {len(slides_data)}")
-
-    vision_tasks = []
-    logger.info(
-        f"🤖 [OSMOSE PURE] Soumission de {len(slides_data)} tâches Vision (résumés)..."
-    )
-
-    with ThreadPoolExecutor(max_workers=actual_workers) as ex:
-        for slide in slides_data:
-            idx = slide["slide_index"]
-            raw_text = slide.get("text", "")
-            notes = slide.get("notes", "")
-            megaparse_content = slide.get("megaparse_content", raw_text)
-
-            if idx in image_paths:
-                # Mode OSMOSE Pure: Vision génère résumé riche
-                if use_vision:
-                    vision_tasks.append(
-                        (
-                            idx,
-                            ex.submit(
-                                ask_gpt_vision_summary,  # Nouvelle fonction
-                                image_paths[idx],
+        logger.info(f"📊 [OSMOSE PURE] use_vision = {use_vision}")
+        logger.info(f"📊 [OSMOSE PURE] image_paths count = {len(image_paths)}")
+        logger.info(f"📊 [OSMOSE PURE] slides_data count = {len(slides_data)}")
+    
+        vision_tasks = []
+        logger.info(
+            f"🤖 [OSMOSE PURE] Soumission de {len(slides_data)} tâches Vision (résumés)..."
+        )
+    
+        with ThreadPoolExecutor(max_workers=actual_workers) as ex:
+            for slide in slides_data:
+                idx = slide["slide_index"]
+                raw_text = slide.get("text", "")
+                notes = slide.get("notes", "")
+                megaparse_content = slide.get("megaparse_content", raw_text)
+    
+                if idx in image_paths:
+                    # Mode OSMOSE Pure: Vision génère résumé riche
+                    if use_vision:
+                        vision_tasks.append(
+                            (
                                 idx,
-                                pptx_path.name,
-                                raw_text,
-                                notes,
-                                megaparse_content,
-                            ),
+                                ex.submit(
+                                    ask_gpt_vision_summary,  # Nouvelle fonction
+                                    image_paths[idx],
+                                    idx,
+                                    pptx_path.name,
+                                    raw_text,
+                                    notes,
+                                    megaparse_content,
+                                ),
+                            )
                         )
-                    )
-                else:
-                    # Fallback texte brut
-                    vision_tasks.append((idx, None))  # Pas de Vision, texte direct
-
-    total_slides_with_vision = len([t for t in vision_tasks if t[1] is not None])
-    logger.info(
-        f"🚀 [OSMOSE PURE] Début génération de {total_slides_with_vision} résumés Vision"
-    )
-
-    if progress_callback:
-        progress_callback(
-            "Analyse Vision",
-            20,
-            100,
-            f"Génération résumés visuels ({total_slides_with_vision} slides)",
+                    else:
+                        # Fallback texte brut
+                        vision_tasks.append((idx, None))  # Pas de Vision, texte direct
+    
+        total_slides_with_vision = len([t for t in vision_tasks if t[1] is not None])
+        logger.info(
+            f"🚀 [OSMOSE PURE] Début génération de {total_slides_with_vision} résumés Vision"
         )
-
-    # Collecter les résumés
-    slide_summaries = []
-
-    for i, (idx, future) in enumerate(vision_tasks):
-        slide_progress = 20 + int((i / len(vision_tasks)) * 40)  # 20% → 60%
+    
         if progress_callback:
             progress_callback(
                 "Analyse Vision",
-                slide_progress,
+                20,
                 100,
-                f"Slide {i+1}/{len(vision_tasks)}",
+                f"Génération résumés visuels ({total_slides_with_vision} slides)",
             )
-
-        if future is not None:
-            # Attendre résumé Vision
-            try:
-                import concurrent.futures
-                import time
-
-                timeout_seconds = 60
-                start_time = time.time()
-
-                while not future.done():
-                    try:
-                        summary = future.result(timeout=timeout_seconds)
-                        break
-                    except concurrent.futures.TimeoutError:
-                        # Heartbeat
-                        elapsed = time.time() - start_time
-                        if elapsed > 300:  # 5 minutes max
-                            logger.warning(
-                                f"Slide {idx} [VISION SUMMARY]: Timeout après 5min"
-                            )
-                            summary = f"Slide {idx}: timeout"
-                            break
-                        try:
-                            from knowbase.ingestion.queue.jobs import (
-                                send_worker_heartbeat,
-                            )
-
-                            send_worker_heartbeat()
-                        except Exception:
-                            pass
-
-                if not future.done():
-                    logger.error(
-                        f"Slide {idx} [VISION SUMMARY]: Future n'est pas done après attente"
-                    )
-                    summary = f"Slide {idx}: erreur"
-                else:
-                    summary = future.result()
-
-            except Exception as e:
-                logger.error(
-                    f"Slide {idx} [VISION SUMMARY]: Erreur récupération résultat: {e}"
+    
+        # Collecter les résumés
+        slide_summaries = []
+    
+        for i, (idx, future) in enumerate(vision_tasks):
+            slide_progress = 20 + int((i / len(vision_tasks)) * 40)  # 20% → 60%
+            if progress_callback:
+                progress_callback(
+                    "Analyse Vision",
+                    slide_progress,
+                    100,
+                    f"Slide {i+1}/{len(vision_tasks)}",
                 )
-                # Fallback texte
+    
+            if future is not None:
+                # Attendre résumé Vision
+                try:
+                    import concurrent.futures
+                    import time
+    
+                    timeout_seconds = 60
+                    start_time = time.time()
+    
+                    while not future.done():
+                        try:
+                            summary = future.result(timeout=timeout_seconds)
+                            break
+                        except concurrent.futures.TimeoutError:
+                            # Heartbeat
+                            elapsed = time.time() - start_time
+                            if elapsed > 300:  # 5 minutes max
+                                logger.warning(
+                                    f"Slide {idx} [VISION SUMMARY]: Timeout après 5min"
+                                )
+                                summary = f"Slide {idx}: timeout"
+                                break
+                            try:
+                                from knowbase.ingestion.queue.jobs import (
+                                    send_worker_heartbeat,
+                                )
+    
+                                send_worker_heartbeat()
+                            except Exception:
+                                pass
+    
+                    if not future.done():
+                        logger.error(
+                            f"Slide {idx} [VISION SUMMARY]: Future n'est pas done après attente"
+                        )
+                        summary = f"Slide {idx}: erreur"
+                    else:
+                        summary = future.result()
+    
+                except Exception as e:
+                    logger.error(
+                        f"Slide {idx} [VISION SUMMARY]: Erreur récupération résultat: {e}"
+                    )
+                    # Fallback texte
+                    slide_data = slides_data[i] if i < len(slides_data) else {}
+                    summary = f"Slide {idx}: {slide_data.get('text', '')} {slide_data.get('notes', '')}"
+    
+            else:
+                # Pas de Vision, utiliser texte brut
                 slide_data = slides_data[i] if i < len(slides_data) else {}
-                summary = f"Slide {idx}: {slide_data.get('text', '')} {slide_data.get('notes', '')}"
+                text = slide_data.get("text", "")
+                notes = slide_data.get("notes", "")
+                summary = f"{text}\n{notes}".strip() or f"Slide {idx}"
+    
+            # Ajouter à la collection
+            slide_summaries.append({"slide_index": idx, "summary": summary})
+    
+            logger.info(f"Slide {idx} [VISION SUMMARY]: {len(summary)} chars collectés")
+    
+            # Heartbeat périodique
+            if (i + 1) % 3 == 0:
+                try:
+                    from knowbase.ingestion.queue.jobs import send_worker_heartbeat
+    
+                    send_worker_heartbeat()
+                except Exception:
+                    pass
+    
+        logger.info(f"✅ [OSMOSE PURE] {len(slide_summaries)} résumés Vision collectés")
+    
+        # ===== Construire texte complet enrichi =====
+        logger.info("[OSMOSE PURE] Construction du texte enrichi complet...")
+    
+        full_text_parts = []
+        for slide_summary in slide_summaries:
+            idx = slide_summary["slide_index"]
+            summary = slide_summary["summary"]
+            full_text_parts.append(f"\n--- Slide {idx} ---\n{summary}")
+    
+        full_text_enriched = "\n\n".join(full_text_parts)
+    
+        logger.info(
+            f"[OSMOSE PURE] Texte enrichi construit: {len(full_text_enriched)} chars depuis {len(slide_summaries)} slides"
+        )
+    
+        # 🔍 DEBUG: Confirmer que le code continue après construction texte enrichi
+        logger.info(
+            "[DEBUG] 🎯 Checkpoint A: Après construction texte enrichi, avant aperçu"
+        )
+    
+        # Afficher aperçu du texte enrichi pour validation
+        preview_length = min(1000, len(full_text_enriched))
+        logger.info("[DEBUG] 🎯 Checkpoint B: preview_length calculé")
+        logger.info(
+            f"[OSMOSE PURE] Aperçu texte enrichi (premiers {preview_length} chars):"
+        )
+        logger.info("=" * 80)
+        logger.info(
+            full_text_enriched[:preview_length]
+            + ("..." if len(full_text_enriched) > preview_length else "")
+        )
+        logger.info("=" * 80)
+        logger.info("[DEBUG] 🎯 Checkpoint C: Après aperçu texte enrichi")
 
-        else:
-            # Pas de Vision, utiliser texte brut
-            slide_data = slides_data[i] if i < len(slides_data) else {}
-            text = slide_data.get("text", "")
-            notes = slide_data.get("notes", "")
-            summary = f"{text}\n{notes}".strip() or f"Slide {idx}"
+    else:
+        # Cache HIT - Texte enrichi déjà chargé depuis cache
+        logger.info("[CACHE] ✅ Texte enrichi déjà disponible depuis cache")
+        logger.info(f"[CACHE]    {len(full_text_enriched)} chars, {len(slide_summaries)} slides")
 
-        # Ajouter à la collection
-        slide_summaries.append({"slide_index": idx, "summary": summary})
-
-        logger.info(f"Slide {idx} [VISION SUMMARY]: {len(summary)} chars collectés")
-
-        # Heartbeat périodique
-        if (i + 1) % 3 == 0:
-            try:
-                from knowbase.ingestion.queue.jobs import send_worker_heartbeat
-
-                send_worker_heartbeat()
-            except Exception:
-                pass
-
-    logger.info(f"✅ [OSMOSE PURE] {len(slide_summaries)} résumés Vision collectés")
-
-    # ===== Construire texte complet enrichi =====
-    logger.info("[OSMOSE PURE] Construction du texte enrichi complet...")
-
-    full_text_parts = []
-    for slide_summary in slide_summaries:
-        idx = slide_summary["slide_index"]
-        summary = slide_summary["summary"]
-        full_text_parts.append(f"\n--- Slide {idx} ---\n{summary}")
-
-    full_text_enriched = "\n\n".join(full_text_parts)
-
-    logger.info(
-        f"[OSMOSE PURE] Texte enrichi construit: {len(full_text_enriched)} chars depuis {len(slide_summaries)} slides"
-    )
-
-    # 🔍 DEBUG: Confirmer que le code continue après construction texte enrichi
-    logger.info(
-        "[DEBUG] 🎯 Checkpoint A: Après construction texte enrichi, avant aperçu"
-    )
-
-    # Afficher aperçu du texte enrichi pour validation
-    preview_length = min(1000, len(full_text_enriched))
-    logger.info("[DEBUG] 🎯 Checkpoint B: preview_length calculé")
-    logger.info(
-        f"[OSMOSE PURE] Aperçu texte enrichi (premiers {preview_length} chars):"
-    )
-    logger.info("=" * 80)
-    logger.info(
-        full_text_enriched[:preview_length]
-        + ("..." if len(full_text_enriched) > preview_length else "")
-    )
-    logger.info("=" * 80)
-    logger.info("[DEBUG] 🎯 Checkpoint C: Après aperçu texte enrichi")
+    # Point de convergence: full_text_enriched est prêt (cache OU Vision)
 
     if progress_callback:
         progress_callback("Préparation OSMOSE", 65, 100, "Texte enrichi construit")
@@ -2217,38 +2292,42 @@ def process_pptx(
 
     # ===== V2.2 - SAUVEGARDE CACHE EXTRACTION =====
     # Sauvegarder cache AVANT OSMOSE pour permettre rejeux rapides
-    logger.info("[CACHE] Sauvegarde du cache d'extraction...")
-    try:
-        cache_manager = get_cache_manager()
-        
-        # Préparer les données cache
-        extraction_stats = {
-            "duration_seconds": time.time() - time.time(),  # TODO: tracker start_time réel
-            "vision_calls": len([s for s in slide_summaries if len(s.get("summary", "")) > 100]),
-            "cost_usd": 0.0,  # TODO: tracker coût extraction
-            "megaparse_blocks": sum(1 for s in slides_data if s.get("megaparse_content"))
-        }
-        
-        extraction_config = {
-            "use_vision": use_vision,
-            "document_type_id": document_type_id,
-            "total_slides": len(slides_data)
-        }
-        
-        # Sauvegarder cache
-        cache_path = cache_manager.save_cache(
-            source_file_path=pptx_path,
-            extracted_text=full_text_enriched,
-            document_metadata=metadata,
-            extraction_config=extraction_config,
-            extraction_stats=extraction_stats,
-            page_texts=[{"slide_index": s["slide_index"], "text": s["summary"]} for s in slide_summaries]
-        )
-        
-        if cache_path:
-            logger.info(f"[CACHE] ✅ Cache saved successfully: {cache_path.name}")
-    except Exception as e:
-        logger.warning(f"[CACHE] ⚠️ Failed to save cache (non-critical): {e}")
+    # (Uniquement si extraction normale, pas si cache chargé)
+    if pdf_path:
+        logger.info("[CACHE] Sauvegarde du cache d'extraction...")
+        try:
+            cache_manager = get_cache_manager()
+
+            # Préparer les données cache
+            extraction_stats = {
+                "duration_seconds": time.time() - time.time(),  # TODO: tracker start_time réel
+                "vision_calls": len([s for s in slide_summaries if len(s.get("summary", "")) > 100]),
+                "cost_usd": 0.0,  # TODO: tracker coût extraction
+                "megaparse_blocks": sum(1 for s in slides_data if s.get("megaparse_content"))
+            }
+
+            extraction_config = {
+                "use_vision": use_vision,
+                "document_type_id": document_type_id,
+                "total_slides": len(slides_data)
+            }
+
+            # Sauvegarder cache
+            cache_path = cache_manager.save_cache(
+                source_file_path=pptx_path,
+                extracted_text=full_text_enriched,
+                document_metadata=metadata,
+                extraction_config=extraction_config,
+                extraction_stats=extraction_stats,
+                page_texts=[{"slide_index": s["slide_index"], "text": s["summary"]} for s in slide_summaries]
+            )
+
+            if cache_path:
+                logger.info(f"[CACHE] ✅ Cache saved successfully: {cache_path.name}")
+        except Exception as e:
+            logger.warning(f"[CACHE] ⚠️ Failed to save cache (non-critical): {e}")
+    else:
+        logger.info("[CACHE] Skip sauvegarde (cache déjà utilisé)")
 
     # ===== OSMOSE Pipeline V2.1 - Analyse Sémantique =====
     logger.info("=" * 80)
