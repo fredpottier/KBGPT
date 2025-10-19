@@ -295,7 +295,7 @@ MAX_TOKENS_THRESHOLD = (
     8000  # Contexte optimal pour analyse de slides (évite consommation excessive)
 )
 MAX_PARTIAL_TOKENS = 8000
-MAX_SUMMARY_TOKENS = 60000
+MAX_SUMMARY_TOKENS = 150000  # OSMOSE V2: Augmenté pour longs docs (Claude 200K window, pas de troncation inutile)
 
 # --- Fonctions principales du pipeline ---
 
@@ -1613,7 +1613,7 @@ Your summary should include:
                 TaskType.VISION,
                 msg,
                 temperature=0.5,  # Plus créatif pour descriptions riches
-                max_tokens=2500,  # Augmenté pour résumés vraiment détaillés
+                max_tokens=4000,  # OSMOSE V2: Augmenté pour résumés vraiment riches (~3000 mots/slide)
             )
 
             summary = (raw_content or "").strip()
