@@ -372,15 +372,18 @@ class TestLLMExtractionIntegration:
     def test_llm_router_chat_completion(self, llm_extractor):
         """Test que LLMRouter fonctionne correctement."""
         # Simple test que le router peut faire un appel
-        response = llm_extractor.llm_router.chat_completion(
+        from knowbase.common.llm_router import TaskType
+
+        response = llm_extractor.llm_router.complete(
+            task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=[{"role": "user", "content": "Say 'test'"}],
-            model="gpt-4o-mini",
+            model_preference="gpt-4o-mini",
             temperature=0.1
         )
 
         assert response is not None
-        assert response.choices is not None
-        assert len(response.choices) > 0
+        assert isinstance(response, str)
+        assert len(response) > 0
 
     def test_json_output_parsing(self, llm_extractor, sample_concepts_encryption):
         """Test que le parsing JSON fonctionne avec réponses LLM réelles."""

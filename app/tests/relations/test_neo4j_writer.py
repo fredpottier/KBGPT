@@ -13,21 +13,35 @@ from knowbase.relations.types import (
     RelationStrength,
     RelationStatus
 )
-from knowbase.db.neo4j_manager import Neo4jManager
+from knowbase.common.clients.neo4j_client import Neo4jClient
+import os
+
+
+@pytest.fixture(scope="module")
+def neo4j_client():
+    """Fixture Neo4jClient pour tests."""
+    client = Neo4jClient(
+        uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+        user=os.getenv("NEO4J_USER", "neo4j"),
+        password=os.getenv("NEO4J_PASSWORD", "graphiti_neo4j_pass"),
+        database=os.getenv("NEO4J_DATABASE", "neo4j")
+    )
+    yield client
+    client.close()
 
 
 @pytest.fixture
-def neo4j_writer(neo4j_manager):
+def neo4j_writer(neo4j_client):
     """Fixture Neo4jRelationshipWriter."""
     writer = Neo4jRelationshipWriter(
-        neo4j_manager=neo4j_manager,
+        neo4j_client=neo4j_client,
         tenant_id="test-tenant"
     )
     return writer
 
 
 @pytest.fixture
-def sample_canonical_concepts(neo4j_manager):
+def sample_canonical_concepts(neo4j_client):
     """Créer concepts canoniques de test dans Neo4j."""
     # Créer 3 concepts pour tests
     concepts = [
@@ -59,13 +73,14 @@ def sample_canonical_concepts(neo4j_manager):
             c.concept_type = $concept_type,
             c.created_at = datetime()
         """
-        neo4j_manager.execute_query(
-            query,
-            concept_id=concept["concept_id"],
-            tenant_id=concept["tenant_id"],
-            canonical_name=concept["canonical_name"],
-            concept_type=concept["concept_type"]
-        )
+        with neo4j_client.driver.session(database=neo4j_client.database) as session:
+            session.run(
+                query,
+                concept_id=concept["concept_id"],
+                tenant_id=concept["tenant_id"],
+                canonical_name=concept["canonical_name"],
+                concept_type=concept["concept_type"]
+            )
 
     yield concepts
 
@@ -74,7 +89,8 @@ def sample_canonical_concepts(neo4j_manager):
     MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
     DETACH DELETE c
     """
-    neo4j_manager.execute_query(cleanup_query, tenant_id="test-tenant")
+    with neo4j_client.driver.session(database=neo4j_client.database) as session:
+        session.run(cleanup_query, tenant_id="test-tenant")
 
 
 @pytest.fixture
@@ -135,7 +151,7 @@ class TestNeo4jRelationshipWriter:
         neo4j_writer,
         sample_canonical_concepts,
         sample_typed_relation,
-        neo4j_manager
+        neo4j_client
     ):
         """Test que relation est bien créée dans Neo4j."""
         # Écrire relation
@@ -153,23 +169,25 @@ class TestNeo4jRelationshipWriter:
         RETURN properties(r) as rel_props
         """
 
-        result = neo4j_manager.execute_query(
-            query,
-            source_id="test-concept-hana",
-            target_id="test-concept-aes256",
-            tenant_id="test-tenant"
-        )
+        with neo4j_client.driver.session(database=neo4j_client.database) as session:
+            result = session.run(
+                query,
+                source_id="test-concept-hana",
+                target_id="test-concept-aes256",
+                tenant_id="test-tenant"
+            )
+            records = [dict(rec) for rec in result]
 
-        assert len(result) == 1
-        rel_props = result[0]["rel_props"]
+        assert len(records) == 1
+        rel_props = records[0]["rel_props"]
 
         # Vérifier metadata
         assert rel_props["confidence"] == 0.92
         assert rel_props["extraction_method"] == "llm"
         assert rel_props["source_doc_id"] == "test-doc-123"
         assert rel_props["language"] == "EN"
-        assert rel_props["strength"] == "STRONG"
-        assert rel_props["status"] == "ACTIVE"
+        assert rel_props["strength"] == "strong"  # Lowercase (enum value)
+        assert rel_props["status"] == "active"  # Lowercase (enum value)
         assert rel_props["evidence"] == "HANA database is encrypted at rest using AES256"
 
     def test_update_relation_higher_confidence(
@@ -398,7 +416,7 @@ class TestNeo4jRelationshipWriter:
         neo4j_writer,
         sample_canonical_concepts,
         sample_typed_relation,
-        neo4j_manager
+        neo4j_client
     ):
         """Test récupération relations sortantes d'un concept."""
         # Écrire relation
@@ -505,7 +523,7 @@ class TestNeo4jWriterIntegration:
         self,
         neo4j_writer,
         sample_canonical_concepts,
-        neo4j_manager
+        neo4j_client
     ):
         """Test workflow complet: extraction → persistence."""
         # Simuler résultat extraction LLM (3 relations)
@@ -560,10 +578,12 @@ class TestNeo4jWriterIntegration:
         RETURN count(r) as relation_count
         """
 
-        result = neo4j_manager.execute_query(
-            query,
-            tenant_id="test-tenant",
-            doc_id="integration-test-doc"
-        )
+        with neo4j_client.driver.session(database=neo4j_client.database) as session:
+            result = session.run(
+                query,
+                tenant_id="test-tenant",
+                doc_id="integration-test-doc"
+            )
+            records = [dict(rec) for rec in result]
 
-        assert result[0]["relation_count"] == 3
+        assert records[0]["relation_count"] == 3
