@@ -202,8 +202,8 @@ class LLMCanonicalizer:
                     response_format={"type": "json_object"}
                 )
 
-                # Parse résultat JSON
-                result_json = json.loads(response_content)
+                # Parse résultat JSON (robust parsing)
+                result_json = self._parse_json_robust(response_content)
                 return CanonicalizationResult(**result_json)
 
             # Appel via circuit breaker
@@ -250,6 +250,50 @@ class LLMCanonicalizer:
                 possible_matches=[],
                 metadata={"error": str(e)}
             )
+
+    def _parse_json_robust(self, response_content: str) -> Dict[str, Any]:
+        """
+        Parse JSON de manière robuste avec fallback sur erreurs.
+
+        Gère:
+        - JSON valide standard
+        - JSON avec trailing commas
+        - JSON malformé → fallback valeurs par défaut
+
+        Args:
+            response_content: Réponse LLM (string JSON attendu)
+
+        Returns:
+            Dict parsé ou dict fallback si erreur
+        """
+        try:
+            # Essai parsing JSON standard
+            return json.loads(response_content)
+        except json.JSONDecodeError as e:
+            logger.warning(f"[LLMCanonicalizer] JSON parse error: {e}, attempting fixes...")
+
+            # Tentative fix 1: Supprimer trailing commas
+            try:
+                import re
+                # Supprimer virgules avant } ou ]
+                fixed_json = re.sub(r',\s*([}\]])', r'\1', response_content)
+                return json.loads(fixed_json)
+            except json.JSONDecodeError:
+                pass
+
+            # Tentative fix 2: Extraire JSON d'un markdown code block
+            try:
+                import re
+                # Chercher JSON dans ```json ... ``` ou ```...```
+                match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_content, re.DOTALL)
+                if match:
+                    return json.loads(match.group(1))
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+            # Échec complet → lever exception pour trigger fallback
+            logger.error(f"[LLMCanonicalizer] Failed to parse JSON after all attempts: {response_content[:200]}")
+            raise json.JSONDecodeError("All JSON parsing attempts failed", response_content, 0)
 
     def _truncate_context(self, context: str, max_length: int = 500) -> str:
         """

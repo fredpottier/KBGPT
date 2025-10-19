@@ -133,10 +133,10 @@ class AdaptiveOntologyManager:
                o.domain AS domain,
                o.confidence AS confidence,
                o.source AS source,
-               o.usage_count AS usage_count,
-               o.ambiguity_warning AS ambiguity_warning,
-               o.possible_matches AS possible_matches,
-               o.ontology_id AS ontology_id
+               COALESCE(o.usage_count, 0) AS usage_count,
+               COALESCE(o.ambiguity_warning, null) AS ambiguity_warning,
+               COALESCE(o.possible_matches, []) AS possible_matches,
+               COALESCE(o.ontology_id, o.canonical_name) AS ontology_id
         LIMIT 1
         """
 
