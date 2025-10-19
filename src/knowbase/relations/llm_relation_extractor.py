@@ -15,7 +15,7 @@ from knowbase.relations.types import (
     RelationStrength,
     RelationStatus
 )
-from knowbase.common.llm_router import LLMRouter
+from knowbase.common.llm_router import LLMRouter, TaskType
 
 logger = logging.getLogger(__name__)
 
@@ -343,16 +343,15 @@ class LLMRelationExtractor:
             concepts_list=concepts_list
         )
 
-        # Appel LLM
+        # Appel LLM via LLMRouter
         try:
-            response = self.llm_router.chat_completion(
+            response_text = self.llm_router.complete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
                 messages=[{"role": "user", "content": prompt}],
-                model=self.model,
                 temperature=0.1,  # Bas pour cohérence
-                response_format={"type": "json_object"}  # Force JSON
+                response_format={"type": "json_object"},  # Force JSON
+                model_preference=self.model  # Préférence pour gpt-4o-mini
             )
-
-            response_text = response.choices[0].message.content
 
             # Parser JSON response
             relations_data = json.loads(response_text)
