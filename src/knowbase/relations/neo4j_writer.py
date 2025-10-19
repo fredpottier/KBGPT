@@ -11,7 +11,7 @@ from knowbase.relations.types import (
     RelationStatus,
     RelationStrength
 )
-from knowbase.db.neo4j_manager import Neo4jManager
+from knowbase.common.clients.neo4j_client import Neo4jClient
 
 logger = logging.getLogger(__name__)
 
@@ -32,22 +32,52 @@ class Neo4jRelationshipWriter:
 
     def __init__(
         self,
-        neo4j_manager: Optional[Neo4jManager] = None,
+        neo4j_client: Optional[Neo4jClient] = None,
         tenant_id: str = "default"
     ):
         """
         Initialise Neo4j writer.
 
         Args:
-            neo4j_manager: Manager Neo4j (default: nouveau instance)
+            neo4j_client: Client Neo4j (default: nouveau instance)
             tenant_id: Tenant ID pour isolation multi-tenant
         """
-        self.neo4j = neo4j_manager or Neo4jManager()
+        self.neo4j = neo4j_client or Neo4jClient()
         self.tenant_id = tenant_id
 
         logger.info(
             f"[OSMOSE:Neo4jRelationshipWriter] Initialized (tenant={tenant_id})"
         )
+
+    def _execute_query(
+        self,
+        query: str,
+        **params
+    ) -> List[Dict[str, Any]]:
+        """
+        Exécuter requête Cypher Neo4j.
+
+        Args:
+            query: Query Cypher
+            **params: Paramètres query
+
+        Returns:
+            Liste résultats (records as dicts)
+        """
+        if not self.neo4j.is_connected():
+            logger.error("[OSMOSE:Neo4jRelationshipWriter] Neo4j not connected")
+            return []
+
+        try:
+            with self.neo4j.driver.session(database=self.neo4j.database) as session:
+                result = session.run(query, **params)
+                return [dict(record) for record in result]
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE:Neo4jRelationshipWriter] Query execution failed: {e}",
+                exc_info=True
+            )
+            return []
 
     def write_relations(
         self,
@@ -225,7 +255,7 @@ class Neo4jRelationshipWriter:
         RETURN count(source) as source_count, count(target) as target_count
         """
 
-        result = self.neo4j.execute_query(
+        result = self._execute_query(
             query,
             source_id=source_id,
             target_id=target_id,
@@ -265,7 +295,7 @@ class Neo4jRelationshipWriter:
         RETURN properties(r) as rel_props
         """
 
-        result = self.neo4j.execute_query(
+        result = self._execute_query(
             query,
             source_id=source_id,
             target_id=target_id,
@@ -301,7 +331,7 @@ class Neo4jRelationshipWriter:
         RETURN r
         """
 
-        self.neo4j.execute_query(
+        self._execute_query(
             query,
             source_id=relation.source_concept,
             target_id=relation.target_concept,
@@ -333,7 +363,7 @@ class Neo4jRelationshipWriter:
         RETURN r
         """
 
-        self.neo4j.execute_query(
+        self._execute_query(
             query,
             source_id=relation.source_concept,
             target_id=relation.target_concept,
@@ -419,7 +449,7 @@ class Neo4jRelationshipWriter:
         RETURN count(r) as deleted_count
         """
 
-        result = self.neo4j.execute_query(
+        result = self._execute_query(
             query,
             tenant_id=self.tenant_id,
             document_id=document_id
@@ -482,7 +512,7 @@ class Neo4jRelationshipWriter:
                    source.canonical_name as other_name
             """
 
-        result = self.neo4j.execute_query(
+        result = self._execute_query(
             query,
             concept_id=concept_id,
             tenant_id=self.tenant_id
