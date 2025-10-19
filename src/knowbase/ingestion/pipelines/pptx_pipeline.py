@@ -295,7 +295,7 @@ MAX_TOKENS_THRESHOLD = (
     8000  # Contexte optimal pour analyse de slides (évite consommation excessive)
 )
 MAX_PARTIAL_TOKENS = 8000
-MAX_SUMMARY_TOKENS = 150000  # OSMOSE V2: Augmenté pour longs docs (Claude 200K window, pas de troncation inutile)
+# MAX_SUMMARY_TOKENS supprimé - OSMOSE V2.2: Aucune limite, Claude 200K gère tout
 
 # --- Fonctions principales du pipeline ---
 
@@ -920,23 +920,8 @@ def summarize_large_pptx(
             logger.error(f"❌ Partial summary error: {e}")
             continue
     final_summary = "\n".join(partial_summaries)
-    if estimate_tokens(final_summary) > MAX_SUMMARY_TOKENS:
-        prompt = render_prompt(
-            batch_template, summary_text=final_summary[: MAX_SUMMARY_TOKENS * 2]
-        )
-        try:
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a precise summarization assistant.",
-                },
-                {"role": "user", "content": prompt},
-            ]
-            raw = llm_router.complete(TaskType.LONG_TEXT_SUMMARY, messages)
-            final_summary = clean_gpt_response(raw)
-        except Exception as e:
-            logger.error(f"❌ Global summary reduction error: {e}")
-            final_summary = final_summary[: MAX_SUMMARY_TOKENS * 100]
+    # OSMOSE V2.2: Suppression de la troncation - Claude 200K gère les longs textes
+    # Le texte complet est transmis à OSMOSE sans limitation artificielle
     return final_summary
 
 
