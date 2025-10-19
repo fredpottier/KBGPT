@@ -106,6 +106,34 @@ Quand l'utilisateur demande de créer de la documentation :
 - **NE JAMAIS arrêter/redémarrer les services Docker sans autorisation**
 - **NE JAMAIS purger un élément ou une queue entière Redis sans autorisation**
 
+### 🚨 RÈGLE VITALE - PROTECTION DES CACHES
+
+**⚠️ NE JAMAIS SUPPRIMER `data/extraction_cache/` ⚠️**
+
+Les fichiers `.knowcache.json` dans `data/extraction_cache/` sont PRÉCIEUX :
+- Ils évitent de re-extraire les documents (économise temps/coûts)
+- Ils permettent de rejouer les imports après une purge système
+- **ILS NE DOIVENT JAMAIS ÊTRE SUPPRIMÉS lors d'une purge**
+
+**✅ Procédure de purge CORRECTE (préserver les caches) :**
+```bash
+# Purger Redis
+docker exec knowbase-redis redis-cli FLUSHDB
+
+# Purger Qdrant
+curl -X DELETE "http://localhost:6333/collections/knowbase"
+curl -X DELETE "http://localhost:6333/collections/rfp_qa"
+
+# Purger Neo4j
+docker exec knowbase-neo4j cypher-shell -u neo4j -p graphiti_neo4j_pass \
+  --format plain "MATCH (n) WHERE n.tenant_id = 'default' DETACH DELETE n"
+
+# Purger fichiers traités
+rm -rf data/docs_in/* data/docs_done/* data/status/*.status
+
+# ❌ NE JAMAIS toucher à data/extraction_cache/ !!!
+```
+
 ### ✅ AUTORISATIONS
 ```bash
 # Consultation uniquement
