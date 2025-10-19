@@ -32,8 +32,8 @@ class RelationExtractionEngine:
 
     def __init__(
         self,
-        enable_patterns: bool = True,
-        enable_llm: bool = True,
+        strategy: str = "llm_first",  # "llm_first", "hybrid", "pattern_only"
+        llm_model: str = "gpt-4o-mini",
         min_confidence: float = 0.60,
         language: str = "EN"
     ):
@@ -41,24 +41,27 @@ class RelationExtractionEngine:
         Initialise le moteur d'extraction.
 
         Args:
-            enable_patterns: Activer extraction pattern-based (regex + spaCy)
-            enable_llm: Activer classification LLM-assisted
+            strategy: Stratégie extraction
+                - "llm_first": LLM principal, patterns fallback (RECOMMANDÉ)
+                - "hybrid": Patterns + LLM validation
+                - "pattern_only": Patterns seuls (déconseillé)
+            llm_model: Modèle LLM (default: gpt-4o-mini - bon rapport qualité/prix)
             min_confidence: Seuil minimum confidence pour accepter relation
             language: Langue principale documents (EN, FR, DE, ES)
         """
-        self.enable_patterns = enable_patterns
-        self.enable_llm = enable_llm
+        self.strategy = strategy
+        self.llm_model = llm_model
         self.min_confidence = min_confidence
         self.language = language
 
         # Composants extraction (lazy loading)
         self._pattern_matcher = None
-        self._llm_classifier = None
-        self._spacy_parser = None
+        self._llm_extractor = None
+        self._llm_router = None
 
         logger.info(
             f"[OSMOSE:RelationExtraction] Engine initialized "
-            f"(patterns={enable_patterns}, llm={enable_llm}, "
+            f"(strategy={strategy}, llm_model={llm_model}, "
             f"min_conf={min_confidence}, lang={language})"
         )
 
@@ -105,9 +108,23 @@ class RelationExtractionEngine:
             f"({len(concepts)} concepts, {len(full_text)} chars)"
         )
 
-        # Étape 1: Pattern-based extraction
-        pattern_relations = []
-        if self.enable_patterns:
+        # Étape 1: Extraction selon stratégie
+        if self.strategy == "llm_first":
+            # LLM-first: Extraction principale via LLM
+            all_relations = self._extract_with_llm(
+                concepts=concepts,
+                full_text=full_text,
+                document_id=document_id,
+                document_name=document_name,
+                chunk_ids=chunk_ids
+            )
+            logger.info(
+                f"[OSMOSE:RelationExtraction] LLM extraction: "
+                f"{len(all_relations)} relations"
+            )
+
+        elif self.strategy == "hybrid":
+            # Hybrid: Patterns + LLM validation
             pattern_relations = self._extract_with_patterns(
                 concepts=concepts,
                 full_text=full_text,
@@ -120,15 +137,27 @@ class RelationExtractionEngine:
                 f"{len(pattern_relations)} candidates"
             )
 
-        # Étape 2: LLM-assisted classification
-        all_relations = pattern_relations
-        if self.enable_llm and pattern_relations:
+            # LLM valide les patterns
             all_relations = self._enhance_with_llm(
                 candidate_relations=pattern_relations,
                 full_text=full_text
             )
             logger.info(
                 f"[OSMOSE:RelationExtraction] LLM-enhanced: "
+                f"{len(all_relations)} relations"
+            )
+
+        else:  # pattern_only
+            # Pattern-only (déconseillé)
+            all_relations = self._extract_with_patterns(
+                concepts=concepts,
+                full_text=full_text,
+                document_id=document_id,
+                document_name=document_name,
+                chunk_ids=chunk_ids
+            )
+            logger.warning(
+                "[OSMOSE:RelationExtraction] Pattern-only mode (déconseillé) - "
                 f"{len(all_relations)} relations"
             )
 
@@ -250,13 +279,51 @@ class RelationExtractionEngine:
         return self._pattern_matcher
 
     # ==================================================================
-    # LLM Classification Components (J8-J10)
+    # LLM Extraction Components (LLM-First)
     # ==================================================================
 
     @property
-    def llm_classifier(self):
-        """Lazy load LLMRelationClassifier (J8-J10)."""
-        if self._llm_classifier is None:
-            # TODO: Implémenter LLMRelationClassifier class
-            logger.warning("[OSMOSE:RelationExtraction] LLMClassifier not implemented yet")
-        return self._llm_classifier
+    def llm_extractor(self):
+        """Lazy load LLMRelationExtractor (LLM-first)."""
+        if self._llm_extractor is None:
+            from knowbase.relations.llm_relation_extractor import LLMRelationExtractor
+            from knowbase.common.llm_router import LLMRouter
+
+            if self._llm_router is None:
+                self._llm_router = LLMRouter()
+
+            self._llm_extractor = LLMRelationExtractor(
+                llm_router=self._llm_router,
+                model=self.llm_model
+            )
+            logger.info("[OSMOSE:RelationExtraction] LLMRelationExtractor loaded")
+        return self._llm_extractor
+
+    def _extract_with_llm(
+        self,
+        concepts: List[Dict[str, Any]],
+        full_text: str,
+        document_id: str,
+        document_name: str,
+        chunk_ids: Optional[List[str]] = None
+    ) -> List[TypedRelation]:
+        """
+        Extraction LLM-first (gpt-4o-mini).
+
+        Pipeline:
+        1. Co-occurrence pre-filtering (réduire coût)
+        2. LLM analyse contexte et extrait relations
+        3. Post-processing et validation
+
+        Returns:
+            Liste relations extraites
+        """
+        logger.debug("[OSMOSE:RelationExtraction] LLM extraction (gpt-4o-mini)")
+
+        return self.llm_extractor.extract_relations(
+            concepts=concepts,
+            full_text=full_text,
+            document_id=document_id,
+            document_name=document_name,
+            chunk_ids=chunk_ids
+        )

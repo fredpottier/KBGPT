@@ -11,6 +11,7 @@ from .types import (
 )
 from .extraction_engine import RelationExtractionEngine
 from .pattern_matcher import PatternMatcher
+from .llm_relation_extractor import LLMRelationExtractor
 
 __all__ = [
     # Types
@@ -24,4 +25,5 @@ __all__ = [
     # Engines
     "RelationExtractionEngine",
     "PatternMatcher",
+    "LLMRelationExtractor",
 ]
