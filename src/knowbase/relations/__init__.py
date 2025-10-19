@@ -12,6 +12,7 @@ from .types import (
 from .extraction_engine import RelationExtractionEngine
 from .pattern_matcher import PatternMatcher
 from .llm_relation_extractor import LLMRelationExtractor
+from .neo4j_writer import Neo4jRelationshipWriter
 
 __all__ = [
     # Types
@@ -26,4 +27,5 @@ __all__ = [
     "RelationExtractionEngine",
     "PatternMatcher",
     "LLMRelationExtractor",
+    "Neo4jRelationshipWriter",
 ]
