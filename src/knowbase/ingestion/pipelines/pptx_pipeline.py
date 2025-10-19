@@ -37,6 +37,9 @@ from knowbase.db import SessionLocal, DocumentType
 # Phase 1 - Document Backbone Services
 from knowbase.api.services.document_registry_service import DocumentRegistryService
 
+# V2.2 - Extraction Cache System
+from knowbase.ingestion.extraction_cache import get_cache_manager
+
 
 # --- Initialisation des chemins et variables globales ---
 settings = get_settings()
@@ -2211,6 +2214,41 @@ def process_pptx(
     if progress_callback:
         progress_callback("Préparation OSMOSE", 65, 100, "Texte enrichi construit")
         logger.info("[DEBUG] 🎯 Checkpoint D: Après progress_callback")
+
+    # ===== V2.2 - SAUVEGARDE CACHE EXTRACTION =====
+    # Sauvegarder cache AVANT OSMOSE pour permettre rejeux rapides
+    logger.info("[CACHE] Sauvegarde du cache d'extraction...")
+    try:
+        cache_manager = get_cache_manager()
+        
+        # Préparer les données cache
+        extraction_stats = {
+            "duration_seconds": time.time() - time.time(),  # TODO: tracker start_time réel
+            "vision_calls": len([s for s in slide_summaries if len(s.get("summary", "")) > 100]),
+            "cost_usd": 0.0,  # TODO: tracker coût extraction
+            "megaparse_blocks": sum(1 for s in slides_data if s.get("megaparse_content"))
+        }
+        
+        extraction_config = {
+            "use_vision": use_vision,
+            "document_type_id": document_type_id,
+            "total_slides": len(slides_data)
+        }
+        
+        # Sauvegarder cache
+        cache_path = cache_manager.save_cache(
+            source_file_path=pptx_path,
+            extracted_text=full_text_enriched,
+            document_metadata=metadata,
+            extraction_config=extraction_config,
+            extraction_stats=extraction_stats,
+            page_texts=[{"slide_index": s["slide_index"], "text": s["summary"]} for s in slide_summaries]
+        )
+        
+        if cache_path:
+            logger.info(f"[CACHE] ✅ Cache saved successfully: {cache_path.name}")
+    except Exception as e:
+        logger.warning(f"[CACHE] ⚠️ Failed to save cache (non-critical): {e}")
 
     # ===== OSMOSE Pipeline V2.1 - Analyse Sémantique =====
     logger.info("=" * 80)
