@@ -298,6 +298,7 @@ class LLMCanonicalizer:
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.0,
+                    max_tokens=8000,  # Fix 2025-10-21: Batch de 20 concepts nécessite ~4000 tokens
                     response_format={"type": "json_object"}
                 )
 
