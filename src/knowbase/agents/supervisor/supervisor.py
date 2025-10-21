@@ -251,9 +251,9 @@ class SupervisorAgent(BaseAgent):
                 return FSMState.FINALIZE
 
             # Récupérer texte complet document
-            full_text = state.metadata.get("full_text", "")
+            full_text = state.full_text or ""
             if not full_text:
-                logger.warning("[SUPERVISOR] EXTRACT_RELATIONS: No full_text in metadata, skipping")
+                logger.warning("[SUPERVISOR] EXTRACT_RELATIONS: No full_text in state, skipping")
                 return FSMState.FINALIZE
 
             # Lazy load composants Phase 2
@@ -270,14 +270,66 @@ class SupervisorAgent(BaseAgent):
                 logger.info("[SUPERVISOR] EXTRACT_RELATIONS: Initialized relation extraction components")
 
             # Préparer concepts pour extraction
+            # PROBLÈME: state.promoted ne contient pas surface_forms (schema mismatch)
+            # SOLUTION: Récupérer depuis Neo4j les CanonicalConcepts avec surface_form
+            from knowbase.common.neo4j_client import get_neo4j_client
+            neo4j_client = get_neo4j_client()
+
             concepts = []
-            for concept_data in state.promoted:
-                concepts.append({
-                    "concept_id": concept_data.get("concept_id"),
-                    "canonical_name": concept_data.get("canonical_name"),
-                    "surface_forms": concept_data.get("surface_forms", []),
-                    "concept_type": concept_data.get("concept_type", "UNKNOWN")
-                })
+            if neo4j_client and neo4j_client.is_connected():
+                # Query Neo4j pour récupérer les CanonicalConcepts du document actuel
+                query = """
+                MATCH (c:CanonicalConcept)
+                WHERE c.tenant_id = $tenant_id
+                RETURN c.canonical_id AS concept_id,
+                       c.canonical_name AS canonical_name,
+                       c.surface_form AS surface_form,
+                       c.concept_type AS concept_type
+                LIMIT 1000
+                """
+                try:
+                    results = neo4j_client.run_query(query, {"tenant_id": state.tenant_id})
+                    for record in results:
+                        # Convertir surface_form (string) → surface_forms (liste)
+                        surface_form = record.get("surface_form", "")
+                        surface_forms = [surface_form] if surface_form else []
+
+                        concepts.append({
+                            "concept_id": record["concept_id"],
+                            "canonical_name": record["canonical_name"],
+                            "surface_forms": surface_forms,
+                            "concept_type": record.get("concept_type", "UNKNOWN")
+                        })
+                    logger.info(
+                        f"[SUPERVISOR] EXTRACT_RELATIONS: Retrieved {len(concepts)} concepts from Neo4j "
+                        f"with surface_forms"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"[SUPERVISOR] EXTRACT_RELATIONS: Error querying Neo4j for concepts: {e}. "
+                        f"Falling back to state.promoted without surface_forms"
+                    )
+                    # Fallback: utiliser state.promoted sans surface_forms (meilleur que rien)
+                    for concept_data in state.promoted:
+                        concepts.append({
+                            "concept_id": concept_data.get("concept_id"),
+                            "canonical_name": concept_data.get("canonical_name"),
+                            "surface_forms": [],  # Vide si erreur Neo4j
+                            "concept_type": concept_data.get("concept_type", "UNKNOWN")
+                        })
+            else:
+                logger.warning(
+                    "[SUPERVISOR] EXTRACT_RELATIONS: Neo4j not available, "
+                    "falling back to state.promoted without surface_forms"
+                )
+                # Fallback: utiliser state.promoted sans surface_forms
+                for concept_data in state.promoted:
+                    concepts.append({
+                        "concept_id": concept_data.get("concept_id"),
+                        "canonical_name": concept_data.get("canonical_name"),
+                        "surface_forms": [],
+                        "concept_type": concept_data.get("concept_type", "UNKNOWN")
+                    })
 
             logger.info(f"[SUPERVISOR] EXTRACT_RELATIONS: Extracting relations from {len(concepts)} canonical concepts")
 
@@ -287,8 +339,8 @@ class SupervisorAgent(BaseAgent):
                     concepts=concepts,
                     full_text=full_text,
                     document_id=state.document_id,
-                    document_name=state.metadata.get("document_name", "unknown"),
-                    chunk_ids=state.metadata.get("chunk_ids", [])
+                    document_name=state.document_name or "unknown",
+                    chunk_ids=state.chunk_ids or []
                 )
 
                 logger.info(
@@ -301,7 +353,7 @@ class SupervisorAgent(BaseAgent):
                     write_stats = self.relation_writer.write_relations(
                         relations=extraction_result.relations,
                         document_id=state.document_id,
-                        document_name=state.metadata.get("document_name", "unknown")
+                        document_name=state.document_name or "unknown"
                     )
 
                     logger.info(
@@ -310,7 +362,7 @@ class SupervisorAgent(BaseAgent):
                     )
 
                     # Stocker stats dans state
-                    state.metadata["relation_extraction_stats"] = {
+                    state.relation_extraction_stats = {
                         "total_extracted": extraction_result.total_relations_extracted,
                         "total_created": write_stats["created"],
                         "total_updated": write_stats["updated"],
@@ -320,7 +372,7 @@ class SupervisorAgent(BaseAgent):
                     }
                 else:
                     logger.info("[SUPERVISOR] EXTRACT_RELATIONS: No relations extracted")
-                    state.metadata["relation_extraction_stats"] = {"total_extracted": 0}
+                    state.relation_extraction_stats = {"total_extracted": 0}
 
             except Exception as e:
                 logger.error(
