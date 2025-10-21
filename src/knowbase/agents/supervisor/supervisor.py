@@ -385,7 +385,82 @@ class SupervisorAgent(BaseAgent):
             return FSMState.FINALIZE
 
         elif fsm_state == FSMState.FINALIZE:
-            # Finalisation métriques
+            # Finalisation: chunking + upload Qdrant
+            logger.info("[SUPERVISOR] FINALIZE: Chunking document and uploading to Qdrant")
+
+            # Récupérer texte complet
+            full_text = state.full_text or ""
+            if not full_text:
+                logger.warning("[SUPERVISOR] FINALIZE: No full_text available, skipping chunking")
+                return FSMState.DONE
+
+            try:
+                # Lazy load TextChunker
+                from knowbase.chunks.text_chunker import get_text_chunker
+                chunker = get_text_chunker()
+
+                # Préparer metadata pour chunks
+                chunk_metadata = {
+                    "tenant_id": state.tenant_id,
+                    "document_id": state.document_id,
+                    "document_name": state.document_name or "unknown",
+                }
+
+                # Chunking document
+                chunks = chunker.chunk_document(
+                    document_id=state.document_id,
+                    text=full_text,
+                    metadata=chunk_metadata
+                )
+
+                logger.info(f"[SUPERVISOR] FINALIZE: Created {len(chunks)} chunks")
+
+                # Upload to Qdrant
+                if chunks:
+                    from knowbase.common.qdrant_client import get_qdrant_client
+                    qdrant_client = get_qdrant_client()
+
+                    if qdrant_client:
+                        # Préparer points Qdrant
+                        points = []
+                        for i, chunk in enumerate(chunks):
+                            points.append({
+                                "id": chunk.get("chunk_id"),
+                                "vector": chunk.get("embedding", []),
+                                "payload": {
+                                    "tenant_id": state.tenant_id,
+                                    "document_id": state.document_id,
+                                    "document_name": state.document_name or "unknown",
+                                    "chunk_index": i,
+                                    "text": chunk.get("text", ""),
+                                    "token_count": chunk.get("token_count", 0),
+                                    **chunk_metadata
+                                }
+                            })
+
+                        # Upload batch
+                        try:
+                            qdrant_client.upsert(
+                                collection_name="knowbase",
+                                points=points
+                            )
+                            logger.info(
+                                f"[SUPERVISOR] FINALIZE: ✅ Uploaded {len(points)} chunks to Qdrant collection 'knowbase'"
+                            )
+                        except Exception as e:
+                            logger.error(f"[SUPERVISOR] FINALIZE: Error uploading to Qdrant: {e}")
+                    else:
+                        logger.warning("[SUPERVISOR] FINALIZE: Qdrant client not available")
+                else:
+                    logger.warning("[SUPERVISOR] FINALIZE: No chunks created")
+
+            except Exception as e:
+                logger.error(
+                    f"[SUPERVISOR] FINALIZE: Error during chunking/upload: {e}",
+                    exc_info=True
+                )
+                # Continue vers DONE même en cas d'erreur (chunking non-critique)
+
             logger.debug("[SUPERVISOR] FINALIZE: Computing final metrics")
             return FSMState.DONE
 
