@@ -251,6 +251,183 @@ class LLMCanonicalizer:
                 metadata={"error": str(e)}
             )
 
+    def canonicalize_batch(
+        self,
+        concepts: List[Dict[str, str]],
+        timeout: int = 30
+    ) -> List[CanonicalizationResult]:
+        """
+        Canonicalise un batch de concepts via LLM (batch processing).
+
+        Args:
+            concepts: Liste de dicts avec clés {raw_name, context, domain_hint}
+            timeout: Timeout max LLM call en secondes
+
+        Returns:
+            Liste de CanonicalizationResult (même ordre que concepts)
+
+        Example:
+            >>> batch = [
+            ...     {"raw_name": "S/4HANA Cloud's", "context": "...", "domain_hint": None},
+            ...     {"raw_name": "MFA", "context": "...", "domain_hint": None}
+            ... ]
+            >>> results = canonicalizer.canonicalize_batch(batch)
+            >>> results[0].canonical_name
+            "SAP S/4HANA Cloud"
+        """
+        if not concepts:
+            return []
+
+        logger.debug(
+            f"[LLMCanonicalizer:Batch] Canonicalizing batch of {len(concepts)} concepts"
+        )
+
+        # Construire prompt batch
+        prompt = self._build_batch_canonicalization_prompt(concepts)
+
+        try:
+            # P0: Appel LLM via circuit breaker
+            def _llm_call():
+                from knowbase.common.llm_router import TaskType
+
+                # Appel LLM via router
+                response_content = self.llm_router.complete(
+                    task_type=TaskType.CANONICALIZATION,
+                    messages=[
+                        {"role": "system", "content": CANONICALIZATION_BATCH_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.0,
+                    response_format={"type": "json_object"}
+                )
+
+                # Fix 2025-10-21: Log RAW response for diagnostic
+                logger.info(
+                    f"[LLMCanonicalizer:Batch] 🔍 RAW LLM response (first 1000 chars):\n"
+                    f"{response_content[:1000]}"
+                )
+
+                # Parse résultat JSON
+                result_json = self._parse_json_robust(response_content)
+
+                # Extraire résultats pour chaque concept
+                results = []
+                concepts_results = result_json.get("concepts", [])
+
+                for idx, concept_result in enumerate(concepts_results):
+                    try:
+                        results.append(CanonicalizationResult(**concept_result))
+                    except Exception as e:
+                        logger.error(
+                            f"[LLMCanonicalizer:Batch] Failed to parse result {idx}: {e}, "
+                            f"using fallback for '{concepts[idx]['raw_name']}'"
+                        )
+                        # Fallback pour ce concept
+                        results.append(CanonicalizationResult(
+                            canonical_name=concepts[idx]["raw_name"].strip().title(),
+                            confidence=0.5,
+                            reasoning="Batch parsing failed, fallback to title case",
+                            aliases=[],
+                            concept_type="Unknown",
+                            domain=None,
+                            ambiguity_warning="Batch canonicalization partial failure",
+                            possible_matches=[],
+                            metadata={"error": str(e)}
+                        ))
+
+                return results
+
+            # Appel via circuit breaker
+            results = self.circuit_breaker.call(_llm_call)
+
+            logger.info(
+                f"[LLMCanonicalizer:Batch] ✅ Batch completed: {len(results)} concepts canonicalized"
+            )
+
+            return results
+
+        except CircuitBreakerOpenError as cb_err:
+            # Circuit breaker ouvert → fallback pour TOUS les concepts
+            logger.warning(
+                f"[LLMCanonicalizer:Batch] ⚠️ Circuit breaker OPEN, "
+                f"falling back to title case for {len(concepts)} concepts"
+            )
+
+            return [
+                CanonicalizationResult(
+                    canonical_name=concept["raw_name"].strip().title(),
+                    confidence=0.5,
+                    reasoning=f"Circuit breaker open: {str(cb_err)}",
+                    aliases=[],
+                    concept_type="Unknown",
+                    domain=None,
+                    ambiguity_warning="LLM service temporarily unavailable",
+                    possible_matches=[],
+                    metadata={"error": "circuit_breaker_open"}
+                )
+                for concept in concepts
+            ]
+
+        except Exception as e:
+            logger.error(f"[LLMCanonicalizer:Batch] ❌ Batch canonicalization failed: {e}")
+
+            # Fallback: retourner résultats basiques pour TOUS
+            return [
+                CanonicalizationResult(
+                    canonical_name=concept["raw_name"].strip().title(),
+                    confidence=0.5,
+                    reasoning=f"Batch LLM error: {str(e)}",
+                    aliases=[],
+                    concept_type="Unknown",
+                    domain=None,
+                    ambiguity_warning="Batch canonicalization failed",
+                    possible_matches=[],
+                    metadata={"error": str(e)}
+                )
+                for concept in concepts
+            ]
+
+    def _build_batch_canonicalization_prompt(
+        self,
+        concepts: List[Dict[str, str]]
+    ) -> str:
+        """Construit prompt batch pour LLM."""
+        concept_lines = []
+
+        for idx, concept in enumerate(concepts, 1):
+            raw_name = concept.get("raw_name", "")
+            context = concept.get("context", "")
+            domain_hint = concept.get("domain_hint")
+
+            line = f"{idx}. **Name:** {raw_name}"
+
+            if context:
+                context_snippet = self._truncate_context(context, max_length=200)
+                line += f" | **Context:** {context_snippet}"
+
+            if domain_hint:
+                line += f" | **Domain:** {domain_hint}"
+
+            concept_lines.append(line)
+
+        concepts_text = "\n".join(concept_lines)
+
+        return f"""
+**Task:** Canonicalize the following {len(concepts)} concepts.
+
+{concepts_text}
+
+Return a JSON object with format:
+{{
+  "concepts": [
+    {{"canonical_name": "...", "confidence": 0.95, "reasoning": "...", ...}},
+    ...
+  ]
+}}
+
+IMPORTANT: Return results in SAME ORDER as input (1-{len(concepts)}).
+"""
+
     def _parse_json_robust(self, response_content: str) -> Dict[str, Any]:
         """
         Parse JSON de manière robuste avec fallback sur erreurs.
@@ -452,4 +629,43 @@ Your task is to find the OFFICIAL CANONICAL NAME for concepts extracted from doc
   ],
   "metadata": {"vendor": "SAP"}
 }
+"""
+
+CANONICALIZATION_BATCH_SYSTEM_PROMPT = """You are a concept canonicalization expert specialized in batch processing.
+
+Your task is to find the OFFICIAL CANONICAL NAME for multiple concepts extracted from documents.
+
+# Guidelines (same as single canonicalization)
+
+1. **Official Names**: Use official product/company/standard names
+2. **Acronyms**: Expand acronyms to full official names
+3. **Possessives**: Remove possessive forms ('s, 's)
+4. **Casing**: Preserve official casing
+5. **Variants**: List common aliases/variants
+6. **Ambiguity**: If uncertain, set ambiguity_warning and list possible_matches
+7. **Type Detection**: Classify concept type
+
+# Batch Output Format (JSON)
+
+{
+  "concepts": [
+    {
+      "canonical_name": "Official name 1",
+      "confidence": 0.95,
+      "reasoning": "Brief explanation",
+      "aliases": ["variant1", "variant2"],
+      "concept_type": "Product|Acronym|...",
+      "domain": "enterprise_software|...",
+      "ambiguity_warning": null,
+      "possible_matches": [],
+      "metadata": {}
+    },
+    {
+      "canonical_name": "Official name 2",
+      ...
+    }
+  ]
+}
+
+CRITICAL: Return results in SAME ORDER as input concepts. The array "concepts" must have EXACTLY the same number of elements as the input.
 """
