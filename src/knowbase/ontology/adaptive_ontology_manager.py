@@ -216,10 +216,32 @@ class AdaptiveOntologyManager:
         # P0: Validation similarité raw_name ↔ canonical_name (hallucination detection)
         from difflib import SequenceMatcher
         similarity = SequenceMatcher(None, raw_name.lower(), canonical_name.lower()).ratio()
-        if similarity < 0.3:
+
+        # Smart acronym detection: Si raw est acronyme de canonical, OK
+        def is_valid_acronym(short: str, long: str) -> bool:
+            """Vérifie si short est un acronyme valide de long."""
+            # Extraire initiales des mots significatifs (>2 chars) du long form
+            import re
+            words = [w for w in re.findall(r'\w+', long) if len(w) > 2 or w.upper() == w]
+            if not words:
+                return False
+            acronym_from_long = ''.join(w[0].upper() for w in words)
+            # Accepter si match exact OU sous-séquence (ex: "ERP" dans "Enterprise Resource Planning")
+            short_upper = short.upper().replace(' ', '')
+            return (short_upper == acronym_from_long or
+                    short_upper in acronym_from_long or
+                    all(c in acronym_from_long for c in short_upper))
+
+        is_acronym = is_valid_acronym(raw_name, canonical_name)
+
+        # Threshold adaptatif: 0.15 pour acronymes, 0.30 pour le reste
+        min_similarity = 0.15 if is_acronym else 0.30
+
+        if similarity < min_similarity:
             logger.error(
                 f"[AdaptiveOntology:Store] ❌ HALLUCINATION DETECTED: "
-                f"raw='{raw_name}' vs canonical='{canonical_name}' (similarity={similarity:.2f})"
+                f"raw='{raw_name}' vs canonical='{canonical_name}' "
+                f"(similarity={similarity:.2f}, acronym={is_acronym}, threshold={min_similarity})"
             )
             return ""
 
