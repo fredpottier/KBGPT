@@ -301,11 +301,18 @@ class LLMCanonicalizer:
                     response_format={"type": "json_object"}
                 )
 
-                # Fix 2025-10-21: Log RAW response for diagnostic
+                # Fix 2025-10-21: Diagnostic + strip whitespace
                 logger.info(
-                    f"[LLMCanonicalizer:Batch] 🔍 RAW LLM response (first 1000 chars):\n"
-                    f"{response_content[:1000]}"
+                    f"[LLMCanonicalizer:Batch] 🔍 RAW LLM response "
+                    f"(type={type(response_content)}, len={len(response_content if response_content else '')}):\n"
+                    f"{response_content[:1000] if response_content else '(EMPTY)'}"
                 )
+
+                # Strip whitespace before parsing
+                response_content = response_content.strip() if response_content else ""
+
+                if not response_content:
+                    raise ValueError("LLM returned empty response")
 
                 # Parse résultat JSON
                 result_json = self._parse_json_robust(response_content)
