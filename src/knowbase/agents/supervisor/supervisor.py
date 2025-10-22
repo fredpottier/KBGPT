@@ -272,7 +272,7 @@ class SupervisorAgent(BaseAgent):
             # Préparer concepts pour extraction
             # PROBLÈME: state.promoted ne contient pas surface_forms (schema mismatch)
             # SOLUTION: Récupérer depuis Neo4j les CanonicalConcepts avec surface_form
-            from knowbase.common.neo4j_client import get_neo4j_client
+            from knowbase.common.clients.neo4j_client import get_neo4j_client
             neo4j_client = get_neo4j_client()
 
             concepts = []
