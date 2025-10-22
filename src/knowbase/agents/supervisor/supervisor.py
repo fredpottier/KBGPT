@@ -396,7 +396,7 @@ class SupervisorAgent(BaseAgent):
 
             try:
                 # Lazy load TextChunker
-                from knowbase.chunks.text_chunker import get_text_chunker
+                from knowbase.ingestion.text_chunker import get_text_chunker
                 chunker = get_text_chunker()
 
                 # Préparer metadata pour chunks
