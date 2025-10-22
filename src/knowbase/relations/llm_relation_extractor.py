@@ -6,6 +6,7 @@ import json
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from knowbase.relations.types import (
     RelationType,
@@ -95,7 +96,7 @@ class LLMRelationExtractor:
         self,
         llm_router: Optional[LLMRouter] = None,
         model: str = "gpt-4o-mini",
-        max_context_chars: int = 3000,
+        max_context_chars: int = 8000,
         co_occurrence_window: int = 150
     ):
         """
@@ -164,22 +165,54 @@ class LLMRelationExtractor:
         # Étape 2: Chunking si texte trop long
         text_chunks = self._chunk_text_if_needed(full_text, concepts)
 
-        # Étape 3: LLM extraction par chunk
+        # Étape 3: LLM extraction par chunk (PARALLÈLE avec 8 workers)
+        max_workers = 8
+        logger.info(
+            f"[OSMOSE:LLMRelationExtractor] Processing {len(text_chunks)} chunks "
+            f"in PARALLEL with {max_workers} workers (OPTIMIZED for speed)"
+        )
+
         all_relations = []
-        for chunk_idx, chunk_data in enumerate(text_chunks):
-            logger.info(
-                f"[OSMOSE:LLMRelationExtractor] Processing chunk {chunk_idx + 1}/{len(text_chunks)} "
-                f"({len(chunk_data['text'])} chars, {len(chunk_data['concepts'])} concepts)"
-            )
 
-            chunk_relations = self._extract_from_chunk(
-                chunk_data=chunk_data,
-                document_id=document_id,
-                document_name=document_name,
-                chunk_ids=chunk_ids
-            )
+        # Extraction parallèle avec ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Soumettre tous les chunks en parallèle
+            future_to_chunk = {
+                executor.submit(
+                    self._extract_from_chunk,
+                    chunk_data=chunk_data,
+                    document_id=document_id,
+                    document_name=document_name,
+                    chunk_ids=chunk_ids
+                ): (chunk_idx, chunk_data)
+                for chunk_idx, chunk_data in enumerate(text_chunks)
+            }
 
-            all_relations.extend(chunk_relations)
+            # Récupérer résultats au fur et à mesure (as_completed pour logs temps réel)
+            completed = 0
+            for future in as_completed(future_to_chunk):
+                chunk_idx, chunk_data = future_to_chunk[future]
+                completed += 1
+
+                try:
+                    chunk_relations = future.result()
+                    all_relations.extend(chunk_relations)
+
+                    logger.info(
+                        f"[OSMOSE:LLMRelationExtractor] ✅ Chunk {chunk_idx + 1}/{len(text_chunks)} "
+                        f"completed ({completed}/{len(text_chunks)} done) - "
+                        f"Extracted {len(chunk_relations)} relations"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"[OSMOSE:LLMRelationExtractor] ❌ Chunk {chunk_idx + 1} failed: {e}",
+                        exc_info=True
+                    )
+
+        logger.info(
+            f"[OSMOSE:LLMRelationExtractor] Parallel extraction completed: "
+            f"{len(all_relations)} total relations from {len(text_chunks)} chunks"
+        )
 
         # Étape 4: Déduplication (même relation peut apparaître dans plusieurs chunks)
         deduplicated = self._deduplicate_relations(all_relations)
@@ -212,8 +245,16 @@ class LLMRelationExtractor:
         # Pour chaque concept, trouver toutes ses mentions dans le texte
         concept_mentions = []
         for concept in concepts:
+            # Fix 2025-10-20: Skip concepts avec canonical_name None
+            canonical_name = concept.get("canonical_name")
+            if not canonical_name:
+                logger.warning(
+                    f"[LLMRelationExtractor] Skipping concept with None canonical_name: {concept}"
+                )
+                continue
+
             # Chercher canonical_name
-            canonical = concept["canonical_name"].lower()
+            canonical = canonical_name.lower()
             start = 0
             while True:
                 pos = text_lower.find(canonical, start)
@@ -229,6 +270,8 @@ class LLMRelationExtractor:
 
             # Chercher surface_forms
             for form in concept.get("surface_forms", []):
+                if not form:  # Skip empty surface forms
+                    continue
                 form_lower = form.lower()
                 start = 0
                 while True:
