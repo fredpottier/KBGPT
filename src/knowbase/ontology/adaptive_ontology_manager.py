@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 # Validation et sanitization (P0 - Security hardening)
-VALID_CONCEPT_NAME_PATTERN = re.compile(r"^[\w\s\-_\/\.\,\(\)\'\"]+$", re.UNICODE)
+VALID_CONCEPT_NAME_PATTERN = re.compile(r"^[\w\s\-_\/\.\,\(\)\'\"\&]+$", re.UNICODE)
 MAX_CONCEPT_NAME_LENGTH = 200
 VALID_TENANT_ID_PATTERN = re.compile(r"^[a-z0-9_-]{1,50}$")
 
