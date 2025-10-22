@@ -288,18 +288,19 @@ class SupervisorAgent(BaseAgent):
                 LIMIT 1000
                 """
                 try:
-                    results = neo4j_client.run_query(query, {"tenant_id": state.tenant_id})
-                    for record in results:
-                        # Convertir surface_form (string) → surface_forms (liste)
-                        surface_form = record.get("surface_form", "")
-                        surface_forms = [surface_form] if surface_form else []
+                    with neo4j_client.driver.session(database=neo4j_client.database) as session:
+                        result = session.run(query, tenant_id=state.tenant_id)
+                        for record in result:
+                            # Convertir surface_form (string) → surface_forms (liste)
+                            surface_form = record.get("surface_form", "")
+                            surface_forms = [surface_form] if surface_form else []
 
-                        concepts.append({
-                            "concept_id": record["concept_id"],
-                            "canonical_name": record["canonical_name"],
-                            "surface_forms": surface_forms,
-                            "concept_type": record.get("concept_type", "UNKNOWN")
-                        })
+                            concepts.append({
+                                "concept_id": record["concept_id"],
+                                "canonical_name": record["canonical_name"],
+                                "surface_forms": surface_forms,
+                                "concept_type": record.get("concept_type", "UNKNOWN")
+                            })
                     logger.info(
                         f"[SUPERVISOR] EXTRACT_RELATIONS: Retrieved {len(concepts)} concepts from Neo4j "
                         f"with surface_forms"
