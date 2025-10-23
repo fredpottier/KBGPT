@@ -11,7 +11,8 @@ from knowbase.relations.types import (
     RelationStatus,
     RelationStrength
 )
-from knowbase.common.clients.neo4j_client import Neo4jClient
+from knowbase.common.clients.neo4j_client import Neo4jClient, get_neo4j_client
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +40,23 @@ class Neo4jRelationshipWriter:
         Initialise Neo4j writer.
 
         Args:
-            neo4j_client: Client Neo4j (default: nouveau instance)
+            neo4j_client: Client Neo4j (default: singleton from env)
             tenant_id: Tenant ID pour isolation multi-tenant
         """
-        self.neo4j = neo4j_client or Neo4jClient()
+        # Fix 2025-10-20: Utiliser get_neo4j_client() pour lire config depuis .env
+        if neo4j_client:
+            self.neo4j = neo4j_client
+        else:
+            self.neo4j = get_neo4j_client(
+                uri=os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
+                user=os.getenv("NEO4J_USER", "neo4j"),
+                password=os.getenv("NEO4J_PASSWORD", "password")
+            )
+
         self.tenant_id = tenant_id
 
         logger.info(
-            f"[OSMOSE:Neo4jRelationshipWriter] Initialized (tenant={tenant_id})"
+            f"[OSMOSE:Neo4jRelationshipWriter] Initialized (tenant={tenant_id}, uri={self.neo4j.uri})"
         )
 
     def _execute_query(
@@ -250,8 +260,8 @@ class Neo4jRelationshipWriter:
             True si les deux existent
         """
         query = """
-        MATCH (source:CanonicalConcept {concept_id: $source_id, tenant_id: $tenant_id})
-        MATCH (target:CanonicalConcept {concept_id: $target_id, tenant_id: $tenant_id})
+        MATCH (source:CanonicalConcept {canonical_id: $source_id, tenant_id: $tenant_id})
+        MATCH (target:CanonicalConcept {canonical_id: $target_id, tenant_id: $tenant_id})
         RETURN count(source) as source_count, count(target) as target_count
         """
 
@@ -286,12 +296,12 @@ class Neo4jRelationshipWriter:
             Metadata relation si existe, None sinon
         """
         # Construire query dynamique selon type relation
-        rel_type_str = relation_type.value
+        rel_type_str = relation_type.value if hasattr(relation_type, 'value') else relation_type
 
         query = f"""
-        MATCH (source:CanonicalConcept {{concept_id: $source_id, tenant_id: $tenant_id}})
+        MATCH (source:CanonicalConcept {{canonical_id: $source_id, tenant_id: $tenant_id}})
         -[r:{rel_type_str}]->
-        (target:CanonicalConcept {{concept_id: $target_id, tenant_id: $tenant_id}})
+        (target:CanonicalConcept {{canonical_id: $target_id, tenant_id: $tenant_id}})
         RETURN properties(r) as rel_props
         """
 
@@ -317,15 +327,15 @@ class Neo4jRelationshipWriter:
         Args:
             relation: Relation à créer
         """
-        rel_type_str = relation.relation_type.value
+        rel_type_str = relation.relation_type.value if hasattr(relation.relation_type, 'value') else relation.relation_type
 
         # Préparer metadata
         metadata = self._prepare_metadata(relation)
 
         # Query MERGE pour éviter duplicates
         query = f"""
-        MATCH (source:CanonicalConcept {{concept_id: $source_id, tenant_id: $tenant_id}})
-        MATCH (target:CanonicalConcept {{concept_id: $target_id, tenant_id: $tenant_id}})
+        MATCH (source:CanonicalConcept {{canonical_id: $source_id, tenant_id: $tenant_id}})
+        MATCH (target:CanonicalConcept {{canonical_id: $target_id, tenant_id: $tenant_id}})
         MERGE (source)-[r:{rel_type_str}]->(target)
         SET r = $metadata
         RETURN r
@@ -349,16 +359,16 @@ class Neo4jRelationshipWriter:
         Args:
             relation: Relation avec nouvelles valeurs
         """
-        rel_type_str = relation.relation_type.value
+        rel_type_str = relation.relation_type.value if hasattr(relation.relation_type, 'value') else relation.relation_type
 
         # Préparer metadata
         metadata = self._prepare_metadata(relation)
 
         # Update relation
         query = f"""
-        MATCH (source:CanonicalConcept {{concept_id: $source_id, tenant_id: $tenant_id}})
+        MATCH (source:CanonicalConcept {{canonical_id: $source_id, tenant_id: $tenant_id}})
         -[r:{rel_type_str}]->
-        (target:CanonicalConcept {{concept_id: $target_id, tenant_id: $tenant_id}})
+        (target:CanonicalConcept {{canonical_id: $target_id, tenant_id: $tenant_id}})
         SET r = $metadata
         RETURN r
         """
@@ -481,34 +491,34 @@ class Neo4jRelationshipWriter:
         """
         if direction == "outgoing":
             query = """
-            MATCH (source:CanonicalConcept {concept_id: $concept_id, tenant_id: $tenant_id})
+            MATCH (source:CanonicalConcept {canonical_id: $concept_id, tenant_id: $tenant_id})
             -[r]->
             (target:CanonicalConcept {tenant_id: $tenant_id})
             RETURN type(r) as relation_type, properties(r) as metadata,
-                   target.concept_id as target_id, target.canonical_name as target_name
+                   target.canonical_id as target_id, target.canonical_name as target_name
             """
         elif direction == "incoming":
             query = """
             MATCH (source:CanonicalConcept {tenant_id: $tenant_id})
             -[r]->
-            (target:CanonicalConcept {concept_id: $concept_id, tenant_id: $tenant_id})
+            (target:CanonicalConcept {canonical_id: $concept_id, tenant_id: $tenant_id})
             RETURN type(r) as relation_type, properties(r) as metadata,
-                   source.concept_id as source_id, source.canonical_name as source_name
+                   source.canonical_id as source_id, source.canonical_name as source_name
             """
         else:  # both
             query = """
-            MATCH (source:CanonicalConcept {concept_id: $concept_id, tenant_id: $tenant_id})
+            MATCH (source:CanonicalConcept {canonical_id: $concept_id, tenant_id: $tenant_id})
             -[r]->
             (target:CanonicalConcept {tenant_id: $tenant_id})
             RETURN 'outgoing' as direction, type(r) as relation_type,
-                   properties(r) as metadata, target.concept_id as other_id,
+                   properties(r) as metadata, target.canonical_id as other_id,
                    target.canonical_name as other_name
             UNION
             MATCH (source:CanonicalConcept {tenant_id: $tenant_id})
             -[r]->
-            (target:CanonicalConcept {concept_id: $concept_id, tenant_id: $tenant_id})
+            (target:CanonicalConcept {canonical_id: $concept_id, tenant_id: $tenant_id})
             RETURN 'incoming' as direction, type(r) as relation_type,
-                   properties(r) as metadata, source.concept_id as other_id,
+                   properties(r) as metadata, source.canonical_id as other_id,
                    source.canonical_name as other_name
             """
 

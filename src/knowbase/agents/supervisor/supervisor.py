@@ -400,18 +400,31 @@ class SupervisorAgent(BaseAgent):
                 from knowbase.ingestion.text_chunker import get_text_chunker
                 chunker = get_text_chunker()
 
-                # Préparer metadata pour chunks
-                chunk_metadata = {
-                    "tenant_id": state.tenant_id,
-                    "document_id": state.document_id,
-                    "document_name": state.document_name or "unknown",
-                }
+                # Récupérer concepts canoniques pour enrichir chunks
+                canonical_concepts = []
+                try:
+                    query = """
+                    MATCH (c:CanonicalConcept)
+                    WHERE c.tenant_id = $tenant_id AND c.document_id = $document_id
+                    RETURN c.canonical_id AS concept_id,
+                           c.canonical_name AS name,
+                           c.concept_type AS type
+                    """
+                    with self.neo4j.driver.session(database=self.neo4j.database) as session:
+                        result = session.run(query, tenant_id=state.tenant_id, document_id=state.document_id)
+                        canonical_concepts = [dict(record) for record in result]
+                    logger.info(f"[SUPERVISOR] FINALIZE: Retrieved {len(canonical_concepts)} canonical concepts for chunking")
+                except Exception as e:
+                    logger.warning(f"[SUPERVISOR] FINALIZE: Failed to retrieve concepts: {e}")
 
                 # Chunking document
                 chunks = chunker.chunk_document(
-                    document_id=state.document_id,
                     text=full_text,
-                    metadata=chunk_metadata
+                    document_id=state.document_id,
+                    document_name=state.document_name or "unknown",
+                    segment_id="full_document",
+                    concepts=canonical_concepts,
+                    tenant_id=state.tenant_id
                 )
 
                 logger.info(f"[SUPERVISOR] FINALIZE: Created {len(chunks)} chunks")
