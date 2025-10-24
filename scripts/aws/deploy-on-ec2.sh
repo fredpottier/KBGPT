@@ -85,8 +85,12 @@ log "✓ Images Docker téléchargées"
 # Étape 6: Démarrage des conteneurs
 log "[6/7] Démarrage conteneurs Docker..."
 
+# Nettoyage préventif: supprimer conteneurs/réseaux existants pour éviter conflits de ports
+log "  Nettoyage conteneurs/réseaux existants..."
+sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml down 2>/dev/null || true
+sudo docker network rm knowbase_network 2>/dev/null || true
+
 # docker-compose créera automatiquement le réseau knowbase_network
-# Ne pas le créer manuellement pour éviter les conflits de labels
 if [ -f "docker-compose.monitoring.yml" ]; then
     sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 else
