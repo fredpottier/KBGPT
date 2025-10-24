@@ -623,13 +623,13 @@ function Deploy-Application {
     Write-Host "Authentification ECR + Démarrage conteneurs Docker (3-5 min)..."
     $AccountID = Get-ECRAccountID
 
-    # Combiner login ECR + pull + up dans une seule session SSH
-    $fullDockerCommand = @"
-aws ecr get-login-password --region $Region | sudo docker login --username AWS --password-stdin ${AccountID}.dkr.ecr.${Region}.amazonaws.com && \
-cd /home/ubuntu/knowbase && \
-sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml pull && \
-sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
-"@
+    # Combiner login ECR + pull + up dans une seule session SSH (utiliser LF Unix uniquement)
+    $fullDockerCommand = (@(
+        "aws ecr get-login-password --region $Region | sudo docker login --username AWS --password-stdin ${AccountID}.dkr.ecr.${Region}.amazonaws.com",
+        "cd /home/ubuntu/knowbase",
+        "sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml pull",
+        "sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d"
+    ) -join ' && ')
 
     ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $fullDockerCommand
     Write-Success "Docker authentifié + Conteneurs démarrés (avec monitoring stack)"
