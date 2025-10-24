@@ -556,17 +556,8 @@ function Deploy-Application {
     }
 
     # Approche simplifiée: Transfert batch + script bash autonome sur EC2
+    # Note: SCP créera automatiquement /home/ubuntu/knowbase lors du premier transfert
     Write-Host "Transfert fichiers essentiels..."
-
-    # 0. Créer répertoire de base sur EC2
-    Write-Host "Création répertoire /home/ubuntu/knowbase..."
-    try {
-        $mkdirCmd = "ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=5 -o BatchMode=yes ubuntu@$PublicIP `"mkdir -p /home/ubuntu/knowbase`""
-        Invoke-SSHWithTimeout -Command $mkdirCmd -TimeoutSeconds 15 -Description "Création répertoire" | Out-Null
-        Write-Success "Répertoire créé"
-    } catch {
-        Write-Warning "Timeout création répertoire, continue quand même..."
-    }
 
     # 1. Transfer deploy script
     $DeployScript = Join-Path $ProjectRoot "scripts\aws\deploy-on-ec2.sh"
