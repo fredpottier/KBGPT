@@ -240,6 +240,32 @@ function Get-ECRAccountID {
     }
 }
 
+function Invoke-SSHWithTimeout {
+    param(
+        [string]$Command,
+        [int]$TimeoutSeconds = 30,
+        [string]$Description = "Commande SSH"
+    )
+
+    $job = Start-Job -ScriptBlock {
+        param($cmd)
+        Invoke-Expression $cmd
+    } -ArgumentList $Command
+
+    $completed = Wait-Job $job -Timeout $TimeoutSeconds
+
+    if ($completed) {
+        $result = Receive-Job $job
+        Remove-Job $job -Force
+        return $result
+    } else {
+        Write-Warning "$Description - Timeout ($TimeoutSeconds s), kill du job"
+        Stop-Job $job -ErrorAction SilentlyContinue
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+        throw "Timeout: $Description"
+    }
+}
+
 function Deploy-CloudFormationStack {
     param(
         [string]$IPCidr
@@ -536,11 +562,20 @@ function Deploy-Application {
     $userDataComplete = $false
 
     while ($waitedUserData -lt $maxWaitUserData -and -not $userDataComplete) {
-        $checkDir = ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@$PublicIP "test -d /home/ubuntu/knowbase && echo 'exists'" 2>$null
-        if ($checkDir -eq "exists") {
-            Write-Success "Répertoires créés par UserData"
-            $userDataComplete = $true
-        } else {
+        try {
+            $sshCmd = "ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@$PublicIP `"test -d /home/ubuntu/knowbase && echo 'exists'`" 2>`$null"
+            $checkDir = Invoke-SSHWithTimeout -Command $sshCmd -TimeoutSeconds 15 -Description "Check UserData dirs" -ErrorAction SilentlyContinue
+            if ($checkDir -eq "exists") {
+                Write-Host ""
+                Write-Success "Répertoires créés par UserData"
+                $userDataComplete = $true
+            } else {
+                Write-Host "." -NoNewline
+                Start-Sleep -Seconds 10
+                $waitedUserData++
+            }
+        } catch {
+            # Timeout ou erreur - continuer à essayer
             Write-Host "." -NoNewline
             Start-Sleep -Seconds 10
             $waitedUserData++
