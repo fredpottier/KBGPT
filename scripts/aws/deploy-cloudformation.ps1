@@ -568,58 +568,29 @@ function Deploy-Application {
     scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
         $MonitoringComposeFile ubuntu@${PublicIP}:/home/ubuntu/knowbase/docker-compose.monitoring.yml
 
-    # Transfer monitoring config (using tar to avoid multiple SCP calls)
+    # Transfer monitoring config (using SCP recursive - simpler and more reliable)
     Write-Host "Transfert configuration monitoring..."
+    scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -r `
+        "$MonitoringDir" ubuntu@${PublicIP}:/home/ubuntu/knowbase/
 
-    # Create temp tar file with monitoring directory
-    $tempMonitoringTar = Join-Path $env:TEMP "knowbase-monitoring.tar.gz"
-    Write-Host "  Création archive monitoring..."
-    tar -czf $tempMonitoringTar -C $ProjectRoot monitoring
-
-    # Transfer single tar file
-    Write-Host "  Transfert archive monitoring..."
-    scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 `
-        $tempMonitoringTar ubuntu@${PublicIP}:/tmp/knowbase-monitoring.tar.gz
-
-    # Extract on remote (with keepalive and timeout)
-    Write-Host "  Extraction sur EC2..."
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=10 `
-        -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o BatchMode=yes ubuntu@$PublicIP `
-        "mkdir -p /home/ubuntu/knowbase && tar -xzf /tmp/knowbase-monitoring.tar.gz -C /home/ubuntu/knowbase && rm /tmp/knowbase-monitoring.tar.gz"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Erreur extraction monitoring (code: $LASTEXITCODE)"
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Configuration monitoring transférée"
+    } else {
+        Write-Warning "Erreur transfert monitoring (code: $LASTEXITCODE)"
     }
 
-    # Cleanup local temp
-    Remove-Item $tempMonitoringTar -ErrorAction SilentlyContinue
-    Write-Success "Configuration monitoring transférée"
-
-    # Transfer config directory (using tar to avoid multiple SCP calls)
+    # Transfer config directory (using SCP recursive - simpler and more reliable)
     Write-Host "Transfert fichiers configuration..."
     $ConfigDir = Join-Path $ProjectRoot "config"
     if (Test-Path $ConfigDir) {
-        # Create temp tar file
-        $tempTar = Join-Path $env:TEMP "knowbase-config.tar.gz"
-        Write-Host "  Création archive config..."
-        tar -czf $tempTar -C $ProjectRoot config/*.yaml
+        scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -r `
+            "$ConfigDir" ubuntu@${PublicIP}:/home/ubuntu/knowbase/
 
-        # Transfer single tar file
-        Write-Host "  Transfert archive (plus rapide que fichiers individuels)..."
-        scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 `
-            $tempTar ubuntu@${PublicIP}:/tmp/knowbase-config.tar.gz
-
-        # Extract on remote (with keepalive and timeout)
-        Write-Host "  Extraction sur EC2..."
-        ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=10 `
-            -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o BatchMode=yes ubuntu@$PublicIP `
-            "mkdir -p /home/ubuntu/knowbase/config && tar -xzf /tmp/knowbase-config.tar.gz -C /home/ubuntu/knowbase --strip-components=1 && rm /tmp/knowbase-config.tar.gz"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Erreur extraction config (code: $LASTEXITCODE)"
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "Fichiers configuration transférés"
+        } else {
+            Write-Warning "Erreur transfert config (code: $LASTEXITCODE)"
         }
-
-        # Cleanup local temp
-        Remove-Item $tempTar -ErrorAction SilentlyContinue
-        Write-Success "Fichiers configuration transférés"
     }
 
     # Configure CORS_ORIGINS avec l'IP EC2 publique
