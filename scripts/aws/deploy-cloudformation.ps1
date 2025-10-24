@@ -555,115 +555,71 @@ function Deploy-Application {
         }
     }
 
-    # Wait for UserData to complete and create directories
-    Write-Host "Vérification UserData (création répertoires - peut prendre 3-5 min)..."
-    $maxWaitUserData = 30  # 30 * 10s = 5 minutes max
-    $waitedUserData = 0
-    $userDataComplete = $false
+    # Approche simplifiée: Transfert batch + script bash autonome sur EC2
+    Write-Host "Transfert fichiers essentiels..."
 
-    while ($waitedUserData -lt $maxWaitUserData -and -not $userDataComplete) {
-        try {
-            $sshCmd = "ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@$PublicIP `"test -d /home/ubuntu/knowbase && echo 'exists'`" 2>`$null"
-            $checkDir = Invoke-SSHWithTimeout -Command $sshCmd -TimeoutSeconds 15 -Description "Check UserData dirs" -ErrorAction SilentlyContinue
-            if ($checkDir -eq "exists") {
-                Write-Host ""
-                Write-Success "Répertoires créés par UserData"
-                $userDataComplete = $true
-            } else {
-                Write-Host "." -NoNewline
-                Start-Sleep -Seconds 10
-                $waitedUserData++
-            }
-        } catch {
-            # Timeout ou erreur - continuer à essayer
-            Write-Host "." -NoNewline
-            Start-Sleep -Seconds 10
-            $waitedUserData++
-        }
+    # 1. Transfer deploy script
+    $DeployScript = Join-Path $ProjectRoot "scripts\aws\deploy-on-ec2.sh"
+    scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 `
+        $DeployScript ubuntu@${PublicIP}:/tmp/deploy-on-ec2.sh
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error-Custom "Échec transfert script de déploiement"
+        exit 1
     }
 
-    # Create directory if UserData didn't complete in time
-    if (-not $userDataComplete) {
-        Write-Host ""
-        Write-Warning-Custom "UserData non terminé, création manuelle des répertoires..."
-        ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP "mkdir -p /home/ubuntu/knowbase /data/neo4j /data/qdrant /data/redis && sudo chown -R ubuntu:ubuntu /home/ubuntu/knowbase /data"
-        Write-Success "Répertoires créés manuellement"
-    }
-
-    # Transfer files
-    Write-Host "Transfert fichiers..."
-    scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
+    # 2. Transfer docker-compose files
+    scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 `
         $DockerComposeFile ubuntu@${PublicIP}:/home/ubuntu/knowbase/docker-compose.yml
 
-    scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
-        $EnvFile ubuntu@${PublicIP}:/home/ubuntu/knowbase/.env
-
-    # Transfer monitoring docker-compose
     $MonitoringComposeFile = Join-Path $ProjectRoot "docker-compose.monitoring.yml"
-    scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
+    scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 `
         $MonitoringComposeFile ubuntu@${PublicIP}:/home/ubuntu/knowbase/docker-compose.monitoring.yml
 
-    # Transfer monitoring config (using SCP recursive - simpler and more reliable)
-    Write-Host "Transfert configuration monitoring..."
-    scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -r `
-        "$MonitoringDir" ubuntu@${PublicIP}:/home/ubuntu/knowbase/
+    # 3. Transfer .env with CORS configured
+    $corsOrigins = "http://${PublicIP}:3000,http://${PublicIP}:8501"
+    Write-Host "Configuration CORS: $corsOrigins"
+
+    # Update .env locally first
+    $envContent = Get-Content $EnvFile
+    $envContent = $envContent | Where-Object { $_ -notmatch '^CORS_ORIGINS=' }
+    $envContent += "CORS_ORIGINS=$corsOrigins"
+    $envContent += "AWS_REGION=$Region"
+    $envContent += "AWS_ACCOUNT_ID=$(Get-ECRAccountID)"
+    $envContent | Set-Content "$EnvFile.temp"
+
+    scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 `
+        "$EnvFile.temp" ubuntu@${PublicIP}:/home/ubuntu/knowbase/.env
+    Remove-Item "$EnvFile.temp" -ErrorAction SilentlyContinue
+
+    # 4. Transfer config directories (batch)
+    Write-Host "Transfert répertoires config et monitoring..."
+    $ConfigDir = Join-Path $ProjectRoot "config"
+    scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=60 -r `
+        "$ConfigDir" "$MonitoringDir" ubuntu@${PublicIP}:/home/ubuntu/knowbase/
 
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "Configuration monitoring transférée"
+        Write-Success "Fichiers transférés"
     } else {
-        Write-Warning "Erreur transfert monitoring (code: $LASTEXITCODE)"
+        Write-Warning "Avertissement: Certains transferts ont échoué (code: $LASTEXITCODE)"
     }
 
-    # Transfer config directory (using SCP recursive - simpler and more reliable)
-    Write-Host "Transfert fichiers configuration..."
-    $ConfigDir = Join-Path $ProjectRoot "config"
-    if (Test-Path $ConfigDir) {
-        scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -r `
-            "$ConfigDir" ubuntu@${PublicIP}:/home/ubuntu/knowbase/
+    # 5. Execute deploy script on EC2 and stream logs
+    Write-Host "`nExécution script de déploiement sur EC2 (logs en temps réel)..."
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor $Cyan
 
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Fichiers configuration transférés"
-        } else {
-            Write-Warning "Erreur transfert config (code: $LASTEXITCODE)"
-        }
+    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ServerAliveInterval=10 ubuntu@$PublicIP `
+        "chmod +x /tmp/deploy-on-ec2.sh && /tmp/deploy-on-ec2.sh"
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor $Cyan
+        Write-Success "Déploiement terminé avec succès"
+    } else {
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor $Cyan
+        Write-Error-Custom "Échec du déploiement (code: $LASTEXITCODE)"
+        Write-Warning-Custom "Consultez les logs: ssh ubuntu@$PublicIP 'cat /tmp/knowbase-deploy.log'"
+        exit 1
     }
-
-    # Configure CORS_ORIGINS avec l'IP EC2 publique
-    Write-Host "Configuration CORS_ORIGINS avec IP EC2..."
-    $corsOrigins = "http://${PublicIP}:3000,http://${PublicIP}:8501"
-    Write-Host "  Valeur: $corsOrigins"
-
-    # Utiliser echo pour écrire directement (PowerShell substitue la variable avant envoi SSH)
-    $updateEnvCmd = "cd /home/ubuntu/knowbase && sed -i '/^CORS_ORIGINS=/d' .env && echo `"CORS_ORIGINS=$corsOrigins`" >> .env"
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=5 -o BatchMode=yes ubuntu@$PublicIP $updateEnvCmd
-    Write-Success "CORS_ORIGINS configuré"
-
-    # Configure Docker permissions (l'utilisateur ubuntu doit être dans le groupe docker)
-    Write-Host "Configuration permissions Docker..."
-    $dockerPermsCmd = "sudo usermod -aG docker ubuntu"
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=5 -o BatchMode=yes ubuntu@$PublicIP $dockerPermsCmd
-    Write-Success "Permissions Docker configurées"
-
-    # Authenticate Docker to ECR and start containers in one session
-    Write-Host "Authentification ECR + Démarrage conteneurs Docker (3-5 min)..."
-    $AccountID = Get-ECRAccountID
-
-    # Combiner login ECR + pull + up dans une seule session SSH (utiliser LF Unix uniquement)
-    $fullDockerCommand = (@(
-        "aws ecr get-login-password --region $Region | sudo docker login --username AWS --password-stdin ${AccountID}.dkr.ecr.${Region}.amazonaws.com",
-        "cd /home/ubuntu/knowbase",
-        "sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml pull",
-        "sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d"
-    ) -join ' && ')
-
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=10 -o BatchMode=yes ubuntu@$PublicIP $fullDockerCommand
-    Write-Success "Docker authentifié + Conteneurs démarrés (avec monitoring stack)"
-
-    # Wait for services
-    Write-Host "Attente services ready (2 min)..."
-    Start-Sleep -Seconds 120
-
-    Write-Success "Déploiement terminé"
 }
 
 function Show-Summary {
