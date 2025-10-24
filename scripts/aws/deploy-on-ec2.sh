@@ -16,45 +16,39 @@ log "==================================="
 log "Déploiement KnowWhere OSMOSE"
 log "==================================="
 
-# Étape 1: Création des répertoires
-log "[1/7] Création structure répertoires..."
+# Étape 1: Création des répertoires et vérification fichiers
+log "[1/7] Préparation environnement..."
 mkdir -p "$WORKDIR"/{config,monitoring/dashboards,data}
 sudo mkdir -p /data/{neo4j,qdrant,redis}
 sudo chown -R ubuntu:ubuntu "$WORKDIR" /data
-log "✓ Répertoires créés"
 
-# Étape 2: Attendre que les fichiers soient uploadés
-log "[2/7] Attente des fichiers de configuration..."
-max_wait=60
-waited=0
-while [ ! -f "$WORKDIR/docker-compose.yml" ] && [ $waited -lt $max_wait ]; do
-    sleep 2
-    waited=$((waited + 2))
-done
-
+# Vérifier que les fichiers essentiels sont présents
 if [ ! -f "$WORKDIR/docker-compose.yml" ]; then
-    log "✗ ERREUR: docker-compose.yml non trouvé après ${max_wait}s"
+    log "✗ ERREUR: docker-compose.yml non trouvé dans $WORKDIR"
+    log "Contenu du répertoire:"
+    ls -la "$WORKDIR"
     exit 1
 fi
-log "✓ Fichiers de configuration reçus"
 
-# Étape 3: Vérifier que .env existe et configure CORS si fourni
-log "[3/7] Configuration environnement..."
 if [ ! -f "$WORKDIR/.env" ]; then
-    log "✗ ERREUR: Fichier .env manquant"
+    log "✗ ERREUR: .env non trouvé dans $WORKDIR"
     exit 1
 fi
 
-# CORS_ORIGINS sera configuré par PowerShell avant ce script
-log "✓ Fichier .env configuré"
+log "✓ Environnement prêt (répertoires + fichiers vérifiés)"
 
-# Étape 4: Ajouter ubuntu au groupe docker
-log "[4/7] Configuration permissions Docker..."
+# Étape 2: Configuration environnement
+log "[2/7] Configuration environnement..."
+# CORS_ORIGINS + AWS variables déjà configurés par PowerShell dans .env
+log "✓ Variables d'environnement configurées"
+
+# Étape 3: Ajouter ubuntu au groupe docker
+log "[3/7] Configuration permissions Docker..."
 sudo usermod -aG docker ubuntu
 log "✓ Permissions Docker configurées"
 
-# Étape 5: Login ECR
-log "[5/7] Authentification ECR..."
+# Étape 4: Login ECR
+log "[4/7] Authentification ECR..."
 AWS_REGION="${AWS_REGION:-eu-west-1}"
 AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-715927975014}"
 
@@ -69,8 +63,8 @@ if [ $? -ne 0 ]; then
 fi
 log "✓ ECR authentifié"
 
-# Étape 6: Pull des images Docker
-log "[6/7] Téléchargement images Docker (2-3 min)..."
+# Étape 5: Pull des images Docker
+log "[5/7] Téléchargement images Docker (2-3 min)..."
 cd "$WORKDIR"
 
 # Check if monitoring stack should be deployed
@@ -88,8 +82,8 @@ if [ $? -ne 0 ]; then
 fi
 log "✓ Images Docker téléchargées"
 
-# Étape 7: Créer réseau Docker + Démarrage des conteneurs
-log "[7/7] Démarrage conteneurs Docker..."
+# Étape 6: Créer réseau Docker + Démarrage des conteneurs
+log "[6/7] Démarrage conteneurs Docker..."
 
 # Créer le réseau s'il n'existe pas
 if ! sudo docker network inspect knowbase_network >/dev/null 2>&1; then
@@ -110,8 +104,8 @@ if [ $? -ne 0 ]; then
 fi
 log "✓ Conteneurs démarrés"
 
-# Attendre que les services soient ready
-log "Attente démarrage services (60s)..."
+# Étape 7: Vérification finale
+log "[7/7] Attente démarrage services (60s)..."
 sleep 60
 
 # Vérifier statut des conteneurs

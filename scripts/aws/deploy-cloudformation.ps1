@@ -558,6 +558,11 @@ function Deploy-Application {
     # Approche simplifiée: Transfert batch + script bash autonome sur EC2
     Write-Host "Transfert fichiers essentiels..."
 
+    # 0. Créer répertoire de base sur EC2
+    Write-Host "Création répertoire /home/ubuntu/knowbase..."
+    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@$PublicIP `
+        "mkdir -p /home/ubuntu/knowbase"
+
     # 1. Transfer deploy script
     $DeployScript = Join-Path $ProjectRoot "scripts\aws\deploy-on-ec2.sh"
     scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 `
