@@ -568,46 +568,49 @@ function Deploy-Application {
     scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
         $MonitoringComposeFile ubuntu@${PublicIP}:/home/ubuntu/knowbase/docker-compose.monitoring.yml
 
-    # Transfer monitoring config
+    # Transfer monitoring config (using tar to avoid multiple SCP calls)
     Write-Host "Transfert configuration monitoring..."
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP "mkdir -p /home/ubuntu/knowbase/monitoring/dashboards"
 
-    # Transfer monitoring YAML files individually
-    Get-ChildItem "$MonitoringDir\*.yml" | ForEach-Object {
-        Write-Host "  Transfert: $($_.Name)"
-        scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes `
-            $_.FullName ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Échec transfert $($_.Name)"
-        }
-    }
+    # Create temp tar file with monitoring directory
+    $tempMonitoringTar = Join-Path $env:TEMP "knowbase-monitoring.tar.gz"
+    Write-Host "  Création archive monitoring..."
+    tar -czf $tempMonitoringTar -C $ProjectRoot monitoring
 
-    # Transfer dashboards JSON files individually
-    Get-ChildItem "$MonitoringDir\dashboards\*.json" | ForEach-Object {
-        Write-Host "  Transfert: $($_.Name)"
-        scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes `
-            $_.FullName ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/dashboards/
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Échec transfert $($_.Name)"
-        }
-    }
+    # Transfer single tar file
+    Write-Host "  Transfert archive monitoring..."
+    scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 `
+        $tempMonitoringTar ubuntu@${PublicIP}:/tmp/knowbase-monitoring.tar.gz
 
+    # Extract on remote
+    Write-Host "  Extraction sur EC2..."
+    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@$PublicIP `
+        "mkdir -p /home/ubuntu/knowbase && tar -xzf /tmp/knowbase-monitoring.tar.gz -C /home/ubuntu/knowbase && rm /tmp/knowbase-monitoring.tar.gz"
+
+    # Cleanup local temp
+    Remove-Item $tempMonitoringTar -ErrorAction SilentlyContinue
     Write-Success "Configuration monitoring transférée"
 
-    # Transfer config directory
+    # Transfer config directory (using tar to avoid multiple SCP calls)
     Write-Host "Transfert fichiers configuration..."
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP "mkdir -p /home/ubuntu/knowbase/config"
-
     $ConfigDir = Join-Path $ProjectRoot "config"
     if (Test-Path $ConfigDir) {
-        Get-ChildItem "$ConfigDir\*.yaml" | ForEach-Object {
-            Write-Host "  Transfert: $($_.Name)"
-            scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes `
-                $_.FullName ubuntu@${PublicIP}:/home/ubuntu/knowbase/config/
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Échec transfert $($_.Name)"
-            }
-        }
+        # Create temp tar file
+        $tempTar = Join-Path $env:TEMP "knowbase-config.tar.gz"
+        Write-Host "  Création archive config..."
+        tar -czf $tempTar -C $ProjectRoot config/*.yaml
+
+        # Transfer single tar file
+        Write-Host "  Transfert archive (plus rapide que fichiers individuels)..."
+        scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 `
+            $tempTar ubuntu@${PublicIP}:/tmp/knowbase-config.tar.gz
+
+        # Extract on remote
+        Write-Host "  Extraction sur EC2..."
+        ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@$PublicIP `
+            "mkdir -p /home/ubuntu/knowbase/config && tar -xzf /tmp/knowbase-config.tar.gz -C /home/ubuntu/knowbase --strip-components=1 && rm /tmp/knowbase-config.tar.gz"
+
+        # Cleanup local temp
+        Remove-Item $tempTar -ErrorAction SilentlyContinue
         Write-Success "Fichiers configuration transférés"
     }
 
