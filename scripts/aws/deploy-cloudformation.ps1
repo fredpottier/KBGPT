@@ -530,13 +530,13 @@ function Deploy-Application {
     }
 
     # Wait for UserData to complete and create directories
-    Write-Host "Vérification UserData (création répertoires)..."
-    $maxWaitUserData = 10
+    Write-Host "Vérification UserData (création répertoires - peut prendre 3-5 min)..."
+    $maxWaitUserData = 30  # 30 * 10s = 5 minutes max
     $waitedUserData = 0
     $userDataComplete = $false
 
     while ($waitedUserData -lt $maxWaitUserData -and -not $userDataComplete) {
-        $checkDir = ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP "test -d /home/ubuntu/knowbase && echo 'exists'" 2>$null
+        $checkDir = ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@$PublicIP "test -d /home/ubuntu/knowbase && echo 'exists'" 2>$null
         if ($checkDir -eq "exists") {
             Write-Success "Répertoires créés par UserData"
             $userDataComplete = $true
