@@ -563,6 +563,11 @@ function Deploy-Application {
     scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
         $EnvFile ubuntu@${PublicIP}:/home/ubuntu/knowbase/.env
 
+    # Transfer monitoring docker-compose
+    $MonitoringComposeFile = Join-Path $ProjectRoot "docker-compose.monitoring.yml"
+    scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
+        $MonitoringComposeFile ubuntu@${PublicIP}:/home/ubuntu/knowbase/docker-compose.monitoring.yml
+
     # Transfer monitoring config
     Write-Host "Transfert configuration monitoring..."
     ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP "mkdir -p /home/ubuntu/knowbase/monitoring/dashboards"
@@ -620,7 +625,7 @@ function Deploy-Application {
 
     # Start containers (utiliser sudo car la session SSH actuelle n'a pas encore les nouvelles permissions)
     Write-Host "Démarrage conteneurs Docker (3-5 min)..."
-    $dockerCommand = "cd /home/ubuntu/knowbase && sudo docker-compose pull && sudo docker-compose up -d"
+    $dockerCommand = "cd /home/ubuntu/knowbase && sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml pull && sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d"
     ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $dockerCommand
     Write-Success "Conteneurs démarrés (avec monitoring stack)"
 
