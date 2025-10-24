@@ -575,15 +575,21 @@ function Deploy-Application {
     # Transfer monitoring YAML files individually
     Get-ChildItem "$MonitoringDir\*.yml" | ForEach-Object {
         Write-Host "  Transfert: $($_.Name)"
-        scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
-            "`"$($_.FullName)`"" ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/
+        scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes `
+            $_.FullName ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Échec transfert $($_.Name)"
+        }
     }
 
     # Transfer dashboards JSON files individually
     Get-ChildItem "$MonitoringDir\dashboards\*.json" | ForEach-Object {
         Write-Host "  Transfert: $($_.Name)"
-        scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
-            "`"$($_.FullName)`"" ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/dashboards/
+        scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes `
+            $_.FullName ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/dashboards/
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Échec transfert $($_.Name)"
+        }
     }
 
     Write-Success "Configuration monitoring transférée"
@@ -595,10 +601,12 @@ function Deploy-Application {
     $ConfigDir = Join-Path $ProjectRoot "config"
     if (Test-Path $ConfigDir) {
         Get-ChildItem "$ConfigDir\*.yaml" | ForEach-Object {
-            $filePath = $_.FullName.Replace('\', '/')
             Write-Host "  Transfert: $($_.Name)"
-            scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
-                "`"$($_.FullName)`"" ubuntu@${PublicIP}:/home/ubuntu/knowbase/config/
+            scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes `
+                $_.FullName ubuntu@${PublicIP}:/home/ubuntu/knowbase/config/
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Échec transfert $($_.Name)"
+            }
         }
         Write-Success "Fichiers configuration transférés"
     }
