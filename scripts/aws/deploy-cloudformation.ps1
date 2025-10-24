@@ -565,16 +565,27 @@ function Deploy-Application {
 
     # Transfer monitoring config
     Write-Host "Transfert configuration monitoring..."
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP "mkdir -p /home/ubuntu/knowbase/monitoring"
-    scp -i $KeyPathUnix -o StrictHostKeyChecking=no -r `
-        "${MonitoringDir}/*" ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/
+    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP "mkdir -p /home/ubuntu/knowbase/monitoring/dashboards"
+
+    # Transfer monitoring YAML files
+    scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
+        "$MonitoringDir/*.yml" ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/
+
+    # Transfer dashboards JSON files
+    scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
+        "$MonitoringDir/dashboards/*.json" ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/dashboards/
+
+    Write-Success "Configuration monitoring transférée"
 
     # Transfer config directory
+    Write-Host "Transfert fichiers configuration..."
+    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP "mkdir -p /home/ubuntu/knowbase/config"
+
     $ConfigDir = Join-Path $ProjectRoot "config"
     if (Test-Path $ConfigDir) {
-        scp -i $KeyPathUnix -o StrictHostKeyChecking=no -r `
-            $ConfigDir ubuntu@${PublicIP}:/home/ubuntu/knowbase/
-        Write-Success "Fichiers transférés"
+        scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
+            "$ConfigDir/*.yaml" ubuntu@${PublicIP}:/home/ubuntu/knowbase/config/
+        Write-Success "Fichiers configuration transférés"
     }
 
     # Configure CORS_ORIGINS avec l'IP EC2 publique
