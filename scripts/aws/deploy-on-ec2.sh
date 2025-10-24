@@ -19,7 +19,7 @@ log "==================================="
 # Étape 1: Création des répertoires
 log "[1/7] Création structure répertoires..."
 mkdir -p "$WORKDIR"/{config,monitoring/dashboards,data}
-mkdir -p /data/{neo4j,qdrant,redis}
+sudo mkdir -p /data/{neo4j,qdrant,redis}
 sudo chown -R ubuntu:ubuntu "$WORKDIR" /data
 log "✓ Répertoires créés"
 
