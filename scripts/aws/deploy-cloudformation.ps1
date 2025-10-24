@@ -567,13 +567,17 @@ function Deploy-Application {
     Write-Host "Transfert configuration monitoring..."
     ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP "mkdir -p /home/ubuntu/knowbase/monitoring/dashboards"
 
-    # Transfer monitoring YAML files
-    scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
-        "$MonitoringDir/*.yml" ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/
+    # Transfer monitoring YAML files individually
+    Get-ChildItem "$MonitoringDir\*.yml" | ForEach-Object {
+        scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
+            $_.FullName ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/
+    }
 
-    # Transfer dashboards JSON files
-    scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
-        "$MonitoringDir/dashboards/*.json" ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/dashboards/
+    # Transfer dashboards JSON files individually
+    Get-ChildItem "$MonitoringDir\dashboards\*.json" | ForEach-Object {
+        scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
+            $_.FullName ubuntu@${PublicIP}:/home/ubuntu/knowbase/monitoring/dashboards/
+    }
 
     Write-Success "Configuration monitoring transférée"
 
@@ -583,8 +587,10 @@ function Deploy-Application {
 
     $ConfigDir = Join-Path $ProjectRoot "config"
     if (Test-Path $ConfigDir) {
-        scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
-            "$ConfigDir/*.yaml" ubuntu@${PublicIP}:/home/ubuntu/knowbase/config/
+        Get-ChildItem "$ConfigDir\*.yaml" | ForEach-Object {
+            scp -i $KeyPathUnix -o StrictHostKeyChecking=no `
+                $_.FullName ubuntu@${PublicIP}:/home/ubuntu/knowbase/config/
+        }
         Write-Success "Fichiers configuration transférés"
     }
 
