@@ -581,10 +581,14 @@ function Deploy-Application {
     scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 `
         $tempMonitoringTar ubuntu@${PublicIP}:/tmp/knowbase-monitoring.tar.gz
 
-    # Extract on remote
+    # Extract on remote (with keepalive and timeout)
     Write-Host "  Extraction sur EC2..."
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@$PublicIP `
+    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=10 `
+        -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o BatchMode=yes ubuntu@$PublicIP `
         "mkdir -p /home/ubuntu/knowbase && tar -xzf /tmp/knowbase-monitoring.tar.gz -C /home/ubuntu/knowbase && rm /tmp/knowbase-monitoring.tar.gz"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Erreur extraction monitoring (code: $LASTEXITCODE)"
+    }
 
     # Cleanup local temp
     Remove-Item $tempMonitoringTar -ErrorAction SilentlyContinue
@@ -604,10 +608,14 @@ function Deploy-Application {
         scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 `
             $tempTar ubuntu@${PublicIP}:/tmp/knowbase-config.tar.gz
 
-        # Extract on remote
+        # Extract on remote (with keepalive and timeout)
         Write-Host "  Extraction sur EC2..."
-        ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@$PublicIP `
+        ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=10 `
+            -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o BatchMode=yes ubuntu@$PublicIP `
             "mkdir -p /home/ubuntu/knowbase/config && tar -xzf /tmp/knowbase-config.tar.gz -C /home/ubuntu/knowbase --strip-components=1 && rm /tmp/knowbase-config.tar.gz"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Erreur extraction config (code: $LASTEXITCODE)"
+        }
 
         # Cleanup local temp
         Remove-Item $tempTar -ErrorAction SilentlyContinue
@@ -621,13 +629,13 @@ function Deploy-Application {
 
     # Utiliser echo pour écrire directement (PowerShell substitue la variable avant envoi SSH)
     $updateEnvCmd = "cd /home/ubuntu/knowbase && sed -i '/^CORS_ORIGINS=/d' .env && echo `"CORS_ORIGINS=$corsOrigins`" >> .env"
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $updateEnvCmd
+    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=5 -o BatchMode=yes ubuntu@$PublicIP $updateEnvCmd
     Write-Success "CORS_ORIGINS configuré"
 
     # Configure Docker permissions (l'utilisateur ubuntu doit être dans le groupe docker)
     Write-Host "Configuration permissions Docker..."
     $dockerPermsCmd = "sudo usermod -aG docker ubuntu"
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $dockerPermsCmd
+    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=5 -o BatchMode=yes ubuntu@$PublicIP $dockerPermsCmd
     Write-Success "Permissions Docker configurées"
 
     # Authenticate Docker to ECR and start containers in one session
@@ -642,7 +650,7 @@ function Deploy-Application {
         "sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d"
     ) -join ' && ')
 
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $fullDockerCommand
+    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=10 -o BatchMode=yes ubuntu@$PublicIP $fullDockerCommand
     Write-Success "Docker authentifié + Conteneurs démarrés (avec monitoring stack)"
 
     # Wait for services
