@@ -606,9 +606,12 @@ function Deploy-Application {
     # Configure CORS_ORIGINS avec l'IP EC2 publique
     Write-Host "Configuration CORS_ORIGINS avec IP EC2..."
     $corsOrigins = "http://${PublicIP}:3000,http://${PublicIP}:8501"
-    $updateEnvCmd = "cd /home/ubuntu/knowbase && sed -i 's|CORS_ORIGINS=.*|CORS_ORIGINS=$corsOrigins|g' .env"
+    Write-Host "  Valeur: $corsOrigins"
+
+    # Échapper correctement pour sed via SSH
+    $updateEnvCmd = "cd /home/ubuntu/knowbase && sed -i `"s|CORS_ORIGINS=.*|CORS_ORIGINS=$corsOrigins|g`" .env"
     ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $updateEnvCmd
-    Write-Success "CORS_ORIGINS configuré: $corsOrigins"
+    Write-Success "CORS_ORIGINS configuré"
 
     # Configure Docker permissions (l'utilisateur ubuntu doit être dans le groupe docker)
     Write-Host "Configuration permissions Docker..."
