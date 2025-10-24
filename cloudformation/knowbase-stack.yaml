@@ -323,8 +323,8 @@ Resources:
 
           # Login to ECR (credentials from IAM role)
           echo "[6/6] Logging into ECR..."
-          # Note: Using su - ubuntu with sg docker to get both IAM credentials and docker group access
-          su - ubuntu -c "aws ecr get-login-password --region ${ECRRegion} | sg docker -c 'docker login --username AWS --password-stdin ${ECRAccountID}.dkr.ecr.${ECRRegion}.amazonaws.com'"
+          # Use sudo -u to run as ubuntu while keeping IAM role credentials from root environment
+          sudo -u ubuntu -H bash -c "aws ecr get-login-password --region ${ECRRegion} | docker login --username AWS --password-stdin ${ECRAccountID}.dkr.ecr.${ECRRegion}.amazonaws.com"
 
           echo "========================================="
           echo "User Data Script Completed Successfully"
