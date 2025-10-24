@@ -82,15 +82,11 @@ if [ $? -ne 0 ]; then
 fi
 log "✓ Images Docker téléchargées"
 
-# Étape 6: Créer réseau Docker + Démarrage des conteneurs
+# Étape 6: Démarrage des conteneurs
 log "[6/7] Démarrage conteneurs Docker..."
 
-# Créer le réseau s'il n'existe pas
-if ! sudo docker network inspect knowbase_network >/dev/null 2>&1; then
-    log "  Création réseau Docker knowbase_network..."
-    sudo docker network create knowbase_network
-fi
-
+# docker-compose créera automatiquement le réseau knowbase_network
+# Ne pas le créer manuellement pour éviter les conflits de labels
 if [ -f "docker-compose.monitoring.yml" ]; then
     sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 else
