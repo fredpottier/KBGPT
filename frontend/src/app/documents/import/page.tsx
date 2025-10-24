@@ -6,29 +6,25 @@ import {
   FormControl,
   FormLabel,
   Heading,
-  Input,
-  Select,
   Text,
   VStack,
   useToast,
   Card,
   CardBody,
   Divider,
-  Spinner,
   Switch,
   HStack,
   Alert,
   AlertIcon,
   AlertDescription,
 } from '@chakra-ui/react'
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { AttachmentIcon, CheckIcon } from '@chakra-ui/icons'
 import { useMutation } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
 import { authService } from '@/lib/auth'
-import { fetchWithAuth } from '@/lib/fetchWithAuth'
 
 interface FileUploadProps {
   onFileSelect: (file: File) => void
@@ -101,58 +97,10 @@ const FileDropzone = ({ onFileSelect, selectedFile }: FileUploadProps) => {
 
 export default function ImportPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [client, setClient] = useState('')
-  const [documentType, setDocumentType] = useState('')
-  const [documentTypes, setDocumentTypes] = useState<any[]>([])
-  const [loadingTypes, setLoadingTypes] = useState(true)
   const [useVision, setUseVision] = useState(false) // Vision désactivée par défaut
 
   const toast = useToast()
   const router = useRouter()
-
-  // Charger les types de documents depuis l'API
-  useEffect(() => {
-    async function fetchDocumentTypes() {
-      try {
-        const token = authService.getAccessToken()
-
-        if (!token) {
-          console.error('Pas de token d\'authentification disponible')
-          toast({
-            title: 'Erreur d\'authentification',
-            description: 'Veuillez vous reconnecter',
-            status: 'error',
-            duration: 3000,
-            isClosable: true,
-          })
-          setLoadingTypes(false)
-          return
-        }
-
-        const response = await fetchWithAuth('/api/document-types?is_active=true')
-
-        if (!response.ok) {
-          throw new Error(`Erreur ${response.status}`)
-        }
-
-        const data = await response.json()
-        console.log('Document types chargés:', data)
-        setDocumentTypes(data.document_types || [])
-      } catch (error) {
-        console.error('Erreur lors du chargement des types de documents:', error)
-        toast({
-          title: 'Erreur de chargement',
-          description: 'Impossible de charger les types de documents',
-          status: 'error',
-          duration: 3000,
-          isClosable: true,
-        })
-      } finally {
-        setLoadingTypes(false)
-      }
-    }
-    fetchDocumentTypes()
-  }, [toast])
 
   // Fonction pour déterminer le type de document basé sur l'extension
   const getFileType = (file: File): 'pptx' | 'pdf' | 'xlsx' => {
@@ -216,29 +164,10 @@ export default function ImportPage() {
       return
     }
 
-
-    if (!documentType) {
-      toast({
-        title: 'Type de document manquant',
-        description: 'Veuillez sélectionner un type de document',
-        status: 'warning',
-        duration: 3000,
-        isClosable: true,
-      })
-      return
-    }
-
     const formData = new FormData()
     formData.append('action_type', 'ingest')
     formData.append('document_type', getFileType(selectedFile))
-    formData.append('document_type_id', documentType) // ID du document type sélectionné
     formData.append('use_vision', useVision.toString()) // Activer/désactiver Vision
-
-    const metadata = {
-      client: client.trim(),
-    }
-
-    formData.append('meta', JSON.stringify(metadata))
     formData.append('file', selectedFile)
 
     uploadMutation.mutate(formData)
@@ -262,43 +191,6 @@ export default function ImportPage() {
           <VStack spacing={6} align="stretch">
             {/* Zone de dépôt de fichier */}
             <FileDropzone onFileSelect={setSelectedFile} selectedFile={selectedFile} />
-
-            <Divider />
-
-            {/* Formulaire de métadonnées */}
-            {/* Note: La date source est maintenant automatiquement extraite des métadonnées PPTX */}
-            <VStack spacing={4} align="stretch">
-              <Heading size="md">Métadonnées du document</Heading>
-
-              <FormControl>
-                <FormLabel>Client (optionnel)</FormLabel>
-                <Input
-                  value={client}
-                  onChange={(e) => setClient(e.target.value)}
-                  placeholder="ex: Entreprise ABC"
-                />
-              </FormControl>
-
-              <FormControl isRequired>
-                <FormLabel>Type de document</FormLabel>
-                <Select
-                  value={documentType}
-                  onChange={(e) => setDocumentType(e.target.value)}
-                  placeholder={loadingTypes ? "Chargement..." : "Sélectionnez un type"}
-                  isDisabled={loadingTypes}
-                >
-                  {loadingTypes ? (
-                    <option disabled>Chargement des types...</option>
-                  ) : (
-                    documentTypes.map((dt) => (
-                      <option key={dt.id} value={dt.id}>
-                        {dt.name}
-                      </option>
-                    ))
-                  )}
-                </Select>
-              </FormControl>
-            </VStack>
 
             <Divider />
 
@@ -347,7 +239,7 @@ export default function ImportPage() {
               onClick={handleSubmit}
               isLoading={uploadMutation.isPending}
               loadingText="Envoi en cours..."
-              isDisabled={!selectedFile || !documentType}
+              isDisabled={!selectedFile}
             >
               Envoyer le document
             </Button>

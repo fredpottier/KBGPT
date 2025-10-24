@@ -25,6 +25,7 @@ import logging
 from typing import Optional
 from fastapi import HTTPException, Header, status
 from datetime import datetime, timedelta
+import bcrypt
 
 logger = logging.getLogger(__name__)
 
@@ -201,3 +202,39 @@ def is_authenticated() -> bool:
 def get_api_key() -> str:
     """Récupérer API key configurée (pour tests)"""
     return API_KEY
+
+
+# ============================================================================
+# PASSWORD HASHING (bcrypt)
+# ============================================================================
+
+def hash_password(password: str) -> str:
+    """
+    Hash un mot de passe avec bcrypt.
+
+    Args:
+        password: Mot de passe en clair
+
+    Returns:
+        Hash bcrypt (str)
+    """
+    password_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode('utf-8')
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """
+    Vérifie un mot de passe contre son hash bcrypt.
+
+    Args:
+        password: Mot de passe en clair
+        password_hash: Hash bcrypt stocké en base
+
+    Returns:
+        True si le mot de passe correspond, False sinon
+    """
+    password_bytes = password.encode('utf-8')
+    password_hash_bytes = password_hash.encode('utf-8')
+    return bcrypt.checkpw(password_bytes, password_hash_bytes)

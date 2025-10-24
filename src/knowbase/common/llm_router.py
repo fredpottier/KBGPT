@@ -533,7 +533,18 @@ def complete_fast_classification(
 def complete_canonicalization(
     messages: List[Dict[str, Any]],
     temperature: float = 0.0,
-    max_tokens: int = 50
+    max_tokens: int = 800  # Augmenté de 400 à 800 pour JSON complet avec reasoning + marge
 ) -> str:
-    """Effectue une canonicalisation de nom."""
-    return get_llm_router().complete(TaskType.CANONICALIZATION, messages, temperature, max_tokens)
+    """
+    Effectue une canonicalisation de nom.
+
+    Fix 2025-10-20: Augmenter max_tokens à 800 et forcer response_format JSON
+    pour éliminer les JSON truncation errors qui causent circuit breaker OPEN.
+    """
+    return get_llm_router().complete(
+        TaskType.CANONICALIZATION,
+        messages,
+        temperature,
+        max_tokens,
+        response_format={"type": "json_object"}  # Force JSON mode OpenAI
+    )

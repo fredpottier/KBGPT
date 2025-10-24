@@ -286,6 +286,11 @@ class ExtractionCacheManager:
         """
         Récupère le cache pour un fichier source (si disponible).
 
+        Logique de fallback pour compatibilité avec anciens caches:
+        1. Cherche d'abord avec hash SHA256 (nouveau système)
+        2. Si pas trouvé, cherche avec pattern filename (ancien système)
+        3. Si ancien trouvé, le migre automatiquement vers nouveau format
+
         Args:
             source_file_path: Chemin fichier source
 
@@ -299,15 +304,60 @@ class ExtractionCacheManager:
         source_hash = self._calculate_file_hash(source_file_path)
         cache_path = self.cache_dir / f"{source_hash[:16]}.knowcache.json"
 
-        if not cache_path.exists():
-            logger.info(f"[CACHE] No cache found for {source_file_path.name} (hash: {source_hash[:16]})")
+        # Tentative 1 : Cache hash-based (nouveau système)
+        if cache_path.exists():
+            # Charger et valider
+            cache = self.load_cache(cache_path)
+
+            if cache:
+                logger.info(f"[CACHE] ✅ Cache HIT (hash-based) for {source_file_path.name} (hash: {source_hash[:16]})")
+
+            return cache
+
+        # Tentative 2 : Fallback vers anciens caches filename-based
+        logger.info(f"[CACHE] No hash-based cache found (hash: {source_hash[:16]}), trying filename-based fallback...")
+
+        # Extraire base filename sans extension ni timestamp
+        # Ex: "RISE_with_SAP_Cloud_ERP_Private.pptx" → "RISE_with_SAP_Cloud_ERP_Private"
+        base_filename = source_file_path.stem
+
+        # Chercher pattern: {base_filename}*.knowcache.json
+        pattern = f"{base_filename}*.knowcache.json"
+        matching_caches = list(self.cache_dir.glob(pattern))
+
+        if not matching_caches:
+            logger.info(f"[CACHE] ❌ No cache found (neither hash-based nor filename-based) for {source_file_path.name}")
             return None
 
-        # Charger et valider
-        cache = self.load_cache(cache_path)
+        # Prendre le plus récent si plusieurs trouvés
+        matching_caches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        old_cache_path = matching_caches[0]
+
+        logger.info(
+            f"[CACHE] Found OLD filename-based cache: {old_cache_path.name} "
+            f"(migrating to hash-based format)"
+        )
+
+        # Charger l'ancien cache
+        cache = self.load_cache(old_cache_path)
 
         if cache:
-            logger.info(f"[CACHE] ✅ Cache HIT for {source_file_path.name} (hash: {source_hash[:16]})")
+            # Migration : Renommer vers format hash-based
+            try:
+                import shutil
+                shutil.move(str(old_cache_path), str(cache_path))
+                logger.info(
+                    f"[CACHE] ✅ Migrated cache: {old_cache_path.name} → {cache_path.name}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[CACHE] Could not migrate cache file (will use it anyway): {e}"
+                )
+
+            logger.info(
+                f"[CACHE] ✅ Cache HIT (filename-based fallback) for {source_file_path.name} "
+                f"({cache.extracted_text.length_chars} chars, ${cache.extraction_stats.cost_usd:.3f} saved)"
+            )
 
         return cache
 

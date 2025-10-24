@@ -1,0 +1,99 @@
+# Docker Compose pour stack monitoring Grafana + Loki + Promtail
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+#
+# Services ajoutés :
+# - Loki : Stockage et indexation des logs (port 3100)
+# - Promtail : Agent de collecte des logs Docker
+# - Grafana : Interface de visualisation (port 3001)
+
+version: '3.8'
+
+services:
+  # ===================================
+  # LOKI - Log Aggregation System
+  # ===================================
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: knowbase-loki
+    environment:
+      - TZ=Europe/Paris  # Timezone Paris pour timestamps
+    ports:
+      - "3100:3100"  # HTTP API Loki
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - knowbase_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ===================================
+  # PROMTAIL - Log Collector Agent
+  # ===================================
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: knowbase-promtail
+    environment:
+      - TZ=Europe/Paris  # Timezone Paris pour timestamps
+    volumes:
+      - ./monitoring/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Montage du répertoire data/logs pour collecter les fichiers logs
+      - ./data/logs:/data/logs:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - knowbase_net
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  # ===================================
+  # GRAFANA - Visualization Dashboard
+  # ===================================
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: knowbase-grafana
+    ports:
+      - "3001:3000"  # Port 3001 pour éviter conflit avec frontend
+    volumes:
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./monitoring/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./monitoring/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - TZ=Europe/Paris  # Timezone Paris pour timestamps
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    networks:
+      - knowbase_net
+    depends_on:
+      - loki
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# Utilise le même réseau que les autres services
+networks:
+  knowbase_net:
+    external: true
+    name: knowbase_network
+
+volumes:
+  loki_data:
+    name: knowbase_loki_data
+  grafana_data:
+    name: knowbase_grafana_data

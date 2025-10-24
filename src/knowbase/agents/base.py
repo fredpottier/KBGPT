@@ -33,6 +33,8 @@ class AgentState(BaseModel):
     document_id: str
     tenant_id: str = "default"
     full_text: Optional[str] = None  # Texte complet pour filtrage contextuel
+    document_name: Optional[str] = None  # Phase 2: Nom document pour relation extraction
+    chunk_ids: List[str] = Field(default_factory=list)  # Phase 2: IDs chunks pour relation extraction
 
     # Budget tracking
     budget_remaining: Dict[str, int] = Field(default_factory=lambda: {
@@ -46,6 +48,9 @@ class AgentState(BaseModel):
     candidates: List[Dict[str, Any]] = Field(default_factory=list)
     promoted: List[Dict[str, Any]] = Field(default_factory=list)
     relations: List[Dict[str, Any]] = Field(default_factory=list)  # Problème 1: Relations sémantiques
+
+    # Phase 2: Stats extraction relations
+    relation_extraction_stats: Dict[str, Any] = Field(default_factory=dict)
 
     # Phase 1.6: Cross-référence Neo4j ↔ Qdrant
     concept_to_chunk_ids: Dict[str, List[str]] = Field(default_factory=dict)  # {"proto-123": ["chunk-456"]}
@@ -63,7 +68,7 @@ class AgentState(BaseModel):
     steps_count: int = 0
     max_steps: int = 50
     started_at: float = Field(default_factory=time.time)
-    timeout_seconds: int = 600  # 10 min/doc (suffisant pour 10 segments + LLM calls)
+    timeout_seconds: int = 3600  # 60 min/doc (nécessaire pour gros documents 200+ slides)
 
     # Errors
     errors: List[str] = Field(default_factory=list)

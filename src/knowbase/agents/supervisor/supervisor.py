@@ -182,6 +182,9 @@ class SupervisorAgent(BaseAgent):
         Returns:
             Prochain état FSM
         """
+        # Timer pour mesurer le temps de chaque étape
+        step_start = time.time()
+
         if fsm_state == FSMState.INIT:
             logger.debug("[SUPERVISOR] INIT: Starting pipeline")
             return FSMState.BUDGET_CHECK
@@ -189,61 +192,72 @@ class SupervisorAgent(BaseAgent):
         elif fsm_state == FSMState.BUDGET_CHECK:
             # Vérifier budget disponible
             budget_ok = await self.budget_manager.check_budget(state)
+            elapsed = time.time() - step_start
             if budget_ok:
-                logger.debug("[SUPERVISOR] BUDGET_CHECK: OK, proceeding to SEGMENT")
+                logger.info(f"[SUPERVISOR] ⏱️ BUDGET_CHECK: OK in {elapsed:.1f}s, proceeding to SEGMENT")
                 return FSMState.SEGMENT
             else:
-                logger.warning("[SUPERVISOR] BUDGET_CHECK: Budget insufficient")
+                logger.warning(f"[SUPERVISOR] ⏱️ BUDGET_CHECK: Budget insufficient ({elapsed:.1f}s)")
                 state.errors.append("Budget insufficient")
                 return FSMState.ERROR
 
         elif fsm_state == FSMState.SEGMENT:
             # Segmentation (utilise SemanticPipeline existant)
-            logger.debug("[SUPERVISOR] SEGMENT: Calling TopicSegmenter")
+            logger.info("[SUPERVISOR] ⏱️ SEGMENT: START")
 
             # Si segments déjà présents (passés par osmose_agentique), les garder
             if len(state.segments) > 0:
-                logger.info(f"[SUPERVISOR] SEGMENT: Segments already present ({len(state.segments)}), skipping segmentation")
+                elapsed = time.time() - step_start
+                logger.info(f"[SUPERVISOR] ⏱️ SEGMENT: Segments already present ({len(state.segments)}) in {elapsed:.1f}s, skipping segmentation")
                 return FSMState.EXTRACT
 
             # TODO: Intégrer TopicSegmenter si segments vides
-            logger.warning("[SUPERVISOR] SEGMENT: No segments found, should call TopicSegmenter here (TODO)")
+            elapsed = time.time() - step_start
+            logger.warning(f"[SUPERVISOR] ⏱️ SEGMENT: No segments found ({elapsed:.1f}s), should call TopicSegmenter here (TODO)")
             state.segments = []  # Placeholder pour éviter erreur
             return FSMState.EXTRACT
 
         elif fsm_state == FSMState.EXTRACT:
             # Extraction concepts via Extractor Orchestrator
-            logger.debug("[SUPERVISOR] EXTRACT: Calling ExtractorOrchestrator")
+            logger.info("[SUPERVISOR] ⏱️ EXTRACT: START - Calling ExtractorOrchestrator")
             state = await self.extractor.execute(state)
+            elapsed = time.time() - step_start
+            logger.info(f"[SUPERVISOR] ⏱️ EXTRACT: COMPLETE in {elapsed:.1f}s")
             return FSMState.MINE_PATTERNS
 
         elif fsm_state == FSMState.MINE_PATTERNS:
             # Mining patterns cross-segments
-            logger.debug("[SUPERVISOR] MINE_PATTERNS: Calling PatternMiner")
+            logger.info("[SUPERVISOR] ⏱️ MINE_PATTERNS: START - Calling PatternMiner")
             state = await self.miner.execute(state)
+            elapsed = time.time() - step_start
+            logger.info(f"[SUPERVISOR] ⏱️ MINE_PATTERNS: COMPLETE in {elapsed:.1f}s")
             return FSMState.GATE_CHECK
 
         elif fsm_state == FSMState.GATE_CHECK:
             # Quality gate check
-            logger.debug("[SUPERVISOR] GATE_CHECK: Calling GatekeeperDelegate")
+            logger.info("[SUPERVISOR] ⏱️ GATE_CHECK: START - Calling GatekeeperDelegate")
             state = await self.gatekeeper.execute(state)
+            elapsed = time.time() - step_start
 
             # Si qualité insuffisante et budget permet, retry avec BIG model
             if len(state.promoted) == 0 and state.budget_remaining["BIG"] > 0:
-                logger.warning("[SUPERVISOR] GATE_CHECK: Quality low, retrying with BIG")
+                logger.warning(f"[SUPERVISOR] ⏱️ GATE_CHECK: Quality low ({elapsed:.1f}s), retrying with BIG")
                 return FSMState.EXTRACT  # Retry
             else:
+                logger.info(f"[SUPERVISOR] ⏱️ GATE_CHECK: COMPLETE in {elapsed:.1f}s - {len(state.promoted)} concepts promoted")
                 return FSMState.PROMOTE
 
         elif fsm_state == FSMState.PROMOTE:
             # Promotion Proto→Published
-            logger.debug("[SUPERVISOR] PROMOTE: Promoting candidates")
+            logger.info("[SUPERVISOR] ⏱️ PROMOTE: START - Promoting candidates")
             # TODO: Appel à Neo4j pour promotion
+            elapsed = time.time() - step_start
+            logger.info(f"[SUPERVISOR] ⏱️ PROMOTE: COMPLETE in {elapsed:.1f}s")
             return FSMState.EXTRACT_RELATIONS  # Phase 2: Transition vers extraction relations
 
         elif fsm_state == FSMState.EXTRACT_RELATIONS:
             # Phase 2 OSMOSE: Extraction relations entre concepts promus
-            logger.info("[SUPERVISOR] EXTRACT_RELATIONS: Extracting relations between canonical concepts")
+            logger.info("[SUPERVISOR] ⏱️ EXTRACT_RELATIONS: START")
 
             # Skip si aucun concept promu
             if not state.promoted or len(state.promoted) == 0:
@@ -383,11 +397,13 @@ class SupervisorAgent(BaseAgent):
                 state.errors.append(f"Relation extraction failed: {str(e)}")
                 # Continue vers FINALIZE même en cas d'erreur (relation extraction non-critique)
 
+            elapsed = time.time() - step_start
+            logger.info(f"[SUPERVISOR] ⏱️ EXTRACT_RELATIONS: COMPLETE in {elapsed:.1f}s")
             return FSMState.FINALIZE
 
         elif fsm_state == FSMState.FINALIZE:
             # Finalisation: chunking + upload Qdrant
-            logger.info("[SUPERVISOR] FINALIZE: Chunking document and uploading to Qdrant")
+            logger.info("[SUPERVISOR] ⏱️ FINALIZE: START - Chunking document and uploading to Qdrant")
 
             # Récupérer texte complet
             full_text = state.full_text or ""
@@ -403,6 +419,9 @@ class SupervisorAgent(BaseAgent):
                 # Récupérer concepts canoniques pour enrichir chunks
                 canonical_concepts = []
                 try:
+                    from knowbase.common.clients.neo4j_client import get_neo4j_client
+                    neo4j_client = get_neo4j_client()
+
                     query = """
                     MATCH (c:CanonicalConcept)
                     WHERE c.tenant_id = $tenant_id AND c.document_id = $document_id
@@ -410,7 +429,7 @@ class SupervisorAgent(BaseAgent):
                            c.canonical_name AS name,
                            c.concept_type AS type
                     """
-                    with self.neo4j.driver.session(database=self.neo4j.database) as session:
+                    with neo4j_client.driver.session(database=neo4j_client.database) as session:
                         result = session.run(query, tenant_id=state.tenant_id, document_id=state.document_id)
                         canonical_concepts = [dict(record) for record in result]
                     logger.info(f"[SUPERVISOR] FINALIZE: Retrieved {len(canonical_concepts)} canonical concepts for chunking")
@@ -455,11 +474,11 @@ class SupervisorAgent(BaseAgent):
                         # Upload batch
                         try:
                             qdrant_client.upsert(
-                                collection_name="knowbase",
+                                collection_name="knowwhere_proto",
                                 points=points
                             )
                             logger.info(
-                                f"[SUPERVISOR] FINALIZE: ✅ Uploaded {len(points)} chunks to Qdrant collection 'knowbase'"
+                                f"[SUPERVISOR] FINALIZE: ✅ Uploaded {len(points)} chunks to Qdrant collection 'knowwhere_proto'"
                             )
                         except Exception as e:
                             logger.error(f"[SUPERVISOR] FINALIZE: Error uploading to Qdrant: {e}")
@@ -475,6 +494,8 @@ class SupervisorAgent(BaseAgent):
                 )
                 # Continue vers DONE même en cas d'erreur (chunking non-critique)
 
+            elapsed = time.time() - step_start
+            logger.info(f"[SUPERVISOR] ⏱️ FINALIZE: COMPLETE in {elapsed:.1f}s")
             logger.debug("[SUPERVISOR] FINALIZE: Computing final metrics")
             return FSMState.DONE
 

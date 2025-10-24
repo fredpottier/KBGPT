@@ -26,6 +26,11 @@ def create_app() -> FastAPI:
     init_db()
     logger.info("✅ Base de données SQLite initialisée (entity_types_registry)")
 
+    # Créer utilisateur admin par défaut si n'existe pas
+    from knowbase.db.init_admin import init_default_admin
+    init_default_admin()
+    logger.info("✅ Utilisateur admin vérifié/créé")
+
     if os.getenv("DEBUG_APP") == "true":
         logger.info("🐛 Attaching debugpy to FastAPI app on port 5678...")
         debugpy.listen(("0.0.0.0", 5678))
@@ -138,19 +143,30 @@ def create_app() -> FastAPI:
     logger.info("✅ Rate limiting configuré : 100 requêtes/minute par IP")
 
     # Configure CORS - Allow frontend to make requests
+    # Origines par défaut (dev local)
+    default_origins = [
+        "http://localhost:3000",  # Frontend Next.js dev
+        "http://localhost:8501",  # Frontend Streamlit legacy
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8501",
+    ]
+
+    # Ajouter origines personnalisées depuis variable d'environnement (production)
+    custom_origins = os.getenv("CORS_ORIGINS", "").strip()
+    if custom_origins:
+        # Format attendu: "http://1.2.3.4:3000,http://1.2.3.4:8501,https://example.com"
+        additional_origins = [origin.strip() for origin in custom_origins.split(",") if origin.strip()]
+        default_origins.extend(additional_origins)
+        logger.info(f"🌐 CORS origines additionnelles configurées depuis CORS_ORIGINS: {additional_origins}")
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:3000",  # Frontend Next.js dev
-            "http://localhost:8501",  # Frontend Streamlit legacy
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:8501",
-        ],
+        allow_origins=default_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    logger.info("✅ CORS configuré pour localhost:3000 et localhost:8501")
+    logger.info(f"✅ CORS configuré pour {len(default_origins)} origine(s): {default_origins}")
 
     openapi_path = Path(__file__).with_name("openapi.json")
     if openapi_path.exists():

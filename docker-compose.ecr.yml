@@ -118,6 +118,7 @@ services:
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:
@@ -130,7 +131,7 @@ services:
     # Production mode: 4 workers uvicorn
     command: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -172,7 +173,10 @@ services:
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
       DEV_MODE: "false"  # Mode production
-      WORKER_CONCURRENCY: "4"  # Nombre de workers concurrents
+      WORKER_CONCURRENCY: "4"  # Jobs par worker (garder 4)
+      # Performance mono-document (parallélisation interne)
+      MAX_PARALLEL_SEGMENTS: "${MAX_PARALLEL_SEGMENTS:-5}"  # Segments en parallèle
+      OPENAI_MAX_RPM: "${OPENAI_MAX_RPM:-500}"  # Rate limit OpenAI
     volumes:
       - worker_data:/data
       - app_models:/data/models  # Partage des modèles avec app
@@ -184,11 +188,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '3.0'
-          memory: 6G
+          cpus: '6.0'  # Augmenté pour parallélisation (8 vCPU - 2 pour système)
+          memory: 16G  # Augmenté pour traiter 5 segments en parallèle
         reservations:
-          cpus: '2.0'
-          memory: 4G
+          cpus: '4.0'
+          memory: 8G
 
   # ===================================
   # LEGACY UI - Streamlit (depuis ECR)
@@ -235,8 +239,8 @@ services:
     environment:
       - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
-      # API URLs pour production EC2 (ajuster selon votre domaine/IP)
-      - NEXT_PUBLIC_API_BASE_URL=${FRONTEND_API_BASE_URL:-http://localhost:8000}
+      # IMPORTANT: NEXT_PUBLIC_* vars sont compilees dans l'image Docker (build time)
+      # Ne PAS les override ici, elles sont deja /api dans l'image
       - NEXT_PUBLIC_API_INTERNAL_URL=http://app:8000
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
@@ -277,6 +281,77 @@ services:
   #   networks:
   #     - knowbase_net
 
+  # ===================================
+  # MONITORING - Loki (Log Aggregation)
+  # ===================================
+  loki:
+    <<: *common-config
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/sap-kb-loki:latest
+    container_name: knowbase-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - knowbase_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ===================================
+  # MONITORING - Promtail (Log Collector)
+  # ===================================
+  promtail:
+    <<: *common-config
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/sap-kb-promtail:latest
+    container_name: knowbase-promtail
+    volumes:
+      - ./monitoring/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data/logs:/data/logs:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - knowbase_net
+    depends_on:
+      - loki
+
+  # ===================================
+  # MONITORING - Grafana (Visualization)
+  # ===================================
+  grafana:
+    <<: *common-config
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/sap-kb-grafana:latest
+    container_name: knowbase-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./monitoring/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./monitoring/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    networks:
+      - knowbase_net
+    depends_on:
+      - loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
 networks:
   knowbase_net:
     name: knowbase_network
@@ -291,6 +366,10 @@ volumes:
     name: knowbase_qdrant_data
   redis_data:
     name: knowbase_redis_data
+  loki_data:
+    name: knowbase_loki_data
+  grafana_data:
+    name: knowbase_grafana_data
   app_data:
     name: knowbase_app_data
   app_models:

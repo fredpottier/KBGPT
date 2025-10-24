@@ -121,12 +121,18 @@ $IMAGE_REPO_NAME_NEO4J = "sap-kb-neo4j"
 $IMAGE_REPO_NAME_REDIS = "sap-kb-redis"
 $IMAGE_REPO_NAME_QDRANT = "sap-kb-qdrant"
 $IMAGE_REPO_NAME_NGROK = "sap-kb-ngrok"
+$IMAGE_REPO_NAME_LOKI = "sap-kb-loki"
+$IMAGE_REPO_NAME_PROMTAIL = "sap-kb-promtail"
+$IMAGE_REPO_NAME_GRAFANA = "sap-kb-grafana"
 
 # Images third-party de base
 $NEO4J_BASE_IMAGE = "neo4j:5.26.0"
 $REDIS_BASE_IMAGE = "redis:7.2"
 $QDRANT_BASE_IMAGE = "qdrant/qdrant:v1.15.1"
 $NGROK_BASE_IMAGE = "ngrok/ngrok:latest"
+$LOKI_BASE_IMAGE = "grafana/loki:2.9.3"
+$PROMTAIL_BASE_IMAGE = "grafana/promtail:2.9.3"
+$GRAFANA_BASE_IMAGE = "grafana/grafana:10.2.3"
 
 $PUSH_LATEST = $true
 
@@ -258,7 +264,10 @@ $REPOS = @(
     $IMAGE_REPO_NAME_NEO4J,
     $IMAGE_REPO_NAME_REDIS,
     $IMAGE_REPO_NAME_QDRANT,
-    $IMAGE_REPO_NAME_NGROK
+    $IMAGE_REPO_NAME_NGROK,
+    $IMAGE_REPO_NAME_LOKI,
+    $IMAGE_REPO_NAME_PROMTAIL,
+    $IMAGE_REPO_NAME_GRAFANA
 )
 
 foreach ($repo in $REPOS) {
@@ -336,6 +345,10 @@ else {
     docker build --file frontend/Dockerfile --tag $FRONTEND_LOCAL_TAG frontend
 }
 
+# Tag local latest
+docker tag $FRONTEND_LOCAL_TAG "sap-kb-frontend:latest"
+
+# Tag pour ECR
 docker tag $FRONTEND_LOCAL_TAG "$ECR_REGISTRY/$IMAGE_REPO_NAME_FRONTEND`:$IMAGE_TAG"
 
 if ($PUSH_LATEST) {
@@ -371,6 +384,9 @@ if (-not $SkipThirdParty) {
     Mirror-ExternalImage -SourceImage $REDIS_BASE_IMAGE -TargetRepo $IMAGE_REPO_NAME_REDIS
     Mirror-ExternalImage -SourceImage $QDRANT_BASE_IMAGE -TargetRepo $IMAGE_REPO_NAME_QDRANT
     Mirror-ExternalImage -SourceImage $NGROK_BASE_IMAGE -TargetRepo $IMAGE_REPO_NAME_NGROK
+    Mirror-ExternalImage -SourceImage $LOKI_BASE_IMAGE -TargetRepo $IMAGE_REPO_NAME_LOKI
+    Mirror-ExternalImage -SourceImage $PROMTAIL_BASE_IMAGE -TargetRepo $IMAGE_REPO_NAME_PROMTAIL
+    Mirror-ExternalImage -SourceImage $GRAFANA_BASE_IMAGE -TargetRepo $IMAGE_REPO_NAME_GRAFANA
 
     Write-SuccessMessage "Toutes les images third-party sont prêtes"
 }
@@ -421,6 +437,9 @@ if (-not $SkipThirdParty) {
     Push-WithTags -Repo $IMAGE_REPO_NAME_REDIS -Tag $redisTag
     Push-WithTags -Repo $IMAGE_REPO_NAME_QDRANT -Tag $qdrantTag
     Push-WithTags -Repo $IMAGE_REPO_NAME_NGROK -Tag $ngrokTag
+    Push-WithTags -Repo $IMAGE_REPO_NAME_LOKI -Tag "2.9.3"
+    Push-WithTags -Repo $IMAGE_REPO_NAME_PROMTAIL -Tag "2.9.3"
+    Push-WithTags -Repo $IMAGE_REPO_NAME_GRAFANA -Tag "10.2.3"
 }
 
 # =====================================================
@@ -445,6 +464,9 @@ if (-not $SkipThirdParty) {
     Write-Host "  - $ECR_REGISTRY/$IMAGE_REPO_NAME_REDIS`:$redisTag"
     Write-Host "  - $ECR_REGISTRY/$IMAGE_REPO_NAME_QDRANT`:$qdrantTag"
     Write-Host "  - $ECR_REGISTRY/$IMAGE_REPO_NAME_NGROK`:$ngrokTag"
+    Write-Host "  - $ECR_REGISTRY/$IMAGE_REPO_NAME_LOKI`:2.9.3"
+    Write-Host "  - $ECR_REGISTRY/$IMAGE_REPO_NAME_PROMTAIL`:2.9.3"
+    Write-Host "  - $ECR_REGISTRY/$IMAGE_REPO_NAME_GRAFANA`:10.2.3"
 }
 
 Write-Host ""

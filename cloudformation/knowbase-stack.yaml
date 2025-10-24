@@ -1,0 +1,540 @@
+﻿AWSTemplateFormatVersion: "2010-09-09"
+Description: "KnowWhere OSMOSE - Infrastructure complète EC2 pour tests performance (Deploy/Destroy en 1 commande)"
+
+# ============================================================================
+# PARAMETERS - Personnalisables a chaque deploiement
+# ============================================================================
+Parameters:
+  InstanceType:
+    Description: "Type instance EC2 (t3.2xlarge par défaut, m5.2xlarge pour production)"
+    Type: String
+    Default: t3.2xlarge
+    AllowedValues:
+      - t3.xlarge    # 4 vCPU, 16 GB RAM - Tests basiques
+      - t3.2xlarge   # 8 vCPU, 32 GB RAM - Tests/Dev (burstable, DEFAULT)
+      - m5.2xlarge   # 8 vCPU, 32 GB RAM - Production (performance stable)
+      - c5.4xlarge   # 16 vCPU, 32 GB RAM - Heavy workload (10 segments //)
+      - c5.9xlarge   # 36 vCPU, 72 GB RAM - Très heavy (15 segments //)
+
+  KeyPairName:
+    Description: "Nom de la clé SSH EC2 (doit exister dans votre compte AWS)"
+    Type: AWS::EC2::KeyPair::KeyName
+
+  YourPublicIP:
+    Description: "Votre IP publique pour accès SSH (format: X.X.X.X/32)"
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    ConstraintDescription: "Doit être une adresse IP CIDR valide (ex: 1.2.3.4/32)"
+
+  RootVolumeSize:
+    Description: "Taille volume root (GB)"
+    Type: Number
+    Default: 30
+    MinValue: 30
+    MaxValue: 100
+
+  DataVolumeSize:
+    Description: "Taille volume data pour Neo4j/Qdrant/Redis (GB)"
+    Type: Number
+    Default: 100
+    MinValue: 50
+    MaxValue: 500
+
+  ECRAccountID:
+    Description: "Votre AWS Account ID (pour ECR registry)"
+    Type: String
+    Default: "715927975014"
+
+  ECRRegion:
+    Description: "Région ECR où sont stockées vos images"
+    Type: String
+    Default: eu-west-1
+
+  AutoDestroyAfterHours:
+    Description: "Auto-destruction du stack après X heures (0 = désactivé, max 24h pour tests)"
+    Type: Number
+    Default: 4
+    MinValue: 0
+    MaxValue: 24
+
+# ============================================================================
+# MAPPINGS - AMI Ubuntu 22.04 LTS par région (mis à jour octobre 2025)
+# ============================================================================
+Mappings:
+  RegionMap:
+    eu-west-1: # Ireland
+      AMI: ami-0ef0fafba270833fc
+    us-east-1: # N. Virginia
+      AMI: ami-0c398cb65a93047f2
+    us-west-2: # Oregon
+      AMI: ami-03c1f788292172a4e
+    eu-central-1: # Frankfurt
+      AMI: ami-0a854fe96e0b45e4e
+
+# ============================================================================
+# CONDITIONS - Logique conditionnelle
+# ============================================================================
+Conditions:
+  EnableAutoDestroy: !Not [!Equals [!Ref AutoDestroyAfterHours, 0]]
+
+# ============================================================================
+# RESOURCES - Infrastructure complète
+# ============================================================================
+Resources:
+  # --------------------------------------------------------------------------
+  # 1. ELASTIC IP (IP fixe pour tests)
+  # --------------------------------------------------------------------------
+  ElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-eip"
+        - Key: Project
+          Value: KnowWhere
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------------------------------
+  # 2. SECURITY GROUP (Ports pour services)
+  # --------------------------------------------------------------------------
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${AWS::StackName}-sg"
+      GroupDescription: "Security Group for KnowWhere OSMOSE stack"
+      # Note: Ne pas spécifier VpcId pour utiliser le VPC par défaut (EC2-Classic ou default VPC)
+      SecurityGroupIngress:
+        # SSH (limité à votre IP)
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref YourPublicIP
+          Description: "SSH access from your IP"
+
+        # API Backend (FastAPI)
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+          Description: "FastAPI Backend"
+
+        # Frontend (Next.js)
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+          Description: "Next.js Frontend"
+
+        # Streamlit UI (Legacy)
+        - IpProtocol: tcp
+          FromPort: 8501
+          ToPort: 8501
+          CidrIp: !Ref YourPublicIP
+          Description: "Streamlit UI (admin only)"
+
+        # Neo4j Browser
+        - IpProtocol: tcp
+          FromPort: 7474
+          ToPort: 7474
+          CidrIp: !Ref YourPublicIP
+          Description: "Neo4j Browser (admin only)"
+
+        # Qdrant UI
+        - IpProtocol: tcp
+          FromPort: 6333
+          ToPort: 6333
+          CidrIp: !Ref YourPublicIP
+          Description: "Qdrant UI (admin only)"
+
+        # Grafana (Monitoring)
+        - IpProtocol: tcp
+          FromPort: 3001
+          ToPort: 3001
+          CidrIp: !Ref YourPublicIP
+          Description: "Grafana Monitoring Dashboard (admin only)"
+
+      # Note: SecurityGroupEgress omis volontairement
+      # AWS ajoutera automatiquement la règle par défaut: tout le trafic sortant autorisé
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-sg"
+        - Key: Project
+          Value: KnowWhere
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------------------------------
+  # 3. IAM ROLE (Pour pull images ECR)
+  # --------------------------------------------------------------------------
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-ec2-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Policy pour pull ECR
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        # Policy pour CloudWatch logs (optionnel)
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-role"
+        - Key: Project
+          Value: KnowWhere
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "${AWS::StackName}-instance-profile"
+      Roles:
+        - !Ref EC2InstanceRole
+
+  # --------------------------------------------------------------------------
+  # 4. EC2 INSTANCE (Serveur principal)
+  # --------------------------------------------------------------------------
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+      KeyName: !Ref KeyPairName
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+
+      # Volumes
+      BlockDeviceMappings:
+        # Root volume
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: !Ref RootVolumeSize
+            VolumeType: gp3
+            DeleteOnTermination: true
+            Encrypted: false
+
+        # Data volume (Neo4j, Qdrant, Redis)
+        - DeviceName: /dev/sdf
+          Ebs:
+            VolumeSize: !Ref DataVolumeSize
+            VolumeType: gp3
+            DeleteOnTermination: true
+            Encrypted: false
+
+      # User Data (Installation automatique Docker + AWS CLI)
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+
+          # Log all output
+          exec > >(tee /var/log/user-data.log)
+          exec 2>&1
+
+          echo "========================================="
+          echo "KnowWhere OSMOSE - User Data Script"
+          echo "Stack: ${AWS::StackName}"
+          echo "Instance Type: ${InstanceType}"
+          echo "========================================="
+
+          # Update system
+          echo "[1/6] Updating system..."
+          apt-get update -y
+          DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+
+          # Install Docker
+          echo "[2/6] Installing Docker..."
+          apt-get install -y \
+            ca-certificates \
+            curl \
+            gnupg \
+            lsb-release
+
+          mkdir -p /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+            $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+          apt-get update -y
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+          # Start Docker
+          systemctl enable docker
+          systemctl start docker
+
+          # Add ubuntu user to docker group (allows docker without sudo)
+          usermod -aG docker ubuntu
+          echo "User ubuntu added to docker group"
+
+          # Install Docker Compose V2
+          echo "[3/6] Installing Docker Compose..."
+          DOCKER_COMPOSE_VERSION="2.24.0"
+          curl -L "https://github.com/docker/compose/releases/download/v${!DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          chmod +x /usr/local/bin/docker-compose
+          ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+
+          # Install AWS CLI v2
+          echo "[4/6] Installing AWS CLI..."
+          cd /tmp
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          apt-get install -y unzip
+          unzip -q awscliv2.zip
+          ./aws/install
+          rm -rf aws awscliv2.zip
+
+          # Configure data volume
+          echo "[5/6] Configuring data volume..."
+          if [ ! -b /dev/nvme1n1 ]; then
+            echo "Waiting for data volume..."
+            sleep 5
+          fi
+
+          # Format if not already formatted
+          if ! blkid /dev/nvme1n1 > /dev/null 2>&1; then
+            mkfs.ext4 /dev/nvme1n1
+          fi
+
+          mkdir -p /data
+          mount /dev/nvme1n1 /data
+          echo "/dev/nvme1n1 /data ext4 defaults,nofail 0 2" >> /etc/fstab
+
+          # Create directories
+          mkdir -p /data/neo4j
+          mkdir -p /data/qdrant
+          mkdir -p /data/redis
+          mkdir -p /home/ubuntu/knowbase
+
+          # Set permissions
+          chown -R ubuntu:ubuntu /home/ubuntu/knowbase
+          chown -R ubuntu:ubuntu /data
+
+          # Login to ECR (credentials from IAM role)
+          echo "[6/6] Logging into ECR..."
+          # Note: Using su - ubuntu with sg docker to get both IAM credentials and docker group access
+          su - ubuntu -c "aws ecr get-login-password --region ${ECRRegion} | sg docker -c 'docker login --username AWS --password-stdin ${ECRAccountID}.dkr.ecr.${ECRRegion}.amazonaws.com'"
+
+          echo "========================================="
+          echo "User Data Script Completed Successfully"
+          echo "========================================="
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-instance"
+        - Key: Project
+          Value: KnowWhere
+        - Key: Environment
+          Value: Test
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------------------------------
+  # 5. ELASTIC IP ASSOCIATION
+  # --------------------------------------------------------------------------
+  EIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref EC2Instance
+      EIP: !Ref ElasticIP
+
+  # --------------------------------------------------------------------------
+  # 6. AUTO-DESTRUCTION (Lambda + EventBridge)
+  # --------------------------------------------------------------------------
+  AutoDestroyLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: EnableAutoDestroy
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-auto-destroy-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CloudFormationDeleteStack
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                Resource: !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*"
+
+  AutoDestroyLambda:
+    Type: AWS::Lambda::Function
+    Condition: EnableAutoDestroy
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-auto-destroy"
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt AutoDestroyLambdaRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          STACK_NAME: !Ref AWS::StackName
+          REGION: !Ref AWS::Region
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          import json
+
+          def handler(event, context):
+              stack_name = os.environ['STACK_NAME']
+              region = os.environ['REGION']
+
+              cf_client = boto3.client('cloudformation', region_name=region)
+
+              print(f"Auto-destruction déclenchée pour le stack: {stack_name}")
+
+              try:
+                  # Vérifier que le stack existe toujours
+                  response = cf_client.describe_stacks(StackName=stack_name)
+                  stack_status = response['Stacks'][0]['StackStatus']
+
+                  if 'DELETE' in stack_status:
+                      print(f"Stack déjà en cours de suppression: {stack_status}")
+                      return {
+                          'statusCode': 200,
+                          'body': json.dumps(f'Stack already being deleted: {stack_status}')
+                      }
+
+                  # Supprimer le stack
+                  cf_client.delete_stack(StackName=stack_name)
+                  print(f"✅ Commande de suppression envoyée pour {stack_name}")
+
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(f'Stack {stack_name} deletion initiated')
+                  }
+
+              except cf_client.exceptions.ClientError as e:
+                  error_code = e.response['Error']['Code']
+                  if error_code == 'ValidationError':
+                      print(f"Stack {stack_name} n'existe plus")
+                      return {
+                          'statusCode': 200,
+                          'body': json.dumps('Stack already deleted')
+                      }
+                  else:
+                      print(f"❌ Erreur: {str(e)}")
+                      raise
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-auto-destroy-lambda"
+        - Key: Project
+          Value: KnowWhere
+
+  AutoDestroyEventRule:
+    Type: AWS::Events::Rule
+    Condition: EnableAutoDestroy
+    Properties:
+      Name: !Sub "${AWS::StackName}-auto-destroy-timer"
+      Description: !Sub "Auto-destruction du stack ${AWS::StackName} après ${AutoDestroyAfterHours}h"
+      # Déclencher une seule fois après X heures
+      ScheduleExpression: !Sub "rate(${AutoDestroyAfterHours} hours)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt AutoDestroyLambda.Arn
+          Id: AutoDestroyTarget
+
+  AutoDestroyLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Condition: EnableAutoDestroy
+    Properties:
+      FunctionName: !Ref AutoDestroyLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AutoDestroyEventRule.Arn
+
+# ============================================================================
+# OUTPUTS - Informations à récupérer après déploiement
+# ============================================================================
+Outputs:
+  StackName:
+    Description: "Nom du stack CloudFormation"
+    Value: !Ref AWS::StackName
+    Export:
+      Name: !Sub "${AWS::StackName}-StackName"
+
+  InstanceId:
+    Description: "ID de l instance EC2"
+    Value: !Ref EC2Instance
+    Export:
+      Name: !Sub "${AWS::StackName}-InstanceId"
+
+  PublicIP:
+    Description: "IP publique Elastic (FIXE - ne change pas)"
+    Value: !Ref ElasticIP
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicIP"
+
+  SSHCommand:
+    Description: "Commande SSH pour se connecter"
+    Value: !Sub 'ssh -i "path/to/${KeyPairName}.pem" ubuntu@${ElasticIP}'
+
+  FrontendURL:
+    Description: "URL Frontend Next.js"
+    Value: !Sub "http://${ElasticIP}:3000"
+
+  BackendURL:
+    Description: "URL API Backend (Swagger)"
+    Value: !Sub "http://${ElasticIP}:8000/docs"
+
+  Neo4jBrowserURL:
+    Description: "URL Neo4j Browser"
+    Value: !Sub "http://${ElasticIP}:7474"
+
+  QdrantDashboardURL:
+    Description: "URL Qdrant Dashboard"
+    Value: !Sub "http://${ElasticIP}:6333/dashboard"
+
+  GrafanaURL:
+    Description: "URL Grafana Monitoring Dashboard"
+    Value: !Sub "http://${ElasticIP}:3001"
+
+  SecurityGroupId:
+    Description: "ID du Security Group"
+    Value: !Ref SecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-SecurityGroupId"
+
+  IAMRoleArn:
+    Description: "ARN du IAM Role"
+    Value: !GetAtt EC2InstanceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-IAMRoleArn"
+
+  EstimatedMonthlyCost:
+    Description: "Coût estimé si running 24/7 (info seulement)"
+    Value: !Sub |
+      Instance ${InstanceType}: ~$120/mois (24/7)
+      Storage ${DataVolumeSize}GB: ~$${DataVolumeSize}/mois × $0.08 = ~$8/mois
+      Elastic IP: $0 (gratuit si associé)
+      TOTAL estimé: ~$128/mois si running 24/7
+
+      Pour tests ponctuels (3h/session): ~$0.50/session
+
+  AutoDestroyStatus:
+    Description: "Statut de l'auto-destruction"
+    Value: !If
+      - EnableAutoDestroy
+      - !Sub "⚠️ ACTIVÉE - Stack sera automatiquement détruit dans ${AutoDestroyAfterHours}h"
+      - "✅ DÉSACTIVÉE - Pensez à détruire le stack manuellement après vos tests"

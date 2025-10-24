@@ -2,11 +2,15 @@
 🤖 OSMOSE Agentique - Extractor Orchestrator
 
 Routing intelligent pour extraction concepts.
+Parallélisation massive pour traitement mono-document rapide.
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import logging
+import asyncio
+import os
 from enum import Enum
+from asyncio import Semaphore
 from pydantic import model_validator
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
@@ -100,12 +104,24 @@ class ExtractorOrchestrator(BaseAgent):
         self.no_llm_threshold = config.get("no_llm_threshold", 3) if config else 3
         self.small_threshold = config.get("small_threshold", 8) if config else 8
 
+        # Configuration parallélisation (optimisé pour 8 vCPU)
+        self.max_parallel_segments = int(os.getenv("MAX_PARALLEL_SEGMENTS", "5"))
+
+        # Rate limiter LLM (selon tier OpenAI)
+        max_rpm = int(os.getenv("OPENAI_MAX_RPM", "500"))
+        # Heuristique: max_rpm / 60s * 20s avg_call_duration = concurrent calls
+        max_concurrent_llm = min(max_rpm // 3, self.max_parallel_segments)
+        self.llm_semaphore = Semaphore(max_concurrent_llm)
+
         # Lazy-init pour MultilingualConceptExtractor (créé au premier appel)
         self._concept_extractor = None
         self._llm_router = None
         self._semantic_config = None
 
-        logger.info("[EXTRACTOR] Initialized with routing thresholds (NO_LLM<3, SMALL≤8, BIG>8)")
+        logger.info(
+            f"[EXTRACTOR] Initialized with routing thresholds (NO_LLM<3, SMALL≤8, BIG>8), "
+            f"max_parallel={self.max_parallel_segments}, rate_limit={max_concurrent_llm} concurrent LLM calls"
+        )
 
     def _get_concept_extractor(self):
         """
@@ -142,7 +158,9 @@ class ExtractorOrchestrator(BaseAgent):
         instruction: Optional[str] = None
     ) -> AgentState:
         """
-        Exécute l'extraction concepts pour tous les segments.
+        Exécute l'extraction concepts pour tous les segments EN PARALLÈLE.
+
+        Parallélisation par batches pour respecter rate limits LLM.
 
         Args:
             state: État actuel (doit contenir state.segments)
@@ -151,7 +169,7 @@ class ExtractorOrchestrator(BaseAgent):
         Returns:
             État mis à jour avec state.candidates rempli
         """
-        logger.info(f"[EXTRACTOR] Starting extraction for {len(state.segments)} segments")
+        logger.info(f"[EXTRACTOR] 🚀 Starting PARALLEL extraction for {len(state.segments)} segments")
 
         if not state.segments:
             logger.warning("[EXTRACTOR] No segments to process, skipping")
@@ -160,54 +178,43 @@ class ExtractorOrchestrator(BaseAgent):
         # Réinitialiser candidates
         state.candidates = []
 
-        # Traiter chaque segment
-        for idx, segment in enumerate(state.segments):
-            logger.debug(f"[EXTRACTOR] Processing segment {idx+1}/{len(state.segments)}")
+        # Traiter en parallèle par batches
+        all_results = []
+        num_batches = (len(state.segments) + self.max_parallel_segments - 1) // self.max_parallel_segments
 
-            # Étape 1: Analyser segment avec PrepassAnalyzer
-            prepass_input = PrepassAnalyzerInput(
-                segment_text=segment.get("text", ""),
-                language=segment.get("language", "en")
-            )
-
-            prepass_result = await self.call_tool("prepass_analyzer", prepass_input)
-
-            if not prepass_result.success:
-                logger.error(f"[EXTRACTOR] PrepassAnalyzer failed for segment {idx}: {prepass_result.message}")
-                continue
-
-            # prepass_result est déjà un PrepassAnalyzerOutput (hérite de ToolOutput)
-            prepass_output = prepass_result
-            recommended_route = prepass_output.recommended_route
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * self.max_parallel_segments
+            end_idx = min(start_idx + self.max_parallel_segments, len(state.segments))
+            batch_segments = state.segments[start_idx:end_idx]
 
             logger.info(
-                f"[EXTRACTOR] Segment {idx}: {prepass_output.entity_count} entities, "
-                f"density {prepass_output.entity_density:.2f}, route={recommended_route}"
+                f"[EXTRACTOR] 📦 Processing batch {batch_idx + 1}/{num_batches} "
+                f"(segments {start_idx + 1}-{end_idx})"
             )
 
-            # Étape 2: Appliquer fallback si budget insuffisant
-            final_route = self._apply_budget_fallback(recommended_route, state)
+            # Créer tâches pour ce batch
+            tasks = [
+                self._process_single_segment(start_idx + i, seg, state)
+                for i, seg in enumerate(batch_segments)
+            ]
 
-            if final_route != recommended_route:
-                logger.warning(
-                    f"[EXTRACTOR] Budget fallback: {recommended_route} → {final_route}"
-                )
+            # Exécuter batch en parallèle
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Étape 3: Extraire concepts avec route choisie
-            extract_input = ExtractConceptsInput(
-                segment=segment,
-                route=final_route,
-                use_llm=(final_route != ExtractionRoute.NO_LLM)
-            )
+            # Filtrer erreurs
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    logger.error(f"[EXTRACTOR] ❌ Segment processing failed: {result}")
+                elif result is not None:
+                    all_results.append(result)
 
-            extract_result = await self.call_tool("extract_concepts", extract_input)
+            logger.info(f"[EXTRACTOR] ✅ Batch {batch_idx + 1} completed: {len(batch_results)} segments processed")
 
-            if not extract_result.success:
-                logger.error(f"[EXTRACTOR] Extraction failed for segment {idx}: {extract_result.message}")
+        # Agréger tous les résultats
+        logger.info(f"[EXTRACTOR] 📊 Aggregating {len(all_results)} segment results")
+        for idx, segment_id, extract_output, final_route in all_results:
+            if extract_output is None:
                 continue
-
-            # extract_result est déjà un ExtractConceptsOutput (hérite de ToolOutput)
-            extract_output = extract_result
 
             # Mettre à jour état
             state.candidates.extend(extract_output.concepts)
@@ -221,19 +228,91 @@ class ExtractorOrchestrator(BaseAgent):
                 state.llm_calls_count["BIG"] += extract_output.llm_calls
                 state.budget_remaining["BIG"] -= extract_output.llm_calls
 
-            logger.info(
-                f"[EXTRACTOR] Segment {idx}: {len(extract_output.concepts)} concepts, "
-                f"cost ${extract_output.cost_incurred:.3f}, route={final_route}"
-            )
-
         # Log final
         logger.info(
-            f"[EXTRACTOR] Extraction complete: {len(state.candidates)} candidates, "
+            f"[EXTRACTOR] ✅ Extraction complete: {len(state.candidates)} candidates, "
             f"cost ${state.cost_incurred:.2f}, "
             f"budget remaining SMALL={state.budget_remaining['SMALL']} BIG={state.budget_remaining['BIG']}"
         )
 
         return state
+
+    async def _process_single_segment(
+        self,
+        idx: int,
+        segment: dict,
+        state: AgentState
+    ) -> Optional[Tuple[int, str, Any, str]]:
+        """
+        Traite UN segment (prepass + extraction) avec rate limiting.
+
+        Args:
+            idx: Index du segment
+            segment: Données du segment
+            state: État global (pour budget)
+
+        Returns:
+            (idx, segment_id, extract_output, final_route) ou None si échec
+        """
+        segment_id = segment.get("segment_id", f"seg_{idx}")
+
+        try:
+            logger.debug(f"[EXTRACTOR] 🔄 Segment {idx + 1} START")
+
+            # Étape 1: Analyser segment avec PrepassAnalyzer (pas de rate limit, local NER)
+            prepass_input = PrepassAnalyzerInput(
+                segment_text=segment.get("text", ""),
+                language=segment.get("language", "en")
+            )
+
+            prepass_result = await self.call_tool("prepass_analyzer", prepass_input)
+
+            if not prepass_result.success:
+                logger.error(f"[EXTRACTOR] PrepassAnalyzer failed for segment {idx}: {prepass_result.message}")
+                return None
+
+            prepass_output = prepass_result
+            recommended_route = prepass_output.recommended_route
+
+            logger.debug(
+                f"[EXTRACTOR] Segment {idx + 1}: {prepass_output.entity_count} entities, "
+                f"density {prepass_output.entity_density:.2f}, route={recommended_route}"
+            )
+
+            # Étape 2: Appliquer fallback si budget insuffisant
+            final_route = self._apply_budget_fallback(recommended_route, state)
+
+            if final_route != recommended_route:
+                logger.warning(
+                    f"[EXTRACTOR] Segment {idx + 1}: Budget fallback {recommended_route} → {final_route}"
+                )
+
+            # Étape 3: Extraire concepts avec rate limiting
+            async with self.llm_semaphore:  # Rate limiter pour appels LLM
+                extract_input = ExtractConceptsInput(
+                    segment=segment,
+                    route=final_route,
+                    use_llm=(final_route != ExtractionRoute.NO_LLM)
+                )
+
+                extract_result = await self.call_tool("extract_concepts", extract_input)
+
+            if not extract_result.success:
+                logger.error(f"[EXTRACTOR] Extraction failed for segment {idx}: {extract_result.message}")
+                return None
+
+            extract_output = extract_result
+
+            logger.info(
+                f"[EXTRACTOR] ✅ Segment {idx + 1} DONE: {len(extract_output.concepts)} concepts, "
+                f"cost ${extract_output.cost_incurred:.3f}, route={final_route}"
+            )
+
+            return (idx, segment_id, extract_output, final_route)
+
+        except Exception as e:
+            logger.error(f"[EXTRACTOR] ❌ Segment {idx + 1} FAILED with exception: {e}", exc_info=True)
+            return None
 
     def _apply_budget_fallback(
         self,

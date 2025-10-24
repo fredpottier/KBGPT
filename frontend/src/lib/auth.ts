@@ -3,7 +3,28 @@
  * Gère login, logout, refresh token et stockage JWT.
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
+// Détection automatique de l'URL API en fonction de l'environnement
+// IMPORTANT: Cette fonction doit être appelée côté client uniquement
+const getApiBaseUrl = (): string => {
+  // Vérification runtime: si window est undefined, on est côté serveur
+  // Dans ce cas, retourner l'URL interne Docker
+  if (typeof window === 'undefined') {
+    return process.env.NEXT_PUBLIC_API_INTERNAL_URL || 'http://app:8000'
+  }
+
+  // Côté client: utiliser window.location pour construire l'URL du backend
+  // Le backend est sur le même host que le frontend, mais port 8000
+  const hostname = window.location.hostname
+  const protocol = window.location.protocol
+
+  // Si on est en localhost, utiliser localhost:8000
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return 'http://localhost:8000'
+  }
+
+  // Sinon, utiliser le même hostname avec le port 8000
+  return `${protocol}//${hostname}:8000`
+}
 
 export interface LoginCredentials {
   email: string
@@ -48,7 +69,8 @@ class AuthService {
    * Login utilisateur et stocke les tokens.
    */
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
-    console.log('[AuthService] Sending login request to:', `${API_BASE_URL}/api/auth/login`)
+    const apiBaseUrl = getApiBaseUrl()
+    console.log('[AuthService] Sending login request to:', `${apiBaseUrl}/api/auth/login`)
     console.log('[AuthService] Credentials:', { email: credentials.email, password: '***' })
 
     // Timeout de 10 secondes pour éviter de rester bloqué
@@ -56,7 +78,7 @@ class AuthService {
     const timeoutId = setTimeout(() => controller.abort(), 10000)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      const response = await fetch(`${apiBaseUrl}/api/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -124,7 +146,8 @@ class AuthService {
       throw new Error('No refresh token available')
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+    const apiBaseUrl = getApiBaseUrl()
+    const response = await fetch(`${apiBaseUrl}/api/auth/refresh`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -161,7 +184,8 @@ class AuthService {
       throw new Error('No access token')
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+    const apiBaseUrl = getApiBaseUrl()
+    const response = await fetch(`${apiBaseUrl}/api/auth/me`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -182,7 +206,8 @@ class AuthService {
    * Register nouvel utilisateur.
    */
   async register(data: RegisterData): Promise<AuthResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+    const apiBaseUrl = getApiBaseUrl()
+    const response = await fetch(`${apiBaseUrl}/api/auth/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -15,11 +15,11 @@ RUN npm install --silent
 # Copy source code
 COPY . .
 
-# Create .next directory with proper permissions
-RUN mkdir -p /app/.next && chown -R node:node /app/.next
-
-# Set proper permissions for the entire app directory
-RUN chown -R node:node /app
+# Create .next directory and next-env.d.ts with proper permissions
+RUN mkdir -p /app/.next && \
+    touch /app/next-env.d.ts && \
+    chown -R node:node /app/.next && \
+    chown -R node:node /app
 
 # Switch to node user
 USER node

@@ -640,6 +640,118 @@ class GatekeeperDelegate(BaseAgent):
 
         return None
 
+    def _batch_canonicalize_pending_concepts(
+        self,
+        concepts: List[Dict[str, Any]],
+        tenant_id: str,
+        batch_size: int = 20
+    ) -> Dict[str, tuple]:
+        """
+        Batch canonicalisation LLM pour TOUS les concepts d'un coup.
+
+        Fix 2025-10-20: Réduire latence réseau de 95% via batch processing.
+        - Avant: 556 concepts × (0.5s latency + 0.1s LLM) = 334s total
+        - Après: 28 batches × (0.5s latency + 0.5s LLM batch) = 28s total
+        - Gain: 306s économisés (~5 min)
+
+        Args:
+            concepts: Liste complète des concepts à promouvoir
+            tenant_id: ID tenant
+            batch_size: Taille des batches (default: 20)
+
+        Returns:
+            Dict[concept_name] -> (canonical_name, confidence)
+
+        Example:
+            >>> cache = self._batch_canonicalize_pending_concepts(concepts, "default")
+            >>> cache["S/4HANA Cloud's"]
+            ("SAP S/4HANA Cloud, Public Edition", 0.92)
+        """
+        if not self.llm_canonicalizer or not self.adaptive_ontology:
+            logger.warning(
+                "[GATEKEEPER:Batch] LLM Canonicalizer unavailable, skipping batch canonicalization"
+            )
+            return {}
+
+        # 1. Collecter concepts nécessitant canonicalisation LLM
+        pending_concepts = []
+
+        for concept in concepts:
+            concept_name = concept.get("name", "")
+            if not concept_name:
+                continue
+
+            # Check si déjà dans cache ontologie
+            cached = self.adaptive_ontology.lookup(concept_name, tenant_id)
+
+            if not cached:
+                # Pas de cache → doit être canonicalisé
+                pending_concepts.append({
+                    "raw_name": concept_name,
+                    "context": concept.get("definition", ""),
+                    "domain_hint": None
+                })
+
+        if not pending_concepts:
+            logger.info("[GATEKEEPER:Batch] ✅ All concepts already cached, no LLM calls needed")
+            return {}
+
+        logger.info(
+            f"[GATEKEEPER:Batch] 🔄 Batch canonicalizing {len(pending_concepts)} concepts "
+            f"(batch_size={batch_size})..."
+        )
+
+        # 2. Canonicaliser par batches
+        results_cache = {}
+        total_batches = (len(pending_concepts) + batch_size - 1) // batch_size
+
+        for batch_idx in range(total_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, len(pending_concepts))
+            batch = pending_concepts[start_idx:end_idx]
+
+            logger.debug(
+                f"[GATEKEEPER:Batch] Processing batch {batch_idx + 1}/{total_batches} "
+                f"({len(batch)} concepts)..."
+            )
+
+            try:
+                # Appel batch LLM
+                batch_results = self.llm_canonicalizer.canonicalize_batch(batch)
+
+                # Stocker résultats dans cache
+                for concept_dict, result in zip(batch, batch_results):
+                    raw_name = concept_dict["raw_name"]
+                    results_cache[raw_name] = (result.canonical_name, result.confidence)
+
+                    # Stocker également dans adaptive ontology pour cache persistant
+                    self.adaptive_ontology.store(
+                        tenant_id=tenant_id,
+                        canonical_name=result.canonical_name,
+                        raw_name=raw_name,
+                        canonicalization_result=result.model_dump(),
+                        context=concept_dict.get("context"),
+                        document_id=None  # Pas de document_id pour batch
+                    )
+
+                logger.info(
+                    f"[GATEKEEPER:Batch] ✅ Batch {batch_idx + 1}/{total_batches} completed "
+                    f"({len(batch_results)} concepts)"
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"[GATEKEEPER:Batch] ❌ Batch {batch_idx + 1}/{total_batches} failed: {e}, "
+                    f"concepts will use fallback"
+                )
+                # Continuer avec le batch suivant
+
+        logger.info(
+            f"[GATEKEEPER:Batch] ✅ Batch canonicalization complete: {len(results_cache)} concepts cached"
+        )
+
+        return results_cache
+
     def _canonicalize_concept_name(
         self,
         raw_name: str,
@@ -764,6 +876,15 @@ class GatekeeperDelegate(BaseAgent):
                     }
                 )
 
+            # Fix 2025-10-20: Batch LLM canonicalization AVANT la boucle
+            # Collecter tous les concepts pour batch processing
+            # Fix 2025-10-20 21:30: tool_input n'a pas de .state, extraire tenant_id du premier concept
+            tenant_id_for_batch = concepts[0].get("tenant_id", "default") if concepts else "default"
+            batch_canonicalization_cache = self._batch_canonicalize_pending_concepts(
+                concepts=concepts,
+                tenant_id=tenant_id_for_batch
+            )
+
             # Promouvoir chaque concept
             promoted_count = 0
             failed_count = 0
@@ -807,43 +928,61 @@ class GatekeeperDelegate(BaseAgent):
                                 f"(entity_id={entity_id}, type={normalized_type}, time={normalization_time_ms:.2f}ms)"
                             )
                         else:
-                            # Phase 1.6+: Fallback LLM Canonicalizer si non trouvé dans ontologie
-                            canonical_name, llm_confidence = self._canonicalize_concept_name(
-                                raw_name=concept_name,
-                                context=definition,  # Utiliser definition comme contexte
-                                tenant_id=tenant_id,
-                                document_id=concept.get("document_id")  # P0.2: Rate limiting
-                            )
-                            logger.debug(
-                                f"[GATEKEEPER:Canonicalization] LLM fallback for '{concept_name}' → '{canonical_name}' "
-                                f"(confidence={llm_confidence:.2f}, not found in ontology, time={normalization_time_ms:.2f}ms)"
-                            )
+                            # Fix 2025-10-20: Utiliser batch cache au lieu d'appel individuel
+                            if concept_name in batch_canonicalization_cache:
+                                canonical_name, llm_confidence = batch_canonicalization_cache[concept_name]
+                                logger.debug(
+                                    f"[GATEKEEPER:Canonicalization:Batch] ✅ Batch cache hit '{concept_name}' → '{canonical_name}' "
+                                    f"(confidence={llm_confidence:.2f})"
+                                )
+                            else:
+                                # Fallback individuel (ne devrait pas arriver, mais sécurité)
+                                canonical_name, llm_confidence = self._canonicalize_concept_name(
+                                    raw_name=concept_name,
+                                    context=definition,
+                                    tenant_id=tenant_id,
+                                    document_id=concept.get("document_id")
+                                )
+                                logger.warning(
+                                    f"[GATEKEEPER:Canonicalization:Batch] ⚠️ Cache MISS for '{concept_name}', "
+                                    f"fallback to individual LLM call"
+                                )
                     except Exception as e:
                         logger.warning(
                             f"[GATEKEEPER:Canonicalization] EntityNormalizerNeo4j failed for '{concept_name}': {e}, "
                             f"falling back to LLM canonicalization"
                         )
-                        # Phase 1.6+: Fallback LLM Canonicalizer si exception
+                        # Fix 2025-10-20: Utiliser batch cache
+                        if concept_name in batch_canonicalization_cache:
+                            canonical_name, llm_confidence = batch_canonicalization_cache[concept_name]
+                        else:
+                            canonical_name, llm_confidence = self._canonicalize_concept_name(
+                                raw_name=concept_name,
+                                context=definition,
+                                tenant_id=tenant_id,
+                                document_id=concept.get("document_id")
+                            )
+                        normalization_time_ms = 0.0
+                else:
+                    # Fix 2025-10-20: Utiliser batch cache
+                    if concept_name in batch_canonicalization_cache:
+                        canonical_name, llm_confidence = batch_canonicalization_cache[concept_name]
+                        logger.debug(
+                            f"[GATEKEEPER:Canonicalization:Batch] ✅ Batch cache hit '{concept_name}' → '{canonical_name}' "
+                            f"(confidence={llm_confidence:.2f}, EntityNormalizerNeo4j unavailable)"
+                        )
+                    else:
                         canonical_name, llm_confidence = self._canonicalize_concept_name(
                             raw_name=concept_name,
                             context=definition,
                             tenant_id=tenant_id,
-                            document_id=concept.get("document_id")  # P0.2: Rate limiting
+                            document_id=concept.get("document_id")
                         )
-                        normalization_time_ms = 0.0
-                else:
-                    # Phase 1.6+: Fallback LLM Canonicalizer si EntityNormalizerNeo4j indisponible
-                    canonical_name, llm_confidence = self._canonicalize_concept_name(
-                        raw_name=concept_name,
-                        context=definition,
-                        tenant_id=tenant_id,
-                        document_id=concept.get("document_id")  # P0.2: Rate limiting
-                    )
+                        logger.warning(
+                            f"[GATEKEEPER:Canonicalization:Batch] ⚠️ Cache MISS for '{concept_name}', "
+                            f"fallback to individual LLM call"
+                        )
                     normalization_time_ms = 0.0
-                    logger.debug(
-                        f"[GATEKEEPER:Canonicalization] LLM canonicalization for '{concept_name}' → '{canonical_name}' "
-                        f"(confidence={llm_confidence:.2f}, EntityNormalizerNeo4j unavailable)"
-                    )
 
                 # Générer unified_definition (si manquant, utiliser nom + type)
                 unified_definition = definition if definition else f"{concept_type}: {concept_name}"

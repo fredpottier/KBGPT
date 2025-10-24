@@ -98,14 +98,15 @@ class GraphCentralityScorer:
                 entity["graph_score"] = 0.5  # Score neutre
             return candidates
 
-        # P1.3: Limite max entities pour éviter O(n²) explosion (300 max)
-        MAX_ENTITIES = 300
-        if len(candidates) > MAX_ENTITIES:
-            logger.warning(
-                f"[OSMOSE] GraphCentralityScorer: Trop de candidats ({len(candidates)} > {MAX_ENTITIES}), "
-                f"utilisation des {MAX_ENTITIES} premiers uniquement (P1.3 protection)"
-            )
-            candidates = candidates[:MAX_ENTITIES]
+        # P1.3: Limite max entities supprimée pour permettre traitement gros documents
+        # TODO: Réimplémenter avec tri intelligent si performance O(n²) devient problématique
+        # MAX_ENTITIES = 300
+        # if len(candidates) > MAX_ENTITIES:
+        #     logger.warning(
+        #         f"[OSMOSE] GraphCentralityScorer: Trop de candidats ({len(candidates)} > {MAX_ENTITIES}), "
+        #         f"utilisation des {MAX_ENTITIES} premiers uniquement (P1.3 protection)"
+        #     )
+        #     candidates = candidates[:MAX_ENTITIES]
 
         logger.info(
             f"[OSMOSE] GraphCentralityScorer: Scoring {len(candidates)} candidats "

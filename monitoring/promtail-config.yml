@@ -1,0 +1,203 @@
+# Configuration Promtail pour KnowWhere / OSMOSE
+# Collecte des logs Docker de tous les conteneurs
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+# Configuration du client Loki
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    # Taille maximale d'un batch
+    batchwait: 1s
+    batchsize: 1048576  # 1 MB
+    # Retry en cas d'échec
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+    # Timeout
+    timeout: 10s
+
+# Configuration du scraping des positions (pour éviter la réingestion)
+positions:
+  filename: /tmp/positions.yaml
+
+# Configuration des scrape jobs
+scrape_configs:
+  # ================================================
+  # JOB 1: Logs conteneurs Docker (via Docker API)
+  # ================================================
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        # Filtrer uniquement les conteneurs du projet KnowWhere
+        filters:
+          - name: label
+            values: ["com.docker.compose.project=sap_kb"]
+
+    # Relabeling des métadonnées Docker
+    relabel_configs:
+      # Nom du conteneur
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container_name'
+
+      # Service du conteneur (depuis label compose)
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'service'
+
+      # Projet compose
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'compose_project'
+
+      # ID du conteneur (court)
+      - source_labels: ['__meta_docker_container_id']
+        regex: '([a-zA-Z0-9]{12}).*'
+        target_label: 'container_id'
+        replacement: '$1'
+
+      # Image Docker
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_image']
+        target_label: 'image'
+
+      # Network
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_network']
+        target_label: 'network'
+
+      # Hostname (nom de la machine)
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_config_hash']
+        target_label: 'config_hash'
+
+    # Pipeline de traitement des logs
+    pipeline_stages:
+      # Stage 1: Parser les logs JSON (pour les conteneurs qui loggent en JSON)
+      - json:
+          expressions:
+            level: level
+            timestamp: timestamp
+            message: message
+            logger: logger
+            module: module
+            tenant_id: tenant_id
+            request_id: request_id
+
+      # Stage 2: Extraire le niveau de log depuis le message (si pas en JSON)
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z?)\s+(?P<level>(DEBUG|INFO|WARNING|ERROR|CRITICAL))\s+(?P<message>.*)'
+
+      # Stage 3: Parser les logs Python (format standard)
+      - regex:
+          expression: '^\[(?P<timestamp>.*?)\]\s+\[(?P<logger>.*?)\]\s+\[(?P<level>.*?)\]\s+(?P<message>.*)'
+
+      # Stage 4: Extraire tenant_id et request_id depuis le message
+      - regex:
+          expression: '.*tenant_id=(?P<tenant_id>[^\s\]]+).*'
+      - regex:
+          expression: '.*request_id=(?P<request_id>[^\s\]]+).*'
+
+      # Stage 5: Ajouter les labels extraits
+      - labels:
+          level:
+          tenant_id:
+          request_id:
+          logger:
+          module:
+
+      # Stage 6: Timestamp parsing (utiliser le timestamp du log si disponible)
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+          fallback_formats:
+            - "2006-01-02T15:04:05.999999999Z07:00"
+            - "2006-01-02T15:04:05.999999999Z"
+            - "2006-01-02 15:04:05.999"
+            - "2006-01-02 15:04:05"
+
+      # Stage 7: Nettoyer le message (enlever les métadonnées déjà extraites)
+      - template:
+          source: message
+          template: '{{ .message }}'
+
+      # Stage 8: Ajouter un label pour le niveau de criticité
+      - match:
+          selector: '{level="ERROR"}'
+          stages:
+            - labels:
+                severity: "error"
+      - match:
+          selector: '{level="CRITICAL"}'
+          stages:
+            - labels:
+                severity: "critical"
+      - match:
+          selector: '{level="WARNING"}'
+          stages:
+            - labels:
+                severity: "warning"
+
+  # ================================================
+  # JOB 2: Logs système (conteneur Promtail)
+  # ================================================
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: varlogs
+          service: promtail
+          __path__: /var/log/*log
+
+  # ================================================
+  # JOB 3: Logs fichiers KnowWhere (data/logs/)
+  # ================================================
+  - job_name: knowwhere_file_logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: knowwhere_logs
+          compose_project: sap_kb
+          service: file_logs
+          __path__: /data/logs/*.log
+
+    # Pipeline de traitement des logs fichiers
+    pipeline_stages:
+      # Stage 1: Extraire le nom du fichier depuis le chemin
+      - regex:
+          source: filename
+          expression: '.*/(?P<log_file>[^/]+\.log)$'
+
+      # Stage 2: Parser les logs au format "[timestamp] [logger] [level] message"
+      - regex:
+          expression: '^\[(?P<timestamp>.*?)\]\s+\[(?P<logger>.*?)\]\s+\[(?P<level>.*?)\]\s+(?P<message>.*)'
+
+      # Stage 3: Parser les logs au format "YYYY-MM-DD HH:MM:SS level message"
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<level>(DEBUG|INFO|WARNING|ERROR|CRITICAL))\s+(?P<message>.*)'
+
+      # Stage 4: Extraire tenant_id et request_id depuis le message
+      - regex:
+          expression: '.*tenant_id=(?P<tenant_id>[^\s\]]+).*'
+      - regex:
+          expression: '.*request_id=(?P<request_id>[^\s\]]+).*'
+
+      # Stage 5: Ajouter les labels extraits
+      - labels:
+          log_file:
+          level:
+          tenant_id:
+          request_id:
+          logger:
+
+      # Stage 6: Timestamp parsing
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+          fallback_formats:
+            - "2006-01-02T15:04:05.999999999Z07:00"
+            - "2006-01-02T15:04:05.999999999Z"
+            - "2006-01-02 15:04:05.999"
+            - "2006-01-02 15:04:05"

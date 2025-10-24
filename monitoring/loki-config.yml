@@ -1,0 +1,104 @@
+# Configuration Loki simplifiée pour KnowWhere / OSMOSE
+# Compatible avec Loki 2.9.x
+
+auth_enabled: false
+
+# Configuration du serveur HTTP
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+
+# Configuration du schéma d'indexation
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+# Configuration du stockage
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /loki/boltdb-shipper-active
+    cache_location: /loki/boltdb-shipper-cache
+    cache_ttl: 24h
+    shared_store: filesystem
+  filesystem:
+    directory: /loki/chunks
+
+# Limites et performances
+limits_config:
+  # Limite de taille pour une requête
+  max_query_length: 0h
+  max_query_lookback: 720h  # 30 jours
+
+  # Taille maximale d'une entrée de log (1 MB)
+  max_line_size: 1048576
+
+  # Nombre maximal de streams par utilisateur/tenant
+  max_streams_per_user: 10000
+
+  # Rétention des logs
+  retention_period: 744h  # 31 jours
+
+  # Rate limiting (par défaut: aucune limite)
+  ingestion_rate_mb: 50
+  ingestion_burst_size_mb: 100
+
+  # Nombre maximal de requêtes parallèles
+  max_concurrent_tail_requests: 10
+
+# Compactage automatique des index (nettoyage des vieux logs)
+compactor:
+  working_directory: /loki/compactor
+  shared_store: filesystem
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+
+# Configuration des chunks
+chunk_store_config:
+  max_look_back_period: 720h  # 30 jours
+
+# Configuration de la table manager
+table_manager:
+  retention_deletes_enabled: true
+  retention_period: 744h  # 31 jours
+
+# Ingestion de logs
+ingester:
+  lifecycler:
+    address: 127.0.0.1
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    final_sleep: 0s
+  chunk_idle_period: 5m
+  chunk_retain_period: 30s
+  max_transfer_retries: 0
+  # Configuration WAL (Write-Ahead Log)
+  wal:
+    enabled: true
+    dir: /loki/wal
+    checkpoint_duration: 5m
+    flush_on_shutdown: true
+    replay_memory_ceiling: 4GB
+
+# Configuration du querier
+querier:
+  max_concurrent: 20
+
+# Configuration du query frontend
+frontend:
+  max_outstanding_per_tenant: 512
+  compress_responses: true
+
+# Limites de requêtes
+query_range:
+  parallelise_shardable_queries: true
+  max_retries: 3

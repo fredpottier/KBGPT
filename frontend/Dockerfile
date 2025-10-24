@@ -17,7 +17,9 @@ RUN npm install --silent
 COPY . .
 
 # Set build environment variables
-ENV NEXT_PUBLIC_API_BASE_URL=http://app:8000
+# IMPORTANT: NEXT_PUBLIC_* vars are baked into the build
+# We use a placeholder that will be replaced at runtime via env var override
+ENV NEXT_PUBLIC_API_BASE_URL=__API_BASE_URL__
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 

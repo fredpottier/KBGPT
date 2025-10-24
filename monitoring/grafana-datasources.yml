@@ -1,0 +1,47 @@
+# Configuration automatique des datasources Grafana
+# Provisionne Loki comme source de données principale
+
+apiVersion: 1
+
+# Liste des datasources à configurer
+datasources:
+  # Datasource Loki (logs)
+  - name: Loki
+    type: loki
+    access: proxy
+    uid: loki
+    url: http://loki:3100
+    version: 1
+    isDefault: true
+    editable: true
+
+    # Options JSON pour Loki
+    jsonData:
+      # Nombre maximum de lignes retournées
+      maxLines: 1000
+
+      # Dérivation des champs (permet d'extraire des métriques depuis les logs)
+      derivedFields:
+        # Extraire request_id et créer un lien de filtre
+        - name: "Request ID"
+          matcherRegex: "request_id=([a-zA-Z0-9-]+)"
+          url: "/explore?orgId=1&left=%5B%22now-1h%22,%22now%22,%22Loki%22,%7B%22expr%22:%22%7Brequest_id%3D%5C%22$${__value.raw}%5C%22%7D%22%7D%5D"
+          datasourceUid: "loki"
+
+        # Extraire tenant_id et créer un lien de filtre
+        - name: "Tenant ID"
+          matcherRegex: "tenant_id=([a-zA-Z0-9-]+)"
+          url: "/explore?orgId=1&left=%5B%22now-1h%22,%22now%22,%22Loki%22,%7B%22expr%22:%22%7Btenant_id%3D%5C%22$${__value.raw}%5C%22%7D%22%7D%5D"
+          datasourceUid: "loki"
+
+        # Extraire ERROR et WARNING pour navigation rapide
+        - name: "Error Details"
+          matcherRegex: "ERROR|CRITICAL"
+          url: "/explore?orgId=1&left=%5B%22now-1h%22,%22now%22,%22Loki%22,%7B%22expr%22:%22%7Blevel%3D~%5C%22ERROR%7CCRITICAL%5C%22%7D%22%7D%5D"
+          datasourceUid: "loki"
+
+# Options de suppression et mise à jour
+deleteDatasources:
+  # Supprimer les anciennes datasources si elles existent
+  - name: Loki
+    orgId: 1

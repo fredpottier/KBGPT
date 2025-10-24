@@ -171,17 +171,24 @@ class OsmoseAgentiqueService:
         """
         Calcule un timeout adaptatif basé sur la complexité du document.
 
-        Formule :
+        Formule Phase 2 OSMOSE (avec extraction relations LLM):
         - Temps de base : 120s (2 min)
-        - Temps par segment : 60s (1 min) (extraction NER + potentiel LLM)
-        - Temps FSM overhead : 60s (mining, gatekeeper, promotion)
-        - Min : 180s (3 min), Max : 1800s (30 min)
+        - Temps par segment : 90s (60s extraction NER + 30s relation extraction LLM)
+        - Temps FSM overhead : 120s (mining, gatekeeper, promotion, relation writing, indexing)
+        - Min : 300s (5 min), Max : 5400s (90 min)
+
+        Rationale Phase 2:
+        - Extraction relations LLM ajoute ~30-50% overhead par segment
+        - Documents larges (500+ concepts) peuvent prendre 60-90 min avec Phase 2
+        - Cas réel observé: 553 concepts, 2246 relations → 48 min (timeout à 30 min!)
 
         Exemples :
-        - 1 segment : 120 + 60*1 + 60 = 240s (4 min)
-        - 10 segments : 120 + 60*10 + 60 = 780s (13 min)
-        - 20 segments : 120 + 60*20 + 60 = 1380s (23 min)
-        - 30+ segments : 120 + 60*30 + 60 = 1980s → capped à 1800s (30 min)
+        - 1 segment : 120 + 90*1 + 120 = 330s (5.5 min)
+        - 10 segments : 120 + 90*10 + 120 = 1140s (19 min)
+        - 20 segments : 120 + 90*20 + 120 = 2040s (34 min)
+        - 30 segments : 120 + 90*30 + 120 = 2940s (49 min)
+        - 50 segments : 120 + 90*50 + 120 = 4740s (79 min)
+        - 60+ segments : 120 + 90*60 + 120 = 5640s → capped à 5400s (90 min)
 
         Args:
             num_segments: Nombre de segments détectés
@@ -190,14 +197,14 @@ class OsmoseAgentiqueService:
             Timeout en secondes
         """
         base_time = 120  # 2 min base
-        time_per_segment = 60  # 60s (1 min) par segment
-        fsm_overhead = 60  # 1 min pour mining, gatekeeper, promotion
+        time_per_segment = 90  # 90s (1.5 min) par segment (extraction + relations Phase 2)
+        fsm_overhead = 120  # 2 min pour mining, gatekeeper, promotion, relation writing, indexing
 
         calculated_timeout = base_time + (time_per_segment * num_segments) + fsm_overhead
 
-        # Bornes: min 180s (3 min), max 1800s (30 min)
-        min_timeout = 180
-        max_timeout = 1800
+        # Bornes: min 300s (5 min), max 5400s (90 min) pour Phase 2 OSMOSE
+        min_timeout = 300
+        max_timeout = 5400
 
         adaptive_timeout = max(min_timeout, min(calculated_timeout, max_timeout))
 

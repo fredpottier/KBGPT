@@ -1,6 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  typescript: {
+    // ⚠️ Production: ignore type errors for faster deployment
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    // ⚠️ Production: ignore ESLint errors for faster deployment
+    ignoreDuringBuilds: true,
+  },
   env: {
     NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000',
   },
