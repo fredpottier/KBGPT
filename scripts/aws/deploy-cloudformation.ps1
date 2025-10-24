@@ -616,18 +616,20 @@ function Deploy-Application {
     ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $dockerPermsCmd
     Write-Success "Permissions Docker configurées"
 
-    # Authenticate Docker to ECR
-    Write-Host "Authentification Docker vers ECR..."
+    # Authenticate Docker to ECR and start containers in one session
+    Write-Host "Authentification ECR + Démarrage conteneurs Docker (3-5 min)..."
     $AccountID = Get-ECRAccountID
-    $ecrLoginCmd = "aws ecr get-login-password --region $Region | sudo docker login --username AWS --password-stdin ${AccountID}.dkr.ecr.${Region}.amazonaws.com"
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $ecrLoginCmd
-    Write-Success "Docker authentifié vers ECR"
 
-    # Start containers (utiliser sudo car la session SSH actuelle n'a pas encore les nouvelles permissions)
-    Write-Host "Démarrage conteneurs Docker (3-5 min)..."
-    $dockerCommand = "cd /home/ubuntu/knowbase && sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml pull && sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d"
-    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $dockerCommand
-    Write-Success "Conteneurs démarrés (avec monitoring stack)"
+    # Combiner login ECR + pull + up dans une seule session SSH
+    $fullDockerCommand = @"
+aws ecr get-login-password --region $Region | sudo docker login --username AWS --password-stdin ${AccountID}.dkr.ecr.${Region}.amazonaws.com && \
+cd /home/ubuntu/knowbase && \
+sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml pull && \
+sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+"@
+
+    ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $fullDockerCommand
+    Write-Success "Docker authentifié + Conteneurs démarrés (avec monitoring stack)"
 
     # Wait for services
     Write-Host "Attente services ready (2 min)..."
