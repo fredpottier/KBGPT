@@ -616,10 +616,8 @@ function Deploy-Application {
     $corsOrigins = "http://${PublicIP}:3000,http://${PublicIP}:8501"
     Write-Host "  Valeur: $corsOrigins"
 
-    # Échapper les / dans l'URL pour sed (utiliser | comme délimiteur)
-    $corsOriginsEscaped = $corsOrigins -replace '/', '\/'
-    # Utiliser echo pour écrire directement la ligne (plus robuste que sed pour ce cas)
-    $updateEnvCmd = "cd /home/ubuntu/knowbase && sed -i '/^CORS_ORIGINS=/d' .env && echo 'CORS_ORIGINS=$corsOrigins' >> .env"
+    # Utiliser echo pour écrire directement (PowerShell substitue la variable avant envoi SSH)
+    $updateEnvCmd = "cd /home/ubuntu/knowbase && sed -i '/^CORS_ORIGINS=/d' .env && echo `"CORS_ORIGINS=$corsOrigins`" >> .env"
     ssh -i $KeyPathUnix -o StrictHostKeyChecking=no ubuntu@$PublicIP $updateEnvCmd
     Write-Success "CORS_ORIGINS configuré"
 
