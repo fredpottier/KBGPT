@@ -87,9 +87,9 @@ services:
       start_period: 40s
 
 # Utilise le même réseau que les autres services
+# Le réseau sera créé automatiquement par docker-compose (défini dans docker-compose.yml)
 networks:
   knowbase_net:
-    external: true
     name: knowbase_network
 
 volumes:
