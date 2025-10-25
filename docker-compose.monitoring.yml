@@ -45,8 +45,8 @@ services:
       - ./monitoring/promtail-config.yml:/etc/promtail/config.yml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Montage du répertoire data/logs pour collecter les fichiers logs
-      - ./data/logs:/data/logs:ro
+      # Volume partagé avec app/worker pour collecter les fichiers logs
+      - app_logs:/data/logs:ro
     command: -config.file=/etc/promtail/config.yml
     networks:
       - knowbase_net
@@ -97,3 +97,5 @@ volumes:
     name: knowbase_loki_data
   grafana_data:
     name: knowbase_grafana_data
+  app_logs:
+    name: knowbase_app_logs

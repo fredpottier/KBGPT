@@ -127,6 +127,7 @@ services:
     volumes:
       - app_data:/data
       - app_models:/data/models
+      - app_logs:/data/logs  # Logs séparés pour Promtail
       - ./config:/config:ro  # Read-only config mount (chemin absolu requis par l'app)
     networks:
       - knowbase_net
@@ -186,6 +187,7 @@ services:
     volumes:
       - app_data:/data  # PARTAGE du volume avec app pour accéder aux fichiers uploadés
       - app_models:/data/models  # Partage des modèles avec app
+      - app_logs:/data/logs  # Logs séparés pour Promtail
       - ./config:/config:ro  # Read-only config mount (chemin absolu requis par l'app)
     networks:
       - knowbase_net
@@ -355,7 +357,7 @@ services:
       - ./monitoring/promtail-config.yml:/etc/promtail/config.yml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./data/logs:/data/logs:ro
+      - app_logs:/data/logs:ro  # Volume partagé avec app/worker (lecture seule)
     command: -config.file=/etc/promtail/config.yml
     networks:
       - knowbase_net
@@ -384,6 +386,8 @@ volumes:
     name: knowbase_app_data
   app_models:
     name: knowbase_app_models
+  app_logs:
+    name: knowbase_app_logs
   ui_data:
     name: knowbase_ui_data
   # ngrok_logs:

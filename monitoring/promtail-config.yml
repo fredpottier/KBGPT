@@ -160,8 +160,8 @@ scrape_configs:
           - localhost
         labels:
           job: knowwhere_logs
-          compose_project: sap_kb
           service: file_logs
+          source: file_logs
           __path__: /data/logs/*.log
 
     # Pipeline de traitement des logs fichiers
