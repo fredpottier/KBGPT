@@ -184,7 +184,7 @@ services:
       JWT_PRIVATE_KEY_PATH: /config/keys/jwt_private.pem
       JWT_PUBLIC_KEY_PATH: /config/keys/jwt_public.pem
     volumes:
-      - worker_data:/data
+      - app_data:/data  # PARTAGE du volume avec app pour accéder aux fichiers uploadés
       - app_models:/data/models  # Partage des modèles avec app
       - ./config:/config:ro  # Read-only config mount (chemin absolu requis par l'app)
     networks:
@@ -384,8 +384,6 @@ volumes:
     name: knowbase_app_data
   app_models:
     name: knowbase_app_models
-  worker_data:
-    name: knowbase_worker_data
   ui_data:
     name: knowbase_ui_data
   # ngrok_logs:
