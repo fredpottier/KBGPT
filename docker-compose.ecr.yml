@@ -321,37 +321,6 @@ services:
     depends_on:
       - loki
 
-  # ===================================
-  # MONITORING - Grafana (Visualization)
-  # ===================================
-  grafana:
-    <<: *common-config
-    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/sap-kb-grafana:latest
-    container_name: knowbase-grafana
-    ports:
-      - "3001:3000"
-    volumes:
-      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
-      - ./monitoring/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
-      - ./monitoring/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana_data:/var/lib/grafana
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3001
-      - GF_INSTALL_PLUGINS=grafana-clock-panel
-    networks:
-      - knowbase_net
-    depends_on:
-      - loki
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
 networks:
   knowbase_net:
     name: knowbase_network
