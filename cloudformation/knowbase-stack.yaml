@@ -203,6 +203,7 @@ Resources:
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
+    DependsOn: EC2InstanceRole
     Properties:
       InstanceProfileName: !Sub "${AWS::StackName}-instance-profile"
       Roles:
@@ -387,6 +388,7 @@ Resources:
   AutoDestroyLambda:
     Type: AWS::Lambda::Function
     Condition: EnableAutoDestroy
+    DependsOn: AutoDestroyLambdaRole
     Properties:
       FunctionName: !Sub "${AWS::StackName}-auto-destroy"
       Runtime: python3.11
