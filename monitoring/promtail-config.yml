@@ -34,9 +34,10 @@ scrape_configs:
       - host: unix:///var/run/docker.sock
         refresh_interval: 5s
         # Filtrer uniquement les conteneurs du projet KnowWhere
+        # Note: Accepte "sap_kb" (local) et "knowbase" (EC2)
         filters:
           - name: label
-            values: ["com.docker.compose.project=sap_kb"]
+            values: ["com.docker.compose.project"]
 
     # Relabeling des métadonnées Docker
     relabel_configs:
