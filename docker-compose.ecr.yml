@@ -119,6 +119,9 @@ services:
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # JWT keys paths (mounted from ./config to /config in container)
+      JWT_PRIVATE_KEY_PATH: /config/keys/jwt_private.pem
+      JWT_PUBLIC_KEY_PATH: /config/keys/jwt_public.pem
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:
@@ -177,6 +180,9 @@ services:
       # Performance mono-document (parallélisation interne)
       MAX_PARALLEL_SEGMENTS: "${MAX_PARALLEL_SEGMENTS:-5}"  # Segments en parallèle
       OPENAI_MAX_RPM: "${OPENAI_MAX_RPM:-500}"  # Rate limit OpenAI
+      # JWT keys paths (mounted from ./config to /config in container)
+      JWT_PRIVATE_KEY_PATH: /config/keys/jwt_private.pem
+      JWT_PUBLIC_KEY_PATH: /config/keys/jwt_public.pem
     volumes:
       - worker_data:/data
       - app_models:/data/models  # Partage des modèles avec app
