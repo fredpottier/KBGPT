@@ -594,10 +594,11 @@ function Deploy-Application {
     Remove-Item "$EnvFile.temp" -ErrorAction SilentlyContinue
 
     # 4. Transfer config directories (batch)
-    Write-Host "Transfert répertoires config et monitoring..."
+    Write-Host "Transfert répertoires config, monitoring et nginx..."
     $ConfigDir = Join-Path $ProjectRoot "config"
+    $NginxDir = Join-Path $ProjectRoot "nginx"
     scp -i $KeyPathUnix -o StrictHostKeyChecking=no -o ConnectTimeout=60 -r `
-        "$ConfigDir" "$MonitoringDir" ubuntu@${PublicIP}:/home/ubuntu/knowbase/
+        "$ConfigDir" "$MonitoringDir" "$NginxDir" ubuntu@${PublicIP}:/home/ubuntu/knowbase/
 
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Fichiers transférés"
