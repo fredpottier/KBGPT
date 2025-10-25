@@ -18,7 +18,7 @@ services:
     environment:
       - TZ=Europe/Paris  # Timezone Paris pour timestamps
     ports:
-      - "3100:3100"  # HTTP API Loki
+      - "3101:3100"  # HTTP API Loki (port 3101 externe pour éviter conflits)
     volumes:
       - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
       - loki_data:/loki
