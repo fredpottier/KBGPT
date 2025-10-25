@@ -114,6 +114,13 @@ Resources:
           CidrIp: !Ref YourPublicIP
           Description: "SSH access from your IP"
 
+        # NGINX Reverse Proxy (HTTP)
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: "NGINX Reverse Proxy - Main entry point"
+
         # API Backend (FastAPI)
         - IpProtocol: tcp
           FromPort: 8000
