@@ -51,7 +51,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "{service=~\"$service\"} |~ \"(?i)$search\"",
+          "expr": "{service=~\"$service\"} |~ \"(?i)$search\" |~ \"(?i)($level)\"",
           "queryType": "range",
           "refId": "A"
         }
@@ -697,7 +697,7 @@
           {
             "selected": true,
             "text": "All",
-            "value": "$__all"
+            "value": ".*"
           },
           {
             "selected": false,
