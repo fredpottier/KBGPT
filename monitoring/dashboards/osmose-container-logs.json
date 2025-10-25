@@ -51,7 +51,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "{job=\"docker\", service=~\"$service\"} |~ \"(?i)$search\"",
+          "expr": "{service=~\"$service\"} |~ \"(?i)$search\"",
           "queryType": "range",
           "refId": "A"
         }
@@ -141,7 +141,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum by (service) (count_over_time({job=\"docker\", service=~\"$service\"}[5m]))",
+          "expr": "sum by (service) (count_over_time({service=~\"$service\"}[5m]))",
           "queryType": "range",
           "refId": "A",
           "legendFormat": "{{service}}"
@@ -292,7 +292,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({job=\"docker\", service=~\"$service\"} [5m]))",
+          "expr": "sum(count_over_time({service=~\"$service\"} [5m]))",
           "queryType": "range",
           "refId": "A",
           "legendFormat": "{{level}}"
@@ -358,7 +358,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({job=\"docker\", service=~\"$service\"} |~ \"(?i)error\" [1h]))",
+          "expr": "sum(count_over_time({service=~\"$service\"} |~ \"(?i)error\" [1h]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -423,7 +423,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({job=\"docker\", service=~\"$service\"} |~ \"(?i)critical\" [1h]))",
+          "expr": "sum(count_over_time({service=~\"$service\"} |~ \"(?i)critical\" [1h]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -488,7 +488,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({job=\"docker\", service=~\"$service\"} |~ \"(?i)warning\" [1h]))",
+          "expr": "sum(count_over_time({service=~\"$service\"} |~ \"(?i)warning\" [1h]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -549,7 +549,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({job=\"docker\", service=~\"$service\"} [1h]))",
+          "expr": "sum(count_over_time({service=~\"$service\"} [1h]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -586,7 +586,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "{job=\"docker\", service=~\"$service\"} |~ \"(?i)(error|critical)\"",
+          "expr": "{service=~\"$service\"} |~ \"(?i)(error|critical)\"",
           "queryType": "range",
           "refId": "A"
         }
