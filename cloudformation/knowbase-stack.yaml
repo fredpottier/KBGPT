@@ -149,6 +149,13 @@ Resources:
           CidrIp: !Ref YourPublicIP
           Description: "Neo4j Browser (admin only)"
 
+        # Neo4j Bolt Protocol
+        - IpProtocol: tcp
+          FromPort: 7687
+          ToPort: 7687
+          CidrIp: !Ref YourPublicIP
+          Description: "Neo4j Bolt Protocol (admin only)"
+
         # Qdrant UI
         - IpProtocol: tcp
           FromPort: 6333
