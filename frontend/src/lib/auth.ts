@@ -13,7 +13,6 @@ const getApiBaseUrl = (): string => {
   }
 
   // Côté client: utiliser window.location pour construire l'URL du backend
-  // Le backend est sur le même host que le frontend, mais port 8000
   const hostname = window.location.hostname
   const protocol = window.location.protocol
 
@@ -22,8 +21,10 @@ const getApiBaseUrl = (): string => {
     return 'http://localhost:8000'
   }
 
-  // Sinon, utiliser le même hostname avec le port 8000
-  return `${protocol}//${hostname}:8000`
+  // Sinon, sur EC2 avec NGINX reverse proxy
+  // NGINX écoute sur port 80 et route /api vers backend:8000
+  // Donc on utilise juste l'URL sans port (port 80 par défaut)
+  return `${protocol}//${hostname}`
 }
 
 export interface LoginCredentials {
