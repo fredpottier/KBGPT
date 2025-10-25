@@ -68,36 +68,47 @@ except Exception as e:
 
 # Import conditionnel de MegaParse avec fallback (après définition du logger)
 PPTX_FALLBACK = False  # Initialiser par défaut
+_MODULES_LOGGED = False  # Flag pour éviter logs répétés
 
 try:
     from megaparse import MegaParse
 
     MEGAPARSE_AVAILABLE = True
-    logger.info("✅ MegaParse disponible")
+    if not _MODULES_LOGGED:
+        logger.info("✅ MegaParse disponible")
 
     # Même si MegaParse est disponible, vérifier python-pptx pour le fallback
     try:
         from pptx import Presentation
 
         PPTX_FALLBACK = True
-        logger.info("✅ python-pptx disponible comme fallback")
+        if not _MODULES_LOGGED:
+            logger.info("✅ python-pptx disponible comme fallback")
+            _MODULES_LOGGED = True
     except ImportError:
         PPTX_FALLBACK = False
-        logger.warning("⚠️ python-pptx non disponible pour fallback")
+        if not _MODULES_LOGGED:
+            logger.warning("⚠️ python-pptx non disponible pour fallback")
+            _MODULES_LOGGED = True
 
 except ImportError as e:
     MEGAPARSE_AVAILABLE = False
-    logger.warning(f"⚠️ MegaParse non disponible, fallback vers python-pptx: {e}")
+    if not _MODULES_LOGGED:
+        logger.warning(f"⚠️ MegaParse non disponible, fallback vers python-pptx: {e}")
 
     # Fallback vers python-pptx si disponible
     try:
         from pptx import Presentation
 
         PPTX_FALLBACK = True
-        logger.info("✅ python-pptx disponible comme fallback")
+        if not _MODULES_LOGGED:
+            logger.info("✅ python-pptx disponible comme fallback")
+            _MODULES_LOGGED = True
     except ImportError:
         PPTX_FALLBACK = False
-        logger.error("❌ Ni MegaParse ni python-pptx disponibles!")
+        if not _MODULES_LOGGED:
+            logger.error("❌ Ni MegaParse ni python-pptx disponibles!")
+            _MODULES_LOGGED = True
 
 PROMPT_REGISTRY = load_prompts()
 
