@@ -63,34 +63,21 @@ if [ $? -ne 0 ]; then
 fi
 log "✓ ECR authentifié"
 
-# Étape 5: Pull des images Docker
-log "[5/7] Téléchargement images Docker (2-3 min)..."
+# Étape 5: Nettoyage préventif avant démarrage
+log "[5/7] Nettoyage environnement Docker..."
 cd "$WORKDIR"
 
-# Check if monitoring stack should be deployed
-if [ -f "docker-compose.monitoring.yml" ]; then
-    log "  Pulling avec stack monitoring..."
-    sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml pull
-else
-    log "  Pulling stack principal uniquement..."
-    sudo docker-compose pull
-fi
-
-if [ $? -ne 0 ]; then
-    log "✗ ERREUR: Échec pull images Docker"
-    exit 1
-fi
-log "✓ Images Docker téléchargées"
-
-# Étape 6: Démarrage des conteneurs
-log "[6/7] Démarrage conteneurs Docker..."
-
-# Nettoyage préventif: supprimer conteneurs/réseaux existants pour éviter conflits de ports
-log "  Nettoyage conteneurs/réseaux existants..."
+# Supprimer conteneurs/réseaux existants pour éviter conflits de ports
+# (important car docker-compose pull peut créer des conteneurs fantômes)
 sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml down 2>/dev/null || true
 sudo docker network rm knowbase_network 2>/dev/null || true
+log "✓ Environnement Docker nettoyé"
 
-# docker-compose créera automatiquement le réseau knowbase_network
+# Étape 6: Démarrage des conteneurs (avec pull automatique)
+log "[6/7] Démarrage conteneurs Docker (pull + start, 2-3 min)..."
+
+# docker-compose up -d fera automatiquement le pull des images puis les démarrera
+# Cela évite les problèmes de conteneurs fantômes créés par un pull séparé
 if [ -f "docker-compose.monitoring.yml" ]; then
     sudo docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 else
