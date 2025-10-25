@@ -18,9 +18,21 @@ log "==================================="
 
 # Étape 1: Création des répertoires et vérification fichiers
 log "[1/7] Préparation environnement..."
-mkdir -p "$WORKDIR"/{config,monitoring/dashboards,data}
+mkdir -p "$WORKDIR"/{config,monitoring/dashboards,data,config/keys}
 sudo mkdir -p /data/{neo4j,qdrant,redis}
 sudo chown -R ubuntu:ubuntu "$WORKDIR" /data
+
+# Générer clés JWT si elles n'existent pas
+if [ ! -f "$WORKDIR/config/keys/jwt_private.pem" ]; then
+    log "Génération des clés JWT..."
+    openssl genrsa -out "$WORKDIR/config/keys/jwt_private.pem" 2048 2>/dev/null
+    openssl rsa -in "$WORKDIR/config/keys/jwt_private.pem" -pubout -out "$WORKDIR/config/keys/jwt_public.pem" 2>/dev/null
+    chmod 600 "$WORKDIR/config/keys/jwt_private.pem"
+    chmod 644 "$WORKDIR/config/keys/jwt_public.pem"
+    log "✓ Clés JWT générées"
+else
+    log "✓ Clés JWT déjà présentes"
+fi
 
 # Vérifier que les fichiers essentiels sont présents
 if [ ! -f "$WORKDIR/docker-compose.yml" ]; then
