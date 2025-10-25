@@ -3,10 +3,18 @@ import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 // Determine if we're running on server or client
 const isServer = typeof window === 'undefined'
 
-// Use internal Docker URL for server-side calls, external URL for client-side
+// Detect if we're behind NGINX reverse proxy (EC2 deployment)
+// NGINX routes /api/* to backend, so we can use relative URL
+const isBehindProxy = !isServer && typeof window !== 'undefined' &&
+  (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+
+// Use internal Docker URL for server-side calls
+// For client-side: use relative URL if behind proxy, otherwise external URL
 const API_BASE_URL = isServer
   ? (process.env.NEXT_PUBLIC_API_INTERNAL_URL || 'http://app:8000')
-  : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000')
+  : isBehindProxy
+    ? ''  // Relative URL - NGINX will route /api/* to backend
+    : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000')
 
 export interface ApiResponse<T = any> {
   success: boolean

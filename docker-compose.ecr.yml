@@ -262,6 +262,41 @@ services:
           memory: 1G
 
   # ===================================
+  # NGINX - Reverse Proxy (EC2 uniquement)
+  # ===================================
+  nginx:
+    <<: *common-config
+    image: nginx:1.25-alpine
+    container_name: knowbase-nginx
+    depends_on:
+      frontend:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    networks:
+      - knowbase_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # ===================================
   # NGROK - Tunnel (optionnel, depuis ECR)
   # ===================================
   # Décommentez si vous voulez exposer votre EC2 via ngrok
