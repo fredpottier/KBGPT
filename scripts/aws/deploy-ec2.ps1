@@ -105,6 +105,7 @@ if (-not $AWS_ACCOUNT_ID) {
 $ECR_REGISTRY = "$AWS_ACCOUNT_ID.dkr.ecr.$Region.amazonaws.com"
 $PROJECT_NAME = "knowbase-osmose"
 $DEPLOY_DIR = "/home/$Username/knowbase"
+$COMPOSE_FILES = "-f docker-compose.ecr.yml -f docker-compose.monitoring.yml"
 
 # =====================================================
 # FONCTIONS UTILITAIRES
@@ -416,8 +417,9 @@ Invoke-SSHCommand -Command "mkdir -p $DEPLOY_DIR/config" -Description "Creation 
 # =====================================================
 Write-Header "Transfert des fichiers de configuration"
 
-# Transfert docker-compose.ecr.yml
-Copy-FileToEC2 -LocalPath "docker-compose.ecr.yml" -RemotePath "$DEPLOY_DIR/docker-compose.yml" -Description "Transfert de docker-compose.ecr.yml"
+# Transfert docker-compose files
+Copy-FileToEC2 -LocalPath "docker-compose.ecr.yml" -RemotePath "$DEPLOY_DIR/docker-compose.ecr.yml" -Description "Transfert de docker-compose.ecr.yml"
+Copy-FileToEC2 -LocalPath "docker-compose.monitoring.yml" -RemotePath "$DEPLOY_DIR/docker-compose.monitoring.yml" -Description "Transfert de docker-compose.monitoring.yml"
 
 # Transfert du fichier .env avec mise a jour automatique de l'IP EC2
 Write-Step "Preparation du fichier .env avec l'IP EC2"
@@ -506,7 +508,7 @@ Write-SuccessMessage "Login ECR reussi"
 # =====================================================
 Write-Header "Pull des images depuis ECR"
 
-Invoke-SSHCommand -Command "cd $DEPLOY_DIR && docker-compose pull" -Description "Pull de toutes les images"
+Invoke-SSHCommand -Command "cd $DEPLOY_DIR && docker-compose $COMPOSE_FILES pull" -Description "Pull de toutes les images"
 
 Write-SuccessMessage "Images telechargees"
 
@@ -517,9 +519,9 @@ Write-Header "Gestion des conteneurs existants"
 
 $stopScript = @"
 cd $DEPLOY_DIR
-if [ -f docker-compose.yml ]; then
+if [ -f docker-compose.ecr.yml ]; then
     echo 'Arret des conteneurs existants...'
-    docker-compose down --remove-orphans || true
+    docker-compose $COMPOSE_FILES down --remove-orphans || true
     echo 'Conteneurs arretes'
 else
     echo 'Pas de conteneurs existants'
@@ -533,14 +535,14 @@ Invoke-SSHCommand -Command $stopScript
 # =====================================================
 Write-Header "Demarrage des conteneurs"
 
-Invoke-SSHCommand -Command "cd $DEPLOY_DIR && docker-compose up -d" -Description "Lancement de tous les services"
+Invoke-SSHCommand -Command "cd $DEPLOY_DIR && docker-compose $COMPOSE_FILES up -d" -Description "Lancement de tous les services"
 
 # Attendre le demarrage
 Write-Step "Attente du demarrage des services (60s)"
 Start-Sleep -Seconds 60
 
 # Verifier les services
-Invoke-SSHCommand -Command "cd $DEPLOY_DIR && docker-compose ps" -Description "Statut des services"
+Invoke-SSHCommand -Command "cd $DEPLOY_DIR && docker-compose $COMPOSE_FILES ps" -Description "Statut des services"
 
 Write-SuccessMessage "Conteneurs demarres"
 
