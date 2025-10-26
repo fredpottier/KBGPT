@@ -119,16 +119,16 @@ services:
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
       CORS_ORIGINS: ${CORS_ORIGINS:-}
-      # JWT keys paths (mounted from ./config to /config in container)
-      JWT_PRIVATE_KEY_PATH: /config/keys/jwt_private.pem
-      JWT_PUBLIC_KEY_PATH: /config/keys/jwt_public.pem
+      # JWT keys paths (mounted from ./config to /app/config in container)
+      JWT_PRIVATE_KEY_PATH: /app/config/keys/jwt_private.pem
+      JWT_PUBLIC_KEY_PATH: /app/config/keys/jwt_public.pem
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:
       - app_data:/data
       - app_models:/data/models
       - app_logs:/data/logs  # Logs séparés pour Promtail
-      - ./config:/config:ro  # Read-only config mount (chemin absolu requis par l'app)
+      - ./config:/app/config:ro  # Read-only config mount (relatif à working_dir /app)
     networks:
       - knowbase_net
     working_dir: /app
@@ -181,14 +181,14 @@ services:
       # Performance mono-document (parallélisation interne)
       MAX_PARALLEL_SEGMENTS: "${MAX_PARALLEL_SEGMENTS:-5}"  # Segments en parallèle
       OPENAI_MAX_RPM: "${OPENAI_MAX_RPM:-500}"  # Rate limit OpenAI
-      # JWT keys paths (mounted from ./config to /config in container)
-      JWT_PRIVATE_KEY_PATH: /config/keys/jwt_private.pem
-      JWT_PUBLIC_KEY_PATH: /config/keys/jwt_public.pem
+      # JWT keys paths (mounted from ./config to /app/config in container)
+      JWT_PRIVATE_KEY_PATH: /app/config/keys/jwt_private.pem
+      JWT_PUBLIC_KEY_PATH: /app/config/keys/jwt_public.pem
     volumes:
       - app_data:/data  # PARTAGE du volume avec app pour accéder aux fichiers uploadés
       - app_models:/data/models  # Partage des modèles avec app
       - app_logs:/data/logs  # Logs séparés pour Promtail
-      - ./config:/config:ro  # Read-only config mount (chemin absolu requis par l'app)
+      - ./config:/app/config:ro  # Read-only config mount (relatif à working_dir /app)
     networks:
       - knowbase_net
     working_dir: /app
