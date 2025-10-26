@@ -124,6 +124,66 @@ Redémarre une instance EC2 arrêtée.
 
 ---
 
+### 💾 Backup & Restore
+
+#### **`backup-to-s3.ps1`**
+Sauvegarde complète de KnowBase (Qdrant, Redis, Neo4j, Data) vers S3.
+
+**Usage :**
+```powershell
+# Backup avec bucket auto-créé
+.\scripts\aws\backup-to-s3.ps1 -EC2Host 63.32.164.133
+
+# Backup avec bucket personnalisé
+.\scripts\aws\backup-to-s3.ps1 `
+  -EC2Host 63.32.164.133 `
+  -S3BucketName "mon-bucket-backups"
+```
+
+**Contenu du backup :**
+- 🔹 Qdrant : Collections `knowbase` + `rfp_qa` (snapshots + volume)
+- 🔹 Redis : Dump RDB complet (cache + queue)
+- 🔹 Neo4j : Volumes data/logs + export cypher
+- 🔹 Data : Documents, logs, modèles ML
+
+**Durée :** 5-15 minutes | **Taille :** 200 MB - 2 GB
+
+**Bucket S3 par défaut :** `knowbase-backups-{AWS_ACCOUNT_ID}`
+
+---
+
+#### **`restore-from-s3.ps1`**
+Restaure un backup sur une nouvelle instance EC2 déployée via CloudFormation.
+
+**Usage :**
+```powershell
+# Restauration complète (récupère IP auto depuis CloudFormation)
+.\scripts\aws\restore-from-s3.ps1 `
+  -StackName "Osmos" `
+  -BackupTimestamp "20251026_143052" `
+  -S3BucketName "knowbase-backups-715927975014"
+
+# Restauration sans redémarrer les services
+.\scripts\aws\restore-from-s3.ps1 `
+  -StackName "Osmos" `
+  -BackupTimestamp "20251026_143052" `
+  -S3BucketName "knowbase-backups-715927975014" `
+  -RestartServices $false
+```
+
+**Workflow automatique :**
+1. Récupère l'IP EC2 depuis le nom de la stack CloudFormation
+2. Télécharge le backup depuis S3
+3. Upload vers la nouvelle EC2
+4. Restaure Qdrant, Redis, Neo4j, Data
+5. Redémarre les services
+
+**Durée :** 10-20 minutes
+
+**📖 Documentation complète :** [README_BACKUP_RESTORE.md](./README_BACKUP_RESTORE.md)
+
+---
+
 ## 🎯 Workflows Typiques
 
 ### Workflow 1 : Déploiement Initial
@@ -203,6 +263,42 @@ docker exec knowbase-neo4j neo4j-admin dump --database=neo4j --to=/data/backup.d
 
 # Coût après destruction : $0/mois
 ```
+
+---
+
+### Workflow 5 : Migration / Disaster Recovery (Backup → Nouvelle Instance)
+
+```powershell
+# 1. Backup de l'instance actuelle
+.\scripts\aws\backup-to-s3.ps1 -EC2Host 63.32.164.133
+# Output: Timestamp 20251026_143052, Bucket knowbase-backups-715927975014
+
+# 2. (Optionnel) Supprimer l'ancienne stack
+.\scripts\aws\delete-stack.ps1 -StackName "Osmos"
+
+# 3. Déployer nouvelle stack CloudFormation
+.\scripts\aws\deploy-cloudformation.ps1 `
+  -StackName "Osmos" `
+  -KeyPairName "Osmose_KeyPair" `
+  -KeyPath ".\Osmose_KeyPair.pem"
+
+# 4. Restaurer le backup sur la nouvelle instance
+.\scripts\aws\restore-from-s3.ps1 `
+  -StackName "Osmos" `
+  -BackupTimestamp "20251026_143052" `
+  -S3BucketName "knowbase-backups-715927975014"
+
+# ✅ Système restauré avec toutes les données !
+# Accès: http://<NOUVELLE_IP>:3000
+```
+
+**Use cases :**
+- 🔄 **Migration** : Changer de région/type d'instance
+- 💾 **Disaster Recovery** : Restaurer après incident
+- 🧪 **Tests** : Créer environnement de staging
+- 📦 **Clonage** : Dupliquer environnement de prod
+
+**Durée totale :** 25-40 minutes
 
 ---
 
