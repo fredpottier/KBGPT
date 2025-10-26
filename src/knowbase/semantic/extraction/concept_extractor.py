@@ -340,10 +340,10 @@ class MultilingualConceptExtractor:
         prompt = self._get_llm_extraction_prompt(topic_text, language)
 
         try:
-            # Appel LLM
+            # Appel LLM async pour parallélisation
             from knowbase.common.llm_router import TaskType
 
-            response_text = self.llm_router.complete(
+            response_text = await self.llm_router.acomplete(
                 task_type=TaskType.KNOWLEDGE_EXTRACTION,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.extraction_config.llm["temperature"],

@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Union
 import yaml
 
 from knowbase.config.settings import get_settings
-from knowbase.common.clients import get_openai_client, get_anthropic_client, is_anthropic_available
+from knowbase.common.clients import get_openai_client, get_async_openai_client, get_anthropic_client, is_anthropic_available
 from knowbase.common.token_tracker import track_tokens
 
 # Import conditionnel pour SageMaker
@@ -48,6 +48,7 @@ class LLMRouter:
     def __init__(self, config_path: Optional[Path] = None):
         self.settings = get_settings()
         self._openai_client = None
+        self._async_openai_client = None
         self._anthropic_client = None
         self._sagemaker_client = None
 
@@ -128,6 +129,13 @@ class LLMRouter:
         if self._openai_client is None:
             self._openai_client = get_openai_client()
         return self._openai_client
+
+    @property
+    def async_openai_client(self):
+        """Client OpenAI async paresseux pour appels parallèles."""
+        if self._async_openai_client is None:
+            self._async_openai_client = get_async_openai_client()
+        return self._async_openai_client
 
     @property
     def anthropic_client(self):
@@ -245,6 +253,65 @@ class LLMRouter:
                 return self._call_openai(default_model, messages, temperature, max_tokens, task_type, **kwargs)
             raise
 
+    async def acomplete(
+        self,
+        task_type: TaskType,
+        messages: List[Dict[str, Any]],
+        temperature: float = None,
+        max_tokens: int = None,
+        **kwargs
+    ) -> str:
+        """
+        Effectue un appel LLM async en routant vers le modèle optimal.
+        Version async pour permettre la parallélisation des appels.
+
+        Args:
+            task_type: Type de tâche pour choisir le modèle
+            messages: Messages au format standard
+            temperature: Température (0.0 à 1.0). Si None, utilise les paramètres du YAML
+            max_tokens: Limite de tokens de réponse. Si None, utilise les paramètres du YAML
+            **kwargs: Arguments supplémentaires
+
+        Returns:
+            Contenu de la réponse du modèle
+        """
+        model = self._get_model_for_task(task_type)
+        provider = self._get_provider_for_model(model)
+
+        # Utilise les paramètres du YAML si non spécifiés
+        task_name = task_type.value
+        task_params = self._config.get("task_parameters", {}).get(task_name, {})
+
+        if temperature is None:
+            temperature = task_params.get("temperature", 0.2)
+        if max_tokens is None:
+            max_tokens = task_params.get("max_tokens", 1024)
+
+        logger.debug(f"[LLM_ROUTER:ASYNC] Task: {task_type.value}, Model: {model}, Provider: {provider}, Temp: {temperature}, Tokens: {max_tokens}")
+
+        try:
+            if provider == "openai":
+                return await self._call_openai_async(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "anthropic":
+                # TODO: Implémenter version async pour Anthropic si nécessaire
+                logger.warning("[LLM_ROUTER:ASYNC] Anthropic async not implemented, falling back to sync")
+                return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "sagemaker":
+                # TODO: Implémenter version async pour SageMaker si nécessaire
+                logger.warning("[LLM_ROUTER:ASYNC] SageMaker async not implemented, falling back to sync")
+                return self._call_sagemaker(model, messages, temperature, max_tokens, task_type, **kwargs)
+            else:
+                raise ValueError(f"Provider {provider} non supporté")
+
+        except Exception as e:
+            logger.error(f"[LLM_ROUTER:ASYNC] Error with {model} ({provider}): {e}")
+            # Fallback d'urgence vers le modèle par défaut
+            default_model = self._config.get("default_model", "gpt-4o")
+            if model != default_model:
+                logger.info(f"[LLM_ROUTER:ASYNC] Fallback emergency to {default_model}")
+                return await self._call_openai_async(default_model, messages, temperature, max_tokens, task_type, **kwargs)
+            raise
+
     def _call_openai(
         self,
         model: str,
@@ -272,6 +339,39 @@ class LLMRouter:
             completion_tokens = response.usage.completion_tokens
             total_tokens = response.usage.total_tokens
             logger.info(f"[TOKENS] {model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
+
+            # Tracking pour analyse des coûts
+            track_tokens(model, task_type.value, prompt_tokens, completion_tokens)
+
+        return response.choices[0].message.content or ""
+
+    async def _call_openai_async(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        task_type: TaskType,
+        **kwargs
+    ) -> str:
+        """Appel async vers OpenAI pour parallélisation."""
+        # Filtrer les paramètres internes qui ne doivent pas être passés à l'API
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
+
+        response = await self.async_openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **api_kwargs
+        )
+
+        # Log et tracking des métriques de tokens
+        if response.usage:
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
+            total_tokens = response.usage.total_tokens
+            logger.info(f"[TOKENS:ASYNC] {model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
 
             # Tracking pour analyse des coûts
             track_tokens(model, task_type.value, prompt_tokens, completion_tokens)
