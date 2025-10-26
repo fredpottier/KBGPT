@@ -578,7 +578,7 @@ docker exec knowbase-redis redis-cli ping || echo 'FAIL'
 
 echo ''
 echo '=== Logs recents ==='
-docker-compose logs --tail=20
+docker-compose -f docker-compose.ecr.yml -f docker-compose.monitoring.yml logs --tail=20
 "@
 
 Invoke-SSHCommand -Command $healthCheckScript
@@ -600,8 +600,8 @@ Write-Host "IMPORTANT: Configurez votre Security Group pour autoriser ces ports 
 Write-Host ""
 Write-Host "Commandes utiles:" -ForegroundColor Cyan
 Write-Host "  ssh -i `"$KeyPath`" $Username@$InstanceIP"
-Write-Host "  cd $DEPLOY_DIR && docker-compose logs -f"
-Write-Host "  cd $DEPLOY_DIR && docker-compose restart app"
+Write-Host "  cd $DEPLOY_DIR && docker-compose -f docker-compose.ecr.yml -f docker-compose.monitoring.yml logs -f"
+Write-Host "  cd $DEPLOY_DIR && docker-compose -f docker-compose.ecr.yml -f docker-compose.monitoring.yml restart app"
 Write-Host ""
 Write-Host "Pour mettre a jour le deploiement:" -ForegroundColor Cyan
 Write-Host "  .\scripts\aws\deploy-ec2.ps1 -InstanceIP $InstanceIP -KeyPath `"$KeyPath`" -SkipSetup"
