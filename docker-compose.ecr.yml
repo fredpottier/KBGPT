@@ -181,6 +181,8 @@ services:
       # Performance mono-document (parallélisation interne)
       MAX_PARALLEL_SEGMENTS: "${MAX_PARALLEL_SEGMENTS:-5}"  # Segments en parallèle
       OPENAI_MAX_RPM: "${OPENAI_MAX_RPM:-500}"  # Rate limit OpenAI
+      # OSMOSE timeout (10 minutes pour docs complexes)
+      OSMOSE_TIMEOUT_SECONDS: "${OSMOSE_TIMEOUT_SECONDS:-600}"
       # JWT keys paths (mounted from ./config to /app/config in container)
       JWT_PRIVATE_KEY_PATH: /app/config/keys/jwt_private.pem
       JWT_PUBLIC_KEY_PATH: /app/config/keys/jwt_public.pem
