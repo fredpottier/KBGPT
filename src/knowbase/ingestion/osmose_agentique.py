@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 import asyncio
 import logging
+import os
 from datetime import datetime
 
 from knowbase.agents.supervisor.supervisor import SupervisorAgent
@@ -175,20 +176,20 @@ class OsmoseAgentiqueService:
         - Temps de base : 120s (2 min)
         - Temps par segment : 90s (60s extraction NER + 30s relation extraction LLM)
         - Temps FSM overhead : 120s (mining, gatekeeper, promotion, relation writing, indexing)
-        - Min : 300s (5 min), Max : 5400s (90 min)
+        - Min : 300s (5 min), Max : OSMOSE_TIMEOUT_SECONDS (défaut 90 min, configurable)
 
         Rationale Phase 2:
         - Extraction relations LLM ajoute ~30-50% overhead par segment
         - Documents larges (500+ concepts) peuvent prendre 60-90 min avec Phase 2
         - Cas réel observé: 553 concepts, 2246 relations → 48 min (timeout à 30 min!)
 
-        Exemples :
+        Exemples (avec max par défaut 5400s / 90 min):
         - 1 segment : 120 + 90*1 + 120 = 330s (5.5 min)
         - 10 segments : 120 + 90*10 + 120 = 1140s (19 min)
         - 20 segments : 120 + 90*20 + 120 = 2040s (34 min)
         - 30 segments : 120 + 90*30 + 120 = 2940s (49 min)
         - 50 segments : 120 + 90*50 + 120 = 4740s (79 min)
-        - 60+ segments : 120 + 90*60 + 120 = 5640s → capped à 5400s (90 min)
+        - 60 segments : 120 + 90*60 + 120 = 5640s → capped à OSMOSE_TIMEOUT_SECONDS
 
         Args:
             num_segments: Nombre de segments détectés
@@ -202,9 +203,10 @@ class OsmoseAgentiqueService:
 
         calculated_timeout = base_time + (time_per_segment * num_segments) + fsm_overhead
 
-        # Bornes: min 300s (5 min), max 5400s (90 min) pour Phase 2 OSMOSE
-        min_timeout = 300
-        max_timeout = 5400
+        # Bornes: min/max configurables via OSMOSE_TIMEOUT_SECONDS (défaut 90 min)
+        configured_timeout = int(os.getenv("OSMOSE_TIMEOUT_SECONDS", "5400"))
+        min_timeout = min(300, configured_timeout)  # Au moins 5 min, ou moins si config plus courte
+        max_timeout = configured_timeout  # Max = valeur configurée
 
         adaptive_timeout = max(min_timeout, min(calculated_timeout, max_timeout))
 
