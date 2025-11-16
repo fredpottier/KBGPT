@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents
+from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts
 
 
 def create_app() -> FastAPI:
@@ -134,6 +134,10 @@ def create_app() -> FastAPI:
                 "name": "Document Types",
                 "description": "Gestion types de documents pour guider extraction LLM (Phase 6)"
             },
+            {
+                "name": "concepts",
+                "description": "**Concepts** - Explications enrichies via cross-référencement Neo4j ↔ Qdrant (Phase 2 POC)"
+            },
         ],
     )
 
@@ -213,6 +217,7 @@ def create_app() -> FastAPI:
     app.include_router(documents.router, prefix="/api")  # Documents API - Document Backbone lifecycle (Phase 1 Week 4)
     app.include_router(admin.router, prefix="/api")  # Admin API - Purge data, health check (Phase 7)
     app.include_router(auth.router, prefix="/api")  # Auth API - JWT Authentication (Phase 0)
+    app.include_router(concepts.router, prefix="/api")  # Concepts API - Explain concepts (Phase 2 POC)
 
     return app
 

@@ -479,8 +479,10 @@ class Neo4jClient:
                          END
                      ) AS aggregated_chunks
 
-                // Mettre à jour CanonicalConcept.chunk_ids
-                SET canonical.chunk_ids = aggregated_chunks
+                // Mettre à jour CanonicalConcept.chunk_ids + name/summary si manquants
+                SET canonical.chunk_ids = aggregated_chunks,
+                    canonical.name = COALESCE(canonical.name, canonical.canonical_name),
+                    canonical.summary = COALESCE(canonical.summary, canonical.unified_definition)
 
                 // Créer lien Proto → Canonical existant
                 MERGE (proto)-[:PROMOTED_TO {
@@ -550,9 +552,11 @@ class Neo4jClient:
                 canonical_id: randomUUID(),
                 tenant_id: $tenant_id,
                 canonical_name: $canonical_name,
+                name: $canonical_name,
                 surface_form: $surface_form,
                 concept_type: proto.concept_type,
                 unified_definition: $unified_definition,
+                summary: $unified_definition,
                 quality_score: $quality_score,
                 chunk_ids: aggregated_chunks,
                 promoted_at: datetime(),
