@@ -28,9 +28,10 @@ def get_qdrant_client() -> QdrantClient:
         QdrantClient instance
     """
     settings = get_settings()
+    # Timeout 300s pour gros batch uploads
     if settings.qdrant_api_key:
-        return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
-    return QdrantClient(url=settings.qdrant_url)
+        return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key, timeout=300)
+    return QdrantClient(url=settings.qdrant_url, timeout=300)
 
 
 def ensure_qdrant_collection(
@@ -255,7 +256,7 @@ def upsert_chunks(
         ensure_qdrant_collection(collection_name, vector_size=1024)
 
     chunk_ids = []
-    points = []
+    all_points = []
 
     for chunk in chunks:
         # Utiliser ID fourni ou générer nouveau UUID
@@ -283,24 +284,41 @@ def upsert_chunks(
             vector=chunk["embedding"],
             payload=payload
         )
-        points.append(point)
+        all_points.append(point)
 
     try:
-        # Batch upsert pour performance
-        client.upsert(
-            collection_name=collection_name,
-            points=points
-        )
+        # Batch upsert par lots de 1000 pour éviter timeouts
+        BATCH_SIZE = 1000
+        total_batches = (len(all_points) + BATCH_SIZE - 1) // BATCH_SIZE
+
+        for batch_idx in range(total_batches):
+            start_idx = batch_idx * BATCH_SIZE
+            end_idx = min((batch_idx + 1) * BATCH_SIZE, len(all_points))
+            batch_points = all_points[start_idx:end_idx]
+
+            logger.info(
+                f"[QDRANT:Chunks] Upserting batch {batch_idx + 1}/{total_batches} "
+                f"({len(batch_points)} chunks)..."
+            )
+
+            client.upsert(
+                collection_name=collection_name,
+                points=batch_points,
+                wait=True  # Attendre confirmation pour chaque batch
+            )
 
         logger.info(
-            f"[QDRANT:Chunks] Upserted {len(points)} chunks "
+            f"[QDRANT:Chunks] ✅ Successfully upserted {len(all_points)} chunks in {total_batches} batches "
             f"(tenant={tenant_id}, collection={collection_name})"
         )
 
         return chunk_ids
 
     except Exception as e:
-        logger.error(f"[QDRANT:Chunks] Error upserting chunks: {e}")
+        logger.error(f"[QDRANT:Chunks] Error upserting chunks: {type(e).__name__}: {e}")
+        logger.error(f"[QDRANT:Chunks] First chunk sample: {chunks[0] if chunks else 'N/A'}")
+        import traceback
+        logger.error(f"[QDRANT:Chunks] Traceback: {traceback.format_exc()}")
         return []
 
 

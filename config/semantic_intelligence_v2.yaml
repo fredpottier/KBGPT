@@ -87,7 +87,7 @@ ner:
 embeddings:
   model: "intfloat/multilingual-e5-large"  # 1024 dimensions
   dimension: 1024
-  device: "cpu"                    # cpu ou cuda
+  device: "cuda"                    # cpu ou cuda
   batch_size: 32                   # Batch size pour embeddings
   normalize: true                  # Normaliser vecteurs (pour cosine)
 

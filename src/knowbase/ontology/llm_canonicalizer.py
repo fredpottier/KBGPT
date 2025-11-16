@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 import json
 import logging
 from datetime import datetime
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -378,6 +379,124 @@ class LLMCanonicalizer:
 
         except Exception as e:
             logger.error(f"[LLMCanonicalizer:Batch] ❌ Batch canonicalization failed: {e}")
+
+            # Fallback: retourner résultats basiques pour TOUS
+            return [
+                CanonicalizationResult(
+                    canonical_name=concept["raw_name"].strip().title(),
+                    confidence=0.5,
+                    reasoning=f"Batch LLM error: {str(e)}",
+                    aliases=[],
+                    concept_type="Unknown",
+                    domain=None,
+                    ambiguity_warning="Batch canonicalization failed",
+                    possible_matches=[],
+                    metadata={"error": str(e)}
+                )
+                for concept in concepts
+            ]
+
+    async def canonicalize_batch_async(
+        self,
+        concepts: List[Dict[str, str]],
+        timeout: int = 30
+    ) -> List[CanonicalizationResult]:
+        """
+        Canonicalise un batch de concepts via LLM async (batch processing parallèle).
+
+        Version async pour utilisation dans boucle événementielle asyncio.
+
+        Args:
+            concepts: Liste de dicts avec clés {raw_name, context, domain_hint}
+            timeout: Timeout max LLM call en secondes
+
+        Returns:
+            Liste de CanonicalizationResult (même ordre que concepts)
+
+        Example:
+            >>> batch = [
+            ...     {"raw_name": "S/4HANA Cloud's", "context": "...", "domain_hint": None},
+            ...     {"raw_name": "MFA", "context": "...", "domain_hint": None}
+            ... ]
+            >>> results = await canonicalizer.canonicalize_batch_async(batch)
+            >>> results[0].canonical_name
+            "SAP S/4HANA Cloud"
+        """
+        if not concepts:
+            return []
+
+        logger.debug(
+            f"[LLMCanonicalizer:BatchAsync] Canonicalizing batch of {len(concepts)} concepts"
+        )
+
+        # Construire prompt batch (même que sync)
+        prompt = self._build_batch_canonicalization_prompt(concepts)
+
+        try:
+            # Appel LLM async via router
+            from knowbase.common.llm_router import TaskType
+
+            # Utiliser acomplete du router (version async)
+            response_content = await self.llm_router.acomplete(
+                task_type=TaskType.CANONICALIZATION,
+                messages=[
+                    {"role": "system", "content": CANONICALIZATION_BATCH_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.0,
+                max_tokens=8000,
+                response_format={"type": "json_object"}
+            )
+
+            # Log diagnostic
+            logger.info(
+                f"[LLMCanonicalizer:BatchAsync] 🔍 RAW LLM response "
+                f"(type={type(response_content)}, len={len(response_content if response_content else '')}):\n"
+                f"{response_content[:1000] if response_content else '(EMPTY)'}"
+            )
+
+            # Strip whitespace
+            response_content = response_content.strip() if response_content else ""
+
+            if not response_content:
+                raise ValueError("LLM returned empty response")
+
+            # Parse résultat JSON
+            result_json = self._parse_json_robust(response_content)
+
+            # Extraire résultats pour chaque concept
+            results = []
+            concepts_results = result_json.get("concepts", [])
+
+            for idx, concept_result in enumerate(concepts_results):
+                try:
+                    results.append(CanonicalizationResult(**concept_result))
+                except Exception as e:
+                    logger.error(
+                        f"[LLMCanonicalizer:BatchAsync] Failed to parse result {idx}: {e}, "
+                        f"using fallback for '{concepts[idx]['raw_name']}'"
+                    )
+                    # Fallback pour ce concept
+                    results.append(CanonicalizationResult(
+                        canonical_name=concepts[idx]["raw_name"].strip().title(),
+                        confidence=0.5,
+                        reasoning="Batch parsing failed, fallback to title case",
+                        aliases=[],
+                        concept_type="Unknown",
+                        domain=None,
+                        ambiguity_warning="Batch canonicalization partial failure",
+                        possible_matches=[],
+                        metadata={"error": str(e)}
+                    ))
+
+            logger.info(
+                f"[LLMCanonicalizer:BatchAsync] ✅ Batch completed: {len(results)} concepts canonicalized"
+            )
+
+            return results
+
+        except Exception as e:
+            logger.error(f"[LLMCanonicalizer:BatchAsync] ❌ Batch canonicalization failed: {e}")
 
             # Fallback: retourner résultats basiques pour TOUS
             return [

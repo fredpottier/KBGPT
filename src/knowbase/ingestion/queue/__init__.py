@@ -1,4 +1,12 @@
-﻿from .connection import (
+﻿# Force 'spawn' method for CUDA compatibility with multiprocessing
+import multiprocessing
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    # Already set, ignore
+    pass
+
+from .connection import (
     DEFAULT_JOB_TIMEOUT,
     DEFAULT_QUEUE_NAME,
     get_queue,

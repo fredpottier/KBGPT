@@ -6,7 +6,7 @@
 supervisor:
   # Timeouts et limites
   max_steps: 50  # Max steps FSM (sécurité)
-  timeout_seconds: 300  # 5 min/doc timeout
+  timeout_seconds: 3600  # 60 min/doc timeout (OSMOSE_TIMEOUT_SECONDS from .env)
 
   # FSM transitions (état → états suivants autorisés)
   fsm_transitions:

@@ -55,9 +55,16 @@ class TextChunker:
         self.overlap = overlap
 
         # Init sentence transformer pour embeddings
+        # Auto-detect GPU (CUDA) si disponible, sinon fallback CPU
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
         try:
-            self.model = SentenceTransformer(model_name)
-            logger.info(f"[TextChunker] Loaded model: {model_name} (dim={self.model.get_sentence_embedding_dimension()})")
+            self.model = SentenceTransformer(model_name, device=device)
+            logger.info(
+                f"[TextChunker] Loaded model: {model_name} "
+                f"(dim={self.model.get_sentence_embedding_dimension()}, device={device})"
+            )
         except Exception as e:
             logger.error(f"[TextChunker] Failed to load model {model_name}: {e}")
             raise
@@ -273,12 +280,17 @@ class TextChunker:
             Liste embeddings (numpy arrays 1024D)
         """
         try:
+            # Batch size optimisé pour GPU (128) vs CPU (32)
+            import torch
+            batch_size = 128 if torch.cuda.is_available() else 32
+
             embeddings = self.model.encode(
                 texts,
-                batch_size=32,
-                show_progress_bar=False,
+                batch_size=batch_size,
+                show_progress_bar=len(texts) > 100,  # Progress bar si >100 chunks
                 convert_to_numpy=True
             )
+            logger.debug(f"[TextChunker] Generated {len(embeddings)} embeddings (batch_size={batch_size})")
             return embeddings
         except Exception as e:
             logger.error(f"[TextChunker] Error generating embeddings: {e}")
@@ -343,11 +355,12 @@ class TextChunker:
         """
         Créer chunks concept-focused (contexte autour de mentions).
 
-        Stratégie:
+        Stratégie OPTIMISÉE GPU (Batching):
         1. Pour chaque concept, trouver toutes ses mentions dans le texte
         2. Extraire contexte autour de chaque mention (±256 tokens)
-        3. Générer embeddings pour chunks focused
-        4. Retourner chunks avec chunk_type="concept_focused" et primary_concept_id set
+        3. Collecter TOUS les textes de chunks
+        4. Générer TOUS les embeddings en 1 batch (GPU optimisé)
+        5. Assembler chunks finaux avec embeddings pré-générés
 
         Args:
             text: Texte complet du document
@@ -361,8 +374,8 @@ class TextChunker:
         Returns:
             Liste chunks concept-focused
         """
-        concept_focused_chunks = []
-        chunk_index = start_index
+        # ===== ÉTAPE 1: Collecter tous les chunk texts (sans embeddings) =====
+        chunk_metadata_list = []  # Liste metadata chunks à créer
 
         for concept in concepts:
             proto_concept_id = concept.get("proto_concept_id")  # ID Neo4j
@@ -377,7 +390,7 @@ class TextChunker:
             if not mentions:
                 continue
 
-            # Pour chaque mention, créer un chunk focused
+            # Pour chaque mention, préparer metadata du chunk
             for mention_start, mention_end in mentions:
                 # Extraire contexte autour de la mention (±256 tokens)
                 chunk_text, char_start, char_end = self._extract_context_window(
@@ -390,35 +403,58 @@ class TextChunker:
                 if not chunk_text or not chunk_text.strip():
                     continue
 
-                # Générer embedding pour ce chunk focused
-                embedding = self._generate_embeddings_batch([chunk_text])[0]
-
-                # Trouver tous les concepts mentionnés dans ce chunk (pas seulement le principal)
-                mentioned_concept_ids = self._find_mentioned_concepts(chunk_text, concepts)
-
-                # Créer chunk concept-focused
-                concept_focused_chunks.append({
-                    "id": str(uuid.uuid4()),
+                # Stocker metadata (SANS embedding pour l'instant)
+                chunk_metadata_list.append({
                     "text": chunk_text.strip(),
-                    "embedding": embedding.tolist(),
-                    "document_id": document_id,
-                    "document_name": document_name,
-                    "segment_id": segment_id,
-                    "chunk_index": chunk_index,
-                    "chunk_type": "concept_focused",  # Type: concept_focused
-                    "primary_concept_id": proto_concept_id,  # Concept principal (Proto ID Neo4j)
-                    "proto_concept_ids": mentioned_concept_ids,  # Tous les concepts mentionnés (Proto IDs Neo4j)
-                    "canonical_concept_ids": [],
-                    "tenant_id": tenant_id,
+                    "proto_concept_id": proto_concept_id,
                     "char_start": char_start,
                     "char_end": char_end
                 })
 
-                chunk_index += 1
+        # ===== ÉTAPE 2: Générer TOUS les embeddings en 1 batch GPU =====
+        if not chunk_metadata_list:
+            logger.debug("[TextChunker:ConceptFocused] No concept-focused chunks to create")
+            return []
 
-        logger.debug(
-            f"[TextChunker:ConceptFocused] Created {len(concept_focused_chunks)} "
-            f"concept-focused chunks for {len(concepts)} concepts"
+        logger.info(
+            f"[TextChunker:ConceptFocused] Generating embeddings for "
+            f"{len(chunk_metadata_list)} concept-focused chunks in single batch..."
+        )
+
+        all_chunk_texts = [chunk_meta["text"] for chunk_meta in chunk_metadata_list]
+        all_embeddings = self._generate_embeddings_batch(all_chunk_texts)
+
+        # ===== ÉTAPE 3: Assembler chunks finaux avec embeddings =====
+        concept_focused_chunks = []
+        chunk_index = start_index
+
+        for chunk_meta, embedding in zip(chunk_metadata_list, all_embeddings):
+            # Trouver tous les concepts mentionnés dans ce chunk (pas seulement le principal)
+            mentioned_concept_ids = self._find_mentioned_concepts(chunk_meta["text"], concepts)
+
+            # Créer chunk concept-focused
+            concept_focused_chunks.append({
+                "id": str(uuid.uuid4()),
+                "text": chunk_meta["text"],
+                "embedding": embedding.tolist(),
+                "document_id": document_id,
+                "document_name": document_name,
+                "segment_id": segment_id,
+                "chunk_index": chunk_index,
+                "chunk_type": "concept_focused",  # Type: concept_focused
+                "primary_concept_id": chunk_meta["proto_concept_id"],  # Concept principal (Proto ID Neo4j)
+                "proto_concept_ids": mentioned_concept_ids,  # Tous les concepts mentionnés (Proto IDs Neo4j)
+                "canonical_concept_ids": [],
+                "tenant_id": tenant_id,
+                "char_start": chunk_meta["char_start"],
+                "char_end": chunk_meta["char_end"]
+            })
+
+            chunk_index += 1
+
+        logger.info(
+            f"[TextChunker:ConceptFocused] ✅ Created {len(concept_focused_chunks)} "
+            f"concept-focused chunks for {len(concepts)} concepts (batch embeddings generated)"
         )
 
         return concept_focused_chunks

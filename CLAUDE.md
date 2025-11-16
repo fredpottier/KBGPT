@@ -373,6 +373,52 @@ docs: mettre à jour documentation API
 
 **Checkpoint Phase 1 (fin Sem 10):** Démo CRR Evolution fonctionne, différenciation vs Copilot prouvée
 
+### 🔧 Commandes Docker Simplifiées
+
+**Script de gestion unifié** : `kw.ps1` (KnowWhere PowerShell script)
+
+```powershell
+# Démarrage
+./kw.ps1 start              # Démarre infra + app (tout)
+./kw.ps1 start infra        # Démarre uniquement infrastructure
+./kw.ps1 start app          # Démarre uniquement application
+
+# Arrêt
+./kw.ps1 stop               # Arrête tout
+./kw.ps1 stop infra         # Arrête uniquement infrastructure
+./kw.ps1 stop app           # Arrête uniquement application
+
+# Redémarrage
+./kw.ps1 restart            # Redémarre tout
+./kw.ps1 restart app        # Redémarre uniquement application
+
+# Status et logs
+./kw.ps1 status             # Affiche statut de tous les services
+./kw.ps1 logs app           # Voir logs du backend
+./kw.ps1 logs worker        # Voir logs du worker
+./kw.ps1 logs neo4j         # Voir logs Neo4j
+
+# Informations
+./kw.ps1 info               # Affiche TOUTES les URLs + credentials
+
+# Nettoyage (DANGER!)
+./kw.ps1 clean              # Purge volumes et containers
+```
+
+**Architecture Docker** : Multi-fichiers (depuis oct 2025)
+- `docker-compose.infra.yml` : Infrastructure stateful (Qdrant, Redis, Neo4j)
+- `docker-compose.yml` : Application stateless (App, Worker, Frontend, UI)
+- `docker-compose.monitoring.yml` : Monitoring (Grafana, Loki, Promtail)
+- `.env` : `COMPOSE_FILE=docker-compose.infra.yml:docker-compose.yml:docker-compose.monitoring.yml`
+
+**URLs et Credentials** (voir `./kw.ps1 info` pour détails complets) :
+- Frontend : http://localhost:3000
+- API : http://localhost:8000/docs
+- Neo4j : http://localhost:7474 (neo4j / graphiti_neo4j_pass)
+- Qdrant : http://localhost:6333/dashboard
+- Grafana : http://localhost:3001 (admin / Rn1lm@tr)
+- Loki API : http://localhost:3101
+
 ### 🔧 Commandes OSMOSE Utiles
 
 **Setup Infrastructure Proto-KG** (première installation ou migration)
@@ -401,4 +447,4 @@ docker-compose exec app pytest tests/semantic/test_infrastructure.py -v
 
 **Voir aussi** : `app/scripts/README.md` pour documentation complète
 
-*Dernière mise à jour : 2025-10-13*
+*Dernière mise à jour : 2025-11-15*

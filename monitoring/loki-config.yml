@@ -52,6 +52,9 @@ limits_config:
   # Nombre maximal de requêtes parallèles
   max_concurrent_tail_requests: 10
 
+  # Split des longues requêtes (doit être dans limits_config pour Loki 2.9+)
+  split_queries_by_interval: 30m
+
 # Compactage automatique des index (nettoyage des vieux logs)
 compactor:
   working_directory: /loki/compactor
@@ -91,14 +94,16 @@ ingester:
 
 # Configuration du querier
 querier:
-  max_concurrent: 20
+  max_concurrent: 50  # Augmenté de 20 à 50 pour dashboards Grafana
+  query_timeout: 5m
 
 # Configuration du query frontend
 frontend:
-  max_outstanding_per_tenant: 512
+  max_outstanding_per_tenant: 2048  # Augmenté de 512 à 2048
   compress_responses: true
 
 # Limites de requêtes
 query_range:
   parallelise_shardable_queries: true
   max_retries: 3
+  cache_results: true  # Cache les résultats

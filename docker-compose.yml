@@ -76,6 +76,13 @@ services:
       - redis
       - qdrant
     stop_grace_period: 15s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1  # Utiliser 1 GPU (Docker Desktop Windows ne supporte pas device_ids)
+              capabilities: [gpu]
     env_file:
       - .env
     environment:
@@ -85,6 +92,7 @@ services:
       KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://redis:6379/0
       DEV_MODE: "true"  # Auto-reload du code après chaque job (désactiver en prod)
+      CUDA_VISIBLE_DEVICES: "0"  # Exposer GPU comme device 0 dans le container (mapping de host device 1)
     ports:
       - "5679:5679"  # Debug port for worker
     volumes:
@@ -165,21 +173,21 @@ services:
       retries: 3
       start_period: 40s
 
-  ngrok:
-    image: ngrok/ngrok:latest
-    container_name: knowbase-ngrok
-    restart: unless-stopped
-    depends_on:
-      - app
-    volumes:
-      - ./ngrok.yml:/etc/ngrok.yml
-      - ./data/logs:/logs
-      - ./src:/app/src
-    env_file:
-      - .env
-    command: start --config /etc/ngrok.yml --all
-    networks:
-      - knowbase_net
+  # ngrok: # DÉSACTIVÉ - Nécessite plan payant pour custom subdomain
+  #   image: ngrok/ngrok:latest
+  #   container_name: knowbase-ngrok
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - app
+  #   volumes:
+  #     - ./ngrok.yml:/etc/ngrok.yml
+  #     - ./data/logs:/logs
+  #     - ./src:/app/src
+  #   env_file:
+  #     - .env
+  #   command: start --config /etc/ngrok.yml --all
+  #   networks:
+  #     - knowbase_net
 
 networks:
   knowbase_net:

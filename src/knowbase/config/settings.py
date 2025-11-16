@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     thumbnails_dir: Path = Field(default=THUMBNAILS_DIR)
     ontologies_dir: Path = Field(default=ONTOLOGIES_DIR)  # Phase 3
 
+    # === OSMOSE Configuration ===
+    osmose_timeout_seconds: int = Field(default=3600, alias="OSMOSE_TIMEOUT_SECONDS")
+
     # === Extraction Cache System (V2.2) ===
     enable_extraction_cache: bool = Field(default=True, alias="ENABLE_EXTRACTION_CACHE")
     extraction_cache_dir: Path = Field(default=DATA_DIR / "extraction_cache", alias="EXTRACTION_CACHE_DIR")

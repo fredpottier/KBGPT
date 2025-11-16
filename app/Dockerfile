@@ -1,4 +1,14 @@
-FROM python:3.11-slim
+# Image de base avec CUDA 12.0 + Python 3.11 pour support GPU RTX 5070 Ti
+FROM nvidia/cuda:12.0.0-base-ubuntu22.04
+
+# Installer Python 3.11
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV TZ=Europe/Paris
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone

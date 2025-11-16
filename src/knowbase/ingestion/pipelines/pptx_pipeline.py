@@ -2105,7 +2105,7 @@ def process_pptx(
         # PDF disponible → Vision processing
         actual_slide_count = len(image_paths)
         total_slides = len(slides_data)  # Corriger la variable manquante
-        MAX_WORKERS = 3  # Valeur par défaut, peut être configurée
+        # MAX_WORKERS est défini globalement depuis .env (ligne 58)
 
         if progress_callback:
             progress_callback(

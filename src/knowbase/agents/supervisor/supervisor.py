@@ -402,97 +402,11 @@ class SupervisorAgent(BaseAgent):
             return FSMState.FINALIZE
 
         elif fsm_state == FSMState.FINALIZE:
-            # Finalisation: chunking + upload Qdrant
-            logger.info("[SUPERVISOR] ⏱️ FINALIZE: START - Chunking document and uploading to Qdrant")
+            step_start = time.time()
 
-            # Récupérer texte complet
-            full_text = state.full_text or ""
-            if not full_text:
-                logger.warning("[SUPERVISOR] FINALIZE: No full_text available, skipping chunking")
-                return FSMState.DONE
-
-            try:
-                # Lazy load TextChunker
-                from knowbase.ingestion.text_chunker import get_text_chunker
-                chunker = get_text_chunker()
-
-                # Récupérer concepts canoniques pour enrichir chunks
-                canonical_concepts = []
-                try:
-                    from knowbase.common.clients.neo4j_client import get_neo4j_client
-                    neo4j_client = get_neo4j_client()
-
-                    query = """
-                    MATCH (c:CanonicalConcept)
-                    WHERE c.tenant_id = $tenant_id AND c.document_id = $document_id
-                    RETURN c.canonical_id AS concept_id,
-                           c.canonical_name AS name,
-                           c.concept_type AS type
-                    """
-                    with neo4j_client.driver.session(database=neo4j_client.database) as session:
-                        result = session.run(query, tenant_id=state.tenant_id, document_id=state.document_id)
-                        canonical_concepts = [dict(record) for record in result]
-                    logger.info(f"[SUPERVISOR] FINALIZE: Retrieved {len(canonical_concepts)} canonical concepts for chunking")
-                except Exception as e:
-                    logger.warning(f"[SUPERVISOR] FINALIZE: Failed to retrieve concepts: {e}")
-
-                # Chunking document
-                chunks = chunker.chunk_document(
-                    text=full_text,
-                    document_id=state.document_id,
-                    document_name=state.document_name or "unknown",
-                    segment_id="full_document",
-                    concepts=canonical_concepts,
-                    tenant_id=state.tenant_id
-                )
-
-                logger.info(f"[SUPERVISOR] FINALIZE: Created {len(chunks)} chunks")
-
-                # Upload to Qdrant
-                if chunks:
-                    from knowbase.common.qdrant_client import get_qdrant_client
-                    qdrant_client = get_qdrant_client()
-
-                    if qdrant_client:
-                        # Préparer points Qdrant
-                        points = []
-                        for i, chunk in enumerate(chunks):
-                            points.append({
-                                "id": chunk.get("chunk_id"),
-                                "vector": chunk.get("embedding", []),
-                                "payload": {
-                                    "tenant_id": state.tenant_id,
-                                    "document_id": state.document_id,
-                                    "document_name": state.document_name or "unknown",
-                                    "chunk_index": i,
-                                    "text": chunk.get("text", ""),
-                                    "token_count": chunk.get("token_count", 0),
-                                    **chunk_metadata
-                                }
-                            })
-
-                        # Upload batch
-                        try:
-                            qdrant_client.upsert(
-                                collection_name="knowwhere_proto",
-                                points=points
-                            )
-                            logger.info(
-                                f"[SUPERVISOR] FINALIZE: ✅ Uploaded {len(points)} chunks to Qdrant collection 'knowwhere_proto'"
-                            )
-                        except Exception as e:
-                            logger.error(f"[SUPERVISOR] FINALIZE: Error uploading to Qdrant: {e}")
-                    else:
-                        logger.warning("[SUPERVISOR] FINALIZE: Qdrant client not available")
-                else:
-                    logger.warning("[SUPERVISOR] FINALIZE: No chunks created")
-
-            except Exception as e:
-                logger.error(
-                    f"[SUPERVISOR] FINALIZE: Error during chunking/upload: {e}",
-                    exc_info=True
-                )
-                # Continue vers DONE même en cas d'erreur (chunking non-critique)
+            # NOTE: Chunking + upload Qdrant désormais fait dans OSMOSE Agentique (osmose_agentique.py:420-450)
+            # Évite duplication et gain de 60-70s de processing
+            logger.info("[SUPERVISOR] ⏱️ FINALIZE: Chunking already done by OSMOSE Agentique, skipping")
 
             elapsed = time.time() - step_start
             logger.info(f"[SUPERVISOR] ⏱️ FINALIZE: COMPLETE in {elapsed:.1f}s")

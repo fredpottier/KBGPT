@@ -12,6 +12,7 @@ Phase 1.5 Jours 7-9: Filtrage Contextuel Hybride
 from typing import Dict, Any, Optional, List
 import logging
 import re
+import asyncio
 from pydantic import model_validator
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
@@ -701,53 +702,96 @@ class GatekeeperDelegate(BaseAgent):
             f"(batch_size={batch_size})..."
         )
 
-        # 2. Canonicaliser par batches
+        # 2. Canonicaliser par batches ASYNC avec parallélisation
         results_cache = {}
         total_batches = (len(pending_concepts) + batch_size - 1) // batch_size
 
+        # Créer batches
+        batches = []
         for batch_idx in range(total_batches):
             start_idx = batch_idx * batch_size
             end_idx = min(start_idx + batch_size, len(pending_concepts))
             batch = pending_concepts[start_idx:end_idx]
-
-            logger.debug(
-                f"[GATEKEEPER:Batch] Processing batch {batch_idx + 1}/{total_batches} "
-                f"({len(batch)} concepts)..."
-            )
-
-            try:
-                # Appel batch LLM
-                batch_results = self.llm_canonicalizer.canonicalize_batch(batch)
-
-                # Stocker résultats dans cache
-                for concept_dict, result in zip(batch, batch_results):
-                    raw_name = concept_dict["raw_name"]
-                    results_cache[raw_name] = (result.canonical_name, result.confidence)
-
-                    # Stocker également dans adaptive ontology pour cache persistant
-                    self.adaptive_ontology.store(
-                        tenant_id=tenant_id,
-                        canonical_name=result.canonical_name,
-                        raw_name=raw_name,
-                        canonicalization_result=result.model_dump(),
-                        context=concept_dict.get("context"),
-                        document_id=None  # Pas de document_id pour batch
-                    )
-
-                logger.info(
-                    f"[GATEKEEPER:Batch] ✅ Batch {batch_idx + 1}/{total_batches} completed "
-                    f"({len(batch_results)} concepts)"
-                )
-
-            except Exception as e:
-                logger.error(
-                    f"[GATEKEEPER:Batch] ❌ Batch {batch_idx + 1}/{total_batches} failed: {e}, "
-                    f"concepts will use fallback"
-                )
-                # Continuer avec le batch suivant
+            batches.append((batch_idx, batch))
 
         logger.info(
-            f"[GATEKEEPER:Batch] ✅ Batch canonicalization complete: {len(results_cache)} concepts cached"
+            f"[GATEKEEPER:BatchAsync] Processing {total_batches} batches in parallel "
+            f"(max_concurrent=5, batch_size={batch_size})..."
+        )
+
+        # Utiliser asyncio pour traiter les batches en parallèle
+        async def process_all_batches():
+            """Traite tous les batches en parallèle avec semaphore pour rate limiting."""
+            semaphore = asyncio.Semaphore(5)  # Max 5 batches simultanés
+
+            async def process_batch(batch_idx, batch):
+                async with semaphore:
+                    logger.debug(
+                        f"[GATEKEEPER:BatchAsync] Processing batch {batch_idx + 1}/{total_batches} "
+                        f"({len(batch)} concepts)..."
+                    )
+
+                    try:
+                        # Appel batch LLM ASYNC
+                        batch_results = await self.llm_canonicalizer.canonicalize_batch_async(batch)
+
+                        # Stocker résultats dans cache
+                        batch_cache = {}
+                        for concept_dict, result in zip(batch, batch_results):
+                            raw_name = concept_dict["raw_name"]
+                            batch_cache[raw_name] = (result.canonical_name, result.confidence)
+
+                            # Stocker également dans adaptive ontology ASYNC
+                            await self.adaptive_ontology.store_async(
+                                tenant_id=tenant_id,
+                                canonical_name=result.canonical_name,
+                                raw_name=raw_name,
+                                canonicalization_result=result.model_dump(),
+                                context=concept_dict.get("context"),
+                                document_id=None  # Pas de document_id pour batch
+                            )
+
+                        logger.info(
+                            f"[GATEKEEPER:BatchAsync] ✅ Batch {batch_idx + 1}/{total_batches} completed "
+                            f"({len(batch_results)} concepts)"
+                        )
+
+                        return batch_cache
+
+                    except Exception as e:
+                        logger.error(
+                            f"[GATEKEEPER:BatchAsync] ❌ Batch {batch_idx + 1}/{total_batches} failed: {e}, "
+                            f"concepts will use fallback"
+                        )
+                        return {}
+
+            # Lancer tous les batches en parallèle
+            tasks = [process_batch(idx, batch) for idx, batch in batches]
+            all_results = await asyncio.gather(*tasks)
+
+            # Merger tous les résultats
+            for batch_result in all_results:
+                results_cache.update(batch_result)
+
+        # Exécuter la coroutine async
+        # Détection intelligente: si loop existe et tourne, créer tâche dedans
+        try:
+            loop = asyncio.get_running_loop()
+            # Loop existe et tourne → utiliser run_coroutine_threadsafe
+            logger.debug("[GATEKEEPER:BatchAsync] Running loop detected, using nest_asyncio approach")
+
+            # Utiliser nest_asyncio pour permettre nested event loops
+            import nest_asyncio
+            nest_asyncio.apply()
+            loop.run_until_complete(process_all_batches())
+
+        except RuntimeError:
+            # Pas de loop actif → créer un nouveau avec asyncio.run()
+            logger.debug("[GATEKEEPER:BatchAsync] No running loop, creating new one")
+            asyncio.run(process_all_batches())
+
+        logger.info(
+            f"[GATEKEEPER:BatchAsync] ✅ Batch canonicalization complete: {len(results_cache)} concepts cached"
         )
 
         return results_cache

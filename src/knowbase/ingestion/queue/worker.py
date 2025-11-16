@@ -4,7 +4,7 @@ import logging
 import os
 
 import debugpy
-from rq import Worker
+from rq import SimpleWorker
 
 from knowbase.common.clients import (
     get_openai_client,
@@ -16,10 +16,13 @@ from .connection import DEFAULT_QUEUE_NAME, get_queue, get_redis_connection
 
 
 def warm_clients() -> None:
-    """Preload shared heavy clients so all jobs reuse the same instances."""
+    """Preload shared heavy clients so all jobs reuse the same instances.
+
+    Using SimpleWorker (no fork), we can safely warm all clients including GPU models.
+    """
     get_openai_client()
     get_qdrant_client()
-    get_sentence_transformer()
+    get_sentence_transformer()  # Safe with SimpleWorker (no fork)
 
 
 def run_worker(*, queue_name: str | None = None, with_scheduler: bool = True) -> None:
@@ -42,8 +45,9 @@ def run_worker(*, queue_name: str | None = None, with_scheduler: bool = True) ->
     if is_dev_mode:
         logger.info("🔄 Mode développement activé : rechargement automatique du code après chaque job")
 
-    # Configurer le worker avec des timeouts plus longs et meilleure gestion
-    worker = Worker(
+    # IMPORTANT: Use SimpleWorker instead of Worker to avoid fork() with CUDA
+    # SimpleWorker runs jobs in the same process (no fork), making it safe for GPU operations
+    worker = SimpleWorker(
         [queue.name],
         connection=get_redis_connection(),
         job_monitoring_interval=30,  # Vérifier les jobs toutes les 30s au lieu de 10s par défaut

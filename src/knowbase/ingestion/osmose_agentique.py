@@ -131,6 +131,118 @@ class OsmoseAgentiqueService:
 
         return self.text_chunker
 
+    def _cross_reference_chunks_and_concepts(
+        self,
+        chunks: List[Dict[str, Any]],
+        chunk_ids: List[str],
+        concept_to_chunk_ids: Dict[str, List[str]],
+        tenant_id: str
+    ) -> None:
+        """
+        Établit le cross-référencement bidirectionnel Neo4j ↔ Qdrant.
+
+        Après création des chunks, cette méthode :
+        1. Récupère le mapping Proto → Canonical depuis Neo4j
+        2. Met à jour les chunks Qdrant avec canonical_concept_ids
+        3. Met à jour les CanonicalConcepts Neo4j avec chunk_ids
+
+        Args:
+            chunks: Liste des chunks créés
+            chunk_ids: IDs des chunks dans Qdrant
+            concept_to_chunk_ids: Mapping proto_id → chunk_ids
+            tenant_id: ID tenant
+        """
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+        from knowbase.common.clients.qdrant_client import get_qdrant_client
+        from knowbase.config.settings import get_settings
+
+        settings = get_settings()
+        neo4j_client = get_neo4j_client(
+            uri=settings.neo4j_uri,
+            user=settings.neo4j_user,
+            password=settings.neo4j_password,
+            database="neo4j"
+        )
+        qdrant_client = get_qdrant_client()
+
+        try:
+            # Étape 1: Récupérer mapping Proto → Canonical depuis Neo4j
+            proto_to_canonical = {}
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run("""
+                    MATCH (p:ProtoConcept)-[:PROMOTED_TO]->(c:CanonicalConcept)
+                    WHERE p.tenant_id = $tenant_id
+                    RETURN p.concept_id as proto_id, c.canonical_id as canonical_id
+                """, tenant_id=tenant_id)
+
+                for record in result:
+                    proto_to_canonical[record["proto_id"]] = record["canonical_id"]
+
+            logger.info(
+                f"[OSMOSE AGENTIQUE:CrossRef] Retrieved {len(proto_to_canonical)} Proto→Canonical mappings"
+            )
+
+            # Étape 2: Construire mapping chunk_id → canonical_concept_ids
+            chunk_to_canonicals = {}
+            canonical_to_chunks = {}  # Pour update Neo4j
+
+            for chunk, chunk_id in zip(chunks, chunk_ids):
+                proto_ids = chunk.get("proto_concept_ids", [])
+                canonical_ids = []
+
+                for proto_id in proto_ids:
+                    canonical_id = proto_to_canonical.get(proto_id)
+                    if canonical_id:
+                        canonical_ids.append(canonical_id)
+                        # Mapper Canonical → Chunks pour Neo4j update
+                        if canonical_id not in canonical_to_chunks:
+                            canonical_to_chunks[canonical_id] = []
+                        canonical_to_chunks[canonical_id].append(chunk_id)
+
+                if canonical_ids:
+                    chunk_to_canonicals[chunk_id] = canonical_ids
+
+            logger.info(
+                f"[OSMOSE AGENTIQUE:CrossRef] Mapped {len(chunk_to_canonicals)} chunks to canonical concepts"
+            )
+
+            # Étape 3: Update chunks Qdrant avec canonical_concept_ids (batch)
+            if chunk_to_canonicals:
+                # Utiliser set_payload pour update uniquement le champ (plus efficace)
+                for chunk_id, canonical_ids in chunk_to_canonicals.items():
+                    qdrant_client.set_payload(
+                        collection_name="knowbase",
+                        payload={"canonical_concept_ids": canonical_ids},
+                        points=[chunk_id]
+                    )
+
+                logger.info(
+                    f"[OSMOSE AGENTIQUE:CrossRef] ✅ Updated {len(chunk_to_canonicals)} chunks in Qdrant with canonical_concept_ids"
+                )
+
+            # Étape 4: Update CanonicalConcepts Neo4j avec chunk_ids (batch)
+            if canonical_to_chunks:
+                with neo4j_client.driver.session(database="neo4j") as session:
+                    for canonical_id, chunk_list in canonical_to_chunks.items():
+                        session.run("""
+                            MATCH (c:CanonicalConcept {canonical_id: $canonical_id, tenant_id: $tenant_id})
+                            SET c.chunk_ids = $chunk_ids
+                        """, canonical_id=canonical_id, tenant_id=tenant_id, chunk_ids=chunk_list)
+
+                logger.info(
+                    f"[OSMOSE AGENTIQUE:CrossRef] ✅ Updated {len(canonical_to_chunks)} CanonicalConcepts in Neo4j with chunk_ids"
+                )
+
+            # Log résumé
+            logger.info(
+                f"[OSMOSE AGENTIQUE:CrossRef] ✅ Cross-reference complete: "
+                f"{len(chunk_to_canonicals)} chunks ↔ {len(canonical_to_chunks)} concepts"
+            )
+
+        except Exception as e:
+            logger.error(f"[OSMOSE AGENTIQUE:CrossRef] Error during cross-reference: {e}", exc_info=True)
+            raise
+
     def _should_process_with_osmose(
         self,
         document_type: str,
@@ -203,10 +315,10 @@ class OsmoseAgentiqueService:
 
         calculated_timeout = base_time + (time_per_segment * num_segments) + fsm_overhead
 
-        # Bornes: min/max configurables via OSMOSE_TIMEOUT_SECONDS (défaut 90 min)
-        configured_timeout = int(os.getenv("OSMOSE_TIMEOUT_SECONDS", "5400"))
-        min_timeout = min(300, configured_timeout)  # Au moins 5 min, ou moins si config plus courte
-        max_timeout = configured_timeout  # Max = valeur configurée
+        # Bornes: min/max configurables via OSMOSE_TIMEOUT_SECONDS (défaut 60 min)
+        configured_timeout = int(os.getenv("OSMOSE_TIMEOUT_SECONDS", "3600"))
+        min_timeout = 300  # Minimum absolu: 5 minutes
+        max_timeout = configured_timeout  # Max = valeur configurée (.env)
 
         adaptive_timeout = max(min_timeout, min(calculated_timeout, max_timeout))
 
@@ -449,6 +561,21 @@ class OsmoseAgentiqueService:
                             f"[OSMOSE AGENTIQUE:Chunks] Created {len(chunks)} chunks in Qdrant "
                             f"({len(concept_to_chunk_ids)} concepts referenced)"
                         )
+
+                        # ===== Phase 1.6: Cross-référencement bidirectionnel Neo4j ↔ Qdrant =====
+                        try:
+                            self._cross_reference_chunks_and_concepts(
+                                chunks=chunks,
+                                chunk_ids=chunk_ids,
+                                concept_to_chunk_ids=concept_to_chunk_ids,
+                                tenant_id=tenant
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"[OSMOSE AGENTIQUE:CrossRef] Error cross-referencing chunks and concepts: {e}",
+                                exc_info=True
+                            )
+                            # Non-bloquant : continuer même si cross-ref échoue
                     else:
                         logger.warning(
                             f"[OSMOSE AGENTIQUE:Chunks] No chunks created for document {document_id}"
@@ -480,6 +607,70 @@ class OsmoseAgentiqueService:
                 f"budget_remaining={final_state.budget_remaining}, "
                 f"promotion_rate={len(final_state.promoted)/len(final_state.candidates)*100 if final_state.candidates else 0:.1f}%"
             )
+
+            # ===== Compter métriques réelles Proto-KG (Neo4j + Qdrant) =====
+            try:
+                from knowbase.common.clients.neo4j_client import get_neo4j_client
+                from knowbase.common.clients.qdrant_client import get_qdrant_client
+                from knowbase.config.settings import get_settings
+
+                settings = get_settings()
+                neo4j_client = get_neo4j_client(
+                    uri=settings.neo4j_uri,
+                    user=settings.neo4j_user,
+                    password=settings.neo4j_password,
+                    database="neo4j"
+                )
+                qdrant_client = get_qdrant_client()
+
+                # Compter ProtoConcept dans Neo4j
+                with neo4j_client.driver.session(database="neo4j") as session:
+                    result_proto = session.run(
+                        "MATCH (n:ProtoConcept) WHERE n.tenant_id = $tenant_id RETURN count(n) as cnt",
+                        tenant_id=tenant_id
+                    )
+                    record_proto = result_proto.single()
+                    proto_count = record_proto["cnt"] if record_proto else 0
+
+                # Compter CanonicalConcept dans Neo4j
+                with neo4j_client.driver.session(database="neo4j") as session:
+                    result_canonical = session.run(
+                        "MATCH (n:CanonicalConcept) WHERE n.tenant_id = $tenant_id RETURN count(n) as cnt",
+                        tenant_id=tenant_id
+                    )
+                    record_canonical = result_canonical.single()
+                    canonical_count = record_canonical["cnt"] if record_canonical else 0
+
+                # Compter relations dans Neo4j
+                with neo4j_client.driver.session(database="neo4j") as session:
+                    result_rels = session.run(
+                        "MATCH ()-[r]->() WHERE r.tenant_id = $tenant_id RETURN count(r) as cnt",
+                        tenant_id=tenant_id
+                    )
+                    record_rels = result_rels.single()
+                    relations_count = record_rels["cnt"] if record_rels else 0
+
+                # Compter chunks dans Qdrant
+                try:
+                    collection_info = qdrant_client.get_collection(settings.qdrant_collection)
+                    chunks_count = collection_info.points_count
+                except Exception:
+                    chunks_count = 0
+
+                # Remplir les champs Proto-KG metrics
+                result.proto_kg_concepts_stored = proto_count + canonical_count  # Total concepts
+                result.proto_kg_relations_stored = relations_count
+                result.proto_kg_embeddings_stored = chunks_count
+
+                logger.info(
+                    f"[OSMOSE AGENTIQUE:Proto-KG] Real metrics: "
+                    f"{proto_count} ProtoConcept + {canonical_count} CanonicalConcept = {proto_count + canonical_count} total, "
+                    f"{relations_count} relations, {chunks_count} chunks in Qdrant"
+                )
+
+            except Exception as e:
+                logger.warning(f"[OSMOSE AGENTIQUE:Proto-KG] Could not query real metrics: {e}")
+                # Laisser les valeurs à 0 par défaut en cas d'erreur
 
             # Log succès
             if result.osmose_success:

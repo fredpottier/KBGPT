@@ -81,3 +81,4 @@ frontend/out/
 # Docker generated files
 app/patch_unstructured.py
 env.production
+.env.production

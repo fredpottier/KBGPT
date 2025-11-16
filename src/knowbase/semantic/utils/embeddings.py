@@ -34,15 +34,26 @@ class MultilingualEmbedder:
         """
         self.config = config
 
+        # Auto-detect GPU (CUDA) si disponible, sinon fallback CPU
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
         # Charger le modèle multilingual-e5-large
         logger.info(f"[OSMOSE] Loading embeddings model: {config.embeddings.model}...")
         self.model = SentenceTransformer(
             config.embeddings.model,
-            device=config.embeddings.device
+            device=device
         )
+
+        # Log avec device réel (pas celui de la config)
+        gpu_info = ""
+        if device == "cuda":
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_info = f" (GPU: {gpu_name})"
+
         logger.info(
             f"[OSMOSE] ✅ Embeddings model loaded: {config.embeddings.model} "
-            f"({config.embeddings.dimension}D, device: {config.embeddings.device})"
+            f"({config.embeddings.dimension}D, device: {device}{gpu_info})"
         )
 
     @lru_cache(maxsize=1000)
@@ -86,16 +97,20 @@ class MultilingualEmbedder:
         elif prefix_type == "passage":
             texts = [f"passage: {text}" for text in texts]
 
+        # Batch size optimisé pour GPU (128) vs CPU (32)
+        import torch
+        batch_size = 128 if torch.cuda.is_available() else 32
+
         embeddings = self.model.encode(
             texts,
-            batch_size=self.config.embeddings.batch_size,
+            batch_size=batch_size,
             convert_to_numpy=True,
             normalize_embeddings=self.config.embeddings.normalize,
             show_progress_bar=False
         )
 
         logger.debug(
-            f"[OSMOSE] Encoded {len(texts)} texts (prefix={prefix_type}) → {embeddings.shape}"
+            f"[OSMOSE] Encoded {len(texts)} texts (prefix={prefix_type}, batch_size={batch_size}) → {embeddings.shape}"
         )
 
         return embeddings

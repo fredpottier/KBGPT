@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 import logging
 import re
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -319,6 +320,170 @@ class AdaptiveOntologyManager:
 
         except Exception as e:
             logger.error(f"[AdaptiveOntology:Store] Error storing '{canonical_name}': {e}")
+            return ""
+
+    async def store_async(
+        self,
+        tenant_id: str,
+        canonical_name: str,
+        raw_name: str,
+        canonicalization_result: Dict[str, Any],
+        context: Optional[str] = None,
+        document_id: Optional[str] = None,
+        min_confidence: float = 0.6
+    ) -> str:
+        """
+        Version async de store() pour utilisation dans boucle événementielle asyncio.
+
+        Stocke résultat canonicalisation dans ontologie (P0 - Cache poisoning protection).
+
+        Args:
+            tenant_id: ID tenant
+            canonical_name: Nom canonique trouvé
+            raw_name: Nom brut d'origine
+            canonicalization_result: Résultat LLM complet
+            context: Contexte textuel (optionnel)
+            document_id: ID document source (optionnel)
+            min_confidence: Confidence minimale pour stocker (P0 protection)
+
+        Returns:
+            ontology_id créé
+        """
+
+        if not self.neo4j.is_connected():
+            logger.warning("[AdaptiveOntology:StoreAsync] Neo4j not connected, skipping store")
+            return ""
+
+        # P0 + P2: Validation inputs
+        try:
+            canonical_name = _sanitize_concept_name(canonical_name)
+            raw_name = _sanitize_concept_name(raw_name)
+            tenant_id = _validate_tenant_id(tenant_id)
+        except ValueError as e:
+            logger.error(f"[AdaptiveOntology:StoreAsync] Validation error: {e}")
+            return ""
+
+        # P0: Validation confidence (cache poisoning protection)
+        confidence = canonicalization_result.get("confidence", 0.0)
+        if confidence < min_confidence:
+            logger.warning(
+                f"[AdaptiveOntology:StoreAsync] ❌ Low confidence {confidence:.2f} < {min_confidence}, "
+                f"skipping store for '{canonical_name}'"
+            )
+            return ""
+
+        # P0: Validation similarité raw_name ↔ canonical_name (hallucination detection)
+        from difflib import SequenceMatcher
+        similarity = SequenceMatcher(None, raw_name.lower(), canonical_name.lower()).ratio()
+
+        # Smart acronym detection: Si raw est acronyme de canonical, OK
+        def is_valid_acronym(short: str, long: str) -> bool:
+            """Vérifie si short est un acronyme valide de long."""
+            # Extraire initiales des mots significatifs (>2 chars) du long form
+            import re
+            words = [w for w in re.findall(r'\w+', long) if len(w) > 2 or w.upper() == w]
+            if not words:
+                return False
+            acronym_from_long = ''.join(w[0].upper() for w in words)
+            # Accepter si match exact OU sous-séquence (ex: "ERP" dans "Enterprise Resource Planning")
+            short_upper = short.upper().replace(' ', '')
+            return (short_upper == acronym_from_long or
+                    short_upper in acronym_from_long or
+                    all(c in acronym_from_long for c in short_upper))
+
+        is_acronym = is_valid_acronym(raw_name, canonical_name)
+
+        # Threshold adaptatif: 0.15 pour acronymes, 0.30 pour le reste
+        min_similarity = 0.15 if is_acronym else 0.30
+
+        if similarity < min_similarity:
+            logger.error(
+                f"[AdaptiveOntology:StoreAsync] ❌ HALLUCINATION DETECTED: "
+                f"raw='{raw_name}' vs canonical='{canonical_name}' "
+                f"(similarity={similarity:.2f}, acronym={is_acronym}, threshold={min_similarity})"
+            )
+            return ""
+
+        # P0: Validation taille aliases (DoS protection)
+        aliases = canonicalization_result.get("aliases", [])
+        if raw_name not in aliases:
+            aliases = [raw_name] + aliases
+
+        MAX_ALIASES = 50
+        if len(aliases) > MAX_ALIASES:
+            logger.warning(
+                f"[AdaptiveOntology:StoreAsync] Truncating aliases: {len(aliases)} → {MAX_ALIASES}"
+            )
+            aliases = aliases[:MAX_ALIASES]
+
+        # P0: Vérifier si canonical_name existe déjà (merge au lieu de duplicate)
+        existing = self.lookup(canonical_name, tenant_id)
+        if existing and existing["canonical_name"] == canonical_name:
+            logger.info(
+                f"[AdaptiveOntology:StoreAsync] Canonical name '{canonical_name}' already exists, "
+                f"merging alias '{raw_name}' with existing entry"
+            )
+            # Merge: ajouter raw_name comme alias de l'entrée existante
+            self.add_alias(canonical_name, tenant_id, raw_name)
+            return existing["ontology_id"]
+
+        query = """
+        CREATE (o:AdaptiveOntology {
+            ontology_id: randomUUID(),
+            tenant_id: $tenant_id,
+            canonical_name: $canonical_name,
+            aliases: $aliases,
+            concept_type: $concept_type,
+            domain: $domain,
+            source: $source,
+            confidence: $confidence,
+            validated_by: 'auto',
+            usage_count: 1,
+            first_seen: datetime(),
+            last_seen: datetime(),
+            first_document_id: $document_id,
+            example_context: $context,
+            ambiguity_warning: $ambiguity_warning,
+            possible_matches: $possible_matches
+        })
+        RETURN o.ontology_id AS ontology_id
+        """
+
+        try:
+            # Exécuter dans un thread pool pour ne pas bloquer l'event loop
+            loop = asyncio.get_event_loop()
+
+            def _sync_store():
+                with self.neo4j.driver.session(database=self.neo4j.database) as session:
+                    result = session.run(
+                        query,
+                        tenant_id=tenant_id,
+                        canonical_name=canonical_name,
+                        aliases=aliases,
+                        concept_type=canonicalization_result.get("concept_type"),
+                        domain=canonicalization_result.get("domain"),
+                        source=canonicalization_result.get("source", "llm_gpt4o_mini"),
+                        confidence=canonicalization_result.get("confidence", 0.0),
+                        document_id=document_id,
+                        context=context[:500] if context else None,
+                        ambiguity_warning=canonicalization_result.get("ambiguity_warning"),
+                        possible_matches=canonicalization_result.get("possible_matches", [])
+                    )
+
+                    record = result.single()
+                    return record["ontology_id"]
+
+            ontology_id = await loop.run_in_executor(None, _sync_store)
+
+            logger.info(
+                f"[AdaptiveOntology:StoreAsync] Created ontology entry '{canonical_name}' "
+                f"(id={ontology_id[:8]}, aliases={len(aliases)})"
+            )
+
+            return ontology_id
+
+        except Exception as e:
+            logger.error(f"[AdaptiveOntology:StoreAsync] Error storing '{canonical_name}': {e}")
             return ""
 
     def add_alias(

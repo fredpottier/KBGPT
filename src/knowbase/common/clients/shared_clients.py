@@ -66,8 +66,16 @@ def get_sentence_transformer(
     """Return a cached SentenceTransformer instance for the requested model/device."""
     name = model_name or os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-base")
     kwargs: dict[str, object] = {}
-    if device is not None:
-        kwargs["device"] = device
+
+    # Auto-detect GPU (CUDA) si device non spécifié
+    if device is None:
+        try:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            device = "cpu"
+
+    kwargs["device"] = device
     if cache_folder is not None:
         kwargs["cache_folder"] = cache_folder
     return SentenceTransformer(name, **kwargs)
