@@ -3,6 +3,8 @@ Script pour créer l'utilisateur admin par défaut.
 
 Usage:
     python scripts/create_default_admin.py
+
+Note: Script unifié (fusion de create_admin_user.py et create_default_admin.py)
 """
 import sys
 from pathlib import Path
@@ -10,13 +12,16 @@ from pathlib import Path
 # Ajouter src au path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from knowbase.db import SessionLocal, User
+from knowbase.db import init_db, SessionLocal, User
 from knowbase.api.services.auth_service import get_auth_service
 from datetime import datetime, timezone
 
 
 def create_default_admin():
     """Crée l'utilisateur admin par défaut."""
+    # Initialiser DB (important pour première utilisation)
+    init_db()
+
     db = SessionLocal()
 
     try:
@@ -39,11 +44,9 @@ def create_default_admin():
             role="admin",
             tenant_id="default",
             is_active=True,
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(timezone.utc),
+            password_hash=auth_service.hash_password("admin123")  # Attribut correct du modèle User
         )
-
-        # Hash le password
-        admin.hashed_password = auth_service.hash_password("admin123")
 
         db.add(admin)
         db.commit()
@@ -57,6 +60,8 @@ def create_default_admin():
         print(f"   Tenant: {admin.tenant_id}")
         print()
         print("🔐 You can now login at http://localhost:3000/login")
+        print()
+        print("⚠️  IMPORTANT: Change this password immediately in production!")
 
     except Exception as e:
         db.rollback()
