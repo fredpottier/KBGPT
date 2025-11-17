@@ -156,7 +156,7 @@ class LLMCanonicalizer:
         Canonicalise un nom via LLM.
 
         Args:
-            raw_name: Nom brut extrait (ex: "S/4HANA Cloud's")
+            raw_name: Nom brut extrait (ex: "CRM System's")
             context: Contexte textuel autour de la mention (optionnel)
             domain_hint: Indice domaine (ex: "enterprise_software")
             timeout: Timeout max LLM call en secondes (P0 - DoS protection)
@@ -166,12 +166,12 @@ class LLMCanonicalizer:
 
         Example:
             >>> result = canonicalizer.canonicalize(
-            ...     raw_name="S/4HANA Cloud's",
-            ...     context="Our ERP runs on SAP S/4HANA Cloud's public edition",
+            ...     raw_name="CRM System's",
+            ...     context="Our sales team uses CRM System's advanced features",
             ...     domain_hint="enterprise_software"
             ... )
             >>> result.canonical_name
-            "SAP S/4HANA Cloud, Public Edition"
+            "Customer Relationship Management System"
         """
 
         logger.debug(
@@ -269,12 +269,12 @@ class LLMCanonicalizer:
 
         Example:
             >>> batch = [
-            ...     {"raw_name": "S/4HANA Cloud's", "context": "...", "domain_hint": None},
+            ...     {"raw_name": "CRM System's", "context": "...", "domain_hint": None},
             ...     {"raw_name": "MFA", "context": "...", "domain_hint": None}
             ... ]
             >>> results = canonicalizer.canonicalize_batch(batch)
             >>> results[0].canonical_name
-            "SAP S/4HANA Cloud"
+            "Customer Relationship Management System"
         """
         if not concepts:
             return []
@@ -415,12 +415,12 @@ class LLMCanonicalizer:
 
         Example:
             >>> batch = [
-            ...     {"raw_name": "S/4HANA Cloud's", "context": "...", "domain_hint": None},
+            ...     {"raw_name": "CRM System's", "context": "...", "domain_hint": None},
             ...     {"raw_name": "MFA", "context": "...", "domain_hint": None}
             ... ]
             >>> results = await canonicalizer.canonicalize_batch_async(batch)
             >>> results[0].canonical_name
-            "SAP S/4HANA Cloud"
+            "Customer Relationship Management System"
         """
         if not concepts:
             return []
@@ -667,7 +667,7 @@ Your task is to find the OFFICIAL CANONICAL NAME for concepts extracted from doc
 # Guidelines
 
 1. **Official Names**: Use official product/company/standard names
-   - Example: "S/4HANA Cloud's" → "SAP S/4HANA Cloud, Public Edition"
+   - Example: "CRM System's" → "Customer Relationship Management System"
    - Example: "iPhone 15 Pro Max's camera" → "Apple iPhone 15 Pro Max"
 
 2. **Acronyms**: Expand acronyms to full official names
@@ -675,16 +675,36 @@ Your task is to find the OFFICIAL CANONICAL NAME for concepts extracted from doc
    - Example: "CEE" → "Communauté Économique Européenne" (if French context)
 
 3. **Possessives**: Remove possessive forms ('s, 's)
-   - Example: "SAP's solution" → "SAP"
+   - Example: "Microsoft's solution" → "Microsoft"
 
 4. **Casing**: Preserve official casing
-   - Acronyms: SAP, ERP, CRM (all caps)
-   - Products: "SAP S/4HANA" (mixed case as official)
+   - Acronyms: ERP, CRM, API (all caps)
+   - Products: "iPhone 15 Pro Max" (mixed case as official)
 
-5. **Variants**: List common aliases/variants
+5. **Aliases**: List ONLY real, commonly-used aliases that you are CERTAIN exist
+   - Include ONLY acronyms or alternative names that are WIDELY KNOWN and OFFICIALLY USED
+   - Use your general knowledge base across ALL domains (not specific to any industry)
+   - When in doubt about whether an acronym exists → DO NOT include it
+
+   **STRICT RULES - Do NOT invent aliases**:
+   - ✅ DO include: Well-established acronyms you are CERTAIN about
+   - ✅ DO include: Official alternative names that are widely recognized
+   - ❌ DON'T invent: Partial names by removing words (e.g., "Analytics Cloud" from "Company Analytics Cloud")
+   - ❌ DON'T invent: Acronyms you are unsure about or that might not exist
+   - ❌ DON'T assume: Just because a name is long doesn't mean an acronym exists
+
+   **Principle**: Better to leave aliases empty than to invent fake ones.
+   **Future refinement**: Aliases will be refined later by specialized models trained on domain-specific data.
+
+   **Generic Examples** (domain-agnostic):
+   - "General Data Protection Regulation" → aliases: ["GDPR"] (universally known) ✅
+   - "Customer Relationship Management" → aliases: ["CRM"] (universally known) ✅
+   - "Service Level Agreement" → aliases: ["SLA"] (universally known) ✅
+   - "Company Analytics Cloud" → aliases: [] (no known acronym, don't invent "CAC"!) ✅
+   - "Advanced Security Platform" → aliases: [] (uncertain, could be "ASP" but might not exist) ✅
 
 6. **Ambiguity**: If uncertain, set ambiguity_warning and list possible_matches
-   - Example: "S/4HANA Cloud" without context → could be Public OR Private Edition
+   - Example: "Cloud Platform" without context → could be AWS, Azure, GCP, or other
 
 7. **Type Detection**: Classify concept type
    - Product, Service, Organization, Acronym, Standard, Person, Location, etc.
@@ -701,27 +721,27 @@ Your task is to find the OFFICIAL CANONICAL NAME for concepts extracted from doc
   "ambiguity_warning": "Warning if ambiguous or null",
   "possible_matches": ["Alternative1", "Alternative2"] or [],
   "metadata": {
-    "vendor": "SAP",
-    "version": "Cloud",
-    "edition": "Public"
+    "vendor": "CompanyName",
+    "version": "1.0",
+    "category": "example"
   }
 }
 
-# Examples
+# Examples (Domain-Agnostic)
 
-## Input: "S/4HANA Cloud's"
-## Context: "Our public cloud ERP solution"
+## Input: "GDPR"
+## Context: "We comply with GDPR regulations for data privacy"
 ## Output:
 {
-  "canonical_name": "SAP S/4HANA Cloud, Public Edition",
-  "confidence": 0.92,
-  "reasoning": "Context mentions 'public cloud', official SAP product name",
-  "aliases": ["S/4HANA Cloud Public", "S4 Cloud"],
-  "concept_type": "Product",
-  "domain": "enterprise_software",
+  "canonical_name": "General Data Protection Regulation",
+  "confidence": 0.98,
+  "reasoning": "Well-known EU regulation, universally referred to as GDPR",
+  "aliases": ["GDPR"],
+  "concept_type": "Regulation",
+  "domain": "legal",
   "ambiguity_warning": null,
   "possible_matches": [],
-  "metadata": {"vendor": "SAP", "edition": "Public"}
+  "metadata": {"region": "EU", "type": "privacy_regulation"}
 }
 
 ## Input: "SLA"
@@ -730,8 +750,8 @@ Your task is to find the OFFICIAL CANONICAL NAME for concepts extracted from doc
 {
   "canonical_name": "Service Level Agreement",
   "confidence": 0.98,
-  "reasoning": "Standard IT acronym",
-  "aliases": ["SLA", "SLAs"],
+  "reasoning": "Standard IT acronym, universally recognized",
+  "aliases": ["SLA"],
   "concept_type": "Acronym",
   "domain": "it_operations",
   "ambiguity_warning": null,
@@ -739,22 +759,38 @@ Your task is to find the OFFICIAL CANONICAL NAME for concepts extracted from doc
   "metadata": {}
 }
 
-## Input: "S/4HANA Cloud"
-## Context: "We use S/4HANA Cloud for accounting"
+## Input: "Advanced Analytics Platform"
+## Context: "We use Advanced Analytics Platform for BI reporting"
 ## Output:
 {
-  "canonical_name": "SAP S/4HANA Cloud",
-  "confidence": 0.65,
-  "reasoning": "Cannot determine Public vs Private edition from context alone",
-  "aliases": ["S/4HANA Cloud", "S4 Cloud"],
+  "canonical_name": "Advanced Analytics Platform",
+  "confidence": 0.85,
+  "reasoning": "Product name without widely-known acronym",
+  "aliases": [],
   "concept_type": "Product",
   "domain": "enterprise_software",
-  "ambiguity_warning": "Cannot determine Public vs Private edition",
+  "ambiguity_warning": null,
+  "possible_matches": [],
+  "metadata": {}
+}
+
+## Input: "Cloud Platform"
+## Context: "We use Cloud Platform for hosting"
+## Output:
+{
+  "canonical_name": "Cloud Platform",
+  "confidence": 0.45,
+  "reasoning": "Cannot determine specific cloud provider from context alone",
+  "aliases": [],
+  "concept_type": "Service",
+  "domain": "cloud_computing",
+  "ambiguity_warning": "Multiple cloud platforms exist, context insufficient",
   "possible_matches": [
-    "SAP S/4HANA Cloud, Public Edition",
-    "SAP S/4HANA Cloud, Private Edition"
+    "Amazon Web Services",
+    "Microsoft Azure",
+    "Google Cloud Platform"
   ],
-  "metadata": {"vendor": "SAP"}
+  "metadata": {}
 }
 """
 
@@ -768,7 +804,11 @@ Your task is to find the OFFICIAL CANONICAL NAME for multiple concepts extracted
 2. **Acronyms**: Expand acronyms to full official names
 3. **Possessives**: Remove possessive forms ('s, 's)
 4. **Casing**: Preserve official casing
-5. **Variants**: List common aliases/variants
+5. **Aliases**: List ONLY real, commonly-used aliases that you are CERTAIN exist
+   - Include ONLY acronyms or alternative names that are WIDELY KNOWN and OFFICIALLY USED
+   - Use your general knowledge base across ALL domains (not specific to any industry)
+   - When in doubt → DO NOT include it. Better no alias than fake alias.
+   - Future refinement: Aliases will be refined later by specialized models
 6. **Ambiguity**: If uncertain, set ambiguity_warning and list possible_matches
 7. **Type Detection**: Classify concept type
 
