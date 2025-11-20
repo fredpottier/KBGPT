@@ -57,6 +57,7 @@ class ExtractConceptsInput(ToolInput):
     segment: Dict[str, Any]
     route: str
     use_llm: bool = False
+    document_context: Optional[str] = None  # Phase 1.8 P0.1: Contexte document global formaté
 
 
 class ExtractConceptsOutput(ToolOutput):
@@ -249,12 +250,21 @@ class ExtractorOrchestrator(BaseAgent):
         Args:
             idx: Index du segment
             segment: Données du segment
-            state: État global (pour budget)
+            state: État global (pour budget + contexte document Phase 1.8 P0.1)
 
         Returns:
             (idx, segment_id, extract_output, final_route) ou None si échec
         """
         segment_id = segment.get("segment_id", f"seg_{idx}")
+
+        # Phase 1.8 P0.1: Récupérer contexte document depuis state
+        document_context_formatted = None
+        if hasattr(state, 'custom_data') and 'document_context' in state.custom_data:
+            doc_context = state.custom_data['document_context']
+            document_context_formatted = doc_context.to_prompt_context()
+            logger.debug(
+                f"[EXTRACTOR:P0.1] Segment {idx + 1}: Using document context for extraction"
+            )
 
         try:
             logger.debug(f"[EXTRACTOR] 🔄 Segment {idx + 1} START")
@@ -292,7 +302,8 @@ class ExtractorOrchestrator(BaseAgent):
                 extract_input = ExtractConceptsInput(
                     segment=segment,
                     route=final_route,
-                    use_llm=(final_route != ExtractionRoute.NO_LLM)
+                    use_llm=(final_route != ExtractionRoute.NO_LLM),
+                    document_context=document_context_formatted  # Phase 1.8 P0.1
                 )
 
                 extract_result = await self.call_tool("extract_concepts", extract_input)
@@ -435,6 +446,7 @@ class ExtractorOrchestrator(BaseAgent):
             segment = tool_input.segment
             route = tool_input.route
             use_llm = tool_input.use_llm
+            document_context = tool_input.document_context  # Phase 1.8 P0.1
 
             # Créer Topic object pour MultilingualConceptExtractor
             # Note: Topic attend des attributs spécifiques (document_id, section_path, windows, anchors)
@@ -459,9 +471,13 @@ class ExtractorOrchestrator(BaseAgent):
             # Obtenir MultilingualConceptExtractor (lazy-init)
             extractor = self._get_concept_extractor()
 
-            # Extraire concepts avec MultilingualConceptExtractor
+            # Extraire concepts avec MultilingualConceptExtractor + contexte document (Phase 1.8 P0.1)
             # Note: La méthode extract_concepts est async
-            concepts_list = await extractor.extract_concepts(topic, enable_llm=use_llm)
+            concepts_list = await extractor.extract_concepts(
+                topic,
+                enable_llm=use_llm,
+                document_context=document_context  # Phase 1.8 P0.1: Injecté dans prompts LLM
+            )
 
             # Convertir List[Concept] en List[Dict] pour JSON serialization
             concepts_dicts = []

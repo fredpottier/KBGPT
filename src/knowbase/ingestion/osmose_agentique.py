@@ -30,6 +30,10 @@ from knowbase.semantic.segmentation.topic_segmenter import get_topic_segmenter
 from knowbase.semantic.config import get_semantic_config
 from knowbase.ingestion.text_chunker import get_text_chunker  # Phase 1.6: Chunking
 from knowbase.common.clients.qdrant_client import upsert_chunks  # Phase 1.6: Qdrant
+from knowbase.semantic.extraction.document_context_generator import (  # Phase 1.8: P0.1
+    get_document_context_generator,
+    DocumentContext
+)
 
 # Configuration du root logger pour que tous les loggers enfants (agents) héritent des handlers
 # IMPORTANT: Récupérer les handlers du logger parent (pptx_pipeline) pour les copier au root logger
@@ -97,6 +101,7 @@ class OsmoseAgentiqueService:
         self.supervisor: Optional[SupervisorAgent] = None
         self.topic_segmenter = None  # Lazy init
         self.text_chunker = None  # Lazy init (Phase 1.6)
+        self.document_context_generator = None  # Lazy init (Phase 1.8: P0.1)
 
         logger.info(
             f"[OSMOSE AGENTIQUE] Service initialized - OSMOSE enabled: {self.config.enable_osmose}"
@@ -130,6 +135,21 @@ class OsmoseAgentiqueService:
             logger.info("[OSMOSE AGENTIQUE] TextChunker initialized (512 tokens, overlap 128)")
 
         return self.text_chunker
+
+    def _get_document_context_generator(self):
+        """Lazy init du DocumentContextGenerator (Phase 1.8: P0.1)."""
+        if self.document_context_generator is None:
+            # Récupérer LLMRouter depuis config
+            from knowbase.common.llm_router import get_llm_router
+            llm_router = get_llm_router()
+
+            self.document_context_generator = get_document_context_generator(
+                llm_router=llm_router,
+                cache_ttl_seconds=3600  # 1h cache
+            )
+            logger.info("[OSMOSE AGENTIQUE] DocumentContextGenerator initialized (cache_ttl=1h)")
+
+        return self.document_context_generator
 
     def _cross_reference_chunks_and_concepts(
         self,
@@ -421,6 +441,35 @@ class OsmoseAgentiqueService:
                 f"(copied from: {', '.join(current_handlers[:3]) if current_handlers else 'none'})"
             )
 
+            # Étape 0: Phase 1.8 P0.1 - Génération contexte document global
+            # Ce contexte sera passé aux extractors pour améliorer précision
+            document_context: Optional[DocumentContext] = None
+
+            try:
+                context_gen = self._get_document_context_generator()
+                document_context = await context_gen.generate_context(
+                    document_id=document_id,
+                    full_text=text_content,
+                    max_sample_length=3000
+                )
+
+                if document_context:
+                    logger.info(
+                        f"[OSMOSE AGENTIQUE:P0.1] ✅ Document context generated: "
+                        f"{document_context.to_short_summary()}"
+                    )
+                else:
+                    logger.warning(
+                        f"[OSMOSE AGENTIQUE:P0.1] Failed to generate document context, "
+                        f"continuing without context"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"[OSMOSE AGENTIQUE:P0.1] Error generating document context: {e}",
+                    exc_info=True
+                )
+                # Non-bloquant: continuer sans contexte
+
             # Étape 1: Créer AgentState initial
             tenant = tenant_id or self.config.default_tenant_id
 
@@ -430,13 +479,22 @@ class OsmoseAgentiqueService:
                 full_text=text_content  # Stocker texte complet pour filtrage contextuel
             )
 
+            # Stocker contexte document dans state pour transmission aux extractors
+            # IMPORTANT: AgentState doit être étendu pour supporter document_context
+            # Pour l'instant, on le stockera dans custom_data dict
+            if document_context:
+                if not hasattr(initial_state, 'custom_data'):
+                    initial_state.custom_data = {}
+                initial_state.custom_data['document_context'] = document_context
+
             # Stocker métadonnées document dans state (custom fields)
             # Note: AgentState devra être étendu pour supporter ces champs
             # Pour l'instant, on les log uniquement
             logger.info(
                 f"[OSMOSE AGENTIQUE] AgentState created: "
                 f"doc={document_id}, tenant={tenant}, "
-                f"budgets={initial_state.budget_remaining}"
+                f"budgets={initial_state.budget_remaining}, "
+                f"context={'YES' if document_context else 'NO'}"
             )
 
             # Étape 2: Segmentation sémantique avec TopicSegmenter

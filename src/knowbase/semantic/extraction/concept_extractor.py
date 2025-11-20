@@ -67,22 +67,24 @@ class MultilingualConceptExtractor:
     async def extract_concepts(
         self,
         topic: Topic,
-        enable_llm: bool = True
+        enable_llm: bool = True,
+        document_context: Optional[str] = None
     ) -> List[Concept]:
         """
         Extrait concepts d'un topic via méthode optimisée (V2.2 Density-Aware).
 
-        Pipeline V2.2:
+        Pipeline V2.2 + Phase 1.8 P0.1:
         0. Analyse densité conceptuelle → Sélection méthode optimale
         1. NER Multilingue (si recommandé)
         2. Semantic Clustering (si recommandé)
-        3. LLM (si insuffisant OU texte dense)
+        3. LLM (si insuffisant OU texte dense) + CONTEXTE DOCUMENT (P0.1)
         4. Fusion + Déduplication
         5. Typage automatique
 
         Args:
             topic: Topic à analyser
             enable_llm: Activer extraction LLM (default: True)
+            document_context: Contexte document global (Phase 1.8 P0.1) - formaté pour prompt
 
         Returns:
             List[Concept]: Concepts extraits et dédupliqués
@@ -113,7 +115,7 @@ class MultilingualConceptExtractor:
             # Texte dense → LLM d'emblée (skip NER inefficace)
             logger.info("[OSMOSE] Dense text detected → LLM-first strategy")
             if enable_llm and "LLM" in self.extraction_config.methods:
-                concepts_llm = await self._extract_via_llm(topic, topic_language)
+                concepts_llm = await self._extract_via_llm(topic, topic_language, document_context)
                 concepts.extend(concepts_llm)
                 logger.info(f"[OSMOSE] LLM: {len(concepts_llm)} concepts")
             else:
@@ -150,7 +152,7 @@ class MultilingualConceptExtractor:
             # Méthode 3: LLM (si insuffisant)
             if enable_llm and "LLM" in self.extraction_config.methods:
                 if len(concepts) < self.extraction_config.min_concepts_per_topic:
-                    concepts_llm = await self._extract_via_llm(topic, topic_language)
+                    concepts_llm = await self._extract_via_llm(topic, topic_language, document_context)
                     concepts.extend(concepts_llm)
                     logger.info(f"[OSMOSE] LLM: {len(concepts_llm)} concepts")
                 else:
@@ -314,14 +316,16 @@ class MultilingualConceptExtractor:
     async def _extract_via_llm(
         self,
         topic: Topic,
-        language: str
+        language: str,
+        document_context: Optional[str] = None
     ) -> List[Concept]:
         """
-        Extraction via LLM avec prompt structuré multilingue.
+        Extraction via LLM avec prompt structuré multilingue + contexte document (Phase 1.8 P0.1).
 
         Args:
             topic: Topic à analyser
             language: Langue détectée
+            document_context: Contexte document global (formaté pour prompt) - Phase 1.8 P0.1
 
         Returns:
             List[Concept]: Concepts extraits via LLM
@@ -336,8 +340,8 @@ class MultilingualConceptExtractor:
         if len(topic_text) > 2000:
             topic_text = topic_text[:2000] + "..."
 
-        # Prompt selon langue
-        prompt = self._get_llm_extraction_prompt(topic_text, language)
+        # Prompt selon langue + contexte document (Phase 1.8 P0.1)
+        prompt = self._get_llm_extraction_prompt(topic_text, language, document_context)
 
         try:
             # Appel LLM async pour parallélisation
@@ -560,63 +564,83 @@ class MultilingualConceptExtractor:
         # Default: ENTITY
         return ConceptType.ENTITY
 
-    def _get_llm_extraction_prompt(self, text: str, language: str) -> str:
+    def _get_llm_extraction_prompt(
+        self,
+        text: str,
+        language: str,
+        document_context: Optional[str] = None
+    ) -> str:
         """
-        Génère prompt LLM extraction selon langue.
+        Génère prompt LLM extraction selon langue + contexte document (Phase 1.8 P0.1).
 
         Args:
             text: Texte à analyser
             language: Langue (en, fr, de, etc.)
+            document_context: Contexte document global formaté (Phase 1.8 P0.1)
 
         Returns:
             str: Prompt formaté
         """
+        # Injection contexte document si disponible (Phase 1.8 P0.1)
+        context_prefix = ""
+        if document_context:
+            context_prefix = f"""{document_context}
+
+IMPORTANT: Use the document context above to:
+- Prefer FULL product/entity names mentioned in context (not abbreviations)
+- Example: If context mentions "SAP S/4HANA Cloud Private Edition", extract the full name even if segment only says "S/4HANA Cloud"
+- Disambiguate acronyms using context (e.g., "CRM" → use the specific CRM mentioned in context)
+
+---
+
+"""
+
         prompts = {
-            "en": """Extract key concepts from the following text.
+            "en": f"""{context_prefix}Extract key concepts from the following text.
 
 For each concept, identify:
-- name: the concept name (2-50 characters)
+- name: the concept name (2-50 characters) - PREFER FULL NAMES from document context
 - type: one of [ENTITY, PRACTICE, STANDARD, TOOL, ROLE]
 - definition: a brief definition (1 sentence)
 - relationships: list of related concept names (max 3)
 
 Text:
-{text}
+{{text}}
 
 Return a JSON object with this exact structure:
-{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
+{{{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}}}
 
 Extract 3-10 concepts maximum. Focus on the most important ones.""",
 
-            "fr": """Extrait les concepts clés du texte suivant.
+            "fr": f"""{context_prefix}Extrait les concepts clés du texte suivant.
 
 Pour chaque concept, identifie :
-- name : le nom du concept (2-50 caractères)
+- name : le nom du concept (2-50 caractères) - PRÉFÉRER NOMS COMPLETS du contexte document
 - type : un parmi [ENTITY, PRACTICE, STANDARD, TOOL, ROLE]
 - definition : une brève définition (1 phrase)
 - relationships : liste de noms de concepts liés (max 3)
 
 Texte :
-{text}
+{{text}}
 
 Retourne un objet JSON avec cette structure exacte:
-{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
+{{{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}}}
 
 Extrait 3-10 concepts maximum. Focus sur les plus importants.""",
 
-            "de": """Extrahiere die Schlüsselkonzepte aus folgendem Text.
+            "de": f"""{context_prefix}Extrahiere die Schlüsselkonzepte aus folgendem Text.
 
 Für jedes Konzept identifiziere:
-- name: der Konzeptname (2-50 Zeichen)
+- name: der Konzeptname (2-50 Zeichen) - VOLLSTÄNDIGE NAMEN aus Dokumentkontext bevorzugen
 - type: eines von [ENTITY, PRACTICE, STANDARD, TOOL, ROLE]
 - definition: eine kurze Definition (1 Satz)
 - relationships: Liste verwandter Konzeptnamen (max 3)
 
 Text:
-{text}
+{{text}}
 
 Gib ein JSON-Objekt mit dieser exakten Struktur zurück:
-{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
+{{{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}}}
 
 Extrahiere maximal 3-10 Konzepte. Fokus auf die wichtigsten."""
         }

@@ -163,7 +163,8 @@ class LLMCanonicalizer:
         context: Optional[str] = None,
         domain_hint: Optional[str] = None,
         timeout: int = 10,
-        tenant_id: str = "default"
+        tenant_id: str = "default",
+        document_context: Optional[str] = None
     ) -> CanonicalizationResult:
         """
         Canonicalise un nom via LLM.
@@ -174,6 +175,7 @@ class LLMCanonicalizer:
             domain_hint: Indice domaine (ex: "enterprise_software")
             timeout: Timeout max LLM call en secondes (P0 - DoS protection)
             tenant_id: ID tenant pour injection contexte métier (Phase 2)
+            document_context: Contexte document global (Phase 1.8 P0.1) - formaté pour prompt
 
         Returns:
             CanonicalizationResult avec canonical_name et métadonnées
@@ -183,7 +185,8 @@ class LLMCanonicalizer:
             ...     raw_name="CRM System's",
             ...     context="Our sales team uses CRM System's advanced features",
             ...     domain_hint="enterprise_software",
-            ...     tenant_id="default"
+            ...     tenant_id="default",
+            ...     document_context="DOCUMENT CONTEXT:\\nTitle: Salesforce CRM Migration\\n..."
             ... )
             >>> result.canonical_name
             "Customer Relationship Management System"
@@ -191,14 +194,16 @@ class LLMCanonicalizer:
 
         logger.debug(
             f"[LLMCanonicalizer] Canonicalizing '{raw_name}' "
-            f"(context_len={len(context) if context else 0}, domain={domain_hint}, tenant={tenant_id})"
+            f"(context_len={len(context) if context else 0}, domain={domain_hint}, tenant={tenant_id}, "
+            f"doc_context={'YES' if document_context else 'NO'})"
         )
 
-        # Construire prompt LLM
+        # Construire prompt LLM (Phase 1.8 P0.1: + document_context)
         prompt = self._build_canonicalization_prompt(
             raw_name=raw_name,
             context=context,
-            domain_hint=domain_hint
+            domain_hint=domain_hint,
+            document_context=document_context
         )
 
         # Phase 2: Injection contexte métier (si disponible)
@@ -678,18 +683,35 @@ IMPORTANT: Return results in SAME ORDER as input (1-{len(concepts)}).
         self,
         raw_name: str,
         context: Optional[str],
-        domain_hint: Optional[str]
+        domain_hint: Optional[str],
+        document_context: Optional[str] = None
     ) -> str:
-        """Construit prompt pour LLM."""
+        """
+        Construit prompt pour LLM (Phase 1.8 P0.1: + document_context).
 
-        parts = [
-            f"**Concept Name:** {raw_name}",
-        ]
+        Args:
+            raw_name: Nom brut à canonicaliser
+            context: Contexte local (segment)
+            domain_hint: Indice domaine
+            document_context: Contexte document global (Phase 1.8 P0.1)
+
+        Returns:
+            str: Prompt formaté
+        """
+        parts = []
+
+        # Phase 1.8 P0.1: Injecter contexte document AVANT le concept
+        if document_context:
+            parts.append(f"**Document Context:**\n{document_context}")
+            parts.append("\nIMPORTANT: Use the document context above to prefer FULL entity names (not abbreviations).")
+            parts.append("---\n")
+
+        parts.append(f"**Concept Name:** {raw_name}")
 
         if context:
             # P2.3: Limiter contexte à 500 chars SANS couper mots
             context_snippet = self._truncate_context(context, max_length=500)
-            parts.append(f"**Context:** {context_snippet}")
+            parts.append(f"**Local Context:** {context_snippet}")
 
         if domain_hint:
             parts.append(f"**Domain Hint:** {domain_hint}")

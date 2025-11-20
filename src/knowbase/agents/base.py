@@ -36,6 +36,9 @@ class AgentState(BaseModel):
     document_name: Optional[str] = None  # Phase 2: Nom document pour relation extraction
     chunk_ids: List[str] = Field(default_factory=list)  # Phase 2: IDs chunks pour relation extraction
 
+    # Phase 1.8: P0.1 - Contexte document global
+    custom_data: Dict[str, Any] = Field(default_factory=dict)  # Données custom (ex: document_context)
+
     # Budget tracking
     budget_remaining: Dict[str, int] = Field(default_factory=lambda: {
         "SMALL": 120,
