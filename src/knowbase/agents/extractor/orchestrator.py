@@ -389,11 +389,25 @@ class ExtractorOrchestrator(BaseAgent):
             word_count = len(segment_text.split())
             entity_density = entity_count / max(word_count, 1)
 
-            # Routing logic
+            # Routing logic Phase 1.8
             # ⚠️ FIX: NO_LLM route désactivée car elle cause 0 concepts extraits → boucle infinie
             # Cas d'usage problématique: TEXT-ONLY fallback (LibreOffice crash) → peu d'entités NER → NO_LLM → échec
             # Solution: Forcer minimum SMALL pour garantir extraction LLM même avec peu d'entités
-            if entity_count <= self.small_threshold:
+
+            # Phase 1.8 T1.8.1.1: Détection LOW_QUALITY_NER
+            # Critère: Peu d'entités NER (< 3) MAIS texte long (> 200 tokens)
+            # → Segment potentiellement riche en concepts que le NER a manqués
+            # → Route vers SMALL pour extraction LLM structured
+            is_low_quality_ner = (entity_count < 3 and word_count > 200)
+
+            if is_low_quality_ner:
+                route = ExtractionRoute.SMALL
+                reasoning = (
+                    f"LOW_QUALITY_NER detected: {entity_count} entities but {word_count} tokens "
+                    f"(NER missed concepts) → SMALL LLM structured extraction (Phase 1.8)"
+                )
+                logger.info(f"[EXTRACTOR:Phase1.8] {reasoning}")
+            elif entity_count <= self.small_threshold:
                 route = ExtractionRoute.SMALL
                 reasoning = f"{entity_count} entities (low density) → SMALL LLM forcé (NO_LLM désactivé)"
             else:

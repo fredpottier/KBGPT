@@ -690,6 +690,147 @@ Extrahiere maximal 3-10 Konzepte. Fokus auf die wichtigsten."""
             logger.error(f"[OSMOSE] Error parsing LLM response: {e}")
             return []
 
+    async def extract_structured_triples(
+        self,
+        segment_text: str,
+        document_context: Optional[str] = None,
+        domain_hint: Optional[str] = None,
+        language: str = "en"
+    ) -> Dict[str, any]:
+        """
+        Extraction de triples structurés (sujet, prédicat, objet) via LLM.
+
+        Phase 1.8 T1.8.1.2 - Utilisé pour segments LOW_QUALITY_NER détectés par
+        ExtractorOrchestrator (peu d'entités NER mais texte long).
+
+        Args:
+            segment_text: Texte du segment à analyser
+            document_context: Contexte document global formaté (Phase 1.8 P0.1)
+            domain_hint: Indice de domaine métier
+            language: Langue du segment
+
+        Returns:
+            Dict contenant:
+                - triples: List[Dict] avec {subject, predicate, object, confidence}
+                - concepts: List[Dict] avec {name, type, confidence, context}
+                - extraction_method: "STRUCTURED_TRIPLES"
+        """
+        if not self.llm_router:
+            logger.warning("[OSMOSE:Phase1.8] Structured triples extraction disabled (no llm_router)")
+            return {"triples": [], "concepts": [], "extraction_method": "STRUCTURED_TRIPLES"}
+
+        # Import prompts Phase 1.8
+        try:
+            from .prompts import (
+                TRIPLE_EXTRACTION_SYSTEM_PROMPT,
+                build_triple_extraction_user_prompt
+            )
+        except ImportError:
+            logger.error("[OSMOSE:Phase1.8] Failed to import prompts.py")
+            return {"triples": [], "concepts": [], "extraction_method": "STRUCTURED_TRIPLES"}
+
+        # Limiter longueur segment
+        if len(segment_text) > 2500:
+            segment_text = segment_text[:2500] + "..."
+            logger.debug("[OSMOSE:Phase1.8] Segment truncated to 2500 chars")
+
+        # Construire prompt avec contexte document
+        user_prompt = build_triple_extraction_user_prompt(
+            segment_text=segment_text,
+            document_context=document_context,
+            domain_hint=domain_hint
+        )
+
+        try:
+            # Appel LLM async (SMALL model pour triples extraction)
+            from knowbase.common.llm_router import TaskType
+
+            logger.info(
+                f"[OSMOSE:Phase1.8] Extracting structured triples from segment "
+                f"({len(segment_text)} chars, LOW_QUALITY_NER)"
+            )
+
+            response_text = await self.llm_router.acomplete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                messages=[
+                    {"role": "system", "content": TRIPLE_EXTRACTION_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,  # Basse température pour extraction structurée
+                max_tokens=1500
+            )
+
+            # Parser JSON response
+            result = self._parse_structured_triples_response(response_text)
+
+            logger.info(
+                f"[OSMOSE:Phase1.8] ✅ Extracted {len(result['triples'])} triples "
+                f"and {len(result['concepts'])} concepts (STRUCTURED_TRIPLES)"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"[OSMOSE:Phase1.8] Structured triples extraction failed: {e}", exc_info=True)
+            return {"triples": [], "concepts": [], "extraction_method": "STRUCTURED_TRIPLES"}
+
+    def _parse_structured_triples_response(self, response_text: str) -> Dict[str, any]:
+        """
+        Parse réponse LLM pour extraction de triples structurés.
+
+        Args:
+            response_text: Réponse LLM brute
+
+        Returns:
+            Dict avec triples + concepts parsés
+        """
+        try:
+            # Chercher JSON dans la réponse
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if not json_match:
+                logger.warning("[OSMOSE:Phase1.8] No JSON found in triples extraction response")
+                return {"triples": [], "concepts": [], "extraction_method": "STRUCTURED_TRIPLES"}
+
+            json_str = json_match.group(0)
+            data = json.loads(json_str)
+
+            # Extraire triples
+            triples = data.get("triples", [])
+            valid_triples = []
+            for triple in triples:
+                if "subject" in triple and "predicate" in triple and "object" in triple:
+                    # Valider confiance
+                    confidence = triple.get("confidence", 0.8)
+                    if confidence >= 0.6:  # Seuil minimum
+                        valid_triples.append(triple)
+
+            # Extraire concepts
+            concepts = data.get("concepts", [])
+            valid_concepts = []
+            for concept in concepts:
+                if "name" in concept and "type" in concept:
+                    confidence = concept.get("confidence", 0.8)
+                    if confidence >= 0.6:
+                        valid_concepts.append(concept)
+
+            logger.debug(
+                f"[OSMOSE:Phase1.8] Parsed {len(valid_triples)} valid triples, "
+                f"{len(valid_concepts)} valid concepts"
+            )
+
+            return {
+                "triples": valid_triples,
+                "concepts": valid_concepts,
+                "extraction_method": "STRUCTURED_TRIPLES"
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error(f"[OSMOSE:Phase1.8] Failed to parse triples JSON: {e}")
+            return {"triples": [], "concepts": [], "extraction_method": "STRUCTURED_TRIPLES"}
+        except Exception as e:
+            logger.error(f"[OSMOSE:Phase1.8] Error parsing triples response: {e}")
+            return {"triples": [], "concepts": [], "extraction_method": "STRUCTURED_TRIPLES"}
+
 
 # ===================================
 # FACTORY PATTERN
