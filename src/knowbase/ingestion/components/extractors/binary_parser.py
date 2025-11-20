@@ -57,11 +57,23 @@ def extract_with_megaparse(
     pptx_path: Path,
     logger: Optional[logging.Logger] = None
 ) -> List[Dict[str, Any]]:
-    """Extraction via MegaParse avec segmentation intelligente"""
+    """Extraction via MegaParse + python-pptx pour structure slides"""
     if logger:
         logger.info(f"📊 [MEGAPARSE] Extraction PPTX: {pptx_path.name}")
 
     try:
+        # Étape 1: Obtenir la structure des slides via python-pptx
+        if not PPTX_FALLBACK:
+            raise ImportError("python-pptx requis pour obtenir la structure des slides")
+
+        from pptx import Presentation
+        prs = Presentation(str(pptx_path))
+        slide_count = len(prs.slides)
+
+        if logger:
+            logger.info(f"📊 [MEGAPARSE] Détection {slide_count} slides via python-pptx")
+
+        # Étape 2: Extraire le contenu enrichi via MegaParse
         megaparse = MegaParse()
         start_time = time.time()
         parsed_content = megaparse.load(str(pptx_path))
@@ -73,7 +85,8 @@ def extract_with_megaparse(
             else parsed_content
         )
 
-        slides_data = extract_slides_from_megaparse(content_str, pptx_path.name, logger)
+        # Étape 3: Diviser le contenu MegaParse en N slides
+        slides_data = split_megaparse_by_slide_count(content_str, slide_count, pptx_path.name, logger)
 
         if logger:
             logger.info(
@@ -194,49 +207,48 @@ def extract_with_python_pptx(
         }]
 
 
-def extract_slides_from_megaparse(
+def split_megaparse_by_slide_count(
     content: str,
+    slide_count: int,
     source_name: str,
     logger: Optional[logging.Logger] = None
 ) -> List[Dict[str, Any]]:
     """
-    Extrait les slides réels depuis le contenu MegaParse.
-    Segmentation intelligente basée sur les patterns de slides.
-    """
-    import re
+    Divise le contenu MegaParse en N slides basé sur le nombre réel de slides.
 
+    LOGIQUE ORIGINALE (éprouvée) : Division proportionnelle par lignes.
+    Le contenu MegaParse est divisé en N parties égales selon le nombre de lignes,
+    où N = nombre de slides détecté par python-pptx.
+    """
     slides_data = []
 
-    # Pattern pour détecter les séparateurs de slides
-    # MegaParse utilise généralement des patterns comme "---" ou "Slide X"
-    slide_pattern = r"(?:^|\n)(?:---+|Slide\s+\d+|Page\s+\d+)"
-
-    # Split le contenu en slides
-    parts = re.split(slide_pattern, content, flags=re.MULTILINE)
-
-    # Nettoyer et créer les slides
-    for i, part in enumerate(parts, start=1):
-        part = part.strip()
-        if not part:
-            continue
-
-        # Extraire notes si présentes (pattern: "Notes: ...")
-        notes_match = re.search(r"(?:^|\n)Notes?:\s*(.+?)(?:\n\n|\Z)", part, re.DOTALL | re.IGNORECASE)
-        notes = notes_match.group(1).strip() if notes_match else ""
-
-        # Le texte principal est le reste
-        text = re.sub(r"(?:^|\n)Notes?:\s*.+?(?:\n\n|\Z)", "", part, flags=re.DOTALL | re.IGNORECASE).strip()
-
-        slides_data.append({
-            "slide_index": i,
-            "text": text,
-            "notes": notes,
-            "megaparse_content": part,
-            "content_type": "megaparse",
-        })
+    # Diviser le contenu en lignes
+    content_lines = content.split("\n")
+    lines_per_slide = len(content_lines) // slide_count if slide_count > 0 else len(content_lines)
 
     if logger:
-        logger.debug(f"[MEGAPARSE] {len(slides_data)} slides segmentés depuis {source_name}")
+        logger.debug(f"[MEGAPARSE] Division {len(content_lines)} lignes en {slide_count} slides (~{lines_per_slide} lignes/slide)")
+
+    for slide_num in range(1, slide_count + 1):
+        # Calculer les indices de ligne pour cette slide
+        start_line = (slide_num - 1) * lines_per_slide
+        end_line = slide_num * lines_per_slide if slide_num < slide_count else len(content_lines)
+
+        # Extraire le contenu pour cette slide
+        slide_content = "\n".join(content_lines[start_line:end_line]).strip()
+
+        # Ne créer une slide que si elle contient du contenu significatif
+        if slide_content and len(slide_content) > 20:
+            slides_data.append({
+                "slide_index": slide_num,
+                "text": slide_content,
+                "notes": "",
+                "megaparse_content": slide_content,
+                "content_type": "megaparse_line_split",
+            })
+
+    if logger:
+        logger.info(f"[MEGAPARSE] {len(slides_data)} slides créés pour {source_name}")
 
     return slides_data if slides_data else [{
         "slide_index": 1,
@@ -245,3 +257,20 @@ def extract_slides_from_megaparse(
         "megaparse_content": content,
         "content_type": "megaparse_single",
     }]
+
+
+def extract_slides_from_megaparse(
+    content: str,
+    source_name: str,
+    logger: Optional[logging.Logger] = None
+) -> List[Dict[str, Any]]:
+    """
+    Legacy function - now redirects to split_megaparse_by_slide_count.
+    Kept for backward compatibility.
+    """
+    # Essayer de détecter le nombre de slides depuis le contenu
+    import re
+    headers = list(re.finditer(r'^# .+$', content, re.MULTILINE))
+    estimated_slide_count = max(1, len(headers))
+
+    return split_megaparse_by_slide_count(content, estimated_slide_count, source_name, logger)

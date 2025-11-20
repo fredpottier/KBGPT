@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from knowbase.common.llm_router import LLMRouter, TaskType
-from knowbase.common.sap.normalizer import normalize_solution_name
+from knowbase.common.entity_normalizer import get_entity_normalizer
 from knowbase.config.prompts_loader import load_prompts, select_prompt, render_prompt
 from ..utils.text_utils import clean_gpt_response, recursive_chunk
 from .deck_summarizer import summarize_large_pptx
@@ -132,24 +132,26 @@ def analyze_deck_summary(
                     metadata[key] = auto_metadata[key]
                     logger.info(f"✅ {key} auto-extrait utilisé: {auto_metadata[key]}")
 
-        # --- Normalisation des solutions directement sur metadata plat ---
+        # --- Normalisation des solutions avec entity_normalizer (domain-agnostic) ---
+        normalizer = get_entity_normalizer()
+
         raw_main = metadata.get("main_solution", "")
         if raw_main:
-            sol_id, canon_name = normalize_solution_name(raw_main)
-            metadata["main_solution_id"] = sol_id
+            sol_id, canon_name, _ = normalizer.normalize_entity_name(raw_main, "SOLUTION")
+            metadata["main_solution_id"] = sol_id or "UNMAPPED"
             metadata["main_solution"] = canon_name or raw_main
 
         # Normaliser supporting_solutions
         normalized_supporting = []
         for supp in metadata.get("supporting_solutions", []):
-            sid, canon = normalize_solution_name(supp)
+            sid, canon, _ = normalizer.normalize_entity_name(supp, "SOLUTION")
             normalized_supporting.append(canon or supp)
         metadata["supporting_solutions"] = list(set(normalized_supporting))
 
         # Normaliser mentioned_solutions
         normalized_mentioned = []
         for ment in metadata.get("mentioned_solutions", []):
-            sid, canon = normalize_solution_name(ment)
+            sid, canon, _ = normalizer.normalize_entity_name(ment, "SOLUTION")
             normalized_mentioned.append(canon or ment)
         metadata["mentioned_solutions"] = list(set(normalized_mentioned))
 

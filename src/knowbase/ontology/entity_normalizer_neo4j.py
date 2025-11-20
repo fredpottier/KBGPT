@@ -198,9 +198,9 @@ class EntityNormalizerNeo4j:
                 )
                 return (entity_id, canonical_name, entity_type, True)
 
-            # Vraiment pas trouvé → retourner brut
-            logger.warning(
-                f"[ONTOLOGY:Sandbox] ❌ NOT FOUND in ontology: '{raw_name}' "
+            # Vraiment pas trouvé → retourner brut (comportement normal, pas une erreur)
+            logger.debug(
+                f"[ONTOLOGY:Sandbox] NOT FOUND in ontology: '{raw_name}' "
                 f"(type={entity_type_hint}, include_pending={include_pending}, tenant={tenant_id})"
             )
 

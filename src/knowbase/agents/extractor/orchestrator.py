@@ -363,15 +363,15 @@ class ExtractorOrchestrator(BaseAgent):
         """
         try:
             # Import local pour éviter dépendance circulaire
-            from ...semantic.utils.ner_manager import MultilingualNER
+            from ...semantic.utils.ner_manager import get_ner_manager
             from ...semantic.config import get_semantic_config
 
             segment_text = tool_input.segment_text
             language = tool_input.language
 
-            # NER spaCy
+            # NER spaCy - utiliser singleton pour éviter reload modèles à chaque segment
             semantic_config = get_semantic_config()
-            ner_manager = MultilingualNER(semantic_config)
+            ner_manager = get_ner_manager(semantic_config)
             entities = ner_manager.extract_entities(segment_text, language)
 
             entity_count = len(entities)
@@ -379,12 +379,12 @@ class ExtractorOrchestrator(BaseAgent):
             entity_density = entity_count / max(word_count, 1)
 
             # Routing logic
-            if entity_count < self.no_llm_threshold:
-                route = ExtractionRoute.NO_LLM
-                reasoning = f"{entity_count} entities < {self.no_llm_threshold}, NO_LLM suffisant"
-            elif entity_count <= self.small_threshold:
+            # ⚠️ FIX: NO_LLM route désactivée car elle cause 0 concepts extraits → boucle infinie
+            # Cas d'usage problématique: TEXT-ONLY fallback (LibreOffice crash) → peu d'entités NER → NO_LLM → échec
+            # Solution: Forcer minimum SMALL pour garantir extraction LLM même avec peu d'entités
+            if entity_count <= self.small_threshold:
                 route = ExtractionRoute.SMALL
-                reasoning = f"{entity_count} entities, complexité modérée → SMALL"
+                reasoning = f"{entity_count} entities (low density) → SMALL LLM forcé (NO_LLM désactivé)"
             else:
                 route = ExtractionRoute.BIG
                 reasoning = f"{entity_count} entities > {self.small_threshold}, segment dense → BIG"

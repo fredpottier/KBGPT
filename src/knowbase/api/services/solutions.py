@@ -1,5 +1,5 @@
 """
-Service de gestion des solutions SAP avec support pour les nouvelles solutions.
+Service de gestion des solutions (domain-agnostic) avec support pour les nouvelles solutions.
 """
 
 import yaml
@@ -13,13 +13,13 @@ from openai.types.chat import (
     ChatCompletionUserMessageParam,
 )
 
-logger = setup_logging(Path(__file__).parent.parent.parent.parent.parent / "data" / "logs", "sap_solutions.log")
+logger = setup_logging(Path(__file__).parent.parent.parent.parent.parent / "data" / "logs", "solutions.log")
 
-class SAPSolutionsManager:
-    """Gestionnaire des solutions SAP avec YAML persistant et découverte automatique."""
+class SolutionsManager:
+    """Gestionnaire des solutions avec YAML persistant et découverte automatique."""
 
     def __init__(self):
-        self.config_path = Path(__file__).parent.parent.parent.parent.parent / "config" / "sap_solutions.yaml"
+        self.config_path = Path(__file__).parent.parent.parent.parent.parent / "config" / "ontologies" / "solutions.yaml"
         self.llm_router = LLMRouter()
         self._solutions_cache = None
 
@@ -29,10 +29,11 @@ class SAPSolutionsManager:
             try:
                 with open(self.config_path, 'r', encoding='utf-8') as file:
                     data = yaml.safe_load(file)
-                    self._solutions_cache = data.get('solutions', {})
-                    logger.info(f"📋 Chargé {len(self._solutions_cache)} solutions SAP depuis YAML")
+                    # Charger depuis clé 'SOLUTION' (nouveau format ontologies)
+                    self._solutions_cache = data.get('SOLUTION', {})
+                    logger.info(f"📋 Chargé {len(self._solutions_cache)} solutions depuis ontologies YAML")
             except Exception as e:
-                logger.error(f"❌ Erreur chargement solutions SAP: {e}")
+                logger.error(f"❌ Erreur chargement solutions: {e}")
                 self._solutions_cache = {}
         return self._solutions_cache
 
@@ -43,10 +44,8 @@ class SAPSolutionsManager:
             with open(self.config_path, 'r', encoding='utf-8') as file:
                 data = yaml.safe_load(file)
 
-            # Mettre à jour les solutions
-            data['solutions'] = solutions
-            data['metadata']['total_solutions'] = len(solutions)
-            data['metadata']['last_updated'] = "2025-01-20"
+            # Mettre à jour les solutions (clé 'SOLUTION' pour nouveau format)
+            data['SOLUTION'] = solutions
 
             # Sauvegarder avec tri alphabétique
             with open(self.config_path, 'w', encoding='utf-8') as file:
@@ -54,10 +53,10 @@ class SAPSolutionsManager:
 
             # Invalider le cache
             self._solutions_cache = None
-            logger.info(f"💾 Sauvegardé {len(solutions)} solutions SAP dans YAML")
+            logger.info(f"💾 Sauvegardé {len(solutions)} solutions dans ontologies YAML")
 
         except Exception as e:
-            logger.error(f"❌ Erreur sauvegarde solutions SAP: {e}")
+            logger.error(f"❌ Erreur sauvegarde solutions: {e}")
 
     def get_solutions_list(self) -> List[Tuple[str, str]]:
         """Retourne la liste des solutions triées alphabétiquement (canonical_name, id)."""
@@ -89,7 +88,7 @@ class SAPSolutionsManager:
         return None
 
     def canonicalize_with_llm(self, user_input: str) -> str:
-        """Utilise le LLM pour canonicaliser un nom de solution SAP."""
+        """Utilise le LLM pour canonicaliser un nom de solution (domain-agnostic)."""
         try:
             solutions = self._load_solutions()
             known_solutions = [data['canonical_name'] for data in solutions.values()]
@@ -97,10 +96,10 @@ class SAPSolutionsManager:
             system_message: ChatCompletionSystemMessageParam = {
                 "role": "system",
                 "content": (
-                    "You are an expert in SAP product naming conventions. "
-                    "Given a user input that might be a SAP solution name or abbreviation, "
-                    "determine the official SAP product name. "
-                    "Only reply with the official SAP solution name, without quotes, explanations, or any extra text."
+                    "You are an expert in software product naming conventions. "
+                    "Given a user input that might be a solution name or abbreviation, "
+                    "determine the official product name. "
+                    "Only reply with the official solution name, without quotes, explanations, or any extra text."
                 ),
             }
 
@@ -108,8 +107,8 @@ class SAPSolutionsManager:
                 "role": "user",
                 "content": (
                     f"Here is a solution name or abbreviation: {user_input}\n"
-                    f"Known SAP solutions include: {', '.join(known_solutions[:10])}...\n"
-                    "What is the official SAP product name? Only reply with the name itself."
+                    f"Known solutions include: {', '.join(known_solutions[:10])}...\n"
+                    "What is the official product name? Only reply with the name itself."
                 ),
             }
 
@@ -177,7 +176,7 @@ class SAPSolutionsManager:
 
     def resolve_solution(self, user_input: str) -> Tuple[str, str]:
         """
-        Résout une solution SAP depuis l'input utilisateur.
+        Résout une solution depuis l'input utilisateur.
         Retourne (canonical_name, solution_id).
         """
         # 1. Chercher dans les solutions existantes
@@ -214,6 +213,6 @@ class SAPSolutionsManager:
             logger.warning(f"⚠️ Erreur ajout alias: {e}")
 
 
-def get_sap_solutions_manager() -> SAPSolutionsManager:
-    """Retourne une nouvelle instance du gestionnaire de solutions SAP."""
-    return SAPSolutionsManager()
+def get_solutions_manager() -> SolutionsManager:
+    """Retourne une nouvelle instance du gestionnaire de solutions."""
+    return SolutionsManager()

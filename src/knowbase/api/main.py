@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, sap_solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts
+from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts
 
 
 def create_app() -> FastAPI:
@@ -205,7 +205,7 @@ def create_app() -> FastAPI:
     app.include_router(ingest.router)
     app.include_router(status.router, prefix="/api")
     app.include_router(imports.router, prefix="/api")
-    app.include_router(sap_solutions.router)  # Déjà avec préfixe /api/sap-solutions
+    app.include_router(solutions.router)  # Déjà avec préfixe /api/solutions
     app.include_router(downloads.router)  # Déjà avec préfixe /api/downloads
     app.include_router(token_analysis.router, prefix="/api")  # Analyse des tokens et coûts
     app.include_router(facts.router, prefix="/api")  # Facts API - Neo4j Native (Phase 2)

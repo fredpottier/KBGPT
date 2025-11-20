@@ -1,24 +1,24 @@
 """
-Router API pour la gestion des solutions SAP.
+Router API pour la gestion des solutions (domain-agnostic).
 """
 
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
 from pydantic import BaseModel
 from knowbase.api.dependencies import get_current_user, get_tenant_id
-from knowbase.api.services.sap_solutions import get_sap_solutions_manager
+from knowbase.api.services.solutions import get_solutions_manager
 from knowbase.common.logging import setup_logging
 from knowbase.common.clients import get_qdrant_client
 from knowbase.config.settings import get_settings
 from pathlib import Path
 
-logger = setup_logging(Path(__file__).parent.parent.parent.parent.parent / "data" / "logs", "api_sap_solutions.log")
+logger = setup_logging(Path(__file__).parent.parent.parent.parent.parent / "data" / "logs", "api_solutions.log")
 
-router = APIRouter(prefix="/api/sap-solutions", tags=["SAP Solutions"])
+router = APIRouter(prefix="/api/solutions", tags=["Solutions"])
 
 
 class SolutionResponse(BaseModel):
-    """Modèle de réponse pour une solution SAP."""
+    """Modèle de réponse pour une solution."""
     id: str
     name: str
 
@@ -47,7 +47,7 @@ async def get_solutions(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """
-    Récupère la liste de toutes les solutions SAP disponibles.
+    Récupère la liste de toutes les solutions disponibles.
 
     **Sécurité**: Requiert authentification JWT (tous rôles).
 
@@ -55,14 +55,14 @@ async def get_solutions(
         SolutionsListResponse: Liste des solutions avec ID et nom canonique
     """
     try:
-        solutions_list = get_sap_solutions_manager().get_solutions_list()
+        solutions_list = get_solutions_manager().get_solutions_list()
 
         solutions = [
             SolutionResponse(id=solution_id, name=canonical_name)
             for canonical_name, solution_id in solutions_list
         ]
 
-        logger.info(f"📋 Retourné {len(solutions)} solutions SAP")
+        logger.info(f"📋 Retourné {len(solutions)} solutions")
 
         return SolutionsListResponse(
             solutions=solutions,
@@ -81,7 +81,7 @@ async def resolve_solution(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """
-    Résout une solution SAP depuis l'input utilisateur en utilisant l'IA.
+    Résout une solution depuis l'input utilisateur en utilisant l'IA.
 
     **Sécurité**: Requiert authentification JWT (tous rôles).
 
@@ -97,7 +97,7 @@ async def resolve_solution(
 
         logger.info(f"🔍 Résolution solution pour: '{request.solution_input}'")
 
-        canonical_name, solution_id = get_sap_solutions_manager().resolve_solution(request.solution_input)
+        canonical_name, solution_id = get_solutions_manager().resolve_solution(request.solution_input)
 
         logger.info(f"✅ Solution résolue: '{request.solution_input}' → '{canonical_name}' (ID: {solution_id})")
 
@@ -119,7 +119,7 @@ async def search_solutions(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """
-    Recherche des solutions SAP par nom ou alias.
+    Recherche des solutions par nom ou alias.
 
     **Sécurité**: Requiert authentification JWT (tous rôles).
 
@@ -130,7 +130,7 @@ async def search_solutions(
         Liste des solutions correspondantes
     """
     try:
-        solutions_list = get_sap_solutions_manager().get_solutions_list()
+        solutions_list = get_solutions_manager().get_solutions_list()
         query_lower = query.lower()
 
         # Filtrer les solutions qui contiennent le terme de recherche
@@ -159,7 +159,7 @@ async def get_solutions_with_chunks(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """
-    Récupère uniquement les solutions SAP qui ont des chunks dans les collections Qdrant.
+    Récupère uniquement les solutions qui ont des chunks dans les collections Qdrant.
 
     **Sécurité**: Requiert authentification JWT (tous rôles).
 
@@ -214,7 +214,7 @@ async def get_solutions_with_chunks(
                 continue
 
         # Filtrer la liste complète des solutions pour ne garder que celles avec chunks
-        all_solutions = get_sap_solutions_manager().get_solutions_list()
+        all_solutions = get_solutions_manager().get_solutions_list()
         filtered_solutions = [
             SolutionResponse(id=solution_id, name=canonical_name)
             for canonical_name, solution_id in all_solutions

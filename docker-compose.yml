@@ -91,7 +91,26 @@ services:
       HF_HOME: /data/models
       KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://redis:6379/0
-      DEV_MODE: "true"  # Auto-reload du code après chaque job (désactiver en prod)
+      DEV_MODE: "false"  # Mode production: worker tourne en continu (10 jobs avant reload)
+
+      # ========== CONFIGURATION TIMEOUT CENTRALISÉE ==========
+      # 🎯 VARIABLE CENTRALE - Ajuster cette valeur unique pour contrôler tous les timeouts de pipeline
+      # Durée maximale de traitement d'un document (en secondes)
+      #
+      # Recommandations selon complexité documents:
+      #   - 3600s (1h)   → Documents standards (< 300 slides) ✅ DÉFAUT
+      #   - 5400s (1h30) → Documents complexes (300-500 slides)
+      #   - 7200s (2h)   → Documents très complexes (> 500 slides)
+      #
+      # Les timeouts ci-dessous sont calculés automatiquement:
+      #   - INGESTION_JOB_TIMEOUT = MAX_DOCUMENT_PROCESSING_TIME * 1.5 (buffer RQ)
+      #   - OSMOSE_TIMEOUT_SECONDS = MAX_DOCUMENT_PROCESSING_TIME
+      MAX_DOCUMENT_PROCESSING_TIME: "3600"  # 1 heure (support jusqu'à ~45 min de processing)
+
+      # Variables legacy (OPTIONNELLES - décommenter pour override manuel):
+      # OSMOSE_TIMEOUT_SECONDS: "3600"      # Auto: MAX_DOCUMENT_PROCESSING_TIME
+      # INGESTION_JOB_TIMEOUT: "5400"       # Auto: MAX_DOCUMENT_PROCESSING_TIME * 1.5
+
       CUDA_VISIBLE_DEVICES: "0"  # Exposer GPU comme device 0 dans le container (mapping de host device 1)
     ports:
       - "5679:5679"  # Debug port for worker

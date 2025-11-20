@@ -732,8 +732,11 @@ class GatekeeperDelegate(BaseAgent):
                     )
 
                     try:
-                        # Appel batch LLM ASYNC
-                        batch_results = await self.llm_canonicalizer.canonicalize_batch_async(batch)
+                        # Appel batch LLM ASYNC avec injection contexte métier (Phase 2)
+                        batch_results = await self.llm_canonicalizer.canonicalize_batch_async(
+                            batch,
+                            tenant_id=tenant_id
+                        )
 
                         # Stocker résultats dans cache
                         batch_cache = {}
@@ -863,11 +866,12 @@ class GatekeeperDelegate(BaseAgent):
         )
 
         try:
-            # 3. LLM canonicalization
+            # 3. LLM canonicalization avec injection contexte métier (Phase 2)
             llm_result = self.llm_canonicalizer.canonicalize(
                 raw_name=raw_name,
                 context=context,
-                domain_hint=None  # Auto-détection par LLM
+                domain_hint=None,  # Auto-détection par LLM
+                tenant_id=tenant_id
             )
 
             logger.info(
@@ -987,8 +991,8 @@ class GatekeeperDelegate(BaseAgent):
                                     tenant_id=tenant_id,
                                     document_id=concept.get("document_id")
                                 )
-                                logger.warning(
-                                    f"[GATEKEEPER:Canonicalization:Batch] ⚠️ Cache MISS for '{concept_name}', "
+                                logger.debug(
+                                    f"[GATEKEEPER:Canonicalization:Batch] Cache MISS for '{concept_name}', "
                                     f"fallback to individual LLM call"
                                 )
                     except Exception as e:
@@ -1153,9 +1157,9 @@ class GatekeeperDelegate(BaseAgent):
                         )
                     else:
                         failed_count += 1
-                        logger.warning(
-                            f"[GATEKEEPER:PromoteConcepts] Failed to promote '{concept_name}' "
-                            f"(Neo4j returned empty canonical_id)"
+                        logger.debug(
+                            f"[GATEKEEPER:PromoteConcepts] Could not promote '{concept_name}' "
+                            f"(Neo4j returned empty canonical_id - proto concept may not exist)"
                         )
 
                 except Exception as e:

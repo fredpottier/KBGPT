@@ -139,10 +139,22 @@ class LLMCanonicalizer:
             recovery_timeout=60
         )
 
+        # Phase 2: Domain Context Injector (injection contexte métier)
+        try:
+            from knowbase.ontology.domain_context_injector import get_domain_context_injector
+            self.context_injector = get_domain_context_injector()
+            logger.debug("[LLMCanonicalizer] Domain context injector enabled")
+        except Exception as e:
+            logger.warning(
+                f"[LLMCanonicalizer] Domain context injector not available: {e}"
+            )
+            self.context_injector = None
+
         logger.info(
             f"[LLMCanonicalizer] Initialized with model={self.model}, "
             f"circuit_breaker(failures={self.circuit_breaker.failure_threshold}, "
-            f"recovery={self.circuit_breaker.recovery_timeout}s)"
+            f"recovery={self.circuit_breaker.recovery_timeout}s), "
+            f"context_injection={'ON' if self.context_injector else 'OFF'}"
         )
 
     def canonicalize(
@@ -150,7 +162,8 @@ class LLMCanonicalizer:
         raw_name: str,
         context: Optional[str] = None,
         domain_hint: Optional[str] = None,
-        timeout: int = 10
+        timeout: int = 10,
+        tenant_id: str = "default"
     ) -> CanonicalizationResult:
         """
         Canonicalise un nom via LLM.
@@ -160,6 +173,7 @@ class LLMCanonicalizer:
             context: Contexte textuel autour de la mention (optionnel)
             domain_hint: Indice domaine (ex: "enterprise_software")
             timeout: Timeout max LLM call en secondes (P0 - DoS protection)
+            tenant_id: ID tenant pour injection contexte métier (Phase 2)
 
         Returns:
             CanonicalizationResult avec canonical_name et métadonnées
@@ -168,7 +182,8 @@ class LLMCanonicalizer:
             >>> result = canonicalizer.canonicalize(
             ...     raw_name="CRM System's",
             ...     context="Our sales team uses CRM System's advanced features",
-            ...     domain_hint="enterprise_software"
+            ...     domain_hint="enterprise_software",
+            ...     tenant_id="default"
             ... )
             >>> result.canonical_name
             "Customer Relationship Management System"
@@ -176,7 +191,7 @@ class LLMCanonicalizer:
 
         logger.debug(
             f"[LLMCanonicalizer] Canonicalizing '{raw_name}' "
-            f"(context_len={len(context) if context else 0}, domain={domain_hint})"
+            f"(context_len={len(context) if context else 0}, domain={domain_hint}, tenant={tenant_id})"
         )
 
         # Construire prompt LLM
@@ -185,6 +200,14 @@ class LLMCanonicalizer:
             context=context,
             domain_hint=domain_hint
         )
+
+        # Phase 2: Injection contexte métier (si disponible)
+        system_prompt = CANONICALIZATION_SYSTEM_PROMPT
+        if self.context_injector:
+            system_prompt = self.context_injector.inject_context(
+                CANONICALIZATION_SYSTEM_PROMPT,
+                tenant_id
+            )
 
         try:
             # P0: Appel LLM via circuit breaker avec protection DoS
@@ -196,7 +219,7 @@ class LLMCanonicalizer:
                 response_content = self.llm_router.complete(
                     task_type=TaskType.CANONICALIZATION,
                     messages=[
-                        {"role": "system", "content": CANONICALIZATION_SYSTEM_PROMPT},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.0,  # Déterministe
@@ -255,7 +278,8 @@ class LLMCanonicalizer:
     def canonicalize_batch(
         self,
         concepts: List[Dict[str, str]],
-        timeout: int = 30
+        timeout: int = 30,
+        tenant_id: str = "default"
     ) -> List[CanonicalizationResult]:
         """
         Canonicalise un batch de concepts via LLM (batch processing).
@@ -263,6 +287,7 @@ class LLMCanonicalizer:
         Args:
             concepts: Liste de dicts avec clés {raw_name, context, domain_hint}
             timeout: Timeout max LLM call en secondes
+            tenant_id: ID tenant pour injection contexte métier (Phase 2)
 
         Returns:
             Liste de CanonicalizationResult (même ordre que concepts)
@@ -272,7 +297,7 @@ class LLMCanonicalizer:
             ...     {"raw_name": "CRM System's", "context": "...", "domain_hint": None},
             ...     {"raw_name": "MFA", "context": "...", "domain_hint": None}
             ... ]
-            >>> results = canonicalizer.canonicalize_batch(batch)
+            >>> results = canonicalizer.canonicalize_batch(batch, tenant_id="default")
             >>> results[0].canonical_name
             "Customer Relationship Management System"
         """
@@ -280,11 +305,19 @@ class LLMCanonicalizer:
             return []
 
         logger.debug(
-            f"[LLMCanonicalizer:Batch] Canonicalizing batch of {len(concepts)} concepts"
+            f"[LLMCanonicalizer:Batch] Canonicalizing batch of {len(concepts)} concepts (tenant={tenant_id})"
         )
 
         # Construire prompt batch
         prompt = self._build_batch_canonicalization_prompt(concepts)
+
+        # Phase 2: Injection contexte métier (si disponible)
+        system_prompt = CANONICALIZATION_BATCH_SYSTEM_PROMPT
+        if self.context_injector:
+            system_prompt = self.context_injector.inject_context(
+                CANONICALIZATION_BATCH_SYSTEM_PROMPT,
+                tenant_id
+            )
 
         try:
             # P0: Appel LLM via circuit breaker
@@ -295,7 +328,7 @@ class LLMCanonicalizer:
                 response_content = self.llm_router.complete(
                     task_type=TaskType.CANONICALIZATION,
                     messages=[
-                        {"role": "system", "content": CANONICALIZATION_BATCH_SYSTEM_PROMPT},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.0,
@@ -399,7 +432,8 @@ class LLMCanonicalizer:
     async def canonicalize_batch_async(
         self,
         concepts: List[Dict[str, str]],
-        timeout: int = 30
+        timeout: int = 30,
+        tenant_id: str = "default"
     ) -> List[CanonicalizationResult]:
         """
         Canonicalise un batch de concepts via LLM async (batch processing parallèle).
@@ -409,6 +443,7 @@ class LLMCanonicalizer:
         Args:
             concepts: Liste de dicts avec clés {raw_name, context, domain_hint}
             timeout: Timeout max LLM call en secondes
+            tenant_id: ID tenant pour injection contexte métier (Phase 2)
 
         Returns:
             Liste de CanonicalizationResult (même ordre que concepts)
@@ -418,7 +453,7 @@ class LLMCanonicalizer:
             ...     {"raw_name": "CRM System's", "context": "...", "domain_hint": None},
             ...     {"raw_name": "MFA", "context": "...", "domain_hint": None}
             ... ]
-            >>> results = await canonicalizer.canonicalize_batch_async(batch)
+            >>> results = await canonicalizer.canonicalize_batch_async(batch, tenant_id="default")
             >>> results[0].canonical_name
             "Customer Relationship Management System"
         """
@@ -426,11 +461,19 @@ class LLMCanonicalizer:
             return []
 
         logger.debug(
-            f"[LLMCanonicalizer:BatchAsync] Canonicalizing batch of {len(concepts)} concepts"
+            f"[LLMCanonicalizer:BatchAsync] Canonicalizing batch of {len(concepts)} concepts (tenant={tenant_id})"
         )
 
         # Construire prompt batch (même que sync)
         prompt = self._build_batch_canonicalization_prompt(concepts)
+
+        # Phase 2: Injection contexte métier (si disponible)
+        system_prompt = CANONICALIZATION_BATCH_SYSTEM_PROMPT
+        if self.context_injector:
+            system_prompt = self.context_injector.inject_context(
+                CANONICALIZATION_BATCH_SYSTEM_PROMPT,
+                tenant_id
+            )
 
         try:
             # Appel LLM async via router
@@ -440,7 +483,7 @@ class LLMCanonicalizer:
             response_content = await self.llm_router.acomplete(
                 task_type=TaskType.CANONICALIZATION,
                 messages=[
-                    {"role": "system", "content": CANONICALIZATION_BATCH_SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.0,
@@ -666,22 +709,45 @@ Your task is to find the OFFICIAL CANONICAL NAME for concepts extracted from doc
 
 # Guidelines
 
-1. **Official Names**: Use official product/company/standard names
+1. **Official Names**: Use official product/company/standard names from authoritative sources
    - Example: "CRM System's" → "Customer Relationship Management System"
    - Example: "iPhone 15 Pro Max's camera" → "Apple iPhone 15 Pro Max"
 
-2. **Acronyms**: Expand acronyms to full official names
+2. **COMPLETE Product Names - Preserve ALL Qualifiers**:
+   - Use the FULL official product name including editions, versions, deployment models, qualifiers
+   - Products often have editions (Enterprise, Professional, Standard, Community, etc.)
+   - Cloud products often specify deployment (Public Cloud, Private Cloud, Hybrid, etc.)
+   - DO NOT shorten official names even if they seem verbose
+   - Preserve qualifiers that distinguish between product variants
+
+   **Examples**:
+   - "Database Enterprise" → "Oracle Database Enterprise Edition" (vendor + product + edition)
+   - "Server Standard" → "Windows Server Standard Edition" (NOT just "Server" or "Windows Server")
+   - "Office Professional" → "Microsoft Office Professional Edition" (preserve edition qualifier)
+   - "Visual Studio Community" → "Microsoft Visual Studio Community Edition" (keep all qualifiers)
+
+3. **Official Naming Authority**:
+   - When a product/standard has an official vendor or governing body, use THEIR exact naming convention
+   - Preserve comma placement, capitalization, and order as per official documentation
+   - For regulations: use official legal citation format when known
+   - For products: match vendor's official product naming scheme
+
+   **Examples**:
+   - Legal: "GDPR" → "General Data Protection Regulation" or "Regulation (EU) 2016/679" if formal citation needed
+   - Products: Use vendor's exact format (e.g., "Product Name, Edition" vs "Product Name Edition")
+
+4. **Acronyms**: Expand acronyms to full official names
    - Example: "SLA" → "Service Level Agreement"
    - Example: "CEE" → "Communauté Économique Européenne" (if French context)
 
-3. **Possessives**: Remove possessive forms ('s, 's)
+5. **Possessives**: Remove possessive forms ('s, 's)
    - Example: "Microsoft's solution" → "Microsoft"
 
-4. **Casing**: Preserve official casing
+6. **Casing**: Preserve official casing
    - Acronyms: ERP, CRM, API (all caps)
    - Products: "iPhone 15 Pro Max" (mixed case as official)
 
-5. **Aliases**: List ONLY real, commonly-used aliases that you are CERTAIN exist
+7. **Aliases**: List ONLY real, commonly-used aliases that you are CERTAIN exist
    - Include ONLY acronyms or alternative names that are WIDELY KNOWN and OFFICIALLY USED
    - Use your general knowledge base across ALL domains (not specific to any industry)
    - When in doubt about whether an acronym exists → DO NOT include it
@@ -689,7 +755,7 @@ Your task is to find the OFFICIAL CANONICAL NAME for concepts extracted from doc
    **STRICT RULES - Do NOT invent aliases**:
    - ✅ DO include: Well-established acronyms you are CERTAIN about
    - ✅ DO include: Official alternative names that are widely recognized
-   - ❌ DON'T invent: Partial names by removing words (e.g., "Analytics Cloud" from "Company Analytics Cloud")
+   - ❌ DON'T invent: Partial names by removing words (e.g., "Collaboration Suite" from "Acme Collaboration Suite")
    - ❌ DON'T invent: Acronyms you are unsure about or that might not exist
    - ❌ DON'T assume: Just because a name is long doesn't mean an acronym exists
 
@@ -700,14 +766,18 @@ Your task is to find the OFFICIAL CANONICAL NAME for concepts extracted from doc
    - "General Data Protection Regulation" → aliases: ["GDPR"] (universally known) ✅
    - "Customer Relationship Management" → aliases: ["CRM"] (universally known) ✅
    - "Service Level Agreement" → aliases: ["SLA"] (universally known) ✅
-   - "Company Analytics Cloud" → aliases: [] (no known acronym, don't invent "CAC"!) ✅
-   - "Advanced Security Platform" → aliases: [] (uncertain, could be "ASP" but might not exist) ✅
+   - "Acme Business Intelligence Platform" → aliases: [] (no known acronym, don't invent "ABIP"!) ✅
+   - "Advanced Security Framework" → aliases: [] (uncertain acronym, better leave empty) ✅
 
-6. **Ambiguity**: If uncertain, set ambiguity_warning and list possible_matches
-   - Example: "Cloud Platform" without context → could be AWS, Azure, GCP, or other
+8. **Ambiguity Detection**: If uncertain or multiple valid interpretations exist
+   - Set ambiguity_warning with clear explanation
+   - List possible_matches with alternative canonical names
+   - Lower confidence score (< 0.7) when ambiguous
+   - Example: "Cloud Platform" without vendor context → could be AWS, Azure, GCP, or generic term
 
-7. **Type Detection**: Classify concept type
-   - Product, Service, Organization, Acronym, Standard, Person, Location, etc.
+9. **Type Detection**: Classify concept type accurately
+   - Product, Service, Organization, Acronym, Standard, Regulation, Person, Location, Technology, Concept, etc.
+   - Use specific types when possible (e.g., "Regulation" not just "Standard" for legal texts)
 
 # Output Format (JSON)
 
@@ -759,19 +829,19 @@ Your task is to find the OFFICIAL CANONICAL NAME for concepts extracted from doc
   "metadata": {}
 }
 
-## Input: "Advanced Analytics Platform"
-## Context: "We use Advanced Analytics Platform for BI reporting"
+## Input: "SQL Server Standard"
+## Context: "We use SQL Server Standard for our production database"
 ## Output:
 {
-  "canonical_name": "Advanced Analytics Platform",
-  "confidence": 0.85,
-  "reasoning": "Product name without widely-known acronym",
-  "aliases": [],
+  "canonical_name": "Microsoft SQL Server Standard Edition",
+  "confidence": 0.95,
+  "reasoning": "Microsoft product with edition qualifier - using full official name including vendor, product, and edition",
+  "aliases": ["SQL Server Standard"],
   "concept_type": "Product",
-  "domain": "enterprise_software",
+  "domain": "database",
   "ambiguity_warning": null,
   "possible_matches": [],
-  "metadata": {}
+  "metadata": {"vendor": "Microsoft", "edition": "Standard", "product_line": "SQL Server"}
 }
 
 ## Input: "Cloud Platform"
@@ -800,17 +870,23 @@ Your task is to find the OFFICIAL CANONICAL NAME for multiple concepts extracted
 
 # Guidelines (same as single canonicalization)
 
-1. **Official Names**: Use official product/company/standard names
-2. **Acronyms**: Expand acronyms to full official names
-3. **Possessives**: Remove possessive forms ('s, 's)
-4. **Casing**: Preserve official casing
-5. **Aliases**: List ONLY real, commonly-used aliases that you are CERTAIN exist
+1. **Official Names**: Use official product/company/standard names from authoritative sources
+2. **COMPLETE Product Names**: Use FULL official names including editions, versions, deployment models, qualifiers
+   - Preserve ALL qualifiers (Enterprise, Professional, Standard, Community, etc.)
+   - DO NOT shorten official names - keep edition/variant distinguishers
+   - Example: "SQL Server Standard" → "Microsoft SQL Server Standard Edition" (vendor + product + edition)
+3. **Official Naming Authority**: Use vendor's/organization's exact naming convention
+   - Preserve comma placement, capitalization, and order as per official documentation
+4. **Acronyms**: Expand acronyms to full official names
+5. **Possessives**: Remove possessive forms ('s, 's)
+6. **Casing**: Preserve official casing
+7. **Aliases**: List ONLY real, commonly-used aliases that you are CERTAIN exist
    - Include ONLY acronyms or alternative names that are WIDELY KNOWN and OFFICIALLY USED
    - Use your general knowledge base across ALL domains (not specific to any industry)
    - When in doubt → DO NOT include it. Better no alias than fake alias.
    - Future refinement: Aliases will be refined later by specialized models
-6. **Ambiguity**: If uncertain, set ambiguity_warning and list possible_matches
-7. **Type Detection**: Classify concept type
+8. **Ambiguity Detection**: If uncertain, set ambiguity_warning and list possible_matches (confidence < 0.7)
+9. **Type Detection**: Classify concept type accurately (Product, Service, Organization, Acronym, Standard, Regulation, etc.)
 
 # Batch Output Format (JSON)
 

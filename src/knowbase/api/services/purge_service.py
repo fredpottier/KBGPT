@@ -85,7 +85,7 @@ class PurgeService:
             qdrant_client.delete_collection(collection_name)
 
             # Recréer collection vide avec la bonne dimension
-            vector_size = get_sentence_transformer().get_sentence_embedding_dimension() or 768
+            vector_size = get_sentence_transformer().get_sentence_embedding_dimension() or 1024
             ensure_qdrant_collection(collection_name, vector_size)
 
             logger.info(f"✅ Qdrant purgé: {points_count} points supprimés, collection recréée")

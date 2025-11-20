@@ -92,7 +92,7 @@ def banner_paths():
 llm_router = LLMRouter()
 qdrant_client = get_qdrant_client()
 model = get_sentence_transformer(MODEL_NAME)
-EMB_SIZE = model.get_sentence_embedding_dimension() or 768
+EMB_SIZE = model.get_sentence_embedding_dimension() or 1024
 ensure_qdrant_collection(COLLECTION_NAME, int(EMB_SIZE))
 
 # ==============

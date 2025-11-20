@@ -22,7 +22,7 @@ task_models:
   classification: "gpt-4o-mini"
 
   # Canonicalisation de noms SAP
-  canonicalization: "gpt-4o-mini"
+  canonicalization: "gpt-4o"
 
   # Analyse intelligente de questions RFP Excel (filtrage + reformulation + fusion)
   rfp_question_analysis: "gpt-4o"
@@ -63,7 +63,7 @@ task_parameters:
   # Canonicalisation de noms SAP
   canonicalization:
     temperature: 0    # Déterministe pour normalisation
-    max_tokens: 100   # Noms courts mais peut inclure reformulation
+    max_tokens: 200   # GPT-4o: plus verbeux, besoin de plus de tokens pour reasoning
 
   # Analyse intelligente de questions RFP Excel
   rfp_question_analysis:

@@ -6,9 +6,24 @@ from functools import lru_cache
 import redis
 from rq import Queue
 
+from knowbase.config.settings import get_settings
+
 DEFAULT_QUEUE_NAME = os.getenv("INGESTION_QUEUE", "ingestion")
-DEFAULT_JOB_TIMEOUT = int(os.getenv("INGESTION_JOB_TIMEOUT", "7200"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+
+def get_default_job_timeout() -> int:
+    """
+    Retourne le timeout RQ job par défaut.
+    Utilise settings.ingestion_job_timeout qui calcule automatiquement depuis
+    MAX_DOCUMENT_PROCESSING_TIME (ou utilise INGESTION_JOB_TIMEOUT si fourni).
+    """
+    settings = get_settings()
+    return settings.ingestion_job_timeout
+
+
+# Legacy: DEFAULT_JOB_TIMEOUT pour backward compatibility
+DEFAULT_JOB_TIMEOUT = get_default_job_timeout()
 
 
 @lru_cache(maxsize=1)

@@ -18,6 +18,11 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Supprimer les warnings verbeux du driver Neo4j (notifications de requêtes)
+# Ces warnings ne sont pas critiques (null values, property hints, etc.)
+logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
+logging.getLogger("neo4j").setLevel(logging.WARNING)  # Garder warnings critiques du driver
+
 
 class Neo4jClient:
     """
@@ -99,7 +104,8 @@ class Neo4jClient:
         """
         if not self.redis_client:
             # Si Redis indisponible, autoriser (dégradation gracieuse)
-            logger.warning(f"[NEO4J:Lock] Redis not available, skipping lock for '{lock_key}'")
+            # Log DEBUG au lieu de WARNING : comportement normal si redis_client non passé
+            logger.debug(f"[NEO4J:Lock] Redis not configured, skipping distributed lock for '{lock_key}'")
             return True
 
         try:
@@ -469,15 +475,13 @@ class Neo4jClient:
                 WITH proto, canonical,
                      existing_chunks + proto_chunks + new_chunks AS all_chunks_raw
 
-                // Dédupliquer avec REDUCE (évite UNWIND qui échoue sur liste vide)
-                WITH proto, canonical,
-                     REDUCE(acc = [], chunk IN all_chunks_raw |
-                         CASE
-                             WHEN chunk IS NULL THEN acc
-                             WHEN chunk IN acc THEN acc
-                             ELSE acc + chunk
-                         END
-                     ) AS aggregated_chunks
+                // Dédupliquer avec UNWIND + COLLECT DISTINCT O(n) au lieu de REDUCE O(n²)
+                // CRITIQUE: Avec 42,000 chunks, REDUCE O(n²) = 1.77 milliards comparaisons!
+                // UNWIND + COLLECT DISTINCT = linéaire, quasi-instantané
+                UNWIND all_chunks_raw AS chunk_item
+                WITH proto, canonical, chunk_item
+                WHERE chunk_item IS NOT NULL
+                WITH proto, canonical, COLLECT(DISTINCT chunk_item) AS aggregated_chunks
 
                 // Mettre à jour CanonicalConcept.chunk_ids + name/summary si manquants
                 SET canonical.chunk_ids = aggregated_chunks,
@@ -516,8 +520,8 @@ class Neo4jClient:
                                 )
                                 return existing_canonical_id
                             else:
-                                logger.warning(
-                                    f"[NEO4J:Dedup] Failed to link Proto to existing Canonical: {proto_concept_id}"
+                                logger.debug(
+                                    f"[NEO4J:Dedup] No existing canonical found for proto {proto_concept_id}, will create new one"
                                 )
                                 return ""
 
@@ -859,11 +863,31 @@ def get_neo4j_client(
     global _neo4j_client
 
     if _neo4j_client is None:
+        # Récupérer Redis client pour distributed locks (P1.1)
+        redis_client = None
+        try:
+            import redis
+            from knowbase.config.settings import get_settings
+            settings = get_settings()
+            redis_client = redis.Redis(
+                host=settings.redis_host,
+                port=settings.redis_port,
+                db=0,
+                decode_responses=True
+            )
+            # Test connexion
+            redis_client.ping()
+            logger.debug(f"[NEO4J] Redis client connected for distributed locks")
+        except Exception as e:
+            logger.debug(f"[NEO4J] Redis client not available for distributed locks: {e}")
+            redis_client = None
+
         _neo4j_client = Neo4jClient(
             uri=uri,
             user=user,
             password=password,
-            database=database
+            database=database,
+            redis_client=redis_client
         )
 
     return _neo4j_client

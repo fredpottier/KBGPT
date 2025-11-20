@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
-from knowbase.common.sap.normalizer import normalize_solution_name
+from knowbase.common.entity_normalizer import get_entity_normalizer
 
 from langdetect import detect, DetectorFactory, LangDetectException
 import fitz  # PyMuPDF
@@ -1024,22 +1024,29 @@ def merge_metadata(meta_list: List[Dict[str, Any]]) -> Dict[str, Any]:
                 merged[k] = meta[k]
     for k in ["supporting_solutions", "mentioned_solutions", "audience"]:
         merged[k] = list(set(merged[k]))
+
+    # Normalisation des solutions avec entity_normalizer (domain-agnostic)
+    normalizer = get_entity_normalizer()
+
     if merged.get("main_solution"):
-        sol_id, canon = normalize_solution_name(merged["main_solution"])
-        merged["main_solution_id"] = sol_id
+        sol_id, canon, _ = normalizer.normalize_entity_name(merged["main_solution"], "SOLUTION")
+        merged["main_solution_id"] = sol_id or "UNMAPPED"
         merged["main_solution"] = canon or merged["main_solution"]
     else:
         merged["main_solution_id"] = "UNMAPPED"
+
     normalized_supporting = []
     for supp in merged["supporting_solutions"]:
-        sid, canon = normalize_solution_name(supp)
+        sid, canon, _ = normalizer.normalize_entity_name(supp, "SOLUTION")
         normalized_supporting.append(canon or supp)
     merged["supporting_solutions"] = list(set(normalized_supporting))
+
     normalized_mentioned = []
     for ment in merged["mentioned_solutions"]:
-        sid, canon = normalize_solution_name(ment)
+        sid, canon, _ = normalizer.normalize_entity_name(ment, "SOLUTION")
         normalized_mentioned.append(canon or ment)
     merged["mentioned_solutions"] = list(set(normalized_mentioned))
+
     return merged
 
 

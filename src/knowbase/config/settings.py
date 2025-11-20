@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
 from .paths import (
@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     neo4j_password: str = Field(default="graphiti_neo4j_pass", alias="NEO4J_PASSWORD")
 
     embeddings_model: str = Field(
-        default="intfloat/multilingual-e5-base", alias="EMB_MODEL_NAME"
+        default="intfloat/multilingual-e5-large", alias="EMB_MODEL_NAME"
     )
     qdrant_url: str = Field(default="http://qdrant:6333", alias="QDRANT_URL")
     qdrant_api_key: Optional[str] = Field(default=None, alias="QDRANT_API_KEY")
@@ -78,7 +78,46 @@ class Settings(BaseSettings):
     ontologies_dir: Path = Field(default=ONTOLOGIES_DIR)  # Phase 3
 
     # === OSMOSE Configuration ===
+    # Timeout central pour traitement documents (1 seule variable à configurer)
+    max_document_processing_time: int = Field(
+        default=3600,
+        alias="MAX_DOCUMENT_PROCESSING_TIME",
+        description="Durée maximale de traitement d'un document (secondes). "
+        "Recommandation: 3600s (1h) pour documents < 300 slides, "
+        "5400s (1h30) pour 300-500 slides, 7200s (2h) pour > 500 slides."
+    )
+
+    # Legacy: osmose_timeout_seconds - peut être fourni explicitement ou calculé auto
     osmose_timeout_seconds: int = Field(default=3600, alias="OSMOSE_TIMEOUT_SECONDS")
+
+    @model_validator(mode='before')
+    @classmethod
+    def compute_derived_timeouts(cls, data: Any) -> Any:
+        """
+        Calcule automatiquement les timeouts dérivés depuis MAX_DOCUMENT_PROCESSING_TIME.
+        Si OSMOSE_TIMEOUT_SECONDS n'est pas fourni explicitement, utilise MAX_DOCUMENT_PROCESSING_TIME.
+        """
+        if isinstance(data, dict):
+            # Récupérer max_document_processing_time (via alias ou nom direct)
+            max_time = data.get("MAX_DOCUMENT_PROCESSING_TIME") or data.get("max_document_processing_time") or 3600
+
+            # Si OSMOSE_TIMEOUT_SECONDS n'est pas fourni, le calculer
+            if "OSMOSE_TIMEOUT_SECONDS" not in data and "osmose_timeout_seconds" not in data:
+                data["osmose_timeout_seconds"] = max_time
+
+        return data
+
+    @property
+    def ingestion_job_timeout(self) -> int:
+        """
+        Timeout RQ job (avec buffer 50% au-dessus du timeout document).
+        Si INGESTION_JOB_TIMEOUT est fourni explicitement, l'utilise.
+        Sinon, calcule automatiquement: MAX_DOCUMENT_PROCESSING_TIME * 1.5
+        """
+        env_value = os.getenv("INGESTION_JOB_TIMEOUT")
+        if env_value:
+            return int(env_value)
+        return int(self.max_document_processing_time * 1.5)
 
     # === Extraction Cache System (V2.2) ===
     enable_extraction_cache: bool = Field(default=True, alias="ENABLE_EXTRACTION_CACHE")

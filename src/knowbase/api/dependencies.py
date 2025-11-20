@@ -33,7 +33,7 @@ def configure_logging() -> logging.Logger:
 def warm_clients() -> None:
     ensure_qdrant_collection(
         get_settings().qdrant_collection,
-        get_sentence_transformer().get_sentence_embedding_dimension() or 768,
+        get_sentence_transformer().get_sentence_embedding_dimension() or 1024,
     )
     get_openai_client()
     get_qdrant_client()

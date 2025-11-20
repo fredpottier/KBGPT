@@ -257,7 +257,11 @@ class SupervisorAgent(BaseAgent):
 
         elif fsm_state == FSMState.EXTRACT_RELATIONS:
             # Phase 2 OSMOSE: Extraction relations entre concepts promus
-            logger.info("[SUPERVISOR] ⏱️ EXTRACT_RELATIONS: START")
+            logger.info(
+                f"[SUPERVISOR] ⏱️ EXTRACT_RELATIONS: START - "
+                f"promoted={len(state.promoted) if state.promoted else 0}, "
+                f"full_text_len={len(state.full_text) if state.full_text else 0}"
+            )
 
             # Skip si aucun concept promu
             if not state.promoted or len(state.promoted) == 0:
@@ -269,6 +273,8 @@ class SupervisorAgent(BaseAgent):
             if not full_text:
                 logger.warning("[SUPERVISOR] EXTRACT_RELATIONS: No full_text in state, skipping")
                 return FSMState.FINALIZE
+
+            logger.info(f"[SUPERVISOR] EXTRACT_RELATIONS: Will extract relations from {len(state.promoted)} concepts, {len(full_text)} chars")
 
             # Lazy load composants Phase 2
             if self.relation_extraction_engine is None:

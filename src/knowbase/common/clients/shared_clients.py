@@ -64,7 +64,7 @@ def get_sentence_transformer(
     cache_folder: Optional[str] = None,
 ) -> SentenceTransformer:
     """Return a cached SentenceTransformer instance for the requested model/device."""
-    name = model_name or os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-base")
+    name = model_name or os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-large")
     kwargs: dict[str, object] = {}
 
     # Auto-detect GPU (CUDA) si device non spécifié
