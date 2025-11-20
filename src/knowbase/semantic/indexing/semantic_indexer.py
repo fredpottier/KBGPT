@@ -32,6 +32,19 @@ from knowbase.common.llm_router import LLMRouter
 logger = logging.getLogger(__name__)
 
 
+# Phase 1.8 T1.8.1.7b - LLM-as-a-Judge System Prompt
+LLM_JUDGE_SYSTEM_PROMPT = """You are an expert knowledge graph curator specializing in concept validation.
+
+Your role is to determine whether clustered concepts should be merged into a single canonical concept or kept separate.
+
+You must be PRECISE and CONSERVATIVE:
+- Only approve merges for TRUE synonyms, translations, or equivalent terms
+- Reject merges for related but semantically distinct concepts
+- Consider domain-specific nuances (e.g., product names, technical terms)
+
+Always provide clear reasoning for your decision."""
+
+
 class SemanticIndexer:
     """
     Canonicalisation cross-lingual et construction hiérarchie.
@@ -132,6 +145,45 @@ class SemanticIndexer:
             f"{len(canonical_groups)} canonical groups"
         )
 
+        # 3b. Phase 1.8 T1.8.1.7b: Validation LLM-as-a-Judge (optionnelle)
+        if self.indexing_config.llm_judge_validation:
+            logger.info("[OSMOSE:Phase1.8] 🔍 Validating clusters via LLM-as-a-Judge")
+            validated_groups = []
+            rejected_count = 0
+            validated_count = 0
+
+            for group in canonical_groups:
+                # Skip validation for single concepts or small clusters
+                if len(group) < self.indexing_config.llm_judge_min_cluster_size:
+                    validated_groups.append(group)
+                    continue
+
+                # Validate cluster via LLM
+                is_valid = await self._validate_cluster_via_llm(
+                    group,
+                    threshold=self.indexing_config.similarity_threshold
+                )
+
+                if is_valid:
+                    validated_groups.append(group)
+                    validated_count += 1
+                else:
+                    # Rejected cluster: split into individual concepts
+                    for concept in group:
+                        validated_groups.append([concept])
+                    rejected_count += 1
+                    logger.warning(
+                        f"[OSMOSE:Phase1.8] ❌ Rejected cluster: "
+                        f"{[c.name for c in group]} (split into {len(group)} individual concepts)"
+                    )
+
+            canonical_groups = validated_groups
+            logger.info(
+                f"[OSMOSE:Phase1.8] ✅ LLM-as-a-Judge validation complete: "
+                f"{validated_count} clusters approved, {rejected_count} clusters rejected, "
+                f"final groups: {len(canonical_groups)}"
+            )
+
         # 4. Construire CanonicalConcept pour chaque groupe
         canonical_concepts = []
         for group in canonical_groups:
@@ -205,6 +257,200 @@ class SemanticIndexer:
             )
 
         return canonical_groups
+
+    async def _validate_cluster_via_llm(
+        self,
+        concepts: List[Concept],
+        threshold: float = 0.85
+    ) -> bool:
+        """
+        Valide un cluster de concepts via LLM-as-a-Judge (Phase 1.8 T1.8.1.7b).
+
+        Inspiration: KGGen Paper Section 3.3 - Iterative Clustering with LLM Validation
+
+        Problème résolu:
+        Le clustering par similarité d'embeddings peut créer des faux positifs:
+        - "security" et "compliance" (similaires mais pas synonymes)
+        - "SAP ERP" et "SAP S/4HANA" (liés mais produits distincts)
+
+        Solution:
+        Demander au LLM de valider si les concepts sont vraiment équivalents/synonymes.
+
+        Args:
+            concepts: Liste de concepts à valider (déjà clustérisés par similarité)
+            threshold: Seuil similarité ayant créé le cluster (pour contexte)
+
+        Returns:
+            bool: True si cluster valide (concepts synonymes), False sinon
+
+        Example:
+            >>> concepts = [
+            ...     Concept(name="authentication", ...),
+            ...     Concept(name="authentification", ...)  # FR equivalent
+            ... ]
+            >>> await indexer._validate_cluster_via_llm(concepts)
+            True  # Vraiment synonymes
+
+            >>> concepts = [
+            ...     Concept(name="security", ...),
+            ...     Concept(name="compliance", ...)  # Proches mais distincts
+            ... ]
+            >>> await indexer._validate_cluster_via_llm(concepts)
+            False  # Pas synonymes, garder séparés
+        """
+        # Skip validation si cluster trop petit (1 seul concept = pas de fusion)
+        if len(concepts) <= 1:
+            logger.debug(
+                f"[OSMOSE:LLM-Judge] Cluster size=1, validation skipped (no merge needed)"
+            )
+            return True
+
+        # Extraire noms pour validation
+        concept_names = [c.name for c in concepts]
+
+        # Limiter validation aux clusters raisonnables (max 5 concepts)
+        if len(concepts) > 5:
+            logger.warning(
+                f"[OSMOSE:LLM-Judge] Cluster size={len(concepts)} > 5, "
+                f"validation may be unreliable. Consider lowering similarity threshold."
+            )
+
+        # Construire prompt LLM-as-a-Judge
+        prompt = self._build_llm_judge_prompt(concept_names, threshold)
+
+        try:
+            from knowbase.common.llm_router import TaskType
+
+            logger.info(
+                f"[OSMOSE:LLM-Judge] Validating cluster: {concept_names} "
+                f"(similarity > {threshold})"
+            )
+
+            # Appel LLM avec temperature basse (déterministe)
+            response_text = await self.llm_router.acomplete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": LLM_JUDGE_SYSTEM_PROMPT
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.0,  # Déterministe
+                response_format={"type": "json_object"},
+                max_tokens=500
+            )
+
+            # Parser réponse JSON
+            result = self._parse_llm_judge_response(response_text)
+
+            if result is None:
+                logger.warning(
+                    f"[OSMOSE:LLM-Judge] Failed to parse LLM response, "
+                    f"defaulting to ACCEPT cluster (conservative)"
+                )
+                return True  # Conservative: accepter si parsing échoue
+
+            is_valid = result.get("are_synonyms", True)
+            reasoning = result.get("reasoning", "N/A")
+
+            logger.info(
+                f"[OSMOSE:LLM-Judge] {'✅ ACCEPT' if is_valid else '❌ REJECT'} cluster: "
+                f"{concept_names} | Reasoning: {reasoning}"
+            )
+
+            return is_valid
+
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE:LLM-Judge] Validation failed: {e}, "
+                f"defaulting to ACCEPT (conservative)",
+                exc_info=True
+            )
+            return True  # Conservative: accepter en cas d'erreur
+
+    def _build_llm_judge_prompt(
+        self,
+        concept_names: List[str],
+        similarity_threshold: float
+    ) -> str:
+        """
+        Construit prompt pour LLM-as-a-Judge validation.
+
+        Args:
+            concept_names: Liste de noms de concepts à valider
+            similarity_threshold: Seuil similarité ayant créé le cluster
+
+        Returns:
+            str: Prompt formaté
+        """
+        concepts_list = "\n".join([f"- {name}" for name in concept_names])
+
+        prompt = f"""You are validating a cluster of concepts that have high embedding similarity (> {similarity_threshold}).
+
+**Concepts to validate:**
+{concepts_list}
+
+**Your task:**
+Determine if these concepts are TRUE SYNONYMS or EQUIVALENT TERMS that should be merged into a single canonical concept.
+
+**Guidelines:**
+- ✅ MERGE if: concepts are translations, abbreviations, or true synonyms
+  - Examples: "authentication" ↔ "authentification" (FR translation)
+  - Examples: "CRM" ↔ "Customer Relationship Management" (abbreviation)
+
+- ❌ KEEP SEPARATE if: concepts are related but semantically distinct
+  - Examples: "security" ≠ "compliance" (related but different domains)
+  - Examples: "SAP ERP" ≠ "SAP S/4HANA" (related products but distinct)
+  - Examples: "cloud computing" ≠ "cloud storage" (different concepts)
+
+**Return format (JSON):**
+{{
+  "are_synonyms": true/false,
+  "reasoning": "Brief explanation (1 sentence)"
+}}
+"""
+        return prompt
+
+    def _parse_llm_judge_response(self, response_text: str) -> Optional[Dict]:
+        """
+        Parse réponse LLM-as-a-Judge.
+
+        Args:
+            response_text: Réponse LLM brute
+
+        Returns:
+            Dict avec {are_synonyms: bool, reasoning: str} ou None si erreur
+        """
+        try:
+            # Extraire JSON de la réponse
+            import re
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if not json_match:
+                logger.warning("[OSMOSE:LLM-Judge] No JSON found in response")
+                return None
+
+            data = json.loads(json_match.group(0))
+
+            # Valider structure
+            if "are_synonyms" not in data:
+                logger.warning("[OSMOSE:LLM-Judge] Missing 'are_synonyms' in response")
+                return None
+
+            return {
+                "are_synonyms": bool(data["are_synonyms"]),
+                "reasoning": data.get("reasoning", "N/A")
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error(f"[OSMOSE:LLM-Judge] JSON parse error: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[OSMOSE:LLM-Judge] Parse error: {e}")
+            return None
 
     async def _build_canonical_concept(
         self,

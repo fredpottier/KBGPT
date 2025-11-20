@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 class SegmentationConfig(BaseModel):
     """Configuration Topic Segmentation"""
     enabled: bool = True
-    window_size: int = 3000
+    window_size: int = 1200  # Réduit pour PPTX (~1 slide = 1-2k chars). TODO: Variabiliser par type doc
     overlap: float = 0.25
-    cohesion_threshold: float = 0.65
+    cohesion_threshold: float = 0.55  # Réduit pour éviter fusion excessive (était 0.65)
     clustering_method: str = "HDBSCAN"
     clustering_fallback: str = "Agglomerative"
     min_cluster_size: int = 2
@@ -57,6 +57,10 @@ class IndexingConfig(BaseModel):
     hierarchy_max_depth: int = 3
     deduplication: bool = True
     deduplication_threshold: float = 0.90
+
+    # Phase 1.8 T1.8.1.7b: LLM-as-a-Judge validation
+    llm_judge_validation: bool = True  # Activer validation LLM des clusters
+    llm_judge_min_cluster_size: int = 2  # Valider seulement si >= 2 concepts
 
 
 class LinkingConfig(BaseModel):

@@ -605,10 +605,10 @@ For each concept, identify:
 - relationships: list of related concept names (max 3)
 
 Text:
-{{text}}
+__TEXT_PLACEHOLDER__
 
 Return a JSON object with this exact structure:
-{{{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}}}
+{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
 
 Extract 3-10 concepts maximum. Focus on the most important ones.""",
 
@@ -621,10 +621,10 @@ Pour chaque concept, identifie :
 - relationships : liste de noms de concepts liés (max 3)
 
 Texte :
-{{text}}
+__TEXT_PLACEHOLDER__
 
 Retourne un objet JSON avec cette structure exacte:
-{{{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}}}
+{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
 
 Extrait 3-10 concepts maximum. Focus sur les plus importants.""",
 
@@ -637,17 +637,17 @@ Für jedes Konzept identifiziere:
 - relationships: Liste verwandter Konzeptnamen (max 3)
 
 Text:
-{{text}}
+__TEXT_PLACEHOLDER__
 
 Gib ein JSON-Objekt mit dieser exakten Struktur zurück:
-{{{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}}}
+{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
 
 Extrahiere maximal 3-10 Konzepte. Fokus auf die wichtigsten."""
         }
 
         # Fallback anglais si langue non supportée
         template = prompts.get(language, prompts["en"])
-        return template.format(text=text)
+        return template.replace("__TEXT_PLACEHOLDER__", text)
 
     def _parse_llm_response(self, response_text: str) -> List[Dict]:
         """
