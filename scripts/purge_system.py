@@ -5,11 +5,14 @@
 Script pour purger TOUTES les données du système KnowWhere/OSMOSE.
 
 Usage:
-    # Depuis l'hôte
+    # Avec confirmation interactive
     python scripts/purge_system.py
 
+    # Sans confirmation (mode automatisé - pour Claude Code)
+    python scripts/purge_system.py --yes
+
     # Depuis le conteneur
-    docker-compose exec app python scripts/purge_system.py
+    docker exec knowbase-app python scripts/purge_system.py --yes
 
 Purge:
     ✅ Redis: TOUTES les clés (FLUSHDB) - includes import queues, RQ jobs, cache
@@ -45,7 +48,8 @@ def purge_redis_all():
     print("🗑️  Purge Redis (FLUSHDB - DB0 + DB1)...")
 
     try:
-        redis_host = os.getenv("REDIS_HOST", "localhost")
+        # Utiliser "redis" comme host par défaut (nom du service Docker)
+        redis_host = os.getenv("REDIS_HOST", "redis")
         redis_port = int(os.getenv("REDIS_PORT", "6379"))
 
         total_keys_deleted = 0
@@ -77,7 +81,8 @@ def purge_qdrant():
     print("🗑️  Purge Qdrant (collections knowbase, rfp_qa)...")
 
     try:
-        qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+        # Utiliser "qdrant" comme host par défaut (nom du service Docker)
+        qdrant_host = os.getenv("QDRANT_HOST", "qdrant")
         qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
 
         client = QdrantClient(host=qdrant_host, port=qdrant_port)
@@ -117,7 +122,8 @@ def purge_neo4j(tenant_id: str = "default"):
     print(f"🗑️  Purge Neo4j (tenant: {tenant_id})...")
 
     try:
-        neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        # Utiliser "neo4j" comme host par défaut (nom du service Docker)
+        neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
         neo4j_user = os.getenv("NEO4J_USER", "neo4j")
         neo4j_password = os.getenv("NEO4J_PASSWORD", "graphiti_neo4j_pass")
 
@@ -211,7 +217,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples:
-  python scripts/purge_system.py                    # Purge complète (recommandé)
+  python scripts/purge_system.py                    # Purge complète avec confirmation
+  python scripts/purge_system.py --yes              # Purge sans confirmation (automatisé)
+  python scripts/purge_system.py -y                 # Alias de --yes
   python scripts/purge_system.py --tenant myorg     # Purge tenant spécifique Neo4j
 
 ⚠️  Ce script purge TOUTES les données mais PRÉSERVE:
@@ -225,6 +233,12 @@ Exemples:
         '--tenant',
         default='default',
         help='Tenant Neo4j à purger (défaut: default)'
+    )
+
+    parser.add_argument(
+        '-y', '--yes',
+        action='store_true',
+        help='Forcer la purge sans confirmation (utile pour scripts automatisés)'
     )
 
     args = parser.parse_args()
@@ -244,15 +258,18 @@ Exemples:
     print("   • data/docs_in/ (documents source)")
     print()
 
-    # Confirmation
-    try:
-        response = input("Continuer? [y/N] ")
-        if response.lower() not in ['y', 'yes', 'o', 'oui']:
-            print("❌ Annulé par l'utilisateur")
+    # Confirmation (sauf si --yes)
+    if not args.yes:
+        try:
+            response = input("Continuer? [y/N] ")
+            if response.lower() not in ['y', 'yes', 'o', 'oui']:
+                print("❌ Annulé par l'utilisateur")
+                sys.exit(0)
+        except (KeyboardInterrupt, EOFError):
+            print("\n❌ Annulé par l'utilisateur")
             sys.exit(0)
-    except KeyboardInterrupt:
-        print("\n❌ Annulé par l'utilisateur")
-        sys.exit(0)
+    else:
+        print("⚡ Mode automatique (--yes): purge sans confirmation")
 
     print()
     print("🚀 Démarrage purge...")
