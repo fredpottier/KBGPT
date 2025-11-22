@@ -41,23 +41,31 @@ from qdrant_client import QdrantClient
 
 
 def purge_redis_all():
-    """Purge COMPLÈTE Redis (FLUSHDB) - supprime TOUTES les clés."""
-    print("🗑️  Purge Redis (FLUSHDB - toutes les clés)...")
+    """Purge COMPLÈTE Redis (FLUSHDB) - supprime TOUTES les clés de DB0 et DB1."""
+    print("🗑️  Purge Redis (FLUSHDB - DB0 + DB1)...")
 
     try:
         redis_host = os.getenv("REDIS_HOST", "localhost")
         redis_port = int(os.getenv("REDIS_PORT", "6379"))
 
-        client = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
+        total_keys_deleted = 0
 
-        # Compter clés avant purge
-        keys_before = client.dbsize()
+        # Purger DB 0 (jobs RQ, cache)
+        client_db0 = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
+        keys_db0 = client_db0.dbsize()
+        client_db0.flushdb()
+        total_keys_deleted += keys_db0
+        print(f"   ✅ DB0: {keys_db0} clés supprimées (jobs RQ, cache)")
 
-        # FLUSHDB: supprime TOUTES les clés de la DB
-        client.flushdb()
+        # Purger DB 1 (historique imports)
+        client_db1 = redis.Redis(host=redis_host, port=redis_port, db=1, decode_responses=True)
+        keys_db1 = client_db1.dbsize()
+        client_db1.flushdb()
+        total_keys_deleted += keys_db1
+        print(f"   ✅ DB1: {keys_db1} clés supprimées (historique imports)")
 
-        print(f"   ✅ {keys_before} clés Redis supprimées (FLUSHDB)")
-        return {"success": True, "keys_deleted": keys_before}
+        print(f"   📊 Total: {total_keys_deleted} clés supprimées")
+        return {"success": True, "keys_deleted": total_keys_deleted}
 
     except Exception as e:
         print(f"   ❌ Erreur purge Redis: {e}")
