@@ -1,4 +1,44 @@
-# Scripts d'Export/Import de Documents
+# Scripts Utilitaires OSMOSE
+
+Scripts pour gérer les données, exports/imports, et maintenance du système KnowWhere/OSMOSE.
+
+## 🗑️ Purge Système Complète
+
+Le script `purge_system.py` permet de purger TOUTES les données du système en une seule commande.
+
+### Usage
+
+```bash
+# Depuis l'hôte (avec confirmation interactive)
+python scripts/purge_system.py
+
+# Depuis le conteneur
+docker-compose exec app python scripts/purge_system.py
+
+# Purge d'un tenant spécifique Neo4j
+python scripts/purge_system.py --tenant myorg
+```
+
+### Ce qui est purgé
+
+- ✅ **Redis** : TOUTES les clés (FLUSHDB) - queues d'imports, jobs RQ, cache
+- ✅ **Qdrant** : Collections `knowbase` et `rfp_qa` complètement supprimées
+- ✅ **Neo4j** : Tous les nodes du tenant `default` (ou spécifié)
+- ✅ **Fichiers** : `data/docs_done/*` et `data/status/*.status`
+
+### Ce qui est PRÉSERVÉ
+
+- ⚠️ **Cache d'extraction** : `data/extraction_cache/*.knowcache.json` (JAMAIS touché)
+- ⚠️ **Documents source** : `data/docs_in/*` (non purgés par défaut)
+- ⚠️ **Schéma Neo4j** : Constraints et indexes (restent en place)
+
+### Pourquoi ce script ?
+
+Après une purge système, la queue Redis des imports terminés ne reflète plus la réalité des données en base. Ce script assure une purge **cohérente** de tous les composants.
+
+---
+
+## 📦 Scripts d'Export/Import de Documents
 
 Ces scripts permettent de sauvegarder et restaurer des documents traités pour éviter de refaire les appels LLM coûteux.
 
