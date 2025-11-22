@@ -461,6 +461,7 @@ class Neo4jClient:
 
                 if existing_canonical_id:
                     # Phase 1.6: Agréger chunk_ids (existants + nouveaux)
+                    # Phase 1.8.1d: Agréger document_ids (traçabilité multi-document)
                     aggregate_query = """
                 MATCH (proto:ProtoConcept {concept_id: $proto_concept_id, tenant_id: $tenant_id})
                 MATCH (canonical:CanonicalConcept {canonical_id: $existing_canonical_id, tenant_id: $tenant_id})
@@ -483,8 +484,26 @@ class Neo4jClient:
                 WHERE chunk_item IS NOT NULL
                 WITH proto, canonical, COLLECT(DISTINCT chunk_item) AS aggregated_chunks
 
-                // Mettre à jour CanonicalConcept.chunk_ids + name/summary si manquants
+                // Phase 1.8.1d: Agréger document_ids (traçabilité multi-document)
+                WITH proto, canonical, aggregated_chunks,
+                     COALESCE(canonical.document_ids, []) AS existing_docs,
+                     CASE
+                         WHEN proto.document_id IS NOT NULL THEN [proto.document_id]
+                         ELSE []
+                     END AS proto_docs
+
+                // Agréger et dédupliquer document_ids
+                WITH proto, canonical, aggregated_chunks,
+                     existing_docs + proto_docs AS all_docs_raw
+
+                UNWIND all_docs_raw AS doc_item
+                WITH proto, canonical, aggregated_chunks, doc_item
+                WHERE doc_item IS NOT NULL
+                WITH proto, canonical, aggregated_chunks, COLLECT(DISTINCT doc_item) AS aggregated_docs
+
+                // Mettre à jour CanonicalConcept.chunk_ids + document_ids + name/summary si manquants
                 SET canonical.chunk_ids = aggregated_chunks,
+                    canonical.document_ids = aggregated_docs,
                     canonical.name = COALESCE(canonical.name, canonical.canonical_name),
                     canonical.summary = COALESCE(canonical.summary, canonical.unified_definition)
 
@@ -496,7 +515,8 @@ class Neo4jClient:
 
                 RETURN canonical.canonical_id AS canonical_id,
                        canonical.canonical_name AS canonical_name,
-                       SIZE(aggregated_chunks) AS chunk_count
+                       SIZE(aggregated_chunks) AS chunk_count,
+                       SIZE(aggregated_docs) AS document_count
                 """
 
                     try:
@@ -513,10 +533,11 @@ class Neo4jClient:
 
                             if record:
                                 chunk_count = record.get("chunk_count", 0)
+                                document_count = record.get("document_count", 0)
                                 logger.info(
                                     f"[NEO4J:Dedup] Linked ProtoConcept to existing CanonicalConcept '{canonical_name}' "
                                     f"(proto={proto_concept_id[:8]}, canonical={existing_canonical_id[:8]}, "
-                                    f"aggregated {chunk_count} chunks)"
+                                    f"aggregated {chunk_count} chunks, {document_count} docs)"
                                 )
                                 return existing_canonical_id
                             else:
@@ -551,7 +572,14 @@ class Neo4jClient:
                      CASE WHEN chunk IN acc THEN acc ELSE acc + chunk END
                  ) AS aggregated_chunks
 
-            // Créer CanonicalConcept (P1.3: ajout surface_form, P1.6: ajout chunk_ids)
+            // Phase 1.8.1d: Préparer document_ids (traçabilité document)
+            WITH proto, aggregated_chunks,
+                 CASE
+                     WHEN proto.document_id IS NOT NULL THEN [proto.document_id]
+                     ELSE []
+                 END AS document_ids
+
+            // Créer CanonicalConcept (P1.3: surface_form, P1.6: chunk_ids, P1.8.1d: document_ids)
             CREATE (canonical:CanonicalConcept {
                 canonical_id: randomUUID(),
                 tenant_id: $tenant_id,
@@ -563,6 +591,7 @@ class Neo4jClient:
                 summary: $unified_definition,
                 quality_score: $quality_score,
                 chunk_ids: aggregated_chunks,
+                document_ids: document_ids,
                 promoted_at: datetime(),
                 metadata_json: $metadata_json,
                 decision_trace_json: $decision_trace_json
@@ -574,7 +603,8 @@ class Neo4jClient:
             RETURN canonical.canonical_id AS canonical_id,
                    canonical.canonical_name AS canonical_name,
                    canonical.surface_form AS surface_form,
-                   SIZE(aggregated_chunks) AS chunk_count
+                   SIZE(aggregated_chunks) AS chunk_count,
+                   SIZE(document_ids) AS document_count
             """
 
             with self.driver.session(database=self.database) as session:
@@ -596,6 +626,7 @@ class Neo4jClient:
                 if record:
                     canonical_id = record["canonical_id"]
                     chunk_count = record.get("chunk_count", 0)
+                    document_count = record.get("document_count", 0)
 
                     # P1.3: Log surface_form si présent
                     surface_info = f", surface='{surface_form}'" if surface_form else ""
@@ -603,9 +634,12 @@ class Neo4jClient:
                     # P1.6: Log chunk_count si présent
                     chunk_info = f", chunks={chunk_count}" if chunk_count > 0 else ""
 
+                    # P1.8.1d: Log document_count si présent
+                    doc_info = f", docs={document_count}" if document_count > 0 else ""
+
                     logger.info(
                         f"[NEO4J:Published] Created NEW CanonicalConcept '{canonical_name}' "
-                        f"(proto={proto_concept_id[:8]}, quality={quality_score:.2f}{surface_info}{chunk_info})"
+                        f"(proto={proto_concept_id[:8]}, quality={quality_score:.2f}{surface_info}{chunk_info}{doc_info})"
                     )
 
                     return canonical_id

@@ -32,12 +32,14 @@ class AgentState(BaseModel):
     """État partagé entre agents (passé via FSM)."""
     document_id: str
     tenant_id: str = "default"
+    document_type: Optional[str] = None  # Phase 1.8.1d: Type document (PPTX, PDF, TXT, etc.)
     full_text: Optional[str] = None  # Texte complet pour filtrage contextuel
     document_name: Optional[str] = None  # Phase 2: Nom document pour relation extraction
     chunk_ids: List[str] = Field(default_factory=list)  # Phase 2: IDs chunks pour relation extraction
 
     # Phase 1.8: P0.1 - Contexte document global
-    custom_data: Dict[str, Any] = Field(default_factory=dict)  # Données custom (ex: document_context)
+    # Phase 1.8.1d: Peut contenir slides_data pour PPTX (extraction locale)
+    custom_data: Dict[str, Any] = Field(default_factory=dict)  # Données custom (ex: document_context, slides_data)
 
     # Budget tracking
     budget_remaining: Dict[str, int] = Field(default_factory=lambda: {

@@ -99,6 +99,15 @@ providers:
       - "claude-opus-4-20250514"
       - "claude-3-haiku-20240307"
 
+  google:
+    api_key_env: "GOOGLE_API_KEY"
+    base_url: null
+    models:
+      - "gemini-1.5-flash"
+      - "gemini-1.5-flash-8b"
+      - "gemini-1.5-pro"
+      - "gemini-2.0-flash-exp"
+
   sagemaker:
     aws_region: "us-east-1"  # Région AWS par défaut
     models:
@@ -192,3 +201,20 @@ default_model: "gpt-4o"
 default_fallbacks:
   - "gpt-4o"
   - "gpt-4o-mini"
+
+# Configuration du cache LLM par provider
+cache_config:
+  # Gemini Context Caching
+  gemini:
+    cache_enabled: true  # Activer cache Gemini (réduit coûts input -75%)
+    default_ttl_hours: 1  # Durée de vie du cache (1h par défaut)
+    cache_system_prompts: true  # Cacher les prompts système
+    cache_document_context: true  # Cacher le contexte document (deck summary)
+
+  # OpenAI (pas de cache natif)
+  openai:
+    cache_enabled: false
+
+  # Anthropic Prompt Caching (futur)
+  anthropic:
+    cache_enabled: false  # Activer quand implémenté

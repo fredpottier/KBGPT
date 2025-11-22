@@ -9,7 +9,7 @@ import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, MagicMock
 from src.knowbase.semantic.indexing.semantic_indexer import SemanticIndexer
-from src.knowbase.semantic.models import Concept, CanonicalConcept, ConceptType
+from src.knowbase.semantic.models import Concept, CanonicalConcept
 from src.knowbase.semantic.config import get_semantic_config
 
 
@@ -44,7 +44,7 @@ def sample_concepts_multilingual():
     return [
         Concept(
             name="authentication",
-            type=ConceptType.PRACTICE,
+            type="practice",
             definition="Process of verifying identity",
             context="User authentication is required",
             language="en",
@@ -54,7 +54,7 @@ def sample_concepts_multilingual():
         ),
         Concept(
             name="authentification",
-            type=ConceptType.PRACTICE,
+            type="practice",
             definition="Processus de vérification d'identité",
             context="L'authentification utilisateur est requise",
             language="fr",
@@ -64,7 +64,7 @@ def sample_concepts_multilingual():
         ),
         Concept(
             name="Authentifizierung",
-            type=ConceptType.PRACTICE,
+            type="practice",
             definition="Prozess der Identitätsüberprüfung",
             context="Benutzer-Authentifizierung ist erforderlich",
             language="de",
@@ -81,7 +81,7 @@ def sample_concepts_hierarchy():
     return [
         Concept(
             name="Security Testing",
-            type=ConceptType.PRACTICE,
+            type="practice",
             definition="Testing for security vulnerabilities",
             context="Security testing is essential",
             language="en",
@@ -91,7 +91,7 @@ def sample_concepts_hierarchy():
         ),
         Concept(
             name="SAST",
-            type=ConceptType.TOOL,
+            type="tool",
             definition="Static Application Security Testing",
             context="SAST tools analyze source code",
             language="en",
@@ -101,7 +101,7 @@ def sample_concepts_hierarchy():
         ),
         Concept(
             name="DAST",
-            type=ConceptType.TOOL,
+            type="tool",
             definition="Dynamic Application Security Testing",
             context="DAST tools test running applications",
             language="en",
@@ -111,7 +111,7 @@ def sample_concepts_hierarchy():
         ),
         Concept(
             name="Penetration Testing",
-            type=ConceptType.PRACTICE,
+            type="practice",
             definition="Simulated cyber attack",
             context="Penetration testing finds vulnerabilities",
             language="en",
@@ -152,7 +152,7 @@ class TestSemanticIndexer:
         assert set(concept.languages) == {"en", "fr", "de"}
 
         # Type
-        assert concept.type == ConceptType.PRACTICE
+        assert concept.type == "practice"
 
         # Support
         assert concept.support == 3
@@ -173,7 +173,7 @@ class TestSemanticIndexer:
         concepts = [
             Concept(
                 name="ISO 27001",
-                type=ConceptType.STANDARD,
+                type="standard",
                 definition="",
                 context="",
                 language="en",
@@ -183,7 +183,7 @@ class TestSemanticIndexer:
             ),
             Concept(
                 name="GDPR",
-                type=ConceptType.STANDARD,
+                type="standard",
                 definition="",
                 context="",
                 language="en",
@@ -210,7 +210,7 @@ class TestSemanticIndexer:
         concepts = [
             Concept(
                 name="authentification",
-                type=ConceptType.PRACTICE,
+                type="practice",
                 definition="",
                 context="",
                 language="fr",
@@ -220,7 +220,7 @@ class TestSemanticIndexer:
             ),
             Concept(
                 name="authentication",
-                type=ConceptType.PRACTICE,
+                type="practice",
                 definition="",
                 context="",
                 language="en",
@@ -230,7 +230,7 @@ class TestSemanticIndexer:
             ),
             Concept(
                 name="auth",  # Plus court
-                type=ConceptType.PRACTICE,
+                type="practice",
                 definition="",
                 context="",
                 language="en",
@@ -253,7 +253,7 @@ class TestSemanticIndexer:
         concepts = [
             Concept(
                 name="authentification",
-                type=ConceptType.PRACTICE,
+                type="practice",
                 definition="",
                 context="",
                 language="fr",
@@ -263,7 +263,7 @@ class TestSemanticIndexer:
             ),
             Concept(
                 name="authentification",  # Duplicate
-                type=ConceptType.PRACTICE,
+                type="practice",
                 definition="",
                 context="",
                 language="fr",
@@ -273,7 +273,7 @@ class TestSemanticIndexer:
             ),
             Concept(
                 name="Authentifizierung",
-                type=ConceptType.PRACTICE,
+                type="practice",
                 definition="",
                 context="",
                 language="de",
@@ -297,7 +297,7 @@ class TestSemanticIndexer:
         concepts = [
             Concept(
                 name="ISO 27001",
-                type=ConceptType.STANDARD,
+                type="standard",
                 definition="Information security management standard",
                 context="",
                 language="en",
@@ -307,7 +307,7 @@ class TestSemanticIndexer:
             ),
             Concept(
                 name="ISO 27001",
-                type=ConceptType.STANDARD,
+                type="standard",
                 definition="Standard for information security",
                 context="",
                 language="en",
@@ -331,7 +331,7 @@ class TestSemanticIndexer:
         concepts = [
             Concept(
                 name="GDPR",
-                type=ConceptType.STANDARD,
+                type="standard",
                 definition="General Data Protection Regulation",
                 context="",
                 language="en",
@@ -354,7 +354,7 @@ class TestSemanticIndexer:
         concepts = [
             Concept(
                 name="Test",
-                type=ConceptType.ENTITY,
+                type="entity",
                 definition="",
                 context="",
                 language="en",
@@ -426,7 +426,7 @@ class TestSemanticIndexer:
         concepts = [
             Concept(
                 name="authentication",
-                type=ConceptType.PRACTICE,
+                type="practice",
                 definition="",
                 context="",
                 language="en",
@@ -436,7 +436,7 @@ class TestSemanticIndexer:
             ),
             Concept(
                 name="authorization",
-                type=ConceptType.PRACTICE,
+                type="practice",
                 definition="",
                 context="",
                 language="en",
@@ -446,7 +446,7 @@ class TestSemanticIndexer:
             ),
             Concept(
                 name="access control",
-                type=ConceptType.PRACTICE,
+                type="practice",
                 definition="",
                 context="",
                 language="en",
@@ -456,7 +456,7 @@ class TestSemanticIndexer:
             ),
             Concept(
                 name="ISO 27001",  # Très différent
-                type=ConceptType.STANDARD,
+                type="standard",
                 definition="",
                 context="",
                 language="en",
@@ -491,7 +491,7 @@ class TestSemanticIndexer:
             canonical_name="authentication",
             aliases=["authentification", "Authentifizierung"],
             languages=["en", "fr", "de"],
-            type=ConceptType.PRACTICE,
+            type="practice",
             definition="Process of verifying identity",
             hierarchy_parent=None,
             hierarchy_children=["MFA", "SSO"],
@@ -519,7 +519,7 @@ class TestSemanticIndexer:
             canonical_name="test",
             aliases=["test"],
             languages=["en"],
-            type=ConceptType.ENTITY,
+            type="entity",
             definition="",
             hierarchy_parent=None,
             hierarchy_children=[],
@@ -593,7 +593,7 @@ class TestSemanticIndexer:
             concepts.append(
                 Concept(
                     name=f"Concept {i}",
-                    type=ConceptType.ENTITY,
+                    type="entity",
                     definition="",
                     context="",
                     language="en",

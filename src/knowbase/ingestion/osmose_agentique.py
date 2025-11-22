@@ -20,6 +20,7 @@ import logging
 import os
 from datetime import datetime
 
+from knowbase.config.settings import get_settings
 from knowbase.agents.supervisor.supervisor import SupervisorAgent
 from knowbase.agents.base import AgentState
 from knowbase.ingestion.osmose_integration import (
@@ -476,6 +477,7 @@ class OsmoseAgentiqueService:
             initial_state = AgentState(
                 document_id=document_id,
                 tenant_id=tenant,
+                document_type=document_type.upper(),  # Phase 1.8.1d: Type document
                 full_text=text_content  # Stocker texte complet pour filtrage contextuel
             )
 
@@ -487,14 +489,39 @@ class OsmoseAgentiqueService:
                     initial_state.custom_data = {}
                 initial_state.custom_data['document_context'] = document_context
 
+            # Phase 1.8.1d: Extraire slides_data pour PPTX (Pipeline Fusion)
+            if document_type.upper() == "PPTX":
+                try:
+                    from knowbase.ingestion.components.extractors.binary_parser import extract_notes_and_text
+
+                    logger.info(f"[OSMOSE AGENTIQUE:Fusion] 🌊 Extracting slides_data for PPTX document")
+                    slides_data = extract_notes_and_text(document_path, logger)
+
+                    if slides_data:
+                        initial_state.custom_data['slides_data'] = slides_data
+                        logger.info(
+                            f"[OSMOSE AGENTIQUE:Fusion] ✅ Extracted {len(slides_data)} slides for Fusion Pipeline"
+                        )
+                    else:
+                        logger.warning(
+                            f"[OSMOSE AGENTIQUE:Fusion] ⚠️ No slides_data extracted, falling back to segmentation"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"[OSMOSE AGENTIQUE:Fusion] ❌ Error extracting slides_data: {e}",
+                        exc_info=True
+                    )
+                    # Non-bloquant: continuer sans slides_data (fallback segmentation)
+
             # Stocker métadonnées document dans state (custom fields)
             # Note: AgentState devra être étendu pour supporter ces champs
             # Pour l'instant, on les log uniquement
             logger.info(
                 f"[OSMOSE AGENTIQUE] AgentState created: "
-                f"doc={document_id}, tenant={tenant}, "
+                f"doc={document_id}, tenant={tenant}, type={document_type}, "
                 f"budgets={initial_state.budget_remaining}, "
-                f"context={'YES' if document_context else 'NO'}"
+                f"context={'YES' if document_context else 'NO'}, "
+                f"slides={'YES' if 'slides_data' in initial_state.custom_data else 'NO'}"
             )
 
             # Étape 2: Segmentation sémantique avec TopicSegmenter
@@ -748,6 +775,52 @@ class OsmoseAgentiqueService:
                     f"[OSMOSE AGENTIQUE] ✅ Document {document_id} processed successfully: "
                     f"{result.canonical_concepts} concepts promoted in {osmose_duration:.1f}s"
                 )
+
+                # 📊 Grafana Metrics (format structuré pour dashboard)
+                logger.info(f"[OSMOSE:Metrics] extraction_latency={osmose_duration:.1f}s")
+                logger.info(f"[OSMOSE:Metrics] {canonical_count} canonical concepts created")
+                logger.info(f"[OSMOSE:Metrics] {result.canonical_concepts} concepts promoted")
+
+                # Métriques heuristiques qualité (si données disponibles)
+                if hasattr(result, 'total_concepts_extracted') and result.total_concepts_extracted > 0:
+                    promotion_rate = (result.canonical_concepts / result.total_concepts_extracted) * 100
+                    logger.info(f"[OSMOSE:Metrics] promotion_rate={promotion_rate:.1f}%")
+
+                # 💰 Métrique coût: Agréger depuis token_usage.jsonl
+                try:
+                    import json
+                    from pathlib import Path
+                    from datetime import datetime, timedelta
+
+                    # Lire token_usage.jsonl des 2 dernières minutes (période d'extraction)
+                    settings = self.config.__dict__.get('settings') or get_settings()
+                    token_log_path = settings.logs_dir / "token_usage.jsonl"
+
+                    if token_log_path.exists():
+                        total_cost = 0.0
+                        cutoff_time = datetime.now() - timedelta(seconds=osmose_duration + 60)  # Marge sécurité
+
+                        with open(token_log_path, 'r', encoding='utf-8') as f:
+                            for line in f:
+                                try:
+                                    entry = json.loads(line.strip())
+                                    entry_time = datetime.fromisoformat(entry.get('timestamp', ''))
+
+                                    # Filtrer entrées de cette extraction
+                                    if entry_time >= cutoff_time:
+                                        total_cost += entry.get('cost', 0.0)
+                                except (json.JSONDecodeError, ValueError):
+                                    continue
+
+                        # Log métrique coût pour Grafana
+                        logger.info(f"[OSMOSE:Metrics] cost_per_doc={total_cost:.4f}")
+                        logger.info(f"[OSMOSE:Metrics] total_cost_usd={total_cost:.4f}")
+                    else:
+                        logger.debug(f"[OSMOSE:Metrics] token_usage.jsonl not found at {token_log_path}")
+
+                except Exception as cost_error:
+                    logger.warning(f"[OSMOSE:Metrics] Could not calculate cost: {cost_error}")
+
             else:
                 logger.error(
                     f"[OSMOSE AGENTIQUE] ❌ Document {document_id} processing failed: "

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from typing import List, Dict, Any
 
 from knowbase.semantic.indexing.semantic_indexer import SemanticIndexer
-from knowbase.semantic.models import Concept, ConceptType
+from knowbase.semantic.models import Concept
 from knowbase.semantic.config import SemanticConfig
 
 
@@ -66,7 +66,7 @@ def sample_concepts() -> List[Concept]:
     return [
         Concept(
             name="authentication",
-            type=ConceptType.PRACTICE,
+            type="practice",
             context="User authentication via MFA",
             language="en",
             confidence=0.9,
@@ -75,7 +75,7 @@ def sample_concepts() -> List[Concept]:
         ),
         Concept(
             name="authentification",
-            type=ConceptType.PRACTICE,
+            type="practice",
             context="Authentification utilisateur via MFA",
             language="fr",
             confidence=0.9,
@@ -91,7 +91,7 @@ def distinct_concepts() -> List[Concept]:
     return [
         Concept(
             name="security",
-            type=ConceptType.PRACTICE,
+            type="practice",
             context="Security controls and measures",
             language="en",
             confidence=0.9,
@@ -100,7 +100,7 @@ def distinct_concepts() -> List[Concept]:
         ),
         Concept(
             name="compliance",
-            type=ConceptType.PRACTICE,
+            type="practice",
             context="Compliance with regulations",
             language="en",
             confidence=0.9,
@@ -495,9 +495,9 @@ class TestLLMJudgeEdgeCases:
     async def test_three_concepts_cluster(self, semantic_indexer, mock_llm_router):
         """Test: cluster avec 3 concepts (edge case)."""
         concepts = [
-            Concept(name="auth", type=ConceptType.PRACTICE, context="Auth", language="en", confidence=0.9, source_topic_id="1", extraction_method="NER"),
-            Concept(name="authentication", type=ConceptType.PRACTICE, context="Authentication", language="en", confidence=0.9, source_topic_id="2", extraction_method="NER"),
-            Concept(name="authentification", type=ConceptType.PRACTICE, context="Authentification", language="fr", confidence=0.9, source_topic_id="3", extraction_method="NER")
+            Concept(name="auth", type="practice", context="Auth", language="en", confidence=0.9, source_topic_id="1", extraction_method="NER"),
+            Concept(name="authentication", type="practice", context="Authentication", language="en", confidence=0.9, source_topic_id="2", extraction_method="NER"),
+            Concept(name="authentification", type="practice", context="Authentification", language="fr", confidence=0.9, source_topic_id="3", extraction_method="NER")
         ]
 
         mock_llm_router.acomplete.return_value = '{"are_synonyms": true, "reasoning": "All synonyms"}'

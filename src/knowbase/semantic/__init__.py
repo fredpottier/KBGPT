@@ -28,7 +28,6 @@ from .models import (
     CanonicalConcept,
     Topic,
     ConceptConnection,
-    ConceptType,
     DocumentRole,
 )
 from .config import SemanticConfig
@@ -46,7 +45,6 @@ __all__ = [
     "CanonicalConcept",
     "Topic",
     "ConceptConnection",
-    "ConceptType",
     "DocumentRole",
     "SemanticConfig",
 ]

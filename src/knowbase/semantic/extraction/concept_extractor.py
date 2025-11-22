@@ -14,7 +14,7 @@ import re
 from sklearn.metrics.pairwise import cosine_distances
 from hdbscan import HDBSCAN
 
-from ..models import Concept, Topic, ConceptType
+from ..models import Concept, Topic
 from ..utils.embeddings import get_embedder
 from ..utils.ner_manager import get_ner_manager
 from ..utils.language_detector import get_language_detector
@@ -68,12 +68,14 @@ class MultilingualConceptExtractor:
         self,
         topic: Topic,
         enable_llm: bool = True,
-        document_context: Optional[str] = None
+        document_context: Optional[str] = None,
+        extraction_mode: str = "standard",
+        source_metadata: Optional[Dict] = None
     ) -> List[Concept]:
         """
         Extrait concepts d'un topic via méthode optimisée (V2.2 Density-Aware).
 
-        Pipeline V2.2 + Phase 1.8 P0.1:
+        Pipeline V2.2 + Phase 1.8 P0.1 + Phase 1.8.1d:
         0. Analyse densité conceptuelle → Sélection méthode optimale
         1. NER Multilingue (si recommandé)
         2. Semantic Clustering (si recommandé)
@@ -85,11 +87,27 @@ class MultilingualConceptExtractor:
             topic: Topic à analyser
             enable_llm: Activer extraction LLM (default: True)
             document_context: Contexte document global (Phase 1.8 P0.1) - formaté pour prompt
+            extraction_mode: Mode extraction (Phase 1.8.1d)
+                - "standard": Extraction classique (large contexte, segmentation préalable)
+                - "local": Extraction granulaire (focus segment isolé, preserve metadata)
+            source_metadata: Metadata source du segment (Phase 1.8.1d)
+                - Exemple: {"slide_index": 1, "section": "intro"}
+                - Préservé dans Concept.metadata pour traçabilité
 
         Returns:
             List[Concept]: Concepts extraits et dédupliqués
+
+        Note:
+            Mode "local" (Phase 1.8.1d):
+            - Focus sur extraction granulaire (3-10 concepts/segment)
+            - Préserve source_metadata dans chaque Concept
+            - Adapte prompts LLM pour granularité fine
+            - Utilisé pour documents structurés (PPTX, slides)
         """
-        logger.info(f"[OSMOSE] Extracting concepts from topic: {topic.topic_id}")
+        logger.info(
+            f"[OSMOSE] Extracting concepts from topic: {topic.topic_id} "
+            f"(mode={extraction_mode})"
+        )
 
         concepts = []
 
@@ -97,6 +115,22 @@ class MultilingualConceptExtractor:
         topic_text = " ".join([w.text for w in topic.windows])
         topic_language = self.language_detector.detect(topic_text[:2000])
         logger.debug(f"[OSMOSE] Topic language: {topic_language}")
+
+        # Phase 1.8.1d: Ajuster paramètres selon extraction_mode
+        if extraction_mode == "local":
+            # Mode local: extraction granulaire avec seuils adaptés
+            original_min_concepts = self.extraction_config.min_concepts_per_topic
+            original_max_concepts = self.extraction_config.max_concepts_per_topic
+
+            # Réduire seuils pour extraction locale fine (3-10 concepts/slide)
+            self.extraction_config.min_concepts_per_topic = 3
+            self.extraction_config.max_concepts_per_topic = 10
+
+            logger.info(
+                f"[OSMOSE:Phase1.8.1d] Local extraction mode: "
+                f"min_concepts={self.extraction_config.min_concepts_per_topic}, "
+                f"max_concepts={self.extraction_config.max_concepts_per_topic}"
+            )
 
         # V2.2: Analyse densité conceptuelle pour optimisation
         density_profile = self.density_detector.analyze_density(
@@ -115,7 +149,12 @@ class MultilingualConceptExtractor:
             # Texte dense → LLM d'emblée (skip NER inefficace)
             logger.info("[OSMOSE] Dense text detected → LLM-first strategy")
             if enable_llm and "LLM" in self.extraction_config.methods:
-                concepts_llm = await self._extract_via_llm(topic, topic_language, document_context)
+                concepts_llm = await self._extract_via_llm(
+                    topic,
+                    topic_language,
+                    document_context,
+                    extraction_mode
+                )
                 concepts.extend(concepts_llm)
                 logger.info(f"[OSMOSE] LLM: {len(concepts_llm)} concepts")
             else:
@@ -152,7 +191,12 @@ class MultilingualConceptExtractor:
             # Méthode 3: LLM (si insuffisant)
             if enable_llm and "LLM" in self.extraction_config.methods:
                 if len(concepts) < self.extraction_config.min_concepts_per_topic:
-                    concepts_llm = await self._extract_via_llm(topic, topic_language, document_context)
+                    concepts_llm = await self._extract_via_llm(
+                        topic,
+                        topic_language,
+                        document_context,
+                        extraction_mode
+                    )
                     concepts.extend(concepts_llm)
                     logger.info(f"[OSMOSE] LLM: {len(concepts_llm)} concepts")
                 else:
@@ -173,6 +217,22 @@ class MultilingualConceptExtractor:
             logger.debug(
                 f"[OSMOSE] Limited to {self.extraction_config.max_concepts_per_topic} concepts"
             )
+
+        # Phase 1.8.1d: Préserver source_metadata dans concepts (mode local)
+        if extraction_mode == "local" and source_metadata:
+            for concept in concepts_deduplicated:
+                # Enrichir metadata du concept avec source
+                if not concept.metadata:
+                    concept.metadata = {}
+                concept.metadata.update(source_metadata)
+
+            logger.debug(
+                f"[OSMOSE:Phase1.8.1d] Source metadata preserved in {len(concepts_deduplicated)} concepts"
+            )
+
+            # Restaurer paramètres originaux
+            self.extraction_config.min_concepts_per_topic = original_min_concepts
+            self.extraction_config.max_concepts_per_topic = original_max_concepts
 
         return concepts_deduplicated
 
@@ -202,7 +262,7 @@ class MultilingualConceptExtractor:
 
         concepts = []
         for ent in entities:
-            # Mapper label NER → ConceptType
+            # Mapper label NER → type string domain-agnostic
             concept_type = self._map_ner_label_to_concept_type(ent["label"])
 
             # Contexte (100 chars avant/après)
@@ -317,15 +377,17 @@ class MultilingualConceptExtractor:
         self,
         topic: Topic,
         language: str,
-        document_context: Optional[str] = None
+        document_context: Optional[str] = None,
+        extraction_mode: str = "standard"
     ) -> List[Concept]:
         """
-        Extraction via LLM avec prompt structuré multilingue + contexte document (Phase 1.8 P0.1).
+        Extraction via LLM avec prompt structuré multilingue + contexte document (Phase 1.8 P0.1+1.8.1d).
 
         Args:
             topic: Topic à analyser
             language: Langue détectée
-            document_context: Contexte document global (formaté pour prompt) - Phase 1.8 P0.1
+            document_context: Contexte document global (Phase 1.8 P0.1)
+            extraction_mode: Mode extraction ("standard" ou "local", Phase 1.8.1d)
 
         Returns:
             List[Concept]: Concepts extraits via LLM
@@ -340,8 +402,13 @@ class MultilingualConceptExtractor:
         if len(topic_text) > 2000:
             topic_text = topic_text[:2000] + "..."
 
-        # Prompt selon langue + contexte document (Phase 1.8 P0.1)
-        prompt = self._get_llm_extraction_prompt(topic_text, language, document_context)
+        # Prompt selon langue + contexte document (Phase 1.8 P0.1+1.8.1d)
+        prompt = self._get_llm_extraction_prompt(
+            topic_text,
+            language,
+            document_context,
+            extraction_mode
+        )
 
         try:
             # Appel LLM async pour parallélisation
@@ -364,10 +431,8 @@ class MultilingualConceptExtractor:
             # Créer objets Concept
             concepts = []
             for concept_dict in concepts_data:
-                try:
-                    concept_type = ConceptType(concept_dict.get("type", "entity").lower())
-                except ValueError:
-                    concept_type = ConceptType.ENTITY
+                # Type domain-agnostic (str découvert par LLM)
+                concept_type = concept_dict.get("type", "entity").lower()
 
                 concept = Concept(
                     name=concept_dict["name"],
@@ -508,40 +573,40 @@ class MultilingualConceptExtractor:
 
         return noun_phrases
 
-    def _map_ner_label_to_concept_type(self, ner_label: str) -> ConceptType:
+    def _map_ner_label_to_concept_type(self, ner_label: str) -> str:
         """
-        Mappe label NER spaCy → ConceptType.
+        Mappe label NER spaCy → concept type (str, domain-agnostic).
 
         Args:
             ner_label: Label NER (ORG, PRODUCT, LAW, etc.)
 
         Returns:
-            ConceptType: Type concept mappé
+            str: Type concept mappé (lowercase)
         """
         mapping = {
-            "ORG": ConceptType.ENTITY,
-            "PRODUCT": ConceptType.TOOL,
-            "LAW": ConceptType.STANDARD,
-            "TECH": ConceptType.TOOL,
-            "MISC": ConceptType.ENTITY,
+            "ORG": "entity",
+            "PRODUCT": "tool",
+            "LAW": "standard",
+            "TECH": "tool",
+            "MISC": "entity",
         }
 
-        return mapping.get(ner_label, ConceptType.ENTITY)
+        return mapping.get(ner_label, "entity")
 
     def _infer_concept_type_heuristic(
         self,
         canonical_name: str,
         related_phrases: List[str]
-    ) -> ConceptType:
+    ) -> str:
         """
-        Infère type concept via heuristique basique.
+        Infère type concept via heuristique basique (domain-agnostic).
 
         Args:
             canonical_name: Nom canonique
             related_phrases: Phrases liées
 
         Returns:
-            ConceptType: Type inféré
+            str: Type inféré (lowercase)
         """
         name_lower = canonical_name.lower()
 
@@ -553,34 +618,52 @@ class MultilingualConceptExtractor:
 
         # Check keywords
         if any(kw in name_lower for kw in tool_keywords):
-            return ConceptType.TOOL
+            return "tool"
         elif any(kw in name_lower for kw in standard_keywords):
-            return ConceptType.STANDARD
+            return "standard"
         elif any(kw in name_lower for kw in practice_keywords):
-            return ConceptType.PRACTICE
+            return "practice"
         elif any(kw in name_lower for kw in role_keywords):
-            return ConceptType.ROLE
+            return "role"
 
         # Default: ENTITY
-        return ConceptType.ENTITY
+        return "entity"
 
     def _get_llm_extraction_prompt(
         self,
         text: str,
         language: str,
-        document_context: Optional[str] = None
+        document_context: Optional[str] = None,
+        extraction_mode: str = "standard"
     ) -> str:
         """
-        Génère prompt LLM extraction selon langue + contexte document (Phase 1.8 P0.1).
+        Génère prompt LLM extraction selon langue + contexte document (Phase 1.8 P0.1+1.8.1d).
 
         Args:
             text: Texte à analyser
             language: Langue (en, fr, de, etc.)
             document_context: Contexte document global formaté (Phase 1.8 P0.1)
+            extraction_mode: Mode extraction ("standard" ou "local", Phase 1.8.1d)
 
         Returns:
             str: Prompt formaté
+
+        Note:
+            Mode "local" adapte le prompt pour extraction granulaire :
+            - Focus sur concepts spécifiques au segment
+            - Éviter généralités globales
+            - Extraction ciblée 3-8 concepts (vs 5-10 en standard)
+
+        Phase 1.8.1d:
+            Inject DomainContext via DomainContextInjector pour canonicalization
+            SAP-aware et expansion acronymes.
         """
+        # Phase 1.8.1d: Injection DomainContext (tenant-specific knowledge)
+        from knowbase.ontology.domain_context_injector import DomainContextInjector
+
+        injector = DomainContextInjector()
+        base_prompt_with_domain = ""  # Will be enriched below
+
         # Injection contexte document si disponible (Phase 1.8 P0.1)
         context_prefix = ""
         if document_context:
@@ -595,6 +678,20 @@ IMPORTANT: Use the document context above to:
 
 """
 
+        # Phase 1.8.1d: Instructions spécifiques au mode extraction
+        if extraction_mode == "local":
+            extraction_guidance = {
+                "en": "\n\nIMPORTANT (Local Extraction Mode):\n- Focus on concepts SPECIFIC to THIS segment only\n- Avoid generic/global concepts (extract those from other segments)\n- Include technical details, metrics, specific features mentioned HERE\n- Extract 3-8 concepts maximum (granular extraction)",
+                "fr": "\n\nIMPORTANT (Mode Extraction Locale):\n- Focus sur concepts SPÉCIFIQUES à CE segment uniquement\n- Éviter concepts génériques/globaux (extraits d'autres segments)\n- Inclure détails techniques, métriques, fonctionnalités spécifiques mentionnées ICI\n- Extraire 3-8 concepts maximum (extraction granulaire)",
+                "de": "\n\nWICHTIG (Lokaler Extraktionsmodus):\n- Fokus auf Konzepte SPEZIFISCH für DIESES Segment nur\n- Vermeide generische/globale Konzepte (aus anderen Segmenten)\n- Technische Details, Metriken, spezifische Funktionen HIER enthalten\n- Maximal 3-8 Konzepte extrahieren (granulare Extraktion)"
+            }
+        else:
+            extraction_guidance = {
+                "en": "\n\nExtract 3-10 concepts maximum. Focus on the most important ones.",
+                "fr": "\n\nExtrait 3-10 concepts maximum. Focus sur les plus importants.",
+                "de": "\n\nExtrahiere maximal 3-10 Konzepte. Fokus auf die wichtigsten."
+            }
+
         prompts = {
             "en": f"""{context_prefix}Extract key concepts from the following text.
 
@@ -608,9 +705,7 @@ Text:
 __TEXT_PLACEHOLDER__
 
 Return a JSON object with this exact structure:
-{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
-
-Extract 3-10 concepts maximum. Focus on the most important ones.""",
+{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}{extraction_guidance.get("en", "")}""",
 
             "fr": f"""{context_prefix}Extrait les concepts clés du texte suivant.
 
@@ -624,9 +719,7 @@ Texte :
 __TEXT_PLACEHOLDER__
 
 Retourne un objet JSON avec cette structure exacte:
-{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
-
-Extrait 3-10 concepts maximum. Focus sur les plus importants.""",
+{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}{extraction_guidance.get("fr", "")}""",
 
             "de": f"""{context_prefix}Extrahiere die Schlüsselkonzepte aus folgendem Text.
 
@@ -640,14 +733,24 @@ Text:
 __TEXT_PLACEHOLDER__
 
 Gib ein JSON-Objekt mit dieser exakten Struktur zurück:
-{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
-
-Extrahiere maximal 3-10 Konzepte. Fokus auf die wichtigsten."""
+{{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}{extraction_guidance.get("de", "")}"""
         }
 
         # Fallback anglais si langue non supportée
         template = prompts.get(language, prompts["en"])
-        return template.replace("__TEXT_PLACEHOLDER__", text)
+        final_prompt = template.replace("__TEXT_PLACEHOLDER__", text)
+
+        # Phase 1.8.1d: Inject DomainContext via DomainContextInjector
+        # Utilise tenant_id="default" (configuré dans agent_state)
+        tenant_id = getattr(self, 'tenant_id', 'default')
+        final_prompt_with_domain = injector.inject_context(final_prompt, tenant_id=tenant_id)
+
+        logger.debug(
+            f"[OSMOSE:ConceptExtractor] DomainContext injected: "
+            f"{len(final_prompt)} → {len(final_prompt_with_domain)} chars"
+        )
+
+        return final_prompt_with_domain
 
     def _parse_llm_response(self, response_text: str) -> List[Dict]:
         """

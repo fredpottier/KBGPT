@@ -9,7 +9,7 @@ Architecture:
 - Concept-based: ENTITY, PRACTICE, STANDARD, TOOL, ROLE
 """
 
-from typing import List, Dict, Optional, Literal
+from typing import List, Dict, Optional, Literal, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
 from uuid import uuid4
@@ -17,17 +17,11 @@ from enum import Enum
 
 
 # ===================================
-# CONCEPT TYPES
+# DOCUMENT ROLE (STABLE ENUM)
 # ===================================
-
-class ConceptType(str, Enum):
-    """Types de concepts sémantiques"""
-    ENTITY = "entity"          # SAP S/4HANA, ISO 27001, MFA, Organizations
-    PRACTICE = "practice"      # threat modeling, code review, penetration testing
-    STANDARD = "standard"      # ISO 27001, GDPR, SOC2, NIST CSF
-    TOOL = "tool"             # SAST, DAST, SIEM, Fortify, SonarQube
-    ROLE = "role"             # BISO, CSO, Security Champion, Architect
-
+# Note: Concept types are intentionally NOT an enum to remain domain-agnostic.
+# Types are discovered dynamically by LLM based on document content.
+# Examples: "product", "technology", "molecule", "campaign", "regulation", etc.
 
 class DocumentRole(str, Enum):
     """Rôle du document par rapport au concept"""
@@ -46,18 +40,20 @@ class Concept(BaseModel):
     """
     Concept extrait d'un topic.
 
-    Un concept représente une entité sémantique identifiée dans le texte:
-    - Entité: ISO 27001, SAP S/4HANA, MFA
-    - Practice: threat modeling, penetration testing
-    - Standard: GDPR, SOC2
-    - Tool: SAST, DAST, SIEM
-    - Role: BISO, Security Champion
+    Un concept représente une entité sémantique identifiée dans le texte.
+    Le type est découvert dynamiquement par le LLM selon le contexte métier.
+
+    Exemples cross-domaines:
+    - SAP/ERP: type="product" (SAP S/4HANA), type="module" (FI-CO)
+    - Life Science: type="molecule" (mRNA-1273), type="pathway" (JAK-STAT)
+    - Retail: type="campaign" (Black Friday), type="segment" (Gen Z Urban)
+    - Cybersecurity: type="practice" (threat modeling), type="standard" (ISO 27001)
     """
     concept_id: str = Field(default_factory=lambda: f"concept_{uuid4().hex[:12]}")
 
     # Identification
-    name: str                           # Nom du concept ("ISO 27001", "MFA", "SAST")
-    type: ConceptType                   # Type sémantique
+    name: str                           # Nom du concept
+    type: str                           # Type sémantique (libre, domain-agnostic)
     definition: str = ""                # Définition (peut être vide, enrichi après)
     context: str                        # Contexte d'extraction (100-200 chars)
 
@@ -73,6 +69,7 @@ class Concept(BaseModel):
     related_concepts: List[str] = []    # Noms de concepts liés (détectés pendant extraction)
 
     # Metadata
+    metadata: Dict[str, Any] = Field(default_factory=dict)  # Phase 1.8.1d: Métadonnées additionnelles (slide_index, etc.)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -101,7 +98,7 @@ class CanonicalConcept(BaseModel):
     languages: List[str]                # Langues représentées (["en", "fr", "de"])
 
     # Type et définition
-    type: ConceptType
+    type: str                           # Type sémantique (libre, domain-agnostic)
     definition: str                     # Définition unifiée (fusion LLM)
 
     # Hiérarchie
@@ -114,6 +111,9 @@ class CanonicalConcept(BaseModel):
     # Sources
     source_concepts: List[Concept]      # Concepts sources qui ont été unifiés
     support: int                        # Nombre de mentions total (len(source_concepts))
+
+    # Phase 1.8.1d: Traçabilité document
+    document_ids: List[str] = []        # IDs documents sources (traçabilité multi-document)
 
     # Confidence
     confidence: float = Field(ge=0.0, le=1.0)  # Moyenne des confidences sources
@@ -233,7 +233,7 @@ class CandidateEntity(BaseModel):
     canonical_name: str                 # Nom canonique
     aliases: List[str] = []             # Variantes linguistiques
     languages: List[str] = []           # Langues ["en", "fr", "de"]
-    concept_type: ConceptType           # Type concept
+    concept_type: str                   # Type concept (libre, domain-agnostic)
 
     # Définition
     definition: str = ""

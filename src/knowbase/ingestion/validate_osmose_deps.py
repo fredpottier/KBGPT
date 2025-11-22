@@ -33,7 +33,6 @@ def test_imports():
             CanonicalConcept,
             Topic,
             ConceptConnection,
-            ConceptType,
             DocumentRole,
         )
         logger.info("✅ knowbase.semantic modules OK")

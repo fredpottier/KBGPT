@@ -9,7 +9,6 @@ from unittest.mock import Mock, AsyncMock
 from src.knowbase.semantic.linking.concept_linker import ConceptLinker
 from src.knowbase.semantic.models import (
     CanonicalConcept,
-    ConceptType,
     DocumentRole
 )
 from src.knowbase.semantic.config import get_semantic_config
@@ -41,7 +40,7 @@ def sample_canonical_concepts():
             canonical_name="ISO 27001",
             aliases=["ISO27001", "ISO 27001 Standard"],
             languages=["en"],
-            type=ConceptType.STANDARD,
+            type="standard",
             definition="Information security management standard",
             hierarchy_parent=None,
             hierarchy_children=[],
@@ -54,7 +53,7 @@ def sample_canonical_concepts():
             canonical_name="Multi-Factor Authentication",
             aliases=["MFA", "2FA", "Two-Factor Authentication"],
             languages=["en"],
-            type=ConceptType.PRACTICE,
+            type="practice",
             definition="Authentication using multiple verification factors",
             hierarchy_parent="Authentication",
             hierarchy_children=[],
@@ -206,7 +205,7 @@ class TestConceptLinker:
                 canonical_name="Blockchain",
                 aliases=["DLT", "Distributed Ledger"],
                 languages=["en"],
-                type=ConceptType.ENTITY,
+                type="entity",
                 definition="",
                 hierarchy_parent=None,
                 hierarchy_children=[],

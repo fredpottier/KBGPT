@@ -8,7 +8,7 @@ import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, MagicMock
 from src.knowbase.semantic.extraction.concept_extractor import MultilingualConceptExtractor
-from src.knowbase.semantic.models import Topic, Window, ConceptType
+from src.knowbase.semantic.models import Topic, Window
 from src.knowbase.semantic.config import get_semantic_config
 
 
@@ -94,7 +94,7 @@ class TestMultilingualConceptExtractor:
 
         for concept in concepts:
             assert concept.name, "Concept should have a name"
-            assert concept.type in ConceptType, "Concept should have valid type"
+            assert isinstance(concept.type, str), "Concept type should be a string"
             assert concept.language in ["en", "fr", "de"], "Should detect language"
             assert 0.0 <= concept.confidence <= 1.0, "Confidence should be [0, 1]"
             assert concept.source_topic_id == "test_topic_001"
@@ -150,7 +150,7 @@ class TestMultilingualConceptExtractor:
 
         concept = concepts_llm[0]
         assert concept.name == "ISO 27001"
-        assert concept.type == ConceptType.STANDARD
+        assert concept.type == "standard"
         assert concept.definition == "Information security standard"
         assert concept.extraction_method == "LLM"
         assert concept.confidence == 0.80
@@ -166,7 +166,7 @@ class TestMultilingualConceptExtractor:
         concepts = [
             Concept(
                 name="ISO 27001",
-                type=ConceptType.STANDARD,
+                type="standard",
                 definition="",
                 context="test",
                 language="en",
@@ -176,7 +176,7 @@ class TestMultilingualConceptExtractor:
             ),
             Concept(
                 name="iso 27001",  # Même nom, case différente
-                type=ConceptType.STANDARD,
+                type="standard",
                 definition="",
                 context="test",
                 language="en",
@@ -186,7 +186,7 @@ class TestMultilingualConceptExtractor:
             ),
             Concept(
                 name="ISO27001",  # Variante sans espace
-                type=ConceptType.STANDARD,
+                type="standard",
                 definition="",
                 context="test",
                 language="en",
@@ -196,7 +196,7 @@ class TestMultilingualConceptExtractor:
             ),
             Concept(
                 name="GDPR",  # Concept différent
-                type=ConceptType.STANDARD,
+                type="standard",
                 definition="",
                 context="test",
                 language="en",
@@ -238,11 +238,11 @@ class TestMultilingualConceptExtractor:
             print(f"   - {c.name} (lang={c.language})")
 
     def test_map_ner_label_to_concept_type(self, extractor):
-        """Test mapping NER label → ConceptType"""
-        assert extractor._map_ner_label_to_concept_type("ORG") == ConceptType.ENTITY
-        assert extractor._map_ner_label_to_concept_type("PRODUCT") == ConceptType.TOOL
-        assert extractor._map_ner_label_to_concept_type("LAW") == ConceptType.STANDARD
-        assert extractor._map_ner_label_to_concept_type("UNKNOWN") == ConceptType.ENTITY
+        """Test mapping NER label → concept type string"""
+        assert extractor._map_ner_label_to_concept_type("ORG") == "entity"
+        assert extractor._map_ner_label_to_concept_type("PRODUCT") == "tool"
+        assert extractor._map_ner_label_to_concept_type("LAW") == "standard"
+        assert extractor._map_ner_label_to_concept_type("UNKNOWN") == "entity"
 
         print("\n✅ NER label mapping working")
 
@@ -252,31 +252,31 @@ class TestMultilingualConceptExtractor:
         assert extractor._infer_concept_type_heuristic(
             "SAST Tool",
             []
-        ) == ConceptType.TOOL
+        ) == "tool"
 
         # STANDARD
         assert extractor._infer_concept_type_heuristic(
             "ISO 27001 Standard",
             []
-        ) == ConceptType.STANDARD
+        ) == "standard"
 
         # PRACTICE
         assert extractor._infer_concept_type_heuristic(
             "Code Review Process",
             []
-        ) == ConceptType.PRACTICE
+        ) == "practice"
 
         # ROLE
         assert extractor._infer_concept_type_heuristic(
             "Security Architect",
             []
-        ) == ConceptType.ROLE
+        ) == "role"
 
         # ENTITY (default)
         assert extractor._infer_concept_type_heuristic(
             "SAP S/4HANA",
             []
-        ) == ConceptType.ENTITY
+        ) == "entity"
 
         print("\n✅ Heuristic type inference working")
 
@@ -381,7 +381,7 @@ class TestMultilingualConceptExtractor:
         for concept in concepts:
             assert concept.name, "Must have name"
             assert len(concept.name) <= 50, "Name too long"
-            assert concept.type in ConceptType, "Must have valid type"
+            assert isinstance(concept.type, str), "Type must be a string"
             assert concept.language, "Must have language"
             assert 0.0 <= concept.confidence <= 1.0, "Invalid confidence"
             assert concept.extraction_method in ["NER", "CLUSTERING", "LLM"]

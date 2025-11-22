@@ -149,13 +149,36 @@ Return a JSON array of concepts:
 
 **Extraction Guidelines:**
 
-1. **Use Document Context:**
+1. **CRITICAL - Canonical Names (Official Product/Concept Names):**
+   - Extract the OFFICIAL CANONICAL NAME without any marketing prefixes or branding
+   - Remove ALL marketing wrappers: "Powered by", "Based on", "Built on", "Enabled by", "Transform with"
+   - Remove pack/program names that wrap the actual product
+   - Use the shortest OFFICIAL product name that uniquely identifies the concept
+
+   **Examples of cleaning:**
+   - "Powered by [Product] Database" → "[Product]"
+   - "[Platform] Cloud Services" → "[Platform]" (if Services is not part of official name)
+   - "[Product]'s Advanced Features" → "[Product] Advanced Features"
+
+   **What to preserve:**
+   - Edition qualifiers: "Enterprise Edition", "Private Cloud", "Standard Edition"
+   - Version numbers: "15 Pro Max", "2024", "v3.5"
+   - Deployment models: "Cloud", "On-Premise", "Hybrid"
+   - Official designations that distinguish products
+
+   **What to remove:**
+   - Marketing program wrappers (e.g., "Transform with", "Powered by")
+   - Generic qualifiers: "Solution", "Platform" (unless part of official name)
+   - Possessives: "'s", "'s"
+   - Redundant descriptors that don't add specificity
+
+2. **Use Document Context:**
    - Leverage document title, main topics, and key entities to disambiguate
    - Expand acronyms using document-level acronym dictionary
    - Align extracted concepts with document's domain
-   - Prefer full canonical names (e.g., "SAP S/4HANA Cloud Private Edition" not "S/4")
+   - When multiple variants appear, choose the canonical form (shortest official name)
 
-2. **Concept Types:**
+3. **Concept Types:**
    - TECHNOLOGY: Software, frameworks, architectures (e.g., "SAP HANA", "Microservices")
    - PRODUCT: Commercial products, solutions (e.g., "SAP Fiori", "SAP Analytics Cloud")
    - PROCESS: Business processes, methodologies (e.g., "Order-to-Cash", "Agile")
@@ -165,14 +188,14 @@ Return a JSON array of concepts:
    - LOCATION: Geographic entities (e.g., "EMEA", "Walldorf")
    - OTHER: Other significant concepts
 
-3. **Quality Standards:**
+4. **Quality Standards:**
    - Extract only concepts with clear semantic value
    - Use canonical names, not variations or abbreviations
    - Assign confidence based on context clarity
    - Include aliases for variations found in text
    - Minimum confidence: 0.6
 
-4. **What NOT to Extract:**
+5. **What NOT to Extract:**
    - Generic terms without domain specificity (e.g., "solution", "system")
    - Stop words and articles
    - Pure numbers without semantic meaning

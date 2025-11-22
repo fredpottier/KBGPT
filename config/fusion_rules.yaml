@@ -1,0 +1,101 @@
+# 🌊 OSMOSE Semantic Intelligence - Fusion Rules Configuration
+# Phase 1.8.1d: Configuration SmartConceptMerger
+
+# Configuration globale
+fusion:
+  enabled: true
+
+  # Types de documents éligibles pour extraction locale
+  # (autres types utilisent TopicSegmenter classique)
+  local_extraction_types:
+    - PPTX
+    - PPTX_SLIDES
+
+  # Stratégie fallback si aucune règle appliquée
+  # Options: "preserve_all" | "merge_similar"
+  fallback_strategy: preserve_all
+
+  # Taille min cluster pour fusion (éviter fusions uniques)
+  min_cluster_size: 2
+
+  # Règles de fusion (ordre = priorité d'application)
+  rules:
+    # ============================================
+    # Règle 1: Main Entities Merge
+    # ============================================
+    - name: main_entities_merge
+      enabled: true
+      priority: 1  # Haute priorité
+      config:
+        # Ratio d'occurrence minimum (0.5% des slides)
+        # Exemple: Concept répété 2 fois sur 230 slides = 0.87% → fusionné si similaire
+        # Ajusté pour documents longs (230 slides) où répétition 2-3× = déjà significatif
+        min_occurrence_ratio: 0.005
+
+        # Seuil de similarité pour fusionner concepts
+        # Cosine similarity ≥ 0.88 → fusionner
+        similarity_threshold: 0.88
+
+        # Types de concepts éligibles pour fusion (domain-agnostic, lowercase)
+        # Les types sont découverts dynamiquement par le LLM selon le contexte métier
+        eligible_types:
+          - entity       # Entités générales (produits, plateformes, systèmes, etc.)
+          - product      # Produits spécifiques (si LLM le détecte)
+          - technology   # Technologies (si LLM le détecte)
+
+    # ============================================
+    # Règle 2: Alternatives & Features
+    # ============================================
+    - name: alternatives_features
+      enabled: true
+      priority: 2  # Moyenne priorité
+      config:
+        # Mots-clés indicateurs d'alternatives/comparaisons
+        antonym_keywords:
+          - "vs"
+          - "versus"
+          - "instead of"
+          - "alternative"
+          - "compared to"
+          - "or"
+
+        # Co-occurrence minimale requise (slides communs)
+        # Exemple: Multi-Tenancy et Single-Tenant mentionnés ensemble sur ≥3 slides
+        min_co_occurrence: 3
+
+    # ============================================
+    # Règle 3: Slide-Specific Preservation
+    # ============================================
+    - name: slide_specific_preserve
+      enabled: true
+      priority: 3  # Basse priorité (après fusions)
+      config:
+        # Occurrence maximale pour considérer "rare"
+        # Concepts mentionnés ≤ 2 fois → préservés
+        max_occurrence: 2
+
+        # Types de concepts à préserver (détails techniques, domain-agnostic, lowercase)
+        # Les types sont découverts dynamiquement par le LLM selon le contexte métier
+        preserve_types:
+          - metric       # Métriques (Response Time < 200ms)
+          - detail       # Détails spécifiques
+          - technical    # Informations techniques
+          - value        # Valeurs numériques
+
+        # Longueur minimale du nom (détails précis ont noms longs)
+        # Exemple: "Response Time < 200ms (P95)" = 28 chars → préservé
+        min_name_length: 10
+
+# ============================================
+# Configuration avancée (Phase 2)
+# ============================================
+advanced:
+  # Activer logging détaillé
+  verbose_logging: false
+
+  # Activer métriques performance
+  performance_tracking: true
+
+  # Cache embeddings (économiser appels API)
+  cache_embeddings: true
+  cache_ttl_seconds: 3600  # 1 heure

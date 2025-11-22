@@ -17,6 +17,7 @@ Date: 2025-10-17
 import re
 import uuid
 import logging
+import os
 from typing import List, Dict, Any, Optional
 from sentence_transformers import SentenceTransformer
 import tiktoken
@@ -54,20 +55,61 @@ class TextChunker:
         self.chunk_size = chunk_size
         self.overlap = overlap
 
-        # Init sentence transformer pour embeddings
-        # Auto-detect GPU (CUDA) si disponible, sinon fallback CPU
+        # Init embedder: HybridEmbedder (local + cloud) ou local seul
+        embedding_mode = os.getenv("EMBEDDING_MODE", "hybrid")
+
+        # Charger modèle local
         import torch
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         try:
-            self.model = SentenceTransformer(model_name, device=device)
+            local_model = SentenceTransformer(model_name, device=device)
             logger.info(
-                f"[TextChunker] Loaded model: {model_name} "
-                f"(dim={self.model.get_sentence_embedding_dimension()}, device={device})"
+                f"[TextChunker] Loaded local model: {model_name} "
+                f"(dim={local_model.get_sentence_embedding_dimension()}, device={device})"
             )
         except Exception as e:
             logger.error(f"[TextChunker] Failed to load model {model_name}: {e}")
             raise
+
+        # Wrapper pour compatibilité avec HybridEmbedder
+        class LocalEmbedderWrapper:
+            def __init__(self, model):
+                self.model = model
+
+            def encode(self, texts, **kwargs):
+                # Extraire seulement les params supportés par SentenceTransformer
+                st_kwargs = {}
+                if 'batch_size' in kwargs:
+                    st_kwargs['batch_size'] = kwargs['batch_size']
+                if 'show_progress_bar' in kwargs:
+                    st_kwargs['show_progress_bar'] = kwargs['show_progress_bar']
+                if 'convert_to_numpy' in kwargs:
+                    st_kwargs['convert_to_numpy'] = kwargs['convert_to_numpy']
+
+                return self.model.encode(texts, **st_kwargs)
+
+        local_embedder = LocalEmbedderWrapper(local_model)
+
+        # Initialiser HybridEmbedder si mode hybrid/cloud
+        if embedding_mode in ["cloud", "hybrid"]:
+            try:
+                from knowbase.semantic.utils.cloud_embeddings import HybridEmbedder
+                threshold = int(os.getenv("EMBEDDING_CLOUD_THRESHOLD", "1000"))
+                self.model = HybridEmbedder(local_embedder, threshold=threshold)
+                logger.info(
+                    f"[TextChunker] ✅ HybridEmbedder initialized "
+                    f"(mode={embedding_mode}, threshold={threshold})"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[TextChunker] Failed to init HybridEmbedder: {e}. "
+                    f"Using local only."
+                )
+                self.model = local_embedder
+        else:
+            self.model = local_embedder
+            logger.info(f"[TextChunker] Using local embedder only")
 
         # Init tokenizer pour découpage précis
         try:

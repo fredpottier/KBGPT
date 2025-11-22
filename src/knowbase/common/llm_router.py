@@ -16,6 +16,8 @@ import yaml
 
 from knowbase.config.settings import get_settings
 from knowbase.common.clients import get_openai_client, get_async_openai_client, get_anthropic_client, is_anthropic_available
+from knowbase.common.clients.gemini_client import get_gemini_client, is_gemini_available
+from knowbase.common.cache import get_cache_manager
 from knowbase.common.token_tracker import track_tokens
 
 # Import conditionnel pour SageMaker
@@ -50,11 +52,16 @@ class LLMRouter:
         self._openai_client = None
         self._async_openai_client = None
         self._anthropic_client = None
+        self._gemini_client = None
         self._sagemaker_client = None
 
         # Configuration dynamique
         self._config = self._load_config(config_path)
         self._available_providers = self._detect_available_providers()
+
+        # Cache manager (optionnel par provider)
+        cache_config = self._config.get("cache_config", {})
+        self._cache_manager = get_cache_manager(cache_config)
 
     def _load_config(self, config_path: Optional[Path] = None) -> Dict[str, Any]:
         """Charge la configuration des modèles depuis le fichier YAML."""
@@ -107,6 +114,19 @@ class LLMRouter:
             providers["anthropic"] = False
             logger.debug(f"✗ Anthropic provider indisponible: {e}")
 
+        # Test Gemini (Google)
+        try:
+            providers["google"] = is_gemini_available()
+            providers["gemini"] = providers["google"]  # Alias
+            if providers["google"]:
+                logger.debug("✓ Google Gemini provider disponible")
+            else:
+                logger.debug("✗ Google Gemini provider indisponible")
+        except Exception as e:
+            providers["google"] = False
+            providers["gemini"] = False
+            logger.debug(f"✗ Google Gemini provider indisponible: {e}")
+
         # Test SageMaker
         try:
             if SAGEMAKER_AVAILABLE:
@@ -145,6 +165,13 @@ class LLMRouter:
         return self._anthropic_client
 
     @property
+    def gemini_client(self):
+        """Client Gemini paresseux."""
+        if self._gemini_client is None:
+            self._gemini_client = get_gemini_client()
+        return self._gemini_client
+
+    @property
     def sagemaker_client(self):
         """Client SageMaker paresseux."""
         if self._sagemaker_client is None and SAGEMAKER_AVAILABLE:
@@ -165,6 +192,8 @@ class LLMRouter:
             return "openai"
         elif model.startswith("claude-"):
             return "anthropic"
+        elif model.startswith("gemini-"):
+            return "google"
         elif model in ["llama3.1:70b", "qwen2.5:32b", "qwen2.5:7b", "llava:34b", "phi3:3.8b"]:
             return "sagemaker"
         else:
@@ -239,6 +268,8 @@ class LLMRouter:
                 return self._call_openai(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "anthropic":
                 return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider in ["google", "gemini"]:
+                return self._call_gemini(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "sagemaker":
                 return self._call_sagemaker(model, messages, temperature, max_tokens, task_type, **kwargs)
             else:
@@ -296,6 +327,8 @@ class LLMRouter:
                 # TODO: Implémenter version async pour Anthropic si nécessaire
                 logger.warning("[LLM_ROUTER:ASYNC] Anthropic async not implemented, falling back to sync")
                 return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider in ["google", "gemini"]:
+                return await self._call_gemini_async(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "sagemaker":
                 # TODO: Implémenter version async pour SageMaker si nécessaire
                 logger.warning("[LLM_ROUTER:ASYNC] SageMaker async not implemented, falling back to sync")
@@ -422,6 +455,138 @@ class LLMRouter:
             track_tokens(model, task_type.value, input_tokens, output_tokens)
 
         return response.content[0].text if response.content else ""
+
+    def _call_gemini(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        task_type: TaskType,
+        **kwargs
+    ) -> str:
+        """
+        Appel vers Google Gemini avec support cache optionnel.
+
+        Args:
+            model: Nom du modèle Gemini
+            messages: Messages au format OpenAI
+            temperature: Température
+            max_tokens: Max tokens output
+            task_type: Type de tâche
+            **kwargs: Arguments additionnels (cache_key, cache_content, etc.)
+
+        Returns:
+            Contenu de la réponse
+        """
+        # Convertir messages OpenAI → Gemini format
+        system_instruction = None
+        contents = []
+
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content")
+
+            if role == "system":
+                system_instruction = content
+            elif role == "user":
+                # Gérer contenu multimodal (texte + images)
+                if isinstance(content, list):
+                    # Format multimodal vision
+                    parts = []
+                    for item in content:
+                        if item.get("type") == "text":
+                            parts.append(item.get("text"))
+                        elif item.get("type") == "image_url":
+                            # Gemini attend base64 directement
+                            image_url = item.get("image_url", {}).get("url", "")
+                            if image_url.startswith("data:image"):
+                                # Extraire base64
+                                import base64
+                                image_data = image_url.split(",")[1]
+                                parts.append({"mime_type": "image/png", "data": base64.b64decode(image_data)})
+                    contents.append({"role": "user", "parts": parts})
+                else:
+                    # Format texte simple
+                    contents.append({"role": "user", "parts": [content]})
+            elif role == "assistant":
+                contents.append({"role": "model", "parts": [content]})
+
+        # Vérifier si cache activé et disponible
+        cache_key = kwargs.get("cache_key")
+        cache_content_data = kwargs.get("cache_content")
+
+        cache_id = None
+        if self._cache_manager.is_cache_enabled("google") and cache_content_data:
+            # Tenter de cacher le contenu partagé
+            cache_payload = {
+                "model": f"models/{model}",
+                "system_instruction": system_instruction,
+                "contents": cache_content_data.get("contents", [])
+            }
+
+            ttl_hours = self._config.get("cache_config", {}).get("gemini", {}).get("default_ttl_hours", 1)
+            cache_id = self._cache_manager.cache_for_provider(
+                "google",
+                cache_key,
+                cache_payload,
+                ttl_hours
+            )
+
+        # Obtenir modèle Gemini (avec ou sans cache)
+        from knowbase.common.clients.gemini_client import get_gemini_model
+        gemini_model = get_gemini_model(model, cache_id)
+
+        # Configuration génération
+        generation_config = {
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+        }
+
+        # Appel Gemini
+        response = gemini_model.generate_content(
+            contents,
+            generation_config=generation_config
+        )
+
+        # Log et tracking tokens
+        if hasattr(response, "usage_metadata"):
+            usage = response.usage_metadata
+            prompt_tokens = usage.prompt_token_count
+            completion_tokens = usage.candidates_token_count
+            total_tokens = usage.total_token_count
+
+            # Ajouter info si cache utilisé
+            cached_tokens = getattr(usage, "cached_content_token_count", 0)
+            cache_info = f" (cached: {cached_tokens})" if cached_tokens > 0 else ""
+
+            logger.info(
+                f"[TOKENS] {model} - Input: {prompt_tokens}, Output: {completion_tokens}, "
+                f"Total: {total_tokens}{cache_info}"
+            )
+
+            # Tracking pour analyse des coûts
+            track_tokens(model, task_type.value, prompt_tokens, completion_tokens)
+
+        return response.text if response.text else ""
+
+    async def _call_gemini_async(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        task_type: TaskType,
+        **kwargs
+    ) -> str:
+        """
+        Appel async vers Gemini.
+
+        Note: Gemini SDK n'a pas de version async native, utilise sync dans thread pool.
+        """
+        # TODO: Implémenter vraie version async si Gemini SDK le supporte
+        logger.debug("[LLM_ROUTER:ASYNC] Gemini async calling sync version")
+        return self._call_gemini(model, messages, temperature, max_tokens, task_type, **kwargs)
 
     def _call_sagemaker(
         self,

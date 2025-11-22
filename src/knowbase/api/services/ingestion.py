@@ -80,13 +80,27 @@ def get_canonical_solution_name(
         f"Voici la liste des solutions connues :\n{list(solution_names)}\n"
         "Donne uniquement le nom canonique le plus proche, ou une liste de suggestions si aucune correspondance parfaite."
     )
+    from knowbase.common.token_tracker import track_tokens
+
     openai_client = get_openai_client()
+    model = os.getenv("GPT_MODEL", "gpt-4o")
     response = openai_client.chat.completions.create(
-        model=os.getenv("GPT_MODEL", "gpt-4o"),
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
         max_tokens=100,
     )
+
+    # Track tokens pour dashboard coûts
+    if response.usage:
+        track_tokens(
+            model=model,
+            task_type="canonicalization",
+            input_tokens=response.usage.prompt_tokens,
+            output_tokens=response.usage.completion_tokens,
+            context="solution_name_canonicalization"
+        )
+
     canonical_name = user_solution_name
     if response.choices:
         first_choice = response.choices[0]

@@ -966,8 +966,16 @@ def process_pptx(
     except Exception:
         pass
 
+    # Déplacer fichier vers docs_done (si existe encore)
     logger.info(f"📁 Déplacement du fichier vers docs_done...")
-    shutil.move(str(pptx_path), DOCS_DONE / f"{pptx_path.stem}.pptx")
+    if pptx_path.exists():
+        try:
+            shutil.move(str(pptx_path), DOCS_DONE / f"{pptx_path.stem}.pptx")
+            logger.info(f"✅ Fichier déplacé vers docs_done")
+        except Exception as e:
+            logger.warning(f"⚠️ Impossible de déplacer le fichier: {e} (peut-être déjà déplacé)")
+    else:
+        logger.warning(f"⚠️ Fichier source introuvable: {pptx_path} (peut-être déjà traité)")
 
     if progress_callback:
         progress_callback("Terminé", 100, 100, f"Import terminé - OSMOSE Pure activé")

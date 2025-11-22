@@ -15,6 +15,9 @@ from pydantic import model_validator
 
 from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
 
+# Phase 1.8.1d: Import SmartConceptMerger pour pipeline fusion PPTX
+from knowbase.semantic.fusion import process_document_with_fusion, load_fusion_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -161,15 +164,36 @@ class ExtractorOrchestrator(BaseAgent):
         """
         Exécute l'extraction concepts pour tous les segments EN PARALLÈLE.
 
+        Phase 1.8.1d: Détecte documents PPTX avec slides_data et utilise
+        pipeline fusion (Extraction Locale + SmartConceptMerger) au lieu
+        de segmentation classique.
+
         Parallélisation par batches pour respecter rate limits LLM.
 
         Args:
-            state: État actuel (doit contenir state.segments)
+            state: État actuel (doit contenir state.segments ou custom_data.slides_data)
             instruction: Ignored (agent autonome)
 
         Returns:
             État mis à jour avec state.candidates rempli
         """
+        # Phase 1.8.1d: Détecter PPTX avec slides_data → Pipeline Fusion
+        if self._should_use_fusion_pipeline(state):
+            logger.info("[EXTRACTOR] 🌊 PPTX detected with slides_data → using Fusion Pipeline")
+            fusion_result = await self._execute_fusion_pipeline(state)
+
+            # Si fusion retourne None → Fallback vers pipeline classique
+            if fusion_result is None:
+                logger.info(
+                    "[EXTRACTOR] 🔄 Fusion pipeline returned None (disabled or failed), "
+                    "falling back to standard segmentation pipeline"
+                )
+                # Continuer vers pipeline classique ci-dessous
+            else:
+                # Fusion réussie, retourner résultat
+                return fusion_result
+
+        # Pipeline classique (segmentation)
         logger.info(f"[EXTRACTOR] 🚀 Starting PARALLEL extraction for {len(state.segments)} segments")
 
         if not state.segments:
@@ -225,9 +249,12 @@ class ExtractorOrchestrator(BaseAgent):
             if final_route == ExtractionRoute.SMALL:
                 state.llm_calls_count["SMALL"] += extract_output.llm_calls
                 state.budget_remaining["SMALL"] -= extract_output.llm_calls
+                # 📊 Grafana Metric: SMALL LLM route usage
+                logger.info(f"[OSMOSE:Extractor] route=SMALL segment={segment_id}")
             elif final_route == ExtractionRoute.BIG:
                 state.llm_calls_count["BIG"] += extract_output.llm_calls
                 state.budget_remaining["BIG"] -= extract_output.llm_calls
+                logger.info(f"[OSMOSE:Extractor] route=BIG segment={segment_id}")
 
         # Log final
         logger.info(
@@ -554,3 +581,160 @@ class ExtractorOrchestrator(BaseAgent):
                     "llm_calls": 0
                 }
             )
+
+    # ============================================================================
+    # Phase 1.8.1d: Pipeline Fusion (Extraction Locale + SmartConceptMerger)
+    # ============================================================================
+
+    def _should_use_fusion_pipeline(self, state: AgentState) -> bool:
+        """
+        Détermine si le pipeline fusion doit être utilisé.
+
+        Critères:
+        - document_type == "PPTX"
+        - custom_data contient "slides_data" non vide
+
+        Args:
+            state: État actuel
+
+        Returns:
+            bool: True si fusion pipeline applicable
+        """
+        if not state.document_type:
+            return False
+
+        if state.document_type.upper() not in ["PPTX", "PPTX_SLIDES"]:
+            return False
+
+        slides_data = state.custom_data.get("slides_data")
+        if not slides_data or not isinstance(slides_data, list) or len(slides_data) == 0:
+            return False
+
+        logger.info(
+            f"[EXTRACTOR:Fusion] ✅ Fusion pipeline eligible: "
+            f"document_type={state.document_type}, slides_count={len(slides_data)}"
+        )
+        return True
+
+    async def _execute_fusion_pipeline(self, state: AgentState) -> AgentState:
+        """
+        Exécute le pipeline fusion pour documents PPTX.
+
+        Process:
+        1. Charger config fusion
+        2. Extraire slides_data depuis custom_data
+        3. Appeler process_document_with_fusion()
+        4. Convertir CanonicalConcepts → candidates (format Gatekeeper)
+        5. Si fusion désactivée ou échoue → Fallback vers pipeline classique
+
+        Args:
+            state: État actuel
+
+        Returns:
+            État mis à jour avec state.candidates rempli
+        """
+        try:
+            slides_data = state.custom_data.get("slides_data", [])
+            document_context = state.custom_data.get("document_context")
+
+            logger.info(
+                f"[EXTRACTOR:Fusion] 🌊 Starting Fusion Pipeline: "
+                f"{len(slides_data)} slides, context={bool(document_context)}"
+            )
+
+            # Charger config fusion
+            fusion_config = load_fusion_config()
+
+            # Vérifier si fusion activée
+            if not fusion_config.enabled:
+                logger.info(
+                    f"[EXTRACTOR:Fusion] ⚠️ Fusion disabled in config (fusion.enabled=false), "
+                    f"falling back to standard segmentation pipeline"
+                )
+                # Supprimer slides_data du state pour forcer segmentation classique
+                del state.custom_data['slides_data']
+                # Retourner None pour signaler qu'il faut utiliser pipeline classique
+                return None
+
+            # Appeler pipeline fusion
+            canonical_concepts = await process_document_with_fusion(
+                document_type=state.document_type,
+                slides_data=slides_data,
+                document_context=document_context,
+                concept_extractor=self._get_concept_extractor(),
+                config=fusion_config
+            )
+
+            # Vérifier si fusion a retourné des résultats
+            if not canonical_concepts or len(canonical_concepts) == 0:
+                logger.warning(
+                    f"[EXTRACTOR:Fusion] ⚠️ Fusion returned 0 concepts, "
+                    f"falling back to standard segmentation pipeline"
+                )
+                # Supprimer slides_data du state pour forcer segmentation classique
+                if 'slides_data' in state.custom_data:
+                    del state.custom_data['slides_data']
+                return None
+
+            logger.info(
+                f"[EXTRACTOR:Fusion] 📊 Fusion complete: {len(canonical_concepts)} canonical concepts"
+            )
+
+            # Convertir CanonicalConcepts → candidates
+            state.candidates = self._convert_canonical_to_candidates(canonical_concepts)
+
+            # Estimer coût fusion (approximation: 3-10 concepts/slide * coût LLM SMALL)
+            # TODO: Récupérer vrais coûts depuis process_document_with_fusion()
+            estimated_cost = len(slides_data) * 0.002  # ~$0.002/slide pour extraction locale
+            state.cost_incurred += estimated_cost
+
+            # Mise à jour budget LLM (approximation: 1 call SMALL par slide)
+            state.llm_calls_count["SMALL"] += len(slides_data)
+            state.budget_remaining["SMALL"] -= len(slides_data)
+
+            logger.info(
+                f"[EXTRACTOR:Fusion] ✅ Candidates created: {len(state.candidates)} candidates, "
+                f"estimated_cost=${estimated_cost:.2f}"
+            )
+
+            return state
+
+        except Exception as e:
+            logger.error(f"[EXTRACTOR:Fusion] ❌ Fusion pipeline failed: {e}", exc_info=True)
+            # Fallback: Supprimer slides_data et retourner None pour utiliser pipeline classique
+            logger.warning(
+                f"[EXTRACTOR:Fusion] Falling back to standard segmentation pipeline due to error"
+            )
+            if 'slides_data' in state.custom_data:
+                del state.custom_data['slides_data']
+            return None
+
+    def _convert_canonical_to_candidates(
+        self,
+        canonical_concepts: List[Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Convertit CanonicalConcepts en format dict pour Gatekeeper.
+
+        Args:
+            canonical_concepts: Liste CanonicalConcept
+
+        Returns:
+            List[Dict]: Format compatible Gatekeeper
+        """
+        candidates = []
+
+        for canonical in canonical_concepts:
+            candidate = {
+                "name": canonical.name,
+                "type": canonical.concept_type.value,
+                "definition": canonical.definition,
+                "confidence": canonical.confidence,
+                "language": canonical.language,
+                "metadata": canonical.metadata or {},
+                "aliases": canonical.aliases,
+                "extraction_method": canonical.metadata.get("fusion_rule", "FUSION") if canonical.metadata else "FUSION"
+            }
+            candidates.append(candidate)
+
+        return candidates

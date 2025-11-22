@@ -129,9 +129,19 @@ class DocumentSampleAnalyzerService:
             # Extraire contenu de la réponse Claude
             llm_response = response.content[0].text if response.content else ""
 
-            # Log tokens
+            # Log tokens et tracking pour dashboard coûts
             if response.usage:
+                from knowbase.common.token_tracker import track_tokens
+
                 logger.info(f"[TOKENS] Claude PDF Analysis - Input: {response.usage.input_tokens}, Output: {response.usage.output_tokens}")
+
+                track_tokens(
+                    model=model_name,
+                    task_type="metadata",
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    context="pdf_sample_analysis"
+                )
 
             # Parser réponse LLM
             result = self._parse_llm_response(llm_response, existing_types)

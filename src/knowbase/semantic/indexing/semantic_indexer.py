@@ -24,7 +24,7 @@ from collections import Counter
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
-from knowbase.semantic.models import Concept, CanonicalConcept, ConceptType
+from knowbase.semantic.models import Concept, CanonicalConcept
 from knowbase.semantic.config import SemanticConfig, IndexingConfig
 from knowbase.semantic.utils.embeddings import get_embedder
 from knowbase.common.llm_router import LLMRouter
@@ -554,7 +554,7 @@ Determine if these concepts are TRUE SYNONYMS or EQUIVALENT TERMS that should be
     def _select_concept_type(
         self,
         concepts: List[Concept]
-    ) -> ConceptType:
+    ) -> str:
         """
         Sélectionne le type de concept majoritaire.
 
@@ -562,9 +562,9 @@ Determine if these concepts are TRUE SYNONYMS or EQUIVALENT TERMS that should be
             concepts: Groupe de concepts
 
         Returns:
-            ConceptType majoritaire
+            Type majoritaire (str, normalized lowercase)
         """
-        type_counts = Counter(c.type for c in concepts)
+        type_counts = Counter(c.type.lower() for c in concepts)
         most_common_type = type_counts.most_common(1)[0][0]
         return most_common_type
 
