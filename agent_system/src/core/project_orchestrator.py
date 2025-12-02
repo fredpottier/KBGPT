@@ -277,27 +277,30 @@ class ProjectOrchestrator:
         return mapping.get(priority_str, TaskPriority.MEDIUM)
 
     def _create_git_branch(self, branch_name: str, base_branch: str) -> None:
-        """Cree une nouvelle branche Git."""
+        """Cree une nouvelle branche Git depuis la branche courante."""
         print(f"🌿 Creation branche Git: {branch_name}")
         # Git operations must run from git repo root (/app)
         git_repo_root = "/app"
         try:
-            # Verifier qu'on est sur base_branch
-            subprocess.run(
-                ["git", "checkout", base_branch],
+            # Obtenir la branche courante
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 cwd=git_repo_root,
                 check=True,
                 capture_output=True,
             )
+            current_branch = result.stdout.decode().strip()
+            print(f"   Branche courante: {current_branch}")
 
-            # Creer et checkout nouvelle branche
+            # Creer nouvelle branche depuis la branche courante
+            # (evite les problemes de checkout avec volumes Docker)
             subprocess.run(
                 ["git", "checkout", "-b", branch_name],
                 cwd=git_repo_root,
                 check=True,
                 capture_output=True,
             )
-            print(f"✅ Branche creee: {branch_name}")
+            print(f"✅ Branche creee: {branch_name} (depuis {current_branch})")
         except subprocess.CalledProcessError as e:
             raise Exception(f"Failed to create git branch: {e.stderr.decode()}")
 
