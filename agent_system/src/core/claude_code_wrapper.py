@@ -225,10 +225,13 @@ Please complete the task and provide a summary of:
         # Claude Code CLI accepte le prompt via stdin avec --print
         # ou via argument direct
 
+        # Note: --dangerously-skip-permissions ne fonctionne pas avec root
+        # On utilise --print pour le mode non-interactif
+        # Si des permissions sont nécessaires, le CLI les demandera et échouera
+        # car on est en mode non-interactif
         cmd = [
             "claude",
             "--print",  # Mode non-interactif, affiche juste la reponse
-            "--dangerously-skip-permissions",  # Skip les confirmations (full auto)
         ]
 
         result = subprocess.run(
