@@ -37,7 +37,9 @@ services:
 
       # Claude Code credentials (OAuth via abonnement Pro)
       # Permet d'utiliser Claude Code CLI sans API key payante
-      - ${HOME}/.claude:/root/.claude:ro
+      # Sur Windows: utiliser USERPROFILE au lieu de HOME
+      # Note: read-write requis car Claude CLI écrit dans debug/ et projects/
+      - ${USERPROFILE}/.claude:/root/.claude
 
       # Code agent_system (read-write pour développement)
       - ./:/app/agent_system
