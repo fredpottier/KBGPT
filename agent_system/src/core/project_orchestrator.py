@@ -294,15 +294,18 @@ class ProjectOrchestrator:
 
             # Creer nouvelle branche depuis la branche courante
             # (evite les problemes de checkout avec volumes Docker)
-            subprocess.run(
+            result = subprocess.run(
                 ["git", "checkout", "-b", branch_name],
                 cwd=git_repo_root,
-                check=True,
                 capture_output=True,
             )
+            # Ignorer l'erreur Git LFS si le checkout a reussi
+            stderr_msg = result.stderr.decode() if result.stderr else ""
+            if result.returncode != 0 and "Switched to a new branch" not in stderr_msg:
+                raise Exception(f"Failed to create git branch: {stderr_msg}")
             print(f"✅ Branche creee: {branch_name} (depuis {current_branch})")
         except subprocess.CalledProcessError as e:
-            raise Exception(f"Failed to create git branch: {e.stderr.decode()}")
+            raise Exception(f"Failed to create git branch: {e.stderr.decode() if e.stderr else str(e)}")
 
     def _git_branch_exists(self, branch_name: str) -> bool:
         """Verifie si une branche Git existe."""
