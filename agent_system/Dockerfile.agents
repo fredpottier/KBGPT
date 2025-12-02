@@ -44,5 +44,5 @@ RUN chmod +x /app/agent_system/scripts/*.py
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import sys; sys.exit(0)"
 
-# Point d'entrée
-CMD ["python", "/app/agent_system/scripts/run_orchestrator.py", "--daemon"]
+# Point d'entrée - Garde le container actif
+CMD ["tail", "-f", "/dev/null"]

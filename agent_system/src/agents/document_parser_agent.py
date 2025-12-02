@@ -7,7 +7,7 @@ import json
 import re
 
 from .base_agent import BaseAgent
-from models import ProjectPlan, ProjectTask, ProjectStatus, ProjectTaskStatus
+from models import ProjectPlan, ProjectTask, ProjectStatus, ProjectTaskStatus, AgentState
 
 
 class DocumentParserAgent(BaseAgent):
@@ -19,9 +19,26 @@ class DocumentParserAgent(BaseAgent):
         agents_config_path: str = "agent_system/config/agents_settings.yaml",
     ):
         super().__init__(
-            agent_name="DocumentParserAgent",
+            name="DocumentParserAgent",
             prompts_config_path=prompts_config_path,
-            agents_config_path=agents_config_path,
+        )
+
+    def execute(self, state: AgentState) -> AgentState:
+        """
+        Methode execute du pattern BaseAgent (non utilisee pour DocumentParser).
+
+        DocumentParserAgent utilise parse_project_document() au lieu de execute().
+        Cette methode est implementee pour satisfaire l'interface abstraite.
+
+        Args:
+            state: Etat actuel (non utilise)
+
+        Returns:
+            State inchange
+        """
+        raise NotImplementedError(
+            "DocumentParserAgent n'utilise pas execute(). "
+            "Utilisez parse_project_document() a la place."
         )
 
     def parse_project_document(
@@ -61,7 +78,7 @@ class DocumentParserAgent(BaseAgent):
             git_branch=f"project/{project_id}",
             base_branch=base_branch,
             global_requirements=parsing_result.get("global_requirements", []),
-            status=ProjectStatus.PARSED,
+            status=ProjectStatus.PENDING,
         )
 
         # Ajouter les taches

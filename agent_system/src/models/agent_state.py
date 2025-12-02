@@ -76,7 +76,7 @@ class AgentState(TypedDict, total=False):
     """Métadonnées additionnelles"""
 
     # Checkpointing
-    checkpoint_id: Optional[str]
+    task_checkpoint_id: Optional[str]
     """ID du checkpoint actuel (pour reprise)"""
 
 
@@ -112,7 +112,7 @@ def create_initial_state(
         requires_human_review=False,
         started_at=datetime.utcnow(),
         metadata={},
-        checkpoint_id=None,
+        task_checkpoint_id=None,
     )
 
 

@@ -32,6 +32,9 @@ services:
       - LOG_FILE=/app/agent_system/data/agent_system.log
 
     volumes:
+      # Repository Git complet (read-write pour git operations)
+      - ../.git:/app/.git
+
       # Code agent_system (read-write pour développement)
       - ./:/app/agent_system
 

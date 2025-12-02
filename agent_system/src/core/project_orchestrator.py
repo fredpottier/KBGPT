@@ -37,11 +37,11 @@ class ProjectOrchestrator:
             config_path: Chemin vers la configuration (optionnel)
         """
         self.workspace_root = Path(workspace_root)
-        self.config_path = config_path
+        self.config_path = config_path or "agent_system/config/"
 
         # Agents
         self.document_parser = DocumentParserAgent()
-        self.task_orchestrator = AgentOrchestrator(config_path=config_path)
+        self.task_orchestrator = AgentOrchestrator(config_path=self.config_path)
 
     def execute_project(
         self,
@@ -279,11 +279,13 @@ class ProjectOrchestrator:
     def _create_git_branch(self, branch_name: str, base_branch: str) -> None:
         """Cree une nouvelle branche Git."""
         print(f"🌿 Creation branche Git: {branch_name}")
+        # Git operations must run from git repo root (/app)
+        git_repo_root = "/app"
         try:
             # Verifier qu'on est sur base_branch
             subprocess.run(
                 ["git", "checkout", base_branch],
-                cwd=self.workspace_root,
+                cwd=git_repo_root,
                 check=True,
                 capture_output=True,
             )
@@ -291,7 +293,7 @@ class ProjectOrchestrator:
             # Creer et checkout nouvelle branche
             subprocess.run(
                 ["git", "checkout", "-b", branch_name],
-                cwd=self.workspace_root,
+                cwd=git_repo_root,
                 check=True,
                 capture_output=True,
             )
@@ -301,10 +303,11 @@ class ProjectOrchestrator:
 
     def _git_branch_exists(self, branch_name: str) -> bool:
         """Verifie si une branche Git existe."""
+        git_repo_root = "/app"
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--verify", branch_name],
-                cwd=self.workspace_root,
+                cwd=git_repo_root,
                 capture_output=True,
             )
             return result.returncode == 0
@@ -313,11 +316,12 @@ class ProjectOrchestrator:
 
     def _rollback_git_branch(self, branch_name: str, base_branch: str) -> None:
         """Rollback: supprime la branche projet et retourne sur base."""
+        git_repo_root = "/app"
         try:
             # Retourner sur base_branch
             subprocess.run(
                 ["git", "checkout", base_branch],
-                cwd=self.workspace_root,
+                cwd=git_repo_root,
                 check=True,
                 capture_output=True,
             )
@@ -325,7 +329,7 @@ class ProjectOrchestrator:
             # Supprimer la branche projet
             subprocess.run(
                 ["git", "branch", "-D", branch_name],
-                cwd=self.workspace_root,
+                cwd=git_repo_root,
                 check=True,
                 capture_output=True,
             )
