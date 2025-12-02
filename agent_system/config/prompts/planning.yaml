@@ -1,0 +1,189 @@
+# ========================================
+# Planning Agent - Prompts Configuration
+# ========================================
+
+system_prompt: |
+  Tu es un Planning Agent expert spécialisé dans la décomposition de tâches complexes
+  pour le projet KnowWhere (OSMOSE - Organic Semantic Memory Organization & Smart Extraction).
+
+  **Ton rôle:**
+  - Analyser les tâches complexes fournies par l'utilisateur
+  - Décomposer ces tâches en sous-tâches atomiques et exécutables
+  - Identifier les dépendances entre sous-tâches
+  - Estimer la complexité et la durée de chaque sous-tâche
+  - Créer un plan d'exécution optimal et structuré
+
+  **Contexte projet:**
+  - Architecture: Dual-Graph Semantic Intelligence (Qdrant + Neo4j)
+  - Stack: Python 3.11, FastAPI, LangChain, Next.js, Docker
+  - Phase actuelle: Phase 1 - Semantic Core
+  - Code source: /app/src/knowbase/
+
+  **Principes de planification:**
+  1. Décomposer jusqu'à obtenir des tâches atomiques (1-2h max)
+  2. Identifier clairement les dépendances (séquentielles vs parallèles)
+  3. Prioriser les tâches critiques sur le chemin critique
+  4. Prévoir des points de validation après chaque groupe de tâches
+  5. Anticiper les risques et prévoir des alternatives
+
+  **Format de sortie:**
+  - Fichier YAML structuré dans /app/agent_system/data/plans/
+  - Structure: plan_id, task_id, subtasks (liste), dependencies, estimated_duration
+
+  **Tu as accès aux tools:**
+  - Filesystem (lecture/écriture dans workspace)
+  - Git (status, diff, log)
+  - Code analysis (AST, tree-sitter)
+
+task_decomposition_prompt: |
+  Décompose la tâche suivante en sous-tâches atomiques et exécutables.
+
+  **Tâche principale:**
+  {task_description}
+
+  **Requirements:**
+  {requirements}
+
+  **Contexte additionnel:**
+  {context}
+
+  **Consignes:**
+  1. Crée entre {min_subtasks} et {max_subtasks} sous-tâches
+  2. Chaque sous-tâche doit être:
+     - Atomique (1 action claire et précise)
+     - Testable (on peut vérifier qu'elle est terminée)
+     - Estimable (complexité faible/moyenne/élevée)
+  3. Identifie les dépendances explicitement
+  4. Fournis une estimation de durée pour chaque sous-tâche
+  5. Suggère des points de validation
+
+  **Format de sortie attendu:**
+  ```yaml
+  plan_id: "plan_{timestamp}"
+  task_id: "{task_id}"
+  task_description: "{task_description}"
+  subtasks:
+    - subtask_id: "subtask_001"
+      title: "Titre court"
+      description: "Description détaillée"
+      complexity: "low|medium|high"
+      estimated_duration_minutes: 60
+      dependencies: ["subtask_000"]  # ou [] si aucune
+      validation_criteria: "Critères pour valider cette sous-tâche"
+      files_impacted: ["path/to/file1.py", "path/to/file2.py"]
+
+  dependencies_graph:
+    # Description ASCII du graphe de dépendances
+
+  critical_path:
+    - "subtask_001"
+    - "subtask_003"
+    - "subtask_007"
+
+  estimated_total_duration_minutes: 480
+
+  risks:
+    - risk: "Description du risque"
+      probability: "low|medium|high"
+      mitigation: "Plan de mitigation"
+
+  validation_points:
+    - after: "subtask_003"
+      check: "Vérifier que X fonctionne"
+  ```
+
+dependency_analysis_prompt: |
+  Analyse les dépendances entre les sous-tâches suivantes et construis un graphe d'exécution optimal.
+
+  **Sous-tâches:**
+  {subtasks}
+
+  **Consignes:**
+  1. Identifie les dépendances explicites et implicites
+  2. Détecte les cycles potentiels
+  3. Identifie le chemin critique
+  4. Suggère des opportunités de parallélisation
+  5. Propose un ordre d'exécution optimal
+
+  **Format de sortie:**
+  - Liste ordonnée d'exécution
+  - Groupes de tâches parallélisables
+  - Chemin critique
+  - Durée totale estimée
+
+complexity_estimation_prompt: |
+  Estime la complexité et la durée de la sous-tâche suivante.
+
+  **Sous-tâche:**
+  {subtask_description}
+
+  **Fichiers impactés:**
+  {files_impacted}
+
+  **Contexte codebase:**
+  {codebase_context}
+
+  **Consignes:**
+  1. Évalue la complexité (low/medium/high) selon:
+     - Nombre de fichiers impactés
+     - Complexité algorithmique
+     - Risque de régression
+     - Dépendances externes
+  2. Estime la durée en minutes (fourchette min-max)
+  3. Identifie les risques potentiels
+  4. Suggère des vérifications à faire
+
+  **Format de sortie:**
+  ```yaml
+  complexity: "low|medium|high"
+  estimated_duration_minutes: 120
+  duration_range:
+    min: 60
+    max: 180
+  complexity_factors:
+    - "Facteur 1"
+    - "Facteur 2"
+  risks:
+    - "Risque 1"
+  checks:
+    - "Vérification 1"
+  ```
+
+reflection_prompt: |
+  Évalue la qualité du plan créé et suggère des améliorations.
+
+  **Plan actuel:**
+  {current_plan}
+
+  **Critères d'évaluation:**
+  1. Complétude: Toutes les étapes nécessaires sont-elles couvertes?
+  2. Atomicité: Chaque sous-tâche est-elle suffisamment atomique?
+  3. Dépendances: Les dépendances sont-elles correctement identifiées?
+  4. Estimation: Les estimations sont-elles réalistes?
+  5. Risques: Les risques sont-ils bien identifiés et mitigés?
+
+  **Questions à te poser:**
+  - Y a-t-il des étapes manquantes?
+  - Certaines sous-tâches sont-elles trop grosses?
+  - Les dépendances sont-elles complètes?
+  - Le chemin critique est-il optimal?
+  - Les points de validation sont-ils pertinents?
+
+  **Format de sortie:**
+  ```yaml
+  evaluation:
+    completeness_score: 0.85
+    atomicity_score: 0.90
+    dependencies_score: 0.80
+    estimation_score: 0.75
+    overall_score: 0.82
+
+  improvements:
+    - "Amélioration 1"
+    - "Amélioration 2"
+
+  missing_steps:
+    - "Étape manquante 1"
+
+  recommendation: "approve|revise"
+  ```

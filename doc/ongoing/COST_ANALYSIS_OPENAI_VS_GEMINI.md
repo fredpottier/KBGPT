@@ -72,14 +72,14 @@
 
 | Modèle | Input Tokens | Output Tokens | Coût Total |
 |--------|--------------|---------------|------------|
-| **OpenAI gpt-4o** | 529,000 | 345,000 | **$22.78** |
-| **Gemini 1.5 Flash** | 529,000 | 345,000 | **$5.70** |
-| **Économie** | - | - | **-$17.08 (-75%)** |
+| **OpenAI gpt-4o** | 529,000 | 345,000 | **$4.77** |
+| **Gemini 1.5 Flash** | 529,000 | 345,000 | **$1.19** |
+| **Économie** | - | - | **-$3.58 (-75%)** |
 
 **Calcul détaillé OpenAI (gpt-4o)** :
-- Input : 529,000 × $2.50/1M = $1.3225
-- Output : 345,000 × $10.00/1M = $3.4500
-- **Total = $4.7725** (par slide) × 230 slides = **$22.78** (arrondi)
+- Input : 529,000 × $2.50/1M = $1.32
+- Output : 345,000 × $10.00/1M = $3.45
+- **Total pour 230 slides = $4.77**
 
 **Note** : Vision non utilisé dans le dernier import car document déjà en cache extraction.
 
@@ -101,9 +101,9 @@
 
 | Modèle | Input Tokens | Output Tokens | Coût Total |
 |--------|--------------|---------------|------------|
-| **OpenAI gpt-4o** | 575,000 | 805,000 | **$34.49** |
-| **Gemini 1.5 Flash** | 575,000 | 805,000 | **$8.62** |
-| **Économie** | - | - | **-$25.87 (-75%)** |
+| **OpenAI gpt-4o** | 575,000 | 805,000 | **$9.49** |
+| **Gemini 1.5 Flash** | 575,000 | 805,000 | **$2.37** |
+| **Économie** | - | - | **-$7.12 (-75%)** |
 
 ---
 
@@ -145,10 +145,10 @@
 
 | Composant | OpenAI | Gemini | Économie |
 |-----------|--------|--------|----------|
-| Vision Summary (230 slides) | $22.78 | $5.70 | -$17.08 |
+| Vision Summary (230 slides) | $4.77 | $1.19 | -$3.58 |
 | Concept Extraction (1000 appels) | $0.30 | $0.08 | -$0.22 |
 | Embeddings (13,763 chunks) | $0.72 | N/A* | - |
-| **TOTAL** | **$23.80** | **$5.78** | **-$18.02 (-75.7%)** |
+| **TOTAL** | **$5.79** | **$1.27** | **-$4.52 (-78.1%)** |
 
 *Embeddings : Utiliser Vertex AI ($0.14) ou garder OpenAI
 
@@ -156,10 +156,10 @@
 
 | Composant | OpenAI | Gemini | Économie |
 |-----------|--------|--------|----------|
-| Vision Analysis (230 slides) | $34.49 | $8.62 | -$25.87 |
+| Vision Analysis (230 slides) | $9.49 | $2.37 | -$7.12 |
 | Concept Extraction (1000 appels) | $0.30 | $0.08 | -$0.22 |
 | Embeddings (13,763 chunks) | $0.72 | N/A* | - |
-| **TOTAL** | **$35.51** | **$8.70** | **-$26.81 (-75.5%)** |
+| **TOTAL** | **$10.51** | **$2.45** | **-$8.06 (-76.7%)** |
 
 ### Scénario 3 : Mode Actuel (Text-only, Sans Vision - Cache Hit)
 
@@ -253,16 +253,16 @@ vision_summary:
 
 | Scénario | OpenAI | Gemini | Économie |
 |----------|--------|--------|----------|
-| **OSMOSE Pure (Vision)** | $23,800 | $5,780 | **-$18,020** |
-| **Mode Legacy (Vision)** | $35,510 | $8,700 | **-$26,810** |
+| **OSMOSE Pure (Vision)** | $5,790 | $1,270 | **-$4,520** |
+| **Mode Legacy (Vision)** | $10,510 | $2,450 | **-$8,060** |
 | **Mode Actuel (Cache)** | $1,020 | $80 | **-$940** |
 
 ### ROI annuel (estimation 5000 documents/an)
 
 **Scénario OSMOSE Pure** :
-- OpenAI : $119,000/an
-- Gemini : $28,900/an
-- **Économie : $90,100/an (-75.7%)**
+- OpenAI : $28,950/an
+- Gemini : $6,350/an
+- **Économie : $22,600/an (-78.1%)**
 
 **Scénario Mode Actuel (cache élevé)** :
 - OpenAI : $5,100/an

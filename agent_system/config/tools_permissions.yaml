@@ -1,0 +1,220 @@
+# ========================================
+# Agent System - Tools Permissions
+# ========================================
+
+shell_commands:
+  # Commandes autorisées (whitelist stricte)
+  allowed:
+    # Testing
+    - pattern: "^pytest( .+)?$"
+      description: "Execute pytest tests"
+      timeout: 300
+      examples:
+        - "pytest"
+        - "pytest -v"
+        - "pytest tests/test_foo.py"
+        - "pytest --cov=src"
+        - "pytest -k test_function_name"
+
+    # Python modules
+    - pattern: "^python -m (pytest|ruff|mypy|black|coverage)( .+)?$"
+      description: "Execute Python modules"
+      timeout: 300
+      examples:
+        - "python -m pytest"
+        - "python -m ruff check src/"
+        - "python -m mypy src/"
+        - "python -m black src/"
+        - "python -m coverage report"
+
+    # Python scripts (dans scripts/)
+    - pattern: "^python scripts/.+\\.py( .+)?$"
+      description: "Execute Python scripts"
+      timeout: 180
+      examples:
+        - "python scripts/analyze_code.py"
+        - "python scripts/run_tests.py"
+
+    # Git (read-only operations)
+    - pattern: "^git (status|diff|log|show|blame|branch)( .+)?$"
+      description: "Git read operations"
+      timeout: 60
+      examples:
+        - "git status"
+        - "git diff"
+        - "git diff HEAD"
+        - "git log --oneline -10"
+        - "git show HEAD"
+        - "git blame src/main.py"
+        - "git branch -a"
+
+    # Docker (read-only operations)
+    - pattern: "^docker compose (ps|logs)( .+)?$"
+      description: "Docker inspect operations"
+      timeout: 60
+      examples:
+        - "docker compose ps"
+        - "docker compose logs app"
+        - "docker compose logs --tail=100 worker"
+
+    # File operations (safe read)
+    - pattern: "^(cat|head|tail|wc) .+$"
+      description: "Safe file reading"
+      timeout: 30
+      examples:
+        - "cat src/main.py"
+        - "head -20 README.md"
+        - "tail -50 logs/app.log"
+        - "wc -l src/**/*.py"
+
+    # Search operations
+    - pattern: "^grep( .+)? .+$"
+      description: "Search in files"
+      timeout: 60
+      examples:
+        - "grep -r 'TODO' src/"
+        - "grep -n 'def main' src/main.py"
+
+    # Directory operations
+    - pattern: "^(tree|find|ls)( .+)?$"
+      description: "Directory listing"
+      timeout: 60
+      examples:
+        - "tree src/"
+        - "find src/ -name '*.py'"
+        - "ls -la"
+        - "ls -R src/"
+
+    # Code quality tools
+    - pattern: "^(ruff|mypy|black|pylint)( .+)?$"
+      description: "Code quality tools"
+      timeout: 120
+      examples:
+        - "ruff check src/"
+        - "mypy src/"
+        - "black --check src/"
+
+  # Commandes strictement interdites
+  denied:
+    - pattern: ".*rm( .+)?$"
+      reason: "File deletion not allowed"
+    - pattern: ".*rm -rf.*"
+      reason: "Dangerous recursive deletion"
+    - pattern: ".*sudo.*"
+      reason: "Privilege escalation not allowed"
+    - pattern: ".*(curl|wget|nc|telnet).*"
+      reason: "Network access not allowed"
+    - pattern: ".*git (push|commit|reset|rebase|merge).*"
+      reason: "Git write operations not allowed"
+    - pattern: ".*docker.*(up|down|restart|stop|start|kill).*"
+      reason: "Docker service manipulation not allowed"
+    - pattern: ".*>.*"
+      reason: "File write via redirect not allowed"
+    - pattern: ".*>>.*"
+      reason: "File append via redirect not allowed"
+    - pattern: ".*mkfifo.*"
+      reason: "Named pipe creation not allowed"
+    - pattern: ".*(chmod|chown).*"
+      reason: "Permission modification not allowed"
+
+filesystem:
+  workspace_root: "/app/agent_system/data/workspace"
+
+  # Chemins en lecture seule
+  allowed_read_paths:
+    - "/app/src"
+    - "/app/tests"
+    - "/app/config"
+    - "/app/agent_system"
+    - "/app/doc"
+    - "/app/scripts"
+
+  # Chemins en lecture/écriture
+  allowed_write_paths:
+    - "/app/agent_system/data/workspace"
+    - "/app/agent_system/data/plans"
+    - "/app/agent_system/data/reports"
+    - "/app/agent_system/data/cache"
+
+  # Chemins strictement interdits
+  denied_paths:
+    - "/app/.env"
+    - "/app/.git"
+    - "/app/data"
+    - "**/*.key"
+    - "**/*.pem"
+    - "**/secrets/**"
+    - "**/credentials/**"
+    - "**/.ssh/**"
+
+  # Limites de fichiers
+  max_file_size_mb: 10
+  max_files_per_operation: 100
+
+  # Extensions autorisées pour l'écriture
+  allowed_write_extensions:
+    - ".py"
+    - ".yaml"
+    - ".yml"
+    - ".json"
+    - ".md"
+    - ".txt"
+    - ".sh"
+    - ".sql"
+    - ".cypher"
+
+  # Extensions interdites pour l'écriture
+  denied_write_extensions:
+    - ".exe"
+    - ".dll"
+    - ".so"
+    - ".dylib"
+    - ".bin"
+    - ".key"
+    - ".pem"
+    - ".crt"
+
+git:
+  # Operations Git autorisées
+  allowed_operations:
+    - "status"
+    - "diff"
+    - "log"
+    - "show"
+    - "blame"
+    - "branch"
+    - "ls-files"
+
+  # Operations Git interdites
+  denied_operations:
+    - "push"
+    - "commit"
+    - "reset"
+    - "rebase"
+    - "merge"
+    - "cherry-pick"
+    - "revert"
+    - "stash"
+    - "clean"
+    - "rm"
+
+docker:
+  # Operations Docker autorisées
+  allowed_operations:
+    - "ps"
+    - "logs"
+    - "inspect"
+    - "stats"
+
+  # Operations Docker interdites
+  denied_operations:
+    - "up"
+    - "down"
+    - "start"
+    - "stop"
+    - "restart"
+    - "kill"
+    - "rm"
+    - "build"
+    - "pull"
+    - "push"

@@ -1,0 +1,48 @@
+FROM python:3.11-slim
+
+LABEL maintainer="KnowWhere Team"
+LABEL description="Agent System for KnowWhere (OSMOSE)"
+
+WORKDIR /app
+
+# Installation des dépendances système
+RUN apt-get update && apt-get install -y \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copie des requirements et installation des dépendances Python
+COPY agent_system/requirements.txt /app/agent_system/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /app/agent_system/requirements.txt
+
+# Copie du code agent_system
+COPY agent_system/ /app/agent_system/
+
+# Copie du code source SAP_KB (lecture seule pour analyse)
+COPY src/ /app/src/
+COPY tests/ /app/tests/
+COPY config/ /app/config/
+
+# Variables d'environnement
+ENV PYTHONPATH=/app/agent_system/src:/app
+ENV WORKSPACE_ROOT=/app/agent_system/data/workspace
+ENV AGENTS_CONFIG_PATH=/app/agent_system/config
+
+# Création des dossiers de données
+RUN mkdir -p /app/agent_system/data/plans \
+             /app/agent_system/data/reports/dev \
+             /app/agent_system/data/reports/control \
+             /app/agent_system/data/workspace \
+             /app/agent_system/data/cache \
+             /app/agent_system/data/checkpoints
+
+# Permissions
+RUN chmod +x /app/agent_system/scripts/*.py
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)"
+
+# Point d'entrée
+CMD ["python", "/app/agent_system/scripts/run_orchestrator.py", "--daemon"]

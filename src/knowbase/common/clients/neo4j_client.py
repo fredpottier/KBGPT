@@ -168,7 +168,11 @@ class Neo4jClient:
         chunk_ids: Optional[List[str]] = None
     ) -> str:
         """
-        Crée concept Proto-KG (extrait, non validé).
+        Crée ou récupère concept Proto-KG (avec déduplication case-insensitive).
+
+        IMPORTANT: Utilise MERGE au lieu de CREATE pour éviter doublons.
+        La déduplication est basée sur (tenant_id, concept_name_normalized, document_id)
+        où concept_name_normalized = toLower(concept_name.strip()).
 
         Args:
             tenant_id: ID tenant (isolation)
@@ -182,7 +186,7 @@ class Neo4jClient:
             chunk_ids: IDs chunks Qdrant mentionnant ce concept (cross-référence)
 
         Returns:
-            concept_id créé
+            concept_id créé ou existant
         """
         if not self.is_connected():
             logger.warning("[NEO4J] Not connected, skipping Proto concept creation")
@@ -193,23 +197,43 @@ class Neo4jClient:
         metadata = metadata or {}
         chunk_ids = chunk_ids or []
 
+        # Normaliser le nom pour déduplication (case-insensitive)
+        concept_name_normalized = concept_name.strip().lower()
+
         # Convertir metadata en JSON string pour Neo4j (ne supporte pas les Maps)
         metadata_json = json.dumps(metadata)
 
+        # MERGE sur clé normalisée pour éviter doublons (case-insensitive + même document)
         query = """
-        CREATE (c:ProtoConcept {
-            concept_id: randomUUID(),
+        MERGE (c:ProtoConcept {
             tenant_id: $tenant_id,
-            concept_name: $concept_name,
-            concept_type: $concept_type,
-            segment_id: $segment_id,
-            document_id: $document_id,
-            extraction_method: $extraction_method,
-            confidence: $confidence,
-            chunk_ids: $chunk_ids,
-            created_at: datetime(),
-            metadata_json: $metadata_json
+            concept_name_normalized: $concept_name_normalized,
+            document_id: $document_id
         })
+        ON CREATE SET
+            c.concept_id = randomUUID(),
+            c.concept_name = $concept_name,
+            c.concept_type = $concept_type,
+            c.segment_id = $segment_id,
+            c.extraction_method = $extraction_method,
+            c.confidence = $confidence,
+            c.chunk_ids = $chunk_ids,
+            c.created_at = datetime(),
+            c.metadata_json = $metadata_json
+        ON MATCH SET
+            c.confidence = CASE
+                WHEN $confidence > c.confidence THEN $confidence
+                ELSE c.confidence
+            END,
+            c.chunk_ids = c.chunk_ids + [id IN $chunk_ids WHERE NOT id IN c.chunk_ids],
+            c.concept_name = CASE
+                WHEN $confidence > c.confidence THEN $concept_name
+                ELSE c.concept_name
+            END,
+            c.metadata_json = CASE
+                WHEN size($metadata_json) > size(c.metadata_json) THEN $metadata_json
+                ELSE c.metadata_json
+            END
         RETURN c.concept_id AS concept_id
         """
 
@@ -219,6 +243,7 @@ class Neo4jClient:
                     query,
                     tenant_id=tenant_id,
                     concept_name=concept_name,
+                    concept_name_normalized=concept_name_normalized,
                     concept_type=concept_type,
                     segment_id=segment_id,
                     document_id=document_id,
@@ -232,14 +257,14 @@ class Neo4jClient:
                 concept_id = record["concept_id"]
 
                 logger.debug(
-                    f"[NEO4J:Proto] Created {concept_type} '{concept_name}' "
-                    f"(tenant={tenant_id}, method={extraction_method})"
+                    f"[NEO4J:Proto] MERGE {concept_type} '{concept_name}' "
+                    f"(normalized='{concept_name_normalized}', tenant={tenant_id}, method={extraction_method})"
                 )
 
                 return concept_id
 
         except Exception as e:
-            logger.error(f"[NEO4J:Proto] Error creating concept: {e}")
+            logger.error(f"[NEO4J:Proto] Error creating/merging concept: {e}")
             return ""
 
     def get_proto_concepts(

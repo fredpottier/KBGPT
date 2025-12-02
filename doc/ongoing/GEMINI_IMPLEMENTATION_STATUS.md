@@ -201,14 +201,14 @@ response = router.complete(
 
 | Composant | OpenAI | Gemini | Économie |
 |-----------|--------|--------|----------|
-| Vision Summary (230 slides) | $22.78 | $5.70 | **-75%** |
+| Vision Summary (230 slides) | $4.77 | $1.19 | **-75%** |
 | Concept Extraction (1000 calls) | $0.30 | $0.08 | **-73%** |
-| **Total/document** | **$23.08** | **$5.78** | **-75%** |
+| **Total/document** | **$5.07** | **$1.27** | **-75%** |
 
 **Pour 5,000 docs/an** :
-- OpenAI : $115,400
-- Gemini : $28,900
-- **Économie : -$86,500 (-75%)**
+- OpenAI : $25,350
+- Gemini : $6,350
+- **Économie : -$19,000 (-75%)**
 
 ### Coûts Embeddings (Vertex AI vs OpenAI)
 
@@ -232,14 +232,14 @@ response = router.complete(
 
 | Scénario | Coût/doc | vs OpenAI |
 |----------|----------|-----------|
-| OpenAI actuel | $23.80 | Baseline |
-| Gemini sans cache + Vertex AI | $5.92 | **-75.1%** |
-| Gemini avec cache + Vertex AI | $3.83 | **-83.9%** |
+| OpenAI actuel | $5.79 | Baseline |
+| Gemini sans cache + Vertex AI | $1.41 | **-75.6%** |
+| Gemini avec cache + Vertex AI | $0.93 | **-83.9%** |
 
 **Pour 5,000 docs/an** :
-- OpenAI : $119,000
-- Gemini + Vertex + Cache : **$19,150**
-- **Économie annuelle : -$99,850 (-83.9%)**
+- OpenAI : $28,950
+- Gemini + Vertex + Cache : **$4,650**
+- **Économie annuelle : -$24,300 (-83.9%)**
 
 **Break-even migration** : 8 documents (8 × $17.88 = $138 coût re-embedding)
 

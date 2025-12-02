@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  agent-orchestrator:
+    build:
+      context: ../
+      dockerfile: agent_system/Dockerfile.agents
+    container_name: knowbase-agent-orchestrator
+    hostname: agent-orchestrator
+
+    environment:
+      # LLM Configuration
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+      # LangSmith Configuration
+      - LANGSMITH_API_KEY=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
+      - LANGSMITH_PROJECT=knowwhere-agents
+      - LANGSMITH_TRACING=true
+      - LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+
+      # Agent System Configuration
+      - WORKSPACE_ROOT=/app/agent_system/data/workspace
+      - AGENTS_CONFIG_PATH=/app/agent_system/config
+      - PYTHONPATH=/app/agent_system/src:/app
+
+      # DeepAgents Configuration
+      - DEEPAGENTS_FILESYSTEM_SANDBOX=true
+      - DEEPAGENTS_SHELL_WHITELIST_ONLY=true
+
+      # Logging
+      - LOG_LEVEL=INFO
+      - LOG_FILE=/app/agent_system/data/agent_system.log
+
+    volumes:
+      # Code agent_system (read-write pour développement)
+      - ./:/app/agent_system
+
+      # Code source SAP_KB (read-only pour analyse)
+      - ../src:/app/src:ro
+      - ../tests:/app/tests:ro
+      - ../config:/app/config:ro
+      - ../doc:/app/doc:ro
+
+      # Données persistantes
+      - agent_plans:/app/agent_system/data/plans
+      - agent_reports:/app/agent_system/data/reports
+      - agent_workspace:/app/agent_system/data/workspace
+      - agent_cache:/app/agent_system/data/cache
+      - agent_checkpoints:/app/agent_system/data/checkpoints
+
+    networks:
+      - agent-network
+
+    ports:
+      - "9000:9000"  # Port pour future API agents (optionnel)
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  agent_plans:
+    driver: local
+  agent_reports:
+    driver: local
+  agent_workspace:
+    driver: local
+  agent_cache:
+    driver: local
+  agent_checkpoints:
+    driver: local
+
+networks:
+  agent-network:
+    driver: bridge
+    name: knowbase-agent-network

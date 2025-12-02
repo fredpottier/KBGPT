@@ -1,0 +1,92 @@
+# ========================================
+# Agent System - Configuration Générale
+# ========================================
+
+llm:
+  provider: "anthropic"
+  model: "claude-sonnet-4-5-20250929"
+  temperature: 0.1
+  max_tokens: 8192
+  streaming: true
+  timeout: 300
+  max_retries: 3
+
+agents:
+  planning:
+    enabled: true
+    max_retries: 3
+    timeout: 300
+    use_deepagents_planner: true
+    max_planning_depth: 3
+    min_subtasks: 2
+    max_subtasks: 10
+
+  dev:
+    enabled: true
+    max_retries: 5
+    timeout: 600
+    auto_test: true
+    test_coverage_threshold: 0.80
+    max_code_iterations: 3
+    enable_code_review: true
+
+  control:
+    enabled: true
+    conformity_threshold: 0.85
+    strict_mode: false
+    auto_approve_if_passed: false
+    validation_checks:
+      - "test_coverage"
+      - "code_quality"
+      - "spec_alignment"
+      - "security_scan"
+
+orchestrator:
+  max_iterations: 10
+  human_in_loop: true
+  auto_commit: false
+  checkpoint_enabled: true
+  checkpoint_dir: "/app/agent_system/data/checkpoints"
+  retry_on_failure: true
+  parallel_execution: false
+
+deepagents:
+  filesystem:
+    enabled: true
+    sandbox_mode: true
+    workspace_root: "/app/agent_system/data/workspace"
+    max_file_size_mb: 10
+    allowed_extensions:
+      - ".py"
+      - ".yaml"
+      - ".yml"
+      - ".json"
+      - ".md"
+      - ".txt"
+      - ".sh"
+
+  shell:
+    enabled: true
+    whitelist_only: true
+    timeout: 120
+    max_output_lines: 1000
+
+  planning:
+    enabled: true
+    max_depth: 3
+    use_reflection: true
+
+langsmith:
+  enabled: true
+  project_name: "knowwhere-agents"
+  tracing: true
+  evaluation: true
+  feedback_enabled: true
+  api_key_env: "LANGSMITH_API_KEY"
+
+logging:
+  level: "INFO"
+  format: "[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s"
+  file: "/app/agent_system/data/agent_system.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5

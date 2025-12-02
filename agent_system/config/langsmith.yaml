@@ -1,0 +1,103 @@
+# ========================================
+# Agent System - LangSmith Configuration
+# ========================================
+
+langsmith:
+  # API Configuration
+  api_key: "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"
+  project_name: "knowwhere-agents"
+  endpoint: "https://api.smith.langchain.com"
+
+  # Tracing Configuration
+  tracing:
+    enabled: true
+    sample_rate: 1.0  # 100% des runs (1.0 = 100%, 0.5 = 50%, etc.)
+    capture_inputs: true
+    capture_outputs: true
+    capture_intermediate_steps: true
+
+  # Evaluation Configuration
+  evaluation:
+    enabled: true
+
+    # Datasets d'évaluation
+    datasets:
+      - name: "agent-planning-eval"
+        description: "Evaluation dataset for planning agent"
+        tags: ["planning", "task-decomposition"]
+
+      - name: "agent-dev-eval"
+        description: "Evaluation dataset for dev agent"
+        tags: ["development", "code-generation"]
+
+      - name: "agent-control-eval"
+        description: "Evaluation dataset for control agent"
+        tags: ["qa", "validation"]
+
+    # Evaluateurs personnalisés
+    evaluators:
+      # Score de conformité aux specs
+      - name: "conformity_score"
+        type: "custom"
+        threshold: 0.85
+        description: "Mesure la conformité du résultat aux spécifications"
+
+      # Couverture de tests
+      - name: "test_coverage"
+        type: "custom"
+        threshold: 0.80
+        description: "Vérifie le taux de couverture des tests"
+
+      # Détection d'hallucinations
+      - name: "hallucination_detection"
+        type: "llm_graded"
+        model: "claude-sonnet-4-5-20250929"
+        temperature: 0.0
+        description: "Détecte les hallucinations dans les réponses"
+        prompt_template: |
+          Analysez la réponse suivante et déterminez si elle contient des hallucinations
+          (informations inventées ou non basées sur les données fournies).
+
+          Contexte: {context}
+          Réponse: {response}
+
+          Répondez par un score de 0 (hallucination complète) à 1 (aucune hallucination).
+
+      # Qualité du code généré
+      - name: "code_quality"
+        type: "custom"
+        threshold: 0.75
+        description: "Évalue la qualité du code généré (lisibilité, maintenabilité)"
+
+      # Pertinence de la planification
+      - name: "planning_relevance"
+        type: "custom"
+        threshold: 0.80
+        description: "Évalue la pertinence de la décomposition de tâches"
+
+  # Feedback Collection
+  feedback:
+    enabled: true
+    auto_collect: true
+    feedback_keys:
+      - "correctness"
+      - "helpfulness"
+      - "completeness"
+      - "efficiency"
+
+  # Monitoring & Alerting
+  monitoring:
+    enabled: true
+    alert_on_failure: true
+    alert_on_low_score: true
+    low_score_threshold: 0.70
+
+  # Metadata tagging
+  metadata:
+    environment: "development"
+    version: "0.1.0"
+    team: "knowwhere"
+    tags:
+      - "agent-orchestration"
+      - "langgraph"
+      - "deepagents"
