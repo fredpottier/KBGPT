@@ -35,6 +35,10 @@ services:
       # Repository Git complet (read-write pour git operations)
       - ../.git:/app/.git
 
+      # Claude Code credentials (OAuth via abonnement Pro)
+      # Permet d'utiliser Claude Code CLI sans API key payante
+      - ${HOME}/.claude:/root/.claude:ro
+
       # Code agent_system (read-write pour développement)
       - ./:/app/agent_system
 

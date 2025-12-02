@@ -9,7 +9,16 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     git \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Installation de Node.js (pour Claude Code CLI)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installation de Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code
 
 # Copie des requirements et installation des dépendances Python
 COPY agent_system/requirements.txt /app/agent_system/requirements.txt
