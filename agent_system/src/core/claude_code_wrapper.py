@@ -225,13 +225,13 @@ Please complete the task and provide a summary of:
         # Claude Code CLI accepte le prompt via stdin avec --print
         # ou via argument direct
 
-        # Note: --dangerously-skip-permissions ne fonctionne pas avec root
-        # On utilise --print pour le mode non-interactif
-        # Si des permissions sont nécessaires, le CLI les demandera et échouera
-        # car on est en mode non-interactif
+        # Mode bypassPermissions : execute sans confirmations
+        # Requiert utilisateur non-root (voir Dockerfile.agents)
+        # Ref: https://www.anthropic.com/engineering/claude-code-sandboxing
         cmd = [
             "claude",
             "--print",  # Mode non-interactif, affiche juste la reponse
+            "--permission-mode", "bypassPermissions",  # Skip confirmations
         ]
 
         result = subprocess.run(

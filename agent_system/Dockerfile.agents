@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     git \
     build-essential \
     curl \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # Installation de Node.js (pour Claude Code CLI)
@@ -19,6 +20,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 
 # Installation de Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
+
+# Création utilisateur non-root (requis pour --permission-mode bypassPermissions)
+# UID/GID 1000 correspond souvent à l'utilisateur hôte sur Linux
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+RUN groupadd --gid ${USER_GID} agent \
+    && useradd --uid ${USER_UID} --gid ${USER_GID} -m agent \
+    && echo "agent ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Copie des requirements et installation des dépendances Python
 COPY agent_system/requirements.txt /app/agent_system/requirements.txt
@@ -37,6 +47,7 @@ COPY config/ /app/config/
 ENV PYTHONPATH=/app/agent_system/src:/app
 ENV WORKSPACE_ROOT=/app/agent_system/data/workspace
 ENV AGENTS_CONFIG_PATH=/app/agent_system/config
+ENV HOME=/home/agent
 
 # Création des dossiers de données
 RUN mkdir -p /app/agent_system/data/plans \
@@ -44,14 +55,22 @@ RUN mkdir -p /app/agent_system/data/plans \
              /app/agent_system/data/reports/control \
              /app/agent_system/data/workspace \
              /app/agent_system/data/cache \
-             /app/agent_system/data/checkpoints
+             /app/agent_system/data/checkpoints \
+             /home/agent/.claude
 
-# Permissions
-RUN chmod +x /app/agent_system/scripts/*.py
+# Permissions - donner accès à l'utilisateur agent
+RUN chown -R agent:agent /app /home/agent
+RUN chmod +x /app/agent_system/scripts/*.py /app/agent_system/scripts/*.sh
+
+# Passage à l'utilisateur non-root
+USER agent
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import sys; sys.exit(0)"
+
+# Entrypoint pour corriger permissions du volume .claude monté
+ENTRYPOINT ["/app/agent_system/scripts/entrypoint.sh"]
 
 # Point d'entrée - Garde le container actif
 CMD ["tail", "-f", "/dev/null"]
