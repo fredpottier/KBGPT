@@ -10,7 +10,10 @@ services:
 
     environment:
       # LLM Configuration
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # IMPORTANT: Ne PAS définir ANTHROPIC_API_KEY ici !
+      # Claude Code CLI doit utiliser OAuth (via ~/.claude/.credentials.json)
+      # Si ANTHROPIC_API_KEY est définie, le CLI l'utilise EN PRIORITÉ sur OAuth
+      # et cela consomme les crédits API payants au lieu du forfait Pro/Max
 
       # LangSmith Configuration
       - LANGSMITH_API_KEY=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
@@ -35,6 +38,10 @@ services:
       # Repository Git complet (read-write pour git operations)
       - ../.git:/app/.git
 
+      # Docker socket - permet de contrôler les containers du host
+      # ATTENTION: Ceci donne accès Docker complet au container
+      - //var/run/docker.sock:/var/run/docker.sock
+
       # Claude Code credentials (OAuth via abonnement Pro)
       # Permet d'utiliser Claude Code CLI sans API key payante
       # Sur Windows: utiliser USERPROFILE au lieu de HOME
@@ -44,11 +51,18 @@ services:
       # Code agent_system (read-write pour développement)
       - ./:/app/agent_system
 
-      # Code source SAP_KB (read-only pour analyse)
-      - ../src:/app/src:ro
-      - ../tests:/app/tests:ro
-      - ../config:/app/config:ro
-      - ../doc:/app/doc:ro
+      # Code source SAP_KB (read-write pour que Claude puisse modifier)
+      - ../src:/app/src
+      - ../tests:/app/tests
+      - ../config:/app/config
+      - ../doc:/app/doc
+      - ../scripts:/app/scripts
+      - ../frontend:/app/frontend
+
+      # Fichiers racine du projet (pour docker-compose, etc.)
+      - ../docker-compose.yml:/app/docker-compose.yml
+      - ../docker-compose.infra.yml:/app/docker-compose.infra.yml
+      - ../.env:/app/.env
 
       # Données persistantes
       - agent_plans:/app/agent_system/data/plans

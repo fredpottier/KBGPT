@@ -130,11 +130,25 @@ class ClaudeCodeWrapper:
             duration = time.time() - start_time
 
             # Parser la reponse
+            # Debug: afficher les infos de retour
+            if result["returncode"] != 0:
+                print(f"[ClaudeCodeWrapper] CLI returncode={result['returncode']}")
+                print(f"[ClaudeCodeWrapper] stderr={result['stderr'][:500] if result['stderr'] else '(empty)'}")
+                print(f"[ClaudeCodeWrapper] stdout (first 500)={result['stdout'][:500] if result['stdout'] else '(empty)'}")
+
+            # Construire un message d'erreur informatif
+            error_msg = None
+            if result["returncode"] != 0:
+                error_msg = result["stderr"] if result["stderr"] else f"CLI exited with code {result['returncode']}"
+                # Si stdout contient une erreur, l'ajouter
+                if result["stdout"] and ("error" in result["stdout"].lower() or "exception" in result["stdout"].lower()):
+                    error_msg = f"{error_msg}; stdout contains: {result['stdout'][:200]}"
+
             output = {
                 "status": "success" if result["returncode"] == 0 else "failed",
                 "task_id": task_id,
                 "output": result["stdout"],
-                "error": result["stderr"] if result["returncode"] != 0 else None,
+                "error": error_msg,
                 "returncode": result["returncode"],
                 "duration_seconds": duration,
                 "timestamp": datetime.now().isoformat(),
@@ -188,33 +202,10 @@ class ClaudeCodeWrapper:
         context: Optional[str],
         allowed_tools: Optional[List[str]],
     ) -> str:
-        """Construit le prompt complet pour Claude Code."""
-        parts = []
-
-        # Task principale
-        parts.append(f"## Task\n\n{task_description}")
-
-        # Contexte si fourni
-        if context:
-            parts.append(f"\n\n## Context\n\n{context}")
-
-        # Instructions sur les tools
-        if allowed_tools:
-            tools_str = ", ".join(allowed_tools)
-            parts.append(f"\n\n## Allowed Tools\n\nYou may use: {tools_str}")
-
-        # Instructions de sortie
-        parts.append("""
-
-## Output Format
-
-Please complete the task and provide a summary of:
-1. What was done
-2. Files created/modified
-3. Any issues encountered
-""")
-
-        return "\n".join(parts)
+        """Construit le prompt pour Claude Code - VERSION LIGHT."""
+        # Version simplifiee pour eviter "Prompt is too long"
+        # Le task_description contient deja tout le contexte necessaire
+        return task_description
 
     def _execute_claude_cli(
         self,
@@ -360,7 +351,7 @@ class ClaudeCodeProjectExecutor:
             result = self.wrapper.execute_task(
                 task_description=description,
                 task_id=task["task_id"],
-                timeout_seconds=600,  # 10 minutes par tache
+                timeout_seconds=1200,  # 20 minutes par tache
             )
 
             results.append(result)

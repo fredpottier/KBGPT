@@ -1,4 +1,4 @@
-project_id: todo_api_test
+project_id: todo_api_v11
 title: Todo List API
 description: Implement a simple but complete REST API for managing todo items. This
   project demonstrates the multi-task project execution capability of the KnowWhere
@@ -7,10 +7,11 @@ document_path: agent_system/specs/todo_api_example.md
 tasks:
 - task_id: task_1
   title: Todo Data Model
-  description: 'Implement a Pydantic model for Todo items with the following fields:
-    id (unique identifier UUID), title (string, required, max 200 characters), description
-    (optional text), completed (boolean, default False), created_at (timestamp), updated_at
-    (timestamp)'
+  description: 'Create the core data model for todo items with proper validation.
+    Implement a Pydantic model for Todo items with the following fields: id (unique
+    identifier UUID), title (string, required, max 200 characters), description (optional
+    text), completed (boolean, default False), created_at (timestamp), updated_at
+    (timestamp).'
   requirements:
   - Use Pydantic for validation
   - Add proper type hints
@@ -27,9 +28,10 @@ tasks:
   completed_at: null
 - task_id: task_2
   title: In-Memory Storage
-  description: 'Create a TodoStorage class that manages todos in memory with basic
-    CRUD operations: create(todo) -> Todo, get(id) -> Optional[Todo], list() -> List[Todo],
-    update(id, data) -> Todo, delete(id) -> bool'
+  description: 'Implement a simple in-memory storage system for todos. Create a TodoStorage
+    class that manages todos in memory with basic CRUD operations: create(todo) ->
+    Todo, get(id) -> Optional[Todo], list() -> List[Todo], update(id, data) -> Todo,
+    delete(id) -> bool.'
   requirements:
   - Thread-safe operations
   - Raise appropriate exceptions for not found
@@ -47,9 +49,9 @@ tasks:
   completed_at: null
 - task_id: task_3
   title: Create Todo Endpoint
-  description: Add a FastAPI endpoint POST /todos that accepts todo data in request
-    body, validates the data, creates the todo in storage, and returns the created
-    todo with HTTP 201
+  description: Implement the POST /todos endpoint to create new todos. Add a FastAPI
+    endpoint that accepts todo data in request body, validates the data, creates the
+    todo in storage, and returns the created todo with HTTP 201.
   requirements:
   - Use FastAPI router
   - Proper HTTP status codes
@@ -68,8 +70,9 @@ tasks:
   completed_at: null
 - task_id: task_4
   title: List Todos Endpoint
-  description: Add a FastAPI endpoint GET /todos that returns all todos, supports
-    optional filtering by completed status, and returns empty list if no todos
+  description: Implement the GET /todos endpoint to list all todos. Add a FastAPI
+    endpoint that returns all todos, supports optional filtering by completed status,
+    and returns empty list if no todos.
   requirements:
   - 'Query parameter: completed (optional boolean)'
   - Returns HTTP 200
@@ -88,8 +91,9 @@ tasks:
   completed_at: null
 - task_id: task_5
   title: Unit Tests
-  description: 'Create pytest tests covering: Todo model validation, Storage operations,
-    API endpoints (using TestClient), and Error cases'
+  description: Write comprehensive unit tests for all components. Create pytest tests
+    covering Todo model validation, Storage operations, API endpoints (using TestClient),
+    and error cases.
   requirements:
   - Minimum 80% code coverage
   - Test both success and error cases
@@ -108,7 +112,7 @@ tasks:
   error_message: null
   started_at: null
   completed_at: null
-git_branch: project/todo_api_test
+git_branch: project/todo_api_v11
 base_branch: main
 global_requirements:
 - All code must have type hints
@@ -116,5 +120,5 @@ global_requirements:
 - Code must pass mypy type checking
 - Use Python 3.11+ features where appropriate
 - Follow PEP 8 style guide
-created_at: '2025-12-02T19:18:04.962576'
+created_at: '2025-12-03T08:50:13.642827'
 status: pending

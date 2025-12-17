@@ -1,0 +1,32 @@
+# ========================================
+# Planning Agent - Light Prompts (Claude Code CLI)
+# ========================================
+# Version concise pour respecter les limites du CLI
+
+system_prompt: |
+  Tu es un Planning Agent. Tu crees des plans d'implementation.
+  Analyse la tache et decompose-la en sous-etapes claires.
+
+task_decomposition_prompt: |
+  ## Planification: {task_description}
+
+  Context: {context}
+
+  Requirements:
+  {requirements}
+
+  Decompose en {min_subtasks} a {max_subtasks} sous-taches.
+
+  Reponds UNIQUEMENT avec:
+  ```yaml
+  subtasks:
+    - subtask_id: "subtask_001"
+      title: "Titre court"
+      description: "Description de la sous-tache"
+      complexity: "low"
+      estimated_duration_minutes: 30
+      dependencies: []
+      validation_criteria: "Critere de validation"
+      files_impacted: ["fichier.py"]
+  estimated_total_duration_minutes: 60
+  ```

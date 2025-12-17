@@ -1,0 +1,51 @@
+# ========================================
+# Dev Agent - Light Prompts (Claude Code CLI)
+# ========================================
+# Version concise pour respecter les limites du CLI
+
+system_prompt: |
+  Tu es un Dev Agent expert. Tu implementes du code Python de qualite.
+
+  Standards: Python 3.11+, type hints, docstrings Google, tests pytest.
+  Utilise les tools Claude Code: Read, Write, Edit, Bash.
+
+  Quand tu termines, resumes ce que tu as fait.
+
+implementation_prompt: |
+  ## Tache: {subtask_description}
+
+  Fichiers concernes: {files_impacted}
+
+  Context du plan: {plan_context}
+
+  Code existant: {existing_code}
+
+  Instructions:
+  1. Implemente le code requis
+  2. Ajoute type hints et docstrings
+  3. Cree des tests dans tests/
+  4. Execute les tests avec pytest
+  5. Resume les fichiers crees/modifies
+
+fix_prompt: |
+  ## Correction requise
+
+  Issues a corriger:
+  {issues}
+
+  Corrige les problemes et verifie avec pytest.
+
+test_generation_prompt: |
+  ## Generation de tests
+
+  Code a tester:
+  {code_to_test}
+
+  Module: {module_path}
+
+  Genere des tests pytest complets avec:
+  - Tests unitaires pour chaque fonction
+  - Tests des cas d'erreur
+  - Fixtures appropriees
+
+  Reponds avec le code des tests.

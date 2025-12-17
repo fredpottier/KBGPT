@@ -344,73 +344,73 @@ final_validation_report_prompt: |
 
   **Format de sortie (Markdown):**
   ```markdown
-  # Rapport de Validation - Task {task_id}
+  # Rapport de Validation - Task {{task_id}}
 
-  **Date:** {timestamp}
+  **Date:** {{timestamp}}
   **Validateur:** Control Agent
   **Décision:** APPROVED | APPROVED_WITH_COMMENTS | REJECTED
 
-  ## Score Global: {overall_score} / 1.00
+  ## Score Global: {{overall_score}} / 1.00
 
   ### Détail des Scores
 
   | Critère | Score | Poids | Contribution |
   |---------|-------|-------|--------------|
-  | Conformité aux specs | {conformity_score} | 30% | {contrib} |
-  | Qualité du code | {quality_score} | 25% | {contrib} |
-  | Tests | {test_score} | 25% | {contrib} |
-  | Sécurité | {security_score} | 10% | {contrib} |
-  | Performance | {performance_score} | 10% | {contrib} |
+  | Conformité aux specs | {{conformity_score}} | 30% | {{contrib}} |
+  | Qualité du code | {{quality_score}} | 25% | {{contrib}} |
+  | Tests | {{test_score}} | 25% | {{contrib}} |
+  | Sécurité | {{security_score}} | 10% | {{contrib}} |
+  | Performance | {{performance_score}} | 10% | {{contrib}} |
 
   ### Conformité aux Spécifications
 
-  - Requirements implémentées: {x}/{total}
-  - Features manquantes: {list}
-  - Écarts par rapport aux specs: {list}
+  - Requirements implémentées: {{x}}/{{total}}
+  - Features manquantes: {{list}}
+  - Écarts par rapport aux specs: {{list}}
 
   ### Qualité du Code
 
-  - Type hints: {coverage}%
-  - Documentation: {coverage}%
-  - Complexité moyenne: {avg_complexity}
-  - Code smells: {count}
+  - Type hints: {{coverage}}%
+  - Documentation: {{coverage}}%
+  - Complexité moyenne: {{avg_complexity}}
+  - Code smells: {{count}}
 
   ### Tests
 
-  - Couverture: {coverage}%
-  - Tests passed: {passed}/{total}
-  - Tests failed: {failed}
+  - Couverture: {{coverage}}%
+  - Tests passed: {{passed}}/{{total}}
+  - Tests failed: {{failed}}
 
   ### Sécurité
 
-  - Vulnérabilités critiques: {count}
-  - Vulnérabilités high: {count}
-  - Vulnérabilités medium: {count}
+  - Vulnérabilités critiques: {{count}}
+  - Vulnérabilités high: {{count}}
+  - Vulnérabilités medium: {{count}}
 
   ### Issues Identifiées
 
   #### Critiques (Bloquantes)
-  {list}
+  {{list}}
 
   #### Importantes
-  {list}
+  {{list}}
 
   #### Mineures
-  {list}
+  {{list}}
 
   ### Recommandations
 
-  1. {recommendation}
-  2. {recommendation}
+  1. {{recommendation}}
+  2. {{recommendation}}
 
   ### Actions Requises
 
-  - [ ] {action}
-  - [ ] {action}
+  - [ ] {{action}}
+  - [ ] {{action}}
 
   ### Conclusion
 
-  {conclusion_text}
+  {{conclusion_text}}
 
   ---
   **Signature:** Control Agent v0.1.0

@@ -103,7 +103,7 @@ test_generation_prompt: |
   # Fixtures
   @pytest.fixture
   def sample_data():
-      return {...}
+      return {{...}}
 
   # Tests
   def test_function_nominal_case(sample_data):
@@ -116,13 +116,13 @@ test_generation_prompt: |
       with pytest.raises(ValueError):
           function(invalid_data)
 
-  @pytest.mark.parametric("input,expected", [
+  @pytest.mark.parametrize("input_val,expected", [
       (value1, expected1),
       (value2, expected2),
   ])
-  def test_function_parametric(input, expected):
+  def test_function_parametric(input_val, expected):
       """Test with multiple parameters."""
-      assert function(input) == expected
+      assert function(input_val) == expected
   ```
 
 code_review_prompt: |

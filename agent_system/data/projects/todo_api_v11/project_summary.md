@@ -1,7 +1,7 @@
 # Project: Todo List API
 
-**Project ID**: todo_api_test
-**Git Branch**: project/todo_api_test
+**Project ID**: todo_api_v11
+**Git Branch**: project/todo_api_v11
 **Total Tasks**: 5
 
 ## Description
@@ -22,7 +22,7 @@ Implement a simple but complete REST API for managing todo items. This project d
 
 **Priority**: high
 
-Implement a Pydantic model for Todo items with the following fields: id (unique identifier UUID), title (string, required, max 200 characters), description (optional text), completed (boolean, default False), created_at (timestamp), updated_at (timestamp)
+Create the core data model for todo items with proper validation. Implement a Pydantic model for Todo items with the following fields: id (unique identifier UUID), title (string, required, max 200 characters), description (optional text), completed (boolean, default False), created_at (timestamp), updated_at (timestamp).
 
 **Requirements**:
 - Use Pydantic for validation
@@ -34,7 +34,7 @@ Implement a Pydantic model for Todo items with the following fields: id (unique 
 **Priority**: high
 **Dependencies**: `task_1`
 
-Create a TodoStorage class that manages todos in memory with basic CRUD operations: create(todo) -> Todo, get(id) -> Optional[Todo], list() -> List[Todo], update(id, data) -> Todo, delete(id) -> bool
+Implement a simple in-memory storage system for todos. Create a TodoStorage class that manages todos in memory with basic CRUD operations: create(todo) -> Todo, get(id) -> Optional[Todo], list() -> List[Todo], update(id, data) -> Todo, delete(id) -> bool.
 
 **Requirements**:
 - Thread-safe operations
@@ -46,7 +46,7 @@ Create a TodoStorage class that manages todos in memory with basic CRUD operatio
 **Priority**: medium
 **Dependencies**: `task_1`, `task_2`
 
-Add a FastAPI endpoint POST /todos that accepts todo data in request body, validates the data, creates the todo in storage, and returns the created todo with HTTP 201
+Implement the POST /todos endpoint to create new todos. Add a FastAPI endpoint that accepts todo data in request body, validates the data, creates the todo in storage, and returns the created todo with HTTP 201.
 
 **Requirements**:
 - Use FastAPI router
@@ -58,7 +58,7 @@ Add a FastAPI endpoint POST /todos that accepts todo data in request body, valid
 **Priority**: medium
 **Dependencies**: `task_2`, `task_3`
 
-Add a FastAPI endpoint GET /todos that returns all todos, supports optional filtering by completed status, and returns empty list if no todos
+Implement the GET /todos endpoint to list all todos. Add a FastAPI endpoint that returns all todos, supports optional filtering by completed status, and returns empty list if no todos.
 
 **Requirements**:
 - Query parameter: completed (optional boolean)
@@ -70,7 +70,7 @@ Add a FastAPI endpoint GET /todos that returns all todos, supports optional filt
 **Priority**: high
 **Dependencies**: `task_1`, `task_2`, `task_3`, `task_4`
 
-Create pytest tests covering: Todo model validation, Storage operations, API endpoints (using TestClient), and Error cases
+Write comprehensive unit tests for all components. Create pytest tests covering Todo model validation, Storage operations, API endpoints (using TestClient), and error cases.
 
 **Requirements**:
 - Minimum 80% code coverage

@@ -98,7 +98,7 @@ class DocumentParserAgent(BaseAgent):
 
     def _parse_with_llm(self, document_content: str) -> Dict[str, Any]:
         """
-        Utilise Claude pour parser le document et extraire les taches.
+        Utilise Claude Code CLI pour parser le document et extraire les taches.
 
         Args:
             document_content: Contenu du document markdown
@@ -111,18 +111,14 @@ class DocumentParserAgent(BaseAgent):
             document_content=document_content
         )
 
-        messages = [
-            {"role": "user", "content": user_prompt}
-        ]
-
-        # Appeler Claude
-        response = self.llm.invoke(
-            messages,
-            system=system_prompt,
+        # Appeler Claude via Claude Code CLI (OAuth)
+        response_text = self.invoke_llm(
+            system_prompt=system_prompt,
+            user_message=user_prompt,
         )
 
         # Parser la reponse JSON
-        response_text = response.content.strip()
+        response_text = response_text.strip()
 
         # Extraire le JSON (peut etre entoure de ```json ... ```)
         json_match = re.search(r"```json\s*(.*?)\s*```", response_text, re.DOTALL)

@@ -1,48 +1,57 @@
 """
 BaseAgent - Classe abstraite pour tous les agents.
+
+Utilise Claude Code CLI avec OAuth (abonnement Pro) au lieu de l'API payante.
 """
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 import yaml
+import uuid
 from pathlib import Path
-
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from models import AgentState
 from tools import BaseTool
+from core.claude_code_wrapper import ClaudeCodeWrapper
 
 
 class BaseAgent(ABC):
-    """Classe abstraite pour tous les agents."""
+    """Classe abstraite pour tous les agents utilisant Claude Code CLI."""
+
+    # Instance partagée du wrapper pour éviter de le recréer à chaque agent
+    _shared_wrapper: Optional[ClaudeCodeWrapper] = None
 
     def __init__(
         self,
         name: str,
-        model: str = "claude-sonnet-4-5-20250929",
-        temperature: float = 0.1,
-        max_tokens: int = 8192,
+        model: str = "claude-sonnet-4-5-20250929",  # Ignoré, utilise Claude Code CLI
+        temperature: float = 0.1,  # Ignoré, géré par Claude Code
+        max_tokens: int = 8192,  # Ignoré, géré par Claude Code
         prompts_config_path: Optional[str] = None,
+        working_directory: str = "/app",
     ) -> None:
         """
         Args:
             name: Nom de l'agent
-            model: Modèle LLM à utiliser
-            temperature: Température pour génération
-            max_tokens: Nombre max de tokens
+            model: Modèle LLM (ignoré - Claude Code utilise le modèle configuré)
+            temperature: Température (ignoré)
+            max_tokens: Nombre max de tokens (ignoré)
             prompts_config_path: Chemin vers config prompts YAML
+            working_directory: Répertoire de travail pour Claude Code
         """
         self.name = name
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.working_directory = working_directory
 
-        # Initialiser le LLM
-        self.llm = ChatAnthropic(
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        # Initialiser le wrapper Claude Code CLI (partagé entre agents)
+        if BaseAgent._shared_wrapper is None:
+            BaseAgent._shared_wrapper = ClaudeCodeWrapper(
+                project_name="knowwhere-agents",
+                enable_tracing=True,
+                working_directory=working_directory,
+            )
+        self.wrapper = BaseAgent._shared_wrapper
 
         # Tools disponibles pour cet agent
         self.tools: List[BaseTool] = []
@@ -97,7 +106,7 @@ class BaseAgent(ABC):
         **kwargs: Any
     ) -> str:
         """
-        Invoque le LLM avec un system prompt et un message utilisateur.
+        Invoque Claude via Claude Code CLI (OAuth).
 
         Args:
             system_prompt: Prompt système
@@ -107,13 +116,25 @@ class BaseAgent(ABC):
         Returns:
             Réponse du LLM
         """
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message),
-        ]
+        # VERSION LIGHT - prompt compact pour eviter "Prompt is too long"
+        # Ne pas dupliquer les en-tetes, juste combiner system + user
+        full_prompt = f"{system_prompt}\n\n{user_message}"
 
-        response = self.llm.invoke(messages)
-        return response.content
+        # Générer un task_id unique
+        task_id = f"{self.name}_{uuid.uuid4().hex[:8]}"
+
+        # Exécuter via Claude Code CLI
+        result = self.wrapper.execute_task(
+            task_description=full_prompt,
+            task_id=task_id,
+            timeout_seconds=1200,  # 20 minutes par appel (tâches complexes)
+        )
+
+        if result["status"] == "success":
+            return result["output"] or ""
+        else:
+            error_msg = result.get("error", "Unknown error")
+            raise Exception(f"Claude Code CLI error: {error_msg}")
 
     def invoke_llm_with_tools(
         self,
@@ -122,25 +143,22 @@ class BaseAgent(ABC):
         tools: Optional[List[BaseTool]] = None,
     ) -> Any:
         """
-        Invoque le LLM avec accès aux tools.
+        Invoque Claude avec accès aux tools via Claude Code CLI.
+
+        Note: Les tools sont disponibles nativement dans Claude Code CLI,
+        donc on passe juste le prompt.
 
         Args:
             system_prompt: Prompt système
             user_message: Message utilisateur
-            tools: Liste de tools à utiliser
+            tools: Liste de tools (ignoré - Claude Code a ses propres tools)
 
         Returns:
             Réponse du LLM
         """
-        # Pour LangChain tools, on devrait bind les tools au LLM
-        # Ici version simplifiée sans binding
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message),
-        ]
-
-        response = self.llm.invoke(messages)
-        return response.content
+        # VERSION LIGHT - Claude Code CLI a deja acces aux tools
+        # Pas besoin d'ajouter une longue note
+        return self.invoke_llm(system_prompt, user_message)
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(name='{self.name}', model='{self.model}')"
+        return f"{self.__class__.__name__}(name='{self.name}', using='ClaudeCodeCLI')"

@@ -87,8 +87,9 @@ class AgentOrchestrator:
 
     def _initialize_planning_agent(self) -> PlanningAgent:
         """Initialise le Planning Agent."""
+        # Utiliser prompts light pour Claude Code CLI (limite de taille)
         agent = PlanningAgent(
-            prompts_config_path=str(self.config_path / "prompts/planning.yaml"),
+            prompts_config_path=str(self.config_path / "prompts/planning_light.yaml"),
         )
 
         # Ajouter les tools pertinents
@@ -100,8 +101,9 @@ class AgentOrchestrator:
 
     def _initialize_dev_agent(self) -> DevAgent:
         """Initialise le Dev Agent."""
+        # Utiliser prompts light pour Claude Code CLI (limite de taille)
         agent = DevAgent(
-            prompts_config_path=str(self.config_path / "prompts/dev.yaml"),
+            prompts_config_path=str(self.config_path / "prompts/dev_light.yaml"),
         )
 
         # Ajouter tous les tools
@@ -112,8 +114,9 @@ class AgentOrchestrator:
 
     def _initialize_control_agent(self) -> ControlAgent:
         """Initialise le Control Agent."""
+        # Utiliser prompts light pour Claude Code CLI (limite de taille)
         agent = ControlAgent(
-            prompts_config_path=str(self.config_path / "prompts/control.yaml"),
+            prompts_config_path=str(self.config_path / "prompts/control_light.yaml"),
             conformity_threshold=self.config.get("agents", {}).get("control", {}).get("conformity_threshold", 0.85),
         )
 

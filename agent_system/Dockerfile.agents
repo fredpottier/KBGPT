@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
+# Installation de Docker CLI (pour contrôler les containers du host)
+RUN curl -fsSL https://get.docker.com | sh
+
 # Installation de Node.js (pour Claude Code CLI)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
@@ -28,7 +31,8 @@ ARG USER_GID=1000
 
 RUN groupadd --gid ${USER_GID} agent \
     && useradd --uid ${USER_UID} --gid ${USER_GID} -m agent \
-    && echo "agent ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    && echo "agent ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
+    && usermod -aG docker agent
 
 # Copie des requirements et installation des dépendances Python
 COPY agent_system/requirements.txt /app/agent_system/requirements.txt

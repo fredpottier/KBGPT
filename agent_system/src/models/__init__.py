@@ -60,6 +60,7 @@ from .project import (
     ProjectStatus,
     ProjectTaskStatus,
 )
+from .todo import Todo
 
 __all__ = [
     # Task models
@@ -115,4 +116,6 @@ __all__ = [
     "ProjectReport",
     "ProjectStatus",
     "ProjectTaskStatus",
+    # Todo model
+    "Todo",
 ]

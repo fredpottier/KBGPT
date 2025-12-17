@@ -1,0 +1,67 @@
+project_id: todo_api_v11
+project_title: Todo List API
+status: rolled_back
+total_tasks: 5
+completed_tasks: 0
+failed_tasks: 1
+skipped_tasks: 0
+task_summaries:
+- task_id: task_1
+  title: Todo Data Model
+  status: failed
+  validation_passed: false
+  error_message: 'Claude Code CLI error: CLI exited with code 1'
+  started_at: '2025-12-03T08:50:13.874227'
+  completed_at: '2025-12-03T09:01:38.856519'
+- task_id: task_2
+  title: In-Memory Storage
+  status: pending
+  validation_passed: false
+  error_message: null
+  started_at: null
+  completed_at: null
+- task_id: task_3
+  title: Create Todo Endpoint
+  status: pending
+  validation_passed: false
+  error_message: null
+  started_at: null
+  completed_at: null
+- task_id: task_4
+  title: List Todos Endpoint
+  status: pending
+  validation_passed: false
+  error_message: null
+  started_at: null
+  completed_at: null
+- task_id: task_5
+  title: Unit Tests
+  status: pending
+  validation_passed: false
+  error_message: null
+  started_at: null
+  completed_at: null
+git_branch: project/todo_api_v11
+git_commits: []
+started_at: '2025-12-03T08:50:13.651095'
+completed_at: '2025-12-03T09:01:41.932741'
+duration_seconds: 688.281646
+execution_log:
+- timestamp: '2025-12-03T08:50:13.651102'
+  type: start
+  message: Project execution started
+- timestamp: '2025-12-03T08:50:13.874181'
+  type: git
+  message: 'Created branch: project/todo_api_v11'
+- timestamp: '2025-12-03T09:01:38.856526'
+  type: task_failed
+  message: 'Task task_1 failed: Claude Code CLI error: CLI exited with code 1'
+  task_id: task_1
+  error: 'Claude Code CLI error: CLI exited with code 1'
+- timestamp: '2025-12-03T09:01:38.862682'
+  type: error
+  message: 'Project execution failed: Task task_1 failed: Claude Code CLI error: CLI
+    exited with code 1'
+- timestamp: '2025-12-03T09:01:41.932727'
+  type: rollback
+  message: Git branch rolled back
