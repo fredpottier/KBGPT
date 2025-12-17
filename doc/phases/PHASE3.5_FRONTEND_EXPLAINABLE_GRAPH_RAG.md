@@ -1,24 +1,26 @@
 # Phase 3.5 : Frontend "Explainable Graph-RAG"
 
-**Version:** 1.0
+**Version:** 2.0
 **Date:** 2025-12-17
 **Status:** 🟡 PLANIFICATION
-**Durée estimée:** 5-6 semaines (Semaines 29-34)
-**Prérequis:** Phase 2 complète + Phase 3 (Multi-Source simplifiée)
+**Durée estimée:** 6-7 semaines (Semaines 29-35)
+**Prérequis:** Phase 2 complète + Phase 2.5 (Memory Layer) + Phase 3 (Multi-Source simplifiée)
 
 ---
 
 ## Table des Matières
 
 1. [Vision et Objectifs](#1-vision-et-objectifs)
-2. [Expérience Utilisateur Cible](#2-expérience-utilisateur-cible)
-3. [Architecture Technique](#3-architecture-technique)
-4. [Maquettes Détaillées](#4-maquettes-détaillées)
-5. [Composants Frontend](#5-composants-frontend)
-6. [APIs Backend Requises](#6-apis-backend-requises)
-7. [Planning Détaillé](#7-planning-détaillé)
-8. [KPIs de Succès](#8-kpis-de-succès)
-9. [Risques et Mitigation](#9-risques-et-mitigation)
+2. [Killer Features](#2-killer-features)
+3. [Expérience Utilisateur Cible](#3-expérience-utilisateur-cible)
+4. [Architecture Technique](#4-architecture-technique)
+5. [Maquettes Détaillées](#5-maquettes-détaillées)
+6. [Composants Frontend](#6-composants-frontend)
+7. [APIs Backend Requises](#7-apis-backend-requises)
+8. [Intégration Memory Layer](#8-intégration-memory-layer)
+9. [Planning Détaillé](#9-planning-détaillé)
+10. [KPIs de Succès](#10-kpis-de-succès)
+11. [Risques et Mitigation](#11-risques-et-mitigation)
 
 ---
 
@@ -68,9 +70,419 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 
 ---
 
-## 2. Expérience Utilisateur Cible
+## 2. Killer Features
 
-### 2.1 Parcours Principal : Question → Réponse Expliquée
+Cette section décrit les fonctionnalités différenciantes qui transforment KnowWhere en un outil véritablement unique sur le marché.
+
+### 2.1 Living Graph (Graphe Vivant)
+
+> **Le graphe de la session grandit à chaque question, créant une carte mentale de l'exploration**
+
+**Concept :**
+Le graphe ne se réinitialise pas à chaque question. Au contraire, il **accumule** les concepts explorés au fil de la conversation, avec un code couleur temporel :
+- Concepts **récents** : couleurs vives
+- Concepts **anciens** : couleurs atténuées
+- Nouveaux concepts ajoutés : animation "apparition"
+
+**Avantages :**
+- L'utilisateur visualise son **parcours d'exploration**
+- Identification visuelle des **zones non explorées**
+- Possibilité de **revenir** sur un concept précédemment vu
+- Création d'une **carte mentale personnalisée** de la session
+
+**Interactions :**
+| Action | Résultat |
+|--------|----------|
+| Nouvelle question | Nouveaux concepts s'ajoutent avec animation |
+| Hover concept ancien | Rappel de la question qui l'a introduit |
+| Click "Reset Graph" | Réinitialisation optionnelle |
+| Click "Export Graph" | Export PNG/SVG de la carte mentale |
+
+```
+Session: Question 1 → Question 2 → Question 3
+         │             │             │
+         ▼             ▼             ▼
+      [C1][C2]      [C3][C4]      [C5][C6]
+         │             │             │
+         └─────────────┴─────────────┘
+                      │
+             LIVING GRAPH UNIFIÉ
+```
+
+### 2.2 Smart Hover (Survol Intelligent)
+
+> **Toutes les informations essentielles sans aucun click**
+
+**Concept :**
+Un tooltip enrichi apparaît au survol de n'importe quel élément, avec des informations contextuelles complètes :
+
+**Sur un concept :**
+```
+┌─────────────────────────────────────────┐
+│ 🟢 RBAC                                  │
+│ Role-Based Access Control                │
+│                                          │
+│ Type: PRACTICE    Confidence: 94%        │
+│ Mentions: 127     Documents: 12          │
+│                                          │
+│ "Modèle de contrôle d'accès où les      │
+│  permissions sont attribuées à des       │
+│  rôles plutôt qu'aux individus..."       │
+│                                          │
+│ 🔗 8 relations • 📚 12 sources           │
+│                                          │
+│ [Click pour voir la carte complète →]    │
+└─────────────────────────────────────────┘
+```
+
+**Sur une relation :**
+```
+┌─────────────────────────────────────────┐
+│ ─── INTEGRATES_WITH ───                  │
+│                                          │
+│ RBAC ←→ Identity Authentication Service  │
+│                                          │
+│ Confidence: 91%                          │
+│ Evidence: 8 documents                    │
+│                                          │
+│ "IAS provides the identity layer for    │
+│  RBAC enforcement in S/4HANA Cloud..."   │
+└─────────────────────────────────────────┘
+```
+
+**Sur une source :**
+```
+┌─────────────────────────────────────────┐
+│ 📄 SAP S/4HANA Security Guide           │
+│                                          │
+│ Type: PDF    Pages: 156                  │
+│ Importé: 2024-11-15                      │
+│                                          │
+│ Concepts utilisés de ce doc: 5          │
+│ [RBAC] [IAS] [Cloud Connector] ...       │
+│                                          │
+│ [Click pour aperçu complet →]            │
+└─────────────────────────────────────────┘
+```
+
+### 2.3 Citations Inline (Style Académique)
+
+> **Chaque affirmation est traçable, comme dans une publication scientifique**
+
+**Concept :**
+La réponse textuelle inclut des citations numérotées type académique ¹²³ qui renvoient aux sources exactes :
+
+**Exemple :**
+```
+La migration vers SAP S/4HANA Cloud implique plusieurs aspects de
+sécurité critiques¹:
+
+1. **Identity Authentication Service (IAS)**¹² - Le service d'authentification
+   centralisé doit être configuré pour gérer les identités utilisateurs...
+
+2. **RBAC (Role-Based Access Control)**¹³ - Le modèle de contrôle d'accès
+   basé sur les rôles nécessite une révision complète lors de la migration.
+
+───────────────────────────────────────────────────────────────────────
+¹ SAP S/4HANA Security Guide, p.12-15 (Confidence: 95%)
+² BTP Architecture Overview, slides 22-28 (Confidence: 92%)
+³ Cloud Connector Setup Guide, ch.3 (Confidence: 88%)
+```
+
+**Interactions :**
+| Action | Résultat |
+|--------|----------|
+| Hover sur ¹ | Tooltip avec titre doc + extrait |
+| Click sur ¹ | Scroll vers source dans panel |
+| Click "Copier avec citations" | Export texte avec références |
+
+### 2.4 Predictive Questions (Questions Prédictives)
+
+> **Le système suggère intelligemment les prochaines questions pertinentes**
+
+**Sources de suggestions :**
+1. **Concepts bleus** (à explorer) → Questions basées sur ces concepts
+2. **Relations non explorées** → "Vous n'avez pas encore exploré la relation X→Y"
+3. **Pattern utilisateur** → Basé sur les questions similaires d'autres utilisateurs
+4. **Gaps de couverture** → "Votre exploration couvre 60% du sujet, considérez..."
+5. **Context Memory Layer** → Questions basées sur l'historique utilisateur
+
+**Affichage :**
+```
+┌─ 💡 Questions suggérées ──────────────────────────────────────────┐
+│                                                                    │
+│ Basées sur votre exploration:                                      │
+│ ┌──────────────────────────────────────────────────────────┐      │
+│ │ 🔵 "Comment configurer SAML avec IAS ?"                  │ [→]  │
+│ └──────────────────────────────────────────────────────────┘      │
+│ ┌──────────────────────────────────────────────────────────┐      │
+│ │ 🔵 "Sécuriser les applications Fiori"                    │ [→]  │
+│ └──────────────────────────────────────────────────────────┘      │
+│                                                                    │
+│ Vous n'avez pas encore exploré:                                    │
+│ ┌──────────────────────────────────────────────────────────┐      │
+│ │ ⚪ "Impact du Cloud Connector sur la latence réseau"     │ [→]  │
+│ └──────────────────────────────────────────────────────────┘      │
+│                                                                    │
+│ Populaires sur ce sujet:                                           │
+│ ┌──────────────────────────────────────────────────────────┐      │
+│ │ 📊 "Comparaison sécurité On-Premise vs Cloud"            │ [→]  │
+│ └──────────────────────────────────────────────────────────┘      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.5 Session Summary (Résumé Exportable)
+
+> **Transformer une session de recherche en briefing métier exploitable**
+
+**Concept :**
+À tout moment, l'utilisateur peut générer un **résumé intelligent** de sa session. Ce n'est PAS une transcription mais un **compte-rendu métier structuré** généré par LLM.
+
+**Format du résumé :**
+```
+═══════════════════════════════════════════════════════════════════
+          SYNTHÈSE DE SESSION - KnowWhere
+═══════════════════════════════════════════════════════════════════
+
+📅 Date: 17 décembre 2025
+👤 Utilisateur: Jean Dupont
+🕐 Durée: 45 minutes (14 questions)
+📊 Couverture: 23 concepts explorés
+
+───────────────────────────────────────────────────────────────────
+                        CONTEXTE
+───────────────────────────────────────────────────────────────────
+
+Objectif de recherche identifié:
+  → Migration sécurisée vers SAP S/4HANA Cloud
+
+Périmètre couvert:
+  • Authentification et identité (IAS, SAML)
+  • Contrôle d'accès (RBAC, Authorization Objects)
+  • Connectivité hybride (Cloud Connector)
+
+───────────────────────────────────────────────────────────────────
+                    POINTS CLÉS RETENUS
+───────────────────────────────────────────────────────────────────
+
+1. ARCHITECTURE SÉCURITÉ
+   IAS est le point central de gestion des identités pour le Cloud.
+   Configuration SAML requise pour SSO avec IdP corporate.
+   → Sources: Security Guide p.12-15, BTP Overview slides 22-28
+
+2. MODÈLE D'AUTORISATION
+   RBAC via Business Catalogs et Business Roles (différent On-Prem).
+   Migration des rôles existants nécessite mapping explicite.
+   → Sources: Authorization Best Practices, Fiori Security Config
+
+3. CONNECTIVITÉ HYBRIDE
+   Cloud Connector obligatoire pour accès ressources On-Premise.
+   RFC over HTTP tunneling pour appels BAPI.
+   → Sources: Cloud Connector Setup Guide ch.3
+
+───────────────────────────────────────────────────────────────────
+                    ACTIONS IDENTIFIÉES
+───────────────────────────────────────────────────────────────────
+
+☐ Inventorier les rôles SAP GUI existants pour mapping Cloud
+☐ Configurer l'intégration IAS avec l'Active Directory corporate
+☐ Installer Cloud Connector sur serveur dédié DMZ
+☐ Définir la matrice RBAC pour les utilisateurs Fiori
+
+───────────────────────────────────────────────────────────────────
+                    ZONES NON EXPLORÉES
+───────────────────────────────────────────────────────────────────
+
+⚠️ Sujets non abordés qui pourraient être pertinents:
+  • Audit et logging des accès (SAP Audit Log)
+  • Chiffrement des données au repos et en transit
+  • Gestion des clés API et certificats
+
+───────────────────────────────────────────────────────────────────
+                        SOURCES
+───────────────────────────────────────────────────────────────────
+
+[1] SAP S/4HANA Security Guide (2024) - 15 citations
+[2] BTP Architecture Overview - 8 citations
+[3] Cloud Connector Setup Guide - 6 citations
+[4] Fiori Security Configuration - 4 citations
+[5] Authorization Best Practices - 3 citations
+
+═══════════════════════════════════════════════════════════════════
+           Généré par KnowWhere - Le Cortex Documentaire
+═══════════════════════════════════════════════════════════════════
+```
+
+**Export PDF :**
+- Layout professionnel avec logo KnowWhere
+- Table des matières cliquable
+- Graphe de session inclus (image)
+- Annexe avec tous les extraits sources cités
+
+### 2.6 Expert Mode (Mode Expert)
+
+> **Pour les power users : contrôle avancé sur le comportement du système**
+
+**Toggle accessible via icône ⚙️ :**
+
+**Contrôles Expert Mode :**
+```
+┌─ ⚙️ MODE EXPERT ──────────────────────────────────────────────────┐
+│                                                                    │
+│ 📊 PARAMÈTRES DE RECHERCHE                                         │
+│ ┌────────────────────────────────────────────────────────────────┐│
+│ │ Profondeur expansion graphe:  [1] [2] [●3] [4] [5]             ││
+│ │ Seuil confiance minimum:      [====●=====] 70%                 ││
+│ │ Sources max par réponse:      [====●=====] 10                  ││
+│ │ Types de relations:           [✓] All [✓] PART_OF [✓] USES ... ││
+│ └────────────────────────────────────────────────────────────────┘│
+│                                                                    │
+│ 🔍 FILTRES DOCUMENTS                                               │
+│ ┌────────────────────────────────────────────────────────────────┐│
+│ │ Types:    [✓] PDF [✓] PPTX [✓] DOCX [ ] Excel                  ││
+│ │ Date:     [Après: 2022-01-01] [Avant: ____]                    ││
+│ │ Tags:     [Security] [Migration] [+]                           ││
+│ └────────────────────────────────────────────────────────────────┘│
+│                                                                    │
+│ 🎨 AFFICHAGE GRAPHE                                                │
+│ ┌────────────────────────────────────────────────────────────────┐│
+│ │ Layout:   [●] Force [○] Hierarchical [○] Radial                ││
+│ │ Nœuds:    [===●====] Taille par mentions                       ││
+│ │ Labels:   [✓] Toujours visibles [ ] Au hover seulement         ││
+│ │ Cluster:  [ ] Auto-cluster si > 50 nœuds                       ││
+│ └────────────────────────────────────────────────────────────────┘│
+│                                                                    │
+│ [Réinitialiser par défaut]                    [Sauver préférences]│
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.7 Concept Comparator (Comparateur de Concepts)
+
+> **Comparer côte à côte deux ou plusieurs concepts**
+
+**Activation :** Sélectionner 2+ concepts (Ctrl+Click ou bouton "Comparer")
+
+**Vue comparative :**
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    COMPARAISON CONCEPTS                              │
+├────────────────────────────┬────────────────────────────────────────┤
+│         IAS                │           RBAC                          │
+│  Identity Authentication   │    Role-Based Access Control            │
+│         SERVICE            │          PRACTICE                       │
+├────────────────────────────┼────────────────────────────────────────┤
+│ 📊 MÉTRIQUES               │ 📊 MÉTRIQUES                            │
+│ Mentions: 89               │ Mentions: 127                           │
+│ Documents: 8               │ Documents: 12                           │
+│ Confidence: 94%            │ Confidence: 92%                         │
+├────────────────────────────┼────────────────────────────────────────┤
+│ 🔗 RELATIONS COMMUNES      │ 🔗 RELATIONS COMMUNES                   │
+│ ←→ S/4HANA Cloud           │ ←→ S/4HANA Cloud                        │
+│ ←→ Security Framework      │ ←→ Security Framework                   │
+├────────────────────────────┼────────────────────────────────────────┤
+│ 🔗 RELATIONS UNIQUES       │ 🔗 RELATIONS UNIQUES                    │
+│ → SAML (auth protocol)     │ → Authorization Objects                 │
+│ → User Provisioning        │ → Business Catalogs                     │
+│ → SSO                      │ → Fiori Launchpad                       │
+├────────────────────────────┼────────────────────────────────────────┤
+│ 📚 SOURCES COMMUNES        │                                         │
+│ • SAP S/4HANA Security Guide (both mentioned)                        │
+│ • BTP Architecture Overview (both mentioned)                         │
+├────────────────────────────┴────────────────────────────────────────┤
+│ 💡 INSIGHT                                                           │
+│ "IAS et RBAC sont complémentaires: IAS gère QUI accède (identity),  │
+│  RBAC gère À QUOI ils accèdent (authorization). Dans une migration   │
+│  S/4HANA Cloud, les deux doivent être configurés conjointement."     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.8 Quick Actions (Actions Rapides)
+
+> **Menu contextuel sur chaque concept pour actions en un click**
+
+**Au click-droit ou bouton "..." sur un concept :**
+```
+┌────────────────────────────────────────┐
+│ 🟢 RBAC                                │
+├────────────────────────────────────────┤
+│ 📖 Voir carte d'identité               │
+│ 🔍 "Qu'est-ce que RBAC ?"              │
+│ 📊 "Comparaison RBAC Cloud vs On-Prem" │
+│ 📈 "Évolution RBAC 2020-2024"          │
+│ 🔗 Voir toutes les relations           │
+│ ───────────────────────────            │
+│ ➕ Ajouter au comparateur               │
+│ 📌 Épingler dans le graphe             │
+│ 🚫 Masquer du graphe                   │
+│ ───────────────────────────            │
+│ 📋 Copier définition                   │
+│ 🔗 Copier lien vers concept            │
+└────────────────────────────────────────┘
+```
+
+### 2.9 Adaptive Layout (Layout Adaptatif 70/30)
+
+> **L'interface s'adapte intelligemment au contenu**
+
+**Principe :** Layout flexible 70/30 avec priorité au contenu le plus pertinent.
+
+**État par défaut (réponse simple) :**
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ ┌─────────────────────────────────┬───────────────────────────────┐ │
+│ │         CHAT (70%)              │       GRAPHE (30%)             │ │
+│ │                                 │                                │ │
+│ │  [Messages]                     │   [Knowledge Graph]            │ │
+│ │                                 │                                │ │
+│ │  Réponse détaillée...           │         ●──●                  │ │
+│ │                                 │        / \   \                │ │
+│ │                                 │       ●   ●   ●               │ │
+│ │                                 │                                │ │
+│ └─────────────────────────────────┴───────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**État exploration graphe (click sur concept) :**
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ ┌───────────────────┬───────────────────┬─────────────────────────┐ │
+│ │   CHAT (40%)      │   GRAPHE (30%)    │   CARTE CONCEPT (30%)   │ │
+│ │                   │                   │                         │ │
+│ │  [Messages]       │ [Knowledge Graph] │  [Slide-in Panel]       │ │
+│ │                   │                   │                         │ │
+│ │  Réponse...       │       ●──●       │   📖 RBAC               │ │
+│ │                   │      / \   \      │   Definition...          │ │
+│ │                   │     ●   ●   ●     │   Relations...           │ │
+│ │                   │         ↑         │   Sources...             │ │
+│ │                   │     [selected]    │                         │ │
+│ └───────────────────┴───────────────────┴─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**État focus graphe (fullscreen graphe) :**
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ ┌─────────────────────────────────────────────────────────────────┐ │
+│ │                      GRAPHE FULLSCREEN (100%)                    │ │
+│ │                                                                  │ │
+│ │              ●───────●───────●                                  │ │
+│ │             / \     / \     / \                                 │ │
+│ │            ●   ●   ●   ●   ●   ●                               │ │
+│ │           / \ / \ / \ / \ / \ / \                               │ │
+│ │          ●   ●   ●   ●   ●   ●   ●                             │ │
+│ │                                                                  │ │
+│ │  [🔙 Retour au chat]                  [Living Graph: 45 nodes]  │ │
+│ └─────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Transitions :** Framer Motion smooth animations entre états.
+
+---
+
+## 3. Expérience Utilisateur Cible
+
+### 3.1 Parcours Principal : Question → Réponse Expliquée
 
 ```
 ÉTAPE 1: L'utilisateur pose une question
@@ -97,7 +509,7 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 • Click sur source → Aperçu document avec extrait
 ```
 
-### 2.2 Système de Couleurs
+### 3.2 Système de Couleurs
 
 | Couleur | Code Hex | Signification | Quand l'utiliser |
 |---------|----------|---------------|------------------|
@@ -114,7 +526,7 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 | Trait plein fin (1px) | Relation disponible, non utilisée |
 | Trait pointillé | Relation inférée (non explicite dans les docs) |
 
-### 2.3 Interactions Clés
+### 3.3 Interactions Clés
 
 | Action | Résultat | Animation |
 |--------|----------|-----------|
@@ -128,9 +540,9 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 
 ---
 
-## 3. Architecture Technique
+## 4. Architecture Technique
 
-### 3.1 Stack Technologique
+### 4.1 Stack Technologique
 
 | Couche | Technologie | Justification |
 |--------|-------------|---------------|
@@ -141,7 +553,7 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 | **Animations** | Framer Motion | Transitions fluides |
 | **Types** | TypeScript strict | Sécurité types |
 
-### 3.2 Choix D3.js : Justification
+### 4.2 Choix D3.js : Justification
 
 **Pourquoi D3.js plutôt que Cytoscape/React Flow :**
 
@@ -156,7 +568,7 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 
 **Décision : D3.js** pour garantir qu'aucune limitation ne bloque les évolutions futures.
 
-### 3.3 Architecture Composants
+### 4.3 Architecture Composants
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -208,7 +620,7 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.4 Flow de Données
+### 4.4 Flow de Données
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
@@ -246,9 +658,9 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 
 ---
 
-## 4. Maquettes Détaillées
+## 5. Maquettes Détaillées
 
-### 4.1 Vue Chat Principal
+### 5.1 Vue Chat Principal (Layout Adaptatif 70/30)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -325,7 +737,7 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 Panel Carte d'Identité Concept (Slide-in Droite)
+### 5.2 Panel Carte d'Identité Concept (Slide-in Droite)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -427,7 +839,7 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.3 Modal Aperçu Document Source
+### 5.3 Modal Aperçu Document Source
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -476,9 +888,9 @@ L'utilisateur ne reçoit pas simplement une réponse textuelle : il **voit** com
 
 ---
 
-## 5. Composants Frontend
+## 6. Composants Frontend
 
-### 5.1 Arborescence des Composants
+### 6.1 Arborescence des Composants
 
 ```
 frontend/src/
@@ -562,9 +974,9 @@ frontend/src/
     └── document.ts                        # Types documents
 ```
 
-### 5.2 Composants Clés - Spécifications
+### 6.2 Composants Clés - Spécifications
 
-#### 5.2.1 `KnowledgeGraph.tsx`
+#### 6.2.1 `KnowledgeGraph.tsx`
 
 ```typescript
 interface KnowledgeGraphProps {
@@ -612,7 +1024,7 @@ interface GraphEdge {
 }
 ```
 
-#### 5.2.2 `ConceptCardPanel.tsx`
+#### 6.2.2 `ConceptCardPanel.tsx`
 
 ```typescript
 interface ConceptCardPanelProps {
@@ -653,7 +1065,7 @@ interface ConceptCard {
 }
 ```
 
-#### 5.2.3 `AssistantMessage.tsx`
+#### 6.2.3 `AssistantMessage.tsx`
 
 ```typescript
 interface AssistantMessageProps {
@@ -691,9 +1103,9 @@ interface AssistantMessageProps {
 
 ---
 
-## 6. APIs Backend Requises
+## 7. APIs Backend Requises
 
-### 6.1 Nouveaux Endpoints
+### 7.1 Nouveaux Endpoints
 
 | Endpoint | Méthode | Description | Priorité |
 |----------|---------|-------------|----------|
@@ -703,9 +1115,9 @@ interface AssistantMessageProps {
 | `/api/concepts/{id}/suggestions` | GET | Questions suggérées | P1 |
 | `/api/documents/{id}/preview` | GET | Aperçu document + extraits | P1 |
 
-### 6.2 Spécifications API
+### 7.2 Spécifications API
 
-#### 6.2.1 `POST /api/chat/graph-guided`
+#### 7.2.1 `POST /api/chat/graph-guided`
 
 **Request:**
 ```json
@@ -772,7 +1184,7 @@ interface AssistantMessageProps {
 }
 ```
 
-#### 6.2.2 `GET /api/concepts/{id}/card`
+#### 7.2.2 `GET /api/concepts/{id}/card`
 
 **Response:**
 ```json
@@ -823,7 +1235,7 @@ interface AssistantMessageProps {
 }
 ```
 
-### 6.3 Modifications Endpoints Existants
+### 7.3 Modifications Endpoints Existants
 
 | Endpoint | Modification | Raison |
 |----------|-------------|--------|
@@ -832,9 +1244,164 @@ interface AssistantMessageProps {
 
 ---
 
-## 7. Planning Détaillé
+## 8. Intégration Memory Layer (Phase 2.5)
 
-### 7.1 Vue d'Ensemble
+> **Le Frontend exploite la Memory Layer pour une expérience conversationnelle continue**
+
+### 8.1 Dépendance Phase 2.5
+
+Cette phase **dépend** de la Phase 2.5 (Memory Layer) qui doit être implémentée au préalable. La Memory Layer fournit :
+
+| Composant Memory Layer | Utilisation Frontend |
+|------------------------|---------------------|
+| **Session Manager** | Persistance du Living Graph entre rafraîchissements |
+| **Context Resolver** | Résolution de questions implicites ("Et pour X ?") |
+| **User Profile** | Personnalisation des suggestions, préférences Expert Mode |
+| **Intelligent Summarizer** | Génération du Session Summary PDF |
+| **Conversation History** | Affichage historique, reprise de sessions précédentes |
+
+### 8.2 Composants Frontend Memory-Aware
+
+```
+frontend/src/
+├── components/
+│   ├── memory/                              # Composants Memory Layer
+│   │   ├── SessionSelector.tsx              # Sélecteur de session (nouvelle/existante)
+│   │   ├── SessionHistory.tsx               # Liste sessions passées
+│   │   ├── SessionResume.tsx                # Bouton "Reprendre où j'en étais"
+│   │   ├── ContextIndicator.tsx             # Indicateur contexte actif
+│   │   └── SummaryExporter.tsx              # Export PDF session summary
+│   │
+│   └── chat/
+│       ├── ChatContainer.tsx                # ← Enrichi avec session context
+│       └── ChatMessages.tsx                 # ← Charge historique session
+│
+├── hooks/
+│   ├── useSession.ts                        # Hook gestion session courante
+│   ├── useSessionHistory.ts                 # Hook historique sessions
+│   └── useContextResolver.ts                # Hook résolution contexte implicite
+│
+└── lib/api/
+    └── memoryApi.ts                         # API Memory Layer
+```
+
+### 8.3 APIs Memory Layer Requises
+
+| Endpoint | Méthode | Description |
+|----------|---------|-------------|
+| `/api/memory/sessions` | GET | Liste sessions utilisateur |
+| `/api/memory/sessions/{id}` | GET | Détail session (messages, graph state) |
+| `/api/memory/sessions` | POST | Créer nouvelle session |
+| `/api/memory/sessions/{id}/context` | GET | Contexte actuel (pour résolution implicite) |
+| `/api/memory/sessions/{id}/summary` | POST | Générer résumé intelligent |
+| `/api/memory/sessions/{id}/export` | GET | Export PDF session summary |
+| `/api/memory/user/profile` | GET/PUT | Profil utilisateur (préférences) |
+
+### 8.4 UX Memory-Aware
+
+#### 8.4.1 Démarrage Session
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🌊 KnowWhere                                                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Bonjour Jean ! Comment puis-je vous aider ?                    │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ 📝 Nouvelle recherche                                       ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  Ou reprendre une session récente :                             │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ 📁 Migration S/4HANA Security (hier, 14 questions)         ││
+│  │    Dernière question: "Configuration RBAC Fiori"            ││
+│  └─────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ 📁 Analyse Cloud Connector (3 déc, 8 questions)            ││
+│  │    Dernière question: "Ports réseau requis"                 ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  [Voir toutes les sessions →]                                   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 8.4.2 Indicateur de Contexte Actif
+
+Lors d'une session en cours, un badge discret indique le contexte actif :
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🌊 KnowWhere          [📌 Contexte: Migration S/4HANA Security]│
+├─────────────────────────────────────────────────────────────────┤
+```
+
+#### 8.4.3 Questions Implicites
+
+La Memory Layer permet de comprendre des questions sans contexte explicite :
+
+```
+👤 "Et pour la rétention des logs ?"
+       │
+       ▼
+[Context Resolver détecte le contexte actif: "S/4HANA Security"]
+       │
+       ▼
+🤖 "Dans le contexte de la sécurité S/4HANA Cloud, la rétention
+    des logs d'audit est configurée via..."
+```
+
+#### 8.4.4 Session Summary avec Actions
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  📊 RÉSUMÉ DE SESSION                              [📥 PDF]     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Cette session a couvert 23 concepts en 14 questions.           │
+│                                                                  │
+│  Actions identifiées pour "Client X":                           │
+│  ☐ Configurer IAS avec AD corporate                             │
+│  ☐ Mapper rôles SAP GUI vers Business Roles Cloud               │
+│  ☐ Installer Cloud Connector en DMZ                             │
+│                                                                  │
+│  [📥 Exporter en PDF]  [📧 Envoyer par email]                   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 8.5 Stockage Living Graph
+
+Le Living Graph est persisté via la Memory Layer :
+
+```json
+{
+  "session_id": "sess_abc123",
+  "living_graph": {
+    "nodes": [...],
+    "edges": [...],
+    "node_metadata": {
+      "c1": {"introduced_at_question": 1, "last_accessed": 5},
+      "c2": {"introduced_at_question": 1, "last_accessed": 3},
+      "c3": {"introduced_at_question": 3, "last_accessed": 5}
+    }
+  },
+  "updated_at": "2025-12-17T10:32:00Z"
+}
+```
+
+Cela permet :
+- De **reprendre** exactement où l'utilisateur en était
+- D'afficher le graphe avec les bonnes **opacités temporelles**
+- De générer des **suggestions basées sur l'historique** d'exploration
+
+---
+
+## 9. Planning Détaillé
+
+### 9.1 Vue d'Ensemble
 
 ```
 Semaine 29 │████████████████████│ Chat Layout + D3 Setup
@@ -845,7 +1412,7 @@ Semaine 33 │████████████████████│ Qu
 Semaine 34 │████████████████████│ Polish + Démo Prep
 ```
 
-### 7.2 Semaine 29 : Fondations Chat & D3 (5 jours)
+### 9.2 Semaine 29 : Fondations Chat & D3 (5 jours)
 
 | Jour | Tâche | Livrable | Effort |
 |------|-------|----------|--------|
@@ -865,7 +1432,7 @@ Semaine 34 │████████████████████│ Po
 - ✅ Nœuds colorés selon rôle (query/used/suggested)
 - ✅ Zoom/pan fonctionnels
 
-### 7.3 Semaine 30 : Graphe Interactif (5 jours)
+### 9.3 Semaine 30 : Graphe Interactif (5 jours)
 
 | Jour | Tâche | Livrable | Effort |
 |------|-------|----------|--------|
@@ -886,7 +1453,7 @@ Semaine 34 │████████████████████│ Po
 - ✅ Highlighting intelligent
 - ✅ Performance fluide (60fps)
 
-### 7.4 Semaine 31 : Carte Concept (5 jours)
+### 9.4 Semaine 31 : Carte Concept (5 jours)
 
 | Jour | Tâche | Livrable | Effort |
 |------|-------|----------|--------|
@@ -906,7 +1473,7 @@ Semaine 34 │████████████████████│ Po
 - ✅ Carte complète avec toutes sections
 - ✅ Navigation fluide
 
-### 7.5 Semaine 32 : Sources & Documents (5 jours)
+### 9.5 Semaine 32 : Sources & Documents (5 jours)
 
 | Jour | Tâche | Livrable | Effort |
 |------|-------|----------|--------|
@@ -927,7 +1494,7 @@ Semaine 34 │████████████████████│ Po
 - ✅ Modal preview document
 - ✅ Navigation document → concept fluide
 
-### 7.6 Semaine 33 : Query Explainer & Suggestions (5 jours)
+### 9.6 Semaine 33 : Query Explainer & Suggestions (5 jours)
 
 | Jour | Tâche | Livrable | Effort |
 |------|-------|----------|--------|
@@ -948,7 +1515,7 @@ Semaine 34 │████████████████████│ Po
 - ✅ Suggestions pertinentes
 - ✅ Flow exploration fluide
 
-### 7.7 Semaine 34 : Polish & Démo (5 jours)
+### 9.7 Semaine 34 : Polish & Démo (5 jours)
 
 | Jour | Tâche | Livrable | Effort |
 |------|-------|----------|--------|
@@ -965,17 +1532,40 @@ Semaine 34 │████████████████████│ Po
 | J30 | Dry run démo | Répétition avec données réelles | 3h |
 | J30 | Backup plan | Fallbacks si problèmes | 2h |
 
-**Checkpoint Sem 34 (FINAL) :**
+**Checkpoint Sem 34 :**
 - ✅ UI polished, animations fluides
 - ✅ 3 scénarios démo prêts
 - ✅ Documentation prête
 - ✅ Démo testée end-to-end
 
+### 9.8 Semaine 35 : Intégration Memory Layer + Killer Features (5 jours)
+
+| Jour | Tâche | Livrable | Effort |
+|------|-------|----------|--------|
+| J31 | Living Graph persistence | State Neo4j + reload | 4h |
+| J31 | Session selector UI | `SessionSelector.tsx` | 4h |
+| J32 | Context indicator | `ContextIndicator.tsx` | 3h |
+| J32 | Citations inline | Markdown parser + tooltips | 5h |
+| J33 | Smart Hover enrichi | Tooltips avec définitions | 4h |
+| J33 | Quick Actions menu | Menu contextuel concepts | 4h |
+| J34 | Session Summary generation | LLM summarizer integration | 6h |
+| J34 | PDF export | Template PDF + génération | 2h |
+| J35 | Expert Mode panel | `ExpertModePanel.tsx` | 4h |
+| J35 | Concept Comparator | `ConceptComparator.tsx` | 4h |
+
+**Checkpoint Sem 35 (FINAL) :**
+- ✅ Memory Layer intégrée (Living Graph persistent)
+- ✅ Citations inline avec tooltips
+- ✅ Session Summary exportable PDF
+- ✅ Expert Mode fonctionnel
+- ✅ Concept Comparator fonctionnel
+- ✅ Toutes killer features livrées
+
 ---
 
-## 8. KPIs de Succès
+## 10. KPIs de Succès
 
-### 8.1 KPIs Techniques
+### 10.1 KPIs Techniques
 
 | KPI | Target | Mesure |
 |-----|--------|--------|
@@ -986,7 +1576,7 @@ Semaine 34 │████████████████████│ Po
 | **Couverture tests** | > 70% | Jest coverage |
 | **Erreurs runtime** | 0 (démo) | Sentry monitoring |
 
-### 8.2 KPIs UX
+### 10.2 KPIs UX
 
 | KPI | Target | Mesure |
 |-----|--------|--------|
@@ -995,7 +1585,7 @@ Semaine 34 │████████████████████│ Po
 | **Satisfaction "explainability"** | > 4/5 | Feedback démo |
 | **Facilité navigation** | > 4/5 | Feedback démo |
 
-### 8.3 KPIs Démo Partenaire
+### 10.3 KPIs Démo Partenaire
 
 | KPI | Target | Validation |
 |-----|--------|------------|
@@ -1006,7 +1596,19 @@ Semaine 34 │████████████████████│ Po
 
 ---
 
-## 9. Risques et Mitigation
+### 10.4 KPIs Killer Features
+
+| KPI | Target | Mesure |
+|-----|--------|--------|
+| **Living Graph utilisé** | > 50% sessions | Analytics |
+| **Session Summary exports** | > 20% sessions | Download count |
+| **Smart Hover engagement** | > 80% users | Hover analytics |
+| **Expert Mode adoption** | > 10% users | Toggle analytics |
+| **Citations cliquées** | > 30% | Click analytics |
+
+---
+
+## 11. Risques et Mitigation
 
 | Risque | Probabilité | Impact | Mitigation |
 |--------|-------------|--------|------------|
@@ -1019,9 +1621,9 @@ Semaine 34 │████████████████████│ Po
 
 ---
 
-## 10. Dépendances
+## 12. Dépendances
 
-### 10.1 Dépendances Phase 2
+### 12.1 Dépendances Phase 2
 
 | Composant Phase 2 | Impact Frontend | Criticité |
 |-------------------|-----------------|-----------|
@@ -1031,7 +1633,17 @@ Semaine 34 │████████████████████│ Po
 | **RelationInferenceEngine** | Relations inférées (pointillés) | MEDIUM |
 | **CrossDocRelationMerger** | Consolidation sources | MEDIUM |
 
-### 10.2 Dépendances Techniques
+### 12.2 Dépendances Phase 2.5 (Memory Layer)
+
+| Composant Phase 2.5 | Impact Frontend | Criticité |
+|---------------------|-----------------|-----------|
+| **SessionManager** | Persistance Living Graph, reprise session | CRITIQUE |
+| **ContextResolver** | Questions implicites, suggestions personnalisées | CRITIQUE |
+| **UserProfile** | Préférences Expert Mode, historique | HIGH |
+| **IntelligentSummarizer** | Session Summary PDF | HIGH |
+| **ConversationHistory** | Affichage historique, reprise | MEDIUM |
+
+### 12.3 Dépendances Techniques
 
 | Dépendance | Version | Usage |
 |------------|---------|-------|
@@ -1043,19 +1655,23 @@ Semaine 34 │████████████████████│ Po
 
 ---
 
-## 11. Prochaines Étapes
+## 13. Prochaines Étapes
 
-1. **Validation de ce document** avec itérations si nécessaire
-2. **Setup technique** : Installer D3.js, créer structure composants
-3. **API Backend** : Développer endpoints en parallèle du frontend
-4. **Corpus démo** : Préparer données représentatives
+1. **Phase 2.5 (Memory Layer)** : Développer la Memory Layer en prérequis
+2. **Validation de ce document** avec itérations si nécessaire
+3. **Setup technique** : Installer D3.js, créer structure composants
+4. **API Backend** : Développer endpoints en parallèle du frontend
+5. **Corpus démo** : Préparer données représentatives
 
 ---
 
-**Version:** 1.0
+**Version:** 2.0
 **Auteur:** Claude Code
+**Date mise à jour:** 2025-12-17
 **Statut:** 🟡 En attente validation
 
 ---
 
 > **"L'explainability n'est pas une feature, c'est la proposition de valeur."**
+>
+> **"Une mémoire conversationnelle qui ne repart jamais de zéro."**
