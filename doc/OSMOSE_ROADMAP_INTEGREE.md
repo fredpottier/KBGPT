@@ -1,9 +1,9 @@
 # 🌊 KnowWhere - Roadmap OSMOSE Intégrée (Architecture Agentique)
 
-**Version:** 2.0 - Intègre Architecture Agentique v1.1
-**Date:** 2025-10-13
+**Version:** 3.0 - Intègre Memory Layer + Frontend Explainable Graph-RAG
+**Date:** 2025-12-17
 **Vision:** Le Cortex Documentaire des Organisations
-**Différenciation:** Semantic Intelligence + Architecture Agentique Orchestrée
+**Différenciation:** Semantic Intelligence + Memory Layer + Explainable Graph-RAG
 
 ---
 
@@ -60,14 +60,31 @@
 **Avant (v1.0)** : 32 semaines linéaires
 **Après (v2.0)** : **37 semaines** avec pilote agentique et tests E2E
 
-**Nouvelle structure** :
+**Nouvelle structure (v3.0)** :
 ```
-Phase 1 (Sem 1-10)      : Semantic Core V2.1 ✅ COMPLÉTÉ (Sem 10/10)
-Phase 1.5 (Sem 11-13)   : ✨ PILOTE AGENTIQUE ✅ COMPLÉTÉ à 95% (J12/15)
-Phase 2 (Sem 14-24)     : Tests E2E + Agentique Production + Living Ontology 🟡 À DÉMARRER
-Phase 3 (Sem 25-30)     : Multi-Source & Enrichment 🟡 NOT STARTED
-Phase 4 (Sem 31-37)     : Production Hardening (étendu) 🟡 NOT STARTED
+Phase 1 (Sem 1-10)      : Semantic Core V2.1 ✅ COMPLÉTÉ
+Phase 1.5 (Sem 11-13)   : ✨ PILOTE AGENTIQUE ✅ COMPLÉTÉ à 95%
+Phase 2 (Sem 14-24)     : Intelligence Relationnelle 🟡 ~25% EN COURS
+Phase 2.5 (Sem 25-28)   : ✨ MEMORY LAYER 🟡 PLANIFICATION (NOUVEAU)
+Phase 3 (Sem 29-32)     : Multi-Source (simplifiée) 🟡 NOT STARTED
+Phase 3.5 (Sem 33-39)   : ✨ FRONTEND EXPLAINABLE GRAPH-RAG 🟡 PLANIFICATION (NOUVEAU)
+Phase 4 (Sem 40+)       : Production Hardening 🟡 NOT STARTED
 ```
+
+**Nouvelles Phases Ajoutées (Partenariat):**
+
+✨ **Phase 2.5 - Memory Layer** : Mémoire conversationnelle pour éviter l'effet "atomique cloisonné"
+- Sessions persistantes par utilisateur
+- Context resolver (questions implicites)
+- Intelligent summarizer (résumés métier LLM)
+- Export PDF des sessions
+
+✨ **Phase 3.5 - Frontend Explainable Graph-RAG** : Interface killer pour démonstration partenaire
+- Living Graph (graphe persistant de session)
+- Citations inline (style académique)
+- Smart Hover (tooltips enrichis)
+- Session Summary exportable PDF
+- Expert Mode + Concept Comparator
 
 ---
 
@@ -119,74 +136,107 @@ Phase 4 (Sem 31-37)     : Production Hardening (étendu) 🟡 NOT STARTED
 
 ---
 
-## 3. Roadmap Révisée (35 Semaines)
+## 3. Roadmap Révisée (45 Semaines)
 
 ### 3.1 Vue d'Ensemble
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ PHASE 1: SEMANTIC CORE (Semaines 1-10)                               │
-│ ✅ Démo use case killer: CRR Evolution Tracker                        │
+│ PHASE 1: SEMANTIC CORE (Semaines 1-10) ✅ COMPLÉTÉ                    │
 │ Composants: Profiler, NarrativeDetector, Segmentation, DualStorage   │
 └────────────────────────────────────────────────────────────────────────┘
          │
          ↓ Checkpoint Phase 1 (Sem 10)
          │
 ┌────────────────────────────────────────────────────────────────────────┐
-│ ✨ PHASE 1.5: PILOTE AGENTIQUE (Semaines 11-13) ✨ NOUVEAU            │
-│ 🎯 GO/NO-GO CRITIQUE                                                   │
+│ PHASE 1.5: PILOTE AGENTIQUE (Semaines 11-13) ✅ COMPLÉTÉ à 95%        │
 │ - Implémentation 6 agents + 18 tools                                  │
-│ - Test 100 docs (50 PDF A, 30 B, 20 PPTX C)                          │
-│ - Validation cost model $1.00, $3.08, $7.88/1000p                    │
-│ - Security, conformité, scalabilité                                   │
+│ - Validation cost model, sécurité, conformité                         │
 └────────────────────────────────────────────────────────────────────────┘
          │
-         ↓ GO/NO-GO Phase 2 (Sem 13)
+         ↓ GO Phase 2 (Sem 13)
          │
 ┌────────────────────────────────────────────────────────────────────────┐
-│ PHASE 2: AGENTIQUE PRODUCTION + LIVING ONTOLOGY (Semaines 14-22)     │
-│ - Scale-up architecture agentique (1000+ docs/jour)                   │
-│ - Living Ontology pattern discovery                                   │
-│ - Lifecycle HOT/WARM/COLD/FROZEN                                      │
-│ - Dashboard monitoring temps-réel (Grafana)                           │
+│ PHASE 2: INTELLIGENCE RELATIONNELLE (Semaines 14-24) 🟡 ~25%         │
+│ - RelationExtractionEngine, TaxonomyBuilder                           │
+│ - TemporalDiffEngine, GraphGuidedRAG                                  │
+│ - Use cases: CRR Evolution, Graph-Guided RAG                          │
 └────────────────────────────────────────────────────────────────────────┘
          │
-         ↓ Checkpoint Phase 2 (Sem 22)
+         ↓ Checkpoint Phase 2 (Sem 24)
          │
 ┌────────────────────────────────────────────────────────────────────────┐
-│ PHASE 3: MULTI-SOURCE & ENRICHMENT (Semaines 23-28)                  │
-│ - Intégration SharePoint, Google Drive, Confluence                    │
-│ - Auto-enrichment external sources                                    │
-│ - Cross-source narrative detection                                    │
+│ ✨ PHASE 2.5: MEMORY LAYER (Semaines 25-28) 🟡 PLANIFICATION ✨       │
+│ - Sessions persistantes + Context Resolver                            │
+│ - Intelligent Summarizer (résumés métier LLM)                         │
+│ - Export PDF sessions                                                 │
+│ 📖 doc/phases/PHASE2.5_MEMORY_LAYER.md                                │
 └────────────────────────────────────────────────────────────────────────┘
          │
-         ↓ Checkpoint Phase 3 (Sem 28)
+         ↓ Checkpoint Phase 2.5 (Sem 28)
          │
 ┌────────────────────────────────────────────────────────────────────────┐
-│ PHASE 4: PRODUCTION HARDENING (Semaines 29-35)                       │
+│ PHASE 3: MULTI-SOURCE SIMPLIFIÉE (Semaines 29-32) 🟡 NOT STARTED     │
+│ - Upload manuel prioritaire                                           │
+│ - SharePoint/Google Drive (si temps)                                  │
+│ - Connecteurs avancés différés Phase 4                                │
+└────────────────────────────────────────────────────────────────────────┘
+         │
+         ↓ Checkpoint Phase 3 (Sem 32)
+         │
+┌────────────────────────────────────────────────────────────────────────┐
+│ ✨ PHASE 3.5: FRONTEND EXPLAINABLE GRAPH-RAG (Sem 33-39) 🟡 NOUVEAU ✨│
+│ 🎯 DÉMO PARTENAIRE - Interface killer différenciante                  │
+│ - Living Graph (graphe session persistant)                            │
+│ - Citations inline (style académique ¹²³)                             │
+│ - Smart Hover, Quick Actions, Expert Mode                             │
+│ - Session Summary exportable PDF                                      │
+│ - Concept Comparator                                                  │
+│ 📖 doc/phases/PHASE3.5_FRONTEND_EXPLAINABLE_GRAPH_RAG.md              │
+└────────────────────────────────────────────────────────────────────────┘
+         │
+         ↓ Checkpoint Phase 3.5 (Sem 39) - DÉMO PARTENAIRE
+         │
+┌────────────────────────────────────────────────────────────────────────┐
+│ PHASE 4: PRODUCTION HARDENING (Semaines 40+) 🟡 NOT STARTED          │
 │ - Beta clients (3-5 enterprises)                                      │
 │ - Tuning performance production                                       │
 │ - Launch v1.0 public                                                  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Comparaison Roadmap v1.0 vs v2.0
+### 3.2 Comparaison Roadmap v2.0 vs v3.0
 
-| Phase | v1.0 (avant agentique) | v2.0 (avec agentique) | Delta |
-|-------|------------------------|------------------------|-------|
+| Phase | v2.0 (agentique) | v3.0 (partenariat) | Delta |
+|-------|------------------|---------------------|-------|
 | **Phase 1** | Sem 1-10 | Sem 1-10 | ✅ Identique |
-| **Phase 1.5** | N/A | **Sem 11-13** | ✨ **+3 semaines** (pilote) |
-| **Phase 2** | Sem 11-18 | Sem 14-24 | +11 semaines (tests E2E + scale-up) |
-| **Phase 3** | Sem 19-26 | Sem 25-30 | +6 semaines (multi-source) |
-| **Phase 4** | Sem 27-32 | Sem 31-37 | +7 semaines (hardening production) |
-| **TOTAL** | **32 semaines** | **37 semaines** | **+5 semaines** |
+| **Phase 1.5** | Sem 11-13 | Sem 11-13 | ✅ Identique |
+| **Phase 2** | Sem 14-24 | Sem 14-24 | ✅ Identique |
+| **Phase 2.5** | N/A | **Sem 25-28** | ✨ **+4 semaines** (Memory Layer) |
+| **Phase 3** | Sem 25-30 | Sem 29-32 | Décalée + simplifiée |
+| **Phase 3.5** | N/A | **Sem 33-39** | ✨ **+7 semaines** (Frontend killer) |
+| **Phase 4** | Sem 31-37 | Sem 40+ | Différée |
+| **TOTAL** | **37 semaines** | **45+ semaines** | **+8 semaines** |
 
-**Justification +5 semaines** :
-- Pilote agentique 3 semaines (Sem 11-13) = investissement stratégique critique
-- Tests E2E 1 semaine (Sem 14) = validation production reportée de Phase 1.5
-- Scale-up agentique +1 semaine (Sem 15-17) = tuning basé métriques réelles
-- Évite refactoring massif en Phase 3-4 si architecture non validée
-- Garantit coûts production maîtrisés AVANT scale-up
+**Justification v3.0 (Partenariat)** :
+
+**Phase 2.5 - Memory Layer (+4 sem)** :
+- Évite l'effet "atomique cloisonné" (chaque question indépendante)
+- Permet questions implicites ("Et pour la rétention ?")
+- Génération de résumés métier exportables PDF
+- Prérequis pour le Living Graph du Frontend
+
+**Phase 3.5 - Frontend Explainable Graph-RAG (+7 sem)** :
+- **Démo partenaire** : Interface différenciante vs Copilot/Gemini
+- Living Graph : carte mentale de l'exploration
+- Citations inline style académique
+- Session Summary exportable
+- Killer features uniques sur le marché
+
+**Phase 3 simplifiée** :
+- Upload manuel prioritaire (suffisant pour démo)
+- Connecteurs SharePoint/GDrive si temps disponible
+- Connecteurs avancés (Confluence, Slack) différés Phase 4
 
 ---
 
@@ -419,7 +469,7 @@ Attendu:
 - [ ] Latency P95 <220s validée
 - [ ] Budget per-tenant stable (<$100/jour moyenne)
 
-#### 2.3 Living Ontology (Sem 18-20)
+#### 2.3 Living Ontology + InferenceEngine (Sem 18-20) 🆕
 
 **Pattern Discovery Automatique** :
 - [ ] Détection émergence nouveaux entity types (seuil 20+ occurrences)
@@ -431,6 +481,34 @@ Attendu:
 - [ ] Migration `entity_type_registry` → Living Ontology
 - [ ] API endpoints ontology management
 - [ ] Versioning ontologie (rollback possible)
+
+**🧠 InferenceEngine - Découverte de Connaissances Cachées** (KILLER FEATURE) 🆕 :
+
+> **Différenciation MASSIVE** : Aucun concurrent (Copilot, Gemini) ne peut faire cela
+
+**Composants (100% GRATUITS)** :
+- Neo4j GDS Community (PageRank, Louvain, Node Similarity) - GPLv3
+- PyKEEN (Knowledge Graph Embeddings) - MIT License
+- LLM optionnel pour validation
+
+**Types d'insights découvrables** :
+- [ ] **Inférences transitives** : A→B→C implique A~C (Cypher natif)
+- [ ] **Signaux faibles** : Mentions rares mais PageRank élevé
+- [ ] **Trous structurels** : Paires de concepts non liés mais devraient l'être
+- [ ] **Contradictions** : Affirmations contradictoires inter-documents
+- [ ] **Communautés cachées** : Clusters cross-domaine non évidents
+
+**API** :
+- [ ] `GET /api/v1/inference/discover` - Découverte d'insights
+- [ ] `GET /api/v1/inference/insights/{type}` - Insights par type
+- [ ] Dashboard Hidden Insights (frontend)
+
+**Métriques Cibles** :
+- 50+ insights pertinents par run
+- Précision > 70% (validation humaine)
+- Temps exécution < 30s (graphe 10K concepts)
+
+**Référence détaillée** : `doc/phases/PHASE2_INTELLIGENCE_AVANCEE.md` - Section UC3.3
 
 #### 2.4 Canonicalisation Robuste & Auto-Apprentissage ✅ **COMPLÉTÉ Phase 1.5**
 
@@ -813,18 +891,21 @@ Attendu:
 
 ---
 
-**Version:** 2.1 - Phase 1.5 Complétée + Tests E2E Reportés
-**Date:** 2025-10-16
+**Version:** 3.0 - Memory Layer + Frontend Explainable Graph-RAG
+**Date:** 2025-12-17
 **Auteur:** Architecture Team OSMOSE
-**Statut:** ✅ **UPDATED** - Roadmap ajustée 37 semaines (Phase 1.5 finalisée)
+**Statut:** ✅ **UPDATED** - Roadmap ajustée 45+ semaines (Phases 2.5 + 3.5 ajoutées)
 
 **Documents Associés** :
 - [`doc/README.md`](./README.md) (guide navigation documentation)
 - [`doc/OSMOSE_STATUS_ACTUEL.md`](./OSMOSE_STATUS_ACTUEL.md) (status actuel du projet)
 - [`doc/OSMOSE_ARCHITECTURE_TECHNIQUE.md`](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) (architecture globale)
-- [`doc/phases/PHASE1_SEMANTIC_CORE.md`](./phases/PHASE1_SEMANTIC_CORE.md) (Phase 1 complète - 1 seul fichier)
+- [`doc/phases/PHASE1_SEMANTIC_CORE.md`](./phases/PHASE1_SEMANTIC_CORE.md) (Phase 1 - Semantic Core)
+- [`doc/phases/PHASE2_INTELLIGENCE_AVANCEE.md`](./phases/PHASE2_INTELLIGENCE_AVANCEE.md) (Phase 2 - Intelligence Relationnelle)
+- [`doc/phases/PHASE2.5_MEMORY_LAYER.md`](./phases/PHASE2.5_MEMORY_LAYER.md) ✨ (Phase 2.5 - Memory Layer)
+- [`doc/phases/PHASE3.5_FRONTEND_EXPLAINABLE_GRAPH_RAG.md`](./phases/PHASE3.5_FRONTEND_EXPLAINABLE_GRAPH_RAG.md) ✨ (Phase 3.5 - Frontend)
 - [`doc/OSMOSE_AMBITION_PRODUIT_ROADMAP.md`](./OSMOSE_AMBITION_PRODUIT_ROADMAP.md) (vision produit)
 
 ---
 
-> **🌊 "OSMOSE v2.0 : Roadmap intégrée avec architecture agentique - Production-ready avec cost intelligence."**
+> **🌊 "OSMOSE v3.0 : Memory Layer + Explainable Graph-RAG - Une mémoire qui ne repart jamais de zéro, une transparence totale du raisonnement."**
