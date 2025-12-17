@@ -16,7 +16,7 @@ services:
       # et cela consomme les crédits API payants au lieu du forfait Pro/Max
 
       # LangSmith Configuration
-      - LANGSMITH_API_KEY=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
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
       - LANGSMITH_PROJECT=knowwhere-agents
       - LANGSMITH_TRACING=true
       - LANGSMITH_ENDPOINT=https://api.smith.langchain.com

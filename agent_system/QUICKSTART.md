@@ -35,7 +35,7 @@ export ANTHROPIC_API_KEY="sk-ant-votre-cle-ici"
 $env:ANTHROPIC_API_KEY="sk-ant-votre-cle-ici"
 
 # Optionnel : LangSmith (déjà pré-configuré)
-export LANGSMITH_API_KEY="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"
+export LANGSMITH_API_KEY="votre-cle-langsmith"
 ```
 
 ### Étape 3 : Première Exécution (2 minutes)
@@ -156,7 +156,7 @@ Créer `.env` dans `agent_system/` :
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-votre-cle
-LANGSMITH_API_KEY=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
+LANGSMITH_API_KEY=votre-cle-langsmith
 LANGSMITH_PROJECT=knowwhere-agents
 LANGSMITH_TRACING=true
 ```

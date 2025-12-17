@@ -166,7 +166,7 @@ filesystem:
 
 ```yaml
 langsmith:
-  api_key: "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"
+  api_key: "${LANGSMITH_API_KEY}"
   project: "knowwhere-agents"
   tracing_enabled: true
 ```
