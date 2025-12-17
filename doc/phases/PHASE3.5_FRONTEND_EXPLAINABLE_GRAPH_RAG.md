@@ -1,8 +1,8 @@
 # Phase 3.5 : Frontend "Explainable Graph-RAG"
 
-**Version:** 2.0
+**Version:** 3.0
 **Date:** 2025-12-17
-**Status:** 🟡 PLANIFICATION
+**Status:** 🟡 PLANIFICATION (Scope Démo défini)
 **Durée estimée:** 6-7 semaines (Semaines 29-35)
 **Prérequis:** Phase 2 complète + Phase 2.5 (Memory Layer) + Phase 3 (Multi-Source simplifiée)
 
@@ -12,6 +12,10 @@
 
 1. [Vision et Objectifs](#1-vision-et-objectifs)
 2. [Killer Features](#2-killer-features)
+   - 2.1-2.8 : Features Core
+   - 2.9-2.11 : **Features Additionnelles** (Evidence-First, What Changed, Ask Subgraph) 🆕
+   - 2.12 : Layout Adaptatif
+   - **2.13 : Scope Démo vs Version Complète** 🎯 🆕
 3. [Expérience Utilisateur Cible](#3-expérience-utilisateur-cible)
 4. [Architecture Technique](#4-architecture-technique)
 5. [Maquettes Détaillées](#5-maquettes-détaillées)
@@ -21,6 +25,7 @@
 9. [Planning Détaillé](#9-planning-détaillé)
 10. [KPIs de Succès](#10-kpis-de-succès)
 11. [Risques et Mitigation](#11-risques-et-mitigation)
+    - **11.1 : Clarification Performance Graphe (Non-Risque)** 🆕
 
 ---
 
@@ -420,9 +425,79 @@ Périmètre couvert:
 └────────────────────────────────────────┘
 ```
 
-### 2.9 Adaptive Layout (Layout Adaptatif 70/30)
+### 2.9 Evidence-First (Preuves d'Abord) 🆕
 
-> **L'interface s'adapte intelligemment au contenu**
+> **Commencer chaque réponse par les preuves clés pour ancrer la confiance immédiatement**
+
+**Concept :**
+Plutôt que d'afficher la réponse textuelle puis les sources en bas, on **inverse** : 2-3 preuves clés sont montrées EN PREMIER, avant le texte de réponse.
+
+**Format :**
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🤖 KnowWhere                                                        │
+│                                                                      │
+│ ┌─ 🔍 PREUVES CLÉS ─────────────────────────────────────────────┐   │
+│ │                                                                │   │
+│ │ [RBAC] ← SAP S/4HANA Security Guide, p.45 (95%)               │   │
+│ │ [IAS] ← BTP Architecture Overview, slide 22 (92%)              │   │
+│ │ [Cloud Connector] ← Setup Guide, ch.3 (88%)                    │   │
+│ │                                                                │   │
+│ └────────────────────────────────────────────────────────────────┘   │
+│                                                                      │
+│ La migration vers SAP S/4HANA Cloud implique plusieurs aspects...   │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Valeur :** L'utilisateur voit IMMÉDIATEMENT sur quoi repose la réponse → confiance instantanée.
+
+---
+
+### 2.10 What Changed (Indicateur de Nouveauté) 🆕
+
+> **Montrer explicitement les nouveaux concepts ajoutés à chaque question**
+
+**Concept :**
+Quand l'utilisateur pose une nouvelle question, indiquer visuellement quels nouveaux concepts ont été ajoutés au Living Graph.
+
+**Format :**
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 💡 Depuis votre dernière question, +4 concepts découverts :         │
+│                                                                      │
+│ [🆕 SAML] [🆕 Trust Configuration] [🆕 IdP] [🆕 Assertion]          │
+│                                                                      │
+│ Cliquez pour explorer ces nouveaux axes.                            │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Animation :** Les nouveaux nœuds dans le graphe ont une animation "pulse" pendant 3 secondes.
+
+**Valeur :** Renforce la proposition de valeur du Living Graph - l'utilisateur VOIT sa base de connaissances grandir.
+
+---
+
+### 2.11 Ask About Subgraph (Explorer un Sous-Graphe) 🆕
+
+> **Sélectionner plusieurs concepts et poser une question ciblée**
+
+**Concept :**
+L'utilisateur peut sélectionner 2-5 concepts dans le graphe (Ctrl+Click ou lasso) et demander "Qu'est-ce qui lie ces concepts ?"
+
+**Interaction :**
+```
+1. User sélectionne [RBAC] + [IAS] + [Fiori]
+2. Bouton "🔗 Explorer ces 3 concepts" apparaît
+3. Click → Question auto-générée:
+   "Comment RBAC, IAS et Fiori interagissent-ils ensemble ?"
+```
+
+**Valeur :** Encourage l'exploration ciblée plutôt que des questions vagues.
+
+---
+
+### 2.12 Adaptive Layout (Layout Adaptatif 70/30)
 
 **Principe :** Layout flexible 70/30 avec priorité au contenu le plus pertinent.
 
@@ -477,6 +552,76 @@ Périmètre couvert:
 ```
 
 **Transitions :** Framer Motion smooth animations entre états.
+
+---
+
+## 2.13 Scope Démo vs Version Complète 🎯
+
+> **Priorisation claire pour la démo partenaire vs la version finale**
+
+### Scope DEMO (3-4 semaines) - MVP Impressionnant
+
+| Feature | Inclus | Pourquoi |
+|---------|--------|----------|
+| **Graphe explicable minimal** | ✅ | Core différenciation |
+| **Evidence-First** (2.9) | ✅ | Confiance immédiate |
+| **Citations inline cliquables** | ✅ | Traçabilité visible |
+| **Smart Hover simplifié** | ✅ | Info sans click |
+| **Carte concept (version light)** | ✅ | Exploration de base |
+| **What Changed indicator** | ✅ | Valorise Living Graph |
+| **Guardrail 40 nœuds** | ✅ | Performance garantie |
+| **Mini Session Summary in-app** | ✅ | Pas besoin PDF complet |
+| **InferenceEngine (2 types)** | ✅ | Killer feature backend |
+
+### Version COMPLÈTE (Post-Démo)
+
+| Feature | Différé | Raison |
+|---------|---------|--------|
+| **Living Graph persistant** | ⏳ | Nécessite Memory Layer complète |
+| **Export PDF Session Summary** | ⏳ | IntelligentSummarizer pas prêt |
+| **Expert Mode complet** | ⏳ | Complexifie UX démo |
+| **Concept Comparator** | ⏳ | Nice-to-have |
+| **Ask About Subgraph** | ⏳ | Interaction avancée |
+| **Timeline Evolution** | ⏳ | Nécessite TemporalDiffEngine |
+
+### Livrables Démo
+
+```
+DÉMO PARTENAIRE - Scénario cible (15 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. QUESTION SIMPLE (3 min)
+   "Quelles sont les implications de sécurité pour S/4HANA Cloud ?"
+   → Réponse + Graphe 8-12 nœuds + Evidence-First + Citations
+
+2. EXPLORATION CONCEPT (3 min)
+   Click sur [RBAC] → Carte concept slide-in
+   → Définition, relations, sources, questions suggérées
+
+3. QUESTION CONTEXTUELLE (3 min)
+   "Et pour la configuration SSO ?"
+   → What Changed: +4 nouveaux concepts
+   → Graphe qui grandit visuellement
+
+4. INFERENCE ENGINE DEMO (3 min)
+   "Montrez-moi les connaissances cachées"
+   → Insights: contradictions, signaux faibles, liens implicites
+   → "AUCUN CONCURRENT NE FAIT ÇA"
+
+5. SESSION SUMMARY (3 min)
+   → Résumé in-app: 3 points clés + actions identifiées
+   → "Exportable en PDF dans la version complète"
+```
+
+### Critères de Succès Démo
+
+| Critère | Target | Validation |
+|---------|--------|------------|
+| **"Wow effect" visuel** | ✅ | Réaction partenaire |
+| **Différenciation claire** | ✅ | "Copilot ne fait pas ça" verbalisé |
+| **Performance fluide** | ✅ | Zéro lag visible |
+| **Questions de suivi** | ≥3 | Intérêt manifesté |
+| **Demande test données réelles** | ✅ | Engagement concret |
 
 ---
 
@@ -1613,11 +1758,53 @@ Semaine 34 │████████████████████│ Po
 | Risque | Probabilité | Impact | Mitigation |
 |--------|-------------|--------|------------|
 | **D3.js courbe d'apprentissage** | Medium | Medium | Commencer tôt, exemples existants |
-| **Performance graphe (>100 nœuds)** | Medium | High | Lazy loading, clustering, WebGL fallback |
 | **APIs backend pas prêtes** | Low | High | Mock data pour frontend, paralléliser dev |
 | **Complexité Panel carte** | Medium | Medium | Itérer, MVP d'abord puis enrichir |
 | **Responsive difficile** | Low | Low | Desktop-first, tablette acceptable |
 | **Données démo insuffisantes** | Medium | High | Préparer corpus dédié en avance |
+| **Memory Layer pas prête** | Medium | Medium | Fallback : graphe session-only sans persistance |
+
+### 11.1 Clarification : Performance Graphe (Non-Risque)
+
+> **⚠️ IMPORTANT : La "performance graphe >100 nœuds" n'est PAS un risque réel**
+
+**Pourquoi ce n'est pas un problème :**
+
+Le graphe affiché n'est **PAS** le Knowledge Graph complet (10K+ concepts). C'est uniquement les **concepts utilisés pour construire la réponse** à une question donnée.
+
+**Estimation réaliste du nombre de nœuds par réponse :**
+
+| Type de question | Concepts typiques | Max réaliste |
+|------------------|-------------------|--------------|
+| Question simple | 5-10 nœuds | 15 |
+| Question complexe | 10-20 nœuds | 30 |
+| Question multi-domaine | 15-30 nœuds | 50 |
+
+**Raisonnement :** Si une réponse nécessite 100+ concepts pour être construite, c'est probablement une mauvaise réponse (trop vague, trop large). Une bonne réponse est ciblée.
+
+**Guardrail par design :**
+
+```typescript
+const MAX_DISPLAYABLE_NODES = 40;
+
+function renderExplanationGraph(concepts: Concept[]) {
+  if (concepts.length > MAX_DISPLAYABLE_NODES) {
+    return (
+      <InfoBanner type="info">
+        La réponse s'appuie sur {concepts.length} concepts interconnectés.
+        Pour des raisons de lisibilité, le graphe visuel est simplifié.
+        <Button onClick={() => showTopConcepts(MAX_DISPLAYABLE_NODES)}>
+          Voir les {MAX_DISPLAYABLE_NODES} concepts principaux
+        </Button>
+      </InfoBanner>
+    );
+  }
+
+  return <D3ExplanationGraph nodes={concepts} />;
+}
+```
+
+**Conclusion :** D3.js vanilla est parfaitement suffisant pour 40 nœuds. Aucun besoin de WebGL, Canvas, ou optimisations complexes.
 
 ---
 
@@ -1665,13 +1852,26 @@ Semaine 34 │████████████████████│ Po
 
 ---
 
-**Version:** 2.0
+**Version:** 3.0
 **Auteur:** Claude Code
 **Date mise à jour:** 2025-12-17
-**Statut:** 🟡 En attente validation
+**Statut:** 🟡 En attente validation (Scope Démo prêt)
+
+---
+
+## Changelog v3.0
+
+- **Section 2.9** : Ajout "Evidence-First" (preuves avant réponse)
+- **Section 2.10** : Ajout "What Changed" (indicateur nouveaux concepts)
+- **Section 2.11** : Ajout "Ask About Subgraph" (exploration ciblée)
+- **Section 2.13** : **Scope Démo vs Version Complète** - Priorisation claire pour démo partenaire
+- **Section 11.1** : Clarification que la "performance >100 nœuds" n'est PAS un risque (guardrail par design)
+- **Guardrail 40 nœuds** : Choix de design intentionnel avec fallback gracieux
 
 ---
 
 > **"L'explainability n'est pas une feature, c'est la proposition de valeur."**
 >
 > **"Une mémoire conversationnelle qui ne repart jamais de zéro."**
+>
+> **"Si une réponse nécessite 100+ concepts, ce n'est pas une bonne réponse."** 🆕
