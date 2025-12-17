@@ -469,7 +469,7 @@ Attendu:
 - [ ] Latency P95 <220s validée
 - [ ] Budget per-tenant stable (<$100/jour moyenne)
 
-#### 2.3 Living Ontology (Sem 18-20)
+#### 2.3 Living Ontology + InferenceEngine (Sem 18-20) 🆕
 
 **Pattern Discovery Automatique** :
 - [ ] Détection émergence nouveaux entity types (seuil 20+ occurrences)
@@ -481,6 +481,34 @@ Attendu:
 - [ ] Migration `entity_type_registry` → Living Ontology
 - [ ] API endpoints ontology management
 - [ ] Versioning ontologie (rollback possible)
+
+**🧠 InferenceEngine - Découverte de Connaissances Cachées** (KILLER FEATURE) 🆕 :
+
+> **Différenciation MASSIVE** : Aucun concurrent (Copilot, Gemini) ne peut faire cela
+
+**Composants (100% GRATUITS)** :
+- Neo4j GDS Community (PageRank, Louvain, Node Similarity) - GPLv3
+- PyKEEN (Knowledge Graph Embeddings) - MIT License
+- LLM optionnel pour validation
+
+**Types d'insights découvrables** :
+- [ ] **Inférences transitives** : A→B→C implique A~C (Cypher natif)
+- [ ] **Signaux faibles** : Mentions rares mais PageRank élevé
+- [ ] **Trous structurels** : Paires de concepts non liés mais devraient l'être
+- [ ] **Contradictions** : Affirmations contradictoires inter-documents
+- [ ] **Communautés cachées** : Clusters cross-domaine non évidents
+
+**API** :
+- [ ] `GET /api/v1/inference/discover` - Découverte d'insights
+- [ ] `GET /api/v1/inference/insights/{type}` - Insights par type
+- [ ] Dashboard Hidden Insights (frontend)
+
+**Métriques Cibles** :
+- 50+ insights pertinents par run
+- Précision > 70% (validation humaine)
+- Temps exécution < 30s (graphe 10K concepts)
+
+**Référence détaillée** : `doc/phases/PHASE2_INTELLIGENCE_AVANCEE.md` - Section UC3.3
 
 #### 2.4 Canonicalisation Robuste & Auto-Apprentissage ✅ **COMPLÉTÉ Phase 1.5**
 
