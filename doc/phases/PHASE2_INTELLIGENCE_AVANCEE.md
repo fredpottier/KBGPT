@@ -419,39 +419,699 @@ def discover_implicit_relations():
 
 ---
 
+#### UC3.3 : InferenceEngine - Découverte de Connaissances Cachées 🧠 **(KILLER FEATURE)**
+
+**Problème** : Les documents contiennent des connaissances **implicites** non directement lisibles :
+- Inférences transitives (A→B, B→C implique A~C)
+- Signaux faibles (mentions rares mais critiques)
+- Corrélations cachées (patterns non évidents)
+- Contradictions inter-documents
+- Trous structurels (concepts liés mais non connectés)
+
+**Différenciation MASSIVE** : Aucun concurrent (Copilot, Gemini, ChatGPT) ne peut faire cela car ils n'ont pas de graphe de connaissances exploitable.
+
+**Solution Architecture** (100% composants GRATUITS) :
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     INFERENCE ENGINE                         │
+│                (Composants 100% Open Source)                 │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
+│  │  Neo4j GDS      │  │    PyKEEN       │  │   LLM        │ │
+│  │  Community      │  │    (MIT)        │  │   Validator  │ │
+│  │  (GPLv3 Free)   │  │                 │  │   (optionnel)│ │
+│  ├─────────────────┤  ├─────────────────┤  ├──────────────┤ │
+│  │ • PageRank      │  │ • TransE        │  │ • Valide     │ │
+│  │ • Louvain       │  │ • RotatE        │  │   inférences │ │
+│  │ • WCC           │  │ • ComplEx       │  │ • Génère     │ │
+│  │ • Betweenness   │  │ • Link Predict. │  │   explications│ │
+│  │ • Similarity    │  │ • Embedding KG  │  │              │ │
+│  └────────┬────────┘  └────────┬────────┘  └──────┬───────┘ │
+│           │                    │                   │         │
+│           └────────────────────┼───────────────────┘         │
+│                                ▼                             │
+│                    ┌───────────────────┐                     │
+│                    │  Insight Ranker   │                     │
+│                    │  & Deduplicator   │                     │
+│                    └───────────────────┘                     │
+│                                │                             │
+└────────────────────────────────┼─────────────────────────────┘
+                                 ▼
+                    ┌───────────────────┐
+                    │  Hidden Insights  │
+                    │  Dashboard        │
+                    └───────────────────┘
+```
+
+**Licences et Coûts** :
+
+| Composant | Licence | Coût | Limitations |
+|-----------|---------|------|-------------|
+| **Neo4j Community** | GPLv3 | **GRATUIT** | Single instance |
+| **Neo4j GDS Community** | GPLv3 | **GRATUIT** | 4 CPU cores max |
+| **PyKEEN** | MIT | **GRATUIT** | Aucune |
+| **NetworkX** (fallback) | BSD | **GRATUIT** | Aucune |
+
+**Implémentation** :
+
+```python
+# src/knowbase/semantic/inference_engine.py
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
+import asyncio
+
+
+class InsightType(Enum):
+    """Types d'insights découvrables."""
+    TRANSITIVE_INFERENCE = "transitive"      # A→B→C implique A~C
+    WEAK_SIGNAL = "weak_signal"              # Mention rare mais critique
+    STRUCTURAL_HOLE = "structural_hole"      # Lien manquant évident
+    CONTRADICTION = "contradiction"          # Conflit inter-documents
+    HIDDEN_CLUSTER = "hidden_cluster"        # Communauté non évidente
+    BRIDGE_CONCEPT = "bridge_concept"        # Concept connecteur clé
+
+
+@dataclass
+class DiscoveredInsight:
+    """Insight découvert par l'InferenceEngine."""
+    insight_type: InsightType
+    title: str
+    description: str
+    confidence: float  # 0.0 - 1.0
+    evidence: list[str]  # Chunks/documents sources
+    affected_concepts: list[str]
+    business_impact: Optional[str] = None
+
+
+class InferenceEngine:
+    """
+    Moteur de découverte de connaissances cachées.
+
+    Utilise UNIQUEMENT des composants gratuits :
+    - Neo4j GDS Community (graph algorithms)
+    - PyKEEN (knowledge graph embeddings)
+    - LLM optionnel (validation/explication)
+    """
+
+    def __init__(
+        self,
+        neo4j_client,
+        qdrant_client,
+        llm_client=None  # Optionnel pour validation
+    ):
+        self.neo4j = neo4j_client
+        self.qdrant = qdrant_client
+        self.llm = llm_client
+
+    async def discover_insights(
+        self,
+        scope: Optional[str] = None,  # Filtre domaine
+        methods: list[str] = None     # Méthodes à utiliser
+    ) -> list[DiscoveredInsight]:
+        """
+        Lance la découverte d'insights sur le graphe.
+
+        Args:
+            scope: Filtrer par domaine (ex: "SAP BTP")
+            methods: Liste de méthodes ["transitive", "weak_signal", ...]
+                     Si None, utilise toutes les méthodes
+        """
+        methods = methods or [
+            "transitive", "weak_signal", "structural_hole",
+            "contradiction", "community"
+        ]
+
+        insights = []
+
+        # Exécuter méthodes en parallèle
+        tasks = []
+        if "transitive" in methods:
+            tasks.append(self._find_transitive_inferences(scope))
+        if "weak_signal" in methods:
+            tasks.append(self._detect_weak_signals(scope))
+        if "structural_hole" in methods:
+            tasks.append(self._find_structural_holes(scope))
+        if "contradiction" in methods:
+            tasks.append(self._detect_contradictions(scope))
+        if "community" in methods:
+            tasks.append(self._discover_hidden_communities(scope))
+
+        results = await asyncio.gather(*tasks)
+        for result in results:
+            insights.extend(result)
+
+        # Dédupliquer et ranker
+        insights = self._rank_and_deduplicate(insights)
+
+        return insights
+
+    # ============================================================
+    # MÉTHODE 1: Inférences Transitives (Cypher natif - GRATUIT)
+    # ============================================================
+    async def _find_transitive_inferences(
+        self,
+        scope: Optional[str] = None
+    ) -> list[DiscoveredInsight]:
+        """
+        Trouve les chemins transitifs A→B→C où A et C ne sont pas
+        directement liés mais devraient l'être.
+
+        Utilise: Cypher natif (aucun plugin requis)
+        """
+        query = """
+        // Trouver concepts connectés via intermédiaire mais pas directement
+        MATCH path = (a:Concept)-[r1]->(b:Concept)-[r2]->(c:Concept)
+        WHERE a <> c
+        AND NOT (a)-[]-(c)  // Pas de lien direct
+        AND a.quality_score > 0.6
+        AND c.quality_score > 0.6
+
+        // Calculer force inférence
+        WITH a, b, c, r1, r2,
+             (a.quality_score + c.quality_score) / 2 AS confidence
+        WHERE confidence > 0.7
+
+        RETURN
+            a.canonical_name AS source,
+            type(r1) AS rel1,
+            b.canonical_name AS bridge,
+            type(r2) AS rel2,
+            c.canonical_name AS target,
+            confidence,
+            a.chunk_ids AS source_chunks,
+            c.chunk_ids AS target_chunks
+        ORDER BY confidence DESC
+        LIMIT 50
+        """
+
+        results = await self.neo4j.execute_query(query)
+        insights = []
+
+        for row in results:
+            insight = DiscoveredInsight(
+                insight_type=InsightType.TRANSITIVE_INFERENCE,
+                title=f"Lien implicite: {row['source']} ↔ {row['target']}",
+                description=(
+                    f"'{row['source']}' est lié à '{row['target']}' "
+                    f"via '{row['bridge']}' "
+                    f"({row['rel1']} → {row['rel2']}), "
+                    f"mais aucun lien direct n'existe."
+                ),
+                confidence=row['confidence'],
+                evidence=row['source_chunks'][:3] + row['target_chunks'][:3],
+                affected_concepts=[row['source'], row['bridge'], row['target']],
+                business_impact=self._assess_transitive_impact(row)
+            )
+            insights.append(insight)
+
+        return insights
+
+    # ============================================================
+    # MÉTHODE 2: Signaux Faibles (Neo4j GDS Community - GRATUIT)
+    # ============================================================
+    async def _detect_weak_signals(
+        self,
+        scope: Optional[str] = None
+    ) -> list[DiscoveredInsight]:
+        """
+        Détecte les concepts rarement mentionnés mais à haute valeur.
+
+        Utilise: PageRank + analyse mentions (Neo4j GDS Community)
+        """
+        # Étape 1: Calculer PageRank pour importance structurelle
+        pagerank_query = """
+        CALL gds.pageRank.stream('concept-graph', {
+            maxIterations: 20,
+            dampingFactor: 0.85
+        })
+        YIELD nodeId, score
+        WITH gds.util.asNode(nodeId) AS concept, score AS pagerank
+
+        // Trouver concepts à haut PageRank mais peu de chunks
+        WHERE size(concept.chunk_ids) < 5  // Rarement mentionné
+        AND pagerank > 0.1                  // Mais structurellement important
+
+        RETURN
+            concept.canonical_name AS name,
+            concept.unified_definition AS definition,
+            size(concept.chunk_ids) AS mention_count,
+            pagerank,
+            concept.chunk_ids AS chunks
+        ORDER BY pagerank DESC
+        LIMIT 20
+        """
+
+        results = await self.neo4j.execute_query(pagerank_query)
+        insights = []
+
+        for row in results:
+            insight = DiscoveredInsight(
+                insight_type=InsightType.WEAK_SIGNAL,
+                title=f"Signal faible: {row['name']}",
+                description=(
+                    f"'{row['name']}' n'est mentionné que {row['mention_count']} fois "
+                    f"mais possède une importance structurelle élevée "
+                    f"(PageRank: {row['pagerank']:.3f}). "
+                    f"Ce concept mérite une attention particulière."
+                ),
+                confidence=min(row['pagerank'] * 2, 0.95),
+                evidence=row['chunks'],
+                affected_concepts=[row['name']],
+                business_impact="Concept potentiellement sous-estimé"
+            )
+            insights.append(insight)
+
+        return insights
+
+    # ============================================================
+    # MÉTHODE 3: Trous Structurels (Neo4j GDS Community - GRATUIT)
+    # ============================================================
+    async def _find_structural_holes(
+        self,
+        scope: Optional[str] = None
+    ) -> list[DiscoveredInsight]:
+        """
+        Identifie les paires de concepts qui devraient être liées
+        (voisins communs, similarité sémantique) mais ne le sont pas.
+
+        Utilise: Node Similarity (Neo4j GDS Community)
+        """
+        # Projeter graphe pour GDS
+        project_query = """
+        CALL gds.graph.project(
+            'similarity-graph',
+            'Concept',
+            {
+                RELATES_TO: {orientation: 'UNDIRECTED'},
+                INTEGRATES_WITH: {orientation: 'UNDIRECTED'},
+                DEPENDS_ON: {orientation: 'UNDIRECTED'}
+            }
+        )
+        """
+
+        # Calculer similarité nodale (voisins communs)
+        similarity_query = """
+        CALL gds.nodeSimilarity.stream('similarity-graph', {
+            topK: 10,
+            similarityCutoff: 0.5
+        })
+        YIELD node1, node2, similarity
+        WITH gds.util.asNode(node1) AS c1,
+             gds.util.asNode(node2) AS c2,
+             similarity
+
+        // Filtrer paires sans lien direct
+        WHERE NOT (c1)-[]-(c2)
+        AND similarity > 0.6
+
+        RETURN
+            c1.canonical_name AS concept1,
+            c2.canonical_name AS concept2,
+            similarity,
+            c1.chunk_ids AS chunks1,
+            c2.chunk_ids AS chunks2
+        ORDER BY similarity DESC
+        LIMIT 30
+        """
+
+        try:
+            await self.neo4j.execute_query(project_query)
+            results = await self.neo4j.execute_query(similarity_query)
+        finally:
+            # Nettoyer projection
+            await self.neo4j.execute_query(
+                "CALL gds.graph.drop('similarity-graph', false)"
+            )
+
+        insights = []
+        for row in results:
+            insight = DiscoveredInsight(
+                insight_type=InsightType.STRUCTURAL_HOLE,
+                title=f"Lien manquant: {row['concept1']} ↔ {row['concept2']}",
+                description=(
+                    f"'{row['concept1']}' et '{row['concept2']}' partagent "
+                    f"de nombreux voisins communs (similarité: {row['similarity']:.2f}) "
+                    f"mais n'ont aucun lien direct. "
+                    f"Un lien devrait probablement exister."
+                ),
+                confidence=row['similarity'],
+                evidence=row['chunks1'][:2] + row['chunks2'][:2],
+                affected_concepts=[row['concept1'], row['concept2']],
+                business_impact="Relation potentiellement non documentée"
+            )
+            insights.append(insight)
+
+        return insights
+
+    # ============================================================
+    # MÉTHODE 4: Détection Contradictions (LLM + Qdrant)
+    # ============================================================
+    async def _detect_contradictions(
+        self,
+        scope: Optional[str] = None
+    ) -> list[DiscoveredInsight]:
+        """
+        Trouve les affirmations contradictoires entre documents.
+
+        Utilise: Qdrant similarity + LLM validation
+        """
+        if not self.llm:
+            return []  # LLM requis pour cette méthode
+
+        # Récupérer concepts avec plusieurs sources
+        query = """
+        MATCH (c:Concept)
+        WHERE size(c.chunk_ids) >= 3
+        RETURN c.canonical_name AS name, c.chunk_ids AS chunks
+        LIMIT 100
+        """
+
+        concepts = await self.neo4j.execute_query(query)
+        insights = []
+
+        for concept in concepts:
+            # Récupérer chunks du concept
+            chunks = await self.qdrant.retrieve(
+                collection_name="knowbase",
+                ids=concept['chunks']
+            )
+
+            if len(chunks) < 2:
+                continue
+
+            # Comparer paires de chunks pour contradictions
+            for i, chunk_a in enumerate(chunks[:-1]):
+                for chunk_b in chunks[i+1:]:
+                    # Skip si même document
+                    if (chunk_a.payload.get('document_id') ==
+                        chunk_b.payload.get('document_id')):
+                        continue
+
+                    # LLM vérifie contradiction
+                    contradiction = await self._check_contradiction(
+                        concept['name'],
+                        chunk_a.payload['text'],
+                        chunk_b.payload['text']
+                    )
+
+                    if contradiction and contradiction['is_contradiction']:
+                        insight = DiscoveredInsight(
+                            insight_type=InsightType.CONTRADICTION,
+                            title=f"Contradiction: {concept['name']}",
+                            description=contradiction['explanation'],
+                            confidence=contradiction['confidence'],
+                            evidence=[chunk_a.id, chunk_b.id],
+                            affected_concepts=[concept['name']],
+                            business_impact="Information incohérente à résoudre"
+                        )
+                        insights.append(insight)
+                        break  # Une contradiction suffit par concept
+
+        return insights
+
+    # ============================================================
+    # MÉTHODE 5: Communautés Cachées (Louvain - GDS Community)
+    # ============================================================
+    async def _discover_hidden_communities(
+        self,
+        scope: Optional[str] = None
+    ) -> list[DiscoveredInsight]:
+        """
+        Découvre des clusters de concepts non évidents.
+
+        Utilise: Louvain Community Detection (Neo4j GDS Community)
+        """
+        # Projeter et détecter communautés
+        community_query = """
+        CALL gds.louvain.stream('concept-graph', {
+            maxLevels: 10,
+            maxIterations: 10
+        })
+        YIELD nodeId, communityId
+        WITH communityId, collect(gds.util.asNode(nodeId)) AS members
+        WHERE size(members) >= 3 AND size(members) <= 15
+
+        // Récupérer infos communauté
+        RETURN
+            communityId,
+            [m IN members | m.canonical_name] AS concept_names,
+            size(members) AS size,
+            reduce(s = 0.0, m IN members | s + m.quality_score) / size(members) AS avg_quality
+        ORDER BY size DESC
+        LIMIT 20
+        """
+
+        results = await self.neo4j.execute_query(community_query)
+        insights = []
+
+        for row in results:
+            # Vérifier si communauté est "surprenante" (concepts de domaines différents)
+            is_surprising = await self._is_surprising_cluster(row['concept_names'])
+
+            if is_surprising:
+                insight = DiscoveredInsight(
+                    insight_type=InsightType.HIDDEN_CLUSTER,
+                    title=f"Cluster caché: {', '.join(row['concept_names'][:3])}...",
+                    description=(
+                        f"Un groupe de {row['size']} concepts forme une communauté "
+                        f"non évidente: {', '.join(row['concept_names'])}. "
+                        f"Ces concepts sont fortement interconnectés dans la documentation."
+                    ),
+                    confidence=row['avg_quality'],
+                    evidence=[],  # Pas de chunks spécifiques
+                    affected_concepts=row['concept_names'],
+                    business_impact="Synergie potentielle à explorer"
+                )
+                insights.append(insight)
+
+        return insights
+
+    # ============================================================
+    # Méthodes utilitaires
+    # ============================================================
+    def _rank_and_deduplicate(
+        self,
+        insights: list[DiscoveredInsight]
+    ) -> list[DiscoveredInsight]:
+        """Trie par confiance et déduplique insights similaires."""
+        # Trier par confiance
+        insights.sort(key=lambda x: x.confidence, reverse=True)
+
+        # Dédupliquer (concepts similaires)
+        seen_concepts = set()
+        unique_insights = []
+
+        for insight in insights:
+            key = frozenset(insight.affected_concepts)
+            if key not in seen_concepts:
+                seen_concepts.add(key)
+                unique_insights.append(insight)
+
+        return unique_insights[:50]  # Top 50
+
+    async def _check_contradiction(
+        self,
+        concept_name: str,
+        text_a: str,
+        text_b: str
+    ) -> Optional[dict]:
+        """Utilise LLM pour vérifier contradiction."""
+        prompt = f"""
+        Analyse ces deux extraits concernant "{concept_name}".
+
+        Extrait A: {text_a[:500]}
+        Extrait B: {text_b[:500]}
+
+        Ces extraits contiennent-ils une CONTRADICTION factuelle ?
+        Réponds en JSON: {{"is_contradiction": bool, "confidence": float, "explanation": str}}
+        """
+
+        response = await self.llm.complete(prompt)
+        # Parser JSON response...
+        return response
+
+    def _assess_transitive_impact(self, row: dict) -> str:
+        """Évalue impact business d'une inférence transitive."""
+        rel_types = {row['rel1'], row['rel2']}
+
+        if 'DEPENDS_ON' in rel_types:
+            return "Dépendance indirecte potentielle"
+        elif 'SECURES' in rel_types:
+            return "Implication sécurité à vérifier"
+        elif 'INTEGRATES_WITH' in rel_types:
+            return "Intégration possible non documentée"
+        else:
+            return "Relation à investiguer"
+
+    async def _is_surprising_cluster(self, concepts: list[str]) -> bool:
+        """Vérifie si cluster est surprenant (cross-domaine)."""
+        # Logique simplifiée : surprenant si > 1 domaine
+        domains = set()
+        domain_keywords = {
+            'security': ['security', 'auth', 'sso', 'rbac'],
+            'integration': ['api', 'integration', 'connector'],
+            'analytics': ['analytics', 'report', 'dashboard'],
+            'cloud': ['cloud', 'btp', 'azure', 'aws']
+        }
+
+        for concept in concepts:
+            concept_lower = concept.lower()
+            for domain, keywords in domain_keywords.items():
+                if any(kw in concept_lower for kw in keywords):
+                    domains.add(domain)
+
+        return len(domains) >= 2  # Cross-domaine
+```
+
+**API Endpoints** :
+
+```python
+# src/knowbase/api/routers/inference.py
+
+from fastapi import APIRouter, Query
+from typing import Optional
+
+router = APIRouter(prefix="/api/v1/inference", tags=["inference"])
+
+@router.get("/discover")
+async def discover_insights(
+    scope: Optional[str] = Query(None, description="Filtrer par domaine"),
+    methods: Optional[str] = Query(
+        None,
+        description="Méthodes (comma-sep): transitive,weak_signal,structural_hole,contradiction,community"
+    ),
+    limit: int = Query(20, le=50)
+):
+    """
+    Découvre des connaissances cachées dans le graphe.
+
+    Returns:
+        Liste d'insights avec type, description, confiance et preuves.
+    """
+    method_list = methods.split(',') if methods else None
+
+    engine = InferenceEngine(
+        neo4j_client=get_neo4j(),
+        qdrant_client=get_qdrant(),
+        llm_client=get_llm()  # Optionnel
+    )
+
+    insights = await engine.discover_insights(
+        scope=scope,
+        methods=method_list
+    )
+
+    return {
+        "total": len(insights),
+        "insights": [
+            {
+                "type": i.insight_type.value,
+                "title": i.title,
+                "description": i.description,
+                "confidence": i.confidence,
+                "affected_concepts": i.affected_concepts,
+                "business_impact": i.business_impact,
+                "evidence_count": len(i.evidence)
+            }
+            for i in insights[:limit]
+        ]
+    }
+
+@router.get("/insights/{insight_type}")
+async def get_insights_by_type(
+    insight_type: str,
+    limit: int = Query(10, le=30)
+):
+    """Récupère insights d'un type spécifique."""
+    # Implementation...
+    pass
+```
+
+**Valeur Business** :
+- ✅ **USP KILLER** : Aucun concurrent ne peut découvrir des connaissances cachées
+- ✅ **Due Diligence** : Détecter risques/contradictions avant décision
+- ✅ **Innovation** : Identifier opportunités cross-domaine non évidentes
+- ✅ **Audit** : Repérer incohérences documentaires automatiquement
+
+**Use Cases Concrets** :
+
+| Insight Type | Exemple Réel | Impact Business |
+|--------------|--------------|-----------------|
+| **Transitive** | "SAP BTP → Cloud Connector → S/4HANA" implique BTP↔S/4 | Dépendance critique non documentée |
+| **Weak Signal** | "Green Ledger" mentionné 2x mais PageRank élevé | Trend émergent à surveiller |
+| **Structural Hole** | "RBAC" et "SSO" jamais liés mais voisins communs | Intégration sécurité à documenter |
+| **Contradiction** | Doc A: "BTP supporte X", Doc B: "X n'est pas supporté" | Incohérence à résoudre |
+| **Hidden Cluster** | {Analytics, ML, Joule, BTP} forment communauté | Convergence IA SAP |
+
+**Métriques de Succès** :
+- 50+ insights pertinents par run
+- Precision des insights > 70% (validation humaine)
+- Temps d'exécution < 30s (graphe 10K concepts)
+- Adoption : 80% users trouvent ≥1 insight actionable
+
+**Implémentation** :
+- Semaine 18 : InferenceEngine core (transitive, weak_signal)
+- Semaine 19 : Méthodes avancées (structural_hole, community)
+- Semaine 20 : API + Dashboard insights + Validation LLM
+
+---
+
 ## 🏗️ Architecture Technique
 
 ### Nouveaux Composants Phase 2
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    API Layer (FastAPI)                   │
-├─────────────────────────────────────────────────────────┤
-│  /concepts/{id}/explain          │ UC1.1 Provenance     │
-│  /search/graph-guided             │ UC1.2 Hybrid Search  │
-│  /concepts/{id}/evolution         │ UC2.1 Evolution      │
-│  /relations/{id}/validate         │ UC2.2 Validation     │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│              Graph-Powered Services Layer                │
-├─────────────────────────────────────────────────────────┤
-│  • GraphGuidedSearchService    (UC1.2)                  │
-│  • ConceptExplainerService     (UC1.1)                  │
-│  • EvolutionAnalyzerService    (UC2.1)                  │
-│  • RelationValidatorService    (UC2.2)                  │
-│  • CooccurrenceMinerService    (UC3.2)                  │
-└─────────────────────────────────────────────────────────┘
-                          │
-        ┌─────────────────┴─────────────────┐
-        ▼                                   ▼
-┌─────────────────┐              ┌──────────────────┐
-│   Neo4j Graph   │◄────────────►│  Qdrant Vector   │
-│                 │  Cross-Ref   │                  │
-│ • chunk_ids []  │  Bidir.      │ • canonical_ids  │
-└─────────────────┘              └──────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                      API Layer (FastAPI)                       │
+├───────────────────────────────────────────────────────────────┤
+│  /concepts/{id}/explain          │ UC1.1 Provenance           │
+│  /search/graph-guided            │ UC1.2 Hybrid Search        │
+│  /concepts/{id}/evolution        │ UC2.1 Evolution            │
+│  /relations/{id}/validate        │ UC2.2 Validation           │
+│  /inference/discover             │ UC3.3 Hidden Knowledge 🆕  │
+│  /inference/insights/{type}      │ UC3.3 Insights by Type 🆕  │
+└───────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────┐
+│                Graph-Powered Services Layer                    │
+├───────────────────────────────────────────────────────────────┤
+│  • GraphGuidedSearchService    (UC1.2)                        │
+│  • ConceptExplainerService     (UC1.1)                        │
+│  • EvolutionAnalyzerService    (UC2.1)                        │
+│  • RelationValidatorService    (UC2.2)                        │
+│  • CooccurrenceMinerService    (UC3.2)                        │
+│  • InferenceEngine             (UC3.3) 🆕 KILLER FEATURE      │
+└───────────────────────────────────────────────────────────────┘
+                            │
+          ┌─────────────────┼─────────────────┐
+          ▼                 ▼                 ▼
+┌─────────────────┐  ┌──────────────┐  ┌──────────────────┐
+│   Neo4j Graph   │  │  Neo4j GDS   │  │  Qdrant Vector   │
+│   Community     │  │  Community   │  │                  │
+│                 │  │  (GRATUIT)   │  │                  │
+│ • chunk_ids []  │  │ • PageRank   │  │ • canonical_ids  │
+│ • Cypher natif  │  │ • Louvain    │  │ • embeddings     │
+│                 │  │ • Similarity │  │                  │
+└────────┬────────┘  └──────────────┘  └────────┬─────────┘
+         │                                      │
+         └──────────── Cross-Ref ───────────────┘
+                      Bidirectionnelle
 ```
+
+### Stack Technique InferenceEngine (100% GRATUIT)
+
+| Composant | Rôle | Licence | Coût |
+|-----------|------|---------|------|
+| **Neo4j Community** | Base graphe | GPLv3 | GRATUIT |
+| **Neo4j GDS Community** | Algorithmes graphe (PageRank, Louvain, Similarity) | GPLv3 | GRATUIT |
+| **PyKEEN** | Embeddings KG (TransE, RotatE) | MIT | GRATUIT |
+| **NetworkX** | Fallback Python natif | BSD | GRATUIT |
+| **LLM** (optionnel) | Validation insights | - | Usage existant |
 
 ### Services à Développer
 
@@ -609,13 +1269,19 @@ class EvolutionAnalyzerService:
 
 ---
 
-### Semaines 18-20 : Auto-Apprentissage (Priorité 3)
+### Semaines 18-20 : Auto-Apprentissage & Découverte (Priorité 3)
 
-**Objectif** : Ontologie auto-apprenante
+**Objectif** : Ontologie auto-apprenante + **InferenceEngine (KILLER FEATURE)**
 
 **Livrables** :
 - ✅ Concept Enrichment quotidien (UC3.1)
 - ✅ Co-occurrence Mining hebdomadaire (UC3.2)
+- ✅ **InferenceEngine core** (UC3.3) 🆕
+  - Inférences transitives (Cypher natif)
+  - Signaux faibles (PageRank - Neo4j GDS Community)
+  - Trous structurels (Node Similarity - Neo4j GDS Community)
+- ✅ **API `/inference/discover`** 🆕
+- ✅ **Dashboard Hidden Insights** 🆕
 - ✅ Dashboard admin (monitoring auto-learning)
 - ✅ Documentation patterns découverts
 
@@ -623,6 +1289,11 @@ class EvolutionAnalyzerService:
 - 50+ relations découvertes automatiquement
 - Concept enrichment : 80% concepts ont facets
 - Zero-intervention uptime : 7 jours
+- **InferenceEngine** 🆕 :
+  - 50+ insights pertinents par run
+  - Précision insights > 70% (validation humaine)
+  - Temps d'exécution < 30s (graphe 10K concepts)
+  - 80% users trouvent ≥1 insight actionable
 
 ---
 
