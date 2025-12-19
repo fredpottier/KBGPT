@@ -1,7 +1,8 @@
 ﻿from __future__ import annotations
 
+import asyncio
 import os
-from typing import Any
+from typing import Any, Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import FieldCondition, Filter, MatchValue, HasIdCondition
@@ -9,11 +10,16 @@ from sentence_transformers import SentenceTransformer
 
 from knowbase.config.settings import Settings
 from knowbase.common.clients import rerank_chunks
+from knowbase.common.logging import setup_logging
 from .synthesis import synthesize_response
 
 TOP_K = 10
 SCORE_THRESHOLD = 0.5
 PUBLIC_URL = os.getenv("PUBLIC_URL", "knowbase.ngrok.app")
+
+# Logger pour le module search
+_settings = Settings()
+logger = setup_logging(_settings.logs_dir, "search_service.log")
 
 
 def build_response_payload(result, public_url: str) -> dict[str, Any]:
@@ -51,7 +57,26 @@ def search_documents(
     embedding_model: SentenceTransformer,
     settings: Settings,
     solution: str | None = None,
+    tenant_id: str = "default",
+    use_graph_context: bool = True,
+    graph_enrichment_level: str = "standard",
 ) -> dict[str, Any]:
+    """
+    Recherche sémantique avec enrichissement Knowledge Graph (OSMOSE).
+
+    Args:
+        question: Question de l'utilisateur
+        qdrant_client: Client Qdrant
+        embedding_model: Modèle d'embedding
+        settings: Configuration
+        solution: Filtre par solution SAP (optionnel)
+        tenant_id: Tenant ID pour le KG
+        use_graph_context: Activer l'enrichissement KG (Graph-Guided RAG)
+        graph_enrichment_level: Niveau d'enrichissement (none, light, standard, deep)
+
+    Returns:
+        Résultats de recherche avec synthèse enrichie
+    """
     query = question.strip()
     query_vector = embedding_model.encode(query)
     if hasattr(query_vector, "tolist"):
@@ -95,14 +120,72 @@ def search_documents(
     # Apply reranking to improve relevance ordering
     reranked_chunks = rerank_chunks(query, response_chunks, top_k=TOP_K)
 
-    # Generate synthesized response using LLM
-    synthesis_result = synthesize_response(query, reranked_chunks)
+    # 🌊 OSMOSE: Enrichissement Knowledge Graph (Graph-Guided RAG)
+    graph_context_text = ""
+    graph_context_data = None
 
-    return {
+    if use_graph_context and graph_enrichment_level != "none":
+        try:
+            from .graph_guided_search import (
+                get_graph_guided_service,
+                EnrichmentLevel
+            )
+
+            service = get_graph_guided_service()
+
+            # Mapper le niveau d'enrichissement
+            level_map = {
+                "none": EnrichmentLevel.NONE,
+                "light": EnrichmentLevel.LIGHT,
+                "standard": EnrichmentLevel.STANDARD,
+                "deep": EnrichmentLevel.DEEP,
+            }
+            enrichment_level = level_map.get(
+                graph_enrichment_level.lower(),
+                EnrichmentLevel.STANDARD
+            )
+
+            # Exécuter l'enrichissement KG de façon synchrone
+            loop = asyncio.new_event_loop()
+            try:
+                graph_context = loop.run_until_complete(
+                    service.build_graph_context(
+                        query=query,
+                        tenant_id=tenant_id,
+                        enrichment_level=enrichment_level
+                    )
+                )
+            finally:
+                loop.close()
+
+            # Formater le contexte pour le prompt LLM
+            graph_context_text = service.format_context_for_synthesis(graph_context)
+            graph_context_data = graph_context.to_dict()
+
+            logger.info(
+                f"[OSMOSE] Graph context: {len(graph_context.query_concepts)} concepts, "
+                f"{len(graph_context.related_concepts)} related, "
+                f"{graph_context.processing_time_ms:.1f}ms"
+            )
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE] Graph enrichment failed (non-blocking): {e}")
+            # Continue sans enrichissement KG
+
+    # Generate synthesized response using LLM (with optional KG context)
+    synthesis_result = synthesize_response(query, reranked_chunks, graph_context_text)
+
+    response = {
         "status": "success",
         "results": reranked_chunks,
         "synthesis": synthesis_result
     }
+
+    # Ajouter le contexte KG si disponible
+    if graph_context_data:
+        response["graph_context"] = graph_context_data
+
+    return response
 
 
 def get_available_solutions(

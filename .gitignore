@@ -82,3 +82,4 @@ frontend/out/
 app/patch_unstructured.py
 env.production
 .env.production
+agent_system/.env.agents

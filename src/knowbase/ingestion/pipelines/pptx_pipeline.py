@@ -210,6 +210,11 @@ def load_document_type_context(document_type_id: str | None) -> str | None:
     """
     Charge le context_prompt depuis la DB pour un document_type_id donné.
 
+    .. deprecated::
+        Cette fonction est DEPRECATED. Le système DocumentType est remplacé
+        par le Domain Context global qui s'adapte progressivement aux documents.
+        Utilisez DomainContextInjector à la place.
+
     Args:
         document_type_id: ID du DocumentType (peut être None ou "default")
 

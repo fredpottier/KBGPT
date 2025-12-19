@@ -14,6 +14,9 @@ $APP_FILE = "docker-compose.yml"
 $MONITORING_FILE = "docker-compose.monitoring.yml"
 $COMPOSE_CMD = "docker-compose -f $INFRA_FILE -f $APP_FILE -f $MONITORING_FILE"
 
+# Mot de passe Grafana (synchronisé avec .env)
+$GRAFANA_PASSWORD = "Rn1lm@tr"
+
 function Show-Help {
     Write-Host ""
     Write-Host "KnowWhere/OSMOSE - Gestionnaire Docker" -ForegroundColor Cyan
@@ -76,6 +79,45 @@ function Show-Info {
     Write-Host ""
 }
 
+function Reset-GrafanaPassword {
+    Write-Host ""
+    Write-Host "Configuration mot de passe Grafana..." -ForegroundColor Cyan
+
+    # Attendre que Grafana soit pret (max 60 secondes)
+    $maxAttempts = 30
+    $attempt = 0
+    $grafanaReady = $false
+
+    Write-Host "   Attente demarrage Grafana..." -ForegroundColor Gray -NoNewline
+    while ($attempt -lt $maxAttempts -and -not $grafanaReady) {
+        $attempt++
+        try {
+            $response = Invoke-WebRequest -Uri "http://localhost:3001/api/health" -TimeoutSec 2 -ErrorAction SilentlyContinue
+            if ($response.StatusCode -eq 200) {
+                $grafanaReady = $true
+            }
+        } catch {
+            Write-Host "." -ForegroundColor Gray -NoNewline
+            Start-Sleep -Seconds 2
+        }
+    }
+    Write-Host ""
+
+    if ($grafanaReady) {
+        # Reset le mot de passe via grafana-cli (silencieux)
+        $result = docker exec knowbase-grafana grafana cli admin reset-admin-password $GRAFANA_PASSWORD 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "   Mot de passe Grafana configure: admin / $GRAFANA_PASSWORD" -ForegroundColor Green
+        } else {
+            Write-Host "   Avertissement: Impossible de configurer le mot de passe Grafana" -ForegroundColor Yellow
+            Write-Host "   Essayez: docker exec knowbase-grafana grafana cli admin reset-admin-password $GRAFANA_PASSWORD" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "   Grafana pas encore pret - mot de passe non configure" -ForegroundColor Yellow
+        Write-Host "   Executez apres demarrage: docker exec knowbase-grafana grafana cli admin reset-admin-password $GRAFANA_PASSWORD" -ForegroundColor Gray
+    }
+}
+
 function Start-Services {
     param([string]$Target)
 
@@ -104,6 +146,12 @@ function Start-Services {
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
         Write-Host "Services demarres avec succes!" -ForegroundColor Green
+
+        # Reset mot de passe Grafana si monitoring est demarre
+        if ($Target -eq "monitoring" -or $Target -eq "all" -or $Target -eq "") {
+            Reset-GrafanaPassword
+        }
+
         Start-Sleep -Seconds 2
         Get-Status
         Show-Info

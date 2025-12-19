@@ -1,0 +1,140 @@
+# ===============================================================================
+# 🌊 OSMOSE Feature Flags Configuration
+# ===============================================================================
+#
+# Feature flags pour contrôler le déploiement progressif des fonctionnalités.
+# Format: feature_name: enabled (bool) ou configuration détaillée
+#
+# Usage:
+#   from knowbase.config.feature_flags import is_feature_enabled
+#   if is_feature_enabled("enable_hybrid_extraction"):
+#       ...
+#
+# ===============================================================================
+
+# ===============================================================================
+# Phase 1.8 - LLM Hybrid Intelligence
+# ===============================================================================
+
+phase_1_8:
+  # Global Phase 1.8 toggle (master switch)
+  enabled: true
+
+  # -------------------------------------------------------------------------
+  # Sprint 1.8.1 - Extraction Concepts Hybrid
+  # -------------------------------------------------------------------------
+
+  # LOW_QUALITY_NER Routing: Route segments problématiques vers LLM
+  # Condition: < 3 entities ET > 200 tokens → SMALL LLM
+  # Impact: Rappel concepts 70% → 85%
+  enable_hybrid_extraction: true
+  low_quality_ner:
+    entity_threshold: 3      # Min entities pour considérer "quality OK"
+    token_threshold: 200     # Min tokens pour considérer segment "long"
+
+  # Document Context Global: Génère résumé pour désambiguïsation
+  # Impact: Precision +15-20%
+  enable_document_context: true
+  document_context:
+    max_length: 500          # Max caractères pour le résumé
+    cache_enabled: true      # Cache par document_id
+
+  # LLM-as-a-Judge: Validation clustering via LLM (KGGen-inspired)
+  # Impact: Réduit faux positifs clustering -47%
+  enable_llm_judge_validation: true
+  llm_judge:
+    threshold: 0.85          # Seuil confidence pour merger
+    min_similarity: 0.75     # Min similarity pour considérer LLM
+    max_similarity: 0.95     # Max similarity pour auto-merge
+
+  # -------------------------------------------------------------------------
+  # Sprint 1.8.1c - Dictionnaires Métier NER (EntityRuler)
+  # -------------------------------------------------------------------------
+
+  # EntityRuler: Dictionnaires métier préchargés
+  # Impact: Precision NER 70% → 85-90%
+  enable_entity_ruler: true
+  entity_ruler:
+    # Dictionnaires globaux à charger
+    # Note: Aucun dictionnaire prédéfini (solution domain-agnostic)
+    # Les ontologies sont apprises progressivement via les documents importés
+    # ou configurées via le Domain Context par le client
+    global_ontologies: []
+    # Support custom tenant (permet de charger des ontologies spécifiques)
+    enable_custom_tenant: true
+
+  # -------------------------------------------------------------------------
+  # Sprint 1.8.2 - Gatekeeper Prefetch Ontology
+  # -------------------------------------------------------------------------
+
+  # Prefetch Ontology: Cache ontologie par type document
+  # Impact: Cache hit rate 50% → 70%, LLM calls -20%
+  enable_ontology_prefetch: true
+  ontology_prefetch:
+    ttl_seconds: 3600        # 1 heure
+    max_entries_per_domain: 500
+
+  # -------------------------------------------------------------------------
+  # Sprint 1.8.3 - Relations LLM Smart Enrichment
+  # -------------------------------------------------------------------------
+
+  # Enrichissement Relations: LLM sur zone grise (0.4-0.6 confidence)
+  # Impact: Precision relations 60% → 80%, Rappel 50% → 70%
+  enable_llm_relation_enrichment: true
+  relation_enrichment:
+    min_confidence: 0.4      # Zone grise min
+    max_confidence: 0.6      # Zone grise max
+    batch_size: 50           # Paires par appel LLM
+    max_batches: 20          # Budget cap
+
+  # -------------------------------------------------------------------------
+  # Sprint 1.8.4 - Business Rules Engine
+  # -------------------------------------------------------------------------
+
+  # Business Rules: Validation métier custom par tenant
+  # Impact: Différenciateur marché vs Copilot/Gemini
+  enable_business_rules_engine: true
+
+
+# ===============================================================================
+# Phases Antérieures (Référence)
+# ===============================================================================
+
+phase_1:
+  # Phase 1.0-1.7 features (toutes actives en production)
+  semantic_extraction: true
+  multilingual_ner: true
+  concept_clustering: true
+  neo4j_graph: true
+  qdrant_vectors: true
+
+phase_1_5:
+  # Agent architecture
+  agent_architecture: true
+  supervisor_agent: true
+  extractor_orchestrator: true
+
+
+# ===============================================================================
+# Architecture de Déploiement
+# ===============================================================================
+#
+# IMPORTANT: OSMOSE utilise une architecture "1 instance = 1 client"
+#
+# Chaque client a sa propre instance dédiée avec :
+# - Sa propre base Neo4j
+# - Sa propre base Qdrant
+# - Ses propres fichiers de configuration
+#
+# Avantages :
+# - Isolation totale des données (exigence enterprise/réglementaire)
+# - Configuration spécifique par client
+# - Audit simplifié
+# - Argument commercial : "Votre instance dédiée"
+#
+# En conséquence :
+# - Pas de multi-tenancy logique sur une même instance
+# - Le tenant_id reste "default" (ou nom client pour les logs)
+# - Cette configuration s'applique à TOUTE l'instance
+#
+# ===============================================================================

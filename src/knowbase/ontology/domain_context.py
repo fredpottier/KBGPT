@@ -65,31 +65,27 @@ class DomainContextProfile(BaseModel):
 
     sub_domains: List[str] = Field(
         default_factory=list,
-        description="Sous-domaines spécifiques (ex: ['ERP', 'HCM', 'Analytics'])",
-        max_length=20
+        description="Sous-domaines spécifiques (ex: ['ERP', 'HCM', 'Analytics'])"
     )
 
     target_users: List[str] = Field(
         default_factory=list,
-        description="Profils utilisateurs cibles (ex: ['consultants', 'solution_architects'])",
-        max_length=10
+        description="Profils utilisateurs cibles (ex: ['consultants', 'solution_architects'])"
     )
 
     document_types: List[str] = Field(
         default_factory=list,
-        description="Types documents traités (ex: ['technical', 'marketing', 'functional'])",
-        max_length=10
+        description="Types documents traités (ex: ['technical', 'marketing', 'functional'])"
     )
 
     common_acronyms: Dict[str, str] = Field(
         default_factory=dict,
-        description="Acronymes courants → Expansions (max 50 entrées)"
+        description="Acronymes courants → Expansions"
     )
 
     key_concepts: List[str] = Field(
         default_factory=list,
-        description="Concepts clés du domaine à reconnaître prioritairement (max 20)",
-        max_length=20
+        description="Concepts clés du domaine à reconnaître prioritairement"
     )
 
     context_priority: Literal["low", "medium", "high"] = Field(
@@ -117,12 +113,12 @@ class DomainContextProfile(BaseModel):
     @field_validator("common_acronyms")
     @classmethod
     def validate_acronyms_limit(cls, v: Dict[str, str]) -> Dict[str, str]:
-        """Limite nombre d'acronymes à 50 max."""
-        if len(v) > 50:
+        """Limite nombre d'acronymes à 100 max (truncation silencieuse)."""
+        if len(v) > 100:
             logger.warning(
-                f"Too many acronyms ({len(v)}), keeping only first 50"
+                f"Too many acronyms ({len(v)}), keeping only first 100"
             )
-            return dict(list(v.items())[:50])
+            return dict(list(v.items())[:100])
         return v
 
     @field_validator("llm_injection_prompt")

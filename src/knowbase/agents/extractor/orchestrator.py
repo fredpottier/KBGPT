@@ -25,6 +25,14 @@ class ExtractionRoute(str, Enum):
     BIG = "BIG"        # gpt-4o ou Claude Sonnet
 
 
+class RoutingReason(str, Enum):
+    """Raisons de routing Phase 1.8."""
+    LOW_QUALITY_NER = "LOW_QUALITY_NER"  # < 3 entities ET > 200 tokens → SMALL
+    SPARSE_ENTITIES = "SPARSE_ENTITIES"  # Peu d'entities → SMALL
+    DENSE_ENTITIES = "DENSE_ENTITIES"    # Beaucoup d'entities → BIG
+    BUDGET_FALLBACK = "BUDGET_FALLBACK"  # Fallback budget
+
+
 class PrepassAnalyzerInput(ToolInput):
     """Input pour PrepassAnalyzer tool."""
     segment_text: str
@@ -57,6 +65,8 @@ class ExtractConceptsInput(ToolInput):
     segment: Dict[str, Any]
     route: str
     use_llm: bool = False
+    document_context: Optional[str] = None  # Phase 1.8: Contexte document pour désambiguïsation
+    technical_density_hint: float = 0.0  # Phase 1.8.2: Hint LLM pour stratégie extraction domain-agnostic
 
 
 class ExtractConceptsOutput(ToolOutput):
@@ -103,6 +113,10 @@ class ExtractorOrchestrator(BaseAgent):
         # Seuils routing (configurables)
         self.no_llm_threshold = config.get("no_llm_threshold", 3) if config else 3
         self.small_threshold = config.get("small_threshold", 8) if config else 8
+
+        # Phase 1.8: Seuils LOW_QUALITY_NER
+        self.low_quality_ner_entity_threshold = config.get("low_quality_ner_entities", 3) if config else 3
+        self.low_quality_ner_token_threshold = config.get("low_quality_ner_tokens", 200) if config else 200
 
         # Configuration parallélisation (optimisé pour 8 vCPU)
         self.max_parallel_segments = int(os.getenv("MAX_PARALLEL_SEGMENTS", "5"))
@@ -288,11 +302,18 @@ class ExtractorOrchestrator(BaseAgent):
                 )
 
             # Étape 3: Extraire concepts avec rate limiting
+            # Phase 1.8: Récupérer document_context depuis state si disponible
+            document_context = getattr(state, 'document_context', None)
+            # Phase 1.8.2: Récupérer technical_density_hint (domain-agnostic)
+            technical_density_hint = getattr(state, 'technical_density_hint', 0.0)
+
             async with self.llm_semaphore:  # Rate limiter pour appels LLM
                 extract_input = ExtractConceptsInput(
                     segment=segment,
                     route=final_route,
-                    use_llm=(final_route != ExtractionRoute.NO_LLM)
+                    use_llm=(final_route != ExtractionRoute.NO_LLM),
+                    document_context=document_context,  # Phase 1.8
+                    technical_density_hint=technical_density_hint  # Phase 1.8.2
                 )
 
                 extract_result = await self.call_tool("extract_concepts", extract_input)
@@ -378,18 +399,40 @@ class ExtractorOrchestrator(BaseAgent):
             word_count = len(segment_text.split())
             entity_density = entity_count / max(word_count, 1)
 
-            # Routing logic
-            # ⚠️ FIX: NO_LLM route désactivée car elle cause 0 concepts extraits → boucle infinie
-            # Cas d'usage problématique: TEXT-ONLY fallback (LibreOffice crash) → peu d'entités NER → NO_LLM → échec
-            # Solution: Forcer minimum SMALL pour garantir extraction LLM même avec peu d'entités
-            if entity_count <= self.small_threshold:
+            # Phase 1.8: Routing logic avec LOW_QUALITY_NER detection
+            # Améliore rappel concepts de 70% → 85% via LLM sur segments problématiques
+
+            # Condition LOW_QUALITY_NER: < 3 entities ET > 200 tokens
+            # Signifie: segment long mais NER trouve peu → NER rate probablement des concepts → LLM requis
+            is_low_quality_ner = (
+                entity_count < self.low_quality_ner_entity_threshold and
+                word_count > self.low_quality_ner_token_threshold
+            )
+
+            if is_low_quality_ner:
+                # Phase 1.8: Forcer SMALL pour segments LOW_QUALITY_NER
                 route = ExtractionRoute.SMALL
-                reasoning = f"{entity_count} entities (low density) → SMALL LLM forcé (NO_LLM désactivé)"
+                routing_reason = RoutingReason.LOW_QUALITY_NER
+                reasoning = (
+                    f"[PHASE1.8:LOW_QUALITY_NER] {entity_count} entities < {self.low_quality_ner_entity_threshold} "
+                    f"ET {word_count} tokens > {self.low_quality_ner_token_threshold} → SMALL LLM requis"
+                )
+                logger.info(f"[EXTRACTOR:PrepassAnalyzer] {reasoning}")
+            elif entity_count <= self.small_threshold:
+                # Peu d'entities → SMALL (LLM pour enrichir)
+                route = ExtractionRoute.SMALL
+                routing_reason = RoutingReason.SPARSE_ENTITIES
+                reasoning = f"{entity_count} entities (sparse) → SMALL LLM"
             else:
+                # Beaucoup d'entities → BIG (LLM pour structurer)
                 route = ExtractionRoute.BIG
+                routing_reason = RoutingReason.DENSE_ENTITIES
                 reasoning = f"{entity_count} entities > {self.small_threshold}, segment dense → BIG"
 
-            logger.debug(f"[EXTRACTOR:PrepassAnalyzer] {entity_count} entities, density {entity_density:.2f}, route={route}")
+            logger.debug(
+                f"[EXTRACTOR:PrepassAnalyzer] {entity_count} entities, {word_count} tokens, "
+                f"density {entity_density:.2f}, route={route}, reason={routing_reason.value}"
+            )
 
             return PrepassAnalyzerOutput(
                 success=True,
@@ -435,6 +478,8 @@ class ExtractorOrchestrator(BaseAgent):
             segment = tool_input.segment
             route = tool_input.route
             use_llm = tool_input.use_llm
+            document_context = tool_input.document_context  # Phase 1.8
+            technical_density_hint = tool_input.technical_density_hint  # Phase 1.8.2
 
             # Créer Topic object pour MultilingualConceptExtractor
             # Note: Topic attend des attributs spécifiques (document_id, section_path, windows, anchors)
@@ -461,7 +506,14 @@ class ExtractorOrchestrator(BaseAgent):
 
             # Extraire concepts avec MultilingualConceptExtractor
             # Note: La méthode extract_concepts est async
-            concepts_list = await extractor.extract_concepts(topic, enable_llm=use_llm)
+            # Phase 1.8: Passer document_context pour désambiguïsation
+            # Phase 1.8.2: Passer technical_density_hint pour stratégie domain-agnostic
+            concepts_list = await extractor.extract_concepts(
+                topic,
+                enable_llm=use_llm,
+                document_context=document_context,
+                technical_density_hint=technical_density_hint
+            )
 
             # Convertir List[Concept] en List[Dict] pour JSON serialization
             concepts_dicts = []

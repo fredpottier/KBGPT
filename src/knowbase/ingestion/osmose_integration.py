@@ -59,6 +59,11 @@ class OsmoseIntegrationConfig:
     # Tenant
     default_tenant_id: str = "default"
 
+    # Phase 2 - Typed Relations (RelationExtractionEngine)
+    enable_phase2_relations: bool = True  # Extraction relations typées Phase 2
+    phase2_relation_strategy: str = "llm_first"  # "llm_first", "hybrid", "pattern_only"
+    phase2_relation_min_confidence: float = 0.60  # Seuil minimum confidence
+
     @classmethod
     def from_env(cls) -> "OsmoseIntegrationConfig":
         """Charge configuration depuis variables d'environnement."""
@@ -78,6 +83,10 @@ class OsmoseIntegrationConfig:
             store_in_proto_kg=getattr(settings, "osmose_store_proto_kg", True),
             proto_kg_collection=getattr(settings, "osmose_proto_kg_collection", "concepts_proto"),
             default_tenant_id=getattr(settings, "osmose_default_tenant", "default"),
+            # Phase 2 - Typed Relations
+            enable_phase2_relations=getattr(settings, "osmose_enable_phase2_relations", True),
+            phase2_relation_strategy=getattr(settings, "osmose_phase2_relation_strategy", "llm_first"),
+            phase2_relation_min_confidence=getattr(settings, "osmose_phase2_relation_min_confidence", 0.60),
         )
 
 
@@ -106,6 +115,11 @@ class OsmoseIntegrationResult:
     proto_kg_relations_stored: int = 0  # Relations dans Neo4j
     proto_kg_embeddings_stored: int = 0  # Embeddings dans Qdrant concepts_proto
 
+    # Phase 2 - Typed Relations (RelationExtractionEngine)
+    phase2_relations_extracted: int = 0  # Relations typées extraites
+    phase2_relations_stored: int = 0  # Relations typées stockées dans Neo4j
+    phase2_relations_by_type: Dict[str, int] = field(default_factory=dict)  # Stats par type
+
     # Performance
     osmose_duration_seconds: float = 0.0
     total_duration_seconds: float = 0.0
@@ -133,6 +147,11 @@ class OsmoseIntegrationResult:
                 "concepts_stored": self.proto_kg_concepts_stored,
                 "relations_stored": self.proto_kg_relations_stored,
                 "embeddings_stored": self.proto_kg_embeddings_stored,
+            },
+            "phase2_relations": {
+                "relations_extracted": self.phase2_relations_extracted,
+                "relations_stored": self.phase2_relations_stored,
+                "relations_by_type": self.phase2_relations_by_type,
             },
             "total_duration_seconds": self.total_duration_seconds,
             "timestamp": self.timestamp,
@@ -180,6 +199,137 @@ class OsmoseIntegrationService:
             logger.info("[OSMOSE] Semantic pipeline initialized")
 
         return self.semantic_pipeline
+
+    async def _extract_phase2_relations(
+        self,
+        canonical_concepts: List[Dict[str, Any]],
+        text_content: str,
+        document_id: str,
+        document_name: str,
+        tenant_id: str = "default"
+    ) -> Dict[str, Any]:
+        """
+        Extraction relations typées Phase 2 via RelationExtractionEngine.
+
+        Cette méthode utilise le module Phase 2 pour extraire des relations
+        sémantiques typées (PART_OF, REQUIRES, REPLACES, etc.) entre les concepts.
+
+        Args:
+            canonical_concepts: Concepts canoniques extraits par OSMOSE
+            text_content: Texte complet du document
+            document_id: ID du document
+            document_name: Nom du document
+            tenant_id: ID tenant
+
+        Returns:
+            Dict avec statistiques:
+            {
+                "relations_extracted": int,
+                "relations_stored": int,
+                "relations_by_type": Dict[str, int]
+            }
+        """
+        stats = {
+            "relations_extracted": 0,
+            "relations_stored": 0,
+            "relations_by_type": {}
+        }
+
+        if not self.config.enable_phase2_relations:
+            logger.info(f"[OSMOSE Phase 2] Typed relations extraction disabled")
+            return stats
+
+        if not canonical_concepts:
+            logger.info(f"[OSMOSE Phase 2] No concepts to extract relations from")
+            return stats
+
+        try:
+            from knowbase.relations.extraction_engine import RelationExtractionEngine
+            from knowbase.relations.neo4j_writer import Neo4jRelationshipWriter
+            from knowbase.config.feature_flags import is_feature_enabled
+
+            # Vérifier feature flag global
+            if not is_feature_enabled("enable_llm_relation_enrichment"):
+                logger.info(
+                    "[OSMOSE Phase 2] LLM relation enrichment feature flag disabled, "
+                    "using pattern_only strategy"
+                )
+                strategy = "pattern_only"
+            else:
+                strategy = self.config.phase2_relation_strategy
+
+            logger.info(
+                f"[OSMOSE Phase 2] Extracting typed relations for {document_id} "
+                f"({len(canonical_concepts)} concepts, strategy={strategy})"
+            )
+
+            # Convertir concepts OSMOSE vers format RelationExtractionEngine
+            concepts_for_extraction = []
+            for concept in canonical_concepts:
+                concepts_for_extraction.append({
+                    "concept_id": f"concept-{concept.get('canonical_name', '').lower().replace(' ', '-')}",
+                    "canonical_name": concept.get("canonical_name", ""),
+                    "surface_forms": concept.get("aliases", []),
+                    "concept_type": concept.get("concept_type", "ENTITY")
+                })
+
+            # Initialiser le moteur d'extraction
+            engine = RelationExtractionEngine(
+                strategy=strategy,
+                llm_model="gpt-4o-mini",
+                min_confidence=self.config.phase2_relation_min_confidence,
+                language="EN"  # Multi-lingual via patterns
+            )
+
+            # Extraire les relations
+            extraction_result = engine.extract_relations(
+                concepts=concepts_for_extraction,
+                full_text=text_content,
+                document_id=document_id,
+                document_name=document_name,
+                chunk_ids=[]
+            )
+
+            stats["relations_extracted"] = extraction_result.total_relations_extracted
+            stats["relations_by_type"] = {
+                str(k.value if hasattr(k, 'value') else k): v
+                for k, v in extraction_result.relations_by_type.items()
+            }
+
+            logger.info(
+                f"[OSMOSE Phase 2] Extracted {stats['relations_extracted']} typed relations "
+                f"in {extraction_result.extraction_time_seconds:.2f}s"
+            )
+
+            # Stocker dans Neo4j si relations extraites
+            if extraction_result.relations:
+                writer = Neo4jRelationshipWriter(tenant_id=tenant_id)
+
+                write_stats = writer.write_relations(
+                    relations=extraction_result.relations,
+                    document_id=document_id,
+                    document_name=document_name
+                )
+
+                stats["relations_stored"] = write_stats.get("created", 0) + write_stats.get("updated", 0)
+
+                logger.info(
+                    f"[OSMOSE Phase 2] ✅ Stored {stats['relations_stored']} typed relations "
+                    f"(created: {write_stats.get('created', 0)}, updated: {write_stats.get('updated', 0)})"
+                )
+
+            return stats
+
+        except ImportError as e:
+            logger.warning(f"[OSMOSE Phase 2] RelationExtractionEngine not available: {e}")
+            return stats
+
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE Phase 2] Typed relations extraction failed for {document_id}: {e}",
+                exc_info=True
+            )
+            return stats
 
     def _should_process_with_osmose(
         self,
@@ -477,6 +627,33 @@ class OsmoseIntegrationService:
                 result.proto_kg_relations_stored = storage_stats.get("relations_stored", 0)
                 result.proto_kg_embeddings_stored = storage_stats.get("embeddings_stored", 0)
 
+            # ===== Phase 2: Extraction Relations Typées =====
+            # Utilise RelationExtractionEngine pour extraire des relations sémantiques
+            # typées (PART_OF, REQUIRES, REPLACES, etc.) entre concepts
+            canonical_concepts_list = osmose_data.get("canonical_concepts", [])
+
+            if canonical_concepts_list and self.config.enable_phase2_relations:
+                logger.info(f"[DEBUG] 🎯 OSMOSE Step 6: Starting Phase 2 typed relations extraction")
+
+                phase2_stats = await self._extract_phase2_relations(
+                    canonical_concepts=canonical_concepts_list,
+                    text_content=text_content,
+                    document_id=document_id,
+                    document_name=document_title,
+                    tenant_id=tenant_id or self.config.default_tenant_id
+                )
+
+                # Métriques Phase 2
+                result.phase2_relations_extracted = phase2_stats.get("relations_extracted", 0)
+                result.phase2_relations_stored = phase2_stats.get("relations_stored", 0)
+                result.phase2_relations_by_type = phase2_stats.get("relations_by_type", {})
+
+                logger.info(
+                    f"[DEBUG] 🔍 Phase 2 stats: "
+                    f"extracted={result.phase2_relations_extracted}, "
+                    f"stored={result.phase2_relations_stored}"
+                )
+
             result.osmose_success = True
             result.osmose_error = None
 
@@ -485,7 +662,8 @@ class OsmoseIntegrationService:
                 f"  - {result.canonical_concepts} canonical concepts\n"
                 f"  - {result.concept_connections} cross-document connections\n"
                 f"  - {result.topics_segmented} topics segmented\n"
-                f"  - Proto-KG: {result.proto_kg_concepts_stored} concepts + {result.proto_kg_relations_stored} relations stored"
+                f"  - Proto-KG: {result.proto_kg_concepts_stored} concepts + {result.proto_kg_relations_stored} relations stored\n"
+                f"  - Phase 2: {result.phase2_relations_extracted} typed relations extracted, {result.phase2_relations_stored} stored"
             )
 
         except asyncio.TimeoutError:

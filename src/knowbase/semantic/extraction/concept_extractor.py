@@ -20,6 +20,9 @@ from ..utils.ner_manager import get_ner_manager
 from ..utils.language_detector import get_language_detector
 from .concept_density_detector import ConceptDensityDetector, ExtractionMethod
 
+# Domain Context injection (Phase 2 - Domain Agnostic)
+from knowbase.ontology.domain_context_injector import get_domain_context_injector
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,7 +70,10 @@ class MultilingualConceptExtractor:
     async def extract_concepts(
         self,
         topic: Topic,
-        enable_llm: bool = True
+        enable_llm: bool = True,
+        document_context: Optional[str] = None,
+        tenant_id: str = "default",
+        technical_density_hint: float = 0.0
     ) -> List[Concept]:
         """
         Extrait concepts d'un topic via méthode optimisée (V2.2 Density-Aware).
@@ -80,9 +86,24 @@ class MultilingualConceptExtractor:
         4. Fusion + Déduplication
         5. Typage automatique
 
+        Phase 1.8: Document Context pour désambiguïsation (T1.8.1.0b)
+        - Le contexte document aide à préférer les noms officiels complets
+        - Exemple: "S/4HANA Cloud" → "SAP S/4HANA Cloud, Private Edition"
+
+        Phase 1.8.2: Technical density hint (domain-agnostic)
+        - Le LLM évalue la densité technique lors de l'analyse document
+        - Ce hint influence le choix NER_ONLY / HYBRID / LLM_FIRST
+
+        Phase 2: Domain Context injection pour extraction domain-aware
+        - Le domain context métier est injecté dans les prompts LLM
+        - Améliore la reconnaissance des concepts spécifiques au domaine
+
         Args:
             topic: Topic à analyser
             enable_llm: Activer extraction LLM (default: True)
+            document_context: Résumé contextuel du document (Phase 1.8)
+            tenant_id: ID tenant pour domain context (Phase 2)
+            technical_density_hint: Hint LLM 0-1 (Phase 1.8.2, domain-agnostic)
 
         Returns:
             List[Concept]: Concepts extraits et dédupliqués
@@ -97,23 +118,32 @@ class MultilingualConceptExtractor:
         logger.debug(f"[OSMOSE] Topic language: {topic_language}")
 
         # V2.2: Analyse densité conceptuelle pour optimisation
+        # Phase 1.8.2: Passer le hint LLM pour améliorer la détection domain-agnostic
         density_profile = self.density_detector.analyze_density(
             text=topic_text,
             sample_size=min(len(topic_text), 2000),
-            language=topic_language
+            language=topic_language,
+            technical_density_hint=technical_density_hint
         )
 
         logger.info(
             f"[OSMOSE] Density Analysis: {density_profile.recommended_method.value} "
-            f"(score={density_profile.density_score:.2f}, confidence={density_profile.confidence:.2f})"
+            f"(score={density_profile.density_score:.2f}, confidence={density_profile.confidence:.2f}, "
+            f"llm_hint={technical_density_hint:.2f})"
         )
+
+        # Log document context si présent (Phase 1.8)
+        if document_context:
+            logger.info(f"[PHASE1.8:Context] Using document context ({len(document_context)} chars)")
 
         # Stratégie selon densité détectée
         if density_profile.recommended_method == ExtractionMethod.LLM_FIRST:
             # Texte dense → LLM d'emblée (skip NER inefficace)
             logger.info("[OSMOSE] Dense text detected → LLM-first strategy")
             if enable_llm and "LLM" in self.extraction_config.methods:
-                concepts_llm = await self._extract_via_llm(topic, topic_language)
+                concepts_llm = await self._extract_via_llm(
+                    topic, topic_language, document_context, tenant_id=tenant_id
+                )
                 concepts.extend(concepts_llm)
                 logger.info(f"[OSMOSE] LLM: {len(concepts_llm)} concepts")
             else:
@@ -150,7 +180,9 @@ class MultilingualConceptExtractor:
             # Méthode 3: LLM (si insuffisant)
             if enable_llm and "LLM" in self.extraction_config.methods:
                 if len(concepts) < self.extraction_config.min_concepts_per_topic:
-                    concepts_llm = await self._extract_via_llm(topic, topic_language)
+                    concepts_llm = await self._extract_via_llm(
+                        topic, topic_language, document_context, tenant_id=tenant_id
+                    )
                     concepts.extend(concepts_llm)
                     logger.info(f"[OSMOSE] LLM: {len(concepts_llm)} concepts")
                 else:
@@ -314,14 +346,21 @@ class MultilingualConceptExtractor:
     async def _extract_via_llm(
         self,
         topic: Topic,
-        language: str
+        language: str,
+        document_context: Optional[str] = None,
+        tenant_id: str = "default"
     ) -> List[Concept]:
         """
         Extraction via LLM avec prompt structuré multilingue.
 
+        Phase 1.8: Utilise document_context pour désambiguïsation (T1.8.1.0b).
+        Phase 2: Utilise tenant_id pour domain context injection.
+
         Args:
             topic: Topic à analyser
             language: Langue détectée
+            document_context: Résumé contextuel du document (Phase 1.8)
+            tenant_id: ID tenant pour domain context (Phase 2)
 
         Returns:
             List[Concept]: Concepts extraits via LLM
@@ -336,8 +375,10 @@ class MultilingualConceptExtractor:
         if len(topic_text) > 2000:
             topic_text = topic_text[:2000] + "..."
 
-        # Prompt selon langue
-        prompt = self._get_llm_extraction_prompt(topic_text, language)
+        # Prompt selon langue (Phase 1.8: avec document context, Phase 2: avec domain context)
+        prompt = self._get_llm_extraction_prompt(
+            topic_text, language, document_context, tenant_id=tenant_id
+        )
 
         try:
             # Appel LLM async pour parallélisation
@@ -560,70 +601,134 @@ class MultilingualConceptExtractor:
         # Default: ENTITY
         return ConceptType.ENTITY
 
-    def _get_llm_extraction_prompt(self, text: str, language: str) -> str:
+    def _get_llm_extraction_prompt(
+        self,
+        text: str,
+        language: str,
+        document_context: Optional[str] = None,
+        tenant_id: str = "default"
+    ) -> str:
         """
         Génère prompt LLM extraction selon langue.
+
+        Phase 1.8: Intègre document_context pour désambiguïsation (T1.8.1.0b).
+        Phase 2: Intègre Domain Context métier pour extraction domain-aware.
 
         Args:
             text: Texte à analyser
             language: Langue (en, fr, de, etc.)
+            document_context: Résumé contextuel du document (Phase 1.8)
+            tenant_id: ID tenant pour récupérer domain context (Phase 2)
 
         Returns:
-            str: Prompt formaté
+            str: Prompt formaté avec domain context injecté
         """
+        # Section contexte document (Phase 1.8)
+        context_section_en = ""
+        context_section_fr = ""
+        context_section_de = ""
+
+        if document_context:
+            context_section_en = f"""DOCUMENT CONTEXT (overall theme and official names):
+{document_context}
+
+IMPORTANT: Use the document context to disambiguate concepts.
+- Prefer full official names over abbreviations
+- Example: If context mentions a full product name like "Product X Enterprise Edition", use the complete name even if the segment only says "Product X"
+- Use context to understand the domain and correctly type concepts
+
+"""
+            context_section_fr = f"""CONTEXTE DOCUMENT (thème global et noms officiels):
+{document_context}
+
+IMPORTANT: Utilise le contexte document pour désambiguïser les concepts.
+- Préfère les noms officiels complets aux abréviations
+- Exemple: Si le contexte mentionne un nom complet comme "Produit X Enterprise Edition", utilise le nom complet même si le segment dit juste "Produit X"
+- Utilise le contexte pour comprendre le domaine et typer correctement les concepts
+
+"""
+            context_section_de = f"""DOKUMENTKONTEXT (Gesamtthema und offizielle Namen):
+{document_context}
+
+WICHTIG: Verwende den Dokumentkontext zur Begriffsklärung.
+- Bevorzuge vollständige offizielle Namen gegenüber Abkürzungen
+- Beispiel: Wenn der Kontext einen vollständigen Namen wie "Produkt X Enterprise Edition" erwähnt, verwende den vollständigen Namen, auch wenn das Segment nur "Produkt X" sagt
+- Verwende den Kontext, um die Domäne zu verstehen und Konzepte korrekt zu typisieren
+
+"""
+
         prompts = {
-            "en": """Extract key concepts from the following text.
+            "en": f"""{context_section_en}Extract key concepts from the following text.
 
 For each concept, identify:
-- name: the concept name (2-50 characters)
+- name: the concept name (2-50 characters, use full official names)
 - type: one of [ENTITY, PRACTICE, STANDARD, TOOL, ROLE]
 - definition: a brief definition (1 sentence)
 - relationships: list of related concept names (max 3)
 
-Text:
-{text}
+SEGMENT TEXT:
+{{text}}
 
 Return a JSON object with this exact structure:
 {{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
 
-Extract 3-10 concepts maximum. Focus on the most important ones.""",
+Extract 10-20 concepts. Be thorough - include all named entities, methodologies, standards, tools, and domain-specific terms. Don't limit yourself to obvious concepts; capture technical terms, abbreviations, and specialized vocabulary.""",
 
-            "fr": """Extrait les concepts clés du texte suivant.
+            "fr": f"""{context_section_fr}Extrait les concepts clés du texte suivant.
 
 Pour chaque concept, identifie :
-- name : le nom du concept (2-50 caractères)
+- name : le nom du concept (2-50 caractères, utilise les noms officiels complets)
 - type : un parmi [ENTITY, PRACTICE, STANDARD, TOOL, ROLE]
 - definition : une brève définition (1 phrase)
 - relationships : liste de noms de concepts liés (max 3)
 
-Texte :
-{text}
+TEXTE DU SEGMENT :
+{{text}}
 
 Retourne un objet JSON avec cette structure exacte:
 {{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
 
-Extrait 3-10 concepts maximum. Focus sur les plus importants.""",
+Extrait 10-20 concepts. Sois exhaustif - inclus toutes les entités nommées, méthodologies, normes, outils et termes du domaine. Ne te limite pas aux concepts évidents; capture les termes techniques, abréviations et vocabulaire spécialisé.""",
 
-            "de": """Extrahiere die Schlüsselkonzepte aus folgendem Text.
+            "de": f"""{context_section_de}Extrahiere die Schlüsselkonzepte aus folgendem Text.
 
 Für jedes Konzept identifiziere:
-- name: der Konzeptname (2-50 Zeichen)
+- name: der Konzeptname (2-50 Zeichen, verwende vollständige offizielle Namen)
 - type: eines von [ENTITY, PRACTICE, STANDARD, TOOL, ROLE]
 - definition: eine kurze Definition (1 Satz)
 - relationships: Liste verwandter Konzeptnamen (max 3)
 
-Text:
-{text}
+SEGMENTTEXT:
+{{text}}
 
 Gib ein JSON-Objekt mit dieser exakten Struktur zurück:
 {{"concepts": [{{"name": "...", "type": "...", "definition": "...", "relationships": [...]}}]}}
 
-Extrahiere maximal 3-10 Konzepte. Fokus auf die wichtigsten."""
+Extrahiere 10-20 Konzepte. Sei gründlich - erfasse alle benannten Entitäten, Methodologien, Standards, Tools und domänenspezifische Begriffe. Beschränke dich nicht auf offensichtliche Konzepte; erfasse technische Begriffe, Abkürzungen und Fachvokabular."""
         }
 
         # Fallback anglais si langue non supportée
         template = prompts.get(language, prompts["en"])
-        return template.format(text=text)
+        # Utiliser replace() au lieu de format() pour éviter KeyError sur les accolades JSON
+        base_prompt = template.replace("{text}", text)
+
+        # Phase 2: Injecter Domain Context métier
+        try:
+            injector = get_domain_context_injector()
+            enriched_prompt = injector.inject_context(base_prompt, tenant_id=tenant_id)
+
+            if enriched_prompt != base_prompt:
+                logger.info(
+                    f"[OSMOSE] ✅ Domain context injected into concept extraction prompt "
+                    f"(tenant={tenant_id})"
+                )
+
+            return enriched_prompt
+        except Exception as e:
+            logger.warning(
+                f"[OSMOSE] Failed to inject domain context into extraction prompt: {e}"
+            )
+            return base_prompt
 
     def _parse_llm_response(self, response_text: str) -> List[Dict]:
         """

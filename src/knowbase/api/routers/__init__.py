@@ -14,6 +14,7 @@
     document_types,
     admin,
     auth,  # Phase 0 - JWT Authentication
+    domain_context,  # Domain Context - Configuration contexte métier global
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "document_types",
     "admin",
     "auth",
+    "domain_context",
 ]

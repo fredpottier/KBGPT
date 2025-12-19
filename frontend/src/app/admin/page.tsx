@@ -160,15 +160,6 @@ export default function AdminDashboard() {
             </Button>
             <Button
               leftIcon={<SettingsIcon />}
-              onClick={() => router.push('/admin/document-types')}
-              colorScheme="purple"
-              variant="outline"
-              justifyContent="flex-start"
-            >
-              Types de Documents
-            </Button>
-            <Button
-              leftIcon={<SettingsIcon />}
               onClick={() => router.push('/admin/dynamic-types')}
               colorScheme="orange"
               variant="outline"
@@ -184,6 +175,14 @@ export default function AdminDashboard() {
               justifyContent="flex-start"
             >
               Paramètres
+            </Button>
+            <Button
+              onClick={() => router.push('/admin/living-ontology')}
+              colorScheme="teal"
+              variant="outline"
+              justifyContent="flex-start"
+            >
+              Living Ontology
             </Button>
           </SimpleGrid>
         </CardBody>

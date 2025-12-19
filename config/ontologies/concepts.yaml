@@ -1,45 +1,6 @@
-# Catalogue ontologie - Type d'entité: CONCEPT
-# Concepts business/techniques clés
+# Ontologies - Concepts
+# Ce fichier est vide par défaut (solution domain-agnostic)
+# Les concepts seront appris automatiquement à partir des documents importés
+# ou configurés via le Domain Context par le client
 
-CONCEPTS:
-  # Exemples à enrichir progressivement
-
-  MICROSERVICES:
-    canonical_name: "Microservices Architecture"
-    aliases:
-      - "Microservices"
-      - "Micro-services"
-      - "microservices"
-    category: "Architecture Pattern"
-
-  CLOUD_NATIVE:
-    canonical_name: "Cloud-Native"
-    aliases:
-      - "Cloud Native"
-      - "cloud-native"
-      - "CloudNative"
-    category: "Architecture Pattern"
-
-  DEVOPS:
-    canonical_name: "DevOps"
-    aliases:
-      - "Dev Ops"
-      - "Development Operations"
-    category: "Methodology"
-
-  AGILE:
-    canonical_name: "Agile Methodology"
-    aliases:
-      - "Agile"
-      - "agile"
-    category: "Methodology"
-
-  API_FIRST:
-    canonical_name: "API-First Design"
-    aliases:
-      - "API First"
-      - "API-first"
-      - "api-first"
-    category: "Design Pattern"
-
-  # À enrichir selon besoins métier
+CONCEPTS: {}

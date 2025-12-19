@@ -13,7 +13,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts
+from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights
+# living_ontology désactivé - génère trop de bruit en mode domain-agnostic (voir OSMOSE_STATUS_ACTUEL.md)
 
 
 def create_app() -> FastAPI:
@@ -138,6 +139,14 @@ def create_app() -> FastAPI:
                 "name": "concepts",
                 "description": "**Concepts** - Explications enrichies via cross-référencement Neo4j ↔ Qdrant (Phase 2 POC)"
             },
+            {
+                "name": "insights",
+                "description": "🌊 **OSMOSE Insights** - Découverte de connaissances cachées via InferenceEngine (Phase 2.3)"
+            },
+            {
+                "name": "living-ontology",
+                "description": "🌊 **OSMOSE Living Ontology** - Évolution dynamique des types, découverte de patterns, propositions et validation (Phase 2.3)"
+            },
         ],
     )
 
@@ -218,6 +227,9 @@ def create_app() -> FastAPI:
     app.include_router(admin.router, prefix="/api")  # Admin API - Purge data, health check (Phase 7)
     app.include_router(auth.router, prefix="/api")  # Auth API - JWT Authentication (Phase 0)
     app.include_router(concepts.router, prefix="/api")  # Concepts API - Explain concepts (Phase 2 POC)
+    app.include_router(domain_context.router, prefix="/api")  # Domain Context - Configuration contexte métier global
+    app.include_router(insights.router, prefix="/api")  # 🌊 OSMOSE Insights - Découverte connaissances cachées (Phase 2.3)
+    # living_ontology.router désactivé - fonctionnalité mise en pause (génère du bruit)
 
     return app
 

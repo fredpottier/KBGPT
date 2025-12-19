@@ -1,33 +1,6 @@
-# Catalogue ontologie - Type d'entité: PERSON
-# Personnes, rôles, postes (si applicable selon contexte)
+# Ontologies - Persons
+# Ce fichier est vide par défaut (solution domain-agnostic)
+# Les personnes/rôles seront appris automatiquement à partir des documents importés
+# ou configurés via le Domain Context par le client
 
-PERSONS:
-  # Ce catalogue peut rester vide si pas pertinent pour le domaine
-  # Ou contenir des rôles génériques
-
-  # Exemples de rôles (pas de personnes nommées pour RGPD)
-  ARCHITECT:
-    canonical_name: "Solution Architect"
-    aliases:
-      - "Architect"
-      - "Solutions Architect"
-      - "SA"
-    category: "Role"
-
-  DEVELOPER:
-    canonical_name: "Developer"
-    aliases:
-      - "Dev"
-      - "Software Developer"
-      - "Engineer"
-    category: "Role"
-
-  PROJECT_MANAGER:
-    canonical_name: "Project Manager"
-    aliases:
-      - "PM"
-      - "Project Mgr"
-      - "Manager"
-    category: "Role"
-
-  # À enrichir si nécessaire (privilégier rôles vs noms propres)
+PERSONS: {}

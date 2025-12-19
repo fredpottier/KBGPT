@@ -239,9 +239,78 @@ class RelationExtractionEngine:
         Returns:
             Relations avec confidence ajustée et metadata enrichie
         """
-        # TODO J8-J10: Implémenter LLM classification
-        logger.debug("[OSMOSE:RelationExtraction] LLM enhancement (TODO J8-J10)")
-        return candidate_relations
+        if not candidate_relations:
+            return []
+
+        logger.info(
+            f"[OSMOSE:RelationExtraction] LLM enhancement: "
+            f"validating {len(candidate_relations)} pattern-based relations"
+        )
+
+        # Utiliser RelationEnricher pour valider via LLM
+        from knowbase.relations.relation_enricher import RelationEnricher
+        from knowbase.config.feature_flags import is_feature_enabled
+
+        # Vérifier si LLM enrichment est activé
+        if not is_feature_enabled("enable_llm_relation_enrichment"):
+            logger.info(
+                "[OSMOSE:RelationExtraction] LLM enrichment disabled, "
+                "returning pattern relations as-is"
+            )
+            return candidate_relations
+
+        try:
+            # Créer enricher avec même LLM router
+            enricher = RelationEnricher(
+                llm_router=self._llm_router,
+                model=self.llm_model,
+                batch_size=50,
+                max_batches=20
+            )
+
+            # Enrichir toutes les relations (pas seulement zone grise)
+            # Car en mode hybrid, on veut valider TOUTES les relations pattern-based
+            enriched_relations = enricher.enrich_relations(
+                relations=candidate_relations,
+                document_context=full_text[:3000]  # Limiter contexte
+            )
+
+            # Mettre à jour la méthode d'extraction vers HYBRID
+            for rel in enriched_relations:
+                if rel.metadata.extraction_method == ExtractionMethod.PATTERN:
+                    rel.metadata.extraction_method = ExtractionMethod.HYBRID
+
+            # Stats
+            validated_count = sum(
+                1 for r in enriched_relations
+                if r.metadata.status == RelationStatus.ACTIVE
+                and not r.metadata.require_validation
+            )
+            invalid_count = sum(
+                1 for r in enriched_relations
+                if r.metadata.status != RelationStatus.ACTIVE
+            )
+
+            logger.info(
+                f"[OSMOSE:RelationExtraction] LLM enhancement complete: "
+                f"{validated_count} validated, {invalid_count} invalidated"
+            )
+
+            # Filtrer les relations invalides
+            active_relations = [
+                r for r in enriched_relations
+                if r.metadata.status == RelationStatus.ACTIVE
+            ]
+
+            return active_relations
+
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE:RelationExtraction] LLM enhancement failed: {e}",
+                exc_info=True
+            )
+            # Fallback: retourner relations originales
+            return candidate_relations
 
     def _count_by_type(
         self,

@@ -1,37 +1,6 @@
-# Catalogue ontologie - Type d'entité: ORGANIZATION
-# Organisations, entreprises, unités business
+# Ontologies - Organizations
+# Ce fichier est vide par défaut (solution domain-agnostic)
+# Les organisations seront apprises automatiquement à partir des documents importés
+# ou configurées via le Domain Context par le client
 
-ORGANIZATIONS:
-  # Exemples à enrichir progressivement
-
-  SAP:
-    canonical_name: "SAP SE"
-    aliases:
-      - "SAP"
-      - "SAP AG"
-      - "Systems Applications and Products"
-    category: "Software Vendor"
-
-  MICROSOFT:
-    canonical_name: "Microsoft Corporation"
-    aliases:
-      - "Microsoft"
-      - "MS"
-      - "MSFT"
-    category: "Software Vendor"
-
-  GOOGLE:
-    canonical_name: "Google LLC"
-    aliases:
-      - "Google"
-      - "Alphabet"
-    category: "Technology Company"
-
-  AWS:
-    canonical_name: "Amazon Web Services"
-    aliases:
-      - "AWS"
-      - "Amazon Cloud"
-    category: "Cloud Provider"
-
-  # À enrichir selon les documents ingérés
+ORGANIZATIONS: {}

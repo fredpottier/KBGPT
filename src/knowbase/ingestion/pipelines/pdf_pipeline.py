@@ -1080,21 +1080,23 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
             except Exception as e:
                 logger.warning(f"⚠️ [CACHE] Échec sauvegarde cache: {e}")
 
-        # ===== OSMOSE Pure - Traitement sémantique UNIQUEMENT =====
+        # ===== OSMOSE Pure Agentique - Traitement sémantique UNIQUEMENT =====
         # REMPLACE l'ingestion legacy (Qdrant "knowbase" + Neo4j entities/relations)
         # Tout passe maintenant par le Proto-KG (concepts canoniques cross-linguals)
+        # Utilise osmose_agentique (SupervisorAgent FSM) comme PPTX
         logger.info("=" * 80)
-        logger.info("[OSMOSE PURE] Lancement du traitement sémantique (remplace ingestion legacy)")
+        logger.info("[OSMOSE PURE] Lancement du traitement sémantique Agentique (remplace ingestion legacy)")
         logger.info("=" * 80)
 
         try:
-            from knowbase.ingestion.osmose_integration import process_document_with_osmose
+            from knowbase.ingestion.osmose_agentique import process_document_with_osmose_agentique
             import asyncio
 
             if full_text and len(full_text) >= 100:
-                # Appeler OSMOSE (même fonction que PPTX) de manière asynchrone
+                # Appeler OSMOSE Agentique (SupervisorAgent FSM) de manière asynchrone
+                # Même pipeline que PPTX pour uniformité
                 osmose_result = asyncio.run(
-                    process_document_with_osmose(
+                    process_document_with_osmose_agentique(
                         document_id=pdf_path.stem,
                         document_title=pdf_path.name,
                         document_path=pdf_path,

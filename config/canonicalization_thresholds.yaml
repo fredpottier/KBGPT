@@ -1,35 +1,40 @@
+# =============================================================================
 # Configuration Seuils Adaptatifs pour Canonicalisation
-# OSMOSE Phase 1.5 - Canonicalisation Robuste
-# Date: 2025-10-16
+# OSMOSE - Version Domain-Agnostic
+# Date: 2025-12-18
+# =============================================================================
 #
 # Les seuils sont ajustés selon le contexte documentaire:
-# - domain: sap_ecosystem, cloud_computing, ai, enterprise_software, etc.
 # - source: official_documentation, internal_documentation, forum_community, etc.
 # - language: french, english, multilingual, technical_jargon
 # - entity_type: PRODUCT, CONCEPT, ORGANIZATION, PERSON, TECHNOLOGY
+#
+# Note: Le domaine métier est appris dynamiquement via le Domain Context
+# configuré par le client. Ces profils sont génériques.
+#
+# =============================================================================
 
 profiles:
   # ========================================================================
-  # Haute Confiance: Documentation Officielle SAP
+  # Haute Confiance: Documentation Officielle
   # ========================================================================
-  SAP_OFFICIAL_DOCS:
-    name: "SAP_OFFICIAL_DOCS"
+  OFFICIAL_DOCS:
+    name: "OFFICIAL_DOCS"
 
     # Seuils de matching
     fuzzy_match_threshold: 0.90
     exact_match_required: false
 
-    # Seuils auto-validation (P0.1 Sandbox)
+    # Seuils auto-validation
     auto_validation_threshold: 0.95      # >= 0.95 → auto-validated
     require_human_validation_below: 0.85 # < 0.85 → requires admin
 
     # Seuils promotion (Gatekeeper)
     promotion_threshold: 0.75
 
-    description: "Documentation SAP officielle (haute qualité, nomenclature standardisée)"
+    description: "Documentation officielle (haute qualité, nomenclature standardisée)"
 
     applies_to:
-      domain: "sap_ecosystem"
       source: "official_documentation"
       language: ["english", "french"]
       entity_types: ["PRODUCT", "SOLUTION", "COMPONENT"]
@@ -45,7 +50,7 @@ profiles:
     exact_match_required: false
 
     auto_validation_threshold: 0.95
-    require_human_validation_below: 0.75  # Plus tolérant que SAP officiel
+    require_human_validation_below: 0.75
 
     promotion_threshold: 0.70
 
@@ -81,10 +86,10 @@ profiles:
 
 
   # ========================================================================
-  # Très Haute Confiance: Produits SAP Catalogués
+  # Très Haute Confiance: Produits Catalogués
   # ========================================================================
-  SAP_PRODUCTS_CATALOG:
-    name: "SAP_PRODUCTS_CATALOG"
+  PRODUCTS_CATALOG:
+    name: "PRODUCTS_CATALOG"
 
     fuzzy_match_threshold: 0.92
     exact_match_required: false
@@ -94,12 +99,10 @@ profiles:
 
     promotion_threshold: 0.80
 
-    description: "Produits SAP catalogués (S/4HANA, SuccessFactors, etc.) - très haute confiance requise"
+    description: "Produits catalogués dans l'ontologie - très haute confiance requise"
 
     applies_to:
-      domain: "sap_ecosystem"
       entity_types: ["PRODUCT", "SOLUTION"]
-      # Exemples: SAP S/4HANA Cloud, SAP SuccessFactors, SAP Ariba
 
 
   # ========================================================================
@@ -126,48 +129,6 @@ profiles:
 
 
   # ========================================================================
-  # Cloud Computing (Générique)
-  # ========================================================================
-  CLOUD_PROVIDERS:
-    name: "CLOUD_PROVIDERS"
-
-    fuzzy_match_threshold: 0.88
-    exact_match_required: false
-
-    auto_validation_threshold: 0.95
-    require_human_validation_below: 0.82
-
-    promotion_threshold: 0.73
-
-    description: "Providers cloud (AWS, Azure, GCP, etc.) - nomenclature standardisée"
-
-    applies_to:
-      domain: "cloud_computing"
-      entity_types: ["PRODUCT", "PLATFORM", "SERVICE"]
-
-
-  # ========================================================================
-  # Intelligence Artificielle & Machine Learning
-  # ========================================================================
-  AI_ML_DOMAIN:
-    name: "AI_ML_DOMAIN"
-
-    fuzzy_match_threshold: 0.85
-    exact_match_required: false
-
-    auto_validation_threshold: 0.93
-    require_human_validation_below: 0.78
-
-    promotion_threshold: 0.70
-
-    description: "Domaine IA/ML (modèles, frameworks, techniques) - terminologie évolutive"
-
-    applies_to:
-      domain: "artificial_intelligence"
-      entity_types: ["TECHNOLOGY", "MODEL", "FRAMEWORK", "ALGORITHM"]
-
-
-  # ========================================================================
   # Profil Par Défaut (Fallback)
   # ========================================================================
   DEFAULT:
@@ -190,38 +151,26 @@ profiles:
 # Règles de Sélection (Priorité)
 # ============================================================================
 # L'ordre de priorité pour sélectionner un profil est:
-# 1. Domaine SAP + Type PRODUCT → SAP_PRODUCTS_CATALOG
-# 2. Domaine SAP + Source officielle → SAP_OFFICIAL_DOCS
+# 1. Type PRODUCT/SOLUTION → PRODUCTS_CATALOG
+# 2. Source officielle → OFFICIAL_DOCS
 # 3. Source communautaire → COMMUNITY_CONTENT
-# 4. Domaine Cloud Computing → CLOUD_PROVIDERS
-# 5. Domaine IA/ML → AI_ML_DOMAIN
-# 6. Multilingue/jargon → MULTILINGUAL_TECHNICAL
-# 7. Docs internes → INTERNAL_DOCS
-# 8. Fallback → DEFAULT
+# 4. Multilingue/jargon → MULTILINGUAL_TECHNICAL
+# 5. Docs internes → INTERNAL_DOCS
+# 6. Fallback → DEFAULT
 
 selection_rules:
   priority:
     - condition:
-        domain: "sap_ecosystem"
-        entity_type: "PRODUCT"
-      profile: "SAP_PRODUCTS_CATALOG"
+        entity_type: ["PRODUCT", "SOLUTION"]
+      profile: "PRODUCTS_CATALOG"
 
     - condition:
-        domain: "sap_ecosystem"
         source: "official_documentation"
-      profile: "SAP_OFFICIAL_DOCS"
+      profile: "OFFICIAL_DOCS"
 
     - condition:
         source: ["forum_community", "presentation_slides", "emails_chat"]
       profile: "COMMUNITY_CONTENT"
-
-    - condition:
-        domain: "cloud_computing"
-      profile: "CLOUD_PROVIDERS"
-
-    - condition:
-        domain: "artificial_intelligence"
-      profile: "AI_ML_DOMAIN"
 
     - condition:
         language: ["multilingual", "technical_jargon"]
@@ -260,14 +209,6 @@ global:
 # Cette section est documentaire pour aider les admins à configurer
 
 valid_contexts:
-  domains:
-    - sap_ecosystem
-    - cloud_computing
-    - artificial_intelligence
-    - enterprise_software
-    - cybersecurity
-    - general
-
   sources:
     - official_documentation
     - internal_documentation

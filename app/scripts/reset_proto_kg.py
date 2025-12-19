@@ -23,13 +23,14 @@ import asyncio
 import argparse
 import sys
 import os
+import redis
 from neo4j import AsyncGraphDatabase
 from knowbase.common.clients.qdrant_client import get_qdrant_client
 from knowbase.semantic.setup_infrastructure import setup_all
 
 
 async def purge_neo4j_data():
-    """Purge tous les nodes CandidateEntity/CandidateRelation"""
+    """Purge toutes les données Neo4j (domain agnostic - pas d'ontologie pré-chargée)"""
     print("🗑️  Purge données Neo4j Proto-KG...")
 
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
@@ -38,27 +39,46 @@ async def purge_neo4j_data():
 
     driver = AsyncGraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
+    # Labels à purger (TOUS - OSMOSE est domain agnostic)
+    osmose_labels = [
+        "CandidateEntity",
+        "CandidateRelation",
+        "CanonicalConcept",
+        "ProtoConcept",
+        "AdaptiveOntology",
+        "DomainContextProfile",
+        "Concept",
+        "Document",
+        "OntologyAlias",
+        "OntologyEntity",
+        "Topic",
+    ]
+
     try:
         async with driver.session() as session:
-            # Compter avant suppression
-            count_result = await session.run("""
-                MATCH (n)
-                WHERE n:CandidateEntity OR n:CandidateRelation
-                RETURN count(n) as total
-            """)
-            count_record = await count_result.single()
-            total = count_record["total"] if count_record else 0
+            total_deleted = 0
 
-            if total > 0:
-                # Supprimer
-                await session.run("""
-                    MATCH (n)
-                    WHERE n:CandidateEntity OR n:CandidateRelation
-                    DETACH DELETE n
+            for label in osmose_labels:
+                # Compter avant suppression
+                count_result = await session.run(f"""
+                    MATCH (n:{label})
+                    RETURN count(n) as total
                 """)
-                print(f"   ✅ {total} nodes supprimés (CandidateEntity/CandidateRelation)")
-            else:
-                print("   ℹ️  Aucune donnée à supprimer")
+                count_record = await count_result.single()
+                count = count_record["total"] if count_record else 0
+
+                if count > 0:
+                    await session.run(f"""
+                        MATCH (n:{label})
+                        DETACH DELETE n
+                    """)
+                    print(f"   ✅ {count} nodes {label} supprimés")
+                    total_deleted += count
+                else:
+                    print(f"   ℹ️  Aucun {label} à supprimer")
+
+            if total_deleted == 0:
+                print("   ℹ️  Aucune donnée OSMOSE à supprimer")
 
     except Exception as e:
         print(f"   ❌ Erreur purge Neo4j: {e}")
@@ -77,20 +97,49 @@ async def purge_neo4j_full():
 
     driver = AsyncGraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
+    # Labels OSMOSE à purger (tous les types de nodes)
+    osmose_labels = [
+        "CandidateEntity",
+        "CandidateRelation",
+        "CanonicalConcept",
+        "ProtoConcept",
+        "AdaptiveOntology",
+        "DomainContextProfile",
+        "Concept",
+        "Document",
+        "OntologyAlias",
+        "OntologyEntity",
+        "Topic",
+    ]
+
     try:
         async with driver.session() as session:
             # 1. Supprimer données
-            await session.run("""
-                MATCH (n)
-                WHERE n:CandidateEntity OR n:CandidateRelation
-                DETACH DELETE n
-            """)
-            print("   ✅ Données supprimées")
+            total_deleted = 0
+            for label in osmose_labels:
+                # Compter avant suppression
+                count_result = await session.run(f"""
+                    MATCH (n:{label})
+                    RETURN count(n) as total
+                """)
+                count_record = await count_result.single()
+                count = count_record["total"] if count_record else 0
+
+                if count > 0:
+                    await session.run(f"""
+                        MATCH (n:{label})
+                        DETACH DELETE n
+                    """)
+                    print(f"   ✅ {count} nodes {label} supprimés")
+                    total_deleted += count
+
+            print(f"   ✅ Total: {total_deleted} nodes supprimés")
 
             # 2. Supprimer constraints
             constraints_to_drop = [
                 "candidate_entity_id",
-                "candidate_relation_id"
+                "candidate_relation_id",
+                "canonical_concept_id",
             ]
 
             for constraint_name in constraints_to_drop:
@@ -105,7 +154,8 @@ async def purge_neo4j_full():
                 "candidate_entity_tenant",
                 "candidate_entity_status",
                 "candidate_relation_tenant",
-                "candidate_relation_status"
+                "candidate_relation_status",
+                "canonical_concept_tenant",
             ]
 
             for index_name in indexes_to_drop:
@@ -122,22 +172,76 @@ async def purge_neo4j_full():
         await driver.close()
 
 
+def purge_redis():
+    """Purge toutes les queues et données Redis (DB 0 et DB 1)"""
+    print("🗑️  Purge Redis (queues + historique imports)...")
+
+    # Dans Docker, le host est "redis" (nom du service)
+    redis_host = os.getenv("REDIS_HOST", "redis")
+    redis_port = int(os.getenv("REDIS_PORT", "6379"))
+
+    # DB 0 = Jobs RQ (queues)
+    # DB 1 = Historique imports
+    databases = [
+        (0, "jobs/queues"),
+        (1, "historique imports"),
+    ]
+
+    try:
+        for db_num, db_name in databases:
+            client = redis.Redis(host=redis_host, port=redis_port, db=db_num, decode_responses=True)
+
+            # Lister les clés avant purge
+            keys = client.keys("*")
+            key_count = len(keys)
+
+            if key_count > 0:
+                # Afficher quelques clés pour info
+                sample_keys = keys[:5]
+                print(f"   📋 DB {db_num} ({db_name}): {key_count} clés (ex: {sample_keys})")
+
+                # Purger la base
+                client.flushdb()
+                print(f"   ✅ DB {db_num}: {key_count} clés supprimées")
+            else:
+                print(f"   ℹ️  DB {db_num} ({db_name}): vide")
+
+            client.close()
+
+    except Exception as e:
+        print(f"   ❌ Erreur purge Redis: {e}")
+        raise
+
+
 def purge_qdrant():
-    """Supprime la collection knowwhere_proto"""
-    print("🗑️  Purge collection Qdrant...")
+    """Supprime toutes les collections Qdrant OSMOSE"""
+    print("🗑️  Purge collections Qdrant...")
+
+    # Collections à purger
+    collections_to_purge = [
+        'knowwhere_proto',  # Proto-KG OSMOSE
+        'knowbase',         # Collection principale recherche
+        'rfp_qa',           # Q/A RFP
+    ]
 
     try:
         client = get_qdrant_client()
 
-        # Vérifier si la collection existe
-        collections = client.get_collections()
-        collection_names = [c.name for c in collections.collections]
+        # Vérifier les collections existantes
+        existing = client.get_collections()
+        existing_names = [c.name for c in existing.collections]
 
-        if 'knowwhere_proto' in collection_names:
-            client.delete_collection('knowwhere_proto')
-            print("   ✅ Collection 'knowwhere_proto' supprimée")
-        else:
-            print("   ℹ️  Collection 'knowwhere_proto' n'existe pas")
+        purged = 0
+        for collection_name in collections_to_purge:
+            if collection_name in existing_names:
+                client.delete_collection(collection_name)
+                print(f"   ✅ Collection '{collection_name}' supprimée")
+                purged += 1
+            else:
+                print(f"   ℹ️  Collection '{collection_name}' n'existe pas")
+
+        if purged == 0:
+            print("   ℹ️  Aucune collection à supprimer")
 
     except Exception as e:
         print(f"   ❌ Erreur purge Qdrant: {e}")
@@ -199,6 +303,8 @@ Exemples:
             await purge_neo4j_data()
 
         purge_qdrant()
+        print()
+        purge_redis()
         print()
 
         # Phase 2: Réinitialisation

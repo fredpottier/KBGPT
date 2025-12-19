@@ -35,7 +35,7 @@ class ExtractionConfig(BaseModel):
     """Configuration Multilingual Concept Extraction"""
     enabled: bool = True
     methods: List[str] = ["NER", "CLUSTERING", "LLM"]
-    min_concepts_per_topic: int = 2
+    min_concepts_per_topic: int = 5  # Augmenté de 2 à 5 pour forcer LLM sur textes denses
     max_concepts_per_topic: int = 15
     concept_types: List[str] = ["ENTITY", "PRACTICE", "STANDARD", "TOOL", "ROLE"]
     confidence_threshold: float = 0.7

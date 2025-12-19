@@ -185,17 +185,59 @@ export const api = {
 
   // Chat - Using the direct /search endpoint (more logical)
   chat: {
-    send: (message: string, language?: string, mime?: string, solution?: string) =>
-      apiClient.post('/search', { question: message, language, mime, solution }),
+    send: (
+      message: string,
+      language?: string,
+      mime?: string,
+      solution?: string,
+      useGraphContext?: boolean,
+      graphEnrichmentLevel?: 'none' | 'light' | 'standard' | 'deep'
+    ) =>
+      apiClient.post('/search', {
+        question: message,
+        language,
+        mime,
+        solution,
+        use_graph_context: useGraphContext,
+        graph_enrichment_level: graphEnrichmentLevel,
+      }),
     history: () => apiClient.get('/chat/history'), // Not implemented in backend yet
     conversation: (id: string) => apiClient.get(`/chat/${id}`), // Not implemented in backend yet
   },
 
   // Search endpoint (same as chat.send but more explicit)
   search: {
-    query: (question: string, language?: string, mime?: string, solution?: string) =>
-      apiClient.post('/search', { question, language, mime, solution }),
+    query: (
+      question: string,
+      language?: string,
+      mime?: string,
+      solution?: string,
+      useGraphContext?: boolean,
+      graphEnrichmentLevel?: 'none' | 'light' | 'standard' | 'deep'
+    ) =>
+      apiClient.post('/search', {
+        question,
+        language,
+        mime,
+        solution,
+        use_graph_context: useGraphContext,
+        graph_enrichment_level: graphEnrichmentLevel,
+      }),
     solutions: () => apiClient.get('/solutions'),
+  },
+
+  // Living Ontology - OSMOSE Phase 2.3
+  livingOntology: {
+    stats: () => apiClient.get('/living-ontology/stats'),
+    types: () => apiClient.get('/living-ontology/types'),
+    patterns: () => apiClient.get('/living-ontology/patterns'),
+    discover: (autoPromote?: boolean) =>
+      apiClient.post('/living-ontology/discover', { auto_promote: autoPromote }),
+    proposals: () => apiClient.get('/living-ontology/proposals'),
+    approveProposal: (id: string) => apiClient.post(`/living-ontology/proposals/${id}/approve`),
+    rejectProposal: (id: string, reason?: string) =>
+      apiClient.post(`/living-ontology/proposals/${id}/reject`, { reason }),
+    history: () => apiClient.get('/living-ontology/history'),
   },
 
   // Dispatch endpoint for file operations
@@ -236,7 +278,9 @@ export const api = {
     exportYaml: () => apiClient.get('/entity-types/export-yaml'),
   },
 
-  // Document Types - Document type templates
+  // Document Types - DEPRECATED
+  // Ce système est remplacé par le Domain Context global.
+  // Ces endpoints seront supprimés dans une future version.
   documentTypes: {
     list: () => apiClient.get('/document-types'),
     get: (id: string) => apiClient.get(`/document-types/${id}`),

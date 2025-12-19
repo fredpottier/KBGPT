@@ -1,8 +1,8 @@
 # 🌊 OSMOSE - Status Actuel du Projet
 
-**Date:** 2025-10-14
-**Phase Courante:** Phase 1 V2.1 - Semantic Core ✅ **COMPLETE**
-**Progrès Global:** 100% (Semaines 10/10) 🎉
+**Date:** 2025-12-19
+**Phase Courante:** Phase 2.3 - Living Ontology ✅ **COMPLETE (Backend + Frontend)**
+**Progrès Global:** Phase 1 ✅ + Phase 2.3 ✅ + Frontend basique ✅
 
 ---
 
@@ -10,430 +10,374 @@
 
 | Indicateur | Valeur | Status |
 |------------|--------|--------|
-| **Phase** | 1 / 4 | ✅ **COMPLETE** |
-| **Progression Phase 1** | 100% (10/10 semaines) | ██████████ |
-| **Tasks Phase 1** | 83/120 (69%) | ███████░░░ |
-| **Code Créé** | ~4500 lignes | ✅ |
-| **Composants Livrés** | 4/4 + Pipeline E2E ✅ TOUS LIVRÉS | ██████████ |
-| **Tests** | 62 test cases | ⚠️ Docker requis |
+| **Phase 1** | Semantic Core | ✅ **COMPLETE** |
+| **Phase 2.1** | Tests E2E Production | ⏭️ Skipped |
+| **Phase 2.2** | Scale-Up Architecture Agentique | ⏭️ Skipped |
+| **Phase 2.3** | InferenceEngine + Graph-Guided RAG + Living Ontology | ✅ **COMPLETE & TESTED** |
+| **Frontend Phase 2** | Graph-Guided RAG + Living Ontology Admin | ✅ **COMPLETE** |
+| **Proto-KG** | 1164 concepts | ✅ Fonctionnel |
+| **Tests réalisés** | 14 études médicales COVID-19 | ✅ |
+| **Types auto-découverts** | RESEARCH (auto-promu) + 8 pending | ✅ |
 
 ---
 
-## 🎯 Pivot Architectural V2.1 (2025-10-14)
+## 🎯 Phase 2.3 - Composants Complétés
 
-### Changement Majeur
+### Partie 1: InferenceEngine + Graph-Guided RAG ✅
 
-**AVANT:** Approche Narrative (Narrative threads, temporal/causal tracking)
-- ❌ Keywords hardcodés monolingues (anglais only)
-- ❌ Non-scalable pour environnements multilingues
-- ❌ Complexité excessive vs valeur business
+#### 1. InferenceEngine (~850 lignes)
+**Fichier:** `src/knowbase/semantic/inference/inference_engine.py`
 
-**APRÈS:** Concept-First, Language-Agnostic
-- ✅ Extraction concepts multilingues automatique
-- ✅ Cross-lingual unification (FR ↔ EN ↔ DE)
-- ✅ Pipeline simplifié (4 étapes vs 6+)
-- ✅ Performance optimisée (<30s/doc vs <45s)
+**6 types d'insights implémentés:**
 
-### Architecture V2.1
+| Type | Algorithme | Description |
+|------|------------|-------------|
+| **Transitive Inference** | Cypher natif | Relations A→B→C donc A→C |
+| **Bridge Concepts** | Betweenness Centrality (NetworkX) | Concepts connectant des clusters |
+| **Hidden Clusters** | Louvain Community Detection | Communautés thématiques cachées |
+| **Weak Signals** | PageRank + Degree Centrality | Concepts émergents sous-documentés |
+| **Structural Holes** | Adamic-Adar Score | Relations manquantes prédites |
+| **Contradictions** | Cypher REPLACES mutuel | Assertions contradictoires |
 
-```
-Document → TopicSegmenter → MultilingualConceptExtractor
-         → SemanticIndexer → ConceptLinker → Proto-KG
-```
+#### 2. API REST /api/insights (~450 lignes)
+**Fichier:** `src/knowbase/api/routers/insights.py`
 
-**4 Composants Principaux:**
-1. TopicSegmenter - Segmentation sémantique
-2. MultilingualConceptExtractor - Extraction concepts ⚠️ CRITIQUE
-3. SemanticIndexer - Canonicalization cross-lingual
-4. ConceptLinker - Relations cross-documents
+#### 3. Graph-Guided RAG (~400 lignes)
+**Fichier:** `src/knowbase/api/services/graph_guided_search.py`
 
----
+**4 niveaux d'enrichissement:**
 
-## ✅ Semaines 1-7 : Réalisations
-
-### Semaines 1-2 : Setup Infrastructure (COMPLETE)
-
-**Code créé (~1500 lignes):**
-- `models.py` (319 lignes) - Concept, CanonicalConcept, Topic
-- `config/semantic_intelligence_v2.yaml` (240 lignes)
-- `config.py` - 10 classes configuration
-- `utils/ner_manager.py` (220 lignes) - NER multilingue spaCy
-- `utils/embeddings.py` (260 lignes) - Embeddings multilingual-e5-large
-- `utils/language_detector.py` (220 lignes) - Détection langue fasttext
-- `setup_infrastructure.py` - Neo4j + Qdrant V2.1 schemas
-
-**Infrastructure:**
-- ✅ NER multilingue (spaCy en/fr/de/xx)
-- ✅ Embeddings cross-lingual (multilingual-e5-large 1024D)
-- ✅ Détection langue automatique (fasttext)
-- ✅ Neo4j schema V2.1 (6 constraints + 11 indexes)
-- ✅ Qdrant collection concepts_proto (1024D, Cosine)
-
-### Semaines 3-4 : TopicSegmenter (CODE COMPLETE)
-
-**Code créé (~650 lignes):**
-- `segmentation/topic_segmenter.py` (650 lignes)
-- `tests/semantic/test_topic_segmenter.py` (280 lignes, 9 tests)
-
-**Features:**
-- 🌍 Support multilingue automatique (EN/FR/DE/+)
-- 🎯 Triple stratégie clustering (HDBSCAN → Agglomerative → Fallback)
-- 📊 Cohesion score intra-topic (cosine similarity)
-- 🔍 Anchor extraction hybride (NER entities + TF-IDF keywords)
-- 📐 Windowing configurable (3000 chars, 25% overlap)
-
-**Pipeline:**
-1. Structural segmentation (Markdown headers + numérotation)
-2. Semantic windowing (sliding windows)
-3. Embeddings multilingues (cached)
-4. Clustering robuste (HDBSCAN primary, Agglomerative fallback)
-5. Anchor extraction (NER + TF-IDF)
-6. Cohesion validation (threshold 0.65)
-
-### Semaines 5-7 : MultilingualConceptExtractor ⚠️ CRITIQUE (CODE COMPLETE)
-
-**Code créé (~750 lignes):**
-- `extraction/concept_extractor.py` (750 lignes)
-- `tests/semantic/test_concept_extractor.py` (450 lignes, 15 tests)
-
-**Features:**
-- 🌍 Support multilingue automatique (EN/FR/DE/+)
-- 🎯 Triple méthode complémentaire (NER + Clustering + LLM)
-- 📊 Déduplication intelligente (exact + embeddings similarity 0.90)
-- 🔍 Typage automatique (5 types ConceptType)
-- 📐 Prompts multilingues (EN/FR/DE + fallback)
-
-**Pipeline:**
-1. **NER Multilingue** (spaCy) - Haute précision, rapide (conf: 0.85)
-2. **Semantic Clustering** (HDBSCAN embeddings) - Grouping sémantique (conf: 0.75)
-3. **LLM Extraction** (gpt-4o-mini) - Contexte, si insuffisant (conf: 0.80)
-4. **Déduplication** (exact + similarity 0.90)
-5. **Typage Automatique** (5 types: ENTITY, PRACTICE, STANDARD, TOOL, ROLE)
-
-**Métriques:**
-- Min concepts/topic: 2 (configurable)
-- Max concepts/topic: 15 (configurable)
-- Seuil déduplication: 0.90
-- 15 test cases créés
+| Niveau | Temps | Contenu |
+|--------|-------|---------|
+| `none` | 0ms | RAG classique (pas de KG) |
+| `light` | ~30ms | Concepts liés uniquement |
+| `standard` | ~50ms | + Relations transitives |
+| `deep` | ~200ms | + Clusters + Bridge concepts |
 
 ---
 
-### Semaines 8-9 : SemanticIndexer ⚠️ USP CRITIQUE (CODE COMPLETE)
+### Partie 2: Living Ontology ✅ **NOUVEAU**
 
-**Code créé (~600 lignes):**
-- `indexing/semantic_indexer.py` (600 lignes)
-- `tests/semantic/test_semantic_indexer.py` (450 lignes, 15 tests)
+#### 1. PatternDiscoveryService (~500 lignes)
+**Fichier:** `src/knowbase/semantic/ontology/pattern_discovery.py`
 
-**Features:**
-- 🌍 Canonicalization cross-lingual automatique (threshold 0.85)
-- 🎯 Sélection nom canonique (priorité anglais)
-- 📊 Génération définition unifiée (LLM fusion multi-sources)
-- 🔍 Construction hiérarchie parent-child (LLM-based)
-- 📐 Extraction relations sémantiques (top-5 similaires)
-- ✨ Quality scoring pour gatekeeper Proto-KG
+**Détection automatique de patterns:**
 
-**Pipeline:**
-1. **Embeddings Similarity** - Cosine similarity matrix cross-lingual
-2. **Clustering** - Grouping concepts similaires (threshold 0.85)
-3. **Canonical Name Selection** - Priorité anglais, sinon plus fréquent
-4. **Unified Definition** - Fusion LLM de définitions multiples
-5. **Hierarchy Construction** - Parent-child via LLM (max depth 3)
-6. **Relations Extraction** - Top-5 similaires via embeddings
+| Type Pattern | Description | Seuil |
+|--------------|-------------|-------|
+| **NEW_ENTITY_TYPE** | Nouveaux types d'entités potentiels | 20+ occurrences |
+| **TYPE_REFINEMENT** | Sous-types de types existants | 5+ concepts |
+| **RELATION_PATTERN** | Patterns de relations récurrents | 10+ occurrences |
+| **NAMING_PATTERN** | Suffixes/préfixes communs | 10+ occurrences |
+| **CLUSTER_PATTERN** | Groupes de concepts similaires | 5+ membres |
 
-**USP KnowWhere:**
-- ✅ **Cross-lingual unification** : FR "authentification" = EN "authentication"
-- ✅ **Language-agnostic KG** : Concepts unifiés indépendamment de la langue
-- ✅ **Meilleur que Copilot/Gemini** : Unification automatique concepts multilingues
+**Algorithmes (100% Domain-Agnostic):**
+- Frequency Analysis (concepts haute fréquence)
+- Token-Based Grouping (tokens communs dans les noms - aucun métier hardcodé)
+- Naming Pattern Detection (suffixes: _API, _Service; préfixes automatiques)
+- Cluster Homogeneity Analysis (via InferenceEngine)
 
-**Métriques:**
-- Similarity threshold: 0.85 (cross-lingual matching)
-- Canonical name priority: "en" (anglais)
-- Hierarchy max depth: 3
-- Relations: top-5 similaires (threshold 0.70)
-- 15 test cases créés
+> **Note:** Mode `use_domain_hints=False` par défaut. Aucune connaissance métier pré-définie.
+
+#### Option `use_domain_hints` (désactivée par défaut)
+
+**Fichier:** `src/knowbase/semantic/ontology/pattern_discovery.py`
+
+**Quand l'activer ?**
+- Si le corpus est très homogène (ex: 100% médical, 100% SAP)
+- Si les tokens communs ne suffisent pas à détecter des patterns
+- Pour accélérer la découverte initiale sur un domaine connu
+
+**Ce que ça fait quand activé (`use_domain_hints=True`):**
+```python
+domain_patterns = {
+    "Clinical Trial": ["trial", "study", "phase", "randomized", "placebo"],
+    "Drug/Treatment": ["drug", "treatment", "therapy", "medication", "dose"],
+    "Medical Condition": ["disease", "syndrome", "disorder", "condition", "symptom"],
+    "Organization": ["hospital", "university", "institute", "company", "consortium"],
+    "Metric/Measure": ["ratio", "score", "index", "rate", "percentage"],
+    "Technology": ["api", "service", "platform", "system", "framework"],
+    "Process": ["process", "workflow", "procedure", "protocol", "method"],
+}
+```
+
+**Logique:** Si un concept contient ≥2 keywords d'un domaine, il est groupé dans ce domaine.
+
+**Pourquoi désactivé par défaut:**
+- Casse le principe "domain-agnostic" d'OSMOSE
+- Peut créer des faux positifs sur corpus multi-domaines
+- Le mode Token-Based fonctionne bien sans indices métier
+
+**Pour activer (si besoin):**
+```python
+# Dans le code
+service = PatternDiscoveryService(use_domain_hints=True)
+
+# Ou via singleton (première instanciation uniquement)
+service = get_pattern_discovery_service(use_domain_hints=True)
+```
+
+**Recommandation:** Garder désactivé sauf besoin spécifique validé.
+
+#### 2. LivingOntologyManager (~450 lignes)
+**Fichier:** `src/knowbase/semantic/ontology/living_ontology_manager.py`
+
+**Gestion du cycle de vie:**
+
+| Fonction | Description |
+|----------|-------------|
+| **run_discovery_cycle()** | Exécute découverte + création propositions |
+| **Auto-Promotion** | Confidence ≥85% → type créé automatiquement |
+| **Pending Review** | Confidence 50-85% → attente validation admin |
+| **Reject** | Confidence <50% → rejeté automatiquement |
+| **Historique** | Tracking complet des changements |
+
+**Seuils configurables:**
+```python
+AUTO_PROMOTE_THRESHOLD = 0.85    # Auto-promotion
+HIGH_CONFIDENCE_THRESHOLD = 0.7  # Suggestion forte
+MIN_CONFIDENCE_THRESHOLD = 0.5   # Rejet si inférieur
+```
+
+#### 3. API REST /api/living-ontology (~350 lignes)
+**Fichier:** `src/knowbase/api/routers/living_ontology.py`
+
+**Endpoints:**
+
+| Endpoint | Méthode | Description |
+|----------|---------|-------------|
+| `/api/living-ontology/stats` | GET | Statistiques ontologie |
+| `/api/living-ontology/types` | GET | Liste types existants |
+| `/api/living-ontology/patterns` | GET | Découvrir patterns (preview) |
+| `/api/living-ontology/discover` | POST | Lancer cycle de découverte |
+| `/api/living-ontology/proposals` | GET | Liste propositions pending |
+| `/api/living-ontology/proposals/{id}/approve` | POST | Approuver proposition |
+| `/api/living-ontology/proposals/{id}/reject` | POST | Rejeter proposition |
+| `/api/living-ontology/history` | GET | Historique changements |
 
 ---
 
-### Semaine 10 : ConceptLinker + Pipeline E2E 🎉 (CODE COMPLETE)
-
-**Code créé (~750 lignes):**
-- `linking/concept_linker.py` (450 lignes)
-- `semantic_pipeline_v2.py` (300 lignes)
-- `tests/semantic/test_concept_linker.py` (450 lignes, 12 tests)
-- `tests/semantic/test_semantic_pipeline_v2.py` (500 lignes, 11 tests)
-
-**Features ConceptLinker:**
-- 🌍 Cross-document linking via embeddings similarity
-- 🎯 DocumentRole classification (5 types)
-  - DEFINES (standards, guidelines)
-  - IMPLEMENTS (projects, solutions)
-  - AUDITS (audit reports, compliance checks)
-  - PROVES (certificates, attestations)
-  - REFERENCES (general mentions)
-- 📊 Context extraction pour mentions
-- 🔍 Graph concept ↔ documents
-
-**Features Pipeline E2E:**
-- 🌍 Orchestration complète 4 composants
-- 🎯 Helper function `process_document_semantic_v2()`
-- 📊 SemanticProfile génération automatique
-- 🔍 Métriques et tracing complets
-
-**Pipeline V2.1 Complet:**
-```
-Document → TopicSegmenter → ConceptExtractor → SemanticIndexer → ConceptLinker → Proto-KG
-```
-
-**Flow:**
-1. **TopicSegmenter** - Segmentation sémantique (windowing + clustering)
-2. **MultilingualConceptExtractor** - Extraction concepts (NER + Clustering + LLM)
-3. **SemanticIndexer** - Canonicalisation cross-lingual (threshold 0.85)
-4. **ConceptLinker** - Linking cross-documents + DocumentRole
-5. **Proto-KG Staging** - Neo4j + Qdrant
-
-**Tests:**
-- 12 test cases ConceptLinker
-- 11 test cases Pipeline E2E
-- Tests multilingues FR/EN
-- Tests cross-lingual unification
-- Tests DocumentRole classification
-
----
-
-## 🎉 Phase 1 V2.1 COMPLETE
-
-### ✅ Livrables Finaux
-
-**4 Composants + Pipeline:**
-1. ✅ TopicSegmenter (650 lignes)
-2. ✅ MultilingualConceptExtractor (750 lignes) ⚠️ CRITIQUE
-3. ✅ SemanticIndexer (600 lignes) ⚠️ USP CRITIQUE
-4. ✅ ConceptLinker (450 lignes)
-5. ✅ SemanticPipelineV2 (300 lignes)
-
-**Code Total:** ~4500 lignes
-**Tests Total:** 62 test cases (~2400 lignes)
-**Infrastructure:** NER multilingue, Embeddings, Language detection
-
-### ✅ USP KnowWhere Démontré
-
-**Cross-lingual unification automatique:**
-- FR "authentification" = EN "authentication" = DE "Authentifizierung"
-- Language-agnostic knowledge graph
-- Meilleur que Copilot/Gemini sur documents multilingues
-
-**DocumentRole classification:**
-- Classification automatique rôle document par rapport au concept
-- 5 types: DEFINES, IMPLEMENTS, AUDITS, PROVES, REFERENCES
-- Graph complet concept ↔ documents
-
-### ⏳ Validation Finale (Docker Required)
-
-**À valider dans environnement Docker:**
-- Performance <30s/doc
-- Accuracy >85%
-- Installation modèles (spaCy, fasttext, multilingual-e5-large)
-- Tests 62 cases passants
-
----
-
-## 📂 Structure Projet
-
-### Code Principal
+## 📂 Nouveaux Fichiers Créés (Phase 2.3 Complète)
 
 ```
-src/knowbase/semantic/
-├── models.py                          ✅ Refactorisé V2.1
-├── config.py                          ✅ Adapté V2.1
-├── setup_infrastructure.py            ✅ Neo4j + Qdrant V2.1
-├── profiler.py                        ✅ Nettoyé (code narratif supprimé)
-│
-├── segmentation/
-│   ├── __init__.py                    ✅
-│   └── topic_segmenter.py             ✅ 650 lignes
-│
-├── extraction/
-│   ├── __init__.py                    ✅
-│   └── concept_extractor.py           ✅ 750 lignes
-│
-├── indexing/
-│   ├── __init__.py                    ✅
-│   └── semantic_indexer.py            ✅ 600 lignes
-│
-├── linking/
-│   ├── __init__.py                    ✅
-│   └── concept_linker.py              ✅ 450 lignes
-│
-├── semantic_pipeline_v2.py            ✅ 300 lignes (Pipeline E2E)
-│
-└── utils/
-    ├── __init__.py                    ✅
-    ├── ner_manager.py                 ✅ 220 lignes
-    ├── embeddings.py                  ✅ 260 lignes
-    └── language_detector.py           ✅ 220 lignes
+src/knowbase/semantic/inference/
+├── __init__.py                    ✅ NEW
+└── inference_engine.py            ✅ NEW (~850 lignes)
+
+src/knowbase/semantic/ontology/
+├── __init__.py                    ✅ NEW
+├── pattern_discovery.py           ✅ NEW (~500 lignes)
+└── living_ontology_manager.py     ✅ NEW (~450 lignes)
+
+src/knowbase/api/routers/
+├── insights.py                    ✅ NEW (~450 lignes)
+└── living_ontology.py             ✅ NEW (~350 lignes)
+
+src/knowbase/api/services/
+└── graph_guided_search.py         ✅ NEW (~400 lignes)
+
+scripts/
+├── test_inference_engine.py       ✅ NEW
+├── test_graph_guided_rag.py       ✅ NEW
+└── test_living_ontology.py        ✅ NEW
 ```
 
-### Documentation
+### Fichiers Modifiés
 
 ```
-doc/
-├── OSMOSE_PROJECT_OVERVIEW.md         ✅ Naming, conventions
-├── OSMOSE_ARCHITECTURE_TECHNIQUE.md   ✅ Spec V2.1 complète
-├── OSMOSE_AMBITION_PRODUIT_ROADMAP.md ✅ Vision produit
-├── OSMOSE_ROADMAP_INTEGREE.md         ✅ MAJ avec progrès Phase 1
-├── OSMOSE_STATUS_ACTUEL.md            ✅ Ce fichier
-│
-├── phase1_v2/                         ✅ Documentation Phase 1 V2.1
-│   ├── README.md                      ✅ Vue d'ensemble
-│   ├── STATUS.md                      ✅ Status détaillé composants
-│   ├── PHASE1_TRACKING.md             ✅ Tracking hebdomadaire
-│   ├── PHASE1_IMPLEMENTATION_PLAN.md  ✅ 8000+ lignes détaillées
-│   └── PHASE1_CHECKPOINTS.md          ✅ Critères validation
-│
-└── archive/
-    └── feat-neo4j-native/
-        └── narrative-approach/         ✅ Approche narrative archivée
-            └── PIVOT_EXPLANATION.md    ✅ Explication pivot
-```
-
-### Configuration
-
-```
-config/
-├── semantic_intelligence_v2.yaml      ✅ 240 lignes
-├── llm_models.yaml                    ✅ Multi-provider
-└── prompts.yaml                       ✅ Prompts configurables
-```
-
-### Tests
-
-```
-tests/semantic/
-├── __init__.py                         ✅
-├── test_topic_segmenter.py             ✅ 9 test cases (280 lignes)
-├── test_concept_extractor.py           ✅ 15 test cases (450 lignes)
-├── test_semantic_indexer.py            ✅ 15 test cases (450 lignes)
-├── test_concept_linker.py              ✅ 12 test cases (450 lignes)
-└── test_semantic_pipeline_v2.py        ✅ 11 test cases (500 lignes)
-
-Total: 62 test cases (~2400 lignes)
+src/knowbase/api/main.py           ✅ +insights +living_ontology routers
+src/knowbase/api/services/search.py ✅ +graph context integration
+src/knowbase/api/services/synthesis.py ✅ +graph_context_text param
+src/knowbase/api/schemas/search.py  ✅ +use_graph_context, graph_enrichment_level
+src/knowbase/api/routers/search.py  ✅ +documentation enrichie
 ```
 
 ---
 
-## 🚀 Prochaines Actions - Validation & Phase 2
+## 🏗️ Architecture Actuelle
 
-### ✅ Phase 1 V2.1 COMPLETE - Validation Docker
-
-**Installation modèles (~2.6GB):**
-```bash
-# Modèles spaCy NER (~2GB)
-python -m spacy download en_core_web_trf
-python -m spacy download fr_core_news_trf
-python -m spacy download de_core_news_trf
-python -m spacy download xx_ent_wiki_sm
-
-# Modèle fasttext (~130MB)
-wget https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin
-mv lid.176.bin models/
-
-# multilingual-e5-large (~500MB) téléchargé auto au premier usage
 ```
-
-**Setup infrastructure:**
-```bash
-python -m knowbase.semantic.setup_infrastructure
+                     ┌─────────────────────────────────────────┐
+                     │           Frontend (Next.js)            │
+                     └─────────────────┬───────────────────────┘
+                                       │
+                     ┌─────────────────▼───────────────────────┐
+                     │            API FastAPI                  │
+                     │  ┌─────────────────────────────────┐   │
+                     │  │  /search (Graph-Guided RAG)     │   │
+                     │  │  /api/insights                   │   │
+                     │  │  /api/living-ontology           │   │
+                     │  └─────────────────────────────────┘   │
+                     └──────┬─────────────────┬───────────────┘
+                            │                 │
+              ┌─────────────▼──────┐   ┌──────▼─────────────┐
+              │      Qdrant        │   │      Neo4j         │
+              │  (Vector Search)   │   │  (Knowledge Graph) │
+              │                    │   │                    │
+              │  - knowbase        │   │  - CanonicalConcept│
+              │  - rfp_qa          │   │  - ProtoConcept    │
+              │  - knowwhere_proto │   │  - 25K+ relations  │
+              └────────────────────┘   └────────────────────┘
+                            │                 │
+                            └────────┬────────┘
+                                     │
+         ┌───────────────────────────▼───────────────────────────┐
+         │                  OSMOSE Engine                         │
+         │  ┌─────────────────────┐ ┌─────────────────────────┐  │
+         │  │   InferenceEngine   │ │   LivingOntologyManager │  │
+         │  │                     │ │                         │  │
+         │  │ • Transitive Rel.   │ │ • Pattern Discovery     │  │
+         │  │ • Bridge Concepts   │ │ • Type Proposals        │  │
+         │  │ • Hidden Clusters   │ │ • Auto-Promotion        │  │
+         │  │ • Weak Signals      │ │ • Human Validation      │  │
+         │  │ • Structural Holes  │ │ • Change History        │  │
+         │  │ • Contradictions    │ │                         │  │
+         │  └─────────────────────┘ └─────────────────────────┘  │
+         └───────────────────────────────────────────────────────┘
 ```
-
-**Exécuter tests (62 test cases):**
-```bash
-pytest tests/semantic/ -v
-# ou individuellement:
-pytest tests/semantic/test_topic_segmenter.py -v          # 9 tests
-pytest tests/semantic/test_concept_extractor.py -v        # 15 tests
-pytest tests/semantic/test_semantic_indexer.py -v         # 15 tests
-pytest tests/semantic/test_concept_linker.py -v           # 12 tests
-pytest tests/semantic/test_semantic_pipeline_v2.py -v     # 11 tests
-```
-
-**Validation finale:**
-- Performance <30s/doc
-- Accuracy >85%
-- Tests passants: 62/62
-
-### 🎯 Phase 2 - Intelligence Avancée (À venir)
-
-**Objectifs Phase 2:**
-1. **Pattern Recognition** - Détection patterns récurrents
-2. **Recommendation Engine** - Recommandations documents similaires
-3. **Smart Filtering** - Filtres intelligents basés concepts
-4. **Document Clustering** - Clustering automatique par thème
-
-**Durée estimée:** 8 semaines
 
 ---
 
-## 📈 Métriques Techniques (Targets Phase 1)
+## 🚀 Prochaines Étapes Possibles
 
-| Métrique | Target | Actuel | Status |
-|----------|--------|--------|--------|
-| **Composants livrés** | 4/4 | 4/4 + Pipeline | ✅ **COMPLETE** |
-| **Code créé** | ~4000 lignes | ~4500 lignes | ✅ **COMPLETE** |
-| **Tests créés** | >50 cases | 62 cases | ✅ **COMPLETE** |
-| **Concept extraction** | Triple méthode | NER+Cluster+LLM | ✅ **COMPLETE** |
-| **Cross-lingual unification** | Automatique | FR/EN/DE | ✅ **COMPLETE** |
-| **DocumentRole classification** | 5 types | DEFINES/IMPLEMENTS/AUDITS/PROVES/REFERENCES | ✅ **COMPLETE** |
-| **Concept extraction precision** | >85% | - | ⏳ Validation Docker |
-| **Processing speed** | <30s/doc | - | ⏳ Validation Docker |
-| **Tests passants** | 100% | - | ⏳ Validation Docker |
+### ✅ COMPLÉTÉ: Frontend Graph-Guided RAG
+
+**Fichier:** `frontend/src/app/chat/page.tsx`
+
+**Implémenté:**
+- Switch "Knowledge Graph" pour activer/désactiver l'enrichissement
+- Dropdown niveau: Light (~30ms) / Standard (~50ms) / Deep (~200ms)
+- Badge visuel avec tooltip explicatif
+- Intégration avec `api.chat.send()` (paramètres `use_graph_context`, `graph_enrichment_level`)
+
+**Accès:** http://localhost:3000/chat
+
+---
+
+### ⏸️ DÉSACTIVÉ: Living Ontology
+
+**Raison:** La fonctionnalité en mode domain-agnostic génère trop de bruit (propositions comme "NATIONAL", "ENTITY_CO_OCCURRENCE" qui n'ont pas de sens sémantique).
+
+**Fichiers concernés (code conservé mais désactivé):**
+- `src/knowbase/api/routers/living_ontology.py` - Router API
+- `src/knowbase/semantic/ontology/` - Services backend
+- `frontend/src/app/admin/living-ontology/page.tsx` - Page admin
+
+**Pour réactiver plus tard:**
+1. Décommenter import dans `src/knowbase/api/main.py`
+2. Décommenter `app.include_router(living_ontology.router)`
+3. Remettre le menu dans `frontend/src/components/layout/Sidebar.tsx`
+4. Considérer `use_domain_hints=True` pour corpus homogène
+
+---
+
+### Option A: Phase 2.5 - Memory Layer
+- Sessions persistantes par utilisateur
+- Context resolver (questions implicites)
+- Intelligent summarizer (résumés métier LLM)
+- Export PDF des sessions
+
+### Option B: Phase 3 - Multi-Source Simplifiée
+- Upload manuel prioritaire
+- SharePoint/Google Drive (si temps)
+- Connecteurs avancés différés
+
+### Option C: Phase 3.5 - Frontend Explainable Graph-RAG
+- Living Graph (graphe persistant de session)
+- Citations inline (style académique)
+- Smart Hover, Quick Actions
+- Session Summary exportable PDF
+
+### Option D: Optimisation & Tests
+- Réduire temps enrichissement DEEP (~2.8s → <500ms)
+- Tests E2E avec corpus plus large
+- Dashboard monitoring Grafana
+
+---
+
+## 📈 Métriques Techniques
+
+| Métrique | Valeur | Status |
+|----------|--------|--------|
+| **Concepts dans KG** | 1164 | ✅ |
+| **Types uniques** | 6 (5 base + RESEARCH) | ✅ |
+| **Propositions pending** | 8 | ⏳ |
+| **Temps enrichissement LIGHT** | ~30ms | ✅ |
+| **Temps enrichissement STANDARD** | ~50ms | ✅ |
+| **Temps enrichissement DEEP** | ~200ms | ✅ |
+| **Seuil auto-promotion** | 85% confidence | ✅ |
+| **Seuil rejection** | <50% confidence | ✅ |
+
+---
+
+## 🧪 Test Réalisé (2025-12-19)
+
+### Living Ontology - Cycle Complet
+
+**Corpus:** 14 études médicales COVID-19 (PDF)
+
+**Résultats du cycle de découverte:**
+- Patterns découverts: 9
+- Auto-promus (≥85%): 1 → **RESEARCH**
+- En attente review: 8 propositions
+- Rejetés: 0
+
+**Type RESEARCH auto-créé (8 concepts reclassifiés):**
+- Health Data Research UK
+- UK Research and Innovation
+- Medical Research Council
+- National Institute for Health Research
+- Cambridge East Research Ethics Committee
+- Biomedical Advanced Research and Development Authority
+- Research Manuscript
+- NIHR Clinical Research Network
+
+**Propositions en attente:**
+| Type | Confidence | Occurrences |
+|------|------------|-------------|
+| ENTITY_CO_OCCURRENCE | 80% | 134 |
+| HEALTH | 75% | 269 |
+| ENTITY_CO_OCCURRENCE_USES | 63% | 7 |
+| SARS_COMPONENT | 50% | 10 |
+| HIGH_COMPONENT | 50% | 10 |
+
+### Graph-Guided RAG - Test Deep
+
+**Question testée:**
+> "Comment les organismes de recherche britanniques collaborent-ils sur les essais COVID ?"
+
+**Résultat:** Synthèse complète incluant:
+- RECOVERY Trial coordination (Oxford, 177 hôpitaux UK)
+- Relations avec NIHR, Wellcome Trust, Bill & Melinda Gates Foundation
+- Relations transitives COVID-19 → Patients → Informed Consent
+- Enrichissement via le nouveau type RESEARCH
 
 ---
 
 ## 🔗 Liens Utiles
 
-**👉 Pour comprendre Phase 1:**
-- **[Phase 1 V2.1 - Semantic Core](./phases/PHASE1_SEMANTIC_CORE.md)** (1 seul fichier, tout regroupé)
+**Documentation:**
+- [Architecture Technique](../OSMOSE_ARCHITECTURE_TECHNIQUE.md)
+- [Roadmap Intégrée](../OSMOSE_ROADMAP_INTEGREE.md)
+- [Phase 1 - Semantic Core](../phases/PHASE1_SEMANTIC_CORE.md)
 
-**Documentation Projet:**
-- [README Documentation](./README.md) - Guide navigation
-- [Roadmap Globale](./OSMOSE_ROADMAP_INTEGREE.md) - Plan 4 phases
-- [Architecture Technique](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) - Architecture complète
-- [Vision Produit](./OSMOSE_AMBITION_PRODUIT_ROADMAP.md) - Ambition et roadmap
+**API Documentation:**
+- Swagger UI: http://localhost:8000/docs
+- Insights API: http://localhost:8000/docs#/insights
+- Living Ontology API: http://localhost:8000/docs#/living-ontology
 
 **Code:**
-- `src/knowbase/semantic/` - Code Phase 1 V2.1
-- `config/semantic_intelligence_v2.yaml` - Configuration
-- `tests/semantic/` - Tests (62 cases)
+- `src/knowbase/semantic/inference/` - InferenceEngine
+- `src/knowbase/semantic/ontology/` - Living Ontology
+- `src/knowbase/api/services/graph_guided_search.py` - Graph-Guided RAG
 
-**Archive:**
-- [Ancienne structure Phase 1](./archive/phase1_v2_old_structure/) - Structure fragmentée (obsolète)
-- [Pivot Explanation](./archive/feat-neo4j-native/narrative-approach/PIVOT_EXPLANATION.md) - Pourquoi le pivot
-
----
-
-## 📝 Notes Importantes
-
-### Décisions Clés
-
-**2025-10-14 - Pivot V2.1:**
-- ❌ Abandon approche narrative (keywords hardcodés non-scalables)
-- ✅ Adoption Concept-First, Language-Agnostic
-- ✅ Pipeline simplifié (4 composants vs 6+)
-- ✅ Cross-lingual unification automatique
-- ✅ Performance optimisée (<30s/doc vs <45s)
-
-### Risques Phase 1
-
-| Risque | Probabilité | Impact | Mitigation |
-|--------|-------------|--------|------------|
-| Concept extraction <85% | Medium | High | Triple méthode (NER+Clustering+LLM) |
-| Cross-lingual fail | Medium | Critical | Embeddings multilingues validés |
-| Performance >30s/doc | Low | Medium | Caching, batch LLM |
-| NER models download fail | Low | Low | Fallback universel (xx) |
+**Scripts de Test:**
+- `scripts/test_inference_engine.py`
+- `scripts/test_graph_guided_rag.py`
+- `scripts/test_living_ontology.py`
 
 ---
 
-**Version:** 2.1
-**Dernière MAJ:** 2025-10-14
-**Prochain Checkpoint:** Semaine 7 (MultilingualConceptExtractor complete)
-**Checkpoint Phase 1:** Semaine 10 (Pipeline V2.1 complet)
+**Version:** 2.3.2 (Living Ontology Tested)
+**Dernière MAJ:** 2025-12-19
+**Auteur:** Claude Code + User collaboration

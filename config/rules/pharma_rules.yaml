@@ -1,0 +1,214 @@
+# ===============================================================================
+# Business Rules - Pharma / Life Sciences
+# ===============================================================================
+#
+# Règles métier pour le domaine pharmaceutique et sciences de la vie.
+# Phase 1.8.4 - Différenciateur marché vs Copilot/Gemini.
+#
+# Usage:
+#   Ces règles sont automatiquement chargées pour les tenants pharma
+#   ou peuvent être activées manuellement.
+#
+# ===============================================================================
+
+rules:
+  # ---------------------------------------------------------------------------
+  # Concept Validation Rules
+  # ---------------------------------------------------------------------------
+
+  - id: pharma-val-001
+    name: FDA Regulatory Term Review
+    description: |
+      Flag FDA regulatory terms for mandatory compliance review.
+      All FDA terms must be validated by regulatory affairs.
+    type: concept_validation
+    action: require_review
+    priority: 10
+    enabled: true
+    tenant_id: default
+    conditions:
+      - field: domain
+        operator: equals
+        value: FDA
+    message: "FDA regulatory term requires compliance review before publication"
+
+  - id: pharma-val-002
+    name: GxP Classification Required
+    description: |
+      Quality concepts must have GxP classification.
+      Mandatory for regulatory compliance.
+    type: concept_validation
+    action: flag
+    priority: 20
+    conditions:
+      - field: domain
+        operator: equals
+        value: Quality
+      - field: gxp_classification
+        operator: not_exists
+        value: null
+    match_all: true
+    message: "Quality concept requires GxP classification (GMP, GCP, GLP, GDP)"
+
+  - id: pharma-val-003
+    name: Clinical Trial Phase Detection
+    description: |
+      Detect clinical trial phase mentions and validate proper nomenclature.
+    type: concept_validation
+    action: accept
+    priority: 30
+    conditions:
+      - field: canonical_name
+        operator: matches
+        value: "Phase\\s+[IViv1-4]"
+    message: "Clinical trial phase detected"
+
+  - id: pharma-val-004
+    name: Deprecated Regulatory Terms
+    description: |
+      Flag potentially deprecated regulatory terminology.
+      User should verify current terminology.
+    type: concept_validation
+    action: flag
+    priority: 40
+    conditions:
+      - field: canonical_name
+        operator: in_list
+        value:
+          - EMEA  # Now EMA
+          - ICH E6  # Now ICH E6(R2)
+          - 21 CFR Part 820  # Updated version
+    message: "Term may be deprecated - verify current regulatory terminology"
+
+  # ---------------------------------------------------------------------------
+  # Concept Enrichment Rules
+  # ---------------------------------------------------------------------------
+
+  - id: pharma-enr-001
+    name: Clinical Trial Enrichment
+    description: |
+      Enrich clinical trial concepts with regulatory metadata.
+    type: concept_enrichment
+    action: enrich
+    priority: 10
+    conditions:
+      - field: canonical_name
+        operator: matches
+        value: "Phase\\s+[IViv1-4]|Clinical\\s+Trial"
+    enrichment:
+      regulatory_category: clinical_trial
+      requires_audit_trail: true
+      data_integrity: critical
+      retention_period_years: 15
+
+  - id: pharma-enr-002
+    name: Drug Safety Enrichment
+    description: |
+      Enrich pharmacovigilance and drug safety concepts.
+    type: concept_enrichment
+    action: enrich
+    priority: 20
+    conditions:
+      - field: canonical_name
+        operator: matches
+        value: "Adverse\\s+Event|SAE|Pharmacovigilance|Drug\\s+Safety"
+    enrichment:
+      regulatory_category: pharmacovigilance
+      reporting_required: true
+      expedited_reporting: possible
+      regulatory_authority: FDA_EMA
+
+  - id: pharma-enr-003
+    name: Validation Concept Enrichment
+    description: |
+      Enrich validation-related concepts with GAMP classification.
+    type: concept_enrichment
+    action: enrich
+    priority: 30
+    conditions:
+      - field: canonical_name
+        operator: contains
+        value: Validation
+    enrichment:
+      gamp_relevant: true
+      documentation_required: true
+      change_control: required
+
+  # ---------------------------------------------------------------------------
+  # Relation Validation Rules
+  # ---------------------------------------------------------------------------
+
+  - id: pharma-rel-001
+    name: Regulatory Submission Relations
+    description: |
+      Validate relations involving regulatory submissions.
+    type: relation_validation
+    action: require_review
+    priority: 10
+    conditions:
+      - field: target_domain
+        operator: in_list
+        value:
+          - FDA
+          - EMA
+          - Regulatory
+      - field: relation_type
+        operator: equals
+        value: REQUIRES
+    match_all: true
+    message: "Regulatory requirement relation needs verification"
+
+  - id: pharma-rel-002
+    name: Low Confidence Relation Rejection
+    description: |
+      Reject relations with very low confidence for pharma content.
+    type: relation_validation
+    action: reject
+    priority: 50
+    conditions:
+      - field: confidence
+        operator: less_than
+        value: 0.4
+      - field: source_domain
+        operator: equals
+        value: Pharma
+    match_all: true
+    message: "Low confidence relation rejected for pharma domain"
+
+  # ---------------------------------------------------------------------------
+  # Document Classification Rules
+  # ---------------------------------------------------------------------------
+
+  - id: pharma-doc-001
+    name: SOP Document Detection
+    description: |
+      Classify Standard Operating Procedure documents.
+    type: document_classification
+    action: enrich
+    priority: 10
+    conditions:
+      - field: title
+        operator: matches
+        value: "SOP|Standard\\s+Operating\\s+Procedure"
+    enrichment:
+      document_type: sop
+      controlled_document: true
+      version_control: required
+      review_cycle_months: 24
+
+  - id: pharma-doc-002
+    name: Protocol Document Detection
+    description: |
+      Classify clinical protocol documents.
+    type: document_classification
+    action: enrich
+    priority: 20
+    conditions:
+      - field: title
+        operator: matches
+        value: "Protocol|Clinical\\s+Study"
+    enrichment:
+      document_type: clinical_protocol
+      controlled_document: true
+      irb_approval: required
+      amendment_tracking: required

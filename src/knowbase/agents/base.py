@@ -34,6 +34,8 @@ class AgentState(BaseModel):
     tenant_id: str = "default"
     full_text: Optional[str] = None  # Texte complet pour filtrage contextuel
     document_name: Optional[str] = None  # Phase 2: Nom document pour relation extraction
+    document_context: Optional[str] = None  # Phase 1.8: Résumé document pour désambiguïsation concepts
+    technical_density_hint: float = 0.5  # Phase 1.8.2: Hint LLM (0-1) pour ajuster stratégie extraction
     chunk_ids: List[str] = Field(default_factory=list)  # Phase 2: IDs chunks pour relation extraction
 
     # Budget tracking

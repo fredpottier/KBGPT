@@ -225,6 +225,12 @@ class DocumentType(Base):
     avec types d'entités suggérés pour améliorer la précision du LLM.
 
     Phase 6 - Document Types Management
+
+    .. deprecated::
+        Cette fonctionnalité est DEPRECATED depuis la version domain-agnostic.
+        La solution s'adapte maintenant progressivement aux documents importés
+        via le Domain Context global au lieu de types de documents prédéfinis.
+        Ce modèle sera supprimé dans une future version.
     """
 
     __tablename__ = "document_types"

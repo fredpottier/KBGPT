@@ -1,56 +1,6 @@
-# Catalogue ontologie - Type d'entité: TECHNOLOGY
-# Technologies, frameworks, standards
+# Ontologies - Technologies
+# Ce fichier est vide par défaut (solution domain-agnostic)
+# Les technologies seront apprises automatiquement à partir des documents importés
+# ou configurées via le Domain Context par le client
 
-TECHNOLOGIES:
-  # Exemples à enrichir progressivement
-
-  KUBERNETES:
-    canonical_name: "Kubernetes"
-    aliases:
-      - "K8s"
-      - "k8s"
-      - "Kube"
-      - "kube"
-    category: "Container Orchestration"
-    vendor: "CNCF"
-
-  DOCKER:
-    canonical_name: "Docker"
-    aliases:
-      - "docker"
-      - "Docker Engine"
-    category: "Containerization"
-    vendor: "Docker Inc"
-
-  REACT:
-    canonical_name: "React"
-    aliases:
-      - "ReactJS"
-      - "React.js"
-      - "react"
-    category: "Frontend Framework"
-    vendor: "Meta"
-
-  PYTHON:
-    canonical_name: "Python"
-    aliases:
-      - "python"
-      - "Python3"
-    category: "Programming Language"
-
-  POSTGRESQL:
-    canonical_name: "PostgreSQL"
-    aliases:
-      - "Postgres"
-      - "postgres"
-      - "postgresql"
-    category: "Database"
-
-  REDIS:
-    canonical_name: "Redis"
-    aliases:
-      - "redis"
-      - "Redis Stack"
-    category: "Cache/Message Broker"
-
-  # À enrichir au fur et à mesure
+TECHNOLOGIES: {}

@@ -1,8 +1,25 @@
-version: "2024-10-05-unified-kg-facts-v2"
+# =============================================================================
+# KnowWhere / OSMOSE - Prompts Configuration
+# Version: 2024-12-18-domain-agnostic
+# =============================================================================
+#
+# Ces prompts sont GÉNÉRIQUES par défaut.
+# Le contexte métier spécifique est injecté dynamiquement via le Domain Context
+# configuré par le client (voir: src/knowbase/ontology/domain_context_injector.py)
+#
+# Architecture:
+# - Prompts de base: Génériques, sans référence à un domaine spécifique
+# - Domain Context: Injecté automatiquement pour personnaliser l'extraction
+# - Ontologies: Apprises progressivement à partir des documents importés
+#
+# =============================================================================
+
+version: "2024-12-18-domain-agnostic"
+
 families:
   default:
     deck:
-      id: "deck_default_v1"
+      id: "deck_default_v2"
       template: |
         You are given a global text summary from a PowerPoint slide deck.
 
@@ -20,17 +37,17 @@ families:
           - language
 
         IMPORTANT:
-        - For 'main_solution', always use the official SAP canonical solution name as published by SAP.
-        - For 'supporting_solutions', only consider SAP Solutions and always use the official SAP canonical solution name.
-        - Do not use acronyms, abbreviations, or local variants.
-        - If unsure, leave the field empty.
+        - For 'main_solution', use the official canonical product/solution name.
+        - For 'supporting_solutions', list related products/solutions with their official names.
+        - Do not use acronyms, abbreviations, or local variants unless no official name exists.
+        - If unsure, leave the field empty or null.
         - Return only the JSON object — no explanation.
 
         Global summary text:
         {{ summary_text }}
 
     slide:
-      id: "slide_default_v4_unified_kg_facts"
+      id: "slide_default_v5_unified_kg_facts"
       template: |
         Global deck summary:
         {{ deck_summary }}
@@ -84,7 +101,7 @@ families:
         4. ✅ Capture valid_from if date/period mentioned (2024, Q1 2024, Jan 2024, since 2023)
         5. ✅ Reference slide_number for traceability
         6. ✅ Indicate fact source: "text" (slide text), "image" (visual diagram/table), "both"
-        7. ❌ DO NOT extract generic facts without value ("SAP offers high availability" → skip)
+        7. ❌ DO NOT extract generic facts without value ("offers high availability" → skip)
         8. ✅ Normalize units: % for SLA, GB/TB for storage, users for capacity
 
         ## 🔗 TASK 3: ENTITIES for Knowledge Graph (Neo4j)
@@ -92,8 +109,8 @@ families:
         Extract **named entities** mentioned in the slide - concrete, identifiable things.
 
         **Entity Types Priority**:
-        - SOLUTION: SAP products/solutions (SAP S/4HANA, SAP BTP, SAP Analytics Cloud)
-        - COMPONENT: Technical components, modules, services (HANA Database, Fiori Apps, API Management)
+        - SOLUTION: Products, solutions, platforms (use official canonical names)
+        - COMPONENT: Technical components, modules, services
         - ORGANIZATION: Companies, business units mentioned
         - PERSON: People, roles, job titles mentioned
         - TECHNOLOGY: Technologies, frameworks, standards (Docker, Kubernetes, OAuth 2.0)
@@ -101,7 +118,7 @@ families:
 
         **Entity Extraction Rules**:
         1. ✅ Extract ONLY entities explicitly mentioned in text/image
-        2. ✅ Use official names (SAP canonical names for SAP products)
+        2. ✅ Use official canonical names when known
         3. ✅ Include brief description (10-50 words) from slide context
         4. ✅ Indicate confidence: 1.0 if explicit name, 0.7-0.9 if inferred from context
         5. ❌ DO NOT create entities for generic terms ("the system", "the platform")
@@ -134,7 +151,7 @@ families:
         {
           "concepts": [
             {
-              "full_explanation": "Complete explanation synthesizing MegaParse text + visual analysis. Describe what you see AND what you read, showing how they complement each other.",
+              "full_explanation": "Complete explanation synthesizing MegaParse text + visual analysis.",
               "meta": {
                 "scope": "solution-specific" | "general" | "industry-specific",
                 "type": "capability" | "architecture" | "process" | "feature" | "benefit" | "use-case" | "integration",
@@ -149,8 +166,8 @@ families:
           ],
           "facts": [
             {
-              "subject": "SAP S/4HANA Cloud, Private Edition",
-              "predicate": "SLA_uptime_garantie",
+              "subject": "Product Name",
+              "predicate": "SLA_uptime",
               "object": "99.7%",
               "value": 99.7,
               "unit": "%",
@@ -159,145 +176,88 @@ families:
               "confidence": 0.95,
               "valid_from": "2024-01-01",
               "source_slide_number": {{ slide_index }},
-              "extraction_context": "Tableau SLA colonne 'Private Edition'",
+              "extraction_context": "SLA table column",
               "source_type": "both"
             }
           ],
           "entities": [
             {
-              "name": "SAP S/4HANA Cloud",
+              "name": "Product Name",
               "entity_type": "SOLUTION",
-              "description": "SAP's flagship cloud ERP solution for large enterprises",
+              "description": "Brief description of the product/entity",
               "confidence": 1.0,
               "attributes": {
-                "vendor": "SAP",
-                "category": "ERP",
-                "deployment": "Cloud"
+                "vendor": "Vendor Name",
+                "category": "Category"
               }
             }
           ],
           "relations": [
             {
-              "source": "SAP S/4HANA Cloud",
-              "target": "SAP BTP",
+              "source": "Product A",
+              "target": "Product B",
               "relation_type": "INTEGRATES_WITH",
-              "description": "S/4HANA integrates with BTP for extension development and analytics",
+              "description": "Product A integrates with Product B for data exchange",
               "confidence": 0.95
             }
           ]
         }
         ```
 
-        **Concept Separation Guidelines (Task 1)**:
-        - Each distinct business capability (text) + its visual representation (diagram/icon) = separate chunk
-        - Each architectural component (MegaParse structure) + its position/connections in diagram = separate chunk
-        - Each process step (textual detail) + its visual flow/arrow/sequence = separate chunk
-        - Each table row (MegaParse data) + its visual formatting/emphasis = potential separate chunk
-        - Each diagram component (visual) + its textual description (MegaParse) = separate chunk
-        - Visual clusters/sections + their corresponding text blocks = separate chunks
-
         **Concept Quality Requirements**:
         - Minimum 50 words per concept explanation (or return empty concepts array [] if no substantial content)
         - Maximum 500 words per concept explanation
         - Focus on actionable, searchable knowledge
         - Preserve technical details and visual descriptions
-        - Use professional, clear language
         - **NEVER make up information or force concepts where none exist**
-
-        **Extraction Examples**:
-
-        **Example 1 - Architecture Diagram Slide**:
-
-        Slide shows: "SAP S/4HANA integrates with SAP BTP via API Management. 99.7% SLA guaranteed."
-
-        Extract:
-        - **Concepts**: [{"full_explanation": "Integration architecture between S/4HANA and BTP using API Management layer...", ...}]
-        - **Facts**: [{"subject": "SAP S/4HANA Cloud", "predicate": "SLA_uptime_garantie", "value": 99.7, ...}]
-        - **Entities**: [
-            {"name": "SAP S/4HANA", "entity_type": "SOLUTION", ...},
-            {"name": "SAP BTP", "entity_type": "SOLUTION", ...},
-            {"name": "API Management", "entity_type": "COMPONENT", ...}
-          ]
-        - **Relations**: [
-            {"source": "SAP S/4HANA", "target": "SAP BTP", "relation_type": "INTEGRATES_WITH", "description": "S/4HANA integrates with BTP via API Management", ...},
-            {"source": "API Management", "target": "SAP BTP", "relation_type": "PART_OF", ...}
-          ]
-
-        **Example 2 - Text-only slide (no entities/relations)**:
-
-        Slide shows: "Benefits of cloud migration: reduced costs, increased agility, better scalability."
-
-        Extract:
-        - **Concepts**: [{"full_explanation": "Cloud migration provides three key benefits: cost reduction...", ...}]
-        - **Facts**: [] (no measurable values)
-        - **Entities**: [] (no named entities)
-        - **Relations**: [] (no relationships)
-
-        **Example 3 - Title/Transition slide**:
-
-        Slide shows: "Section 3: Architecture Overview"
-
-        Extract:
-        - **Concepts**: [] (no substantial content)
-        - **Facts**: []
-        - **Entities**: []
-        - **Relations**: []
 
         **IMPORTANT RULES**:
         - Return `{"concepts": [], "facts": [], "entities": [], "relations": []}` for empty/title/transition slides
         - Always extract all 4 types when relevant data is present
         - Entities and relations work together: relations MUST reference entity names from entities array
-        - Facts are independent from entities (can extract facts even without entities)
 
         Return **only the JSON object**, no extra text, no markdown code blocks.
 
   technical:
     deck:
-      id: "deck_technical_v1"
+      id: "deck_technical_v2"
       template: |
-        You are given raw text extracted from a technical/architecture PowerPoint deck about a software solution.
+        You are given raw text extracted from a technical/architecture PowerPoint deck.
 
         Return ONE JSON object with exactly these keys:
         {
-          "summary": "<3–6 sentences describing scope, main technical themes, intended audience, and what a reader will learn>",
+          "summary": "<3–6 sentences describing scope, main technical themes, intended audience>",
           "metadata": {
             "title": null | "<string>",
             "objective": null | "<string>",
-            "main_solution": null | "<official product name>",                 // SAP: use canonical SAP name only
-            "supporting_solutions": ["<SAP canonical name>", ...],             // [] if none
-            "mentioned_solutions": ["<brand or product name>", ...],           // SAP & non-SAP; [] if none
+            "main_solution": null | "<official product name>",
+            "supporting_solutions": ["<canonical name>", ...],
+            "mentioned_solutions": ["<brand or product name>", ...],
             "document_type": "technical",
-            "audience": null | "<string>",                                     // e.g., "IT architects","DevOps"
-            "source_date": null | "<string as shown>",                         // keep original format (e.g., "H1 2025")
+            "audience": null | "<string>",
+            "source_date": null | "<string as shown>",
             "language": null | "fr" | "en",
-
-            // OPTIONAL fields — fill ONLY if explicitly present in THIS deck:
-            "product_version": null | "<string>",                               // e.g., "2023 FPxx"
+            "product_version": null | "<string>",
             "document_subtype": null | "reference_architecture" | "deployment_guide" | "design_doc" | "operations_runbook" | "integration_guide" | "overview",
-            "architecture_focus": ["<short bullet>", ...],                      // 0–10 items; concise phrases
-            "architecture_domains": ["compute" | "network" | "storage" | "data" | "integration" | "security" | "identity" | "observability" | "operations" | "performance" | "availability" | "scalability", ...],
-            "key_patterns": ["client-server" | "event-driven" | "pub/sub" | "batch ETL" | "microservices" | "layered" | "cache-aside" | "<as written>", ...],
+            "architecture_focus": ["<short bullet>", ...],
+            "architecture_domains": ["compute" | "network" | "storage" | "data" | "integration" | "security" | "identity" | "observability", ...],
+            "key_patterns": ["client-server" | "event-driven" | "microservices" | "layered" | "<as written>", ...],
             "tech_stack": ["<runtime/db/middleware/tool name>", ...],
-            "assumptions": ["<explicit assumption>", ...],
-            "constraints": ["<explicit constraint/limit>", ...],
-            "dependencies": ["<external system/service>", ...],
-            "non_goals": ["<explicit scope exclusion>", ...],
-            "quality_attributes": ["performance" | "reliability" | "maintainability" | "security" | "scalability" | "availability" | "<as written>", ...],
-            "standards_frameworks": ["<standard/framework explicitly named>", ...]   // e.g., "ISO 27001","SOC 2","NIST CSF"; [] if none
+            "quality_attributes": ["performance" | "reliability" | "security" | "scalability", ...]
           }
         }
 
         Extraction rules:
-        - **Explicit-only**: extract only what appears in THIS deck’s text; if absent → use null (scalars) or [] (lists).
-        - **Naming**: SAP → canonical SAP names; non-SAP → official brand/product names.
-        - **Limits**: keep lists concise (≤ 12 items), deduplicate exact duplicates, no invented content.
+        - **Explicit-only**: extract only what appears in THIS deck's text; if absent → use null or [].
+        - **Naming**: Use official canonical product names when known.
+        - **Limits**: keep lists concise (≤ 12 items), deduplicate, no invented content.
         - **Output**: return ONLY the JSON object; no comments, no trailing text.
 
         Raw deck text:
         {{ summary_text }}
 
     slide:
-      id: "slide_technical_v3_unified_kg_facts"
+      id: "slide_technical_v4_unified_kg_facts"
       template: |
         Global deck summary:
         {{ deck_summary }}
@@ -313,250 +273,60 @@ families:
 
         Analyze technical section {{ slide_index }} from '{{ source_name }}' (PowerPoint document).
 
-        **CRITICAL DUAL-SOURCE TECHNICAL ANALYSIS**: You have TWO complementary technical information sources:
-        1. **MegaParse content**: Structured technical text with preserved tables, code blocks, configurations, and hierarchical data
-        2. **Visual image**: Technical diagrams, architecture schemas, network topologies, component relationships, and visual technical flows
+        **TECHNICAL ANALYSIS**: Extract technical information from this slide.
 
-        **YOUR QUAD MISSION** - Extract FOUR types of technical information from this slide in a single pass:
+        **YOUR QUAD MISSION** - Extract FOUR types of technical information:
 
-        ## 🎯 TASK 1: TECHNICAL CONCEPTS for Semantic Search (Qdrant)
+        ## 🎯 TASK 1: TECHNICAL CONCEPTS for Semantic Search
+        Extract technical concepts combining text specifications and visual architecture diagrams.
 
-        SYNTHESIZE both sources to extract ALL GENUINE DISTINCT TECHNICAL CONCEPTS (if any). Each concept should combine:
-        - Technical specifications from MegaParse (configs, APIs, data structures, protocols)
-        - Visual architecture from the image (component connections, data flows, deployment patterns, topology)
+        ## 📊 TASK 2: STRUCTURED FACTS for Knowledge Graph
+        Extract precise technical facts (SLA, capacity, performance metrics).
 
-        **Multi-concept extraction**: Extract ONLY genuine, distinct technical concepts present in the content. This could be:
-        - 0 concepts (if title/transition/agenda slide with no technical content)
-        - 1 concept (if slide focuses on one technical topic)
-        - Multiple concepts (if slide genuinely covers several distinct technical topics)
+        ## 🔗 TASK 3: TECHNICAL ENTITIES for Knowledge Graph
+        Extract named technical entities (solutions, components, technologies, infrastructure).
 
-        **Quality over quantity**: Better one accurate technical concept than multiple fabricated ones.
+        ## 🔗 TASK 4: TECHNICAL RELATIONS for Knowledge Graph
+        Extract technical relationships (INTEGRATES_WITH, PART_OF, DEPLOYS_TO, COMMUNICATES_WITH).
 
-        ## 📊 TASK 2: STRUCTURED FACTS for Knowledge Graph (Neo4j)
-
-        Extract ONLY **objective, verifiable technical facts with precise numeric values or dates**.
-
-        **Fact Types Priority** (Technical Focus):
-        - SERVICE_LEVEL: SLA, uptime, performance guarantees, latency, throughput, response time
-        - CAPACITY: Technical limits, quotas, max sizes (CPU, RAM, storage, bandwidth, IOPS, concurrent connections)
-        - PRICING: Infrastructure costs, license costs, compute costs (€, $, credits/hour)
-        - FEATURE: Enabled/disabled technical features, available modules, supported protocols
-        - COMPLIANCE: Security certifications, technical standards (ISO 27001, SOC2, PCI-DSS, FIPS 140-2)
-        - GENERAL: Other measurable technical facts
-
-        **Strict Rules for Technical Facts**:
-        1. ❌ Ignore vague estimates, marketing claims ("up to", "approximately", "can support")
-        2. ✅ Require PRECISE numeric value for SERVICE_LEVEL, CAPACITY (e.g., "4 vCPU", "16 GB RAM", "99.9% uptime")
-        3. ✅ Indicate confidence 0.9-1.0 if explicit in diagram/table, 0.6-0.8 if inferred
-        4. ✅ Capture valid_from if version/release/date mentioned (2024, Q1 2024, v2.0, since 2023)
-        5. ✅ Reference slide_number for traceability
-        6. ✅ Indicate fact source: "text" (technical text), "image" (architecture diagram/table), "both"
-        7. ❌ DO NOT extract generic facts without value ("system has high availability" → skip)
-        8. ✅ Normalize units: % for SLA, GB/TB for storage, vCPU for compute, ms for latency
-
-        ## 🔗 TASK 3: TECHNICAL ENTITIES for Knowledge Graph (Neo4j)
-
-        Extract **named technical entities** mentioned in the slide - concrete, identifiable technical things.
-
-        **Entity Types Priority** (Technical Focus):
-        - SOLUTION: SAP products/solutions (SAP S/4HANA, SAP BTP, SAP HANA Database)
-        - COMPONENT: Technical components, services, modules (API Gateway, Load Balancer, Message Queue, Cache Layer)
-        - TECHNOLOGY: Technologies, frameworks, platforms (Kubernetes, Docker, Redis, PostgreSQL, OAuth 2.0, gRPC)
-        - INFRASTRUCTURE: Infrastructure elements (VPC, Subnet, Security Group, CDN, Firewall)
-        - ORGANIZATION: Vendors, cloud providers (AWS, Azure, Google Cloud, Hyperscaler)
-        - CONCEPT: Key technical concepts (Microservices, Event-Driven Architecture, Zero-Trust Security)
-
-        **Entity Extraction Rules** (Technical):
-        1. ✅ Extract ONLY entities explicitly mentioned in architecture diagrams or technical text
-        2. ✅ Use official technical names (canonical names for SAP products, standard names for technologies)
-        3. ✅ Include brief technical description (10-50 words) from slide context
-        4. ✅ Indicate confidence: 1.0 if explicit label/name, 0.7-0.9 if inferred from diagram context
-        5. ❌ DO NOT create entities for generic terms ("the database", "the API", "the service")
-        6. ✅ Capture technical attributes if mentioned (version, port, protocol, vendor)
-
-        ## 🔗 TASK 4: TECHNICAL RELATIONS for Knowledge Graph (Neo4j)
-
-        Extract **technical relationships between entities** - how systems/components connect/interact.
-
-        **Relation Types Priority** (Technical Focus):
-        - INTEGRATES_WITH: System A integrates/connects with System B via protocol/API
-        - PART_OF: Component is part of larger technical system/architecture
-        - USES: Entity A uses/depends on Entity B (technical dependency)
-        - PROVIDES: Entity A provides technical service/capability to Entity B
-        - REPLACES: Entity A replaces/supersedes Entity B technically
-        - REQUIRES: Entity A requires Entity B (hard technical dependency)
-        - COMMUNICATES_WITH: Systems exchange data/messages
-        - DEPLOYS_TO: Software/service deploys to infrastructure
-        - SCALES_WITH: Component scales horizontally/vertically with another
-
-        **Relation Extraction Rules** (Technical):
-        1. ✅ Extract ONLY relations explicitly shown in architecture diagrams or stated in technical text
-        2. ✅ Use entity names exactly as extracted in entities array
-        3. ✅ Include technical description explaining the relationship (10-30 words, with protocol/method if shown)
-        4. ✅ Indicate confidence: 1.0 if explicit arrow/connection in diagram, 0.7-0.9 if inferred from text
-        5. ❌ DO NOT invent relations not shown in architecture/diagram
-        6. ✅ Prefer specific technical relation types over generic INTERACTS_WITH
-
-        **UNIFIED JSON OUTPUT FORMAT** - Return ALL FOUR outputs in a single JSON object:
-
+        **JSON OUTPUT FORMAT**:
         ```json
         {
-          "concepts": [
-            {
-              "full_explanation": "Complete technical explanation synthesizing MegaParse specs + visual architecture. Describe technical components, data flows, protocols, and architectural patterns.",
-              "meta": {
-                "scope": "solution-specific" | "general" | "infrastructure-specific",
-                "type": "architecture" | "component" | "integration" | "deployment" | "configuration" | "security" | "performance",
-                "level": "strategic" | "tactical" | "operational",
-                "tags": ["tag1", "tag2"],
-                "slide_role": "title" | "content" | "summary" | "transition" | "agenda",
-                "concept_confidence": 0.1-1.0,
-                "has_visuals": true | false,
-                "visual_type": "component_diagram" | "deployment_diagram" | "sequence_diagram" | "network_topology" | "table" | "chart" | null
-              }
-            }
-          ],
-          "facts": [
-            {
-              "subject": "SAP HANA Database",
-              "predicate": "max_memory_capacity",
-              "object": "12 TB RAM",
-              "value": 12,
-              "unit": "TB",
-              "value_type": "numeric",
-              "fact_type": "CAPACITY",
-              "confidence": 0.95,
-              "valid_from": "2024-01-01",
-              "source_slide_number": {{ slide_index }},
-              "extraction_context": "Architecture diagram - Database tier specifications",
-              "source_type": "image"
-            }
-          ],
-          "entities": [
-            {
-              "name": "SAP API Management",
-              "entity_type": "COMPONENT",
-              "description": "API gateway layer managing authentication, rate limiting, and routing for SAP BTP services",
-              "confidence": 1.0,
-              "attributes": {
-                "vendor": "SAP",
-                "category": "Integration",
-                "protocols": ["REST", "OData", "GraphQL"]
-              }
-            }
-          ],
-          "relations": [
-            {
-              "source": "SAP S/4HANA Cloud",
-              "target": "SAP API Management",
-              "relation_type": "INTEGRATES_WITH",
-              "description": "S/4HANA exposes business APIs through API Management layer using OData protocol",
-              "confidence": 0.95
-            }
-          ]
+          "concepts": [{"full_explanation": "...", "meta": {...}}],
+          "facts": [{"subject": "...", "predicate": "...", "value": ..., ...}],
+          "entities": [{"name": "...", "entity_type": "...", ...}],
+          "relations": [{"source": "...", "target": "...", "relation_type": "...", ...}]
         }
         ```
 
-        **Technical Concept Separation Guidelines (Task 1)**:
-        - Each architectural component (diagram box) + its technical specs (text) = separate chunk
-        - Each integration pattern (visual connection) + its protocol details (text) = separate chunk
-        - Each deployment topology (diagram) + its configuration (text) = separate chunk
-        - Each data flow (arrow/path) + its transformation logic (description) = separate chunk
-        - Each technical table row + its visual context = potential separate chunk
-        - Each network zone (diagram section) + its security controls (text) = separate chunk
+        Return **only the JSON object**, no extra text.
 
-        **Concept Quality Requirements**:
-        - Minimum 50 words per technical concept (or return empty concepts array [] if no substantial content)
-        - Maximum 600 words per technical concept
-        - Focus on implementable, technical knowledge
-        - Preserve exact technical terminology, protocols, standards
-        - **NEVER make up technical information or force concepts where none exist**
-
-        **Extraction Examples**:
-
-        **Example 1 - Architecture Diagram with SLA**:
-
-        Slide shows: "SAP S/4HANA Cloud Private connects to SAP BTP via API Management. 99.7% SLA. 4 vCPU, 16 GB RAM per instance."
-
-        Extract:
-        - **Concepts**: [{"full_explanation": "Integration architecture between S/4HANA Cloud Private and SAP BTP using API Management layer for secure API exposure...", ...}]
-        - **Facts**: [
-            {"subject": "SAP S/4HANA Cloud Private", "predicate": "SLA_uptime", "value": 99.7, "unit": "%", "fact_type": "SERVICE_LEVEL", ...},
-            {"subject": "SAP S/4HANA Cloud Private", "predicate": "instance_cpu", "value": 4, "unit": "vCPU", "fact_type": "CAPACITY", ...},
-            {"subject": "SAP S/4HANA Cloud Private", "predicate": "instance_memory", "value": 16, "unit": "GB", "fact_type": "CAPACITY", ...}
-          ]
-        - **Entities**: [
-            {"name": "SAP S/4HANA Cloud Private", "entity_type": "SOLUTION", ...},
-            {"name": "SAP BTP", "entity_type": "SOLUTION", ...},
-            {"name": "SAP API Management", "entity_type": "COMPONENT", ...}
-          ]
-        - **Relations**: [
-            {"source": "SAP S/4HANA Cloud Private", "target": "SAP API Management", "relation_type": "INTEGRATES_WITH", "description": "S/4HANA exposes APIs through API Management", ...},
-            {"source": "SAP API Management", "target": "SAP BTP", "relation_type": "PART_OF", ...}
-          ]
-
-        **Example 2 - Network Topology (technical diagram only)**:
-
-        Slide shows network diagram: "Customer VPC → VPN Gateway → SAP VPC (10.0.0.0/16)"
-
-        Extract:
-        - **Concepts**: [{"full_explanation": "Network connectivity architecture using VPN tunnel between customer VPC and SAP managed VPC with private IP range 10.0.0.0/16...", ...}]
-        - **Facts**: [{"subject": "SAP VPC", "predicate": "ip_range", "object": "10.0.0.0/16", "fact_type": "GENERAL", ...}]
-        - **Entities**: [
-            {"name": "Customer VPC", "entity_type": "INFRASTRUCTURE", ...},
-            {"name": "VPN Gateway", "entity_type": "COMPONENT", ...},
-            {"name": "SAP VPC", "entity_type": "INFRASTRUCTURE", ...}
-          ]
-        - **Relations**: [
-            {"source": "Customer VPC", "target": "VPN Gateway", "relation_type": "COMMUNICATES_WITH", "description": "Customer VPC connects to VPN Gateway for secure tunnel", ...},
-            {"source": "VPN Gateway", "target": "SAP VPC", "relation_type": "COMMUNICATES_WITH", ...}
-          ]
-
-        **Example 3 - Title/Transition slide**:
-
-        Slide shows: "Section 3: Technical Architecture Overview"
-
-        Extract:
-        - **Concepts**: [] (no technical content)
-        - **Facts**: []
-        - **Entities**: []
-        - **Relations**: []
-
-        **IMPORTANT RULES**:
-        - Return `{"concepts": [], "facts": [], "entities": [], "relations": []}` for empty/title/transition slides
-        - Always extract all 4 types when relevant technical data is present
-        - Entities and relations work together: relations MUST reference entity names from entities array
-        - Facts are independent from entities (can extract technical facts even without entities)
-        - Focus on precise technical details, not marketing language
-
-        Return **only the JSON object**, no extra text, no markdown code blocks.
   functional:
     deck:
-      id: "deck_functional_v1"
+      id: "deck_functional_v2"
       template: |
-        You are given raw text extracted from a PowerPoint deck about an SAP solution.
+        You are given raw text extracted from a business/functional PowerPoint deck.
 
         Return a single JSON object with two fields:
-        - "summary": 3–6 sentences describing the deck’s purpose, target audience, and what a reader will learn.
+        - "summary": 3–6 sentences describing the deck's purpose, target audience, and what a reader will learn.
         - "metadata": object with:
           - title
           - objective
-          - main_solution              // SAP canonical name
-          - supporting_solutions       // SAP canonical names (array)
-          - mentioned_solutions        // both SAP & non-SAP (array)
-          - document_type              // e.g., "Business Scope", "Overview", "Release Highlights"
-          - audience                   // e.g., Line-of-Business leaders, IT architects, buyers
-          - source_date                // if present (string)
-          - language                   // "en" | "fr"
-          - product_version            // e.g., "SAP S/4HANA 2023 FPS03" if visible
-          - lob_coverage               // e.g., ["Finance","Supply Chain","Sales",...]
-          - industry_coverage          // e.g., ["Automotive","Utilities",...]
-          - capabilities_summary       // short bullets of key business capabilities
-          - innovations_summary        // bullets for “What’s new/Delta highlights”
-          - fiori_apps_present         // true|false if there is a page listing apps
+          - main_solution
+          - supporting_solutions
+          - mentioned_solutions
+          - document_type
+          - audience
+          - source_date
+          - language
+          - product_version
+          - lob_coverage (Lines of Business)
+          - industry_coverage
+          - capabilities_summary
+          - innovations_summary
 
         IMPORTANT:
-        - Use official SAP canonical names. No acronyms.
+        - Use official canonical product names when known.
         - If a value is not clearly present, set it to null or [].
         - Return only the JSON object, no extra text.
 
@@ -564,7 +334,7 @@ families:
         {{ summary_text }}
 
     slide:
-      id: "slide_functional_v3_unified_kg_facts"
+      id: "slide_functional_v4_unified_kg_facts"
       template: |
         Global deck summary:
         {{ deck_summary }}
@@ -580,215 +350,30 @@ families:
 
         Analyze functional section {{ slide_index }} from '{{ source_name }}' (PowerPoint document).
 
-        **CRITICAL DUAL-SOURCE BUSINESS ANALYSIS**: You have TWO complementary business information sources:
-        1. **MegaParse content**: Structured business text with preserved capability matrices, process lists, feature tables, and hierarchical business data
-        2. **Visual image**: Business process flows, capability maps, organizational charts, user journey diagrams, and visual business relationships
+        **BUSINESS ANALYSIS**: Extract business/functional information from this slide.
 
-        **YOUR QUAD MISSION** - Extract FOUR types of business/functional information from this slide in a single pass:
+        **YOUR QUAD MISSION** - Extract FOUR types of business information:
 
-        ## 🎯 TASK 1: BUSINESS CONCEPTS for Semantic Search (Qdrant)
+        ## 🎯 TASK 1: BUSINESS CONCEPTS for Semantic Search
+        Extract business concepts (capabilities, processes, features, benefits).
 
-        SYNTHESIZE both sources to extract ALL GENUINE DISTINCT BUSINESS CONCEPTS (if any). Each concept should combine:
-        - Business specifications from MegaParse (capabilities, features, processes, KPIs, business rules)
-        - Visual business context from the image (process flows, user interactions, capability maps, business diagrams)
+        ## 📊 TASK 2: STRUCTURED FACTS for Knowledge Graph
+        Extract measurable business facts (KPIs, cycle times, cost savings).
 
-        **Multi-concept extraction**: Extract ONLY genuine, distinct business concepts present in the content. This could be:
-        - 0 concepts (if title/transition/agenda slide with no business content)
-        - 1 concept (if slide focuses on one business topic)
-        - Multiple concepts (if slide genuinely covers several distinct business topics)
+        ## 🔗 TASK 3: BUSINESS ENTITIES for Knowledge Graph
+        Extract named business entities (solutions, business processes, roles, organizations).
 
-        **Quality over quantity**: Better one accurate business concept than multiple fabricated ones.
+        ## 🔗 TASK 4: BUSINESS RELATIONS for Knowledge Graph
+        Extract business relationships (PROVIDES, SUPPORTS, ENABLES, USES).
 
-        ## 📊 TASK 2: STRUCTURED FACTS for Knowledge Graph (Neo4j)
-
-        Extract ONLY **objective, verifiable business facts with precise values or measurable outcomes**.
-
-        **Fact Types Priority** (Business Focus):
-        - SERVICE_LEVEL: Business SLAs, service commitments, availability guarantees
-        - CAPACITY: Business limits (max users, max transactions/day, process volumes)
-        - PRICING: License costs, subscription fees, pricing tiers (€, $, credits/month, per user)
-        - FEATURE: Available business features, enabled capabilities, functional coverage
-        - COMPLIANCE: Business compliance certifications, industry standards (SOX, GxP, 21 CFR Part 11)
-        - GENERAL: Other measurable business facts (process cycle times, approval steps, data retention periods)
-
-        **Strict Rules for Business Facts**:
-        1. ❌ Ignore vague business claims ("improves efficiency", "better decisions", "reduces costs" without numbers)
-        2. ✅ Require PRECISE value for measurable facts (e.g., "reduces order-to-cash cycle by 25%", "supports 10,000 concurrent users")
-        3. ✅ Indicate confidence 0.9-1.0 if explicit in table/chart, 0.6-0.8 if business estimate
-        4. ✅ Capture valid_from if version/release mentioned (2024, Q1 2024, Release 2023 FPS03)
-        5. ✅ Reference slide_number for traceability
-        6. ✅ Indicate fact source: "text" (business text), "image" (process diagram/chart), "both"
-        7. ❌ DO NOT extract generic facts without value ("provides better visibility" → skip)
-        8. ✅ Normalize units: % for improvements, days for cycles, users for capacity
-
-        ## 🔗 TASK 3: BUSINESS ENTITIES for Knowledge Graph (Neo4j)
-
-        Extract **named business entities** mentioned in the slide - concrete, identifiable business things.
-
-        **Entity Types Priority** (Business Focus):
-        - SOLUTION: SAP solutions (SAP S/4HANA, SAP Ariba, SAP SuccessFactors, SAP Analytics Cloud)
-        - COMPONENT: Business modules, Fiori apps, business services (Order-to-Cash, Procure-to-Pay, Financial Closing)
-        - ORGANIZATION: Business units, departments, external partners
-        - PERSON: Roles, job titles, personas (CFO, Procurement Manager, Sales Rep)
-        - CONCEPT: Key business concepts (Digital Transformation, Process Excellence, Customer Experience)
-        - TECHNOLOGY: Business-relevant technologies (Machine Learning, Predictive Analytics, RPA)
-
-        **Entity Extraction Rules** (Business):
-        1. ✅ Extract ONLY entities explicitly mentioned in business diagrams or functional text
-        2. ✅ Use official business names (canonical SAP solution names, standard business terms)
-        3. ✅ Include brief business description (10-50 words) from slide context
-        4. ✅ Indicate confidence: 1.0 if explicit label/name, 0.7-0.9 if inferred from business context
-        5. ❌ DO NOT create entities for generic terms ("the process", "the user", "the system")
-        6. ✅ Capture business attributes if mentioned (industry, LOB, user count, license type)
-
-        ## 🔗 TASK 4: BUSINESS RELATIONS for Knowledge Graph (Neo4j)
-
-        Extract **business relationships between entities** - how business capabilities/processes/systems interact.
-
-        **Relation Types Priority** (Business Focus):
-        - INTEGRATES_WITH: Solution A integrates with Solution B for business process
-        - PART_OF: Capability/module is part of larger business solution
-        - USES: Business role/process uses capability/app
-        - PROVIDES: Solution provides business capability/service
-        - REPLACES: New capability replaces legacy business process
-        - REQUIRES: Business process requires prerequisite capability
-        - SUPPORTS: Solution supports business process/use case
-        - ENABLES: Capability enables business outcome
-
-        **Relation Extraction Rules** (Business):
-        1. ✅ Extract ONLY relations explicitly shown in business flow diagrams or stated in functional text
-        2. ✅ Use entity names exactly as extracted in entities array
-        3. ✅ Include business description explaining the relationship (10-30 words, with business benefit if shown)
-        4. ✅ Indicate confidence: 1.0 if explicit arrow/connection in diagram, 0.7-0.9 if inferred from text
-        5. ❌ DO NOT invent relations not shown in business diagram/process
-        6. ✅ Prefer specific business relation types over generic SUPPORTS
-
-        **UNIFIED JSON OUTPUT FORMAT** - Return ALL FOUR outputs in a single JSON object:
-
+        **JSON OUTPUT FORMAT**:
         ```json
         {
-          "concepts": [
-            {
-              "full_explanation": "Complete business explanation synthesizing MegaParse capabilities + visual process flows. Describe business value, user workflows, and functional benefits.",
-              "meta": {
-                "scope": "solution-specific" | "general" | "industry-specific",
-                "type": "capability" | "process" | "feature" | "benefit" | "use-case" | "integration" | "app",
-                "level": "strategic" | "tactical" | "operational",
-                "tags": ["tag1", "tag2"],
-                "slide_role": "title" | "content" | "summary" | "transition" | "agenda",
-                "concept_confidence": 0.1-1.0,
-                "has_visuals": true | false,
-                "visual_type": "process_flow" | "capability_matrix" | "fiori_apps_list" | "table" | "chart" | "screenshot" | null
-              }
-            }
-          ],
-          "facts": [
-            {
-              "subject": "SAP S/4HANA Order-to-Cash",
-              "predicate": "cycle_time_reduction",
-              "object": "30% faster processing",
-              "value": 30,
-              "unit": "%",
-              "value_type": "numeric",
-              "fact_type": "GENERAL",
-              "confidence": 0.85,
-              "valid_from": "2024-01-01",
-              "source_slide_number": {{ slide_index }},
-              "extraction_context": "Business value chart - Process improvement metrics",
-              "source_type": "image"
-            }
-          ],
-          "entities": [
-            {
-              "name": "SAP Fiori My Inbox",
-              "entity_type": "COMPONENT",
-              "description": "Centralized inbox app for approving workflow tasks across all SAP business processes",
-              "confidence": 1.0,
-              "attributes": {
-                "vendor": "SAP",
-                "category": "Fiori App",
-                "lob": ["Cross-functional"]
-              }
-            }
-          ],
-          "relations": [
-            {
-              "source": "Procurement Manager",
-              "target": "SAP Fiori My Inbox",
-              "relation_type": "USES",
-              "description": "Procurement managers use My Inbox to approve purchase requisitions and purchase orders",
-              "confidence": 0.9
-            }
-          ]
+          "concepts": [{"full_explanation": "...", "meta": {...}}],
+          "facts": [{"subject": "...", "predicate": "...", "value": ..., ...}],
+          "entities": [{"name": "...", "entity_type": "...", ...}],
+          "relations": [{"source": "...", "target": "...", "relation_type": "...", ...}]
         }
         ```
 
-        **Business Concept Separation Guidelines (Task 1)**:
-        - Each business capability (description) + its visual representation (process box/icon) = separate chunk
-        - Each Fiori app (details) + its workflow context (screenshot/process position) = separate chunk
-        - Each process step (description) + its visual flow sequence (arrow/lane) = separate chunk
-        - Each industry use case (text) + its business scenario (diagram) = separate chunk
-        - Each capability matrix row + its visual grouping = potential separate chunk
-        - Each business integration + its visual data flow = separate chunk
-
-        **Concept Quality Requirements**:
-        - Minimum 50 words per business concept (or return empty concepts array [] if no substantial content)
-        - Maximum 500 words per business concept
-        - Focus on actionable, business-relevant knowledge
-        - Emphasize business value and outcomes
-        - Preserve capability hierarchies and business relationships
-        - **NEVER make up business capabilities or force concepts where none exist**
-
-        **Extraction Examples**:
-
-        **Example 1 - Fiori Apps List with Business Value**:
-
-        Slide shows: "Fiori Apps for Finance: My Inbox (approval workflows), Payment Run (vendor payments). Reduces approval time by 40%."
-
-        Extract:
-        - **Concepts**: [{"full_explanation": "SAP Fiori apps streamline financial processes through centralized approvals and automated payment execution. My Inbox consolidates all approval tasks, while Payment Run automates vendor payments, collectively reducing approval cycle time by 40%...", ...}]
-        - **Facts**: [
-            {"subject": "SAP Fiori Finance Apps", "predicate": "approval_time_reduction", "value": 40, "unit": "%", "fact_type": "GENERAL", ...}
-          ]
-        - **Entities**: [
-            {"name": "SAP Fiori My Inbox", "entity_type": "COMPONENT", "description": "Centralized approval inbox for financial workflows", ...},
-            {"name": "SAP Fiori Payment Run", "entity_type": "COMPONENT", "description": "Automated vendor payment execution app", ...}
-          ]
-        - **Relations**: [
-            {"source": "SAP Fiori My Inbox", "target": "SAP S/4HANA Finance", "relation_type": "PART_OF", ...},
-            {"source": "SAP Fiori Payment Run", "target": "SAP S/4HANA Finance", "relation_type": "PART_OF", ...}
-          ]
-
-        **Example 2 - Process Flow Diagram**:
-
-        Slide shows process: "Order → Approval (CFO) → Fulfillment → Invoice"
-
-        Extract:
-        - **Concepts**: [{"full_explanation": "Order-to-Cash process flow requiring CFO approval for orders before fulfillment and invoicing. Process ensures financial controls and authorization at order stage...", ...}]
-        - **Facts**: [] (no measurable values)
-        - **Entities**: [
-            {"name": "Order-to-Cash", "entity_type": "COMPONENT", "description": "End-to-end business process from customer order to payment receipt", ...},
-            {"name": "CFO", "entity_type": "PERSON", "description": "Chief Financial Officer role responsible for high-value order approvals", ...}
-          ]
-        - **Relations**: [
-            {"source": "CFO", "target": "Order-to-Cash", "relation_type": "USES", "description": "CFO approves orders within Order-to-Cash process", ...}
-          ]
-
-        **Example 3 - Title/Transition slide**:
-
-        Slide shows: "Section 2: Business Capabilities Overview"
-
-        Extract:
-        - **Concepts**: [] (no business content)
-        - **Facts**: []
-        - **Entities**: []
-        - **Relations**: []
-
-        **IMPORTANT RULES**:
-        - Return `{"concepts": [], "facts": [], "entities": [], "relations": []}` for empty/title/transition slides
-        - Always extract all 4 types when relevant business data is present
-        - Entities and relations work together: relations MUST reference entity names from entities array
-        - Facts are independent from entities (can extract business facts even without entities)
-        - Focus on business value and outcomes, not technical implementation
-
-        Return **only the JSON object**, no extra text, no markdown code blocks.
+        Return **only the JSON object**, no extra text.

@@ -27,7 +27,6 @@ class FSMState(str, Enum):
     EXTRACT = "extract"
     MINE_PATTERNS = "mine_patterns"
     GATE_CHECK = "gate_check"
-    PROMOTE = "promote"
     EXTRACT_RELATIONS = "extract_relations"  # Phase 2 OSMOSE
     FINALIZE = "finalize"
     ERROR = "error"
@@ -39,7 +38,7 @@ class SupervisorAgent(BaseAgent):
     Supervisor Agent - FSM Master.
 
     Pipeline FSM:
-    INIT → BUDGET_CHECK → SEGMENT → EXTRACT → MINE_PATTERNS → GATE_CHECK → PROMOTE → EXTRACT_RELATIONS → FINALIZE → DONE
+    INIT → BUDGET_CHECK → SEGMENT → EXTRACT → MINE_PATTERNS → GATE_CHECK → EXTRACT_RELATIONS → FINALIZE → DONE
 
     Transitions conditionnelles:
     - BUDGET_CHECK fail → ERROR
@@ -47,7 +46,7 @@ class SupervisorAgent(BaseAgent):
     - Any step timeout → ERROR
     - Max steps reached → ERROR
 
-    Phase 2 OSMOSE: EXTRACT_RELATIONS ajoutée après PROMOTE
+    Note: La promotion vers Neo4j est gérée par GatekeeperDelegate dans GATE_CHECK.
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -72,9 +71,8 @@ class SupervisorAgent(BaseAgent):
             FSMState.SEGMENT: [FSMState.EXTRACT, FSMState.ERROR],
             FSMState.EXTRACT: [FSMState.MINE_PATTERNS, FSMState.ERROR],
             FSMState.MINE_PATTERNS: [FSMState.GATE_CHECK, FSMState.ERROR],
-            FSMState.GATE_CHECK: [FSMState.PROMOTE, FSMState.EXTRACT, FSMState.ERROR],  # Retry si fail
-            FSMState.PROMOTE: [FSMState.EXTRACT_RELATIONS, FSMState.ERROR],  # Phase 2
-            FSMState.EXTRACT_RELATIONS: [FSMState.FINALIZE, FSMState.ERROR],  # Phase 2
+            FSMState.GATE_CHECK: [FSMState.EXTRACT_RELATIONS, FSMState.EXTRACT, FSMState.ERROR],  # Retry si fail
+            FSMState.EXTRACT_RELATIONS: [FSMState.FINALIZE, FSMState.ERROR],
             FSMState.FINALIZE: [FSMState.DONE, FSMState.ERROR],
             FSMState.ERROR: [FSMState.DONE],  # Terminaison forcée
             FSMState.DONE: []  # État terminal
@@ -234,7 +232,7 @@ class SupervisorAgent(BaseAgent):
             return FSMState.GATE_CHECK
 
         elif fsm_state == FSMState.GATE_CHECK:
-            # Quality gate check
+            # Quality gate check + promotion vers Neo4j (gérée par GatekeeperDelegate)
             logger.info("[SUPERVISOR] ⏱️ GATE_CHECK: START - Calling GatekeeperDelegate")
             state = await self.gatekeeper.execute(state)
             elapsed = time.time() - step_start
@@ -244,16 +242,8 @@ class SupervisorAgent(BaseAgent):
                 logger.warning(f"[SUPERVISOR] ⏱️ GATE_CHECK: Quality low ({elapsed:.1f}s), retrying with BIG")
                 return FSMState.EXTRACT  # Retry
             else:
-                logger.info(f"[SUPERVISOR] ⏱️ GATE_CHECK: COMPLETE in {elapsed:.1f}s - {len(state.promoted)} concepts promoted")
-                return FSMState.PROMOTE
-
-        elif fsm_state == FSMState.PROMOTE:
-            # Promotion Proto→Published
-            logger.info("[SUPERVISOR] ⏱️ PROMOTE: START - Promoting candidates")
-            # TODO: Appel à Neo4j pour promotion
-            elapsed = time.time() - step_start
-            logger.info(f"[SUPERVISOR] ⏱️ PROMOTE: COMPLETE in {elapsed:.1f}s")
-            return FSMState.EXTRACT_RELATIONS  # Phase 2: Transition vers extraction relations
+                logger.info(f"[SUPERVISOR] ⏱️ GATE_CHECK: COMPLETE in {elapsed:.1f}s - {len(state.promoted)} concepts promoted to Neo4j")
+                return FSMState.EXTRACT_RELATIONS
 
         elif fsm_state == FSMState.EXTRACT_RELATIONS:
             # Phase 2 OSMOSE: Extraction relations entre concepts promus

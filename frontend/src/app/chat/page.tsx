@@ -16,6 +16,9 @@ import {
   Textarea,
   useToast,
   Select,
+  Switch,
+  Tooltip,
+  Badge,
 } from '@chakra-ui/react'
 import { AttachmentIcon, ArrowUpIcon } from '@chakra-ui/icons'
 import { useState, useRef, useEffect } from 'react'
@@ -34,10 +37,14 @@ interface Message {
   searchResult?: SearchResponse // Add search result for assistant messages
 }
 
+type GraphEnrichmentLevel = 'none' | 'light' | 'standard' | 'deep'
+
 export default function ChatPage() {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [selectedSolution, setSelectedSolution] = useState<string>('')
+  const [useGraphContext, setUseGraphContext] = useState<boolean>(true)
+  const [graphEnrichmentLevel, setGraphEnrichmentLevel] = useState<GraphEnrichmentLevel>('standard')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
 
@@ -108,7 +115,14 @@ export default function ChatPage() {
 
   const sendMessageMutation = useMutation({
     mutationFn: (message: string) =>
-      api.chat.send(message, undefined, undefined, selectedSolution || undefined),
+      api.chat.send(
+        message,
+        undefined,
+        undefined,
+        selectedSolution || undefined,
+        useGraphContext,
+        useGraphContext ? graphEnrichmentLevel : undefined
+      ),
     onSuccess: (response) => {
       if (response.success) {
         const searchResult = response.data as SearchResponse
@@ -272,53 +286,113 @@ export default function ChatPage() {
       {/* Input area */}
       <Card w="full">
         <CardBody>
-          <HStack spacing={2} w="full">
-            <IconButton
-              aria-label="Attach file"
-              icon={<AttachmentIcon />}
-              variant="ghost"
-              size="sm"
-              flexShrink={0}
-            />
-            <AutoResizeTextarea
-              value={input}
-              onChange={setInput}
-              onKeyDown={handleKeyPress}
-              placeholder="Type your message here..."
-              flex="1"
-              minW={0}
-              minHeight={40}
-              maxHeight={200}
-            />
-            <IconButton
-              aria-label="Send message"
-              icon={<ArrowUpIcon />}
-              colorScheme="blue"
-              isDisabled={!input.trim() || sendMessageMutation.isPending}
-              isLoading={sendMessageMutation.isPending}
-              onClick={handleSend}
-              flexShrink={0}
-            />
-            <Select
-              placeholder="Toutes les solutions"
-              value={selectedSolution}
-              onChange={(e) => setSelectedSolution(e.target.value)}
-              size="sm"
-              bg="white"
-              isDisabled={solutionsLoading}
-              minW="200px"
-              maxW="250px"
-              flexShrink={0}
-            >
-              {solutionsResponse?.success &&
-                Array.isArray(solutionsResponse.data) &&
-                solutionsResponse.data.map((solution: string) => (
-                  <option key={solution} value={solution}>
-                    {solution}
-                  </option>
-                ))}
-            </Select>
-          </HStack>
+          <VStack spacing={3} w="full">
+            {/* Graph-Guided RAG controls */}
+            <HStack spacing={4} w="full" justify="flex-start" flexWrap="wrap">
+              <Tooltip label="Enrichir les réponses avec le Knowledge Graph" hasArrow>
+                <HStack spacing={2}>
+                  <Switch
+                    id="use-graph"
+                    isChecked={useGraphContext}
+                    onChange={(e) => setUseGraphContext(e.target.checked)}
+                    colorScheme="teal"
+                    size="sm"
+                  />
+                  <Text fontSize="sm" color="gray.600">
+                    🌊 Knowledge Graph
+                  </Text>
+                </HStack>
+              </Tooltip>
+              {useGraphContext && (
+                <HStack spacing={2}>
+                  <Text fontSize="sm" color="gray.500">Niveau:</Text>
+                  <Select
+                    value={graphEnrichmentLevel}
+                    onChange={(e) => setGraphEnrichmentLevel(e.target.value as GraphEnrichmentLevel)}
+                    size="xs"
+                    w="120px"
+                    bg="white"
+                  >
+                    <option value="light">Light (~30ms)</option>
+                    <option value="standard">Standard (~50ms)</option>
+                    <option value="deep">Deep (~200ms)</option>
+                  </Select>
+                  <Tooltip
+                    label={
+                      graphEnrichmentLevel === 'light'
+                        ? 'Concepts liés uniquement'
+                        : graphEnrichmentLevel === 'standard'
+                        ? 'Concepts + Relations transitives'
+                        : 'Concepts + Relations + Clusters + Bridge concepts'
+                    }
+                    hasArrow
+                  >
+                    <Badge
+                      colorScheme={
+                        graphEnrichmentLevel === 'light'
+                          ? 'gray'
+                          : graphEnrichmentLevel === 'standard'
+                          ? 'blue'
+                          : 'purple'
+                      }
+                      fontSize="xs"
+                    >
+                      {graphEnrichmentLevel === 'deep' ? '🚀' : graphEnrichmentLevel === 'standard' ? '⚡' : '💨'}
+                    </Badge>
+                  </Tooltip>
+                </HStack>
+              )}
+            </HStack>
+
+            {/* Message input row */}
+            <HStack spacing={2} w="full">
+              <IconButton
+                aria-label="Attach file"
+                icon={<AttachmentIcon />}
+                variant="ghost"
+                size="sm"
+                flexShrink={0}
+              />
+              <AutoResizeTextarea
+                value={input}
+                onChange={setInput}
+                onKeyDown={handleKeyPress}
+                placeholder="Type your message here..."
+                flex="1"
+                minW={0}
+                minHeight={40}
+                maxHeight={200}
+              />
+              <IconButton
+                aria-label="Send message"
+                icon={<ArrowUpIcon />}
+                colorScheme="blue"
+                isDisabled={!input.trim() || sendMessageMutation.isPending}
+                isLoading={sendMessageMutation.isPending}
+                onClick={handleSend}
+                flexShrink={0}
+              />
+              <Select
+                placeholder="Toutes les solutions"
+                value={selectedSolution}
+                onChange={(e) => setSelectedSolution(e.target.value)}
+                size="sm"
+                bg="white"
+                isDisabled={solutionsLoading}
+                minW="200px"
+                maxW="250px"
+                flexShrink={0}
+              >
+                {solutionsResponse?.success &&
+                  Array.isArray(solutionsResponse.data) &&
+                  solutionsResponse.data.map((solution: string) => (
+                    <option key={solution} value={solution}>
+                      {solution}
+                    </option>
+                  ))}
+              </Select>
+            </HStack>
+          </VStack>
         </CardBody>
       </Card>
     </Flex>

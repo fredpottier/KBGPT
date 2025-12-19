@@ -3,7 +3,13 @@ Router API pour gestion Document Types.
 
 Phase 6 - Document Types Management
 
-Endpoints:
+.. deprecated::
+    Ce router est DEPRECATED. Le système DocumentType est remplacé par le
+    Domain Context global qui s'adapte progressivement aux documents importés.
+    Ces endpoints seront supprimés dans une future version.
+    Utilisez /domain-context à la place pour la configuration du contexte métier.
+
+Endpoints (DEPRECATED):
 - GET /document-types - Liste tous les types
 - POST /document-types - Créer nouveau type (admin)
 - GET /document-types/{id} - Détails type

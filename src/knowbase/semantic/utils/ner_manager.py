@@ -2,11 +2,19 @@
 🌊 OSMOSE Semantic Intelligence V2.1 - NER Multilingue
 
 Gestionnaire Named Entity Recognition multilingue avec spaCy
+
+Phase 1.8 - EntityRuler Integration:
+- Dictionnaires métier préchargés (SAP, Salesforce, Pharma)
+- Améliore precision NER de 70% → 85-90%
+- Alternative pragmatique au fine-tuning
 """
 
 import spacy
+from spacy.pipeline import EntityRuler
 from typing import List, Dict, Optional
 from functools import lru_cache
+from pathlib import Path
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,16 +33,23 @@ class MultilingualNER:
     Phase 1 V2.1 - Semaine 1
     """
 
-    def __init__(self, config):
+    def __init__(self, config, tenant_id: str = "default"):
         """
         Initialise le gestionnaire NER.
 
         Args:
             config: Configuration SemanticConfig avec config.ner
+            tenant_id: ID tenant pour dictionnaires custom (Phase 1.8)
         """
         self.config = config
+        self.tenant_id = tenant_id
         self._models = {}
+        self._entity_ruler_loaded = False
         self._load_models()
+
+        # Phase 1.8: Charger dictionnaires métier si activé
+        if getattr(self.config.ner, 'enable_entity_ruler', True):
+            self._load_entity_ruler_patterns()
 
     def _load_models(self):
         """
@@ -60,6 +75,139 @@ class MultilingualNER:
             logger.error("[OSMOSE] ❌ No NER models loaded! Install at least one model.")
         else:
             logger.info(f"[OSMOSE] Loaded {len(self._models)} NER models: {list(self._models.keys())}")
+
+    # =========================================================================
+    # Phase 1.8 - EntityRuler Integration
+    # =========================================================================
+
+    def _load_entity_ruler_patterns(self):
+        """
+        Charge les dictionnaires métier comme patterns EntityRuler.
+
+        Phase 1.8: Améliore precision NER via dictionnaires prépackagés.
+
+        Charge:
+        1. Dictionnaires globaux (config/ontologies/*.json)
+        2. Dictionnaires custom tenant (config/ontologies/custom/{tenant_id}/*.json)
+        """
+        patterns = []
+
+        # Chemin de base pour les ontologies
+        base_path = Path("config/ontologies")
+
+        # 1. Charger dictionnaires globaux
+        global_ontologies = [
+            "sap_products.json",
+            "salesforce_concepts.json",
+            "pharma_fda_terms.json"
+        ]
+
+        for ontology_file in global_ontologies:
+            ontology_path = base_path / ontology_file
+            if ontology_path.exists():
+                file_patterns = self._load_ontology_file(ontology_path)
+                patterns.extend(file_patterns)
+
+        # 2. Charger dictionnaires custom tenant
+        tenant_path = base_path / "custom" / self.tenant_id
+        if tenant_path.exists():
+            for ontology_file in tenant_path.glob("*.json"):
+                file_patterns = self._load_ontology_file(ontology_file)
+                patterns.extend(file_patterns)
+
+        if not patterns:
+            logger.debug("[NER:EntityRuler] No domain dictionaries found")
+            return
+
+        # 3. Ajouter EntityRuler à chaque modèle chargé
+        for lang, model in self._models.items():
+            try:
+                # Vérifier si EntityRuler existe déjà
+                if "entity_ruler" not in model.pipe_names:
+                    # Créer EntityRuler AVANT le NER natif pour priorité
+                    ruler = model.add_pipe("entity_ruler", before="ner")
+                    ruler.add_patterns(patterns)
+                    logger.info(
+                        f"[NER:EntityRuler] Added {len(patterns)} patterns to {lang} model"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"[NER:EntityRuler] Failed to add EntityRuler to {lang} model: {e}"
+                )
+
+        self._entity_ruler_loaded = True
+        logger.info(
+            f"[NER:EntityRuler] ✅ Loaded {len(patterns)} domain patterns "
+            f"(tenant={self.tenant_id})"
+        )
+
+    def _load_ontology_file(self, file_path: Path) -> List[Dict]:
+        """
+        Charge un fichier ontologie JSON et convertit en patterns EntityRuler.
+
+        Args:
+            file_path: Chemin vers le fichier JSON
+
+        Returns:
+            Liste de patterns EntityRuler
+        """
+        patterns = []
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                entities = json.load(f)
+
+            for entity in entities:
+                name = entity.get("name", "")
+                entity_type = entity.get("type", "CONCEPT")
+                entity_id = entity.get("entity_id", name)
+                aliases = entity.get("aliases", [])
+
+                if not name:
+                    continue
+
+                # Pattern pour le nom principal
+                patterns.append({
+                    "label": entity_type,
+                    "pattern": name,
+                    "id": entity_id
+                })
+
+                # Patterns pour les aliases
+                for alias in aliases:
+                    if alias:
+                        patterns.append({
+                            "label": entity_type,
+                            "pattern": alias,
+                            "id": entity_id
+                        })
+
+            logger.debug(
+                f"[NER:EntityRuler] Loaded {len(patterns)} patterns from {file_path.name}"
+            )
+
+        except json.JSONDecodeError as e:
+            logger.error(f"[NER:EntityRuler] JSON error in {file_path}: {e}")
+        except Exception as e:
+            logger.error(f"[NER:EntityRuler] Error loading {file_path}: {e}")
+
+        return patterns
+
+    def reload_entity_ruler(self, tenant_id: Optional[str] = None):
+        """
+        Recharge les patterns EntityRuler (utile après modification dictionnaires).
+
+        Args:
+            tenant_id: Nouveau tenant_id (optionnel)
+        """
+        if tenant_id:
+            self.tenant_id = tenant_id
+
+        # Réinitialiser les modèles pour enlever l'ancien EntityRuler
+        self._load_models()
+        self._load_entity_ruler_patterns()
+
+        logger.info(f"[NER:EntityRuler] Reloaded patterns for tenant={self.tenant_id}")
 
     def _is_valid_entity(self, entity_text: str) -> bool:
         """

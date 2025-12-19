@@ -19,7 +19,23 @@ def search(
     tenant_id: str = Depends(get_tenant_id),
 ):
     """
-    Recherche sémantique dans la base de connaissances.
+    🌊 **OSMOSE Graph-Guided RAG** - Recherche sémantique enrichie par Knowledge Graph.
+
+    **Fonctionnement:**
+    1. Recherche vectorielle dans Qdrant (chunks documents)
+    2. Reranking pour améliorer la pertinence
+    3. **Enrichissement KG** (si activé):
+       - Extraction des concepts de la question
+       - Récupération des concepts liés dans Neo4j
+       - Relations transitives découvertes
+       - Clusters thématiques (niveau deep)
+    4. Synthèse LLM avec contexte enrichi
+
+    **Niveaux d'enrichissement:**
+    - `none`: RAG classique (pas d'enrichissement KG)
+    - `light`: Concepts liés uniquement (~50ms)
+    - `standard`: Concepts + relations transitives (~100ms)
+    - `deep`: Tout (concepts, transitives, clusters, bridges) (~200ms)
 
     **Sécurité**: Requiert authentification JWT (tous rôles).
     """
@@ -32,6 +48,9 @@ def search(
         embedding_model=embedding_model,
         settings=settings,
         solution=request.solution,
+        tenant_id=tenant_id,
+        use_graph_context=request.use_graph_context,
+        graph_enrichment_level=request.graph_enrichment_level,
     )
 
 

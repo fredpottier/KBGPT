@@ -78,35 +78,30 @@ class ConceptDensityDetector:
     ```
     """
 
-    # Patterns techniques (ISO, RFC, SAP, etc.)
+    # Patterns techniques génériques (domain-agnostic)
+    # Détecte les structures formelles communes à tous les domaines techniques
     TECHNICAL_PATTERNS = [
-        r'\bISO\s+\d{4,5}(?:-\d+)?\b',          # ISO 27001, ISO/IEC 27034-1
-        r'\bRFC\s+\d{3,5}\b',                    # RFC 2616
-        r'\bSAP\s+[A-Z0-9/]+\b',                 # SAP S/4HANA, SAP ECC
-        r'\b[A-Z]{2,}[-/][A-Z0-9]+\b',          # ERP/CRM, CI/CD
-        r'\b[A-Z]{3,}\b(?=\s|$|[,.])',          # SAST, DAST, CVSS (3+ majuscules)
-        r'\bCVE-\d{4}-\d{4,7}\b',               # CVE-2021-12345
-        r'\bCWE-\d{1,4}\b',                      # CWE-79
-        r'\bOWASP\s+Top\s+\d+\b',               # OWASP Top 10
-        r'\b(?:GDPR|SOC\s*2|HIPAA|PCI\s*DSS)\b',  # Standards compliance
+        r'\b[A-Z]{2,}[-/][A-Z0-9]+\b',          # Acronymes composés: ERP/CRM, CI/CD, COVID-19
+        r'\b[A-Z]{3,}\b(?=\s|$|[,.])',          # Acronymes 3+ lettres: SAST, FDA, HANA
+        r'\b[A-Z]+\s+\d{4,}(?:-\d+)?\b',        # Standards avec numéros: ISO 27001, RFC 2616
+        r'\b\d+\.\d+(?:\.\d+)?\b',              # Versions/numéros: 2.0, 3.1.4
+        r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b',     # CamelCase: SuccessFactors, NetWeaver
     ]
 
-    # Mots techniques courants (enrichir au besoin)
+    # Mots génériques indiquant un texte technique (domain-agnostic)
+    # Ces mots sont communs à TOUS les domaines techniques, pas spécifiques à un vertical
     TECHNICAL_KEYWORDS = {
-        # Security
-        "penetration", "vulnerability", "exploit", "malware", "phishing",
-        "authentication", "authorization", "encryption", "cryptography",
-        "firewall", "intrusion", "detection", "prevention", "remediation",
+        # Structure documentaire technique
+        "implementation", "configuration", "integration", "specification",
+        "architecture", "infrastructure", "optimization", "documentation",
 
-        # DevOps/SDLC
-        "deployment", "pipeline", "orchestration", "containerization",
-        "microservices", "kubernetes", "docker", "jenkins", "gitlab",
+        # Processus/Méthodologie générique
+        "methodology", "framework", "compliance", "governance", "workflow",
+        "procedure", "protocol", "standard", "requirement", "specification",
 
-        # SAP Specific
-        "fiori", "hana", "netweaver", "bapi", "idoc", "abap",
-
-        # Standards/Frameworks
-        "compliance", "audit", "governance", "framework", "methodology",
+        # Analyse/Évaluation générique
+        "analysis", "assessment", "evaluation", "validation", "verification",
+        "benchmark", "performance", "metrics", "criteria", "threshold",
     }
 
     def __init__(self, ner_manager=None):
@@ -130,15 +125,21 @@ class ConceptDensityDetector:
         self,
         text: str,
         sample_size: int = 2000,
-        language: str = "en"
+        language: str = "en",
+        technical_density_hint: float = 0.0
     ) -> DensityProfile:
         """
         Analyse la densité conceptuelle d'un texte.
+
+        Phase 1.8.2: Intègre technical_density_hint du LLM (domain-agnostic).
+        Le hint LLM permet d'ajuster la détection pour n'importe quel domaine
+        sans avoir à maintenir des patterns spécifiques par vertical métier.
 
         Args:
             text: Texte à analyser (utilise échantillon début)
             sample_size: Taille échantillon (chars)
             language: Langue du texte
+            technical_density_hint: Hint LLM 0-1 (0=simple, 1=très technique)
 
         Returns:
             DensityProfile avec recommandation méthode extraction
@@ -148,6 +149,20 @@ class ConceptDensityDetector:
 
         if len(sample) < 200:
             # Texte trop court → analyse non fiable, utiliser hybrid
+            # Mais si hint LLM fort, respecter le hint
+            if technical_density_hint >= 0.6:
+                logger.debug("[OSMOSE] Text too short but LLM hint is high, using LLM_FIRST")
+                return DensityProfile(
+                    density_score=technical_density_hint,
+                    recommended_method=ExtractionMethod.LLM_FIRST,
+                    confidence=0.7,
+                    acronym_density=0.0,
+                    technical_pattern_count=0,
+                    rare_vocab_ratio=0.0,
+                    ner_preview_ratio=0.0,
+                    sample_length=len(sample),
+                    indicators={"reason": "text_too_short_but_llm_hint_high", "llm_hint": technical_density_hint}
+                )
             logger.debug("[OSMOSE] Text too short for density analysis, defaulting to HYBRID")
             return DensityProfile(
                 density_score=0.5,
@@ -173,13 +188,25 @@ class ConceptDensityDetector:
         # 4. NER Preview (si NER disponible)
         ner_preview_ratio = self._test_ner_preview(sample, language) if self.ner_manager else 0.0
 
-        # Calcul score densité (pondération des indicateurs)
-        density_score = self._calculate_density_score(
+        # Calcul score densité (pondération des indicateurs heuristiques)
+        heuristic_score = self._calculate_density_score(
             acronym_density=acronym_density,
             technical_pattern_count=technical_pattern_count,
             rare_vocab_ratio=rare_vocab_ratio,
             ner_preview_ratio=ner_preview_ratio
         )
+
+        # Phase 1.8.2: Combiner score heuristique avec hint LLM
+        # Si hint > 0, il a été fourni par le LLM lors de l'analyse document
+        # Pondération: 40% heuristique + 60% LLM hint (le LLM comprend mieux le domaine)
+        if technical_density_hint > 0:
+            density_score = (0.4 * heuristic_score) + (0.6 * technical_density_hint)
+            logger.info(
+                f"[OSMOSE] Density score combined: heuristic={heuristic_score:.2f} + "
+                f"LLM_hint={technical_density_hint:.2f} → final={density_score:.2f}"
+            )
+        else:
+            density_score = heuristic_score
 
         # Recommandation méthode
         recommended_method, confidence = self._recommend_method(density_score)
@@ -198,7 +225,9 @@ class ConceptDensityDetector:
                 "acronym_density": acronym_density,
                 "technical_patterns": technical_pattern_count,
                 "rare_vocab_ratio": rare_vocab_ratio,
-                "ner_preview_ratio": ner_preview_ratio
+                "ner_preview_ratio": ner_preview_ratio,
+                "llm_hint": technical_density_hint,
+                "heuristic_score": heuristic_score
             }
         )
 
@@ -209,7 +238,7 @@ class ConceptDensityDetector:
         logger.debug(
             f"[OSMOSE] Indicators: acronyms={acronym_density:.1f}/100w, "
             f"tech_patterns={technical_pattern_count}, rare_vocab={rare_vocab_ratio:.2f}, "
-            f"ner_preview={ner_preview_ratio:.2f}"
+            f"ner_preview={ner_preview_ratio:.2f}, llm_hint={technical_density_hint:.2f}"
         )
 
         return profile
@@ -351,27 +380,31 @@ class ConceptDensityDetector:
         """
         Recommande méthode extraction basée sur density score.
 
-        Seuils:
-        - 0.0-0.30: NER_ONLY (texte simple)
-        - 0.30-0.55: NER_LLM_HYBRID (standard)
-        - 0.55-1.0: LLM_FIRST (texte dense) ← ABAISSÉ pour docs techniques
+        Seuils (Phase 1.8.2 - Optimisé pour docs techniques/scientifiques):
+        - 0.0-0.25: NER_ONLY (texte très simple, marketing, etc.)
+        - 0.25-0.40: NER_LLM_HYBRID (standard business docs)
+        - 0.40-1.0: LLM_FIRST (texte technique/scientifique) ← ABAISSÉ de 0.55
+
+        Rationale: Les documents techniques (médicaux, scientifiques, SAP) ont
+        souvent une densité > 0.40 et NER spaCy sous-performe sur ce vocabulaire.
+        Mieux vaut aller au LLM directement pour meilleur recall.
 
         Returns:
             (method, confidence)
         """
-        if density_score < 0.30:  # Changed from 0.35
-            # Faible densité → NER efficace
-            confidence = 0.8 + (0.30 - density_score) * 0.5  # Changed from 0.35
+        if density_score < 0.25:  # Abaissé de 0.30
+            # Faible densité → NER efficace (textes simples)
+            confidence = 0.8 + (0.25 - density_score) * 0.6
             return ExtractionMethod.NER_ONLY, confidence
 
-        elif density_score < 0.55:  # Changed from 0.65 - LOWERED for technical docs
+        elif density_score < 0.40:  # Abaissé de 0.55 à 0.40
             # Densité moyenne → Hybrid standard
-            # Confiance plus faible au milieu de la zone
-            distance_from_center = abs(density_score - 0.425)  # Center of 0.30-0.55
+            distance_from_center = abs(density_score - 0.325)  # Center of 0.25-0.40
             confidence = 0.6 + distance_from_center  # 0.6-0.75
             return ExtractionMethod.NER_LLM_HYBRID, confidence
 
         else:
-            # Haute densité → LLM first
-            confidence = 0.7 + (density_score - 0.55) * 0.85  # Changed from 0.65
+            # Haute densité → LLM first (textes techniques/scientifiques)
+            # Seuil abaissé de 0.55 à 0.40 pour capturer plus de textes techniques
+            confidence = 0.75 + (density_score - 0.40) * 0.4
             return ExtractionMethod.LLM_FIRST, confidence

@@ -184,7 +184,7 @@ class Neo4jRelationshipWriter:
         Upsert une relation dans Neo4j.
 
         Logique:
-        1. Vérifier existence concepts source/target
+        1. Résoudre IDs concepts source/target
         2. Si relation existe:
             - Comparer confidence
             - Si nouvelle > ancienne: update
@@ -199,18 +199,21 @@ class Neo4jRelationshipWriter:
         Returns:
             "created", "updated", ou "skipped"
         """
-        # Validation: concepts existent-ils ?
-        if not self._concepts_exist(relation.source_concept, relation.target_concept):
+        # Résoudre les IDs des concepts (peuvent être des noms)
+        resolved_source = self._resolve_concept_id(relation.source_concept)
+        resolved_target = self._resolve_concept_id(relation.target_concept)
+
+        if not resolved_source or not resolved_target:
             logger.warning(
                 f"[OSMOSE:Neo4jRelationshipWriter] Concepts not found: "
                 f"{relation.source_concept} or {relation.target_concept}"
             )
             return "skipped"
 
-        # Vérifier si relation existe déjà
+        # Vérifier si relation existe déjà (avec IDs résolus)
         existing = self._get_existing_relation(
-            source_id=relation.source_concept,
-            target_id=relation.target_concept,
+            source_id=resolved_source,
+            target_id=resolved_target,
             relation_type=relation.relation_type
         )
 
@@ -221,7 +224,7 @@ class Neo4jRelationshipWriter:
 
             if new_confidence > existing_confidence:
                 # Update relation avec nouvelle confidence
-                self._update_relation(relation)
+                self._update_relation_with_ids(relation, resolved_source, resolved_target)
                 logger.debug(
                     f"[OSMOSE:Neo4jRelationshipWriter] Updated {relation.relation_type} "
                     f"(conf: {existing_confidence:.2f} → {new_confidence:.2f})"
@@ -235,8 +238,8 @@ class Neo4jRelationshipWriter:
                 )
                 return "skipped"
         else:
-            # Nouvelle relation, créer
-            self._create_relation(relation)
+            # Nouvelle relation, créer (avec IDs résolus)
+            self._create_relation_with_ids(relation, resolved_source, resolved_target)
             logger.debug(
                 f"[OSMOSE:Neo4jRelationshipWriter] Created {relation.relation_type} "
                 f"{relation.source_concept} → {relation.target_concept} "
@@ -251,32 +254,98 @@ class Neo4jRelationshipWriter:
     ) -> bool:
         """
         Vérifier que concepts source et target existent dans Neo4j.
+        Cherche par canonical_id OU canonical_name (pour compatibilité LLM).
 
         Args:
-            source_id: ID concept source
-            target_id: ID concept target
+            source_id: ID ou nom concept source
+            target_id: ID ou nom concept target
 
         Returns:
             True si les deux existent
         """
-        query = """
-        MATCH (source:CanonicalConcept {canonical_id: $source_id, tenant_id: $tenant_id})
-        MATCH (target:CanonicalConcept {canonical_id: $target_id, tenant_id: $tenant_id})
-        RETURN count(source) as source_count, count(target) as target_count
+        # Résoudre les IDs (peuvent être des noms de concepts)
+        resolved_source = self._resolve_concept_id(source_id)
+        resolved_target = self._resolve_concept_id(target_id)
+
+        return resolved_source is not None and resolved_target is not None
+
+    def _resolve_concept_id(self, concept_ref: str) -> Optional[str]:
         """
+        Résoudre une référence de concept en canonical_id.
 
-        result = self._execute_query(
-            query,
-            source_id=source_id,
-            target_id=target_id,
-            tenant_id=self.tenant_id
-        )
+        Stratégie de matching:
+        1. Si c'est un UUID valide, chercher par canonical_id
+        2. Sinon chercher par canonical_name (exact match, case-insensitive)
+        3. Sinon chercher par surface_form
 
+        Args:
+            concept_ref: ID ou nom du concept
+
+        Returns:
+            canonical_id si trouvé, None sinon
+        """
+        # Cache pour éviter requêtes répétées
+        if not hasattr(self, '_concept_cache'):
+            self._concept_cache = {}
+
+        if concept_ref in self._concept_cache:
+            return self._concept_cache[concept_ref]
+
+        # Stratégie 1: Recherche par canonical_id (si ressemble à UUID)
+        if len(concept_ref) == 36 and '-' in concept_ref:
+            query = """
+            MATCH (c:CanonicalConcept {canonical_id: $ref, tenant_id: $tenant_id})
+            RETURN c.canonical_id as id
+            LIMIT 1
+            """
+            result = self._execute_query(query, ref=concept_ref, tenant_id=self.tenant_id)
+            if result:
+                self._concept_cache[concept_ref] = result[0]["id"]
+                return result[0]["id"]
+
+        # Stratégie 2: Recherche par canonical_name (case-insensitive)
+        query = """
+        MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+        WHERE toLower(c.canonical_name) = toLower($ref)
+        RETURN c.canonical_id as id
+        LIMIT 1
+        """
+        result = self._execute_query(query, ref=concept_ref, tenant_id=self.tenant_id)
         if result:
-            record = result[0]
-            return record["source_count"] > 0 and record["target_count"] > 0
+            self._concept_cache[concept_ref] = result[0]["id"]
+            return result[0]["id"]
 
-        return False
+        # Stratégie 3: Recherche par surface_form
+        query = """
+        MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+        WHERE toLower(c.surface_form) = toLower($ref)
+        RETURN c.canonical_id as id
+        LIMIT 1
+        """
+        result = self._execute_query(query, ref=concept_ref, tenant_id=self.tenant_id)
+        if result:
+            self._concept_cache[concept_ref] = result[0]["id"]
+            return result[0]["id"]
+
+        # Stratégie 4: Recherche fuzzy (contient le terme)
+        query = """
+        MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+        WHERE toLower(c.canonical_name) CONTAINS toLower($ref)
+           OR toLower($ref) CONTAINS toLower(c.canonical_name)
+        RETURN c.canonical_id as id, c.canonical_name as name
+        LIMIT 1
+        """
+        result = self._execute_query(query, ref=concept_ref, tenant_id=self.tenant_id)
+        if result:
+            self._concept_cache[concept_ref] = result[0]["id"]
+            logger.debug(
+                f"[OSMOSE:Neo4jRelationshipWriter] Fuzzy matched '{concept_ref}' → '{result[0]['name']}'"
+            )
+            return result[0]["id"]
+
+        # Pas trouvé
+        self._concept_cache[concept_ref] = None
+        return None
 
     def _get_existing_relation(
         self,
@@ -317,15 +386,19 @@ class Neo4jRelationshipWriter:
 
         return None
 
-    def _create_relation(
+    def _create_relation_with_ids(
         self,
-        relation: TypedRelation
+        relation: TypedRelation,
+        source_id: str,
+        target_id: str
     ) -> None:
         """
-        Créer nouvelle relation dans Neo4j.
+        Créer nouvelle relation dans Neo4j avec IDs résolus.
 
         Args:
             relation: Relation à créer
+            source_id: canonical_id résolu du concept source
+            target_id: canonical_id résolu du concept target
         """
         rel_type_str = relation.relation_type.value if hasattr(relation.relation_type, 'value') else relation.relation_type
 
@@ -343,21 +416,25 @@ class Neo4jRelationshipWriter:
 
         self._execute_query(
             query,
-            source_id=relation.source_concept,
-            target_id=relation.target_concept,
+            source_id=source_id,
+            target_id=target_id,
             tenant_id=self.tenant_id,
             metadata=metadata
         )
 
-    def _update_relation(
+    def _update_relation_with_ids(
         self,
-        relation: TypedRelation
+        relation: TypedRelation,
+        source_id: str,
+        target_id: str
     ) -> None:
         """
-        Mettre à jour relation existante.
+        Mettre à jour relation existante avec IDs résolus.
 
         Args:
             relation: Relation avec nouvelles valeurs
+            source_id: canonical_id résolu du concept source
+            target_id: canonical_id résolu du concept target
         """
         rel_type_str = relation.relation_type.value if hasattr(relation.relation_type, 'value') else relation.relation_type
 
@@ -375,8 +452,8 @@ class Neo4jRelationshipWriter:
 
         self._execute_query(
             query,
-            source_id=relation.source_concept,
-            target_id=relation.target_concept,
+            source_id=source_id,
+            target_id=target_id,
             tenant_id=self.tenant_id,
             metadata=metadata
         )

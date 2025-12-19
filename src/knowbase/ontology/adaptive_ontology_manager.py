@@ -5,15 +5,69 @@ Gère le cache d'ontologie auto-apprenant dans Neo4j.
 
 Phase 1.6+ : Zero-Config Intelligence - L'ontologie s'apprend automatiquement
 lors de l'ingestion de documents.
+
+Phase 1.8.2: Gatekeeper Prefetch Ontology - Préchargement intelligent par type
+de document pour améliorer le cache hit rate (50% → 70%).
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
 from datetime import datetime
 import logging
 import re
 import asyncio
+import time
 
 logger = logging.getLogger(__name__)
+
+
+# =========================================================================
+# Phase 1.8.2 - Document Type → Domain Mapping
+# =========================================================================
+
+DOCUMENT_TYPE_DOMAIN_MAPPING: Dict[str, List[str]] = {
+    # Documents techniques SAP
+    "sap_technical": ["SAP", "ERP", "Cloud", "Integration"],
+    "sap_functional": ["SAP", "Business Process", "Finance", "HR"],
+    "sap_presentation": ["SAP", "Product", "Solution"],
+
+    # Documents commerciaux
+    "rfp": ["Business", "Requirements", "Compliance"],
+    "proposal": ["Solution", "Services", "Implementation"],
+    "contract": ["Legal", "Commercial", "SLA"],
+
+    # Documents pharma/réglementaires
+    "pharma_regulatory": ["FDA", "Pharma", "Regulatory", "Compliance"],
+    "pharma_clinical": ["Clinical", "Trial", "Safety", "Pharma"],
+    "pharma_quality": ["Quality", "GxP", "Validation", "Pharma"],
+
+    # Documents CRM/Salesforce
+    "crm_documentation": ["CRM", "Salesforce", "Sales", "Marketing"],
+    "crm_integration": ["CRM", "Integration", "API", "Data"],
+
+    # Documents génériques
+    "technical_specification": ["Technical", "Architecture", "API"],
+    "user_guide": ["User", "Guide", "Tutorial"],
+    "presentation": ["Overview", "Summary", "Presentation"],
+
+    # Fallback
+    "default": ["Business", "Technical", "General"]
+}
+
+
+def get_domains_for_document_type(document_type: str) -> List[str]:
+    """
+    Retourne les domaines associés à un type de document.
+
+    Args:
+        document_type: Type de document (ex: "pharma_regulatory")
+
+    Returns:
+        Liste des domaines pertinents
+    """
+    return DOCUMENT_TYPE_DOMAIN_MAPPING.get(
+        document_type,
+        DOCUMENT_TYPE_DOMAIN_MAPPING["default"]
+    )
 
 
 # Validation et sanitization (P0 - Security hardening)
@@ -694,3 +748,320 @@ class AdaptiveOntologyManager:
         except Exception as e:
             logger.error(f"[AdaptiveOntology:Stats] Error getting stats: {e}")
             return {"total_entries": 0, "error": str(e)}
+
+    # =========================================================================
+    # Phase 1.8.2 - Gatekeeper Prefetch Ontology
+    # =========================================================================
+
+    def prefetch_for_document_type(
+        self,
+        document_type: str,
+        tenant_id: str,
+        ttl_seconds: int = 3600,
+        max_entries: int = 500
+    ) -> int:
+        """
+        Précharge les entrées ontologie pertinentes pour un type de document.
+
+        Phase 1.8.2: Améliore cache hit rate de 50% → 70% en préchargeant
+        les concepts par domaine avant l'extraction.
+
+        Args:
+            document_type: Type de document (ex: "pharma_regulatory", "sap_technical")
+            tenant_id: ID tenant
+            ttl_seconds: Durée de vie cache en secondes (défaut 1h)
+            max_entries: Nombre max d'entrées à précharger par domaine
+
+        Returns:
+            Nombre d'entrées préchargées
+
+        Example:
+            >>> count = manager.prefetch_for_document_type("pharma_regulatory", "default")
+            >>> print(f"Préchargé {count} entrées ontologie")
+        """
+        if not self.neo4j.is_connected():
+            logger.warning("[AdaptiveOntology:Prefetch] Neo4j not connected")
+            return 0
+
+        # P2: Validation tenant_id
+        try:
+            tenant_id = _validate_tenant_id(tenant_id)
+        except ValueError as e:
+            logger.error(f"[AdaptiveOntology:Prefetch] Validation error: {e}")
+            return 0
+
+        # Obtenir les domaines pertinents pour ce type de document
+        domains = get_domains_for_document_type(document_type)
+
+        if not domains:
+            logger.debug(f"[AdaptiveOntology:Prefetch] No domains for type '{document_type}'")
+            return 0
+
+        # Clé cache Redis pour le prefetch
+        cache_key = f"ontology_prefetch:{tenant_id}:{document_type}"
+
+        # Vérifier si déjà en cache (éviter requêtes répétées)
+        if self.redis:
+            try:
+                cached = self.redis.get(cache_key)
+                if cached:
+                    logger.debug(
+                        f"[AdaptiveOntology:Prefetch] Cache HIT for '{document_type}' "
+                        f"(tenant={tenant_id})"
+                    )
+                    return int(cached)
+            except Exception as e:
+                logger.warning(f"[AdaptiveOntology:Prefetch] Redis get error: {e}")
+
+        # Requête Neo4j pour récupérer les entrées par domaines
+        query = """
+        MATCH (o:AdaptiveOntology)
+        WHERE o.tenant_id = $tenant_id
+          AND o.domain IN $domains
+          AND o.confidence >= 0.7
+        RETURN o.canonical_name AS canonical_name,
+               o.aliases AS aliases,
+               o.concept_type AS concept_type,
+               o.domain AS domain,
+               o.confidence AS confidence,
+               o.usage_count AS usage_count
+        ORDER BY o.usage_count DESC
+        LIMIT $max_entries
+        """
+
+        start_time = time.time()
+        prefetched_count = 0
+
+        try:
+            with self.neo4j.driver.session(database=self.neo4j.database) as session:
+                result = session.run(
+                    query,
+                    tenant_id=tenant_id,
+                    domains=domains,
+                    max_entries=max_entries
+                )
+
+                # Stocker les entrées préchargées dans le cache local
+                prefetched_entries = []
+                for record in result:
+                    entry = {
+                        "canonical_name": record["canonical_name"],
+                        "aliases": record["aliases"] or [],
+                        "concept_type": record["concept_type"],
+                        "domain": record["domain"],
+                        "confidence": record["confidence"],
+                        "usage_count": record["usage_count"]
+                    }
+                    prefetched_entries.append(entry)
+                    prefetched_count += 1
+
+                # Stocker dans Redis si disponible
+                if self.redis and prefetched_entries:
+                    try:
+                        import json
+                        self.redis.setex(
+                            cache_key,
+                            ttl_seconds,
+                            str(prefetched_count)
+                        )
+                        # Stocker aussi les données préchargées
+                        data_key = f"{cache_key}:data"
+                        self.redis.setex(
+                            data_key,
+                            ttl_seconds,
+                            json.dumps(prefetched_entries)
+                        )
+                    except Exception as e:
+                        logger.warning(f"[AdaptiveOntology:Prefetch] Redis set error: {e}")
+
+            elapsed = (time.time() - start_time) * 1000
+
+            logger.info(
+                f"[AdaptiveOntology:Prefetch] ✅ Préchargé {prefetched_count} entrées "
+                f"pour type='{document_type}' domains={domains} "
+                f"(tenant={tenant_id}, {elapsed:.1f}ms)"
+            )
+
+            return prefetched_count
+
+        except Exception as e:
+            logger.error(f"[AdaptiveOntology:Prefetch] Error: {e}")
+            return 0
+
+    def get_prefetched_entries(
+        self,
+        document_type: str,
+        tenant_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Récupère les entrées ontologie préchargées depuis le cache.
+
+        Args:
+            document_type: Type de document
+            tenant_id: ID tenant
+
+        Returns:
+            Liste des entrées préchargées (vide si pas en cache)
+        """
+        if not self.redis:
+            logger.debug("[AdaptiveOntology:GetPrefetched] Redis not available")
+            return []
+
+        cache_key = f"ontology_prefetch:{tenant_id}:{document_type}:data"
+
+        try:
+            import json
+            cached_data = self.redis.get(cache_key)
+            if cached_data:
+                entries = json.loads(cached_data)
+                logger.debug(
+                    f"[AdaptiveOntology:GetPrefetched] Retrieved {len(entries)} entries "
+                    f"from cache for type='{document_type}'"
+                )
+                return entries
+        except Exception as e:
+            logger.warning(f"[AdaptiveOntology:GetPrefetched] Error: {e}")
+
+        return []
+
+    def lookup_in_prefetch(
+        self,
+        raw_name: str,
+        document_type: str,
+        tenant_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Cherche d'abord dans le cache prefetch avant Neo4j.
+
+        Optimisation Phase 1.8.2: Réduit les requêtes Neo4j en utilisant
+        le cache prefetch local.
+
+        Args:
+            raw_name: Nom brut à chercher
+            document_type: Type de document (pour clé cache)
+            tenant_id: ID tenant
+
+        Returns:
+            Dict avec canonical_name, etc. ou None si non trouvé
+        """
+        # Normaliser pour comparaison
+        normalized_raw = raw_name.strip().lower()
+
+        # 1. Chercher dans le cache prefetch
+        prefetched = self.get_prefetched_entries(document_type, tenant_id)
+
+        for entry in prefetched:
+            # Vérifier canonical_name
+            if entry["canonical_name"].lower() == normalized_raw:
+                logger.debug(
+                    f"[AdaptiveOntology:LookupPrefetch] ✅ PREFETCH HIT "
+                    f"'{raw_name}' → '{entry['canonical_name']}'"
+                )
+                return entry
+
+            # Vérifier aliases
+            for alias in entry.get("aliases", []):
+                if alias.lower() == normalized_raw:
+                    logger.debug(
+                        f"[AdaptiveOntology:LookupPrefetch] ✅ PREFETCH HIT (alias) "
+                        f"'{raw_name}' → '{entry['canonical_name']}'"
+                    )
+                    return entry
+
+        # 2. Fallback sur lookup Neo4j standard
+        logger.debug(
+            f"[AdaptiveOntology:LookupPrefetch] Prefetch MISS for '{raw_name}', "
+            f"falling back to Neo4j"
+        )
+        return self.lookup(raw_name, tenant_id)
+
+    def invalidate_prefetch_cache(
+        self,
+        document_type: str,
+        tenant_id: str
+    ) -> bool:
+        """
+        Invalide le cache prefetch pour un type de document.
+
+        Utile après modification de l'ontologie.
+
+        Args:
+            document_type: Type de document
+            tenant_id: ID tenant
+
+        Returns:
+            True si invalidé, False sinon
+        """
+        if not self.redis:
+            return False
+
+        cache_key = f"ontology_prefetch:{tenant_id}:{document_type}"
+        data_key = f"{cache_key}:data"
+
+        try:
+            self.redis.delete(cache_key, data_key)
+            logger.info(
+                f"[AdaptiveOntology:InvalidatePrefetch] Cache invalidated "
+                f"for type='{document_type}' (tenant={tenant_id})"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"[AdaptiveOntology:InvalidatePrefetch] Error: {e}")
+            return False
+
+    def get_prefetch_stats(self, tenant_id: str) -> Dict[str, Any]:
+        """
+        Retourne statistiques du cache prefetch.
+
+        Args:
+            tenant_id: ID tenant
+
+        Returns:
+            Dict avec stats prefetch (cached_types, total_entries, etc.)
+        """
+        if not self.redis:
+            return {"error": "Redis not available"}
+
+        stats = {
+            "cached_types": [],
+            "total_cached_entries": 0
+        }
+
+        try:
+            # Scanner les clés prefetch pour ce tenant
+            pattern = f"ontology_prefetch:{tenant_id}:*:data"
+            cursor = 0
+            keys = []
+
+            # Utiliser SCAN pour éviter KEYS sur grande DB
+            while True:
+                cursor, partial_keys = self.redis.scan(
+                    cursor=cursor,
+                    match=pattern,
+                    count=100
+                )
+                keys.extend(partial_keys)
+                if cursor == 0:
+                    break
+
+            for key in keys:
+                # Extraire document_type de la clé
+                parts = key.split(":")
+                if len(parts) >= 4:
+                    doc_type = parts[2]
+                    # Compter les entrées
+                    import json
+                    data = self.redis.get(key)
+                    if data:
+                        entries = json.loads(data)
+                        stats["cached_types"].append({
+                            "document_type": doc_type,
+                            "entries_count": len(entries)
+                        })
+                        stats["total_cached_entries"] += len(entries)
+
+        except Exception as e:
+            logger.error(f"[AdaptiveOntology:PrefetchStats] Error: {e}")
+            stats["error"] = str(e)
+
+        return stats

@@ -13,12 +13,16 @@ Author: OSMOSE Phase 1.5
 Date: 2025-10-15
 """
 
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import asyncio
+import hashlib
 import logging
 import os
+import re
 from datetime import datetime
+from functools import lru_cache
 
 from knowbase.agents.supervisor.supervisor import SupervisorAgent
 from knowbase.agents.base import AgentState
@@ -30,6 +34,8 @@ from knowbase.semantic.segmentation.topic_segmenter import get_topic_segmenter
 from knowbase.semantic.config import get_semantic_config
 from knowbase.ingestion.text_chunker import get_text_chunker  # Phase 1.6: Chunking
 from knowbase.common.clients.qdrant_client import upsert_chunks  # Phase 1.6: Qdrant
+from knowbase.common.llm_router import LLMRouter, TaskType  # Phase 1.8: Document Context
+from knowbase.ontology.domain_context_injector import get_domain_context_injector  # Domain Context injection
 
 # Configuration du root logger pour que tous les loggers enfants (agents) héritent des handlers
 # IMPORTANT: Récupérer les handlers du logger parent (pptx_pipeline) pour les copier au root logger
@@ -62,6 +68,10 @@ if not parent_handlers_found and not root_logger.hasHandlers():
 root_logger.setLevel(logging.INFO)
 
 logger = logging.getLogger(__name__)
+
+# Cache global pour les résumés de documents (Phase 1.8)
+# Clé: hash(document_id), Valeur: résumé généré
+_document_context_cache: Dict[str, str] = {}
 
 
 class OsmoseAgentiqueService:
@@ -97,6 +107,7 @@ class OsmoseAgentiqueService:
         self.supervisor: Optional[SupervisorAgent] = None
         self.topic_segmenter = None  # Lazy init
         self.text_chunker = None  # Lazy init (Phase 1.6)
+        self.llm_router = None  # Lazy init (Phase 1.8: Document Context)
 
         logger.info(
             f"[OSMOSE AGENTIQUE] Service initialized - OSMOSE enabled: {self.config.enable_osmose}"
@@ -130,6 +141,233 @@ class OsmoseAgentiqueService:
             logger.info("[OSMOSE AGENTIQUE] TextChunker initialized (512 tokens, overlap 128)")
 
         return self.text_chunker
+
+    def _get_llm_router(self) -> LLMRouter:
+        """Lazy init du LLMRouter (Phase 1.8)."""
+        if self.llm_router is None:
+            self.llm_router = LLMRouter()
+            logger.info("[OSMOSE AGENTIQUE] LLMRouter initialized (Phase 1.8)")
+
+        return self.llm_router
+
+    def _extract_document_metadata(self, full_text: str) -> Dict[str, Any]:
+        """
+        Extrait métadonnées basiques du document sans LLM.
+
+        Phase 1.8: Extraction heuristique titre, headers, mots-clés.
+
+        Args:
+            full_text: Texte complet du document
+
+        Returns:
+            Dict avec title, headers, keywords
+        """
+        metadata: Dict[str, Any] = {
+            "title": None,
+            "headers": [],
+            "keywords": []
+        }
+
+        lines = full_text.split("\n")
+        non_empty_lines = [l.strip() for l in lines if l.strip()]
+
+        # Heuristique titre: première ligne non-vide courte (<100 chars)
+        if non_empty_lines:
+            first_line = non_empty_lines[0]
+            if len(first_line) < 100:
+                metadata["title"] = first_line
+
+        # Extraction headers via patterns (# Header, HEADER:, Header majuscule isolé)
+        header_patterns = [
+            r'^#{1,3}\s+(.+)$',  # Markdown headers
+            r'^([A-Z][A-Z0-9\s]{2,50}):?\s*$',  # UPPERCASE headers
+            r'^(\d+\.?\s+[A-Z].{5,80})$',  # Numbered headers
+        ]
+
+        for line in non_empty_lines[:50]:  # Limiter aux 50 premières lignes
+            for pattern in header_patterns:
+                match = re.match(pattern, line)
+                if match:
+                    header = match.group(1).strip()
+                    if header and len(header) < 100 and header not in metadata["headers"]:
+                        metadata["headers"].append(header)
+                        if len(metadata["headers"]) >= 10:
+                            break
+            if len(metadata["headers"]) >= 10:
+                break
+
+        # Extraction mots-clés: termes SAP fréquents + noms propres capitalisés
+        sap_keywords = set()
+
+        # Pattern SAP: "SAP X", "S/4HANA", "BTP", etc.
+        sap_pattern = r'\b(SAP\s+\w+(?:\s+\w+)?|S/4HANA(?:\s+Cloud)?|BTP|Fiori|HANA|SuccessFactors|Ariba|Concur)\b'
+        for match in re.finditer(sap_pattern, full_text, re.IGNORECASE):
+            term = match.group(1)
+            if term:
+                sap_keywords.add(term)
+
+        # Pattern noms propres: mots capitalisés répétés
+        proper_nouns = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', full_text)
+        noun_counts = Counter(proper_nouns)
+
+        # Garder les plus fréquents (>2 occurrences)
+        for noun, count in noun_counts.most_common(20):
+            if count > 2 and noun not in ["The", "This", "That", "These", "What", "How", "Where"]:
+                sap_keywords.add(noun)
+
+        metadata["keywords"] = list(sap_keywords)[:15]
+
+        return metadata
+
+    async def _generate_document_summary(
+        self,
+        document_id: str,
+        full_text: str,
+        max_length: int = 500
+    ) -> tuple[str, float]:
+        """
+        Génère un résumé contextuel du document ET évalue sa densité technique.
+
+        Phase 1.8 Task T1.8.1.0: Document Context Global.
+        Phase 1.8.2: Ajout technical_density_hint pour stratégie extraction domain-agnostic.
+
+        Ce résumé est utilisé pour:
+        - Désambiguïser les acronymes/abréviations
+        - Préférer les noms complets officiels
+        - Contexte domaine pour meilleure extraction
+
+        Le technical_density_hint (0.0-1.0) indique si le document contient
+        du vocabulaire technique spécialisé nécessitant une extraction LLM.
+
+        Args:
+            document_id: ID unique pour cache
+            full_text: Texte complet du document
+            max_length: Longueur max du résumé (caractères)
+
+        Returns:
+            Tuple (résumé contextuel, technical_density_hint 0.0-1.0)
+        """
+        # Vérifier cache global (inclut maintenant le hint)
+        cache_key = hashlib.md5(document_id.encode()).hexdigest()
+
+        if cache_key in _document_context_cache:
+            cached = _document_context_cache[cache_key]
+            # Support ancien format (string) et nouveau format (tuple)
+            if isinstance(cached, tuple):
+                logger.info(f"[PHASE1.8:Context] Cache hit for document {document_id[:20]}...")
+                return cached
+            else:
+                # Ancien format: retourner avec hint par défaut
+                return (cached, 0.5)
+
+        logger.info(f"[PHASE1.8:Context] Generating document context for {document_id[:20]}...")
+
+        # Extraction métadonnées sans LLM
+        metadata = self._extract_document_metadata(full_text)
+
+        # Construire prompt pour LLM
+        # Limiter texte envoyé au LLM (premiers 4000 chars + derniers 1000)
+        text_sample = full_text[:4000]
+        if len(full_text) > 5000:
+            text_sample += "\n[...]\n" + full_text[-1000:]
+
+        # Prompt générique (domain-agnostic) avec évaluation densité technique
+        system_prompt = """You are a document analyst. Your task is to:
+1. Generate a concise document summary (1-2 paragraphs, max 500 characters)
+2. Evaluate the technical density of the document
+
+For the summary, focus on:
+- Main theme/topic of the document
+- Full official names of products, solutions, or key terms mentioned
+- Industry or domain context
+- Target audience
+
+For technical density evaluation (0.0-1.0):
+- 0.0-0.3: Simple text (marketing, general communication, basic explanations)
+- 0.3-0.5: Moderate technical content (business documents, standard procedures)
+- 0.5-0.7: Technical content (specialized domain vocabulary, acronyms, jargon)
+- 0.7-1.0: Highly technical (scientific papers, technical specifications, dense terminology)
+
+Answer in JSON format:
+{"summary": "your summary here", "technical_density": 0.X}
+
+Write the summary in the same language as the document."""
+
+        # Injection du Domain Context si disponible
+        try:
+            injector = get_domain_context_injector()
+            system_prompt = injector.inject_context(system_prompt, tenant_id="default")
+            logger.info("[PHASE1.8:Context] Domain Context injected into summary prompt")
+        except Exception as e:
+            logger.debug(f"[PHASE1.8:Context] No Domain Context available: {e}")
+
+        user_prompt = f"""Document metadata:
+- Title: {metadata.get('title', 'Unknown')}
+- Headers: {', '.join(metadata.get('headers', [])[:5])}
+- Keywords detected: {', '.join(metadata.get('keywords', [])[:10])}
+
+Document text sample:
+{text_sample}
+
+Analyze this document and provide JSON response:"""
+
+        try:
+            llm_router = self._get_llm_router()
+
+            # Utiliser LONG_TEXT_SUMMARY pour ce type de tâche
+            response = await llm_router.acomplete(
+                task_type=TaskType.LONG_TEXT_SUMMARY,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=400
+            )
+
+            # Parser la réponse JSON
+            import json
+            technical_density = 0.5  # Défaut
+            summary = response
+
+            try:
+                # Chercher JSON dans la réponse
+                json_match = re.search(r'\{[^}]+\}', response, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group(0))
+                    summary = data.get("summary", response)
+                    technical_density = float(data.get("technical_density", 0.5))
+                    # Clamp entre 0 et 1
+                    technical_density = max(0.0, min(1.0, technical_density))
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"[PHASE1.8:Context] Failed to parse JSON response: {e}")
+                # Garder le response brut comme summary
+
+            # Tronquer si trop long
+            if len(summary) > max_length:
+                summary = summary[:max_length-3] + "..."
+
+            # Stocker en cache (nouveau format tuple)
+            _document_context_cache[cache_key] = (summary, technical_density)
+
+            logger.info(
+                f"[PHASE1.8:Context] Generated context ({len(summary)} chars, "
+                f"technical_density={technical_density:.2f}) for document {document_id[:20]}..."
+            )
+
+            return (summary, technical_density)
+
+        except Exception as e:
+            logger.warning(f"[PHASE1.8:Context] Failed to generate summary: {e}")
+
+            # Fallback: construire contexte minimal depuis métadonnées
+            fallback = f"Document: {metadata.get('title', 'Unknown')}. "
+            if metadata.get('keywords'):
+                fallback += f"Topics: {', '.join(metadata['keywords'][:5])}."
+
+            # Fallback hint: 0.5 (neutre)
+            _document_context_cache[cache_key] = (fallback, 0.5)
+            return (fallback, 0.5)
 
     def _cross_reference_chunks_and_concepts(
         self,
@@ -430,14 +668,30 @@ class OsmoseAgentiqueService:
                 full_text=text_content  # Stocker texte complet pour filtrage contextuel
             )
 
-            # Stocker métadonnées document dans state (custom fields)
-            # Note: AgentState devra être étendu pour supporter ces champs
-            # Pour l'instant, on les log uniquement
             logger.info(
                 f"[OSMOSE AGENTIQUE] AgentState created: "
                 f"doc={document_id}, tenant={tenant}, "
                 f"budgets={initial_state.budget_remaining}"
             )
+
+            # Phase 1.8: Générer document_context pour désambiguïsation concepts
+            # Phase 1.8.2: Récupérer aussi technical_density_hint (domain-agnostic)
+            try:
+                document_context, technical_density_hint = await self._generate_document_summary(
+                    document_id=document_id,
+                    full_text=text_content,
+                    max_length=500
+                )
+                initial_state.document_context = document_context
+                initial_state.technical_density_hint = technical_density_hint
+                logger.info(
+                    f"[PHASE1.8:Context] Document context generated ({len(document_context)} chars, "
+                    f"technical_density={technical_density_hint:.2f})"
+                )
+            except Exception as e:
+                logger.warning(f"[PHASE1.8:Context] Failed to generate context: {e}")
+                # Non-bloquant: continuer sans contexte, hint par défaut 0.5
+                initial_state.technical_density_hint = 0.5
 
             # Étape 2: Segmentation sémantique avec TopicSegmenter
             segmenter = self._get_topic_segmenter()
@@ -653,10 +907,14 @@ class OsmoseAgentiqueService:
                     record_canonical = result_canonical.single()
                     canonical_count = record_canonical["cnt"] if record_canonical else 0
 
-                # Compter relations dans Neo4j
+                # Compter relations dans Neo4j (entre concepts du tenant)
                 with neo4j_client.driver.session(database="neo4j") as session:
                     result_rels = session.run(
-                        "MATCH ()-[r]->() WHERE r.tenant_id = $tenant_id RETURN count(r) as cnt",
+                        """
+                        MATCH (a:CanonicalConcept)-[r]->(b:CanonicalConcept)
+                        WHERE a.tenant_id = $tenant_id AND b.tenant_id = $tenant_id
+                        RETURN count(r) as cnt
+                        """,
                         tenant_id=tenant_id
                     )
                     record_rels = result_rels.single()

@@ -298,8 +298,10 @@ class LLMRelationExtractor:
                 if distance > self.co_occurrence_window:
                     break  # Trop loin, passer à mention suivante
 
-                # Vérifier que ce sont des concepts différents
-                if mention_a["concept"]["concept_id"] != mention_b["concept"]["concept_id"]:
+                # Vérifier que ce sont des concepts différents (utiliser canonical_name, concept_id peut être None)
+                name_a = mention_a["concept"].get("canonical_name", "").lower()
+                name_b = mention_b["concept"].get("canonical_name", "").lower()
+                if name_a and name_b and name_a != name_b:
                     # Extraire contexte
                     context_start = max(0, mention_a["position"] - 20)
                     context_end = min(len(full_text), mention_b["position"] + mention_b["length"] + 20)
@@ -312,10 +314,15 @@ class LLMRelationExtractor:
                     ))
 
         # Déduplication (même paire peut apparaître plusieurs fois)
+        # Utiliser canonical_name comme clé (concept_id peut être None si pas encore stocké en Neo4j)
         unique_pairs = []
         seen = set()
         for concept_a, concept_b, context in pairs:
-            pair_key = tuple(sorted([concept_a["concept_id"], concept_b["concept_id"]]))
+            name_a = concept_a.get("canonical_name", "")
+            name_b = concept_b.get("canonical_name", "")
+            if not name_a or not name_b:
+                continue
+            pair_key = tuple(sorted([name_a.lower(), name_b.lower()]))
             if pair_key not in seen:
                 seen.add(pair_key)
                 unique_pairs.append((concept_a, concept_b, context))
@@ -374,10 +381,11 @@ class LLMRelationExtractor:
         chunk_text = chunk_data["text"]
         chunk_concepts = chunk_data["concepts"]
 
-        # Formater concepts pour prompt
+        # Formater concepts pour prompt (utiliser canonical_name comme identifiant principal)
         concepts_list = "\n".join([
-            f"- {c['concept_id']}: {c['canonical_name']} ({c.get('concept_type', 'UNKNOWN')})"
+            f"- {c.get('canonical_name', 'UNKNOWN')} ({c.get('concept_type', 'UNKNOWN')})"
             for c in chunk_concepts
+            if c.get('canonical_name')  # Skip concepts sans nom
         ])
 
         # Construire prompt

@@ -1,7 +1,18 @@
 """
-🌊 OSMOSE Semantic Intelligence V2.1 - Topic Segmenter
+🌊 OSMOSE Semantic Intelligence V2.3.1 - Topic Segmenter
 
-Segmentation sémantique de documents en topics cohérents
+Segmentation hiérarchique de documents en topics cohérents.
+
+V2.3.1: Garantie Minimum Topics (Document-Level)
+- Document-level: Garantit min(5, doc_size/5000) topics via Agglomerative fallback
+- Résout le problème HDBSCAN qui ne trouvait que 2 clusters sur docs complexes
+- Améliore significativement l'extraction de concepts (+150% Proto/Canonical)
+
+V2.3: Segmentation Hiérarchique Adaptative
+- Petits documents (< 50K chars): Document-level clustering adaptatif
+- Gros documents (>= 50K chars): Macro-sections → HDBSCAN par section
+
+Phase 1 V2.3.1 - Guaranteed Minimum Topics
 """
 
 from typing import List, Dict, Optional
@@ -26,20 +37,32 @@ from ..utils.language_detector import get_language_detector
 
 logger = logging.getLogger(__name__)
 
+# Seuil pour basculer vers segmentation hiérarchique
+HIERARCHICAL_THRESHOLD_CHARS = 50000  # ~10-15 pages
+
 
 class TopicSegmenter:
     """
     Segmente documents en topics sémantiquement cohérents.
 
-    Pipeline:
-    1. Structural segmentation (headers H1-H3)
-    2. Semantic windowing (3000 chars, 25% overlap)
-    3. Embeddings multilingues (cached)
-    4. Clustering (HDBSCAN primary + Agglomerative fallback)
-    5. Anchor extraction (NER multilingue + TF-IDF)
-    6. Cohesion validation (threshold 0.65)
+    Pipeline V2.3 (Hierarchical Adaptive Segmentation):
 
-    Phase 1 V2.1 - Semaines 3-4
+    Pour PETITS documents (< 50K chars):
+        1. Windowing global sur tout le document
+        2. HDBSCAN clustering global
+        3. Topics sémantiques naturels
+
+    Pour GROS documents (>= 50K chars):
+        1. Extraction macro-sections (chapitres H1, numérotation 1., 2., 3.)
+        2. Pour chaque macro-section: Windowing + HDBSCAN
+        3. Topics regroupés par macro-section (cohérence structurelle)
+
+    Avantages:
+    - Petits docs: clustering global optimal
+    - Gros docs: parallélisable, topics cohérents par chapitre
+    - Scalable: O(n) au lieu de O(n²) pour HDBSCAN
+
+    Phase 1 V2.3 - Hierarchical Segmentation
     """
 
     def __init__(self, config):
@@ -58,9 +81,10 @@ class TopicSegmenter:
         self.language_detector = get_language_detector(config)
 
         logger.info(
-            f"[OSMOSE] TopicSegmenter initialisé "
+            f"[OSMOSE] TopicSegmenter V2.3 initialisé "
             f"(window_size={self.segmentation_config.window_size}, "
-            f"overlap={self.segmentation_config.overlap})"
+            f"overlap={self.segmentation_config.overlap}, "
+            f"hierarchical_threshold={HIERARCHICAL_THRESHOLD_CHARS} chars)"
         )
 
     async def segment_document(
@@ -72,6 +96,8 @@ class TopicSegmenter:
         """
         Segmente un document en topics sémantiquement cohérents.
 
+        V2.3: Stratégie adaptative selon la taille du document.
+
         Args:
             document_id: ID unique du document
             text: Contenu textuel complet
@@ -82,26 +108,115 @@ class TopicSegmenter:
         """
         logger.info(f"[OSMOSE] Segmenting document: {document_id} ({len(text)} chars)")
 
-        # Détection langue globale (optionnel)
+        # Détection langue globale
         doc_language = None
         if detect_language:
             doc_language = self.language_detector.detect(text[:2000])
             logger.info(f"[OSMOSE] Document language detected: {doc_language}")
 
-        # 1. Structural segmentation (sections via headers)
-        sections = self._extract_sections(text)
-        logger.info(f"[OSMOSE] Extracted {len(sections)} structural sections")
+        # Stratégie adaptative selon taille
+        if len(text) < HIERARCHICAL_THRESHOLD_CHARS:
+            logger.info(f"[OSMOSE] Small document → Document-level segmentation")
+            return await self._segment_document_level(document_id, text, doc_language)
+        else:
+            logger.info(f"[OSMOSE] Large document → Hierarchical segmentation")
+            return await self._segment_hierarchical(document_id, text, doc_language)
+
+    async def _segment_document_level(
+        self,
+        document_id: str,
+        text: str,
+        doc_language: Optional[str]
+    ) -> List[Topic]:
+        """
+        Segmentation document-level pour petits documents.
+
+        Windowing global + clustering adaptatif.
+
+        V2.3.1: Garantit un minimum de topics proportionnel à la taille du document
+        pour assurer une extraction de concepts suffisante.
+        """
+        # 1. Windowing GLOBAL
+        windows = self._create_windows(
+            text,
+            size=self.segmentation_config.window_size,
+            overlap=self.segmentation_config.overlap
+        )
+
+        if not windows:
+            logger.warning(f"[OSMOSE] No windows created for document {document_id}")
+            return []
+
+        logger.info(f"[OSMOSE] Created {len(windows)} windows (document-level)")
+
+        # 2. Embeddings
+        window_texts = [w.text for w in windows]
+        embeddings = self.embedder.encode(window_texts)
+
+        # 3. Calculer nombre minimum de topics basé sur taille document
+        # Heuristique: ~1 topic par 5000 chars, minimum 5 topics pour docs > 10K chars
+        min_topics = max(5, len(text) // 5000)
+        min_topics = min(min_topics, len(windows))  # Ne pas dépasser nb windows
+
+        logger.info(f"[OSMOSE] Document-level: targeting minimum {min_topics} topics")
+
+        # 4. Clustering avec garantie de minimum topics
+        clusters = self._cluster_with_min_topics(windows, embeddings, min_topics)
+        logger.info(f"[OSMOSE] Found {len(clusters)} semantic clusters")
+
+        # 5. Créer topics
+        all_topics = self._create_topics_from_clusters(
+            document_id=document_id,
+            clusters=clusters,
+            windows=windows,
+            embeddings=embeddings,
+            doc_language=doc_language,
+            section_prefix="doc"
+        )
+
+        avg_cohesion = np.mean([t.cohesion_score for t in all_topics]) if all_topics else 0.0
+        logger.info(
+            f"[OSMOSE] ✅ Document-level segmentation complete: {len(all_topics)} topics "
+            f"(avg cohesion: {avg_cohesion:.2f})"
+        )
+
+        return all_topics
+
+    async def _segment_hierarchical(
+        self,
+        document_id: str,
+        text: str,
+        doc_language: Optional[str]
+    ) -> List[Topic]:
+        """
+        Segmentation hiérarchique pour gros documents.
+
+        1. Extraction macro-sections (chapitres)
+        2. HDBSCAN par macro-section
+        3. Fusion topics
+        """
+        # 1. Extraire macro-sections (niveau chapitres uniquement)
+        macro_sections = self._extract_macro_sections(text)
+        logger.info(f"[OSMOSE] Extracted {len(macro_sections)} macro-sections (chapters)")
+
+        # Si une seule macro-section → fallback document-level
+        if len(macro_sections) <= 1:
+            logger.info("[OSMOSE] Single macro-section detected → fallback to document-level")
+            return await self._segment_document_level(document_id, text, doc_language)
 
         all_topics = []
 
-        for section in sections:
+        # 2. Pour chaque macro-section → windowing + clustering
+        for section in macro_sections:
             section_text = section["text"]
+            section_path = section["path"]
 
-            if len(section_text) < 500:  # Skip sections trop courtes
-                logger.debug(f"[OSMOSE] Skipping short section: {section['path']}")
+            # Skip sections trop courtes (< 1000 chars)
+            if len(section_text) < 1000:
+                logger.debug(f"[OSMOSE] Skipping short macro-section: {section_path}")
                 continue
 
-            # 2. Windowing
+            # Windowing sur la macro-section
             windows = self._create_windows(
                 section_text,
                 size=self.segmentation_config.window_size,
@@ -111,68 +226,47 @@ class TopicSegmenter:
             if not windows:
                 continue
 
-            logger.debug(
-                f"[OSMOSE] Section '{section['path']}': {len(windows)} windows"
-            )
+            logger.debug(f"[OSMOSE] Macro-section '{section_path}': {len(windows)} windows")
 
-            # 3. Embeddings
+            # Embeddings
             window_texts = [w.text for w in windows]
             embeddings = self.embedder.encode(window_texts)
 
-            # 4. Clustering (HDBSCAN + fallback)
+            # Clustering sur la macro-section
             clusters = self._cluster_with_fallbacks(windows, embeddings)
-            logger.debug(f"[OSMOSE] Found {len(clusters)} clusters")
 
-            # 5. Pour chaque cluster → créer topic
-            for cluster_id, cluster_windows in clusters.items():
-                if len(cluster_windows) == 0:
-                    continue
+            # Créer topics pour cette macro-section
+            section_topics = self._create_topics_from_clusters(
+                document_id=document_id,
+                clusters=clusters,
+                windows=windows,
+                embeddings=embeddings,
+                doc_language=doc_language,
+                section_prefix=f"sec{section['id']}"
+            )
 
-                # Anchors (NER multilingue + TF-IDF)
-                anchors = self._extract_anchors_multilingual(
-                    cluster_windows,
-                    language=doc_language
-                )
+            # Enrichir section_path avec info macro-section
+            for topic in section_topics:
+                topic.section_path = f"{section_path} / {topic.section_path}"
 
-                # Cohesion score
-                cluster_indices = [windows.index(w) for w in cluster_windows]
-                cluster_embeddings = embeddings[cluster_indices]
-                cohesion = self._calculate_cohesion(cluster_embeddings)
+            all_topics.extend(section_topics)
+            logger.debug(f"[OSMOSE] Macro-section '{section_path}': {len(section_topics)} topics")
 
-                # Filter par cohesion threshold
-                if cohesion < self.segmentation_config.cohesion_threshold:
-                    logger.debug(
-                        f"[OSMOSE] Skipping low cohesion topic: {cohesion:.2f} < "
-                        f"{self.segmentation_config.cohesion_threshold}"
-                    )
-                    continue
-
-                # Créer Topic
-                topic = Topic(
-                    topic_id=f"{document_id}_sec{section['id']}_c{cluster_id}",
-                    document_id=document_id,
-                    section_path=section["path"],
-                    windows=cluster_windows,
-                    anchors=anchors,
-                    cohesion_score=cohesion
-                )
-
-                all_topics.append(topic)
-
+        avg_cohesion = np.mean([t.cohesion_score for t in all_topics]) if all_topics else 0.0
         logger.info(
-            f"[OSMOSE] ✅ Segmentation complete: {len(all_topics)} topics "
-            f"(avg cohesion: {np.mean([t.cohesion_score for t in all_topics]):.2f})"
+            f"[OSMOSE] ✅ Hierarchical segmentation complete: {len(all_topics)} topics "
+            f"from {len(macro_sections)} macro-sections (avg cohesion: {avg_cohesion:.2f})"
         )
 
         return all_topics
 
-    def _extract_sections(self, text: str) -> List[Dict]:
+    def _extract_macro_sections(self, text: str) -> List[Dict]:
         """
-        Extraction sections structurelles via headers (Markdown-style).
+        Extraction macro-sections (chapitres niveau 1 uniquement).
 
-        Détecte:
-        - Headers Markdown: # H1, ## H2, ### H3
-        - Headers style: 1., 1.1, 1.1.1
+        Détecte uniquement:
+        - Headers Markdown H1: # Title
+        - Numérotation niveau 1: 1. Title, 2. Title (pas 1.1, 1.2)
 
         Args:
             text: Texte complet
@@ -182,16 +276,16 @@ class TopicSegmenter:
         """
         sections = []
 
-        # Pattern Markdown headers
-        header_pattern = r'^(#{1,3})\s+(.+)$'
+        # Pattern H1 Markdown uniquement
+        h1_pattern = r'^#\s+(.+)$'
 
-        # Pattern numérotation (1., 1.1, 1.1.1)
-        numbering_pattern = r'^(\d+(?:\.\d+)*)\.\s+(.+)$'
+        # Pattern numérotation niveau 1 uniquement (1., 2., pas 1.1)
+        numbering_l1_pattern = r'^(\d+)\.\s+([A-Z].+)$'
 
         lines = text.split('\n')
         current_section = {
             "id": 0,
-            "path": "root",
+            "path": "Introduction",
             "text": "",
             "start": 0,
             "end": 0
@@ -199,32 +293,30 @@ class TopicSegmenter:
         current_pos = 0
         section_id = 0
 
-        for i, line in enumerate(lines):
+        for line in lines:
             line_len = len(line) + 1  # +1 pour \n
 
-            # Check Markdown header
-            md_match = re.match(header_pattern, line, re.MULTILINE)
-            if md_match:
+            # Check H1 Markdown
+            h1_match = re.match(h1_pattern, line)
+            if h1_match:
                 # Sauvegarder section précédente si non-vide
                 if current_section["text"].strip():
                     current_section["end"] = current_pos
                     sections.append(current_section.copy())
 
-                # Nouvelle section
                 section_id += 1
-                level = len(md_match.group(1))
-                title = md_match.group(2).strip()
+                title = h1_match.group(1).strip()
                 current_section = {
                     "id": section_id,
-                    "path": f"{'#' * level} {title}",
+                    "path": title,
                     "text": "",
                     "start": current_pos + line_len,
                     "end": 0
                 }
 
-            # Check numérotation
-            elif re.match(numbering_pattern, line, re.MULTILINE):
-                num_match = re.match(numbering_pattern, line, re.MULTILINE)
+            # Check numérotation niveau 1
+            elif re.match(numbering_l1_pattern, line):
+                num_match = re.match(numbering_l1_pattern, line)
                 if current_section["text"].strip():
                     current_section["end"] = current_pos
                     sections.append(current_section.copy())
@@ -234,7 +326,7 @@ class TopicSegmenter:
                 title = num_match.group(2).strip()
                 current_section = {
                     "id": section_id,
-                    "path": f"{numbering} {title}",
+                    "path": f"{numbering}. {title}",
                     "text": "",
                     "start": current_pos + line_len,
                     "end": 0
@@ -251,17 +343,79 @@ class TopicSegmenter:
             current_section["end"] = current_pos
             sections.append(current_section)
 
-        # Si aucun header détecté → tout le texte = 1 section
+        # Si aucune macro-section détectée → tout le texte = 1 section
         if not sections:
             sections = [{
                 "id": 0,
-                "path": "root",
+                "path": "Document",
                 "text": text,
                 "start": 0,
                 "end": len(text)
             }]
 
         return sections
+
+    def _create_topics_from_clusters(
+        self,
+        document_id: str,
+        clusters: Dict[int, List[Window]],
+        windows: List[Window],
+        embeddings: np.ndarray,
+        doc_language: Optional[str],
+        section_prefix: str
+    ) -> List[Topic]:
+        """
+        Crée des topics à partir des clusters.
+
+        Args:
+            document_id: ID du document
+            clusters: Dict {cluster_id: [windows]}
+            windows: Liste complète des windows
+            embeddings: Embeddings des windows
+            doc_language: Langue détectée
+            section_prefix: Préfixe pour topic_id
+
+        Returns:
+            List[Topic]: Topics créés
+        """
+        topics = []
+
+        for cluster_id, cluster_windows in clusters.items():
+            if len(cluster_windows) == 0:
+                continue
+
+            # Anchors (NER + TF-IDF)
+            anchors = self._extract_anchors_multilingual(
+                cluster_windows,
+                language=doc_language
+            )
+
+            # Cohesion score
+            cluster_indices = [windows.index(w) for w in cluster_windows]
+            cluster_embeddings = embeddings[cluster_indices]
+            cohesion = self._calculate_cohesion(cluster_embeddings)
+
+            # Filter par cohesion threshold
+            if cohesion < self.segmentation_config.cohesion_threshold:
+                logger.debug(
+                    f"[OSMOSE] Skipping low cohesion topic: {cohesion:.2f} < "
+                    f"{self.segmentation_config.cohesion_threshold}"
+                )
+                continue
+
+            # Créer Topic
+            topic = Topic(
+                topic_id=f"{document_id}_{section_prefix}_c{cluster_id}",
+                document_id=document_id,
+                section_path=f"cluster_{cluster_id}",
+                windows=cluster_windows,
+                anchors=anchors,
+                cohesion_score=cohesion
+            )
+
+            topics.append(topic)
+
+        return topics
 
     def _create_windows(
         self,
@@ -323,8 +477,6 @@ class TopicSegmenter:
         # Tentative HDBSCAN (si disponible)
         if HDBSCAN_AVAILABLE and self.segmentation_config.clustering_method == "HDBSCAN":
             try:
-                # HDBSCAN avec euclidean sur embeddings normalisés
-                # (équivalent à distance cosine car embeddings sont normalisés)
                 clusterer = HDBSCAN(
                     min_cluster_size=self.segmentation_config.min_cluster_size,
                     metric='euclidean',
@@ -333,7 +485,7 @@ class TopicSegmenter:
                 )
                 cluster_labels = clusterer.fit_predict(embeddings)
 
-                # Calculer et logger le taux d'outliers (recommandation OpenAI)
+                # Calculer taux d'outliers
                 outliers = cluster_labels == -1
                 outlier_count = outliers.sum()
                 outlier_rate = outlier_count / len(cluster_labels) if len(cluster_labels) > 0 else 0.0
@@ -343,22 +495,21 @@ class TopicSegmenter:
                     f"({outlier_count}/{len(cluster_labels)} windows)"
                 )
 
-                # Vérifier si clusters trouvés (pas que du bruit -1)
+                # Vérifier si clusters trouvés
                 unique_labels = set(cluster_labels)
-                if len(unique_labels) > 1 and -1 in unique_labels:
+                if -1 in unique_labels:
                     unique_labels.remove(-1)
 
                 if len(unique_labels) >= 1:
                     logger.debug(f"[OSMOSE] HDBSCAN: {len(unique_labels)} clusters found")
 
-                    # Warning si taux d'outliers élevé (calibration à ajuster)
                     if outlier_rate > 0.3:
                         logger.warning(
                             f"[OSMOSE] High HDBSCAN outlier rate ({outlier_rate:.2%}). "
-                            "Consider adjusting min_cluster_size or using Agglomerative on outliers."
+                            "Consider adjusting min_cluster_size."
                         )
                 else:
-                    logger.debug("[OSMOSE] HDBSCAN found only noise, fallback")
+                    logger.debug("[OSMOSE] HDBSCAN found only noise, fallback to Agglomerative")
                     cluster_labels = None
 
             except Exception as e:
@@ -367,33 +518,147 @@ class TopicSegmenter:
 
         # Fallback Agglomerative
         if cluster_labels is None:
+            if len(windows) <= 5:
+                logger.debug(f"[OSMOSE] Small section ({len(windows)} windows) → 1 cluster")
+                return {0: windows}
+
             n_clusters = max(2, min(len(windows) // 5, self.segmentation_config.max_windows_per_topic))
 
             try:
-                # AgglomerativeClustering avec euclidean sur embeddings normalisés
-                # (équivalent à distance cosine car embeddings sont normalisés)
                 clusterer = AgglomerativeClustering(
                     n_clusters=n_clusters,
                     metric='euclidean',
-                    linkage='ward'  # ward est optimal pour euclidean
+                    linkage='ward'
                 )
                 cluster_labels = clusterer.fit_predict(embeddings)
                 logger.debug(f"[OSMOSE] Agglomerative: {n_clusters} clusters")
 
             except Exception as e:
                 logger.error(f"[OSMOSE] Agglomerative clustering failed: {e}")
-                # Ultimate fallback: tout dans 1 cluster
                 return {0: windows}
 
         # Construire dict clusters
         clusters = {}
         for i, label in enumerate(cluster_labels):
-            if label == -1:  # Noise HDBSCAN
+            if label == -1:
                 continue
 
             if label not in clusters:
                 clusters[label] = []
 
+            clusters[label].append(windows[i])
+
+        return clusters
+
+    def _cluster_with_min_topics(
+        self,
+        windows: List[Window],
+        embeddings: np.ndarray,
+        min_topics: int
+    ) -> Dict[int, List[Window]]:
+        """
+        Clustering avec garantie d'un nombre minimum de topics.
+
+        V2.3.1: Pour document-level, on veut garantir suffisamment de topics
+        pour une extraction de concepts riche.
+
+        Stratégie:
+        1. Essayer HDBSCAN d'abord
+        2. Si insuffisant (< min_topics), utiliser Agglomerative avec min_topics clusters
+        3. Assigner les outliers HDBSCAN aux clusters les plus proches
+
+        Args:
+            windows: Liste fenêtres
+            embeddings: Embeddings correspondants
+            min_topics: Nombre minimum de topics souhaité
+
+        Returns:
+            Dict[int, List[Window]]: {cluster_id: [windows]}
+        """
+        if len(windows) < 3:
+            return {0: windows}
+
+        cluster_labels = None
+        use_agglomerative = True  # Par défaut, utiliser Agglomerative pour garantie
+
+        # Tentative HDBSCAN d'abord (si disponible)
+        if HDBSCAN_AVAILABLE and self.segmentation_config.clustering_method == "HDBSCAN":
+            try:
+                clusterer = HDBSCAN(
+                    min_cluster_size=max(2, len(windows) // min_topics),  # Adapté au min_topics
+                    metric='euclidean',
+                    cluster_selection_method='eom',
+                    min_samples=1
+                )
+                hdbscan_labels = clusterer.fit_predict(embeddings)
+
+                # Compter clusters trouvés (sans outliers)
+                unique_labels = set(hdbscan_labels)
+                if -1 in unique_labels:
+                    unique_labels.remove(-1)
+
+                n_clusters_found = len(unique_labels)
+                outlier_count = (hdbscan_labels == -1).sum()
+
+                logger.info(
+                    f"[OSMOSE] HDBSCAN document-level: {n_clusters_found} clusters, "
+                    f"{outlier_count}/{len(windows)} outliers"
+                )
+
+                # Si HDBSCAN trouve suffisamment de clusters, utiliser ses résultats
+                if n_clusters_found >= min_topics:
+                    cluster_labels = hdbscan_labels
+                    use_agglomerative = False
+                    logger.info(f"[OSMOSE] HDBSCAN sufficient ({n_clusters_found} >= {min_topics})")
+                else:
+                    logger.info(
+                        f"[OSMOSE] HDBSCAN insufficient ({n_clusters_found} < {min_topics}), "
+                        f"switching to Agglomerative"
+                    )
+
+            except Exception as e:
+                logger.warning(f"[OSMOSE] HDBSCAN failed: {e}, using Agglomerative")
+
+        # Utiliser Agglomerative si HDBSCAN insuffisant
+        if use_agglomerative:
+            n_clusters = min(min_topics, len(windows))
+
+            try:
+                clusterer = AgglomerativeClustering(
+                    n_clusters=n_clusters,
+                    metric='euclidean',
+                    linkage='ward'
+                )
+                cluster_labels = clusterer.fit_predict(embeddings)
+                logger.info(f"[OSMOSE] Agglomerative document-level: {n_clusters} clusters (guaranteed)")
+
+            except Exception as e:
+                logger.error(f"[OSMOSE] Agglomerative clustering failed: {e}")
+                return {0: windows}
+
+        # Construire dict clusters
+        clusters = {}
+        for i, label in enumerate(cluster_labels):
+            if label == -1:
+                # Pour les outliers HDBSCAN, trouver cluster le plus proche
+                if len(clusters) > 0:
+                    # Calculer distance aux centroids des clusters existants
+                    best_cluster = 0
+                    best_dist = float('inf')
+                    for c_id, c_windows in clusters.items():
+                        c_indices = [j for j, w in enumerate(windows) if w in c_windows]
+                        if c_indices:
+                            centroid = embeddings[c_indices].mean(axis=0)
+                            dist = np.linalg.norm(embeddings[i] - centroid)
+                            if dist < best_dist:
+                                best_dist = dist
+                                best_cluster = c_id
+                    label = best_cluster
+                else:
+                    label = 0
+
+            if label not in clusters:
+                clusters[label] = []
             clusters[label].append(windows[i])
 
         return clusters
@@ -405,22 +670,9 @@ class TopicSegmenter:
     ) -> List[str]:
         """
         Extrait anchors (entités clés + keywords) multilingue.
-
-        Méthode:
-        1. NER multilingue (primary)
-        2. TF-IDF keywords (fallback si NER insuffisant)
-
-        Args:
-            windows: Fenêtres du topic
-            language: Langue détectée (optionnel)
-
-        Returns:
-            List[str]: Anchors uniques (max 20)
         """
-        # Concaténer tout le texte
         all_text = " ".join([w.text for w in windows])
 
-        # Détection langue si non fournie
         if language is None:
             language = self.language_detector.detect(all_text[:1000])
 
@@ -442,22 +694,11 @@ class TopicSegmenter:
         return unique_anchors
 
     def _tfidf_keywords(self, windows: List[Window], top_k: int = 10) -> List[str]:
-        """
-        Extrait keywords TF-IDF.
-
-        Args:
-            windows: Fenêtres du topic
-            top_k: Nombre de keywords
-
-        Returns:
-            List[str]: Top keywords
-        """
+        """Extrait keywords TF-IDF."""
         texts = [w.text for w in windows]
 
         if len(texts) < 2:
-            # Fallback: split simple
             words = " ".join(texts).split()
-            # Retirer stop words basiques
             stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"}
             keywords = [w for w in words if len(w) > 3 and w.lower() not in stop_words]
             return list(set(keywords))[:top_k]
@@ -465,13 +706,12 @@ class TopicSegmenter:
         try:
             vectorizer = TfidfVectorizer(
                 max_features=top_k,
-                stop_words='english',  # Basic stop words
+                stop_words='english',
                 ngram_range=(1, 2)
             )
             tfidf_matrix = vectorizer.fit_transform(texts)
             feature_names = vectorizer.get_feature_names_out()
 
-            # Top keywords par score TF-IDF moyen
             tfidf_scores = tfidf_matrix.mean(axis=0).A1
             top_indices = tfidf_scores.argsort()[-top_k:][::-1]
 
@@ -483,22 +723,11 @@ class TopicSegmenter:
             return []
 
     def _calculate_cohesion(self, embeddings: np.ndarray) -> float:
-        """
-        Calcule cohésion intra-cluster (similarité cosine moyenne).
-
-        Args:
-            embeddings: Embeddings du cluster
-
-        Returns:
-            float: Cohesion score [0.0, 1.0]
-        """
+        """Calcule cohésion intra-cluster."""
         if len(embeddings) < 2:
             return 1.0
 
-        # Similarité pairwise
         sim_matrix = cosine_similarity(embeddings)
-
-        # Moyenne (exclure diagonale)
         np.fill_diagonal(sim_matrix, 0)
         n = len(embeddings)
         mean_similarity = sim_matrix.sum() / (n * (n - 1))

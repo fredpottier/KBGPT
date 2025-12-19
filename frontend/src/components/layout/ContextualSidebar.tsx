@@ -18,7 +18,7 @@ import {
   SettingsIcon,
   CheckCircleIcon,
 } from '@chakra-ui/icons'
-import { FiDatabase, FiLayers } from 'react-icons/fi'
+import { FiDatabase, FiLayers, FiGlobe } from 'react-icons/fi'
 
 interface SidebarItemProps {
   icon?: any
@@ -113,9 +113,9 @@ export default function ContextualSidebar({ section }: ContextualSidebarProps) {
             href: '/admin/dynamic-types',
           },
           {
-            icon: FiDatabase,
-            label: 'Types de Documents',
-            href: '/admin/document-types',
+            icon: FiGlobe,
+            label: 'Domain Context',
+            href: '/admin/domain-context',
           },
           {
             icon: SettingsIcon,

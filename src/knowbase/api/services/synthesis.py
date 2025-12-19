@@ -13,6 +13,7 @@ Voici la question de l'utilisateur :
 Voici les extraits pertinents (classés par ordre de pertinence). Chaque bloc indique obligatoirement le document et le numéro de slide disponibles :
 
 {chunks_content}
+{graph_context}
 
 Règles STRICTES :
 1. Analyse uniquement ces extraits et synthétise une réponse cohérente qui répond directement à la question de l'utilisateur.
@@ -96,13 +97,18 @@ def format_chunks_for_synthesis(chunks: List[Dict[str, Any]]) -> str:
     return "\n\n".join(formatted_chunks)
 
 
-def synthesize_response(question: str, chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
+def synthesize_response(
+    question: str,
+    chunks: List[Dict[str, Any]],
+    graph_context_text: str = ""
+) -> Dict[str, Any]:
     """
     Génère une réponse synthétisée à partir des chunks et de la question.
 
     Args:
         question: Question de l'utilisateur
         chunks: Liste des chunks reranqués
+        graph_context_text: Contexte Knowledge Graph formaté (OSMOSE)
 
     Returns:
         Dictionnaire contenant la réponse synthétisée et les métadonnées
@@ -117,10 +123,11 @@ def synthesize_response(question: str, chunks: List[Dict[str, Any]]) -> Dict[str
     # Formate les chunks pour le prompt
     chunks_content = format_chunks_for_synthesis(chunks)
 
-    # Construit le prompt
+    # Construit le prompt avec contexte KG optionnel
     prompt = SYNTHESIS_PROMPT.format(
         question=question,
-        chunks_content=chunks_content
+        chunks_content=chunks_content,
+        graph_context=graph_context_text
     )
 
     # Appel LLM via le routeur

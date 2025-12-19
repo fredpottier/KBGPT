@@ -24,6 +24,7 @@ import {
   SettingsIcon,
   ExternalLinkIcon
 } from '@chakra-ui/icons'
+import { FiGlobe } from 'react-icons/fi'
 
 interface SidebarProps {
   isOpen: boolean
@@ -146,13 +147,14 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           Types Entités
         </NavItem>
         <NavItem
-          icon={ViewIcon}
-          href="/admin/document-types"
-          isActive={pathname?.startsWith('/admin/document-types')}
+          icon={FiGlobe}
+          href="/admin/domain-context"
+          isActive={pathname?.startsWith('/admin/domain-context')}
           onClick={isMobile ? onClose : undefined}
         >
-          Types de Documents
+          Domain Context
         </NavItem>
+        {/* Living Ontology désactivé - fonctionnalité mise en pause (génère du bruit en mode domain-agnostic) */}
         <NavItem
           icon={SettingsIcon}
           href="/admin/settings"
