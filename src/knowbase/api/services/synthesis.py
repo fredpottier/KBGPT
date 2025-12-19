@@ -5,30 +5,35 @@ from typing import Any, Dict, List
 from knowbase.common.llm_router import TaskType, get_llm_router
 
 
-SYNTHESIS_PROMPT = """Tu es un assistant expert en SAP qui aide les utilisateurs à trouver des informations pertinentes dans la base de connaissances SAP.
-
-Voici la question de l'utilisateur :
+SYNTHESIS_PROMPT = """Tu es un assistant expert qui aide les utilisateurs à trouver des informations pertinentes dans la base de connaissances.
+{session_context}
+## Question actuelle de l'utilisateur
 {question}
 
-Voici les extraits pertinents (classés par ordre de pertinence). Chaque bloc indique obligatoirement le document et le numéro de slide disponibles :
-
+## Sources disponibles
 {chunks_content}
 {graph_context}
 
-Règles STRICTES :
-1. Analyse uniquement ces extraits et synthétise une réponse cohérente qui répond directement à la question de l'utilisateur.
-2. Tu ne peux référencer que les slides explicitement listés dans les blocs ci-dessus. Ignore toute mention textuelle qui ferait référence à d'autres slides.
-3. Structure ta réponse de manière claire et organisée avec des sections numérotées ou à puces si approprié.
-4. Pour chaque point important, indique précisément la référence slide en respectant ces formats :
-   - Si un seul document : « slide 71 » ou « slides 113-115 » (en restant dans les indices fournis).
-   - Si plusieurs documents sont utilisés : « slide 36 du document ABC » ou « slides 71-73 du document XYZ ».
-5. Ne mentionne jamais « Extrait X » – utilise toujours des références de slides autorisées.
-6. Si des informations contradictoires existent, mentionne-le explicitement.
-7. Si les slides ne contiennent pas assez d'informations pour répondre complètement, indique-le clairement.
-8. Reste concis mais informatif.
-9. Réponds en français.
+## Règles de réponse
 
-IMPORTANT : Toute référence à un slide non listé dans les extraits est interdite. Ne reformule pas en inventant d'autres numéros de slides.
+1. **Synthétise** les informations des sources pour répondre à la question de manière claire et structurée.
+
+2. **Contexte conversationnel** : Si un contexte de conversation précédente est fourni, utilise-le pour comprendre les références implicites ("cela", "cette personne", "ce document", etc.) et maintenir la continuité de la discussion.
+
+3. **Citations obligatoires** : Pour chaque information importante dont la source est connue, cite-la ainsi :
+   - Format simple : *(Source : Document ABC, slide 12)*
+   - Si plusieurs slides d'un même document : *(Source : Document ABC, slides 12-15)*
+   - Si plusieurs documents : indique le nom du document à chaque citation
+
+4. **Ne jamais** utiliser "Bloc #X", "Extrait X", "Document inconnu" ou "Source inconnue" - cite UNIQUEMENT les documents dont le nom est explicitement fourni dans les sources. Si une source n'a pas de nom de document clair, n'ajoute pas de citation pour cette information.
+
+5. **Structure** ta réponse avec des sections ou puces si approprié.
+
+6. Si les sources sont **insuffisantes** pour répondre complètement, indique-le clairement.
+
+7. Si des informations sont **contradictoires**, mentionne les deux versions avec leurs sources.
+
+8. Réponds en **français**.
 
 Réponse :"""
 
@@ -76,22 +81,10 @@ def format_chunks_for_synthesis(chunks: List[Dict[str, Any]]) -> str:
         else:
             document_name = 'Document inconnu'
 
-        meta_lines = [
-            f"[Bloc #{idx}] Document : {document_name}",
-            f"Slide disponible : {slide_ref}"
-        ]
-        if score is not None:
-            try:
-                meta_lines.append(f"Score Qdrant : {float(score):.3f}")
-            except (TypeError, ValueError):
-                pass
-        if rerank is not None:
-            try:
-                meta_lines.append(f"Score rerank : {float(rerank):.3f}")
-            except (TypeError, ValueError):
-                pass
+        # Format clair : Document + Slide en premier pour que le LLM cite correctement
+        header = f"### Source {idx}: {document_name}, {slide_ref}"
 
-        block_lines = meta_lines + ['Contenu :', chunk_text]
+        block_lines = [header, "", chunk_text]
         formatted_chunks.append("\n".join(block_lines))
 
     return "\n\n".join(formatted_chunks)
@@ -100,7 +93,8 @@ def format_chunks_for_synthesis(chunks: List[Dict[str, Any]]) -> str:
 def synthesize_response(
     question: str,
     chunks: List[Dict[str, Any]],
-    graph_context_text: str = ""
+    graph_context_text: str = "",
+    session_context_text: str = ""
 ) -> Dict[str, Any]:
     """
     Génère une réponse synthétisée à partir des chunks et de la question.
@@ -109,6 +103,7 @@ def synthesize_response(
         question: Question de l'utilisateur
         chunks: Liste des chunks reranqués
         graph_context_text: Contexte Knowledge Graph formaté (OSMOSE)
+        session_context_text: Contexte conversationnel formaté (Memory Layer Phase 2.5)
 
     Returns:
         Dictionnaire contenant la réponse synthétisée et les métadonnées
@@ -123,11 +118,12 @@ def synthesize_response(
     # Formate les chunks pour le prompt
     chunks_content = format_chunks_for_synthesis(chunks)
 
-    # Construit le prompt avec contexte KG optionnel
+    # Construit le prompt avec contextes optionnels (KG et Session)
     prompt = SYNTHESIS_PROMPT.format(
         question=question,
         chunks_content=chunks_content,
-        graph_context=graph_context_text
+        graph_context=graph_context_text,
+        session_context=session_context_text
     )
 
     # Appel LLM via le routeur

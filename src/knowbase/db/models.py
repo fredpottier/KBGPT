@@ -645,4 +645,271 @@ class AuditLog(Base):
         )
 
 
-__all__ = ["EntityTypeRegistry", "DocumentType", "DocumentTypeEntityType", "User", "AuditLog"]
+# ============================================================================
+# Phase 2.5 - Memory Layer Models
+# ============================================================================
+
+
+class Session(Base):
+    """
+    Session de conversation persistante.
+
+    Phase 2.5 - Memory Layer
+
+    Permet de maintenir un contexte de conversation sur plusieurs interactions,
+    avec gestion automatique du résumé via LangChain Memory.
+    """
+
+    __tablename__ = "sessions"
+
+    # Primary key
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        comment="UUID de la session"
+    )
+
+    # Utilisateur propriétaire
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="FK vers users"
+    )
+
+    # Informations session
+    title = Column(
+        String(255),
+        nullable=True,
+        comment="Titre de la session (auto-généré ou défini par user)"
+    )
+
+    # Résumé LangChain Memory (auto-généré)
+    summary = Column(
+        Text,
+        nullable=True,
+        comment="Résumé cumulatif de la conversation (LangChain Memory)"
+    )
+
+    # Contexte métier (pour Context Resolver)
+    context_metadata = Column(
+        Text,
+        nullable=True,
+        comment="JSON métadonnées contexte (documents référencés, entités mentionnées...)"
+    )
+
+    # État
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        comment="Session active ou archivée"
+    )
+
+    # Multi-tenancy
+    tenant_id = Column(
+        String(50),
+        nullable=False,
+        default="default",
+        index=True,
+        comment="Tenant ID"
+    )
+
+    # Compteurs
+    message_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Nombre de messages dans la session"
+    )
+
+    token_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Estimation tokens consommés (pour tracking)"
+    )
+
+    # Timestamps
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        comment="Date création session"
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        comment="Date dernière activité"
+    )
+
+    last_message_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Date dernier message"
+    )
+
+    # Relations
+    user = relationship("User", backref="sessions")
+    messages = relationship(
+        "SessionMessage",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="SessionMessage.created_at"
+    )
+
+    # Indexes
+    __table_args__ = (
+        Index('ix_session_user_active', 'user_id', 'is_active'),
+        Index('ix_session_tenant_updated', 'tenant_id', 'updated_at'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Session(id={self.id}, user_id={self.user_id}, title='{self.title}')>"
+
+
+class SessionMessage(Base):
+    """
+    Message individuel dans une session de conversation.
+
+    Phase 2.5 - Memory Layer
+
+    Stocke chaque échange (question user + réponse assistant) avec métadonnées
+    pour le context resolver et l'audit.
+    """
+
+    __tablename__ = "session_messages"
+
+    # Primary key
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        comment="UUID du message"
+    )
+
+    # Session parente
+    session_id = Column(
+        String(36),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="FK vers sessions"
+    )
+
+    # Rôle du message
+    role = Column(
+        String(20),
+        nullable=False,
+        index=True,
+        comment="Rôle: user | assistant | system"
+    )
+
+    # Contenu
+    content = Column(
+        Text,
+        nullable=False,
+        comment="Contenu textuel du message"
+    )
+
+    # Métadonnées pour Context Resolver
+    entities_mentioned = Column(
+        Text,
+        nullable=True,
+        comment="JSON array entités mentionnées dans ce message"
+    )
+
+    documents_referenced = Column(
+        Text,
+        nullable=True,
+        comment="JSON array documents référencés (sources RAG)"
+    )
+
+    # Métadonnées LLM
+    model_used = Column(
+        String(50),
+        nullable=True,
+        comment="Modèle LLM utilisé pour la réponse (si role=assistant)"
+    )
+
+    tokens_input = Column(
+        Integer,
+        nullable=True,
+        comment="Tokens input pour cette réponse"
+    )
+
+    tokens_output = Column(
+        Integer,
+        nullable=True,
+        comment="Tokens output pour cette réponse"
+    )
+
+    latency_ms = Column(
+        Integer,
+        nullable=True,
+        comment="Latence réponse en millisecondes"
+    )
+
+    # Feedback utilisateur (optionnel)
+    feedback_rating = Column(
+        Integer,
+        nullable=True,
+        comment="Rating user: 1 (thumbs down) | 2 (thumbs up)"
+    )
+
+    feedback_comment = Column(
+        Text,
+        nullable=True,
+        comment="Commentaire feedback user"
+    )
+
+    # Multi-tenancy
+    tenant_id = Column(
+        String(50),
+        nullable=False,
+        default="default",
+        index=True,
+        comment="Tenant ID"
+    )
+
+    # Timestamp
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        index=True,
+        comment="Date création message"
+    )
+
+    # Relations
+    session = relationship("Session", back_populates="messages")
+
+    # Indexes
+    __table_args__ = (
+        Index('ix_message_session_created', 'session_id', 'created_at'),
+        Index('ix_message_tenant_created', 'tenant_id', 'created_at'),
+    )
+
+    def __repr__(self) -> str:
+        content_preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
+        return f"<SessionMessage(id={self.id}, role='{self.role}', content='{content_preview}')>"
+
+
+__all__ = [
+    "EntityTypeRegistry",
+    "DocumentType",
+    "DocumentTypeEntityType",
+    "User",
+    "AuditLog",
+    "Session",
+    "SessionMessage"
+]

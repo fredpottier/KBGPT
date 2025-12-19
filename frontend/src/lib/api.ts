@@ -191,7 +191,8 @@ export const api = {
       mime?: string,
       solution?: string,
       useGraphContext?: boolean,
-      graphEnrichmentLevel?: 'none' | 'light' | 'standard' | 'deep'
+      graphEnrichmentLevel?: 'none' | 'light' | 'standard' | 'deep',
+      sessionId?: string
     ) =>
       apiClient.post('/search', {
         question: message,
@@ -200,6 +201,7 @@ export const api = {
         solution,
         use_graph_context: useGraphContext,
         graph_enrichment_level: graphEnrichmentLevel,
+        session_id: sessionId,
       }),
     history: () => apiClient.get('/chat/history'), // Not implemented in backend yet
     conversation: (id: string) => apiClient.get(`/chat/${id}`), // Not implemented in backend yet
@@ -305,5 +307,64 @@ export const api = {
       stats: () => apiClient.get('/admin/monitoring/stats'),
       logs: () => apiClient.get('/admin/monitoring/logs'),
     },
+  },
+
+  // Sessions - Memory Layer (Phase 2.5)
+  sessions: {
+    // Session CRUD
+    list: (activeOnly: boolean = true, limit: number = 20) =>
+      apiClient.get(`/sessions?active_only=${activeOnly}&limit=${limit}`),
+    get: (sessionId: string) => apiClient.get(`/sessions/${sessionId}`),
+    create: (title?: string) => apiClient.post('/sessions', { title }),
+    update: (sessionId: string, data: { title?: string; is_active?: boolean }) =>
+      apiClient.put(`/sessions/${sessionId}`, data),
+    delete: (sessionId: string) => apiClient.delete(`/sessions/${sessionId}`),
+
+    // Messages
+    getMessages: (sessionId: string, limit?: number, offset?: number) => {
+      const params = new URLSearchParams()
+      if (limit) params.append('limit', limit.toString())
+      if (offset) params.append('offset', offset.toString())
+      const query = params.toString()
+      return apiClient.get(`/sessions/${sessionId}/messages${query ? `?${query}` : ''}`)
+    },
+    addMessage: (sessionId: string, message: {
+      role: 'user' | 'assistant' | 'system',
+      content: string,
+      entities_mentioned?: string[],
+      documents_referenced?: string[],
+      model_used?: string,
+      tokens_input?: number,
+      tokens_output?: number,
+      latency_ms?: number
+    }) => apiClient.post(`/sessions/${sessionId}/messages`, message),
+
+    // Context
+    getContext: (sessionId: string, includeSummary: boolean = true, recentCount: number = 10) =>
+      apiClient.get(`/sessions/${sessionId}/context?include_summary=${includeSummary}&recent_count=${recentCount}`),
+    updateContext: (sessionId: string, context: {
+      entities?: any[],
+      documents?: any[],
+      search_results?: any[],
+      topics?: string[]
+    }) => apiClient.put(`/sessions/${sessionId}/context`, context),
+
+    // Feedback
+    addFeedback: (sessionId: string, messageId: string, rating: 1 | 2, comment?: string) =>
+      apiClient.post(`/sessions/${sessionId}/messages/${messageId}/feedback`, { rating, comment }),
+
+    // Title generation
+    generateTitle: (sessionId: string, force: boolean = false) =>
+      apiClient.post(`/sessions/${sessionId}/generate-title?force=${force}`),
+
+    // Reference resolution
+    resolve: (query: string, sessionId: string) =>
+      apiClient.post('/sessions/resolve', { query, session_id: sessionId }),
+
+    // Summary generation
+    getSummary: (sessionId: string, format: 'business' | 'technical' | 'executive' = 'business') =>
+      apiClient.get(`/sessions/${sessionId}/summary?format=${format}`),
+    generateSummary: (sessionId: string, format: 'business' | 'technical' | 'executive' = 'business') =>
+      apiClient.post(`/sessions/${sessionId}/summary`, { format }),
   },
 }

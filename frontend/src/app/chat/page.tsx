@@ -21,20 +21,23 @@ import {
   Badge,
 } from '@chakra-ui/react'
 import { AttachmentIcon, ArrowUpIcon } from '@chakra-ui/icons'
-import { useState, useRef, useEffect } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { SearchResponse } from '@/types/api'
 import CopyButton from '@/components/ui/CopyButton'
 import AutoResizeTextarea from '@/components/ui/AutoResizeTextarea'
 import SearchResultDisplay from '@/components/ui/SearchResultDisplay'
+import SessionSelector from '@/components/chat/SessionSelector'
+import SessionSummary from '@/components/chat/SessionSummary'
 
 interface Message {
   id: string
   content: string
   role: 'user' | 'assistant'
   timestamp: string
-  searchResult?: SearchResponse // Add search result for assistant messages
+  searchResult?: SearchResponse
+  feedback_rating?: number
 }
 
 type GraphEnrichmentLevel = 'none' | 'light' | 'standard' | 'deep'
@@ -42,11 +45,13 @@ type GraphEnrichmentLevel = 'none' | 'light' | 'standard' | 'deep'
 export default function ChatPage() {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [selectedSolution, setSelectedSolution] = useState<string>('')
   const [useGraphContext, setUseGraphContext] = useState<boolean>(true)
   const [graphEnrichmentLevel, setGraphEnrichmentLevel] = useState<GraphEnrichmentLevel>('standard')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
+  const queryClient = useQueryClient()
 
   // Fetch available solutions
   const { data: solutionsResponse, isLoading: solutionsLoading } = useQuery({
@@ -54,10 +59,30 @@ export default function ChatPage() {
     queryFn: () => api.search.solutions(),
   })
 
+  // Fetch messages for current session
+  const { data: messagesResponse, refetch: refetchMessages } = useQuery({
+    queryKey: ['session-messages', currentSessionId],
+    queryFn: () => currentSessionId ? api.sessions.getMessages(currentSessionId) : null,
+    enabled: !!currentSessionId,
+  })
+
+  // Load messages when session changes
+  useEffect(() => {
+    if (messagesResponse?.success && messagesResponse.data) {
+      const sessionMessages = (messagesResponse.data as { messages: any[] }).messages || []
+      setMessages(sessionMessages.map((msg: any) => ({
+        id: msg.id,
+        content: msg.content,
+        role: msg.role as 'user' | 'assistant',
+        timestamp: msg.created_at,
+        feedback_rating: msg.feedback_rating,
+      })))
+    }
+  }, [messagesResponse])
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
-
 
   useEffect(() => {
     scrollToBottom()
@@ -66,22 +91,20 @@ export default function ChatPage() {
   // Helper function to convert search results to markdown
   const formatSearchResults = (results: any[]): string => {
     if (!results || results.length === 0) {
-      return 'Aucune information pertinente trouvée dans la base de connaissance.'
+      return 'Aucune information pertinente trouvee dans la base de connaissance.'
     }
 
     let markdown = ''
 
-    // Add thumbnails if available
     const thumbnails = results
       .filter(r => r.slide_image_url)
-      .slice(0, 4) // Limit to 4 thumbnails
+      .slice(0, 4)
       .map(r => `[![Slide ${r.slide_index}](${r.slide_image_url})](${r.slide_image_url})`)
 
     if (thumbnails.length > 0) {
-      markdown += '## 📸 Aperçus\n\n' + thumbnails.join(' ') + '\n\n---\n\n'
+      markdown += '## Apercus\n\n' + thumbnails.join(' ') + '\n\n---\n\n'
     }
 
-    // Add results
     results.forEach((result, index) => {
       const score = (result.score * 100).toFixed(0)
       const sourceInfo = result.source_file
@@ -95,61 +118,116 @@ export default function ChatPage() {
       markdown += `- ${truncatedText}\n  ${sourceInfo}\n\n`
     })
 
-    // Add sources section
     const sourceSet = new Set(results
       .filter(r => r.source_file)
       .map(r => r.source_file))
     const sources = Array.from(sourceSet)
 
     if (sources.length > 0) {
-      markdown += '**📎 Sources**\n\n'
+      markdown += '**Sources**\n\n'
       sources.forEach(source => {
         const filename = source.split('/').pop()
         const extension = filename?.split('.').pop()?.toUpperCase() || 'FILE'
-        markdown += `- [${filename}](${source}) — ${extension}\n`
+        markdown += `- [${filename}](${source}) - ${extension}\n`
       })
     }
 
     return markdown
   }
 
+  // Create session mutation
+  const createSessionMutation = useMutation({
+    mutationFn: () => api.sessions.create(),
+    onSuccess: (response) => {
+      if (response.success && response.data) {
+        const newSession = response.data as { id: string }
+        setCurrentSessionId(newSession.id)
+        setMessages([])
+        queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      }
+    },
+  })
+
+  // Add message to session mutation
+  const addMessageMutation = useMutation({
+    mutationFn: ({ sessionId, message }: { sessionId: string, message: any }) =>
+      api.sessions.addMessage(sessionId, message),
+  })
+
   const sendMessageMutation = useMutation({
-    mutationFn: (message: string) =>
-      api.chat.send(
+    mutationFn: async (message: string) => {
+      // Create session if none exists
+      let sessionId = currentSessionId
+      if (!sessionId) {
+        const sessionResponse = await api.sessions.create()
+        if (sessionResponse.success && sessionResponse.data) {
+          sessionId = (sessionResponse.data as { id: string }).id
+          setCurrentSessionId(sessionId)
+          queryClient.invalidateQueries({ queryKey: ['sessions'] })
+        } else {
+          throw new Error('Failed to create session')
+        }
+      }
+
+      // Save user message to session
+      await api.sessions.addMessage(sessionId, {
+        role: 'user',
+        content: message,
+      })
+
+      // Send search request with session context for conversational continuity
+      const response = await api.chat.send(
         message,
         undefined,
         undefined,
         selectedSolution || undefined,
         useGraphContext,
-        useGraphContext ? graphEnrichmentLevel : undefined
-      ),
-    onSuccess: (response) => {
+        useGraphContext ? graphEnrichmentLevel : undefined,
+        sessionId  // Pass session_id for Memory Layer context
+      )
+
+      return { response, sessionId }
+    },
+    onSuccess: async ({ response, sessionId }) => {
       if (response.success) {
         const searchResult = response.data as SearchResponse
 
-        // Use synthesis if available, otherwise fallback to formatted results
         let content = 'No response'
         if (searchResult?.synthesis?.synthesized_answer) {
           content = searchResult.synthesis.synthesized_answer
         } else if (searchResult?.results && Array.isArray(searchResult.results)) {
           content = formatSearchResults(searchResult.results)
         } else if ((response.data as any)?.answer_markdown) {
-          // Fallback for dispatch format
           content = (response.data as any).answer_markdown
         }
 
+        // Save assistant message to session
+        const assistantMessageResponse = await api.sessions.addMessage(sessionId, {
+          role: 'assistant',
+          content: content,
+          documents_referenced: searchResult?.results?.map((r: any) => r.source_file).filter(Boolean),
+        })
+
         const newMessage: Message = {
-          id: Date.now().toString(),
+          id: assistantMessageResponse.success && assistantMessageResponse.data
+            ? (assistantMessageResponse.data as { id: string }).id
+            : Date.now().toString(),
           content,
           role: 'assistant',
           timestamp: new Date().toISOString(),
           searchResult: searchResult
         }
         setMessages(prev => [...prev, newMessage])
+
+        // Generate title if this is the first exchange
+        if (messages.length <= 1) {
+          api.sessions.generateTitle(sessionId)
+            .then(() => queryClient.invalidateQueries({ queryKey: ['sessions'] }))
+        }
       } else {
         toast({
-          title: 'Error',
-          description: response.error || 'Failed to send message',
+          title: 'Erreur',
+          description: response.error || 'Echec de l\'envoi du message',
           status: 'error',
           duration: 3000,
           isClosable: true,
@@ -158,11 +236,29 @@ export default function ChatPage() {
     },
     onError: (error) => {
       toast({
-        title: 'Error',
-        description: 'Failed to send message',
+        title: 'Erreur',
+        description: 'Echec de l\'envoi du message',
         status: 'error',
         duration: 3000,
         isClosable: true,
+      })
+    },
+  })
+
+  // Feedback mutation
+  const feedbackMutation = useMutation({
+    mutationFn: ({ messageId, rating }: { messageId: string, rating: 1 | 2 }) =>
+      currentSessionId
+        ? api.sessions.addFeedback(currentSessionId, messageId, rating)
+        : Promise.reject('No session'),
+    onSuccess: (_, { messageId, rating }) => {
+      setMessages(prev => prev.map(msg =>
+        msg.id === messageId ? { ...msg, feedback_rating: rating } : msg
+      ))
+      toast({
+        title: rating === 2 ? 'Merci !' : 'Feedback enregistre',
+        status: 'success',
+        duration: 1500,
       })
     },
   })
@@ -189,9 +285,53 @@ export default function ChatPage() {
     }
   }
 
+  const handleSessionChange = (sessionId: string | null) => {
+    setCurrentSessionId(sessionId)
+    if (!sessionId) {
+      setMessages([])
+    }
+  }
+
+  const handleNewSession = () => {
+    setCurrentSessionId(null)
+    setMessages([])
+  }
+
+  const handleFeedback = (messageId: string, rating: 1 | 2) => {
+    feedbackMutation.mutate({ messageId, rating })
+  }
+
   return (
-    <Flex direction="column" h="full" gap={4} w="full" maxW="100%">
-      {/* Chat messages */}
+    <Flex direction="column" h="full" w="full" maxW="100%" overflow="hidden">
+      {/* Session selector header - FIXED */}
+      <Box
+        flexShrink={0}
+        bg="gray.50"
+        py={2}
+        px={2}
+        borderBottom="1px"
+        borderColor="gray.200"
+      >
+        <HStack justify="space-between">
+          <SessionSelector
+            currentSessionId={currentSessionId}
+            onSessionChange={handleSessionChange}
+            onNewSession={handleNewSession}
+          />
+          {currentSessionId && (
+            <HStack spacing={2}>
+              <Text fontSize="xs" color="gray.500">
+                {messages.length} message{messages.length !== 1 ? 's' : ''}
+              </Text>
+              {messages.length >= 2 && (
+                <SessionSummary sessionId={currentSessionId} />
+              )}
+            </HStack>
+          )}
+        </HStack>
+      </Box>
+
+      {/* Chat messages - scrollable area */}
       <Box
         flex="1"
         overflow="auto"
@@ -201,14 +341,15 @@ export default function ChatPage() {
         p={4}
         w="full"
         maxW="100%"
+        mt={2}
       >
         {messages.length === 0 ? (
           <Flex align="center" justify="center" h="full" direction="column">
             <Text fontSize="lg" color="gray.500" mb={4}>
-              Welcome to SAP Knowledge Base Chat
+              Bienvenue dans KnowWhere Chat
             </Text>
             <Text color="gray.400" textAlign="center">
-              Ask me anything about your SAP documents and I&apos;ll help you find the information you need.
+              Posez vos questions sur vos documents SAP et je vous aiderai a trouver les informations.
             </Text>
           </Flex>
         ) : (
@@ -233,7 +374,6 @@ export default function ChatPage() {
                   />
                   <Card flex="1" minW={0} position="relative" _hover={{ '& .copy-button': { opacity: 1 } }}>
                     <CardBody py={3} px={4}>
-                      {/* Show SearchResultDisplay for assistant messages with search results */}
                       {message.role === 'assistant' && message.searchResult ? (
                         <SearchResultDisplay searchResult={message.searchResult} />
                       ) : (
@@ -247,9 +387,38 @@ export default function ChatPage() {
                         </Text>
                       )}
                       <Flex justify="space-between" align="center" mt={2}>
-                        <Text fontSize="xs" color="gray.500">
-                          {new Date(message.timestamp).toLocaleTimeString()}
-                        </Text>
+                        <HStack spacing={2}>
+                          <Text fontSize="xs" color="gray.500">
+                            {new Date(message.timestamp).toLocaleTimeString()}
+                          </Text>
+                          {/* Feedback buttons for assistant messages */}
+                          {message.role === 'assistant' && currentSessionId && (
+                            <HStack spacing={1}>
+                              <Tooltip label="Utile">
+                                <IconButton
+                                  aria-label="Thumbs up"
+                                  icon={<span>+</span>}
+                                  size="xs"
+                                  variant={message.feedback_rating === 2 ? 'solid' : 'ghost'}
+                                  colorScheme={message.feedback_rating === 2 ? 'green' : 'gray'}
+                                  onClick={() => handleFeedback(message.id, 2)}
+                                  isDisabled={feedbackMutation.isPending}
+                                />
+                              </Tooltip>
+                              <Tooltip label="Pas utile">
+                                <IconButton
+                                  aria-label="Thumbs down"
+                                  icon={<span>-</span>}
+                                  size="xs"
+                                  variant={message.feedback_rating === 1 ? 'solid' : 'ghost'}
+                                  colorScheme={message.feedback_rating === 1 ? 'red' : 'gray'}
+                                  onClick={() => handleFeedback(message.id, 1)}
+                                  isDisabled={feedbackMutation.isPending}
+                                />
+                              </Tooltip>
+                            </HStack>
+                          )}
+                        </HStack>
                         <CopyButton
                           text={message.content}
                           className="copy-button"
@@ -270,7 +439,7 @@ export default function ChatPage() {
                       <HStack>
                         <Spinner size="sm" />
                         <Text fontSize="sm" color="gray.500">
-                          Thinking...
+                          Recherche en cours...
                         </Text>
                       </HStack>
                     </CardBody>
@@ -289,7 +458,7 @@ export default function ChatPage() {
           <VStack spacing={3} w="full">
             {/* Graph-Guided RAG controls */}
             <HStack spacing={4} w="full" justify="flex-start" flexWrap="wrap">
-              <Tooltip label="Enrichir les réponses avec le Knowledge Graph" hasArrow>
+              <Tooltip label="Enrichir les reponses avec le Knowledge Graph" hasArrow>
                 <HStack spacing={2}>
                   <Switch
                     id="use-graph"
@@ -299,7 +468,7 @@ export default function ChatPage() {
                     size="sm"
                   />
                   <Text fontSize="sm" color="gray.600">
-                    🌊 Knowledge Graph
+                    Knowledge Graph
                   </Text>
                 </HStack>
               </Tooltip>
@@ -320,7 +489,7 @@ export default function ChatPage() {
                   <Tooltip
                     label={
                       graphEnrichmentLevel === 'light'
-                        ? 'Concepts liés uniquement'
+                        ? 'Concepts lies uniquement'
                         : graphEnrichmentLevel === 'standard'
                         ? 'Concepts + Relations transitives'
                         : 'Concepts + Relations + Clusters + Bridge concepts'
@@ -337,7 +506,7 @@ export default function ChatPage() {
                       }
                       fontSize="xs"
                     >
-                      {graphEnrichmentLevel === 'deep' ? '🚀' : graphEnrichmentLevel === 'standard' ? '⚡' : '💨'}
+                      {graphEnrichmentLevel === 'deep' ? 'Deep' : graphEnrichmentLevel === 'standard' ? 'Std' : 'Light'}
                     </Badge>
                   </Tooltip>
                 </HStack>
@@ -357,7 +526,7 @@ export default function ChatPage() {
                 value={input}
                 onChange={setInput}
                 onKeyDown={handleKeyPress}
-                placeholder="Type your message here..."
+                placeholder="Posez votre question..."
                 flex="1"
                 minW={0}
                 minHeight={40}

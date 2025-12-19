@@ -104,6 +104,10 @@ pydantic-settings
 zep-python>=2.0.2
 asyncpg>=0.29.0
 
+# === PostgreSQL (Phase 2.5 - Memory Layer) ===
+psycopg2-binary>=2.9.9
+sqlalchemy[asyncio]>=2.0.0
+
 # === Fuzzy Matching (Phase 5B) ===
 fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.21.0

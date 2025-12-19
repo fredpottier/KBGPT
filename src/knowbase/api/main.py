@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights
+from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions
 # living_ontology désactivé - génère trop de bruit en mode domain-agnostic (voir OSMOSE_STATUS_ACTUEL.md)
 
 
@@ -22,10 +22,12 @@ def create_app() -> FastAPI:
     logger = configure_logging()
     warm_clients()
 
-    # Initialiser base de données SQLite (entity_types_registry)
+    # Initialiser base de données (PostgreSQL si configuré, sinon SQLite fallback)
     from knowbase.db import init_db
+    from knowbase.db.base import is_sqlite
     init_db()
-    logger.info("✅ Base de données SQLite initialisée (entity_types_registry)")
+    db_type = "SQLite (fallback)" if is_sqlite else "PostgreSQL"
+    logger.info(f"✅ Base de données {db_type} initialisée")
 
     # Créer utilisateur admin par défaut si n'existe pas
     from knowbase.db.init_admin import init_default_admin
@@ -147,6 +149,10 @@ def create_app() -> FastAPI:
                 "name": "living-ontology",
                 "description": "🌊 **OSMOSE Living Ontology** - Évolution dynamique des types, découverte de patterns, propositions et validation (Phase 2.3)"
             },
+            {
+                "name": "Sessions",
+                "description": "🧠 **Memory Layer** - Sessions de conversation persistantes, contexte conversationnel, résolution références implicites (Phase 2.5)"
+            },
         ],
     )
 
@@ -210,7 +216,7 @@ def create_app() -> FastAPI:
     if public_root.exists():
         app.mount("/static", StaticFiles(directory=public_root), name="static")
 
-    app.include_router(search.router)
+    app.include_router(search.router, prefix="/api")  # Search API - enrichi KG
     app.include_router(ingest.router)
     app.include_router(status.router, prefix="/api")
     app.include_router(imports.router, prefix="/api")
@@ -230,6 +236,7 @@ def create_app() -> FastAPI:
     app.include_router(domain_context.router, prefix="/api")  # Domain Context - Configuration contexte métier global
     app.include_router(insights.router, prefix="/api")  # 🌊 OSMOSE Insights - Découverte connaissances cachées (Phase 2.3)
     # living_ontology.router désactivé - fonctionnalité mise en pause (génère du bruit)
+    app.include_router(sessions.router, prefix="/api")  # 🧠 Memory Layer - Sessions de conversation (Phase 2.5)
 
     return app
 

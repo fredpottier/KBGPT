@@ -13,6 +13,12 @@ class SearchRequest(BaseModel):
     mime: str | None = Field(None, description="Filtre par type MIME")
     solution: str | None = Field(None, description="Filtre par solution SAP")
 
+    # 🧠 Memory Layer - Session Context (Phase 2.5)
+    session_id: str | None = Field(
+        None,
+        description="ID de session pour contexte conversationnel (Memory Layer Phase 2.5)"
+    )
+
     # 🌊 OSMOSE Graph-Guided RAG options
     use_graph_context: bool = Field(
         default=True,
@@ -33,6 +39,7 @@ class SearchRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "question": "Quels sont les effets du Remdesivir sur les patients COVID-19 ?",
+                "session_id": "optional-session-uuid",
                 "use_graph_context": True,
                 "graph_enrichment_level": "standard"
             }

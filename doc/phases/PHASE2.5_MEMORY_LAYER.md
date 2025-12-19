@@ -1,8 +1,9 @@
 # Phase 2.5 : Memory Layer - Mémoire Conversationnelle
 
-**Version:** 1.0
+**Version:** 1.1
 **Date:** 2025-12-17
-**Status:** 🟡 PLANIFICATION
+**Dernière MAJ:** 2025-12-19
+**Status:** 🟢 COMPLÉTÉ - 100% (Étapes 1-6 + UI Fixes)
 **Durée estimée:** 3-4 semaines (Semaines 25-28)
 **Prérequis:** Phase 2 complète (Intelligence Relationnelle)
 
@@ -1224,10 +1225,224 @@ class GDPRManager:
 
 ---
 
-**Version:** 1.0
+**Version:** 1.1
 **Auteur:** Claude Code
 **Date:** 2025-12-17
-**Statut:** 🟡 En attente validation
+**Dernière MAJ:** 2025-12-19
+**Statut:** 🟢 IN PROGRESS
+
+---
+
+## 14. Tracking Implémentation
+
+### Vue d'Ensemble Progress
+
+```
+Phase 2.5 : Memory Layer
+════════════════════════════════════════════
+Progress Global : [████████████████████] 100%
+
+Étapes :
+├─ 🟢 Étape 1 : Session Context dans Search    : ✅ COMPLÉTÉ (100%)
+├─ 🟢 Étape 2 : Session Entity Resolver        : ✅ COMPLÉTÉ (100%)
+├─ 🟢 Étape 3 : Citation Sources Fix           : ✅ COMPLÉTÉ (100%)
+├─ 🟢 Étape 4 : Session Manager complet        : ✅ COMPLÉTÉ (100%) - EXISTANT
+├─ 🟢 Étape 5 : Context Resolver               : ✅ COMPLÉTÉ (100%) - EXISTANT
+├─ 🟢 Étape 6 : Intelligent Summarizer         : ✅ COMPLÉTÉ (100%)
+├─ 🟢 Étape 6b: UI Fixes (header/modal)        : ✅ COMPLÉTÉ (100%)
+└─ ⏸️ Étape 7 : Export PDF                     : ⏸️ OPTIONNEL (future)
+```
+
+### 🟢 Étape 1 : Session Context dans Search (COMPLÉTÉ - 2025-12-18)
+
+**Objectif :** Injecter le contexte de conversation dans la recherche et synthèse.
+
+**Fichiers créés/modifiés :**
+- `src/knowbase/api/services/search.py` : Ajout récupération session context
+- `src/knowbase/api/services/synthesis.py` : Prompt enrichi avec contexte session
+- `frontend/src/lib/api.ts` : Paramètre `session_id` dans chat.send()
+
+**Fonctionnalités :**
+- ✅ Récupération des 5 derniers messages de session
+- ✅ Enrichissement de la requête vectorielle avec contexte thématique
+- ✅ Passage du contexte au prompt de synthèse LLM
+- ✅ Compréhension des références implicites ("cela", "cette personne", etc.)
+
+### 🟢 Étape 2 : Session Entity Resolver (COMPLÉTÉ - 2025-12-19)
+
+**Objectif :** Utiliser le Knowledge Graph pour les questions de suivi sur des entités mentionnées.
+
+**Fichier créé :**
+- `src/knowbase/api/services/session_entity_resolver.py` (359 lignes)
+
+**Fonctionnalités :**
+- ✅ Extraction d'entités des messages de session (noms propres, termes techniques)
+- ✅ Recherche fuzzy des concepts KG correspondants (Cypher)
+- ✅ Récupération des chunks liés aux concepts identifiés
+- ✅ Intégration dans le flux de recherche (ajout chunks KG aux résultats)
+
+**Architecture :**
+```
+Question suivi: "Sur quelle étude a travaillé Richard Davies?"
+       ↓
+SessionEntityResolver
+       ↓
+1. Extraction entités session → ["Richard Davies", "COVID", ...]
+2. Match fuzzy Neo4j → CanonicalConcept(canonical_id=xxx)
+3. Récupération chunks Qdrant via concept → [chunk1, chunk2, ...]
+4. Injection dans résultats recherche
+```
+
+### 🟢 Étape 3 : Citation Sources Fix (COMPLÉTÉ - 2025-12-19)
+
+**Objectif :** Corriger le problème "Document inconnu" dans les citations.
+
+**Cause racine identifiée :**
+- `build_response_payload()` cherchait `source_file_url` (n'existe pas)
+- Les chunks OSMOSE utilisent `document_name` à la place
+
+**Fix appliqué :**
+- `src/knowbase/api/services/search.py:34-38` : Ajout fallback vers `document_name`
+
+```python
+source_file_url = (
+    document.get("source_file_url") or
+    payload.get("source_file_url") or
+    payload.get("document_name", "")  # Nouveau fallback
+)
+```
+
+**Note :** Les liens de téléchargement des sources ne sont pas encore fonctionnels.
+Ceci sera traité dans une phase ultérieure (connecteurs sources).
+
+### 🟢 Étape 4 : Session Manager complet (EXISTANT - Découvert 2025-12-19)
+
+**Objectif :** Gestion CRUD complète des sessions de conversation.
+
+**DÉCOUVERTE :** Le Session Manager était **déjà implémenté** avec PostgreSQL (pas Neo4j comme prévu initialement dans la spec).
+
+**Fichiers existants :**
+- `src/knowbase/memory/session_manager.py` (730 lignes) - SessionManager complet
+- `src/knowbase/api/routers/sessions.py` (579 lignes) - REST API complète
+- `src/knowbase/api/schemas/sessions.py` (166 lignes) - Pydantic schemas
+- `src/knowbase/db/models.py` - SQLAlchemy models (Session, SessionMessage)
+
+**Fonctionnalités implémentées :**
+- ✅ Session CRUD (create, get, list, archive, delete, update_title)
+- ✅ Messages management (add, get, get_recent)
+- ✅ LangChain Memory integration (ConversationSummaryBufferMemory)
+- ✅ Context metadata management
+- ✅ Feedback system (thumbs up/down)
+- ✅ Auto-title generation via LLM
+- ✅ Multi-tenancy support
+
+**Intégration Frontend :**
+- `frontend/src/components/chat/SessionSelector.tsx` - UI session selector
+- `frontend/src/app/chat/page.tsx` - Full chat page with sessions
+- `frontend/src/lib/api.ts` - API client avec endpoints sessions
+
+### 🟢 Étape 5 : Context Resolver (EXISTANT - Découvert 2025-12-19)
+
+**Objectif :** Résoudre les références implicites dans les questions de suivi.
+
+**DÉCOUVERTE :** Le Context Resolver était **déjà implémenté**.
+
+**Fichier existant :**
+- `src/knowbase/memory/context_resolver.py` (476 lignes) - ContextResolver complet
+
+**Fonctionnalités implémentées :**
+- ✅ Résolution de pronoms (il, elle, ils, elles, ça, cela, ce document...)
+- ✅ Résolution de références documents (le premier document, le PDF mentionné...)
+- ✅ Résolution de références entités (cette personne, l'auteur, le responsable...)
+- ✅ Résolution d'ordinaux (le premier, le deuxième, le dernier...)
+- ✅ Patterns regex configurables
+- ✅ Gestion du contexte avec entités/documents récents
+
+**Note :** Ce Context Resolver utilise des patterns regex plutôt qu'un LLM.
+Une version LLM-powered pourrait être ajoutée ultérieurement si les patterns
+s'avèrent insuffisants.
+
+### 🟢 Étape 6 : Intelligent Summarizer (COMPLÉTÉ - 2025-12-19)
+
+**Objectif :** Générer des comptes-rendus métier structurés des sessions.
+
+**Fichiers créés :**
+- `src/knowbase/memory/intelligent_summarizer.py` (~400 lignes)
+- `frontend/src/components/chat/SessionSummary.tsx` (~280 lignes)
+
+**Fichiers modifiés :**
+- `src/knowbase/memory/__init__.py` - Export du summarizer
+- `src/knowbase/api/schemas/sessions.py` - Schemas Summary
+- `src/knowbase/api/routers/sessions.py` - Endpoints summary
+- `frontend/src/lib/api.ts` - API client summary
+- `frontend/src/app/chat/page.tsx` - Intégration bouton résumé
+
+**Fonctionnalités implémentées :**
+- ✅ 3 formats de résumé: Business, Technical, Executive
+- ✅ Extraction automatique des topics et concepts
+- ✅ Détection des actions via patterns regex
+- ✅ Points clés avec sources documentaires
+- ✅ Zones non explorées suggérées
+- ✅ API POST/GET `/sessions/{id}/summary`
+- ✅ Composant frontend avec modal et sélecteur de format
+
+**Architecture :**
+```
+IntelligentSummarizer
+├── _extract_session_data()    → Topics, concepts, sources, actions
+├── _format_conversation_transcript()  → Formatage pour LLM
+├── _generate_with_llm()       → Appel LLM avec prompt adapté
+└── _parse_summary()           → Structure SessionSummary
+```
+
+### 🟢 Étape 6b : UI Fixes (COMPLÉTÉ - 2025-12-19)
+
+**Objectif :** Corriger les problèmes d'UX du chat et du résumé.
+
+**Fichiers modifiés :**
+- `frontend/src/components/layout/MainLayout.tsx` - Fix header sticky
+- `frontend/src/components/chat/SessionSummary.tsx` - Fix modal comportement
+- `frontend/src/app/chat/page.tsx` - Ajustements Flex layout
+- `src/knowbase/api/openapi.json` → `openapi.json.bak` - Suppression fichier statique
+
+**Corrections appliquées :**
+- ✅ **Header sticky** : Le conteneur principal utilise maintenant `h="calc(100vh - 64px)"` avec `overflow="hidden"` pour créer un contexte de scroll. Le header du chat reste toujours visible.
+- ✅ **Modal summary** : L'ouverture du modal n'exécute plus automatiquement la génération. L'utilisateur peut d'abord choisir le format (Business/Technique/Executive) via des cartes cliquables, puis cliquer "Générer".
+- ✅ **OpenAPI dynamique** : Suppression du fichier `openapi.json` statique obsolète qui masquait les nouveaux endpoints (dont `/sessions/{id}/summary`).
+
+### ⏸️ Étapes Suivantes (Optionnel)
+
+| Étape | Description | Effort | Priorité |
+|-------|-------------|--------|----------|
+| **7** | Export PDF | 2 jours | LOW |
+
+### Journal des Sessions
+
+#### 2025-12-19 : Intelligent Summarizer + UI Fixes
+- ✅ Création `intelligent_summarizer.py` avec 3 formats
+- ✅ Endpoints API `/sessions/{id}/summary` (GET/POST)
+- ✅ Composant frontend `SessionSummary.tsx`
+- ✅ Intégration dans la page chat
+- ✅ Fix header sticky: `MainLayout.tsx` avec `h="calc(100vh - 64px)"` et `overflow="hidden"`
+- ✅ Fix modal summary: ouverture sans génération auto, sélection format d'abord
+- ✅ Suppression `openapi.json` statique obsolète pour permettre génération dynamique FastAPI
+
+#### 2025-12-19 : Session Entity Resolver + Citation Fix
+- ✅ Création `session_entity_resolver.py`
+- ✅ Intégration dans `search.py`
+- ✅ Diagnostic et fix "Document inconnu" (fallback `document_name`)
+- ⏳ Liens sources à traiter ultérieurement
+
+#### 2025-12-19 : Session Manager EXISTANT découvert
+- ✅ `session_manager.py` (730 lignes) - PostgreSQL
+- ✅ `context_resolver.py` (476 lignes) - Patterns regex
+- ✅ API complète `/api/sessions/*`
+- ✅ Frontend `SessionSelector.tsx` + chat integration
+
+#### 2025-12-18 : Session Context Integration
+- ✅ Modification `search.py` pour contexte session
+- ✅ Modification `synthesis.py` pour prompt enrichi
+- ✅ API `session_id` paramètre ajouté
 
 ---
 

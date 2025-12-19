@@ -29,7 +29,10 @@ def search(
        - Récupération des concepts liés dans Neo4j
        - Relations transitives découvertes
        - Clusters thématiques (niveau deep)
-    4. Synthèse LLM avec contexte enrichi
+    4. **Contexte conversationnel** (si session_id fourni - Phase 2.5):
+       - Récupération des messages récents de la session
+       - Compréhension des références implicites ("cela", "cette personne", etc.)
+    5. Synthèse LLM avec contexte enrichi
 
     **Niveaux d'enrichissement:**
     - `none`: RAG classique (pas d'enrichissement KG)
@@ -51,6 +54,7 @@ def search(
         tenant_id=tenant_id,
         use_graph_context=request.use_graph_context,
         graph_enrichment_level=request.graph_enrichment_level,
+        session_id=request.session_id,
     )
 
 

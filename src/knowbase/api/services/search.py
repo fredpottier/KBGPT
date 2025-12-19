@@ -29,8 +29,13 @@ def build_response_payload(result, public_url: str) -> dict[str, Any]:
     document = payload.get("document", {})
     chunk = payload.get("chunk", {})
 
-    # Gestion des URLs avec fallback vers l'ancienne structure
-    source_file_url = document.get("source_file_url") or payload.get("source_file_url", "")
+    # Gestion des URLs avec fallback vers l'ancienne structure ET document_name
+    # Priorité: document.source_file_url > payload.source_file_url > payload.document_name
+    source_file_url = (
+        document.get("source_file_url") or
+        payload.get("source_file_url") or
+        payload.get("document_name", "")  # Fallback vers document_name (nouvelle structure OSMOSE)
+    )
     slide_image_url = document.get("slide_image_url") or payload.get("slide_image_url", "")
     slide_index = chunk.get("slide_index") or payload.get("slide_index", "")
 
@@ -60,9 +65,10 @@ def search_documents(
     tenant_id: str = "default",
     use_graph_context: bool = True,
     graph_enrichment_level: str = "standard",
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """
-    Recherche sémantique avec enrichissement Knowledge Graph (OSMOSE).
+    Recherche sémantique avec enrichissement Knowledge Graph (OSMOSE) et contexte conversationnel.
 
     Args:
         question: Question de l'utilisateur
@@ -73,12 +79,58 @@ def search_documents(
         tenant_id: Tenant ID pour le KG
         use_graph_context: Activer l'enrichissement KG (Graph-Guided RAG)
         graph_enrichment_level: Niveau d'enrichissement (none, light, standard, deep)
+        session_id: ID de session pour contexte conversationnel (Memory Layer Phase 2.5)
 
     Returns:
         Résultats de recherche avec synthèse enrichie
     """
     query = question.strip()
-    query_vector = embedding_model.encode(query)
+
+    # 🧠 Memory Layer: Récupérer le contexte de conversation si session_id fourni
+    session_context_text = ""
+    enriched_query = query  # Requête enrichie pour la recherche vectorielle
+    recent_messages = []  # Pour le resolver d'entités
+
+    if session_id:
+        try:
+            from knowbase.memory import get_session_manager
+            manager = get_session_manager()
+
+            # Récupérer les derniers messages de la session
+            recent_messages = manager.get_recent_messages(session_id, count=5)
+
+            if recent_messages:
+                # Construire le contexte conversationnel pour la synthèse
+                session_context_lines = ["## Contexte de la conversation précédente\n"]
+                for msg in recent_messages:
+                    role_label = "Utilisateur" if msg.role == "user" else "Assistant"
+                    # Tronquer les messages longs
+                    content = msg.content[:500] + "..." if len(msg.content) > 500 else msg.content
+                    session_context_lines.append(f"**{role_label}**: {content}\n")
+                session_context_text = "\n".join(session_context_lines)
+
+                # 🔑 Enrichir la requête vectorielle avec le contexte
+                # Récupérer le dernier message assistant pour contexte thématique
+                last_assistant_msg = None
+                for msg in reversed(recent_messages):
+                    if msg.role == "assistant":
+                        last_assistant_msg = msg.content
+                        break
+
+                if last_assistant_msg:
+                    # Extraire les premiers 200 caractères du contexte pour enrichir la recherche
+                    context_snippet = last_assistant_msg[:200].replace("\n", " ")
+                    enriched_query = f"{query} {context_snippet}"
+                    logger.info(f"[MEMORY] Query enriched with session context")
+
+                logger.info(
+                    f"[MEMORY] Session context loaded: {len(recent_messages)} messages from {session_id[:8]}..."
+                )
+        except Exception as e:
+            logger.warning(f"[MEMORY] Failed to load session context (non-blocking): {e}")
+
+    # Utiliser la requête enrichie pour l'embedding
+    query_vector = embedding_model.encode(enriched_query)
     if hasattr(query_vector, "tolist"):
         query_vector = query_vector.tolist()
     elif hasattr(query_vector, "numpy"):
@@ -119,6 +171,42 @@ def search_documents(
 
     # Apply reranking to improve relevance ordering
     reranked_chunks = rerank_chunks(query, response_chunks, top_k=TOP_K)
+
+    # 🧠 Session Entity Resolution: Si session active, chercher chunks via KG
+    # pour les entités mentionnées dans le contexte de conversation
+    kg_entity_chunks = []
+    if session_id and recent_messages and use_graph_context:
+        try:
+            from .session_entity_resolver import get_session_entity_resolver
+
+            resolver = get_session_entity_resolver(tenant_id)
+            kg_entity_chunks = resolver.resolve_and_get_chunks(
+                query=query,
+                session_messages=recent_messages,
+                max_chunks=5  # Max 5 chunks supplémentaires du KG
+            )
+
+            if kg_entity_chunks:
+                logger.info(
+                    f"[SESSION-KG] Found {len(kg_entity_chunks)} chunks via entity resolution"
+                )
+
+                # Ajouter les chunks KG aux résultats (avec marqueur kg_source)
+                # Les placer en tête car ils sont pertinents pour la question de suivi
+                for kg_chunk in kg_entity_chunks:
+                    # Éviter les doublons (comparer par texte)
+                    is_duplicate = any(
+                        chunk.get("text", "")[:100] == kg_chunk.get("text", "")[:100]
+                        for chunk in reranked_chunks
+                    )
+                    if not is_duplicate:
+                        reranked_chunks.insert(0, kg_chunk)
+
+                # Limiter le total de chunks
+                reranked_chunks = reranked_chunks[:TOP_K + 3]
+
+        except Exception as e:
+            logger.warning(f"[SESSION-KG] Entity resolution failed (non-blocking): {e}")
 
     # 🌊 OSMOSE: Enrichissement Knowledge Graph (Graph-Guided RAG)
     graph_context_text = ""
@@ -172,8 +260,13 @@ def search_documents(
             logger.warning(f"[OSMOSE] Graph enrichment failed (non-blocking): {e}")
             # Continue sans enrichissement KG
 
-    # Generate synthesized response using LLM (with optional KG context)
-    synthesis_result = synthesize_response(query, reranked_chunks, graph_context_text)
+    # Generate synthesized response using LLM (with optional KG and session context)
+    synthesis_result = synthesize_response(
+        query,
+        reranked_chunks,
+        graph_context_text,
+        session_context_text
+    )
 
     response = {
         "status": "success",
