@@ -6,10 +6,7 @@ import {
   VStack,
   HStack,
   Link,
-  Icon,
-  Divider,
 } from '@chakra-ui/react'
-import { ExternalLinkIcon, DownloadIcon } from '@chakra-ui/icons'
 import { SynthesisResult } from '@/types/api'
 
 interface SourcesSectionProps {
@@ -51,98 +48,44 @@ export default function SourcesSection({ synthesis }: SourcesSectionProps) {
 
   return (
     <Box w="full">
-      <VStack spacing={4} align="stretch">
-        {/* Header */}
-        <Text fontSize="lg" fontWeight="semibold" color="gray.700">
-          📎 Sources utilisées
+      <VStack spacing={1} align="stretch">
+        {/* Header compact */}
+        <Text fontSize="xs" fontWeight="medium" color="gray.500">
+          Sources ({synthesis.sources_used.length})
         </Text>
 
-        <Divider />
+        {/* Sources list - inline compact */}
+        <HStack spacing={1} flexWrap="wrap">
+          {synthesis.sources_used.map((source, index) => {
+            const filename = getDocumentName(source)
+            const extension = getFileExtension(filename)
 
-        {/* Sources list */}
-        <Box
-          bg="blue.50"
-          p={4}
-          borderRadius="lg"
-          border="1px solid"
-          borderColor="blue.200"
-        >
-          <VStack spacing={3} align="stretch">
-            {synthesis.sources_used.map((source, index) => {
-              const filename = getDocumentName(source)
-              const extension = getFileExtension(filename)
-
-              return (
-                <HStack
-                  key={index}
-                  spacing={3}
-                  p={3}
-                  bg="white"
-                  borderRadius="md"
-                  border="1px solid"
-                  borderColor="gray.200"
-                  _hover={{
-                    borderColor: 'blue.300',
-                    shadow: 'sm'
-                  }}
-                  transition="all 0.2s"
-                >
-                  {/* File type indicator */}
-                  <Box
-                    bg={getFileTypeColor(extension)}
-                    color="white"
-                    px={2}
-                    py={1}
-                    borderRadius="md"
-                    fontSize="xs"
-                    fontWeight="bold"
-                    minW="50px"
-                    textAlign="center"
-                  >
-                    {extension}
-                  </Box>
-
-                  {/* File info */}
-                  <VStack spacing={1} align="start" flex="1">
-                    <Text
-                      fontSize="sm"
-                      fontWeight="medium"
-                      color="gray.800"
-                      noOfLines={1}
-                    >
-                      {filename}
-                    </Text>
-                    <Text fontSize="xs" color="gray.500">
-                      Source {index + 1} sur {synthesis.sources_used.length}
-                    </Text>
-                  </VStack>
-
-                  {/* Download link */}
-                  <Link
-                    href={source}
-                    isExternal
-                    color="blue.600"
-                    _hover={{ color: 'blue.800' }}
-                    display="flex"
-                    alignItems="center"
-                    gap={1}
-                    fontSize="sm"
-                    fontWeight="medium"
-                  >
-                    <DownloadIcon w={3} h={3} />
-                    Télécharger
-                    <ExternalLinkIcon w={3} h={3} />
-                  </Link>
-                </HStack>
-              )
-            })}
-          </VStack>
-        </Box>
-
-        {/* Summary */}
-        <Text fontSize="xs" color="gray.500" textAlign="center">
-          {synthesis.sources_used.length} document{synthesis.sources_used.length > 1 ? 's' : ''} utilisé{synthesis.sources_used.length > 1 ? 's' : ''} pour générer cette réponse
-        </Text>
+            return (
+              <Link
+                key={index}
+                href={source}
+                isExternal
+                px={1.5}
+                py={0.5}
+                bg="gray.100"
+                borderRadius="sm"
+                fontSize="2xs"
+                color="gray.600"
+                _hover={{ bg: 'blue.100', color: 'blue.700' }}
+                display="inline-flex"
+                alignItems="center"
+                gap={0.5}
+              >
+                <Text as="span" fontWeight="medium" color={getFileTypeColor(extension)}>
+                  {extension}
+                </Text>
+                <Text as="span" noOfLines={1} maxW="120px">
+                  {filename.replace(`.${extension.toLowerCase()}`, '')}
+                </Text>
+              </Link>
+            )
+          })}
+        </HStack>
       </VStack>
     </Box>
   )

@@ -309,6 +309,15 @@ export const api = {
     },
   },
 
+  // Concepts - Phase 3.5 Explainable Graph-RAG
+  concepts: {
+    explain: (conceptId: string) => apiClient.get(`/concepts/${conceptId}/explain`),
+    search: (query: string, limit: number = 10) =>
+      apiClient.get(`/concepts/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+    related: (conceptId: string, maxDepth: number = 2) =>
+      apiClient.get(`/concepts/${conceptId}/related?max_depth=${maxDepth}`),
+  },
+
   // Sessions - Memory Layer (Phase 2.5)
   sessions: {
     // Session CRUD

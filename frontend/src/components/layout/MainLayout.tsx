@@ -90,11 +90,11 @@ export default function MainLayout({ children }: MainLayoutProps) {
         <Box
           flex="1"
           ml={showSidebar ? '256px' : '0'} // 64 * 4 = 256px (sidebar documents ou admin)
-          h="calc(100vh - 64px)"
+          minH="calc(100vh - 64px)"
           bg="gray.50"
-          overflow="hidden"
+          overflowY="auto"
         >
-          <Box p={6} h="full" overflow="hidden">
+          <Box p={6}>
             {children}
           </Box>
         </Box>

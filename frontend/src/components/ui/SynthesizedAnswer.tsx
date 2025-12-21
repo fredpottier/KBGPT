@@ -8,16 +8,21 @@ import {
   Divider,
   Flex,
 } from '@chakra-ui/react'
-import { SynthesisResult, SearchChunk } from '@/types/api'
+import { SynthesisResult, SearchChunk, ExplorationIntelligence } from '@/types/api'
 import CopyButton from './CopyButton'
+import { ResponseGraph } from '@/components/chat'
+import type { GraphData } from '@/types/graph'
 
 interface SynthesizedAnswerProps {
   synthesis: SynthesisResult
   chunks?: SearchChunk[]
   onSlideClick?: (chunk: SearchChunk) => void
+  graphData?: GraphData
+  explorationIntelligence?: ExplorationIntelligence
+  onSearch?: (query: string) => void
 }
 
-export default function SynthesizedAnswer({ synthesis, chunks, onSlideClick }: SynthesizedAnswerProps) {
+export default function SynthesizedAnswer({ synthesis, chunks, onSlideClick, graphData, explorationIntelligence, onSearch }: SynthesizedAnswerProps) {
   const getConfidenceColor = (confidence: number) => {
     if (confidence >= 0.7) return 'green'
     if (confidence >= 0.5) return 'yellow'
@@ -121,50 +126,49 @@ export default function SynthesizedAnswer({ synthesis, chunks, onSlideClick }: S
 
   return (
     <Box w="full">
-      <VStack spacing={4} align="stretch">
-        {/* Header with confidence indicator */}
-        <Flex justify="space-between" align="center" mb={2}>
-          <Text fontSize="lg" fontWeight="semibold" color="gray.700">
-            🤖 Réponse générée
-          </Text>
-          <Badge
-            colorScheme={getConfidenceColor(synthesis.confidence)}
-            variant="subtle"
-            fontSize="xs"
-          >
-            {getConfidenceLabel(synthesis.confidence)} ({Math.round(synthesis.confidence * 100)}%)
-          </Badge>
-        </Flex>
-
-        <Divider />
-
-        {/* Synthesized answer */}
+      <VStack spacing={2} align="stretch">
+        {/* Synthesized answer - ultra compact, pas de header */}
         <Box
           bg="gray.50"
-          p={6}
-          borderRadius="lg"
+          p={2}
+          borderRadius="sm"
           border="1px solid"
           borderColor="gray.200"
           position="relative"
         >
           <Text
-            fontSize="md"
-            lineHeight="1.6"
+            fontSize="xs"
+            lineHeight="1.4"
             whiteSpace="pre-wrap"
-            color="gray.800"
-            mb={4}
+            color="gray.700"
           >
             {renderAnswerWithClickableSlides(synthesis.synthesized_answer)}
           </Text>
 
-          {/* Copy button positioned at bottom right of the answer */}
-          <Flex justify="flex-end" mt={3}>
+          {/* Copy + confidence inline */}
+          <Flex justify="space-between" align="center" mt={1.5}>
+            <Badge
+              colorScheme={getConfidenceColor(synthesis.confidence)}
+              variant="subtle"
+              fontSize="2xs"
+            >
+              {Math.round(synthesis.confidence * 100)}%
+            </Badge>
             <CopyButton
               text={synthesis.synthesized_answer}
               className="copy-answer-button"
             />
           </Flex>
         </Box>
+
+        {/* Knowledge Graph - APRÈS la réponse */}
+        {graphData && graphData.nodes.length > 0 && (
+          <ResponseGraph
+            graphData={graphData}
+            explorationIntelligence={explorationIntelligence}
+            onSearch={onSearch}
+          />
+        )}
       </VStack>
     </Box>
   )

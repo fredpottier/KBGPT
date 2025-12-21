@@ -108,37 +108,39 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
   return (
     <>
       <Box position="relative" w="full">
-        <Text fontSize="lg" fontWeight="semibold" mb={4} color="gray.700">
-          📸 Aperçus des documents
+        <Text fontSize="xs" fontWeight="medium" mb={1} color="gray.500">
+          Aperçus
         </Text>
 
         <Box position="relative">
           {/* Left scroll button */}
-          {chunksWithImages.length > 3 && (
+          {chunksWithImages.length > 4 && (
             <IconButton
               aria-label="Scroll left"
-              icon={<ChevronLeftIcon />}
+              icon={<ChevronLeftIcon boxSize={3} />}
               position="absolute"
-              left={-2}
+              left={-1}
               top="50%"
               transform="translateY(-50%)"
               zIndex={2}
               bg="white"
-              shadow="md"
+              shadow="sm"
               borderRadius="full"
-              size="sm"
+              size="xs"
+              minW={5}
+              h={5}
               onClick={() => scroll('left')}
             />
           )}
 
-          {/* Carousel container */}
+          {/* Carousel container - compact */}
           <Box
             ref={scrollRef}
             display="flex"
-            gap={4}
+            gap={2}
             overflowX="auto"
-            py={2}
-            px={6}
+            py={1}
+            px={4}
             css={{
               scrollbarWidth: 'none',
               '&::-webkit-scrollbar': {
@@ -153,20 +155,20 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
                 cursor="pointer"
                 onClick={() => handleImageClick(chunk)}
                 _hover={{
-                  transform: 'scale(1.05)',
-                  shadow: 'lg'
+                  transform: 'scale(1.03)',
+                  shadow: 'md'
                 }}
                 transition="all 0.2s"
               >
-                <VStack spacing={2} align="center">
+                <VStack spacing={0.5} align="center">
                   <Box
                     position="relative"
-                    borderRadius="md"
+                    borderRadius="sm"
                     overflow="hidden"
-                    border="2px solid"
+                    border="1px solid"
                     borderColor="gray.200"
-                    w="150px"
-                    h="100px"
+                    w="100px"
+                    h="65px"
                   >
                     <Image
                       src={chunk.slide_image_url}
@@ -183,46 +185,37 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
                           alignItems="center"
                           justifyContent="center"
                         >
-                          <Text fontSize="xs" color="gray.500">
-                            Image non disponible
+                          <Text fontSize="2xs" color="gray.400">
+                            N/A
                           </Text>
                         </Box>
                       }
                     />
                   </Box>
-                  <VStack spacing={1} align="center">
-                    <Text fontSize="xs" fontWeight="medium" color="gray.600">
-                      Slide {chunk.slide_index}
-                    </Text>
-                    <Text
-                      fontSize="xs"
-                      color="gray.500"
-                      textAlign="center"
-                      maxW="150px"
-                      noOfLines={2}
-                    >
-                      {getDocumentName(chunk.source_file)}
-                    </Text>
-                  </VStack>
+                  <Text fontSize="2xs" color="gray.500">
+                    Slide {chunk.slide_index}
+                  </Text>
                 </VStack>
               </Box>
             ))}
           </Box>
 
           {/* Right scroll button */}
-          {chunksWithImages.length > 3 && (
+          {chunksWithImages.length > 4 && (
             <IconButton
               aria-label="Scroll right"
-              icon={<ChevronRightIcon />}
+              icon={<ChevronRightIcon boxSize={3} />}
               position="absolute"
-              right={-2}
+              right={-1}
               top="50%"
               transform="translateY(-50%)"
               zIndex={2}
               bg="white"
-              shadow="md"
+              shadow="sm"
               borderRadius="full"
-              size="sm"
+              size="xs"
+              minW={5}
+              h={5}
               onClick={() => scroll('right')}
             />
           )}

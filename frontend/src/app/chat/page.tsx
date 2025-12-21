@@ -1,11 +1,15 @@
 'use client'
 
+/**
+ * 🌊 OSMOSE Phase 3.5 - Chat Page avec Knowledge Graph intégré
+ *
+ * Page de chat avec graphe D3.js intégré dans chaque réponse (accordéon).
+ */
+
 import {
   Box,
-  Button,
   Flex,
   HStack,
-  Input,
   Text,
   VStack,
   Card,
@@ -13,7 +17,6 @@ import {
   Avatar,
   Spinner,
   IconButton,
-  Textarea,
   useToast,
   Select,
   Switch,
@@ -30,6 +33,11 @@ import AutoResizeTextarea from '@/components/ui/AutoResizeTextarea'
 import SearchResultDisplay from '@/components/ui/SearchResultDisplay'
 import SessionSelector from '@/components/chat/SessionSelector'
 import SessionSummary from '@/components/chat/SessionSummary'
+import { ConceptCardPanel } from '@/components/concept'
+import { parseGraphData } from '@/lib/graph'
+import type { GraphData } from '@/types/graph'
+import type { ExplorationIntelligence } from '@/types/api'
+import { useDisclosure } from '@chakra-ui/react'
 
 interface Message {
   id: string
@@ -38,6 +46,8 @@ interface Message {
   timestamp: string
   searchResult?: SearchResponse
   feedback_rating?: number
+  graphData?: GraphData
+  explorationIntelligence?: ExplorationIntelligence
 }
 
 type GraphEnrichmentLevel = 'none' | 'light' | 'standard' | 'deep'
@@ -52,6 +62,14 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
   const queryClient = useQueryClient()
+
+  // Concept card panel
+  const {
+    isOpen: isConceptPanelOpen,
+    onOpen: openConceptPanel,
+    onClose: closeConceptPanel,
+  } = useDisclosure()
+  const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null)
 
   // Fetch available solutions
   const { data: solutionsResponse, isLoading: solutionsLoading } = useQuery({
@@ -106,7 +124,6 @@ export default function ChatPage() {
     }
 
     results.forEach((result, index) => {
-      const score = (result.score * 100).toFixed(0)
       const sourceInfo = result.source_file
         ? `*(${result.source_file.split('/').pop()}, slide ${result.slide_index})*`
         : '*(Source inconnue)*'
@@ -134,25 +151,6 @@ export default function ChatPage() {
 
     return markdown
   }
-
-  // Create session mutation
-  const createSessionMutation = useMutation({
-    mutationFn: () => api.sessions.create(),
-    onSuccess: (response) => {
-      if (response.success && response.data) {
-        const newSession = response.data as { id: string }
-        setCurrentSessionId(newSession.id)
-        setMessages([])
-        queryClient.invalidateQueries({ queryKey: ['sessions'] })
-      }
-    },
-  })
-
-  // Add message to session mutation
-  const addMessageMutation = useMutation({
-    mutationFn: ({ sessionId, message }: { sessionId: string, message: any }) =>
-      api.sessions.addMessage(sessionId, message),
-  })
 
   const sendMessageMutation = useMutation({
     mutationFn: async (message: string) => {
@@ -183,7 +181,7 @@ export default function ChatPage() {
         selectedSolution || undefined,
         useGraphContext,
         useGraphContext ? graphEnrichmentLevel : undefined,
-        sessionId  // Pass session_id for Memory Layer context
+        sessionId
       )
 
       return { response, sessionId }
@@ -201,6 +199,16 @@ export default function ChatPage() {
           content = (response.data as any).answer_markdown
         }
 
+        // 🌊 Phase 3.5: Extraire graph_data pour le ResponseGraph
+        let graphData: GraphData | undefined
+        if ((searchResult as any)?.graph_data) {
+          graphData = parseGraphData((searchResult as any).graph_data) || undefined
+        }
+
+        // 🌊 Phase 3.5+: Extraire exploration_intelligence
+        const explorationIntelligence: ExplorationIntelligence | undefined =
+          (searchResult as any)?.exploration_intelligence
+
         // Save assistant message to session
         const assistantMessageResponse = await api.sessions.addMessage(sessionId, {
           role: 'assistant',
@@ -215,7 +223,9 @@ export default function ChatPage() {
           content,
           role: 'assistant',
           timestamp: new Date().toISOString(),
-          searchResult: searchResult
+          searchResult: searchResult,
+          graphData: graphData,
+          explorationIntelligence: explorationIntelligence,
         }
         setMessages(prev => [...prev, newMessage])
 
@@ -301,269 +311,327 @@ export default function ChatPage() {
     feedbackMutation.mutate({ messageId, rating })
   }
 
+  const handleConceptClickFromPanel = useCallback((conceptId: string) => {
+    // Naviguer vers un autre concept depuis le panel
+    setSelectedConceptId(conceptId)
+  }, [])
+
+  const handleQuestionClick = useCallback((question: string) => {
+    // Insérer la question suggérée dans l'input
+    setInput(question)
+    closeConceptPanel()
+  }, [closeConceptPanel])
+
+  // 🌊 Phase 3.5+: Callback pour les recherches depuis le graphe d'exploration
+  const handleExplorationSearch = useCallback((query: string) => {
+    // Insérer la requête dans l'input et déclencher la recherche
+    setInput(query)
+    // Auto-envoyer après un court délai pour que l'utilisateur voie la requête
+    setTimeout(() => {
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        content: query,
+        role: 'user',
+        timestamp: new Date().toISOString(),
+      }
+      setMessages(prev => [...prev, userMessage])
+      sendMessageMutation.mutate(query)
+      setInput('')
+    }, 100)
+  }, [sendMessageMutation])
+
   return (
-    <Flex direction="column" h="full" w="full" maxW="100%" overflow="hidden">
-      {/* Session selector header - FIXED */}
-      <Box
-        flexShrink={0}
-        bg="gray.50"
-        py={2}
-        px={2}
-        borderBottom="1px"
-        borderColor="gray.200"
-      >
-        <HStack justify="space-between">
-          <SessionSelector
-            currentSessionId={currentSessionId}
-            onSessionChange={handleSessionChange}
-            onNewSession={handleNewSession}
-          />
-          {currentSessionId && (
-            <HStack spacing={2}>
-              <Text fontSize="xs" color="gray.500">
-                {messages.length} message{messages.length !== 1 ? 's' : ''}
-              </Text>
-              {messages.length >= 2 && (
-                <SessionSummary sessionId={currentSessionId} />
-              )}
-            </HStack>
-          )}
-        </HStack>
-      </Box>
-
-      {/* Chat messages - scrollable area */}
-      <Box
+    <Flex h="full" w="full" overflow="hidden">
+      {/* Zone de Chat (100%) - graphe intégré dans chaque réponse */}
+      <Flex
+        direction="column"
         flex="1"
-        overflow="auto"
-        bg="white"
-        borderRadius="lg"
-        shadow="sm"
-        p={4}
-        w="full"
-        maxW="100%"
-        mt={2}
+        minW={0}
+        overflow="hidden"
       >
-        {messages.length === 0 ? (
-          <Flex align="center" justify="center" h="full" direction="column">
-            <Text fontSize="lg" color="gray.500" mb={4}>
-              Bienvenue dans KnowWhere Chat
-            </Text>
-            <Text color="gray.400" textAlign="center">
-              Posez vos questions sur vos documents SAP et je vous aiderai a trouver les informations.
-            </Text>
-          </Flex>
-        ) : (
-          <VStack spacing={4} align="stretch">
-            {messages.map((message) => (
-              <Flex
-                key={message.id}
-                justify={message.role === 'user' ? 'flex-end' : 'flex-start'}
-              >
-                <HStack
-                  spacing={3}
-                  maxW={{ base: "95%", md: "85%" }}
-                  flexDirection={message.role === 'user' ? 'row-reverse' : 'row'}
-                  align="flex-start"
-                  w="full"
-                >
-                  <Avatar
-                    size="sm"
-                    name={message.role === 'user' ? 'User' : 'Assistant'}
-                    bg={message.role === 'user' ? 'blue.500' : 'green.500'}
-                    flexShrink={0}
-                  />
-                  <Card flex="1" minW={0} position="relative" _hover={{ '& .copy-button': { opacity: 1 } }}>
-                    <CardBody py={3} px={4}>
-                      {message.role === 'assistant' && message.searchResult ? (
-                        <SearchResultDisplay searchResult={message.searchResult} />
-                      ) : (
-                        <Text
-                          fontSize="sm"
-                          whiteSpace="pre-wrap"
-                          wordBreak="break-word"
-                          overflowWrap="break-word"
-                        >
-                          {message.content}
-                        </Text>
-                      )}
-                      <Flex justify="space-between" align="center" mt={2}>
-                        <HStack spacing={2}>
-                          <Text fontSize="xs" color="gray.500">
-                            {new Date(message.timestamp).toLocaleTimeString()}
-                          </Text>
-                          {/* Feedback buttons for assistant messages */}
-                          {message.role === 'assistant' && currentSessionId && (
-                            <HStack spacing={1}>
-                              <Tooltip label="Utile">
-                                <IconButton
-                                  aria-label="Thumbs up"
-                                  icon={<span>+</span>}
-                                  size="xs"
-                                  variant={message.feedback_rating === 2 ? 'solid' : 'ghost'}
-                                  colorScheme={message.feedback_rating === 2 ? 'green' : 'gray'}
-                                  onClick={() => handleFeedback(message.id, 2)}
-                                  isDisabled={feedbackMutation.isPending}
-                                />
-                              </Tooltip>
-                              <Tooltip label="Pas utile">
-                                <IconButton
-                                  aria-label="Thumbs down"
-                                  icon={<span>-</span>}
-                                  size="xs"
-                                  variant={message.feedback_rating === 1 ? 'solid' : 'ghost'}
-                                  colorScheme={message.feedback_rating === 1 ? 'red' : 'gray'}
-                                  onClick={() => handleFeedback(message.id, 1)}
-                                  isDisabled={feedbackMutation.isPending}
-                                />
-                              </Tooltip>
-                            </HStack>
-                          )}
-                        </HStack>
-                        <CopyButton
-                          text={message.content}
-                          className="copy-button"
-                          size="xs"
-                        />
-                      </Flex>
-                    </CardBody>
-                  </Card>
-                </HStack>
-              </Flex>
-            ))}
-            {sendMessageMutation.isPending && (
-              <Flex justify="flex-start">
-                <HStack spacing={3}>
-                  <Avatar size="sm" name="Assistant" bg="green.500" />
-                  <Card>
-                    <CardBody py={3} px={4}>
-                      <HStack>
-                        <Spinner size="sm" />
-                        <Text fontSize="sm" color="gray.500">
-                          Recherche en cours...
-                        </Text>
-                      </HStack>
-                    </CardBody>
-                  </Card>
-                </HStack>
-              </Flex>
-            )}
-            <div ref={messagesEndRef} />
-          </VStack>
-        )}
-      </Box>
-
-      {/* Input area */}
-      <Card w="full">
-        <CardBody>
-          <VStack spacing={3} w="full">
-            {/* Graph-Guided RAG controls */}
-            <HStack spacing={4} w="full" justify="flex-start" flexWrap="wrap">
-              <Tooltip label="Enrichir les reponses avec le Knowledge Graph" hasArrow>
-                <HStack spacing={2}>
-                  <Switch
-                    id="use-graph"
-                    isChecked={useGraphContext}
-                    onChange={(e) => setUseGraphContext(e.target.checked)}
-                    colorScheme="teal"
-                    size="sm"
-                  />
-                  <Text fontSize="sm" color="gray.600">
-                    Knowledge Graph
+        {/* Session selector header */}
+        <Box
+          flexShrink={0}
+          bg="gray.50"
+          py={2}
+          px={2}
+          borderBottom="1px"
+          borderColor="gray.200"
+        >
+          <HStack justify="space-between">
+            <SessionSelector
+              currentSessionId={currentSessionId}
+              onSessionChange={handleSessionChange}
+              onNewSession={handleNewSession}
+            />
+            <HStack spacing={2}>
+              {currentSessionId && (
+                <>
+                  <Text fontSize="xs" color="gray.500">
+                    {messages.length} message{messages.length !== 1 ? 's' : ''}
                   </Text>
-                </HStack>
-              </Tooltip>
-              {useGraphContext && (
-                <HStack spacing={2}>
-                  <Text fontSize="sm" color="gray.500">Niveau:</Text>
-                  <Select
-                    value={graphEnrichmentLevel}
-                    onChange={(e) => setGraphEnrichmentLevel(e.target.value as GraphEnrichmentLevel)}
-                    size="xs"
-                    w="120px"
-                    bg="white"
-                  >
-                    <option value="light">Light (~30ms)</option>
-                    <option value="standard">Standard (~50ms)</option>
-                    <option value="deep">Deep (~200ms)</option>
-                  </Select>
-                  <Tooltip
-                    label={
-                      graphEnrichmentLevel === 'light'
-                        ? 'Concepts lies uniquement'
-                        : graphEnrichmentLevel === 'standard'
-                        ? 'Concepts + Relations transitives'
-                        : 'Concepts + Relations + Clusters + Bridge concepts'
-                    }
-                    hasArrow
-                  >
-                    <Badge
-                      colorScheme={
-                        graphEnrichmentLevel === 'light'
-                          ? 'gray'
-                          : graphEnrichmentLevel === 'standard'
-                          ? 'blue'
-                          : 'purple'
-                      }
-                      fontSize="xs"
-                    >
-                      {graphEnrichmentLevel === 'deep' ? 'Deep' : graphEnrichmentLevel === 'standard' ? 'Std' : 'Light'}
-                    </Badge>
-                  </Tooltip>
-                </HStack>
+                  {messages.length >= 2 && (
+                    <SessionSummary sessionId={currentSessionId} />
+                  )}
+                </>
               )}
             </HStack>
+          </HStack>
+        </Box>
 
-            {/* Message input row */}
-            <HStack spacing={2} w="full">
-              <IconButton
-                aria-label="Attach file"
-                icon={<AttachmentIcon />}
-                variant="ghost"
-                size="sm"
-                flexShrink={0}
-              />
-              <AutoResizeTextarea
-                value={input}
-                onChange={setInput}
-                onKeyDown={handleKeyPress}
-                placeholder="Posez votre question..."
-                flex="1"
-                minW={0}
-                minHeight={40}
-                maxHeight={200}
-              />
-              <IconButton
-                aria-label="Send message"
-                icon={<ArrowUpIcon />}
-                colorScheme="blue"
-                isDisabled={!input.trim() || sendMessageMutation.isPending}
-                isLoading={sendMessageMutation.isPending}
-                onClick={handleSend}
-                flexShrink={0}
-              />
-              <Select
-                placeholder="Toutes les solutions"
-                value={selectedSolution}
-                onChange={(e) => setSelectedSolution(e.target.value)}
-                size="sm"
-                bg="white"
-                isDisabled={solutionsLoading}
-                minW="200px"
-                maxW="250px"
-                flexShrink={0}
-              >
-                {solutionsResponse?.success &&
-                  Array.isArray(solutionsResponse.data) &&
-                  solutionsResponse.data.map((solution: string) => (
-                    <option key={solution} value={solution}>
-                      {solution}
-                    </option>
-                  ))}
-              </Select>
-            </HStack>
-          </VStack>
-        </CardBody>
-      </Card>
+        {/* Chat messages */}
+        <Box
+          flex="1"
+          overflow="auto"
+          bg="white"
+          borderRadius="lg"
+          shadow="sm"
+          p={4}
+          w="full"
+          mt={2}
+        >
+          {messages.length === 0 ? (
+            <Flex align="center" justify="center" h="full" direction="column">
+              <Text fontSize="lg" color="gray.500" mb={4}>
+                Bienvenue dans KnowWhere Chat
+              </Text>
+              <Text color="gray.400" textAlign="center" maxW="500px">
+                Posez vos questions sur vos documents et je vous aiderai à trouver les informations.
+                Chaque réponse affichera un Knowledge Graph dépliable montrant les concepts liés.
+              </Text>
+              {useGraphContext && (
+                <Badge mt={4} colorScheme="teal" variant="subtle">
+                  Graph-Guided RAG activé
+                </Badge>
+              )}
+            </Flex>
+          ) : (
+            <VStack spacing={4} align="stretch">
+              {messages.map((message) => (
+                <Flex
+                  key={message.id}
+                  justify={message.role === 'user' ? 'flex-end' : 'flex-start'}
+                >
+                  <HStack
+                    spacing={3}
+                    maxW={{ base: "95%", md: "85%" }}
+                    flexDirection={message.role === 'user' ? 'row-reverse' : 'row'}
+                    align="flex-start"
+                    w="full"
+                  >
+                    <Avatar
+                      size="sm"
+                      name={message.role === 'user' ? 'User' : 'Assistant'}
+                      bg={message.role === 'user' ? 'blue.500' : 'green.500'}
+                      flexShrink={0}
+                    />
+                    <Card flex="1" minW={0} position="relative" _hover={{ '& .copy-button': { opacity: 1 } }}>
+                      <CardBody py={3} px={4}>
+                        {message.role === 'assistant' && message.searchResult ? (
+                          <SearchResultDisplay
+                            searchResult={message.searchResult}
+                            graphData={message.graphData}
+                            explorationIntelligence={message.explorationIntelligence}
+                            onSearch={handleExplorationSearch}
+                          />
+                        ) : (
+                          <Text
+                            fontSize="sm"
+                            whiteSpace="pre-wrap"
+                            wordBreak="break-word"
+                            overflowWrap="break-word"
+                          >
+                            {message.content}
+                          </Text>
+                        )}
+                        <Flex justify="space-between" align="center" mt={2}>
+                          <HStack spacing={2}>
+                            <Text fontSize="xs" color="gray.500">
+                              {new Date(message.timestamp).toLocaleTimeString()}
+                            </Text>
+                            {/* Feedback buttons for assistant messages */}
+                            {message.role === 'assistant' && currentSessionId && (
+                              <HStack spacing={1}>
+                                <Tooltip label="Utile">
+                                  <IconButton
+                                    aria-label="Thumbs up"
+                                    icon={<span>+</span>}
+                                    size="xs"
+                                    variant={message.feedback_rating === 2 ? 'solid' : 'ghost'}
+                                    colorScheme={message.feedback_rating === 2 ? 'green' : 'gray'}
+                                    onClick={() => handleFeedback(message.id, 2)}
+                                    isDisabled={feedbackMutation.isPending}
+                                  />
+                                </Tooltip>
+                                <Tooltip label="Pas utile">
+                                  <IconButton
+                                    aria-label="Thumbs down"
+                                    icon={<span>-</span>}
+                                    size="xs"
+                                    variant={message.feedback_rating === 1 ? 'solid' : 'ghost'}
+                                    colorScheme={message.feedback_rating === 1 ? 'red' : 'gray'}
+                                    onClick={() => handleFeedback(message.id, 1)}
+                                    isDisabled={feedbackMutation.isPending}
+                                  />
+                                </Tooltip>
+                              </HStack>
+                            )}
+                          </HStack>
+                          <CopyButton
+                            text={message.content}
+                            className="copy-button"
+                            size="xs"
+                          />
+                        </Flex>
+                      </CardBody>
+                    </Card>
+                  </HStack>
+                </Flex>
+              ))}
+              {sendMessageMutation.isPending && (
+                <Flex justify="flex-start">
+                  <HStack spacing={3}>
+                    <Avatar size="sm" name="Assistant" bg="green.500" />
+                    <Card>
+                      <CardBody py={3} px={4}>
+                        <HStack>
+                          <Spinner size="sm" />
+                          <Text fontSize="sm" color="gray.500">
+                            Recherche en cours...
+                          </Text>
+                        </HStack>
+                      </CardBody>
+                    </Card>
+                  </HStack>
+                </Flex>
+              )}
+              <div ref={messagesEndRef} />
+            </VStack>
+          )}
+        </Box>
+
+        {/* Input area */}
+        <Card w="full" flexShrink={0}>
+          <CardBody>
+            <VStack spacing={3} w="full">
+              {/* Graph-Guided RAG controls */}
+              <HStack spacing={4} w="full" justify="flex-start" flexWrap="wrap">
+                <Tooltip label="Enrichir les reponses avec le Knowledge Graph" hasArrow>
+                  <HStack spacing={2}>
+                    <Switch
+                      id="use-graph"
+                      isChecked={useGraphContext}
+                      onChange={(e) => setUseGraphContext(e.target.checked)}
+                      colorScheme="teal"
+                      size="sm"
+                    />
+                    <Text fontSize="sm" color="gray.600">
+                      Knowledge Graph
+                    </Text>
+                  </HStack>
+                </Tooltip>
+                {useGraphContext && (
+                  <HStack spacing={2}>
+                    <Text fontSize="sm" color="gray.500">Niveau:</Text>
+                    <Select
+                      value={graphEnrichmentLevel}
+                      onChange={(e) => setGraphEnrichmentLevel(e.target.value as GraphEnrichmentLevel)}
+                      size="xs"
+                      w="120px"
+                      bg="white"
+                    >
+                      <option value="light">Light (~30ms)</option>
+                      <option value="standard">Standard (~50ms)</option>
+                      <option value="deep">Deep (~200ms)</option>
+                    </Select>
+                    <Tooltip
+                      label={
+                        graphEnrichmentLevel === 'light'
+                          ? 'Concepts lies uniquement'
+                          : graphEnrichmentLevel === 'standard'
+                          ? 'Concepts + Relations transitives'
+                          : 'Concepts + Relations + Clusters + Bridge concepts'
+                      }
+                      hasArrow
+                    >
+                      <Badge
+                        colorScheme={
+                          graphEnrichmentLevel === 'light'
+                            ? 'gray'
+                            : graphEnrichmentLevel === 'standard'
+                            ? 'blue'
+                            : 'purple'
+                        }
+                        fontSize="xs"
+                      >
+                        {graphEnrichmentLevel === 'deep' ? 'Deep' : graphEnrichmentLevel === 'standard' ? 'Std' : 'Light'}
+                      </Badge>
+                    </Tooltip>
+                  </HStack>
+                )}
+              </HStack>
+
+              {/* Message input row */}
+              <HStack spacing={2} w="full">
+                <IconButton
+                  aria-label="Attach file"
+                  icon={<AttachmentIcon />}
+                  variant="ghost"
+                  size="sm"
+                  flexShrink={0}
+                />
+                <AutoResizeTextarea
+                  value={input}
+                  onChange={setInput}
+                  onKeyDown={handleKeyPress}
+                  placeholder="Posez votre question..."
+                  flex="1"
+                  minW={0}
+                  minHeight={40}
+                  maxHeight={200}
+                />
+                <IconButton
+                  aria-label="Send message"
+                  icon={<ArrowUpIcon />}
+                  colorScheme="blue"
+                  isDisabled={!input.trim() || sendMessageMutation.isPending}
+                  isLoading={sendMessageMutation.isPending}
+                  onClick={handleSend}
+                  flexShrink={0}
+                />
+                <Select
+                  placeholder="Toutes les solutions"
+                  value={selectedSolution}
+                  onChange={(e) => setSelectedSolution(e.target.value)}
+                  size="sm"
+                  bg="white"
+                  isDisabled={solutionsLoading}
+                  minW="200px"
+                  maxW="250px"
+                  flexShrink={0}
+                >
+                  {solutionsResponse?.success &&
+                    Array.isArray(solutionsResponse.data) &&
+                    solutionsResponse.data.map((solution: string) => (
+                      <option key={solution} value={solution}>
+                        {solution}
+                      </option>
+                    ))}
+                </Select>
+              </HStack>
+            </VStack>
+          </CardBody>
+        </Card>
+      </Flex>
+
+      {/* Concept Card Panel (slide-in) */}
+      <ConceptCardPanel
+        conceptId={selectedConceptId}
+        isOpen={isConceptPanelOpen}
+        onClose={closeConceptPanel}
+        onConceptClick={handleConceptClickFromPanel}
+        onQuestionClick={handleQuestionClick}
+      />
     </Flex>
   )
 }

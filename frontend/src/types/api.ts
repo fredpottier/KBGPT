@@ -108,9 +108,61 @@ export interface SynthesisResult {
   confidence: number
 }
 
+// 🌊 Phase 3.5+: Exploration Intelligence Types
+export interface ConceptExplanation {
+  concept_id: string
+  concept_name: string
+  why_used: string
+  role_in_answer: string
+  source_documents: string[]
+  confidence: number
+}
+
+export interface ExplorationSuggestion {
+  suggestion_type: 'concept' | 'document' | 'question'
+  title: string
+  description: string
+  action_label: string
+  action_value: string
+  relevance_score: number
+}
+
+export interface SuggestedQuestion {
+  question: string
+  context: string
+  related_concepts: string[]
+}
+
+// 🌊 Phase 3.5: Research Axes (basés sur signaux KG réels)
+export interface ResearchAxis {
+  axis_id: string
+  axis_type: 'bridge' | 'weak_signal' | 'cluster' | 'continuity' | 'unexplored' | 'transitive'
+  title: string
+  justification: string
+  contextual_question: string
+  concepts_involved: string[]
+  relevance_score: number
+  data_source: string
+  search_query: string
+}
+
+export interface ExplorationIntelligence {
+  concept_explanations: Record<string, ConceptExplanation>
+  exploration_suggestions: ExplorationSuggestion[]
+  suggested_questions: SuggestedQuestion[]
+  // 🌊 Phase 3.5: Axes de recherche structurés
+  research_axes: ResearchAxis[]
+  processing_time_ms: number
+}
+
 export interface SearchResponse {
   status: 'success' | 'no_results'
   results: SearchChunk[]
   synthesis?: SynthesisResult
   message?: string
+  // 🌊 Phase 3.5: Knowledge Graph
+  graph_context?: any
+  graph_data?: import('./graph').GraphData
+  // 🌊 Phase 3.5+: Exploration Intelligence
+  exploration_intelligence?: ExplorationIntelligence
 }
