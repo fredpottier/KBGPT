@@ -1,7 +1,7 @@
 # Phase 2.7 - Concept Matching Engine
 
 **Date de création:** 2025-12-21
-**Status:** PALIER 1 + 2 IMPLÉMENTÉS ✅
+**Status:** PALIERS 1 + 2 + 3 IMPLÉMENTÉS ✅ (78% golden set)
 **Priorité:** CRITIQUE (bloquant pour valeur KG)
 **Dépendances:** Phase 2.3 (Graph-Guided RAG)
 
@@ -401,15 +401,31 @@ def test_golden_set():
 - Score final: 70% RRF + 20% popularity + 10% quality
 - Diversity: max 4 concepts par type
 
-### 6.3 Palier 3 (Optionnel)
+### 6.3 Palier 3 ✅ IMPLÉMENTÉ 2025-12-21
 
-| Tâche | Fichier | Estimation |
-|-------|---------|------------|
-| Prompt LLM surface forms | Config | 30min |
-| Script génération batch | Script | 2h |
-| Mise à jour index Neo4j | Script | 1h |
+| Tâche | Fichier | Status |
+|-------|---------|--------|
+| Dictionnaire traductions FR↔EN | `scripts/generate_surface_forms.py` | ✅ 30+ termes |
+| Script génération batch | `scripts/generate_surface_forms.py` | ✅ |
+| Mise à jour 11796 concepts | Exécution | ✅ 71436 surface forms |
 
-**Total Palier 3:** ~4h
+**Approche hybride (sans LLM pour coût zéro):**
+- Dictionnaire de traductions pour acronymes réglementaires (GDPR/RGPD, AI/IA, DPO/DPD, etc.)
+- Variantes typographiques automatiques (casing, tirets, pluriel)
+- Stockage: champ `surface_form` indexé en full-text
+
+**Résultats Golden Set Palier 1+2+3:**
+
+| Query | P1 | P1+2 | P1+2+3 |
+|-------|-----|------|--------|
+| IA + Cybersécurité | ❌ | ✅ 4/4 | ✅ 4/4 |
+| NIS2 + High-Risk | ⚠️ 1/3 | ⚠️ 1/3 | ✅ **3/3** |
+| Ransomware + Incident | ✅ 2/4 | ✅ 3/4 | ✅ 3/4 |
+| AI Act + Compliance | ⚠️ 1/3 | ⚠️ 1/3 | ⚠️ 1/3 |
+| RGPD → GDPR | ⚠️ 2/4 | ✅ 3/4 | ✅ 3/4 |
+| **TOTAL** | ~45% | 67% | **78%** |
+
+**Amélioration clé:** "High-Risk AI System" maintenant trouvé via surface forms
 
 ---
 
