@@ -1,7 +1,7 @@
 # 🌊 KnowWhere - Roadmap OSMOSE Intégrée (Architecture Agentique)
 
-**Version:** 3.0 - Intègre Memory Layer + Frontend Explainable Graph-RAG
-**Date:** 2025-12-17
+**Version:** 3.1 - Ajoute Phase 2.7 Concept Matching Engine (CRITIQUE)
+**Date:** 2025-12-21
 **Vision:** Le Cortex Documentaire des Organisations
 **Différenciation:** Semantic Intelligence + Memory Layer + Explainable Graph-RAG
 
@@ -60,15 +60,17 @@
 **Avant (v1.0)** : 32 semaines linéaires
 **Après (v2.0)** : **37 semaines** avec pilote agentique et tests E2E
 
-**Nouvelle structure (v3.0)** :
+**Nouvelle structure (v3.1)** :
 ```
 Phase 1 (Sem 1-10)      : Semantic Core V2.1 ✅ COMPLÉTÉ
 Phase 1.5 (Sem 11-13)   : ✨ PILOTE AGENTIQUE ✅ COMPLÉTÉ à 95%
-Phase 2 (Sem 14-24)     : Intelligence Relationnelle 🟡 ~25% EN COURS
-Phase 2.5 (Sem 25-28)   : ✨ MEMORY LAYER 🟡 PLANIFICATION (NOUVEAU)
-Phase 3 (Sem 29-32)     : Multi-Source (simplifiée) 🟡 NOT STARTED
-Phase 3.5 (Sem 33-39)   : ✨ FRONTEND EXPLAINABLE GRAPH-RAG 🟡 PLANIFICATION (NOUVEAU)
-Phase 4 (Sem 40+)       : Production Hardening 🟡 NOT STARTED
+Phase 2 (Sem 14-24)     : Intelligence Relationnelle 🟡 ~45% EN COURS
+Phase 2.3 (Sem 18-20)   : InferenceEngine + Living Ontology ✅ COMPLÉTÉ
+Phase 2.5 (Sem 25-28)   : ✨ MEMORY LAYER ✅ COMPLÉTÉ
+Phase 2.7 (Sem XX)      : ⭐ CONCEPT MATCHING ENGINE 🟡 EN COURS (CRITIQUE)
+Phase 3 (Sem 29-32)     : Multi-Source (simplifiée) ⏸️ NOT STARTED
+Phase 3.5 (Sem 33-39)   : ✨ FRONTEND EXPLAINABLE GRAPH-RAG 🟡 ~70% EN COURS
+Phase 4 (Sem 40+)       : Production Hardening ⏸️ NOT STARTED
 ```
 
 **Nouvelles Phases Ajoutées (Partenariat):**
@@ -78,6 +80,13 @@ Phase 4 (Sem 40+)       : Production Hardening 🟡 NOT STARTED
 - Context resolver (questions implicites)
 - Intelligent summarizer (résumés métier LLM)
 - Export PDF des sessions
+
+⭐ **Phase 2.7 - Concept Matching Engine** : **CRITIQUE** - Débloquer la valeur du Knowledge Graph
+- Résout le bug fondamental : `extract_concepts_from_query` ne trouvait pas les bons concepts
+- Architecture 3 paliers : Full-text Neo4j + Vector Qdrant + Fusion Ranking
+- Support multilingue FR↔EN↔DE sans dictionnaire
+- Prérequis pour que Graph-Guided RAG apporte réellement de la valeur
+- **Impact** : Différenciation vs RAG classique enfin exploitable
 
 ✨ **Phase 3.5 - Frontend Explainable Graph-RAG** : Interface killer pour démonstration partenaire
 - Living Graph (graphe persistant de session)
@@ -166,17 +175,28 @@ Phase 4 (Sem 40+)       : Production Hardening 🟡 NOT STARTED
          ↓ Checkpoint Phase 2 (Sem 24)
          │
 ┌────────────────────────────────────────────────────────────────────────┐
-│ ✨ PHASE 2.5: MEMORY LAYER (Semaines 25-28) 🟡 PLANIFICATION ✨       │
+│ ✨ PHASE 2.5: MEMORY LAYER (Semaines 25-28) ✅ COMPLÉTÉ               │
 │ - Sessions persistantes + Context Resolver                            │
 │ - Intelligent Summarizer (résumés métier LLM)                         │
 │ - Export PDF sessions                                                 │
 │ 📖 doc/phases/PHASE2.5_MEMORY_LAYER.md                                │
 └────────────────────────────────────────────────────────────────────────┘
          │
-         ↓ Checkpoint Phase 2.5 (Sem 28)
+         ↓ Checkpoint Phase 2.5 (Sem 28) ✅
          │
 ┌────────────────────────────────────────────────────────────────────────┐
-│ PHASE 3: MULTI-SOURCE SIMPLIFIÉE (Semaines 29-32) 🟡 NOT STARTED     │
+│ ⭐ PHASE 2.7: CONCEPT MATCHING ENGINE 🟡 EN COURS ⭐ CRITIQUE         │
+│ - Résout: extract_concepts_from_query() cassé (96% concepts ignorés)  │
+│ - Palier 1: Full-text Neo4j (index créé, testé)                       │
+│ - Palier 2: Vector search Qdrant (multilingue FR↔EN↔DE)               │
+│ - Palier 3: Surface forms LLM (optionnel)                             │
+│ 📖 doc/ongoing/PHASE2.7_CONCEPT_MATCHING_ENGINE.md                    │
+└────────────────────────────────────────────────────────────────────────┘
+         │
+         ↓ Checkpoint Phase 2.7 - CRITIQUE pour valeur KG
+         │
+┌────────────────────────────────────────────────────────────────────────┐
+│ PHASE 3: MULTI-SOURCE SIMPLIFIÉE (Semaines 29-32) ⏸️ NOT STARTED     │
 │ - Upload manuel prioritaire                                           │
 │ - SharePoint/Google Drive (si temps)                                  │
 │ - Connecteurs avancés différés Phase 4                                │
@@ -205,16 +225,18 @@ Phase 4 (Sem 40+)       : Production Hardening 🟡 NOT STARTED
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Comparaison Roadmap v2.0 vs v3.0
+### 3.2 Comparaison Roadmap v2.0 vs v3.1
 
-| Phase | v2.0 (agentique) | v3.0 (partenariat) | Delta |
-|-------|------------------|---------------------|-------|
-| **Phase 1** | Sem 1-10 | Sem 1-10 | ✅ Identique |
-| **Phase 1.5** | Sem 11-13 | Sem 11-13 | ✅ Identique |
-| **Phase 2** | Sem 14-24 | Sem 14-24 | ✅ Identique |
-| **Phase 2.5** | N/A | **Sem 25-28** | ✨ **+4 semaines** (Memory Layer) |
+| Phase | v2.0 (agentique) | v3.1 (actuel) | Delta |
+|-------|------------------|---------------|-------|
+| **Phase 1** | Sem 1-10 | Sem 1-10 | ✅ Identique - COMPLÉTÉ |
+| **Phase 1.5** | Sem 11-13 | Sem 11-13 | ✅ Identique - COMPLÉTÉ |
+| **Phase 2** | Sem 14-24 | Sem 14-24 | ✅ Identique - ~45% |
+| **Phase 2.3** | N/A | Sem 18-20 | ✅ InferenceEngine - COMPLÉTÉ |
+| **Phase 2.5** | N/A | Sem 25-28 | ✅ Memory Layer - COMPLÉTÉ |
+| **Phase 2.7** | N/A | **EN COURS** | ⭐ **CRITIQUE** - Concept Matching |
 | **Phase 3** | Sem 25-30 | Sem 29-32 | Décalée + simplifiée |
-| **Phase 3.5** | N/A | **Sem 33-39** | ✨ **+7 semaines** (Frontend killer) |
+| **Phase 3.5** | N/A | Sem 33-39 | 🟡 ~70% Frontend killer |
 | **Phase 4** | Sem 31-37 | Sem 40+ | Différée |
 | **TOTAL** | **37 semaines** | **45+ semaines** | **+8 semaines** |
 
@@ -891,21 +913,22 @@ Attendu:
 
 ---
 
-**Version:** 3.0 - Memory Layer + Frontend Explainable Graph-RAG
-**Date:** 2025-12-17
-**Auteur:** Architecture Team OSMOSE
-**Statut:** ✅ **UPDATED** - Roadmap ajustée 45+ semaines (Phases 2.5 + 3.5 ajoutées)
+**Version:** 3.1 - Ajoute Phase 2.7 Concept Matching Engine (CRITIQUE)
+**Date:** 2025-12-21
+**Auteur:** Architecture Team OSMOSE + ChatGPT collaboration
+**Statut:** ✅ **UPDATED** - Phase 2.7 ajoutée (résout problème fondamental KG)
 
 **Documents Associés** :
 - [`doc/README.md`](./README.md) (guide navigation documentation)
-- [`doc/OSMOSE_STATUS_ACTUEL.md`](./OSMOSE_STATUS_ACTUEL.md) (status actuel du projet)
+- [`doc/ongoing/OSMOSE_STATUS_ACTUEL.md`](./ongoing/OSMOSE_STATUS_ACTUEL.md) (status actuel du projet)
 - [`doc/OSMOSE_ARCHITECTURE_TECHNIQUE.md`](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) (architecture globale)
 - [`doc/phases/PHASE1_SEMANTIC_CORE.md`](./phases/PHASE1_SEMANTIC_CORE.md) (Phase 1 - Semantic Core)
 - [`doc/phases/PHASE2_INTELLIGENCE_AVANCEE.md`](./phases/PHASE2_INTELLIGENCE_AVANCEE.md) (Phase 2 - Intelligence Relationnelle)
-- [`doc/phases/PHASE2.5_MEMORY_LAYER.md`](./phases/PHASE2.5_MEMORY_LAYER.md) ✨ (Phase 2.5 - Memory Layer)
-- [`doc/phases/PHASE3.5_FRONTEND_EXPLAINABLE_GRAPH_RAG.md`](./phases/PHASE3.5_FRONTEND_EXPLAINABLE_GRAPH_RAG.md) ✨ (Phase 3.5 - Frontend)
+- [`doc/phases/PHASE2.5_MEMORY_LAYER.md`](./phases/PHASE2.5_MEMORY_LAYER.md) ✅ (Phase 2.5 - Memory Layer)
+- [`doc/ongoing/PHASE2.7_CONCEPT_MATCHING_ENGINE.md`](./ongoing/PHASE2.7_CONCEPT_MATCHING_ENGINE.md) ⭐ (Phase 2.7 - CRITIQUE)
+- [`doc/phases/PHASE3.5_FRONTEND_EXPLAINABLE_GRAPH_RAG.md`](./phases/PHASE3.5_FRONTEND_EXPLAINABLE_GRAPH_RAG.md) 🟡 (Phase 3.5 - Frontend)
 - [`doc/OSMOSE_AMBITION_PRODUIT_ROADMAP.md`](./OSMOSE_AMBITION_PRODUIT_ROADMAP.md) (vision produit)
 
 ---
 
-> **🌊 "OSMOSE v3.0 : Memory Layer + Explainable Graph-RAG - Une mémoire qui ne repart jamais de zéro, une transparence totale du raisonnement."**
+> **🌊 "OSMOSE v3.1 : Concept Matching Engine - Enfin, le Knowledge Graph apporte une vraie valeur au RAG."**

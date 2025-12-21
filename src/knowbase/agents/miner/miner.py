@@ -264,24 +264,29 @@ class PatternMiner(BaseAgent):
                 topic_id = candidate.get("source_topic_id", "unknown")
                 segments[topic_id].append(candidate)
 
-            # Détecter co-occurrences
+            # ========== CO_OCCURRENCE DÉSACTIVÉ ==========
+            # Les relations CO_OCCURRENCE créaient du bruit dans le KG
+            # (42k+ relations sans valeur sémantique, ralentissant les requêtes)
+            # Décision: désactivé le 2025-12-20 après analyse avec ChatGPT
+            # Les infos de provenance sont dans CanonicalConcept.chunk_ids
+            # et peuvent être exposées via Document->MENTIONS->Concept si besoin
+            # ================================================
             relations = []
-
-            for topic_id, segment_concepts in segments.items():
-                if len(segment_concepts) < 2:
-                    continue
-
-                # Créer relations entre concepts du même segment
-                for i, concept_a in enumerate(segment_concepts):
-                    for concept_b in segment_concepts[i+1:]:
-                        relation = {
-                            "source": concept_a.get("name", ""),
-                            "target": concept_b.get("name", ""),
-                            "type": "CO_OCCURRENCE",
-                            "segment_id": topic_id,
-                            "confidence": 0.7  # Base confidence pour co-occurrence
-                        }
-                        relations.append(relation)
+            
+            # ANCIEN CODE (conservé pour référence):
+            # for topic_id, segment_concepts in segments.items():
+            #     if len(segment_concepts) < 2:
+            #         continue
+            #     for i, concept_a in enumerate(segment_concepts):
+            #         for concept_b in segment_concepts[i+1:]:
+            #             relation = {
+            #                 "source": concept_a.get("name", ""),
+            #                 "target": concept_b.get("name", ""),
+            #                 "type": "CO_OCCURRENCE",
+            #                 "segment_id": topic_id,
+            #                 "confidence": 0.7
+            #             }
+            #             relations.append(relation)
 
             logger.debug(f"[MINER:LinkConcepts] {len(relations)} relations created")
 

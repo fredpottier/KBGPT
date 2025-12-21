@@ -1,196 +1,371 @@
 # 🌊 OSMOSE - Status Actuel du Projet
 
-**Date:** 2025-12-19
-**Phase Courante:** Phase 2.3 - Living Ontology ✅ **COMPLETE (Backend + Frontend)**
-**Progrès Global:** Phase 1 ✅ + Phase 2.3 ✅ + Frontend basique ✅
+**Date:** 2025-12-21
+**Progrès Global:** 6 phases complétées sur 9
 
 ---
 
 ## 📊 Vue d'Ensemble Rapide
 
-| Indicateur | Valeur | Status |
-|------------|--------|--------|
-| **Phase 1** | Semantic Core | ✅ **COMPLETE** |
-| **Phase 2.1** | Tests E2E Production | ⏭️ Skipped |
-| **Phase 2.2** | Scale-Up Architecture Agentique | ⏭️ Skipped |
-| **Phase 2.3** | InferenceEngine + Graph-Guided RAG + Living Ontology | ✅ **COMPLETE & TESTED** |
-| **Frontend Phase 2** | Graph-Guided RAG + Living Ontology Admin | ✅ **COMPLETE** |
-| **Proto-KG** | 1164 concepts | ✅ Fonctionnel |
-| **Tests réalisés** | 14 études médicales COVID-19 | ✅ |
-| **Types auto-découverts** | RESEARCH (auto-promu) + 8 pending | ✅ |
+| Phase | Nom | Status | Progression |
+|-------|-----|--------|-------------|
+| **Phase 1** | Semantic Core V2.1 | ✅ **COMPLETE** | 100% |
+| **Phase 1.5** | Pilote Agentique | ✅ **COMPLETE** | 95% |
+| **Phase 2** | Intelligence Relationnelle | 🟡 **EN COURS** | ~45% |
+| **Phase 2.3** | InferenceEngine + Living Ontology | ✅ **COMPLETE** | 100% |
+| **Phase 2.5** | Memory Layer (LangChain) | ✅ **COMPLETE** | 100% |
+| **Phase 2.7** | Concept Matching Engine ⭐ | 🟡 **EN COURS** | 10% |
+| **Phase 3** | Multi-Source Simplifiée | ⏸️ **NON DÉMARRÉE** | 0% |
+| **Phase 3.5** | Frontend Explainable Graph-RAG | 🟡 **EN COURS** | ~70% |
+| **Phase 4** | Production Hardening | ⏸️ **NON DÉMARRÉE** | 0% |
+
+### Résumé Graphique
+
+```
+Phase 1    ████████████████████  100% ✅ COMPLETE
+Phase 1.5  ██████████████████░░   95% ✅ COMPLETE
+Phase 2    █████████░░░░░░░░░░░   45% 🟡 IN PROGRESS
+Phase 2.3  ████████████████████  100% ✅ COMPLETE
+Phase 2.5  ████████████████████  100% ✅ COMPLETE
+Phase 2.7  ██░░░░░░░░░░░░░░░░░░   10% 🟡 IN PROGRESS ⭐ CRITICAL
+Phase 3    ░░░░░░░░░░░░░░░░░░░░    0% ⏸️ NOT STARTED
+Phase 3.5  ██████████████░░░░░░   70% 🟡 IN PROGRESS
+Phase 4    ░░░░░░░░░░░░░░░░░░░░    0% ⏸️ NOT STARTED
+```
 
 ---
 
-## 🎯 Phase 2.3 - Composants Complétés
+## ✅ Phase 1 - Semantic Core V2.1 (100%)
 
-### Partie 1: InferenceEngine + Graph-Guided RAG ✅
+**Composants livrés:**
+- TopicSegmenter (650 lignes) ✅
+- MultilingualConceptExtractor (750 lignes) ✅
+- SemanticIndexer (600 lignes) ✅
+- ConceptLinker (450 lignes) ✅
+- SemanticPipelineV2 (300 lignes) ✅
 
-#### 1. InferenceEngine (~850 lignes)
+**USP validée:** Cross-lingual unification automatique (FR = EN = DE)
+
+---
+
+## ✅ Phase 1.5 - Pilote Agentique (95%)
+
+- 6 agents implémentés ✅
+- 18 tools avec JSON I/O ✅
+- 165 tests (~85% pass rate) ✅
+- 13,458 lignes production-ready ✅
+- Tests E2E reportés Phase 2 ⏳
+
+---
+
+## 🟡 Phase 2 - Intelligence Relationnelle (~45%)
+
+| Composant | Status | Progression |
+|-----------|--------|-------------|
+| POC Concept Explainer | ✅ Complété | 100% |
+| DomainContextPersonalizer | ⏸️ Optionnel | - |
+| **RelationExtractionEngine** | ✅ Complété | 95% |
+| TaxonomyBuilder | ⏸️ Not Started | 0% |
+| **TemporalDiffEngine** ⭐ | ⏸️ Not Started | 0% |
+| RelationInferenceEngine | ⏸️ Not Started | 0% |
+| CrossDocRelationMerger | ⏸️ Not Started | 0% |
+
+**⭐ TemporalDiffEngine** = KILLER FEATURE (CRR Evolution Tracker)
+
+---
+
+## ✅ Phase 2.3 - InferenceEngine + Living Ontology (100%)
+
+### InferenceEngine (~850 lignes)
 **Fichier:** `src/knowbase/semantic/inference/inference_engine.py`
 
-**6 types d'insights implémentés:**
-
+**6 types d'insights:**
 | Type | Algorithme | Description |
 |------|------------|-------------|
-| **Transitive Inference** | Cypher natif | Relations A→B→C donc A→C |
-| **Bridge Concepts** | Betweenness Centrality (NetworkX) | Concepts connectant des clusters |
-| **Hidden Clusters** | Louvain Community Detection | Communautés thématiques cachées |
-| **Weak Signals** | PageRank + Degree Centrality | Concepts émergents sous-documentés |
-| **Structural Holes** | Adamic-Adar Score | Relations manquantes prédites |
-| **Contradictions** | Cypher REPLACES mutuel | Assertions contradictoires |
+| Transitive Inference | Cypher natif | Relations A→B→C donc A→C |
+| Bridge Concepts | Betweenness Centrality | Concepts connectant des clusters |
+| Hidden Clusters | Louvain Community Detection | Communautés thématiques cachées |
+| Weak Signals | PageRank + Degree Centrality | Concepts émergents |
+| Structural Holes | Adamic-Adar Score | Relations manquantes prédites |
+| Contradictions | Cypher REPLACES mutuel | Assertions contradictoires |
 
-#### 2. API REST /api/insights (~450 lignes)
-**Fichier:** `src/knowbase/api/routers/insights.py`
-
-#### 3. Graph-Guided RAG (~400 lignes)
+### Graph-Guided RAG (~400 lignes)
 **Fichier:** `src/knowbase/api/services/graph_guided_search.py`
 
 **4 niveaux d'enrichissement:**
-
 | Niveau | Temps | Contenu |
 |--------|-------|---------|
-| `none` | 0ms | RAG classique (pas de KG) |
+| `none` | 0ms | RAG classique |
 | `light` | ~30ms | Concepts liés uniquement |
 | `standard` | ~50ms | + Relations transitives |
 | `deep` | ~200ms | + Clusters + Bridge concepts |
 
+### Living Ontology (Backend complet, UI désactivée)
+- PatternDiscoveryService ✅
+- LivingOntologyManager ✅
+- API REST `/api/living-ontology` ✅
+
+> **Note:** Désactivé car génère trop de bruit en mode domain-agnostic.
+
 ---
 
-### Partie 2: Living Ontology ✅ **NOUVEAU**
+## ✅ Phase 2.5 - Memory Layer (100%)
 
-#### 1. PatternDiscoveryService (~500 lignes)
-**Fichier:** `src/knowbase/semantic/ontology/pattern_discovery.py`
+### Architecture LangChain Memory + PostgreSQL
 
-**Détection automatique de patterns:**
+**Fichiers (~1800 lignes totales):**
+```
+src/knowbase/memory/
+├── __init__.py
+├── session_manager.py         (~730 lignes) ✅
+├── context_resolver.py        (~475 lignes) ✅
+└── intelligent_summarizer.py  (~540 lignes) ✅
 
-| Type Pattern | Description | Seuil |
-|--------------|-------------|-------|
-| **NEW_ENTITY_TYPE** | Nouveaux types d'entités potentiels | 20+ occurrences |
-| **TYPE_REFINEMENT** | Sous-types de types existants | 5+ concepts |
-| **RELATION_PATTERN** | Patterns de relations récurrents | 10+ occurrences |
-| **NAMING_PATTERN** | Suffixes/préfixes communs | 10+ occurrences |
-| **CLUSTER_PATTERN** | Groupes de concepts similaires | 5+ membres |
-
-**Algorithmes (100% Domain-Agnostic):**
-- Frequency Analysis (concepts haute fréquence)
-- Token-Based Grouping (tokens communs dans les noms - aucun métier hardcodé)
-- Naming Pattern Detection (suffixes: _API, _Service; préfixes automatiques)
-- Cluster Homogeneity Analysis (via InferenceEngine)
-
-> **Note:** Mode `use_domain_hints=False` par défaut. Aucune connaissance métier pré-définie.
-
-#### Option `use_domain_hints` (désactivée par défaut)
-
-**Fichier:** `src/knowbase/semantic/ontology/pattern_discovery.py`
-
-**Quand l'activer ?**
-- Si le corpus est très homogène (ex: 100% médical, 100% SAP)
-- Si les tokens communs ne suffisent pas à détecter des patterns
-- Pour accélérer la découverte initiale sur un domaine connu
-
-**Ce que ça fait quand activé (`use_domain_hints=True`):**
-```python
-domain_patterns = {
-    "Clinical Trial": ["trial", "study", "phase", "randomized", "placebo"],
-    "Drug/Treatment": ["drug", "treatment", "therapy", "medication", "dose"],
-    "Medical Condition": ["disease", "syndrome", "disorder", "condition", "symptom"],
-    "Organization": ["hospital", "university", "institute", "company", "consortium"],
-    "Metric/Measure": ["ratio", "score", "index", "rate", "percentage"],
-    "Technology": ["api", "service", "platform", "system", "framework"],
-    "Process": ["process", "workflow", "procedure", "protocol", "method"],
-}
+src/knowbase/api/
+├── routers/sessions.py        (~780 lignes) ✅
+├── schemas/sessions.py        (~220 lignes) ✅
+└── services/session_entity_resolver.py (~360 lignes) ✅
 ```
 
-**Logique:** Si un concept contient ≥2 keywords d'un domaine, il est groupé dans ce domaine.
+### Composants Implémentés
 
-**Pourquoi désactivé par défaut:**
-- Casse le principe "domain-agnostic" d'OSMOSE
-- Peut créer des faux positifs sur corpus multi-domaines
-- Le mode Token-Based fonctionne bien sans indices métier
+#### 1. SessionManager (LangChain Memory + PostgreSQL)
+- ✅ Sessions persistantes par utilisateur
+- ✅ Messages avec tracking (tokens, latence, modèle utilisé)
+- ✅ `ConversationSummaryBufferMemory` pour auto-summarization
+- ✅ CRUD complet (create, list, update, archive, delete)
+- ✅ Multi-tenant isolé
+- ✅ Génération automatique de titre via LLM
+- ✅ Cache mémoire des LangChain Memory par session
 
-**Pour activer (si besoin):**
-```python
-# Dans le code
-service = PatternDiscoveryService(use_domain_hints=True)
+#### 2. ContextResolver (Résolution Références Implicites)
+**Patterns supportés:**
+- ✅ Pronoms: "il", "elle", "ça", "ceci", "cela"
+- ✅ Références documentaires: "ce document", "cette présentation"
+- ✅ Références d'entités: "cette solution", "ce produit"
+- ✅ Références ordinales: "le premier", "le dernier"
+- ✅ Cache local + persistence PostgreSQL
 
-# Ou via singleton (première instanciation uniquement)
-service = get_pattern_discovery_service(use_domain_hints=True)
-```
+#### 3. IntelligentSummarizer (Comptes-Rendus Métier)
+**3 formats de résumé:**
+| Format | Description | Max mots |
+|--------|-------------|----------|
+| `business` | Orienté décideur, points clés et actions | 400 |
+| `technical` | Détails techniques, références précises | 600 |
+| `executive` | Ultra-concis, 3-5 bullet points | 150 |
 
-**Recommandation:** Garder désactivé sauf besoin spécifique validé.
+**Features:**
+- ✅ Extraction automatique de topics/actions via patterns regex
+- ✅ Points clés avec sources documentaires
+- ✅ Zones non explorées suggérées
+- ✅ Génération LLM avec fallback
 
-#### 2. LivingOntologyManager (~450 lignes)
-**Fichier:** `src/knowbase/semantic/ontology/living_ontology_manager.py`
+#### 4. SessionEntityResolver (KG Integration)
+- ✅ Extraction d'entités des messages de session
+- ✅ Recherche fuzzy dans le Knowledge Graph
+- ✅ Récupération chunks associés aux concepts
 
-**Gestion du cycle de vie:**
-
-| Fonction | Description |
-|----------|-------------|
-| **run_discovery_cycle()** | Exécute découverte + création propositions |
-| **Auto-Promotion** | Confidence ≥85% → type créé automatiquement |
-| **Pending Review** | Confidence 50-85% → attente validation admin |
-| **Reject** | Confidence <50% → rejeté automatiquement |
-| **Historique** | Tracking complet des changements |
-
-**Seuils configurables:**
-```python
-AUTO_PROMOTE_THRESHOLD = 0.85    # Auto-promotion
-HIGH_CONFIDENCE_THRESHOLD = 0.7  # Suggestion forte
-MIN_CONFIDENCE_THRESHOLD = 0.5   # Rejet si inférieur
-```
-
-#### 3. API REST /api/living-ontology (~350 lignes)
-**Fichier:** `src/knowbase/api/routers/living_ontology.py`
-
-**Endpoints:**
+### API REST Complète `/api/sessions/*`
 
 | Endpoint | Méthode | Description |
 |----------|---------|-------------|
-| `/api/living-ontology/stats` | GET | Statistiques ontologie |
-| `/api/living-ontology/types` | GET | Liste types existants |
-| `/api/living-ontology/patterns` | GET | Découvrir patterns (preview) |
-| `/api/living-ontology/discover` | POST | Lancer cycle de découverte |
-| `/api/living-ontology/proposals` | GET | Liste propositions pending |
-| `/api/living-ontology/proposals/{id}/approve` | POST | Approuver proposition |
-| `/api/living-ontology/proposals/{id}/reject` | POST | Rejeter proposition |
-| `/api/living-ontology/history` | GET | Historique changements |
+| `/sessions` | POST | Créer une session |
+| `/sessions` | GET | Lister les sessions |
+| `/sessions/{id}` | GET | Détails session |
+| `/sessions/{id}` | PATCH | Mettre à jour |
+| `/sessions/{id}` | DELETE | Supprimer |
+| `/sessions/{id}/messages` | POST | Ajouter message |
+| `/sessions/{id}/messages` | GET | Lister messages |
+| `/sessions/{id}/context` | GET | Contexte conversationnel |
+| `/sessions/{id}/context` | PUT | Mettre à jour contexte |
+| `/sessions/{id}/summary` | POST | Générer résumé intelligent |
+| `/sessions/{id}/summary` | GET | Obtenir dernier résumé |
+| `/sessions/{id}/generate-title` | POST | Générer titre auto |
+| `/sessions/{id}/messages/{msg_id}/feedback` | POST | Thumbs up/down |
+| `/sessions/resolve` | POST | Résoudre références implicites |
 
 ---
 
-## 📂 Nouveaux Fichiers Créés (Phase 2.3 Complète)
+## 🟡 Phase 2.7 - Concept Matching Engine ⭐ CRITIQUE (10%)
+
+> **⚠️ PHASE CRITIQUE** : Cette phase résout le problème fondamental qui empêche le KG d'apporter de la valeur au RAG.
+
+### Problème Identifié (2025-12-20)
+
+La méthode `extract_concepts_from_query` dans `graph_guided_search.py` est cassée :
+- **Bug 1** : `LIMIT 500` sur 11,796 concepts (96% ignorés)
+- **Bug 2** : Filtre `len(word) > 3` élimine AI, NIS2, IoT, DPO...
+- **Bug 3** : Match substring exact (pas de fuzzy/sémantique)
+- **Bug 4** : Pas de ranking (premiers 500 aléatoires)
+
+**Conséquence** : Le Graph-Guided RAG ne trouve presque jamais les bons concepts → le KG n'enrichit pas la réponse.
+
+### Architecture Cible : 3 Paliers
 
 ```
-src/knowbase/semantic/inference/
-├── __init__.py                    ✅ NEW
-└── inference_engine.py            ✅ NEW (~850 lignes)
-
-src/knowbase/semantic/ontology/
-├── __init__.py                    ✅ NEW
-├── pattern_discovery.py           ✅ NEW (~500 lignes)
-└── living_ontology_manager.py     ✅ NEW (~450 lignes)
-
-src/knowbase/api/routers/
-├── insights.py                    ✅ NEW (~450 lignes)
-└── living_ontology.py             ✅ NEW (~350 lignes)
-
-src/knowbase/api/services/
-└── graph_guided_search.py         ✅ NEW (~400 lignes)
-
-scripts/
-├── test_inference_engine.py       ✅ NEW
-├── test_graph_guided_rag.py       ✅ NEW
-└── test_living_ontology.py        ✅ NEW
+┌─────────────────────────────────────────────────────────────────┐
+│                    Concept Matching Engine                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Query: "Quels sont les risques des systèmes IA à haut risque?" │
+│                                                                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
+│  │  Palier 1    │───▶│  Palier 2    │───▶│   Fusion     │       │
+│  │  Full-Text   │    │  Vector      │    │   Ranking    │       │
+│  │  Neo4j       │    │  Qdrant      │    │              │       │
+│  └──────────────┘    └──────────────┘    └──────────────┘       │
+│         │                   │                   │                │
+│         ▼                   ▼                   ▼                │
+│   "IA" → match        "IA" → AI           Top-5 concepts        │
+│   lexical rapide      cross-lingual       score fusionné        │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Fichiers Modifiés
+### Paliers d'Implémentation
+
+| Palier | Description | Status |
+|--------|-------------|--------|
+| **Palier 1** | Full-text Neo4j + ranking lex_adj | ✅ Index créé |
+| **Palier 2** | Vector search Qdrant (multilingue) | ⏸️ À faire |
+| **Palier 3** | Surface forms via LLM (optionnel) | ⏸️ Optionnel |
+
+### Index Neo4j Créé
+
+```cypher
+CREATE FULLTEXT INDEX concept_search IF NOT EXISTS
+FOR (c:CanonicalConcept)
+ON EACH [c.canonical_name, c.name, c.surface_form, c.summary, c.unified_definition]
+```
+
+**Test validé** : Query "NIS2 directive high risk AI" retourne NIS2 Directive (26.8) et High-Risk AI System (22.8) en top 3.
+
+### Formule de Ranking Final
 
 ```
-src/knowbase/api/main.py           ✅ +insights +living_ontology routers
-src/knowbase/api/services/search.py ✅ +graph context integration
-src/knowbase/api/services/synthesis.py ✅ +graph_context_text param
-src/knowbase/api/schemas/search.py  ✅ +use_graph_context, graph_enrichment_level
-src/knowbase/api/routers/search.py  ✅ +documentation enrichie
+score = 0.55 × semantic_score      # Qdrant (palier 2)
+      + 0.35 × lex_adj_score       # Neo4j full-text (palier 1)
+      + 0.05 × quality_score       # Champs remplis
+      + 0.05 × log(popularity + 1) # Mentions dans chunks
 ```
+
+### Golden Set de Test
+
+| Query | Concepts attendus |
+|-------|-------------------|
+| "IA à haut risque" | High-Risk AI System, AI Act |
+| "NIS2 directive" | NIS2 Directive, Cybersecurity |
+| "ransomware GDPR" | Ransomware, GDPR, Data Breach |
+| "SAP S/4HANA migration" | SAP S/4HANA, ERP Migration |
+| "DPO responsibilities" | DPO, GDPR, Data Protection |
+
+### Fichiers Impactés
+
+| Fichier | Modification |
+|---------|--------------|
+| `src/knowbase/api/services/graph_guided_search.py` | Refonte `extract_concepts_from_query` |
+| `src/knowbase/api/services/concept_matcher.py` | **NOUVEAU** - Service dédié |
+| Neo4j | Index full-text `concept_search` créé |
+
+### Documentation
+
+- **Spec complète** : `doc/ongoing/PHASE2.7_CONCEPT_MATCHING_ENGINE.md`
+
+---
+
+## 🟡 Phase 3.5 - Frontend Explainable Graph-RAG (~70%)
+
+| Feature | Status |
+|---------|--------|
+| Graph-Guided RAG Switch | ✅ |
+| Dropdown niveau enrichissement | ✅ |
+| ResponseGraph (graphe visuel) | ✅ |
+| ExplorationIntelligence | ✅ |
+| ResearchAxesSection (UI) | ✅ |
+| **Research Axes Engine** | 🔴 **EN PAUSE** |
+| Living Graph (session persistant) | ⏸️ Not Started |
+| Citations inline | ⏸️ Not Started |
+| Session Summary PDF | ⏸️ Not Started |
+
+---
+
+## ⏸️ Phase 3 - Multi-Source Simplifiée (0%)
+
+**Planifié:**
+- Upload manuel prioritaire
+- SharePoint/Google Drive (optionnel)
+- Connecteurs avancés différés Phase 4
+
+---
+
+## ⏸️ Phase 4 - Production Hardening (0%)
+
+**Planifié:**
+- Beta clients (3-5 enterprises)
+- Tuning performance production
+- Security hardening (GDPR, SOC2)
+- Launch v1.0 public
+
+---
+
+## 📋 Backlog - Chantiers à Reprendre
+
+### 🔴 Research Axes Engine (Phase 3.5) - EN PAUSE
+
+**Problème:** Les propositions de pistes de recherche générées ne sont pas pertinentes ou n'ont aucun lien contextuel avec la question posée.
+
+**Fichiers implémentés (code conservé mais à améliorer):**
+- `src/knowbase/api/services/research_axes_engine.py` - Moteur de génération d'axes
+- `src/knowbase/api/services/exploration_intelligence.py` - Intégration avec ExplorationIntelligence
+- `frontend/src/components/chat/ResearchAxesSection.tsx` - Composant UI
+
+**Ce qui fonctionne:**
+- Architecture en place (collecte de signaux KG via InferenceEngine)
+- Types d'axes définis (bridge, weak_signal, cluster, continuity, unexplored, transitive)
+- UI compacte avec chips cliquables
+
+**Ce qui ne fonctionne pas:**
+- Pertinence des suggestions (axes générés non liés à la question)
+- Filtrage contextuel insuffisant
+- Scoring de relevance à revoir
+
+**Pour reprendre ce chantier:**
+1. Analyser pourquoi les bridges/weak_signals ne matchent pas la question
+2. Améliorer le filtrage par `query_concepts`
+3. Considérer un LLM pour valider la pertinence avant affichage
+4. Tester avec différents niveaux d'enrichissement KG
+
+### 🟡 Living Ontology (Phase 2.3) - DÉSACTIVÉ
+
+**Raison:** Génère trop de bruit en mode domain-agnostic (propositions non pertinentes).
+
+**Pour réactiver:**
+1. Décommenter import dans `src/knowbase/api/main.py`
+2. Considérer `use_domain_hints=True` pour corpus homogène
+
+---
+
+## 🎯 Prochaines Priorités Recommandées
+
+1. **⭐ Concept Matching Engine** (Phase 2.7) - CRITIQUE : Débloquer la valeur du KG
+2. **TaxonomyBuilder** (Phase 2) - Organiser concepts en hiérarchies
+3. **TemporalDiffEngine** (Phase 2) - KILLER FEATURE : CRR Evolution Tracker
+4. **Research Axes Engine** (Phase 3.5) - Corriger pertinence suggestions (dépend de 2.7)
+5. **Frontend Memory Layer** - Intégrer sessions UI (historique, résumés)
+
+---
+
+## 📈 Métriques Techniques
+
+| Métrique | Valeur | Status |
+|----------|--------|--------|
+| **Concepts dans KG** | 1164 | ✅ |
+| **Types uniques** | 6 (5 base + RESEARCH) | ✅ |
+| **Temps enrichissement LIGHT** | ~30ms | ✅ |
+| **Temps enrichissement STANDARD** | ~50ms | ✅ |
+| **Temps enrichissement DEEP** | ~200ms | ✅ |
+| **Sessions API** | 14 endpoints | ✅ |
+| **Memory Layer** | ~1800 lignes | ✅ |
 
 ---
 
@@ -206,6 +381,7 @@ src/knowbase/api/routers/search.py  ✅ +documentation enrichie
                      │  ┌─────────────────────────────────┐   │
                      │  │  /search (Graph-Guided RAG)     │   │
                      │  │  /api/insights                   │   │
+                     │  │  /api/sessions (Memory Layer)    │   │
                      │  │  /api/living-ontology           │   │
                      │  └─────────────────────────────────┘   │
                      └──────┬─────────────────┬───────────────┘
@@ -213,144 +389,27 @@ src/knowbase/api/routers/search.py  ✅ +documentation enrichie
               ┌─────────────▼──────┐   ┌──────▼─────────────┐
               │      Qdrant        │   │      Neo4j         │
               │  (Vector Search)   │   │  (Knowledge Graph) │
-              │                    │   │                    │
-              │  - knowbase        │   │  - CanonicalConcept│
-              │  - rfp_qa          │   │  - ProtoConcept    │
-              │  - knowwhere_proto │   │  - 25K+ relations  │
               └────────────────────┘   └────────────────────┘
+                            │                 │
+              ┌─────────────▼──────┐         │
+              │    PostgreSQL      │         │
+              │  (Sessions/Users)  │         │
+              └────────────────────┘         │
                             │                 │
                             └────────┬────────┘
                                      │
          ┌───────────────────────────▼───────────────────────────┐
          │                  OSMOSE Engine                         │
          │  ┌─────────────────────┐ ┌─────────────────────────┐  │
-         │  │   InferenceEngine   │ │   LivingOntologyManager │  │
+         │  │   InferenceEngine   │ │   Memory Layer          │  │
          │  │                     │ │                         │  │
-         │  │ • Transitive Rel.   │ │ • Pattern Discovery     │  │
-         │  │ • Bridge Concepts   │ │ • Type Proposals        │  │
-         │  │ • Hidden Clusters   │ │ • Auto-Promotion        │  │
-         │  │ • Weak Signals      │ │ • Human Validation      │  │
-         │  │ • Structural Holes  │ │ • Change History        │  │
-         │  │ • Contradictions    │ │                         │  │
+         │  │ • Transitive Rel.   │ │ • SessionManager        │  │
+         │  │ • Bridge Concepts   │ │ • ContextResolver       │  │
+         │  │ • Hidden Clusters   │ │ • IntelligentSummarizer │  │
+         │  │ • Weak Signals      │ │ • LangChain Memory      │  │
          │  └─────────────────────┘ └─────────────────────────┘  │
          └───────────────────────────────────────────────────────┘
 ```
-
----
-
-## 🚀 Prochaines Étapes Possibles
-
-### ✅ COMPLÉTÉ: Frontend Graph-Guided RAG
-
-**Fichier:** `frontend/src/app/chat/page.tsx`
-
-**Implémenté:**
-- Switch "Knowledge Graph" pour activer/désactiver l'enrichissement
-- Dropdown niveau: Light (~30ms) / Standard (~50ms) / Deep (~200ms)
-- Badge visuel avec tooltip explicatif
-- Intégration avec `api.chat.send()` (paramètres `use_graph_context`, `graph_enrichment_level`)
-
-**Accès:** http://localhost:3000/chat
-
----
-
-### ⏸️ DÉSACTIVÉ: Living Ontology
-
-**Raison:** La fonctionnalité en mode domain-agnostic génère trop de bruit (propositions comme "NATIONAL", "ENTITY_CO_OCCURRENCE" qui n'ont pas de sens sémantique).
-
-**Fichiers concernés (code conservé mais désactivé):**
-- `src/knowbase/api/routers/living_ontology.py` - Router API
-- `src/knowbase/semantic/ontology/` - Services backend
-- `frontend/src/app/admin/living-ontology/page.tsx` - Page admin
-
-**Pour réactiver plus tard:**
-1. Décommenter import dans `src/knowbase/api/main.py`
-2. Décommenter `app.include_router(living_ontology.router)`
-3. Remettre le menu dans `frontend/src/components/layout/Sidebar.tsx`
-4. Considérer `use_domain_hints=True` pour corpus homogène
-
----
-
-### Option A: Phase 2.5 - Memory Layer
-- Sessions persistantes par utilisateur
-- Context resolver (questions implicites)
-- Intelligent summarizer (résumés métier LLM)
-- Export PDF des sessions
-
-### Option B: Phase 3 - Multi-Source Simplifiée
-- Upload manuel prioritaire
-- SharePoint/Google Drive (si temps)
-- Connecteurs avancés différés
-
-### Option C: Phase 3.5 - Frontend Explainable Graph-RAG
-- Living Graph (graphe persistant de session)
-- Citations inline (style académique)
-- Smart Hover, Quick Actions
-- Session Summary exportable PDF
-
-### Option D: Optimisation & Tests
-- Réduire temps enrichissement DEEP (~2.8s → <500ms)
-- Tests E2E avec corpus plus large
-- Dashboard monitoring Grafana
-
----
-
-## 📈 Métriques Techniques
-
-| Métrique | Valeur | Status |
-|----------|--------|--------|
-| **Concepts dans KG** | 1164 | ✅ |
-| **Types uniques** | 6 (5 base + RESEARCH) | ✅ |
-| **Propositions pending** | 8 | ⏳ |
-| **Temps enrichissement LIGHT** | ~30ms | ✅ |
-| **Temps enrichissement STANDARD** | ~50ms | ✅ |
-| **Temps enrichissement DEEP** | ~200ms | ✅ |
-| **Seuil auto-promotion** | 85% confidence | ✅ |
-| **Seuil rejection** | <50% confidence | ✅ |
-
----
-
-## 🧪 Test Réalisé (2025-12-19)
-
-### Living Ontology - Cycle Complet
-
-**Corpus:** 14 études médicales COVID-19 (PDF)
-
-**Résultats du cycle de découverte:**
-- Patterns découverts: 9
-- Auto-promus (≥85%): 1 → **RESEARCH**
-- En attente review: 8 propositions
-- Rejetés: 0
-
-**Type RESEARCH auto-créé (8 concepts reclassifiés):**
-- Health Data Research UK
-- UK Research and Innovation
-- Medical Research Council
-- National Institute for Health Research
-- Cambridge East Research Ethics Committee
-- Biomedical Advanced Research and Development Authority
-- Research Manuscript
-- NIHR Clinical Research Network
-
-**Propositions en attente:**
-| Type | Confidence | Occurrences |
-|------|------------|-------------|
-| ENTITY_CO_OCCURRENCE | 80% | 134 |
-| HEALTH | 75% | 269 |
-| ENTITY_CO_OCCURRENCE_USES | 63% | 7 |
-| SARS_COMPONENT | 50% | 10 |
-| HIGH_COMPONENT | 50% | 10 |
-
-### Graph-Guided RAG - Test Deep
-
-**Question testée:**
-> "Comment les organismes de recherche britanniques collaborent-ils sur les essais COVID ?"
-
-**Résultat:** Synthèse complète incluant:
-- RECOVERY Trial coordination (Oxford, 177 hôpitaux UK)
-- Relations avec NIHR, Wellcome Trust, Bill & Melinda Gates Foundation
-- Relations transitives COVID-19 → Patients → Informed Consent
-- Enrichissement via le nouveau type RESEARCH
 
 ---
 
@@ -360,24 +419,20 @@ src/knowbase/api/routers/search.py  ✅ +documentation enrichie
 - [Architecture Technique](../OSMOSE_ARCHITECTURE_TECHNIQUE.md)
 - [Roadmap Intégrée](../OSMOSE_ROADMAP_INTEGREE.md)
 - [Phase 1 - Semantic Core](../phases/PHASE1_SEMANTIC_CORE.md)
+- [Phase 2.7 - Concept Matching Engine](./PHASE2.7_CONCEPT_MATCHING_ENGINE.md) ⭐ CRITIQUE
 
 **API Documentation:**
 - Swagger UI: http://localhost:8000/docs
+- Sessions API: http://localhost:8000/docs#/Sessions
 - Insights API: http://localhost:8000/docs#/insights
-- Living Ontology API: http://localhost:8000/docs#/living-ontology
 
-**Code:**
-- `src/knowbase/semantic/inference/` - InferenceEngine
-- `src/knowbase/semantic/ontology/` - Living Ontology
-- `src/knowbase/api/services/graph_guided_search.py` - Graph-Guided RAG
-
-**Scripts de Test:**
-- `scripts/test_inference_engine.py`
-- `scripts/test_graph_guided_rag.py`
-- `scripts/test_living_ontology.py`
+**Code Memory Layer:**
+- `src/knowbase/memory/` - SessionManager, ContextResolver, IntelligentSummarizer
+- `src/knowbase/api/routers/sessions.py` - API REST
+- `src/knowbase/api/schemas/sessions.py` - Pydantic schemas
 
 ---
 
-**Version:** 2.3.2 (Living Ontology Tested)
-**Dernière MAJ:** 2025-12-19
-**Auteur:** Claude Code + User collaboration
+**Version:** 2.7.0 (Concept Matching Engine - En cours)
+**Dernière MAJ:** 2025-12-21
+**Auteur:** Claude Code + User collaboration + ChatGPT
