@@ -77,6 +77,8 @@ aws-resources-created.json
 # Next.js build files (générés automatiquement)
 frontend/.next/
 frontend/out/
+frontend/node_modules/
+frontend/next-env.d.ts
 
 # Docker generated files
 app/patch_unstructured.py
