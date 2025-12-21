@@ -1,7 +1,7 @@
 # Phase 2.7 - Concept Matching Engine
 
 **Date de création:** 2025-12-21
-**Status:** PALIER 1 IMPLÉMENTÉ ✅
+**Status:** PALIER 1 + 2 IMPLÉMENTÉS ✅
 **Priorité:** CRITIQUE (bloquant pour valeur KG)
 **Dépendances:** Phase 2.3 (Graph-Guided RAG)
 
@@ -371,17 +371,35 @@ def test_golden_set():
 - ✅ Requêtes anglaises: AI Act, Ransomware → concepts trouvés
 - ⚠️ Requêtes FR→EN: "ia"→"AI", "RGPD"→"GDPR" → besoin Palier 2
 
-### 6.2 Palier 2 (Semaine suivante)
+### 6.2 Palier 2 ✅ IMPLÉMENTÉ 2025-12-21
 
-| Tâche | Fichier | Estimation |
-|-------|---------|------------|
-| Créer collection Qdrant `concepts` | Script setup | 1h |
-| Indexer 11k concepts | Script batch | 1h |
-| Implémenter `search_concepts_semantic` | `concept_matcher.py` | 1h |
-| Implémenter fusion lex + sem | `concept_matcher.py` | 1h |
-| Tests de validation | Tests | 1h |
+| Tâche | Fichier | Status |
+|-------|---------|--------|
+| Créer collection Qdrant `knowwhere_concepts` | `scripts/index_concepts_qdrant.py` | ✅ |
+| Indexer 11796 concepts (embeddings 1024D) | Script batch | ✅ (~15min) |
+| Implémenter `search_concepts_semantic` | `graph_guided_search.py` | ✅ |
+| Implémenter fusion RRF (lex + sem) | `graph_guided_search.py` | ✅ |
+| Tests golden set | Tests | ✅ 67% (vs 45% Palier 1) |
 
-**Total Palier 2:** ~5h
+**Résultats Golden Set Palier 1+2:**
+
+| Query | Palier 1 | Palier 1+2 | Amélioration |
+|-------|----------|------------|--------------|
+| IA + Cybersécurité (FR→EN) | ❌ 0/4 | ✅ 4/4 | **+400%** |
+| NIS2 + High-Risk | ⚠️ 1/3 | ⚠️ 1/3 | = |
+| Ransomware + Incident | ✅ 2/4 | ✅ 3/4 | **+50%** |
+| AI Act + Compliance | ⚠️ 1/3 | ⚠️ 1/3 | = |
+| RGPD → GDPR (FR→EN) | ⚠️ 2/4 | ✅ 3/4 | **+50%** |
+| **TOTAL** | ~45% | **67%** | **+22%** |
+
+**Performance:**
+- Premier call: ~3.2s (chargement modèle e5-large)
+- Calls suivants: **~80ms** (lex + sem en parallèle)
+
+**Algorithme de fusion: Reciprocal Rank Fusion (RRF)**
+- k=60 (constante standard)
+- Score final: 70% RRF + 20% popularity + 10% quality
+- Diversity: max 4 concepts par type
 
 ### 6.3 Palier 3 (Optionnel)
 

@@ -30,6 +30,9 @@ from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 from knowbase.semantic.inference import InferenceEngine, InsightType
 
+# Palier 2 - Semantic Search
+QDRANT_CONCEPTS_COLLECTION = "knowwhere_concepts"
+
 # ============================================================================
 # Phase 2.7 - Concept Matching Engine (Palier 1: Full-Text Neo4j)
 # ============================================================================
@@ -197,6 +200,8 @@ class GraphGuidedSearchService:
     def __init__(self):
         self._inference_engine: Optional[InferenceEngine] = None
         self._neo4j_client = None
+        self._qdrant_client = None
+        self._embedder = None
 
     @property
     def inference_engine(self) -> InferenceEngine:
@@ -213,38 +218,117 @@ class GraphGuidedSearchService:
             self._neo4j_client = get_neo4j_client()
         return self._neo4j_client
 
-    async def extract_concepts_from_query(
+    @property
+    def qdrant_client(self):
+        """Lazy loading du client Qdrant pour Palier 2."""
+        if self._qdrant_client is None:
+            from qdrant_client import QdrantClient
+            self._qdrant_client = QdrantClient(url=settings.qdrant_url)
+        return self._qdrant_client
+
+    @property
+    def embedder(self):
+        """Lazy loading de l'embedder multilingue pour Palier 2."""
+        if self._embedder is None:
+            from knowbase.semantic.config import get_semantic_config
+            from knowbase.semantic.utils.embeddings import get_embedder
+            config = get_semantic_config()
+            self._embedder = get_embedder(config)
+        return self._embedder
+
+    async def search_concepts_semantic(
         self,
         query: str,
         tenant_id: str = "default",
-        top_k: int = 10,
-        max_per_type: int = 4
-    ) -> List[str]:
+        top_k: int = 20
+    ) -> List[Dict[str, Any]]:
         """
-        Phase 2.7 - Concept Matching Engine (Palier 1: Full-Text Neo4j)
+        Phase 2.7 - Palier 2: Recherche sémantique des concepts.
 
-        Extrait les concepts pertinents de la question via recherche full-text.
+        Utilise les embeddings multilingual-e5-large pour trouver
+        les concepts sémantiquement similaires à la requête.
 
-        Algorithme:
-        1. Tokenization + normalisation (stopwords FR/EN, min_length=2)
-        2. Recherche full-text Neo4j (index concept_search)
-        3. Calcul lex_adj (score ajusté par longueur du texte)
-        4. Ranking composite: 0.60*lex + 0.25*pop + 0.15*quality
-        5. Diversity re-ranking: max 4 concepts par type
+        Avantages:
+        - Multilingue (FR→EN, EN→FR)
+        - Synonymes et reformulations
+        - Concepts connexes non-mentionnés explicitement
 
         Args:
             query: Question utilisateur
             tenant_id: Tenant ID
-            top_k: Nombre de concepts à retourner (default: 10)
-            max_per_type: Max concepts par type pour diversité (default: 4)
+            top_k: Nombre de résultats max
 
         Returns:
-            Liste des noms de concepts triés par pertinence
+            Liste de dicts avec concept_id, canonical_name, sem_score
         """
         import time
         start_time = time.time()
 
-        # Étape 1: Tokenization
+        try:
+            # Vérifier que la collection existe
+            collections = self.qdrant_client.get_collections().collections
+            if not any(c.name == QDRANT_CONCEPTS_COLLECTION for c in collections):
+                logger.warning(f"[OSMOSE] Collection {QDRANT_CONCEPTS_COLLECTION} not found")
+                return []
+
+            # Générer l'embedding de la requête (prefix "query" pour e5)
+            query_embedding = self.embedder.encode([query], prefix_type="query")[0]
+
+            # Recherche vectorielle
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+            search_filter = Filter(
+                must=[
+                    FieldCondition(
+                        key="tenant_id",
+                        match=MatchValue(value=tenant_id)
+                    )
+                ]
+            )
+
+            results = self.qdrant_client.search(
+                collection_name=QDRANT_CONCEPTS_COLLECTION,
+                query_vector=query_embedding.tolist(),
+                query_filter=search_filter,
+                limit=top_k,
+                with_payload=True
+            )
+
+            # Formater les résultats
+            concepts = []
+            for hit in results:
+                concepts.append({
+                    "concept_id": hit.payload.get("concept_id"),
+                    "canonical_name": hit.payload.get("canonical_name"),
+                    "concept_type": hit.payload.get("concept_type"),
+                    "quality_score": hit.payload.get("quality_score", 0.5),
+                    "popularity": hit.payload.get("popularity", 0),
+                    "sem_score": hit.score,
+                })
+
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.info(
+                f"[OSMOSE] Semantic search: {len(concepts)} concepts in {elapsed_ms:.1f}ms"
+            )
+
+            return concepts
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE] Semantic search failed: {e}")
+            return []
+
+    async def _search_concepts_lexical(
+        self,
+        query: str,
+        tenant_id: str = "default",
+        top_k: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Palier 1: Recherche lexicale full-text Neo4j.
+
+        Retourne une liste de candidats avec lex_adj normalisé.
+        """
+        # Tokenization
         tokens = tokenize_query(query, min_length=2)
 
         if not tokens:
@@ -253,9 +337,8 @@ class GraphGuidedSearchService:
 
         # Construire la query full-text (OR entre tokens)
         fulltext_query = " OR ".join(tokens)
-        logger.debug(f"[OSMOSE] Full-text query: {fulltext_query}")
 
-        # Étape 2: Recherche full-text Neo4j
+        # Recherche full-text Neo4j
         cypher = """
         CALL db.index.fulltext.queryNodes('concept_search', $query)
         YIELD node, score
@@ -270,20 +353,20 @@ class GraphGuidedSearchService:
             coalesce(node.unified_definition, '') AS definition,
             score AS lex_score
         ORDER BY score DESC
-        LIMIT 50
+        LIMIT $limit
         """
 
         try:
             results = self.neo4j_client.execute_query(cypher, {
                 "query": fulltext_query,
-                "tenant_id": tenant_id
+                "tenant_id": tenant_id,
+                "limit": top_k
             })
 
             if not results:
-                logger.info(f"[OSMOSE] No concepts found for: {fulltext_query}")
                 return []
 
-            # Étape 3: Calcul lex_adj (normalisation par longueur)
+            # Calcul lex_adj (normalisation par longueur)
             candidates = []
             for record in results:
                 name = record.get("name", "")
@@ -306,55 +389,150 @@ class GraphGuidedSearchService:
                     "type": record.get("type", "UNKNOWN"),
                     "quality": record.get("quality", 0.5),
                     "popularity": record.get("popularity", 0),
-                    "lex_score": lex_score,
                     "lex_adj": lex_adj,
                 })
 
-            # Étape 4: Ranking composite
-            # Normaliser les scores
-            lex_adj_values = [c["lex_adj"] for c in candidates]
-            pop_values = [math.log(1 + c["popularity"]) for c in candidates]
-            quality_values = [c["quality"] for c in candidates]
-
-            lex_adj_norm = normalize_scores(lex_adj_values)
-            pop_norm = normalize_scores(pop_values)
-            quality_norm = normalize_scores(quality_values)
-
-            for i, c in enumerate(candidates):
-                c["final_score"] = (
-                    0.60 * lex_adj_norm[i] +
-                    0.25 * pop_norm[i] +
-                    0.15 * quality_norm[i]
-                )
-
-            # Trier par score final
-            candidates.sort(key=lambda x: x["final_score"], reverse=True)
-
-            # Étape 5: Diversity re-ranking
-            final_concepts = []
-            type_counts: Dict[str, int] = defaultdict(int)
-
-            for c in candidates:
-                ctype = c["type"]
-                if type_counts[ctype] < max_per_type:
-                    final_concepts.append(c["name"])
-                    type_counts[ctype] += 1
-
-                if len(final_concepts) >= top_k:
-                    break
-
-            elapsed_ms = (time.time() - start_time) * 1000
-            logger.info(
-                f"[OSMOSE] Concept matching: {len(final_concepts)} concepts in {elapsed_ms:.1f}ms "
-                f"(tokens: {tokens}, candidates: {len(candidates)})"
-            )
-
-            return final_concepts
+            return candidates
 
         except Exception as e:
-            logger.error(f"[OSMOSE] Failed to extract query concepts: {e}")
-            # Fallback: retourner liste vide plutôt que crash
+            logger.warning(f"[OSMOSE] Lexical search failed: {e}")
             return []
+
+    async def extract_concepts_from_query(
+        self,
+        query: str,
+        tenant_id: str = "default",
+        top_k: int = 10,
+        max_per_type: int = 4,
+        use_semantic: bool = True
+    ) -> List[str]:
+        """
+        Phase 2.7 - Concept Matching Engine (Palier 1 + 2: Fusion Lex-Sem)
+
+        Extrait les concepts pertinents de la question via:
+        - Palier 1: Recherche full-text Neo4j (mots exacts)
+        - Palier 2: Recherche sémantique Qdrant (multilingual)
+
+        Fusion: Reciprocal Rank Fusion (RRF) pour combiner les deux rankings.
+
+        Args:
+            query: Question utilisateur
+            tenant_id: Tenant ID
+            top_k: Nombre de concepts à retourner (default: 10)
+            max_per_type: Max concepts par type pour diversité (default: 4)
+            use_semantic: Activer Palier 2 (default: True)
+
+        Returns:
+            Liste des noms de concepts triés par pertinence
+        """
+        import time
+        start_time = time.time()
+
+        # =====================================================================
+        # Étape 1: Exécuter Palier 1 + Palier 2 en parallèle
+        # =====================================================================
+        if use_semantic:
+            lex_task = self._search_concepts_lexical(query, tenant_id, top_k=50)
+            sem_task = self.search_concepts_semantic(query, tenant_id, top_k=30)
+
+            lex_results, sem_results = await asyncio.gather(lex_task, sem_task)
+        else:
+            lex_results = await self._search_concepts_lexical(query, tenant_id, top_k=50)
+            sem_results = []
+
+        # =====================================================================
+        # Étape 2: Fusion avec Reciprocal Rank Fusion (RRF)
+        # =====================================================================
+        # RRF: score(d) = sum( 1 / (k + rank(d)) ) pour chaque système
+        # k=60 est la constante standard
+        RRF_K = 60
+
+        # Construire le dictionnaire de fusion
+        concept_scores: Dict[str, Dict[str, Any]] = {}
+
+        # Ajouter les résultats lexicaux (déjà triés par lex_adj)
+        for rank, c in enumerate(lex_results, start=1):
+            name = c["name"]
+            if name not in concept_scores:
+                concept_scores[name] = {
+                    "name": name,
+                    "type": c["type"],
+                    "quality": c["quality"],
+                    "popularity": c["popularity"],
+                    "lex_rank": rank,
+                    "sem_rank": None,
+                    "rrf_score": 0.0,
+                }
+            concept_scores[name]["lex_rank"] = rank
+            concept_scores[name]["rrf_score"] += 1.0 / (RRF_K + rank)
+
+        # Ajouter les résultats sémantiques (triés par sem_score)
+        for rank, c in enumerate(sem_results, start=1):
+            name = c["canonical_name"]
+            if name not in concept_scores:
+                concept_scores[name] = {
+                    "name": name,
+                    "type": c["concept_type"],
+                    "quality": c["quality_score"],
+                    "popularity": c["popularity"],
+                    "lex_rank": None,
+                    "sem_rank": rank,
+                    "rrf_score": 0.0,
+                }
+            concept_scores[name]["sem_rank"] = rank
+            concept_scores[name]["rrf_score"] += 1.0 / (RRF_K + rank)
+
+        # =====================================================================
+        # Étape 3: Ranking final avec qualité + popularité
+        # =====================================================================
+        candidates = list(concept_scores.values())
+
+        if not candidates:
+            logger.info(f"[OSMOSE] No concepts found for: {query[:50]}...")
+            return []
+
+        # Normaliser RRF, popularity, quality
+        rrf_values = [c["rrf_score"] for c in candidates]
+        pop_values = [math.log(1 + c["popularity"]) for c in candidates]
+        quality_values = [c["quality"] for c in candidates]
+
+        rrf_norm = normalize_scores(rrf_values)
+        pop_norm = normalize_scores(pop_values)
+        quality_norm = normalize_scores(quality_values)
+
+        # Score final: 70% RRF + 20% popularité + 10% qualité
+        for i, c in enumerate(candidates):
+            c["final_score"] = (
+                0.70 * rrf_norm[i] +
+                0.20 * pop_norm[i] +
+                0.10 * quality_norm[i]
+            )
+
+        # Trier par score final
+        candidates.sort(key=lambda x: x["final_score"], reverse=True)
+
+        # =====================================================================
+        # Étape 4: Diversity re-ranking
+        # =====================================================================
+        final_concepts = []
+        type_counts: Dict[str, int] = defaultdict(int)
+
+        for c in candidates:
+            ctype = c["type"]
+            if type_counts[ctype] < max_per_type:
+                final_concepts.append(c["name"])
+                type_counts[ctype] += 1
+
+            if len(final_concepts) >= top_k:
+                break
+
+        elapsed_ms = (time.time() - start_time) * 1000
+        logger.info(
+            f"[OSMOSE] Concept matching (RRF): {len(final_concepts)} concepts in {elapsed_ms:.1f}ms "
+            f"(lex={len(lex_results)}, sem={len(sem_results)}, fusion={len(candidates)})"
+        )
+
+        return final_concepts
 
     async def get_related_concepts(
         self,
