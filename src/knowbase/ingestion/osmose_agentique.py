@@ -37,36 +37,7 @@ from knowbase.common.clients.qdrant_client import upsert_chunks  # Phase 1.6: Qd
 from knowbase.common.llm_router import LLMRouter, TaskType  # Phase 1.8: Document Context
 from knowbase.ontology.domain_context_injector import get_domain_context_injector  # Domain Context injection
 
-# Configuration du root logger pour que tous les loggers enfants (agents) héritent des handlers
-# IMPORTANT: Récupérer les handlers du logger parent (pptx_pipeline) pour les copier au root logger
-# Cela permet aux loggers enfants (agents) d'écrire dans le même fichier de log
-root_logger = logging.getLogger()
-
-# Trouver le handler du fichier ingest_debug.log depuis n'importe quel logger parent
-parent_handlers_found = False
-for parent_name in ["knowbase.ingestion.pipelines.pptx_pipeline", "knowbase.ingestion"]:
-    parent_logger = logging.getLogger(parent_name)
-    if parent_logger.handlers:
-        for handler in parent_logger.handlers:
-            # Copier le handler au root logger s'il n'est pas déjà présent
-            if handler not in root_logger.handlers:
-                root_logger.addHandler(handler)
-                parent_handlers_found = True
-        break
-
-# Si aucun handler parent trouvé, ajouter au moins un StreamHandler pour debug
-if not parent_handlers_found and not root_logger.hasHandlers():
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)s [%(name)s]: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    ))
-    root_logger.addHandler(console_handler)
-
-# S'assurer que le root logger a le bon niveau
-root_logger.setLevel(logging.INFO)
-
+# Logger pour ce module (pas de manipulation du root logger pour eviter les doublons)
 logger = logging.getLogger(__name__)
 
 # Cache global pour les résumés de documents (Phase 1.8)
@@ -637,28 +608,6 @@ Analyze this document and provide JSON response:"""
         osmose_start = asyncio.get_event_loop().time()
 
         try:
-            # Configuration logging pour agents : copier tous les handlers actifs au root logger
-            # IMPORTANT: Ceci doit être fait ICI (au runtime) et non au niveau module
-            root_logger = logging.getLogger()
-            current_handlers = []
-
-            # Récupérer TOUS les handlers de TOUS les loggers actifs
-            for logger_name in logging.Logger.manager.loggerDict:
-                active_logger = logging.getLogger(logger_name)
-                if active_logger.handlers:
-                    for handler in active_logger.handlers:
-                        if handler not in root_logger.handlers:
-                            root_logger.addHandler(handler)
-                            current_handlers.append(f"{logger_name}:{type(handler).__name__}")
-
-            # S'assurer que le root logger a le bon niveau
-            root_logger.setLevel(logging.INFO)
-
-            logger.info(
-                f"[OSMOSE AGENTIQUE] 🔧 Logger configured: root has {len(root_logger.handlers)} handlers "
-                f"(copied from: {', '.join(current_handlers[:3]) if current_handlers else 'none'})"
-            )
-
             # Étape 1: Créer AgentState initial
             tenant = tenant_id or self.config.default_tenant_id
 

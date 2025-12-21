@@ -112,6 +112,9 @@ sqlalchemy[asyncio]>=2.0.0
 fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.21.0
 
+# === Folder Watcher (Phase 3 - Multi-Source) ===
+watchdog>=3.0.0
+
 # === Architecture Agentique OSMOSE (Phase 1.5) ===
 langgraph>=0.2.0
 networkx>=3.1

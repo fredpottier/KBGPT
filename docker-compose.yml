@@ -72,6 +72,7 @@ services:
       dockerfile: ./app/Dockerfile
     image: sap-kb-worker:latest
     container_name: knowbase-worker
+    restart: unless-stopped
     depends_on:
       - redis
       - qdrant
@@ -125,6 +126,33 @@ services:
     working_dir: /app
     entrypoint: ["/app/entrypoint-worker.sh"]
     command: python -m knowbase.ingestion.queue
+
+  folder-watcher:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    image: sap-kb-watcher:latest
+    container_name: knowbase-watcher
+    depends_on:
+      - redis
+    stop_grace_period: 10s
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Paris
+      PYTHONPATH: /app:/app/src
+      KNOWBASE_DATA_DIR: /data
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./app:/app
+      - ./data:/data
+      - ./src:/app/src
+      - ./config:/app/config
+    networks:
+      - knowbase_net
+    working_dir: /app
+    command: python -m knowbase.ingestion.folder_watcher
+    restart: unless-stopped
 
   ui:
     build:

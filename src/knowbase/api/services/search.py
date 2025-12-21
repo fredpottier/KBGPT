@@ -278,6 +278,52 @@ def search_documents(
     if graph_context_data:
         response["graph_context"] = graph_context_data
 
+        # 🌊 Phase 3.5: Transformer en graph_data pour D3.js
+        try:
+            from .graph_data_transformer import transform_graph_context
+
+            # Extraire les concepts utilisés dans la synthèse
+            # (approximation basée sur les concepts de la réponse)
+            used_concepts = graph_context_data.get("query_concepts", [])
+
+            # Transformer en format D3.js (synchrone)
+            graph_data = transform_graph_context(
+                graph_context_data,
+                used_in_synthesis=used_concepts,
+                tenant_id=tenant_id
+            )
+            response["graph_data"] = graph_data
+            logger.info(
+                f"[PHASE-3.5] Graph data: {len(graph_data.get('nodes', []))} nodes, "
+                f"{len(graph_data.get('edges', []))} edges"
+            )
+
+        except Exception as e:
+            logger.warning(f"[PHASE-3.5] Graph data transformation failed (non-blocking): {e}")
+
+        # 🌊 Phase 3.5+: Exploration Intelligence (explications, suggestions, questions)
+        try:
+            from .exploration_intelligence import get_exploration_service
+
+            exploration_service = get_exploration_service()
+            exploration_intelligence = exploration_service.generate_exploration_intelligence(
+                query=query,
+                synthesis_answer=synthesis_result.get("synthesized_answer", ""),
+                graph_context=graph_context_data,
+                chunks=reranked_chunks,
+            )
+            response["exploration_intelligence"] = exploration_intelligence.to_dict()
+            logger.info(
+                f"[PHASE-3.5+] Exploration intelligence: "
+                f"{len(exploration_intelligence.concept_explanations)} explanations, "
+                f"{len(exploration_intelligence.exploration_suggestions)} suggestions, "
+                f"{len(exploration_intelligence.suggested_questions)} questions "
+                f"({exploration_intelligence.processing_time_ms:.1f}ms)"
+            )
+
+        except Exception as e:
+            logger.warning(f"[PHASE-3.5+] Exploration intelligence failed (non-blocking): {e}")
+
     return response
 
 
