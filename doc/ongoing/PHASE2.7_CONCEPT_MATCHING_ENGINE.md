@@ -1,7 +1,7 @@
 # Phase 2.7 - Concept Matching Engine
 
 **Date de création:** 2025-12-21
-**Status:** EN COURS DE SPECIFICATION
+**Status:** PALIER 1 IMPLÉMENTÉ ✅
 **Priorité:** CRITIQUE (bloquant pour valeur KG)
 **Dépendances:** Phase 2.3 (Graph-Guided RAG)
 
@@ -356,18 +356,20 @@ def test_golden_set():
 
 ## 6. Plan d'Implémentation
 
-### 6.1 Palier 1 (Immédiat)
+### 6.1 Palier 1 (Immédiat) ✅ IMPLÉMENTÉ 2025-12-21
 
-| Tâche | Fichier | Estimation |
-|-------|---------|------------|
-| Modifier `extract_concepts_from_query` | `graph_guided_search.py` | 1h |
-| Ajouter tokenization + normalisation | `graph_guided_search.py` | 30min |
-| Implémenter `lex_adj` normalisé | `graph_guided_search.py` | 30min |
-| Implémenter ranking composite | `graph_guided_search.py` | 30min |
-| Implémenter diversity re-ranking | `graph_guided_search.py` | 30min |
-| Tester golden set | Tests | 30min |
+| Tâche | Fichier | Status |
+|-------|---------|--------|
+| Modifier `extract_concepts_from_query` | `graph_guided_search.py` | ✅ |
+| Ajouter tokenization + normalisation | `graph_guided_search.py` | ✅ |
+| Implémenter `lex_adj` normalisé | `graph_guided_search.py` | ✅ |
+| Implémenter ranking composite | `graph_guided_search.py` | ✅ |
+| Implémenter diversity re-ranking | `graph_guided_search.py` | ✅ |
+| Tester golden set | Tests | ✅ 2/5 pass, 3/5 need Palier 2 |
 
-**Total Palier 1:** ~4h
+**Résultats Golden Set Palier 1:**
+- ✅ Requêtes anglaises: AI Act, Ransomware → concepts trouvés
+- ⚠️ Requêtes FR→EN: "ia"→"AI", "RGPD"→"GDPR" → besoin Palier 2
 
 ### 6.2 Palier 2 (Semaine suivante)
 

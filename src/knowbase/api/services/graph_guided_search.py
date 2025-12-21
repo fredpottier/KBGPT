@@ -19,13 +19,96 @@ Différenciation vs RAG classique:
 from __future__ import annotations
 
 import asyncio
+import math
+import re
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from enum import Enum
 
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 from knowbase.semantic.inference import InferenceEngine, InsightType
+
+# ============================================================================
+# Phase 2.7 - Concept Matching Engine (Palier 1: Full-Text Neo4j)
+# ============================================================================
+
+# Stopwords FR/EN pour tokenization
+STOPWORDS_FR = {
+    "le", "la", "les", "un", "une", "des", "du", "de", "d", "l",
+    "et", "ou", "mais", "donc", "car", "ni", "que", "qui", "quoi",
+    "ce", "cette", "ces", "mon", "ma", "mes", "ton", "ta", "tes",
+    "son", "sa", "ses", "notre", "nos", "votre", "vos", "leur", "leurs",
+    "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles",
+    "me", "te", "se", "lui", "y", "en",
+    "est", "sont", "a", "ont", "fait", "faire", "être", "avoir",
+    "pour", "par", "avec", "sans", "dans", "sur", "sous", "entre",
+    "vers", "chez", "avant", "après", "pendant", "depuis",
+    "quel", "quelle", "quels", "quelles", "comment", "pourquoi", "quand",
+    "plus", "moins", "très", "bien", "aussi", "comme", "tout", "tous",
+}
+
+STOPWORDS_EN = {
+    "the", "a", "an", "and", "or", "but", "if", "then", "else",
+    "when", "where", "why", "how", "what", "which", "who", "whom",
+    "this", "that", "these", "those", "is", "are", "was", "were",
+    "be", "been", "being", "have", "has", "had", "do", "does", "did",
+    "will", "would", "could", "should", "may", "might", "must", "shall",
+    "can", "need", "dare", "ought", "used", "to", "of", "in", "for",
+    "on", "with", "at", "by", "from", "up", "about", "into", "through",
+    "during", "before", "after", "above", "below", "between", "under",
+    "again", "further", "once", "here", "there", "all", "each", "few",
+    "more", "most", "other", "some", "such", "no", "nor", "not", "only",
+    "own", "same", "so", "than", "too", "very", "just", "also",
+}
+
+STOPWORDS = STOPWORDS_FR | STOPWORDS_EN
+
+
+def tokenize_query(query: str, min_length: int = 2) -> List[str]:
+    """
+    Tokenize et normalise une requête utilisateur.
+
+    - Lowercase
+    - Supprime ponctuation sauf tirets internes
+    - Filtre stopwords FR/EN
+    - Garde les tokens courts (AI, NIS2, IoT) si min_length=2
+    """
+    # Lowercase et nettoyage basique
+    query_clean = query.lower()
+
+    # Remplacer ponctuation par espaces (garder tirets internes aux mots)
+    query_clean = re.sub(r"[^\w\s\-]", " ", query_clean)
+
+    # Split et filtrer
+    tokens = []
+    for token in query_clean.split():
+        # Nettoyer tirets en début/fin
+        token = token.strip("-")
+
+        if len(token) < min_length:
+            continue
+        if token in STOPWORDS:
+            continue
+
+        tokens.append(token)
+
+    return tokens
+
+
+def normalize_scores(values: List[float]) -> List[float]:
+    """Normalisation min-max des scores."""
+    if not values:
+        return []
+
+    min_val = min(values)
+    max_val = max(values)
+
+    if max_val == min_val:
+        return [0.5] * len(values)
+
+    return [(v - min_val) / (max_val - min_val) for v in values]
 
 settings = get_settings()
 logger = setup_logging(settings.logs_dir, "graph_guided_search.log")
@@ -133,48 +216,144 @@ class GraphGuidedSearchService:
     async def extract_concepts_from_query(
         self,
         query: str,
-        tenant_id: str = "default"
+        tenant_id: str = "default",
+        top_k: int = 10,
+        max_per_type: int = 4
     ) -> List[str]:
         """
-        Extrait les concepts pertinents de la question.
+        Phase 2.7 - Concept Matching Engine (Palier 1: Full-Text Neo4j)
 
-        Utilise une recherche fuzzy dans le KG pour identifier
-        les concepts mentionnés dans la question.
+        Extrait les concepts pertinents de la question via recherche full-text.
+
+        Algorithme:
+        1. Tokenization + normalisation (stopwords FR/EN, min_length=2)
+        2. Recherche full-text Neo4j (index concept_search)
+        3. Calcul lex_adj (score ajusté par longueur du texte)
+        4. Ranking composite: 0.60*lex + 0.25*pop + 0.15*quality
+        5. Diversity re-ranking: max 4 concepts par type
+
+        Args:
+            query: Question utilisateur
+            tenant_id: Tenant ID
+            top_k: Nombre de concepts à retourner (default: 10)
+            max_per_type: Max concepts par type pour diversité (default: 4)
+
+        Returns:
+            Liste des noms de concepts triés par pertinence
         """
-        # Normaliser la query
-        query_lower = query.lower()
-        words = set(query_lower.split())
+        import time
+        start_time = time.time()
 
-        # Chercher les concepts qui matchent des mots de la query
+        # Étape 1: Tokenization
+        tokens = tokenize_query(query, min_length=2)
+
+        if not tokens:
+            logger.warning(f"[OSMOSE] No tokens after filtering: {query[:50]}...")
+            return []
+
+        # Construire la query full-text (OR entre tokens)
+        fulltext_query = " OR ".join(tokens)
+        logger.debug(f"[OSMOSE] Full-text query: {fulltext_query}")
+
+        # Étape 2: Recherche full-text Neo4j
         cypher = """
-        MATCH (c:CanonicalConcept)
-        WHERE c.tenant_id = $tenant_id
-        RETURN c.canonical_name AS name, c.concept_type AS type
-        LIMIT 500
+        CALL db.index.fulltext.queryNodes('concept_search', $query)
+        YIELD node, score
+        WHERE node.tenant_id = $tenant_id
+        RETURN
+            node.concept_id AS id,
+            node.canonical_name AS name,
+            node.concept_type AS type,
+            coalesce(node.quality_score, 0.5) AS quality,
+            coalesce(size(node.chunk_ids), 0) AS popularity,
+            coalesce(node.summary, '') AS summary,
+            coalesce(node.unified_definition, '') AS definition,
+            score AS lex_score
+        ORDER BY score DESC
+        LIMIT 50
         """
 
         try:
-            results = self.neo4j_client.execute_query(cypher, {"tenant_id": tenant_id})
+            results = self.neo4j_client.execute_query(cypher, {
+                "query": fulltext_query,
+                "tenant_id": tenant_id
+            })
 
-            matched_concepts = []
+            if not results:
+                logger.info(f"[OSMOSE] No concepts found for: {fulltext_query}")
+                return []
+
+            # Étape 3: Calcul lex_adj (normalisation par longueur)
+            candidates = []
             for record in results:
-                concept_name = record.get("name", "")
-                if not concept_name:
+                name = record.get("name", "")
+                if not name:
                     continue
 
-                concept_lower = concept_name.lower()
+                summary = record.get("summary", "") or ""
+                definition = record.get("definition", "") or ""
+                lex_score = record.get("lex_score", 0.0)
 
-                # Match exact ou partiel
-                if concept_lower in query_lower:
-                    matched_concepts.append(concept_name)
-                elif any(word in concept_lower for word in words if len(word) > 3):
-                    matched_concepts.append(concept_name)
+                # Longueur du texte indexé (plafonné)
+                len_text = len(name) + min(len(summary), 400) + min(len(definition), 400)
 
-            logger.debug(f"[OSMOSE] Query concepts extracted: {matched_concepts[:5]}")
-            return matched_concepts[:5]  # Top 5 concepts
+                # Score ajusté par longueur (évite biais concepts "bavards")
+                lex_adj = lex_score / math.log(20 + len_text)
+
+                candidates.append({
+                    "id": record.get("id"),
+                    "name": name,
+                    "type": record.get("type", "UNKNOWN"),
+                    "quality": record.get("quality", 0.5),
+                    "popularity": record.get("popularity", 0),
+                    "lex_score": lex_score,
+                    "lex_adj": lex_adj,
+                })
+
+            # Étape 4: Ranking composite
+            # Normaliser les scores
+            lex_adj_values = [c["lex_adj"] for c in candidates]
+            pop_values = [math.log(1 + c["popularity"]) for c in candidates]
+            quality_values = [c["quality"] for c in candidates]
+
+            lex_adj_norm = normalize_scores(lex_adj_values)
+            pop_norm = normalize_scores(pop_values)
+            quality_norm = normalize_scores(quality_values)
+
+            for i, c in enumerate(candidates):
+                c["final_score"] = (
+                    0.60 * lex_adj_norm[i] +
+                    0.25 * pop_norm[i] +
+                    0.15 * quality_norm[i]
+                )
+
+            # Trier par score final
+            candidates.sort(key=lambda x: x["final_score"], reverse=True)
+
+            # Étape 5: Diversity re-ranking
+            final_concepts = []
+            type_counts: Dict[str, int] = defaultdict(int)
+
+            for c in candidates:
+                ctype = c["type"]
+                if type_counts[ctype] < max_per_type:
+                    final_concepts.append(c["name"])
+                    type_counts[ctype] += 1
+
+                if len(final_concepts) >= top_k:
+                    break
+
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.info(
+                f"[OSMOSE] Concept matching: {len(final_concepts)} concepts in {elapsed_ms:.1f}ms "
+                f"(tokens: {tokens}, candidates: {len(candidates)})"
+            )
+
+            return final_concepts
 
         except Exception as e:
-            logger.warning(f"[OSMOSE] Failed to extract query concepts: {e}")
+            logger.error(f"[OSMOSE] Failed to extract query concepts: {e}")
+            # Fallback: retourner liste vide plutôt que crash
             return []
 
     async def get_related_concepts(
