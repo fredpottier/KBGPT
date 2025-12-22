@@ -1,7 +1,8 @@
 # Phase 2.7 - Concept Matching Engine
 
 **Date de création:** 2025-12-21
-**Status:** PALIERS 1 + 2 + 3 IMPLÉMENTÉS ✅ (78% golden set)
+**Status:** ✅ PHASE 2.7 COMPLÈTE - Concept Matching Engine opérationnel
+**Résultat:** 78% golden set | KG double la précision (31% → 62%) | ~250ms temps-réel
 **Priorité:** CRITIQUE (bloquant pour valeur KG)
 **Dépendances:** Phase 2.3 (Graph-Guided RAG)
 
@@ -490,15 +491,59 @@ src/knowbase/
 
 ---
 
-## 11. Références
+## 11. Benchmark KG vs No-KG (2025-12-21)
+
+### 11.1 Résultats : Valeur Ajoutée du Knowledge Graph
+
+Benchmark comparant RAG classique (sans KG) vs Graph-Guided RAG (avec KG) :
+
+| Query | Sans KG | Avec KG | Gain |
+|-------|---------|---------|------|
+| NIS2 + IA à haut risque | 1/3 | 2/3 | **+1** |
+| RGPD + IA (FR→EN) | 1/3 | 3/3 | **+2** |
+| Ransomware + Reporting | 0/4 | 1/4 | **+1** |
+| AI Act Compliance (EN) | 2/3 | 2/3 | 0 |
+| **TOTAL** | **4/13 (31%)** | **8/13 (62%)** | **+31%** |
+
+**Concepts uniques apportés par le KG :** `GDPR`, `Data Protection`, `High-Risk AI System`, `Ransomware`
+
+**Conclusion :** Le Knowledge Graph **DOUBLE** la précision de découverte de concepts (31% → 62%).
+
+### 11.2 ⚠️ AVERTISSEMENT PERFORMANCE - EnrichmentLevel
+
+| Niveau | Temps | Usage |
+|--------|-------|-------|
+| `NONE` | 0ms | Désactivé |
+| `LIGHT` | ~100ms | Concepts liés uniquement |
+| `STANDARD` | **~250ms** | ✅ **RECOMMANDÉ TEMPS-RÉEL** |
+| `DEEP` | **~3 MINUTES** | ⚠️ **OFFLINE ONLY** |
+
+**CAUSE :** `DEEP` utilise InferenceEngine → NetworkX (betweenness, Louvain) sur ~12000 nœuds.
+
+**RÈGLE :** Ne JAMAIS utiliser `EnrichmentLevel.DEEP` pour des requêtes temps-réel !
+
+### 11.3 Scripts de Benchmark
+
+```bash
+# Test Concept Matching (Palier 1+2+3)
+docker exec knowbase-app python /app/scripts/test_concept_matching_p2.py
+
+# Benchmark KG vs No-KG
+docker exec knowbase-app python /app/scripts/benchmark_kg_vs_no_kg.py
+```
+
+---
+
+## 12. Références
 
 - **Discussion technique:** Session Claude Code 2025-12-21 avec collaboration ChatGPT
 - **Code actuel:** `src/knowbase/api/services/graph_guided_search.py`
 - **Index Neo4j:** `concept_search` (créé 2025-12-21)
+- **Collection Qdrant:** `knowwhere_concepts` (11796 concepts, embeddings 1024D)
 - **Phase parente:** Phase 2.3 - InferenceEngine + Graph-Guided RAG
 
 ---
 
-**Version:** 0.1 (Spécification)
+**Version:** 0.2 (Implémentation complète + Benchmark)
 **Dernière MAJ:** 2025-12-21
 **Auteur:** Claude Code + ChatGPT collaboration
