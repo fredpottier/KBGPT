@@ -121,7 +121,7 @@ def enqueue_file(file_path: Path) -> bool:
             enqueue_pdf_ingestion(
                 job_id=job_id,
                 file_path=file_str,
-                use_vision=True,
+                use_vision=False,  # Text extraction is sufficient for most PDFs
             )
             logger.info(f"PDF ajouté à la queue: {file_path.name} (job_id={job_id})")
 
@@ -129,7 +129,7 @@ def enqueue_file(file_path: Path) -> bool:
             enqueue_pptx_ingestion(
                 job_id=job_id,
                 file_path=file_str,
-                use_vision=True,
+                use_vision=False,  # Disabled for cost savings - can enable per-doc if needed
             )
             logger.info(f"PPTX ajouté à la queue: {file_path.name} (job_id={job_id})")
 

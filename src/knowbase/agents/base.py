@@ -28,6 +28,15 @@ class AgentRole(str, Enum):
     DISPATCHER = "llm_dispatcher"
 
 
+class SegmentWithConcepts(BaseModel):
+    """Phase 2.9: Segment avec ses concepts locaux pour extraction segment-level."""
+    segment_id: str
+    text: str
+    topic_id: str = ""
+    local_concept_ids: List[str] = Field(default_factory=list)  # IDs concepts extraits de ce segment
+    catalogue_concept_ids: List[str] = Field(default_factory=list)  # IDs catalogue hybride (local + global)
+
+
 class AgentState(BaseModel):
     """État partagé entre agents (passé via FSM)."""
     document_id: str
@@ -50,6 +59,9 @@ class AgentState(BaseModel):
     candidates: List[Dict[str, Any]] = Field(default_factory=list)
     promoted: List[Dict[str, Any]] = Field(default_factory=list)
     relations: List[Dict[str, Any]] = Field(default_factory=list)  # Problème 1: Relations sémantiques
+
+    # Phase 2.9: Segments avec concepts pour extraction segment-level
+    segments_with_concepts: Dict[str, SegmentWithConcepts] = Field(default_factory=dict)
 
     # Phase 2: Stats extraction relations
     relation_extraction_stats: Dict[str, Any] = Field(default_factory=dict)

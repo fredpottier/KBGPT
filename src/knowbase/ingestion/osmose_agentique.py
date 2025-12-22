@@ -573,9 +573,11 @@ Analyze this document and provide JSON response:"""
             Résultat OSMOSE avec métriques agentiques
         """
         start_time = asyncio.get_event_loop().time()
+        print(f"[DEBUG OSMOSE] >>> ENTRY process_document_agentique: doc={document_id}")
 
         # Déterminer type de document
         document_type = document_path.suffix.lower().replace(".", "")
+        print(f"[DEBUG OSMOSE] Document type: {document_type}")
 
         # Résultat OSMOSE
         result = OsmoseIntegrationResult(
@@ -625,6 +627,7 @@ Analyze this document and provide JSON response:"""
 
             # Phase 1.8: Générer document_context pour désambiguïsation concepts
             # Phase 1.8.2: Récupérer aussi technical_density_hint (domain-agnostic)
+            print(f"[DEBUG OSMOSE] Phase 1.8: Generating document context...")
             try:
                 document_context, technical_density_hint = await self._generate_document_summary(
                     document_id=document_id,
@@ -639,11 +642,15 @@ Analyze this document and provide JSON response:"""
                 )
             except Exception as e:
                 logger.warning(f"[PHASE1.8:Context] Failed to generate context: {e}")
+                print(f"[DEBUG OSMOSE] Phase 1.8: Context generation FAILED: {e}")
                 # Non-bloquant: continuer sans contexte, hint par défaut 0.5
                 initial_state.technical_density_hint = 0.5
 
+            print(f"[DEBUG OSMOSE] Phase 1.8: Context done. Starting segmentation...")
+
             # Étape 2: Segmentation sémantique avec TopicSegmenter
             segmenter = self._get_topic_segmenter()
+            print(f"[DEBUG OSMOSE] TopicSegmenter obtained, calling segment_document...")
 
             try:
                 # Appel TopicSegmenter (async)
@@ -715,21 +722,27 @@ Analyze this document and provide JSON response:"""
                 )
 
             # Étape 3: Lancer SupervisorAgent FSM
+            print(f"[DEBUG OSMOSE] Segmentation done. Getting SupervisorAgent...")
             supervisor = self._get_supervisor()
+            print(f"[DEBUG OSMOSE] SupervisorAgent obtained.")
 
             # DEBUG: Vérifier que les segments sont bien présents
             logger.info(
                 f"[OSMOSE AGENTIQUE] 🔍 DEBUG: Passing {len(initial_state.segments)} segments to SupervisorAgent"
             )
+            print(f"[DEBUG OSMOSE] Passing {len(initial_state.segments)} segments to SupervisorAgent")
             if initial_state.segments:
                 logger.info(
                     f"[OSMOSE AGENTIQUE] 🔍 DEBUG: First segment keys: {list(initial_state.segments[0].keys())}"
                 )
+                print(f"[DEBUG OSMOSE] First segment keys: {list(initial_state.segments[0].keys())}")
 
+            print(f"[DEBUG OSMOSE] >>> Calling supervisor.execute() with timeout={self.config.timeout_seconds}s...")
             final_state = await asyncio.wait_for(
                 supervisor.execute(initial_state),
                 timeout=self.config.timeout_seconds
             )
+            print(f"[DEBUG OSMOSE] <<< supervisor.execute() COMPLETED")
 
             logger.info(
                 f"[OSMOSE AGENTIQUE] SupervisorAgent FSM completed: "
@@ -958,7 +971,12 @@ async def process_document_with_osmose_agentique(
     Returns:
         Résultat OSMOSE Agentique
     """
+    # DEBUG Phase 2.9: Trace entrée fonction
+    print(f"[DEBUG OSMOSE] >>> ENTRY process_document_with_osmose_agentique: doc={document_id}, text_len={len(text_content)}")
+    logger.info(f"[DEBUG OSMOSE] >>> ENTRY process_document_with_osmose_agentique: doc={document_id}")
+
     service = OsmoseAgentiqueService(config=config)
+    print(f"[DEBUG OSMOSE] OsmoseAgentiqueService created, calling process_document_agentique...")
 
     return await service.process_document_agentique(
         document_id=document_id,

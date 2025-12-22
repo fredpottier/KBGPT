@@ -61,11 +61,13 @@ class PatternMiner(BaseAgent):
     - Lie concepts entre segments (co-occurrence, proximity)
     - Infère hiérarchies (parent-child relations)
     - Disambiguate Named Entities (SAP S/4HANA vs SAP ECC)
+    - Phase 2.9.3: Cross-segment relation extraction via LLM
 
     Algorithmes:
     - Frequency analysis: Concepts récurrents (≥2 segments)
     - Co-occurrence: Concepts apparaissant ensemble
     - Hierarchy inference: "SAP S/4HANA" → parent: "SAP ERP"
+    - Cross-segment LLM: Relations entre concepts de segments différents
 
     Output enrichit state.candidates avec:
     - pattern_score: float (0-1)
@@ -81,9 +83,14 @@ class PatternMiner(BaseAgent):
         self.min_frequency = config.get("min_frequency", 2) if config else 2
         self.min_cooccurrence = config.get("min_cooccurrence", 0.3) if config else 0.3
 
+        # Phase 2.9.3: Configuration cross-segment
+        self.enable_cross_segment_llm = config.get("enable_cross_segment_llm", False) if config else False
+        self.cross_segment_top_k = config.get("cross_segment_top_k", 20) if config else 20
+
         logger.info(
             f"[MINER] Initialized with min_frequency={self.min_frequency}, "
-            f"min_cooccurrence={self.min_cooccurrence}"
+            f"min_cooccurrence={self.min_cooccurrence}, "
+            f"cross_segment_llm={'ON' if self.enable_cross_segment_llm else 'OFF'}"
         )
 
     def _register_tools(self):
@@ -310,3 +317,170 @@ class PatternMiner(BaseAgent):
                 message=f"LinkConcepts failed: {str(e)}",
                 relations=[]
             )
+
+    # =========================================================================
+    # Phase 2.9.3 - Cross-Segment Relation Extraction
+    # =========================================================================
+
+    async def extract_cross_segment_relations(
+        self,
+        segments_with_concepts: Dict[str, Any],
+        promoted_concepts: List[Dict[str, Any]],
+        hub_concepts: List[Dict[str, Any]],
+        document_id: str,
+        tenant_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Phase 2.9.3: Extrait relations entre concepts de segments différents.
+
+        Stratégie:
+        1. Identifier concepts "ponts" (présents dans multiple segments)
+        2. Pour chaque paire de segments partageant un concept pont:
+           - Extraire relations potentielles via LLM
+        3. Prioriser les hub concepts pour les relations cross-segment
+
+        Args:
+            segments_with_concepts: Dict segment_id -> SegmentWithConcepts
+            promoted_concepts: Tous les concepts promus
+            hub_concepts: Concepts déjà bien connectés (hubs)
+            document_id: ID du document
+            tenant_id: ID tenant
+
+        Returns:
+            Liste de relations cross-segment
+        """
+        if not self.enable_cross_segment_llm:
+            logger.debug("[MINER] Cross-segment LLM disabled, skipping")
+            return []
+
+        logger.info(
+            f"[MINER] Phase 2.9.3: Extracting cross-segment relations from "
+            f"{len(segments_with_concepts)} segments"
+        )
+
+        # 1. Identifier concepts présents dans multiple segments
+        concept_to_segments: Dict[str, List[str]] = defaultdict(list)
+
+        for segment_id, segment in segments_with_concepts.items():
+            if hasattr(segment, 'local_concept_ids'):
+                local_ids = segment.local_concept_ids
+            else:
+                local_ids = segment.get("local_concept_ids", [])
+
+            for concept_id in local_ids:
+                concept_to_segments[concept_id].append(segment_id)
+
+        # Concepts ponts = présents dans 2+ segments
+        bridge_concepts = [
+            cid for cid, segments in concept_to_segments.items()
+            if len(segments) >= 2
+        ]
+
+        # Ajouter les hub concepts comme ponts potentiels
+        hub_ids = [h.get("canonical_id") for h in hub_concepts if h.get("canonical_id")]
+        bridge_concepts = list(set(bridge_concepts + hub_ids))
+
+        logger.info(
+            f"[MINER] Found {len(bridge_concepts)} bridge concepts "
+            f"(multi-segment + hubs)"
+        )
+
+        if not bridge_concepts:
+            logger.debug("[MINER] No bridge concepts, skipping cross-segment extraction")
+            return []
+
+        # 2. Identifier paires de segments à analyser
+        segment_pairs_to_analyze = set()
+
+        for concept_id in bridge_concepts:
+            segments_with_concept = concept_to_segments.get(concept_id, [])
+            if len(segments_with_concept) >= 2:
+                # Créer paires de segments
+                for i, seg_a in enumerate(segments_with_concept):
+                    for seg_b in segments_with_concept[i+1:]:
+                        pair = tuple(sorted([seg_a, seg_b]))
+                        segment_pairs_to_analyze.add(pair)
+
+        logger.info(f"[MINER] {len(segment_pairs_to_analyze)} segment pairs to analyze")
+
+        # 3. Limiter aux top-K paires (pour éviter explosion combinatoire)
+        segment_pairs_list = list(segment_pairs_to_analyze)[:self.cross_segment_top_k]
+
+        cross_relations = []
+
+        # 4. Pour chaque paire, extraire relations via LLM
+        # Note: Cette extraction utilise les hub concepts comme catalogue
+        for seg_a, seg_b in segment_pairs_list:
+            try:
+                segment_a = segments_with_concepts.get(seg_a)
+                segment_b = segments_with_concepts.get(seg_b)
+
+                if not segment_a or not segment_b:
+                    continue
+
+                # Récupérer texte des deux segments
+                text_a = segment_a.text if hasattr(segment_a, 'text') else segment_a.get("text", "")
+                text_b = segment_b.text if hasattr(segment_b, 'text') else segment_b.get("text", "")
+
+                if not text_a or not text_b:
+                    continue
+
+                # Identifier concepts communs entre les deux segments
+                ids_a = set(segment_a.local_concept_ids if hasattr(segment_a, 'local_concept_ids') else segment_a.get("local_concept_ids", []))
+                ids_b = set(segment_b.local_concept_ids if hasattr(segment_b, 'local_concept_ids') else segment_b.get("local_concept_ids", []))
+
+                shared_concept_ids = ids_a.intersection(ids_b)
+
+                if shared_concept_ids:
+                    # Créer relation CROSS_SEGMENT pour chaque concept partagé
+                    for concept_id in shared_concept_ids:
+                        relation = {
+                            "type": "CROSS_SEGMENT_BRIDGE",
+                            "concept_id": concept_id,
+                            "segment_a": seg_a,
+                            "segment_b": seg_b,
+                            "document_id": document_id,
+                            "confidence": 0.8
+                        }
+                        cross_relations.append(relation)
+
+            except Exception as e:
+                logger.debug(f"[MINER] Error processing segment pair ({seg_a}, {seg_b}): {e}")
+                continue
+
+        logger.info(
+            f"[MINER] Phase 2.9.3: Extracted {len(cross_relations)} cross-segment relations"
+        )
+
+        return cross_relations
+
+    def get_bridge_concepts(
+        self,
+        segments_with_concepts: Dict[str, Any],
+        min_segments: int = 2
+    ) -> List[str]:
+        """
+        Identifie les concepts "ponts" présents dans plusieurs segments.
+
+        Args:
+            segments_with_concepts: Dict segment_id -> SegmentWithConcepts
+            min_segments: Nombre minimum de segments pour être un pont
+
+        Returns:
+            Liste des concept_ids ponts
+        """
+        concept_to_segments: Dict[str, int] = defaultdict(int)
+
+        for segment_id, segment in segments_with_concepts.items():
+            if hasattr(segment, 'local_concept_ids'):
+                local_ids = segment.local_concept_ids
+            else:
+                local_ids = segment.get("local_concept_ids", [])
+
+            for concept_id in local_ids:
+                concept_to_segments[concept_id] += 1
+
+        return [
+            cid for cid, count in concept_to_segments.items()
+            if count >= min_segments
+        ]

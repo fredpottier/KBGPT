@@ -183,6 +183,8 @@ class ExtractorOrchestrator(BaseAgent):
         Returns:
             État mis à jour avec state.candidates rempli
         """
+        # DEBUG Phase 2.9
+        print(f"[DEBUG EXTRACTOR] >>> ENTRY execute() with {len(state.segments)} segments")
         logger.info(f"[EXTRACTOR] 🚀 Starting PARALLEL extraction for {len(state.segments)} segments")
 
         if not state.segments:
@@ -201,6 +203,8 @@ class ExtractorOrchestrator(BaseAgent):
             end_idx = min(start_idx + self.max_parallel_segments, len(state.segments))
             batch_segments = state.segments[start_idx:end_idx]
 
+            # DEBUG Phase 2.9
+            print(f"[DEBUG EXTRACTOR] Processing batch {batch_idx + 1}/{num_batches} (segments {start_idx + 1}-{end_idx})")
             logger.info(
                 f"[EXTRACTOR] 📦 Processing batch {batch_idx + 1}/{num_batches} "
                 f"(segments {start_idx + 1}-{end_idx})"
@@ -213,7 +217,9 @@ class ExtractorOrchestrator(BaseAgent):
             ]
 
             # Exécuter batch en parallèle
+            print(f"[DEBUG EXTRACTOR] >>> asyncio.gather() starting for batch {batch_idx + 1}...")
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+            print(f"[DEBUG EXTRACTOR] <<< asyncio.gather() done for batch {batch_idx + 1}, got {len(batch_results)} results")
 
             # Filtrer erreurs
             for result in batch_results:
@@ -317,6 +323,8 @@ class ExtractorOrchestrator(BaseAgent):
         segment_id = segment.get("segment_id", f"seg_{idx}")
 
         try:
+            # DEBUG Phase 2.9
+            print(f"[DEBUG EXTRACTOR] _process_single_segment({idx + 1}) START - segment_id={segment_id}")
             logger.debug(f"[EXTRACTOR] 🔄 Segment {idx + 1} START")
 
             # Étape 1: Analyser segment avec PrepassAnalyzer (pas de rate limit, local NER)
@@ -325,7 +333,9 @@ class ExtractorOrchestrator(BaseAgent):
                 language=segment.get("language", "en")
             )
 
+            print(f"[DEBUG EXTRACTOR] Segment {idx + 1}: calling prepass_analyzer...")
             prepass_result = await self.call_tool("prepass_analyzer", prepass_input)
+            print(f"[DEBUG EXTRACTOR] Segment {idx + 1}: prepass_analyzer done, success={prepass_result.success}")
 
             if not prepass_result.success:
                 logger.error(f"[EXTRACTOR] PrepassAnalyzer failed for segment {idx}: {prepass_result.message}")
@@ -353,7 +363,9 @@ class ExtractorOrchestrator(BaseAgent):
             # Phase 1.8.2: Récupérer technical_density_hint (domain-agnostic)
             technical_density_hint = getattr(state, 'technical_density_hint', 0.0)
 
+            print(f"[DEBUG EXTRACTOR] Segment {idx + 1}: acquiring LLM semaphore for route={final_route}...")
             async with self.llm_semaphore:  # Rate limiter pour appels LLM
+                print(f"[DEBUG EXTRACTOR] Segment {idx + 1}: semaphore acquired, calling extract_concepts...")
                 extract_input = ExtractConceptsInput(
                     segment=segment,
                     route=final_route,
@@ -363,6 +375,7 @@ class ExtractorOrchestrator(BaseAgent):
                 )
 
                 extract_result = await self.call_tool("extract_concepts", extract_input)
+                print(f"[DEBUG EXTRACTOR] Segment {idx + 1}: extract_concepts done, success={extract_result.success}")
 
             if not extract_result.success:
                 logger.error(f"[EXTRACTOR] Extraction failed for segment {idx}: {extract_result.message}")
@@ -517,6 +530,9 @@ class ExtractorOrchestrator(BaseAgent):
             Liste concepts, cost, llm_calls
         """
         try:
+            # DEBUG Phase 2.9
+            print(f"[DEBUG EXTRACTOR] _extract_concepts_tool: route={tool_input.route}, use_llm={tool_input.use_llm}")
+
             # Import local pour éviter dépendance circulaire
             from ...semantic.models import Topic, Window
             import asyncio
@@ -548,18 +564,22 @@ class ExtractorOrchestrator(BaseAgent):
             )
 
             # Obtenir MultilingualConceptExtractor (lazy-init)
+            print(f"[DEBUG EXTRACTOR] Getting concept extractor (lazy-init)...")
             extractor = self._get_concept_extractor()
+            print(f"[DEBUG EXTRACTOR] Concept extractor obtained")
 
             # Extraire concepts avec MultilingualConceptExtractor
             # Note: La méthode extract_concepts est async
             # Phase 1.8: Passer document_context pour désambiguïsation
             # Phase 1.8.2: Passer technical_density_hint pour stratégie domain-agnostic
+            print(f"[DEBUG EXTRACTOR] >>> Calling extractor.extract_concepts() with enable_llm={use_llm}...")
             concepts_list = await extractor.extract_concepts(
                 topic,
                 enable_llm=use_llm,
                 document_context=document_context,
                 technical_density_hint=technical_density_hint
             )
+            print(f"[DEBUG EXTRACTOR] <<< extractor.extract_concepts() returned {len(concepts_list)} concepts")
 
             # Convertir List[Concept] en List[Dict] pour JSON serialization
             concepts_dicts = []

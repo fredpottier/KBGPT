@@ -127,6 +127,9 @@ networkx>=3.1
 # spacy>=3.7.2 (déjà installé)
 # networkx>=3.1 (déjà installé - graphe algorithms)
 
+# === Phase 2.8 OSMOSE - RawAssertion Architecture ===
+python-ulid>=2.2.0  # ULID pour IDs RawAssertion
+
 # Modèles spaCy supplémentaires pour patterns multilingues:
 # python -m spacy download en_core_web_sm  # English (small - 13MB)
 # python -m spacy download fr_core_news_sm # French (small - 16MB)

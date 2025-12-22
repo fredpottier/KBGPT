@@ -20,7 +20,7 @@ from openai.types.chat import (
 from qdrant_client.models import PointStruct
 from knowbase.common.clients import (
     ensure_qdrant_collection,
-    ensure_qa_collection,
+    # ensure_qa_collection,  # Désactivé - fonctionnalité Excel Q/A non utilisée
     get_qdrant_client,
     get_sentence_transformer,
 )
@@ -54,7 +54,7 @@ embedding_size = model.get_sentence_embedding_dimension()
 if embedding_size is None:
     raise RuntimeError("SentenceTransformer returned no embedding dimension")
 EMB_SIZE = int(embedding_size)
-ensure_qa_collection(EMB_SIZE)
+# ensure_qa_collection(EMB_SIZE)  # Désactivé - fonctionnalité Excel Q/A non utilisée
 
 # === UTILITAIRES ===
 

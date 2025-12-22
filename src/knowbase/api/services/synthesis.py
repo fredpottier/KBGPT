@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import time
+import logging
 from typing import Any, Dict, List
 
 from knowbase.common.llm_router import TaskType, get_llm_router
+
+logger = logging.getLogger(__name__)
 
 
 SYNTHESIS_PROMPT = """Tu es un assistant expert qui aide les utilisateurs à trouver des informations pertinentes dans la base de connaissances.
@@ -133,6 +137,11 @@ def synthesize_response(
         {"role": "user", "content": prompt}
     ]
 
+    # Log prompt size for debugging
+    prompt_size = len(prompt)
+    logger.info(f"[SYNTHESIS] Starting LLM call, prompt size: {prompt_size} chars")
+    start_time = time.time()
+
     try:
         synthesized_answer = router.complete(
             task_type=TaskType.LONG_TEXT_SUMMARY,
@@ -140,6 +149,9 @@ def synthesize_response(
             temperature=0.3,
             max_tokens=2000
         )
+
+        elapsed_ms = (time.time() - start_time) * 1000
+        logger.info(f"[SYNTHESIS] LLM call completed in {elapsed_ms:.0f}ms, response: {len(synthesized_answer)} chars")
 
         # Extrait les sources utilisées
         sources_used = []

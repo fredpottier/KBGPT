@@ -319,8 +319,24 @@ class SessionManager:
 
             logger.debug(f"[SessionManager] Added message to session {session_id}")
 
-            # Détacher l'objet de la session en le convertissant explicitement
+            # Force le chargement de tous les attributs AVANT de détacher
             # pour éviter DetachedInstanceError
+            _ = (
+                db_message.id,
+                db_message.session_id,
+                db_message.role,
+                db_message.content,
+                db_message.entities_mentioned,
+                db_message.documents_referenced,
+                db_message.model_used,
+                db_message.tokens_input,
+                db_message.tokens_output,
+                db_message.latency_ms,
+                db_message.feedback_rating,
+                db_message.feedback_comment,
+                db_message.created_at,
+            )
+
             db.expunge(db_message)
             return db_message
 

@@ -65,7 +65,7 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "knowbase.ngrok.app")
 # ====================
 # Logging
 # ====================
-logger = setup_logging(LOGS_DIR, "ingest_pdf_debug.log", enable_console=False)
+logger = setup_logging(LOGS_DIR, "ingest_pdf_debug.log", enable_console=True)
 
 
 def banner_paths():
@@ -874,7 +874,7 @@ def ingest_chunks(chunks, doc_metadata, file_uid, page_index):
 def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision: bool = False):
     # Reconfigurer logger pour le contexte RQ worker avec lazy file creation
     global logger
-    logger = setup_logging(LOGS_DIR, "ingest_pdf_debug.log", enable_console=False)
+    logger = setup_logging(LOGS_DIR, "ingest_pdf_debug.log", enable_console=True)
 
     # Premier log réel - c'est ici que le fichier sera créé
     logger.info("")

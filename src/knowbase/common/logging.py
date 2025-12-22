@@ -140,6 +140,7 @@ def setup_logging(
     Configuration de logging avec création lazy du fichier.
 
     Le fichier de log n'est créé que lors du premier log effectif, pas à l'initialisation.
+    Configure également le logger parent "knowbase" pour capturer les logs des sous-modules.
     """
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.DEBUG)
@@ -152,22 +153,42 @@ def setup_logging(
 
     logger.propagate = False
 
+    # Créer les handlers
+    log_file = logs_dir / log_file_name
+    formatter = logging.Formatter("%(asctime)s %(levelname)s: %(message)s")
+
     # Console handler (optionnel)
+    console_handler = None
     if enable_console:
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
-        ch.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
-        logger.addHandler(ch)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
     # File handler avec auto-flush et création LAZY
-    # Le fichier ne sera créé qu'au premier log
-    log_file = logs_dir / log_file_name
     fh_lazy = LazyFlushingFileHandler(str(log_file), mode='a', encoding="utf-8")
     fh_lazy.setLevel(logging.DEBUG)
-    fh_lazy.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+    fh_lazy.setFormatter(formatter)
     logger.addHandler(fh_lazy)
 
-    # IMPORTANT: Ne pas logger ici pour éviter création immédiate du fichier
-    # Le fichier sera créé uniquement lors du premier usage réel
+    # ==================================================================
+    # IMPORTANT: Configurer aussi le logger parent "knowbase" pour
+    # capturer les logs des sous-modules (agents, semantic, relations, etc.)
+    # ==================================================================
+    knowbase_logger = logging.getLogger("knowbase")
+    knowbase_logger.setLevel(logging.DEBUG)
+
+    # Supprimer handlers existants du logger knowbase
+    if knowbase_logger.hasHandlers():
+        for handler in knowbase_logger.handlers[:]:
+            knowbase_logger.removeHandler(handler)
+            handler.close()
+
+    knowbase_logger.propagate = False
+
+    # Ajouter les mêmes handlers au logger knowbase
+    if console_handler:
+        knowbase_logger.addHandler(console_handler)
+    knowbase_logger.addHandler(fh_lazy)
 
     return logger

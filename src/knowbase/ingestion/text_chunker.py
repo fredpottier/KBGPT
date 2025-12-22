@@ -279,23 +279,50 @@ class TextChunker:
         Returns:
             Liste embeddings (numpy arrays 1024D)
         """
-        try:
-            # Batch size optimisé pour GPU (128) vs CPU (32)
-            import torch
-            batch_size = 128 if torch.cuda.is_available() else 32
+        import torch
+        import numpy as np
 
+        # Déterminer device et batch size
+        is_cuda = next(self.model.parameters()).device.type == "cuda"
+        batch_size = 128 if is_cuda else 32
+
+        try:
             embeddings = self.model.encode(
                 texts,
                 batch_size=batch_size,
-                show_progress_bar=len(texts) > 100,  # Progress bar si >100 chunks
+                show_progress_bar=len(texts) > 100,
                 convert_to_numpy=True
             )
             logger.debug(f"[TextChunker] Generated {len(embeddings)} embeddings (batch_size={batch_size})")
             return embeddings
+
         except Exception as e:
-            logger.error(f"[TextChunker] Error generating embeddings: {e}")
-            # Fallback: embeddings vides
-            import numpy as np
+            # Si erreur CUDA, basculer vers CPU et réessayer
+            if is_cuda and "CUDA" in str(e).upper():
+                logger.warning(f"[TextChunker] CUDA error, falling back to CPU: {e}")
+                try:
+                    # Déplacer modèle vers CPU
+                    self.model = self.model.to("cpu")
+                    torch.cuda.empty_cache()  # Libérer mémoire GPU
+                    logger.info("[TextChunker] Model moved to CPU, retrying embeddings...")
+
+                    embeddings = self.model.encode(
+                        texts,
+                        batch_size=32,  # Batch size CPU
+                        show_progress_bar=len(texts) > 100,
+                        convert_to_numpy=True
+                    )
+                    logger.info(f"[TextChunker] CPU fallback succeeded: {len(embeddings)} embeddings")
+                    return embeddings
+
+                except Exception as cpu_e:
+                    logger.error(f"[TextChunker] CPU fallback also failed: {cpu_e}")
+
+            else:
+                logger.error(f"[TextChunker] Error generating embeddings: {e}")
+
+            # Fallback ultime: embeddings vides
+            logger.warning(f"[TextChunker] Returning zero embeddings for {len(texts)} texts")
             return [np.zeros(1024) for _ in texts]
 
     def _find_mentioned_concepts(

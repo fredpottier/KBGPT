@@ -195,6 +195,16 @@ class GraphGuidedSearchService:
 
     Enrichit les résultats de recherche vectorielle avec des insights
     du KG pour une meilleure compréhension contextuelle.
+
+    ⚠️ PERFORMANCE WARNING:
+    - EnrichmentLevel.NONE   : 0ms (pas d'enrichissement)
+    - EnrichmentLevel.LIGHT  : ~100ms (concepts liés uniquement)
+    - EnrichmentLevel.STANDARD : ~250ms (+ relations transitives) ✅ Recommandé temps-réel
+    - EnrichmentLevel.DEEP   : ~3min (+ NetworkX betweenness/Louvain) ⚠️ OFFLINE ONLY
+
+    Ne JAMAIS utiliser DEEP pour des requêtes temps-réel !
+    DEEP utilise des algorithmes NetworkX (betweenness, Louvain) qui chargent
+    tout le graphe (~12000 nœuds) en mémoire et calculent des métriques coûteuses.
     """
 
     def __init__(self):

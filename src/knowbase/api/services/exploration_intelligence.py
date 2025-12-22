@@ -164,7 +164,19 @@ class ExplorationIntelligenceService:
                 unique_docs.add(doc_name)
 
         # 🌊 Phase 3.5: Générer les axes de recherche via ResearchAxesEngine
+        # ⚠️ DÉSACTIVÉ TEMPORAIREMENT - ResearchAxesEngine utilise InferenceEngine+NetworkX
+        # qui charge tout le graphe (45k+ nœuds) et prend ~12 secondes.
+        # TODO: Optimiser InferenceEngine ou précalculer les signaux
+        ENABLE_RESEARCH_AXES = False  # Set to True once NetworkX is optimized
+
+        if not ENABLE_RESEARCH_AXES:
+            logger.info("[EXPLORATION] ResearchAxesEngine disabled for performance")
+        elif ENABLE_RESEARCH_AXES:
+            pass  # Skip to avoid the try block
+
         try:
+            if not ENABLE_RESEARCH_AXES:
+                raise Exception("ResearchAxesEngine disabled")
             # Convertir chunks en format attendu
             chunks_data = [
                 {

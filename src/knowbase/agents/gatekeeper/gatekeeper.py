@@ -384,9 +384,25 @@ class GatekeeperDelegate(BaseAgent):
             if not promote_result.success:
                 logger.error(f"[GATEKEEPER] PromoteConcepts failed: {promote_result.message}")
             else:
+                # Phase 2.8+: Enrichir state.promoted avec canonical_ids pour EXTRACT_RELATIONS
+                concept_mapping = promote_result.data.get("concept_name_to_canonical_id", {})
+                enriched_count = 0
+                for concept in state.promoted:
+                    concept_name = concept.get("name") or concept.get("concept_name", "")
+                    if concept_name in concept_mapping:
+                        concept["canonical_id"] = concept_mapping[concept_name]
+                        concept["canonical_name"] = concept_name
+                        enriched_count += 1
+
+                if enriched_count > 0:
+                    logger.info(
+                        f"[GATEKEEPER] Phase 2.8+: Enriched {enriched_count}/{len(state.promoted)} "
+                        f"concepts with canonical_ids for EXTRACT_RELATIONS"
+                    )
+
                 # Problème 1: Persister relations sémantiques dans Neo4j
                 if state.relations:
-                    concept_mapping = promote_result.data.get("concept_name_to_canonical_id", {})
+                    # Note: concept_mapping déjà défini au-dessus pour enrichissement Phase 2.8+
                     persisted_count = 0
                     skipped_count = 0
 

@@ -265,7 +265,9 @@ def process_pptx(
     logger = setup_logging(LOGS_DIR, "ingest_debug.log", enable_console=False)
 
     # Premier log réel - c'est ici que le fichier sera créé
-    logger.info(f"start ingestion for {pptx_path.name}")
+    logger.info("")
+    logger.info("=" * 80)
+    logger.info(f"🚀 Traitement: {pptx_path.name}")
     logger.info(f"📋 Document Type ID: {document_type_id or 'default'}")
     logger.info(
         f"🔍 Mode extraction: {'VISION (GPT-4 avec images)' if use_vision else 'TEXT-ONLY (LLM rapide)'}"

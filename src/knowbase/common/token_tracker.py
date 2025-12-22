@@ -69,6 +69,72 @@ class TokenTracker:
     def __init__(self, log_file: Optional[Path] = None):
         self.usage_history: List[TokenUsage] = []
         self.log_file = log_file
+        self._session_start_index = 0  # Pour tracking par document
+
+    def start_session(self) -> None:
+        """Marque le début d'une session de tracking (nouveau document)."""
+        self._session_start_index = len(self.usage_history)
+
+    def get_session_stats(self) -> Dict[str, Dict[str, float]]:
+        """Statistiques de la session courante uniquement."""
+        session_usage = self.usage_history[self._session_start_index:]
+        stats = {}
+
+        for usage in session_usage:
+            if usage.model not in stats:
+                stats[usage.model] = {
+                    "total_calls": 0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "total_cost": 0.0
+                }
+
+            stats[usage.model]["total_calls"] += 1
+            stats[usage.model]["total_input_tokens"] += usage.input_tokens
+            stats[usage.model]["total_output_tokens"] += usage.output_tokens
+            stats[usage.model]["total_cost"] += self.calculate_cost(usage)
+
+        return stats
+
+    def get_session_summary(self) -> str:
+        """Génère un résumé formaté de la session courante."""
+        stats = self.get_session_stats()
+        if not stats:
+            return "Aucun appel LLM dans cette session"
+
+        lines = []
+        lines.append("=" * 60)
+        lines.append("📊 RÉSUMÉ DES APPELS LLM")
+        lines.append("=" * 60)
+
+        total_calls = 0
+        total_input = 0
+        total_output = 0
+        total_cost = 0.0
+
+        for model, data in sorted(stats.items(), key=lambda x: x[1]["total_cost"], reverse=True):
+            calls = data["total_calls"]
+            input_tokens = data["total_input_tokens"]
+            output_tokens = data["total_output_tokens"]
+            cost = data["total_cost"]
+
+            lines.append(f"\n🤖 {model}:")
+            lines.append(f"   Appels: {calls}")
+            lines.append(f"   Tokens: {input_tokens:,} in / {output_tokens:,} out")
+            lines.append(f"   Coût: ${cost:.4f}")
+
+            total_calls += calls
+            total_input += input_tokens
+            total_output += output_tokens
+            total_cost += cost
+
+        lines.append("\n" + "-" * 60)
+        lines.append(f"📈 TOTAL: {total_calls} appels LLM")
+        lines.append(f"   Tokens: {total_input:,} in / {total_output:,} out ({total_input + total_output:,} total)")
+        lines.append(f"   💰 COÛT TOTAL: ${total_cost:.4f}")
+        lines.append("=" * 60)
+
+        return "\n".join(lines)
 
     def add_usage(
         self,
