@@ -60,9 +60,10 @@ class SupervisorAgent(BaseAgent):
         self.gatekeeper = GatekeeperDelegate(config)
         self.dispatcher = LLMDispatcher(config)
 
-        # Phase 2 OSMOSE: Composants extraction relations
-        self.relation_extraction_engine = None  # Lazy load
-        self.relation_writer = None  # Lazy load
+        # Phase 2.8+ OSMOSE: Composants extraction relations (ID-First architecture)
+        self.llm_relation_extractor = None  # Lazy load - LLMRelationExtractor ID-First
+        self.raw_assertion_writer = None  # Lazy load - RawAssertionWriter pour Neo4j nodes
+        self.unresolved_mention_writer = None  # Lazy load - UnresolvedMentionWriter pour Neo4j
 
         # FSM transitions (état actuel → états suivants possibles)
         self.fsm_transitions: Dict[FSMState, List[FSMState]] = {
@@ -246,155 +247,290 @@ class SupervisorAgent(BaseAgent):
                 return FSMState.EXTRACT_RELATIONS
 
         elif fsm_state == FSMState.EXTRACT_RELATIONS:
-            # Phase 2 OSMOSE: Extraction relations entre concepts promus
+            # =================================================================
+            # Phase 2.9 OSMOSE: SEGMENT-LEVEL Relation Extraction
+            # =================================================================
             logger.info(
-                f"[SUPERVISOR] ⏱️ EXTRACT_RELATIONS: START - "
+                f"[SUPERVISOR] ⏱️ EXTRACT_RELATIONS (Phase 2.9 Segment-Level): START - "
                 f"promoted={len(state.promoted) if state.promoted else 0}, "
-                f"full_text_len={len(state.full_text) if state.full_text else 0}"
+                f"segments_with_concepts={len(state.segments_with_concepts)}"
             )
 
             # Skip si aucun concept promu
             if not state.promoted or len(state.promoted) == 0:
-                logger.warning("[SUPERVISOR] EXTRACT_RELATIONS: No promoted concepts, skipping relation extraction")
+                logger.warning("[SUPERVISOR] EXTRACT_RELATIONS: No promoted concepts, skipping")
                 return FSMState.FINALIZE
 
-            # Récupérer texte complet document
-            full_text = state.full_text or ""
-            if not full_text:
-                logger.warning("[SUPERVISOR] EXTRACT_RELATIONS: No full_text in state, skipping")
-                return FSMState.FINALIZE
-
-            logger.info(f"[SUPERVISOR] EXTRACT_RELATIONS: Will extract relations from {len(state.promoted)} concepts, {len(full_text)} chars")
-
-            # Lazy load composants Phase 2
-            if self.relation_extraction_engine is None:
-                from knowbase.relations import RelationExtractionEngine, Neo4jRelationshipWriter
-                self.relation_extraction_engine = RelationExtractionEngine(
-                    strategy="llm_first",  # LLM-first comme demandé
-                    llm_model="gpt-4o-mini",
-                    min_confidence=0.60
-                )
-                self.relation_writer = Neo4jRelationshipWriter(
-                    tenant_id=state.tenant_id
-                )
-                logger.info("[SUPERVISOR] EXTRACT_RELATIONS: Initialized relation extraction components")
-
-            # Préparer concepts pour extraction
-            # PROBLÈME: state.promoted ne contient pas surface_forms (schema mismatch)
-            # SOLUTION: Récupérer depuis Neo4j les CanonicalConcepts avec surface_form
+            # Préparer connexion Neo4j
             from knowbase.common.clients.neo4j_client import get_neo4j_client
             neo4j_client = get_neo4j_client()
 
-            concepts = []
-            if neo4j_client and neo4j_client.is_connected():
-                # Query Neo4j pour récupérer les CanonicalConcepts du document actuel
-                query = """
-                MATCH (c:CanonicalConcept)
-                WHERE c.tenant_id = $tenant_id
-                RETURN c.canonical_id AS concept_id,
-                       c.canonical_name AS canonical_name,
-                       c.surface_form AS surface_form,
-                       c.concept_type AS concept_type
-                LIMIT 1000
-                """
-                try:
-                    with neo4j_client.driver.session(database=neo4j_client.database) as session:
-                        result = session.run(query, tenant_id=state.tenant_id)
-                        for record in result:
-                            # Convertir surface_form (string) → surface_forms (liste)
-                            surface_form = record.get("surface_form", "")
-                            surface_forms = [surface_form] if surface_form else []
-
-                            concepts.append({
-                                "concept_id": record["concept_id"],
-                                "canonical_name": record["canonical_name"],
-                                "surface_forms": surface_forms,
-                                "concept_type": record.get("concept_type", "UNKNOWN")
-                            })
-                    logger.info(
-                        f"[SUPERVISOR] EXTRACT_RELATIONS: Retrieved {len(concepts)} concepts from Neo4j "
-                        f"with surface_forms"
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"[SUPERVISOR] EXTRACT_RELATIONS: Error querying Neo4j for concepts: {e}. "
-                        f"Falling back to state.promoted without surface_forms"
-                    )
-                    # Fallback: utiliser state.promoted sans surface_forms (meilleur que rien)
-                    for concept_data in state.promoted:
-                        concepts.append({
-                            "concept_id": concept_data.get("concept_id"),
-                            "canonical_name": concept_data.get("canonical_name"),
-                            "surface_forms": [],  # Vide si erreur Neo4j
-                            "concept_type": concept_data.get("concept_type", "UNKNOWN")
-                        })
-            else:
-                logger.warning(
-                    "[SUPERVISOR] EXTRACT_RELATIONS: Neo4j not available, "
-                    "falling back to state.promoted without surface_forms"
+            # Phase 2.9: Lazy load composants
+            if self.llm_relation_extractor is None:
+                from knowbase.relations import (
+                    LLMRelationExtractor,
+                    RawAssertionWriter,
+                    UnresolvedMentionWriter,
                 )
-                # Fallback: utiliser state.promoted sans surface_forms
-                for concept_data in state.promoted:
-                    concepts.append({
-                        "concept_id": concept_data.get("concept_id"),
-                        "canonical_name": concept_data.get("canonical_name"),
-                        "surface_forms": [],
-                        "concept_type": concept_data.get("concept_type", "UNKNOWN")
-                    })
+                from knowbase.common.llm_router import LLMRouter
 
-            logger.info(f"[SUPERVISOR] EXTRACT_RELATIONS: Extracting relations from {len(concepts)} canonical concepts")
-
-            try:
-                # Extraction relations
-                extraction_result = self.relation_extraction_engine.extract_relations(
-                    concepts=concepts,
-                    full_text=full_text,
-                    document_id=state.document_id,
-                    document_name=state.document_name or "unknown",
-                    chunk_ids=state.chunk_ids or []
+                self.llm_relation_extractor = LLMRelationExtractor(
+                    llm_router=LLMRouter(),
+                    model="gpt-4o-mini",
+                    use_id_first=True
                 )
-
+                self.raw_assertion_writer = RawAssertionWriter(
+                    tenant_id=state.tenant_id,
+                    extractor_version="v2.9.0",
+                    model_used="gpt-4o-mini",
+                    neo4j_client=neo4j_client
+                )
+                self.unresolved_mention_writer = UnresolvedMentionWriter(
+                    tenant_id=state.tenant_id,
+                    neo4j_client=neo4j_client
+                )
                 logger.info(
-                    f"[SUPERVISOR] EXTRACT_RELATIONS: Extracted {extraction_result.total_relations_extracted} relations "
-                    f"in {extraction_result.extraction_time_seconds:.2f}s"
+                    "[SUPERVISOR] EXTRACT_RELATIONS: Initialized Phase 2.9 components"
                 )
 
-                # Persistance dans Neo4j
-                if extraction_result.relations:
-                    write_stats = self.relation_writer.write_relations(
-                        relations=extraction_result.relations,
-                        document_id=state.document_id,
-                        document_name=state.document_name or "unknown"
-                    )
-
-                    logger.info(
-                        f"[SUPERVISOR] EXTRACT_RELATIONS: ✅ Wrote {write_stats['created']} new, "
-                        f"updated {write_stats['updated']}, skipped {write_stats['skipped']} relations"
-                    )
-
-                    # Stocker stats dans state
-                    state.relation_extraction_stats = {
-                        "total_extracted": extraction_result.total_relations_extracted,
-                        "total_created": write_stats["created"],
-                        "total_updated": write_stats["updated"],
-                        "total_skipped": write_stats["skipped"],
-                        "relations_by_type": {k.value: v for k, v in extraction_result.relations_by_type.items()},
-                        "extraction_time_seconds": extraction_result.extraction_time_seconds
+            # Préparer promoted concepts comme dict pour lookup rapide
+            promoted_by_id = {}
+            for concept_data in state.promoted:
+                canonical_id = concept_data.get("canonical_id") or concept_data.get("concept_id")
+                if canonical_id:
+                    promoted_by_id[canonical_id] = {
+                        "canonical_id": canonical_id,
+                        "canonical_name": concept_data.get("canonical_name", ""),
+                        "surface_forms": concept_data.get("surface_forms", []),
+                        "concept_type": concept_data.get("concept_type") or "UNKNOWN",
+                        "segment_id": concept_data.get("segment_id", ""),
+                        "topic_id": concept_data.get("topic_id", "")
                     }
-                else:
-                    logger.info("[SUPERVISOR] EXTRACT_RELATIONS: No relations extracted")
-                    state.relation_extraction_stats = {"total_extracted": 0}
 
-            except Exception as e:
-                logger.error(
-                    f"[SUPERVISOR] EXTRACT_RELATIONS: Error during relation extraction: {e}",
-                    exc_info=True
+            # =================================================================
+            # Phase 2.9: Extraction SEGMENT-LEVEL avec catalogue hybride
+            # =================================================================
+
+            total_written = 0
+            total_skipped = 0
+            total_unresolved = 0
+            segment_stats = []
+
+            # Vérifier si on a des segments avec concepts
+            if state.segments_with_concepts:
+                logger.info(
+                    f"[SUPERVISOR] EXTRACT_RELATIONS: Phase 2.9 SEGMENT-LEVEL mode - "
+                    f"{len(state.segments_with_concepts)} segments"
                 )
-                state.errors.append(f"Relation extraction failed: {str(e)}")
-                # Continue vers FINALIZE même en cas d'erreur (relation extraction non-critique)
+
+                from knowbase.relations.catalogue_builder import (
+                    build_hybrid_catalogue,
+                    CatalogueConfig
+                )
+
+                config = CatalogueConfig(
+                    top_k_global=15,
+                    hub_min_degree=3,
+                    hub_limit=10,
+                    adjacent_limit=10,
+                    max_catalogue_size=60
+                )
+
+                # Traiter chaque segment
+                for segment_id, segment in state.segments_with_concepts.items():
+                    try:
+                        # Récupérer texte et local_concept_ids
+                        if hasattr(segment, 'text'):
+                            segment_text = segment.text
+                            local_ids = segment.local_concept_ids
+                            topic_id = segment.topic_id
+                        else:
+                            segment_text = segment.get("text", "")
+                            local_ids = segment.get("local_concept_ids", [])
+                            topic_id = segment.get("topic_id", "")
+
+                        # DEBUG Phase 2.9.1: Tracer les segments et leur contenu
+                        logger.info(
+                            f"[SUPERVISOR] 🔍 DEBUG Segment {segment_id}: "
+                            f"text_len={len(segment_text) if segment_text else 0}, "
+                            f"local_concepts={len(local_ids) if local_ids else 0}"
+                        )
+
+                        if not segment_text or not local_ids:
+                            logger.warning(
+                                f"[SUPERVISOR] ⚠️ Segment {segment_id}: SKIPPED - "
+                                f"text_empty={not segment_text}, concepts_empty={not local_ids}"
+                            )
+                            continue
+
+                        # Construire catalogue hybride pour ce segment
+                        catalogue = build_hybrid_catalogue(
+                            segment_id=segment_id,
+                            segment_text=segment_text,
+                            local_concept_ids=local_ids,
+                            all_promoted=list(promoted_by_id.values()),
+                            neo4j_client=neo4j_client,
+                            tenant_id=state.tenant_id,
+                            topic_id=topic_id,
+                            config=config
+                        )
+
+                        logger.debug(
+                            f"[SUPERVISOR] Segment {segment_id}: catalogue {catalogue.stats['total']} concepts "
+                            f"(local={catalogue.stats['local']}, global={catalogue.stats['global_top_k']}, "
+                            f"hubs={catalogue.stats['hubs']})"
+                        )
+
+                        # Extraction ID-First avec ce catalogue
+                        concepts_for_segment = [
+                            promoted_by_id[cid]
+                            for cid in catalogue.index_to_concept.keys()
+                            if cid.startswith("c") and catalogue.index_to_concept[cid]["canonical_id"] in promoted_by_id
+                        ]
+
+                        # Reconstruire la liste depuis index_to_concept
+                        concepts_for_segment = []
+                        for idx, concept_info in catalogue.index_to_concept.items():
+                            cid = concept_info["canonical_id"]
+                            if cid in promoted_by_id:
+                                concepts_for_segment.append(promoted_by_id[cid])
+
+                        if not concepts_for_segment:
+                            logger.debug(f"[SUPERVISOR] Segment {segment_id}: no valid concepts")
+                            continue
+
+                        # Extraction relations pour ce segment
+                        extraction_result = self.llm_relation_extractor.extract_relations_id_first(
+                            concepts=concepts_for_segment,
+                            full_text=segment_text,
+                            document_id=state.document_id,
+                            chunk_id=f"{state.document_id}_{segment_id}"
+                        )
+
+                        # Écrire RawAssertions
+                        segment_written = 0
+                        segment_skipped = 0
+
+                        for rel in extraction_result.relations:
+                            try:
+                                result_id = self.raw_assertion_writer.write_assertion(
+                                    subject_concept_id=rel.subject_concept_id,
+                                    object_concept_id=rel.object_concept_id,
+                                    predicate_raw=rel.predicate_raw,
+                                    evidence_text=rel.evidence,
+                                    source_doc_id=state.document_id,
+                                    source_chunk_id=f"{state.document_id}_{segment_id}",
+                                    confidence=rel.confidence,
+                                    source_language="multi",
+                                    subject_surface_form=rel.subject_surface_form,
+                                    object_surface_form=rel.object_surface_form,
+                                    flags=rel.flags
+                                )
+
+                                if result_id:
+                                    segment_written += 1
+                                else:
+                                    segment_skipped += 1
+                            except Exception as e:
+                                logger.debug(f"[SUPERVISOR] Error writing assertion: {e}")
+                                segment_skipped += 1
+
+                        # Écrire UnresolvedMentions
+                        segment_unresolved = 0
+                        if extraction_result.unresolved_mentions:
+                            segment_unresolved = self.unresolved_mention_writer.write_batch(
+                                mentions=extraction_result.unresolved_mentions,
+                                source_doc_id=state.document_id,
+                                source_chunk_id=f"{state.document_id}_{segment_id}"
+                            )
+
+                        total_written += segment_written
+                        total_skipped += segment_skipped
+                        total_unresolved += segment_unresolved
+
+                        segment_stats.append({
+                            "segment_id": segment_id,
+                            "catalogue_size": catalogue.stats["total"],
+                            "relations_written": segment_written,
+                            "unresolved": segment_unresolved
+                        })
+
+                        logger.debug(
+                            f"[SUPERVISOR] Segment {segment_id}: {segment_written} relations written"
+                        )
+
+                    except Exception as e:
+                        logger.warning(f"[SUPERVISOR] Segment {segment_id} failed: {e}")
+                        continue
+
+            else:
+                # Fallback: Mode document-level (Phase 2.8 legacy)
+                logger.info(
+                    "[SUPERVISOR] EXTRACT_RELATIONS: No segments_with_concepts, "
+                    "falling back to document-level extraction"
+                )
+
+                full_text = state.full_text or ""
+                if full_text and promoted_by_id:
+                    extraction_result = self.llm_relation_extractor.extract_relations_id_first(
+                        concepts=list(promoted_by_id.values()),
+                        full_text=full_text,
+                        document_id=state.document_id,
+                        chunk_id=state.chunk_ids[0] if state.chunk_ids else "chunk_0"
+                    )
+
+                    for rel in extraction_result.relations:
+                        try:
+                            result_id = self.raw_assertion_writer.write_assertion(
+                                subject_concept_id=rel.subject_concept_id,
+                                object_concept_id=rel.object_concept_id,
+                                predicate_raw=rel.predicate_raw,
+                                evidence_text=rel.evidence,
+                                source_doc_id=state.document_id,
+                                source_chunk_id=state.chunk_ids[0] if state.chunk_ids else "chunk_0",
+                                confidence=rel.confidence,
+                                source_language="multi",
+                                subject_surface_form=rel.subject_surface_form,
+                                object_surface_form=rel.object_surface_form,
+                                flags=rel.flags
+                            )
+                            if result_id:
+                                total_written += 1
+                            else:
+                                total_skipped += 1
+                        except:
+                            total_skipped += 1
+
+                    if extraction_result.unresolved_mentions:
+                        total_unresolved = self.unresolved_mention_writer.write_batch(
+                            mentions=extraction_result.unresolved_mentions,
+                            source_doc_id=state.document_id,
+                            source_chunk_id=state.chunk_ids[0] if state.chunk_ids else "chunk_0"
+                        )
+
+            # Stats finales
+            writer_stats = self.raw_assertion_writer.get_stats()
+            mention_stats = self.unresolved_mention_writer.get_stats()
+
+            logger.info(
+                f"[SUPERVISOR] EXTRACT_RELATIONS: ✅ Phase 2.9 Segment-Level - "
+                f"Written {total_written} RawAssertions from {len(segment_stats)} segments, "
+                f"skipped {total_skipped}, unresolved {total_unresolved}"
+            )
+
+            # Stocker stats dans state
+            state.relation_extraction_stats = {
+                "total_written": total_written,
+                "total_skipped": total_skipped,
+                "duplicates": writer_stats.get("skipped_duplicate", 0),
+                "unresolved_written": total_unresolved,
+                "segments_processed": len(segment_stats),
+                "segment_stats": segment_stats,
+                "phase": "2.9_segment_level"
+            }
 
             elapsed = time.time() - step_start
-            logger.info(f"[SUPERVISOR] ⏱️ EXTRACT_RELATIONS: COMPLETE in {elapsed:.1f}s")
+            logger.info(f"[SUPERVISOR] ⏱️ EXTRACT_RELATIONS (Phase 2.9): COMPLETE in {elapsed:.1f}s")
             return FSMState.FINALIZE
 
         elif fsm_state == FSMState.FINALIZE:

@@ -13,7 +13,7 @@ from enum import Enum
 from asyncio import Semaphore
 from pydantic import model_validator
 
-from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput
+from ..base import BaseAgent, AgentRole, AgentState, ToolInput, ToolOutput, SegmentWithConcepts
 
 logger = logging.getLogger(__name__)
 
@@ -226,13 +226,58 @@ class ExtractorOrchestrator(BaseAgent):
 
         # Agréger tous les résultats
         logger.info(f"[EXTRACTOR] 📊 Aggregating {len(all_results)} segment results")
+
+        # Phase 2.9: Initialiser segments_with_concepts pour extraction segment-level
+        state.segments_with_concepts = {}
+
         for idx, segment_id, extract_output, final_route in all_results:
             if extract_output is None:
                 continue
 
+            # Phase 2.8.1: Propager segment_id à chaque concept AVANT agrégation
+            # Fix Bug #1: segment_id était "unknown" car non propagé ici
+            concept_ids_for_segment = []
+            for concept in extract_output.concepts:
+                concept["segment_id"] = segment_id
+                # Phase 2.9: Collecter IDs pour le segment
+                concept_id = concept.get("concept_id", "")
+                if concept_id:
+                    concept_ids_for_segment.append(concept_id)
+
             # Mettre à jour état
             state.candidates.extend(extract_output.concepts)
             state.cost_incurred += extract_output.cost_incurred
+
+            # Phase 2.9: Stocker segment avec ses concepts locaux
+            # Récupérer le texte et topic_id du segment original
+            original_segment = next(
+                (s for s in state.segments if s.get("segment_id") == segment_id),
+                {}
+            )
+
+            # DEBUG Phase 2.9.1: Tracer la correspondance segment_id
+            segment_text = original_segment.get("text", "")
+            if not original_segment:
+                logger.warning(
+                    f"[EXTRACTOR] ⚠️ DEBUG: segment_id='{segment_id}' NOT FOUND in state.segments! "
+                    f"Available segment_ids: {[s.get('segment_id', 'MISSING') for s in state.segments[:5]]}"
+                )
+            elif not segment_text:
+                logger.warning(
+                    f"[EXTRACTOR] ⚠️ DEBUG: segment_id='{segment_id}' found but text is empty!"
+                )
+            else:
+                logger.debug(
+                    f"[EXTRACTOR] ✅ DEBUG: segment_id='{segment_id}' matched, text_len={len(segment_text)}"
+                )
+
+            state.segments_with_concepts[segment_id] = SegmentWithConcepts(
+                segment_id=segment_id,
+                text=segment_text,
+                topic_id=original_segment.get("topic_id", ""),
+                local_concept_ids=concept_ids_for_segment,
+                catalogue_concept_ids=[]  # Sera rempli par CatalogueBuilder dans Supervisor
+            )
 
             # Mettre à jour compteurs LLM
             if final_route == ExtractionRoute.SMALL:
@@ -246,7 +291,8 @@ class ExtractorOrchestrator(BaseAgent):
         logger.info(
             f"[EXTRACTOR] ✅ Extraction complete: {len(state.candidates)} candidates, "
             f"cost ${state.cost_incurred:.2f}, "
-            f"budget remaining SMALL={state.budget_remaining['SMALL']} BIG={state.budget_remaining['BIG']}"
+            f"budget remaining SMALL={state.budget_remaining['SMALL']} BIG={state.budget_remaining['BIG']}, "
+            f"segments_with_concepts={len(state.segments_with_concepts)} (Phase 2.9)"
         )
 
         return state

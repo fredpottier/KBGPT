@@ -665,6 +665,7 @@ Analyze this document and provide JSON response:"""
 
                     segment_dict = {
                         "topic_id": topic.topic_id,
+                        "segment_id": topic.topic_id,  # Phase 2.9 FIX: Alias pour compatibilité orchestrator
                         "text": segment_text,
                         "language": segment_language,
                         "start_page": 0,  # TODO: Extraire de windows metadata
@@ -696,6 +697,7 @@ Analyze this document and provide JSON response:"""
                 # Fallback: Document complet = 1 segment
                 initial_state.segments = [{
                     "topic_id": "seg-fallback",
+                    "segment_id": "seg-fallback",  # Phase 2.9 FIX: Alias pour compatibilité orchestrator
                     "text": text_content,
                     "language": "en",
                     "start_page": 0,

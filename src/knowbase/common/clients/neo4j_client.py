@@ -16,6 +16,9 @@ import logging
 from typing import Optional, Dict, List, Any
 from datetime import datetime
 
+# Phase 2.8.1: Import fonction de normalisation pour déduplication robuste
+from knowbase.utils.normalize import normalize_canonical_key
+
 logger = logging.getLogger(__name__)
 
 # Supprimer les warnings verbeux du driver Neo4j (notifications de requêtes)
@@ -337,11 +340,14 @@ class Neo4jClient:
         canonical_name: str
     ) -> Optional[str]:
         """
-        Chercher un CanonicalConcept existant par nom canonique et tenant.
+        Chercher un CanonicalConcept existant par clé canonique normalisée.
+
+        Phase 2.8.1: Utilise canonical_key (normalisé) au lieu de canonical_name
+        pour une déduplication robuste (case-insensitive, ponctuation ignorée).
 
         Args:
             tenant_id: ID tenant
-            canonical_name: Nom canonique à chercher
+            canonical_name: Nom canonique à chercher (sera normalisé)
 
         Returns:
             canonical_id si trouvé, None sinon
@@ -349,9 +355,18 @@ class Neo4jClient:
         if not self.is_connected():
             return None
 
+        # Phase 2.8.1: Normaliser le nom pour lookup
+        canonical_key = normalize_canonical_key(canonical_name)
+
+        if not canonical_key:
+            logger.warning(f"[NEO4J:Dedup] Empty canonical_key for name '{canonical_name}'")
+            return None
+
+        # Phase 2.8.1: Lookup par canonical_key (index optimisé)
         query = """
-        MATCH (c:CanonicalConcept {tenant_id: $tenant_id, canonical_name: $canonical_name})
-        RETURN c.canonical_id AS canonical_id
+        MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+        WHERE c.canonical_key = $canonical_key
+        RETURN c.canonical_id AS canonical_id, c.canonical_name AS canonical_name
         LIMIT 1
         """
 
@@ -360,16 +375,17 @@ class Neo4jClient:
                 result = session.run(
                     query,
                     tenant_id=tenant_id,
-                    canonical_name=canonical_name
+                    canonical_key=canonical_key
                 )
 
                 record = result.single()
 
                 if record:
                     canonical_id = record["canonical_id"]
+                    existing_name = record.get("canonical_name", canonical_name)
                     logger.debug(
-                        f"[NEO4J:Dedup] Found existing CanonicalConcept '{canonical_name}' "
-                        f"(id={canonical_id[:8]})"
+                        f"[NEO4J:Dedup] Found existing CanonicalConcept "
+                        f"(key='{canonical_key}', name='{existing_name}', id={canonical_id[:8]})"
                     )
                     return canonical_id
                 else:
@@ -429,14 +445,19 @@ class Neo4jClient:
         # Convertir metadata en JSON string pour Neo4j (ne supporte pas les Maps)
         metadata_json = json.dumps(metadata)
 
+        # Phase 2.8.1: Calculer canonical_key une seule fois pour cohérence
+        canonical_key = normalize_canonical_key(canonical_name)
+
         # P1.1: Distributed lock pour éviter race conditions (2 workers créent même CanonicalConcept)
-        lock_key = f"canonical_lock:{tenant_id}:{canonical_name}"
+        # Phase 2.8.1: Utiliser canonical_key normalisé pour le lock (pas canonical_name)
+        # Cela garantit que "Legitimate Interests" et "legitimate interests" utilisent le même lock
+        lock_key = f"canonical_lock:{tenant_id}:{canonical_key}"
 
         lock_acquired = self._acquire_lock(lock_key, timeout_sec=5)
 
         if not lock_acquired:
             logger.warning(
-                f"[NEO4J:Lock] Could not acquire lock for '{canonical_name}', "
+                f"[NEO4J:Lock] Could not acquire lock for '{canonical_key}', "
                 f"retrying find_canonical_concept..."
             )
             # Retry find après wait
@@ -520,15 +541,28 @@ class Neo4jClient:
                                 )
                                 return existing_canonical_id
                             else:
-                                logger.debug(
-                                    f"[NEO4J:Dedup] No existing canonical found for proto {proto_concept_id}, will create new one"
+                                # Phase 2.8.1 FIX: Le canonical existe mais le ProtoConcept n'a pas été trouvé
+                                # dans l'aggregate_query (peut-être pas encore visible dans Neo4j).
+                                # Retourner existing_canonical_id quand même - la relation PROMOTED_TO sera
+                                # créée par le script repair_orphan_protos.py plus tard.
+                                logger.warning(
+                                    f"[NEO4J:Dedup] CanonicalConcept exists but ProtoConcept {proto_concept_id[:8]} "
+                                    f"not found in aggregate query. Returning existing canonical_id anyway. "
+                                    f"Run repair_orphan_protos.py to link orphans later."
                                 )
-                                return ""
+                                return existing_canonical_id
 
                     except Exception as e:
                         logger.error(f"[NEO4J:Dedup] Error linking to existing concept: {e}")
-                        # Fallback: continuer avec création normale
-                        logger.info(f"[NEO4J:Dedup] Fallback to normal creation")
+                        # Phase 2.8.1 FIX: Retourner existing_canonical_id même en cas d'erreur
+                        # (le canonical existe, on n'a juste pas pu créer la relation)
+                        logger.warning(
+                            f"[NEO4J:Dedup] Returning existing canonical_id despite error. "
+                            f"Run repair_orphan_protos.py to fix orphans."
+                        )
+                        return existing_canonical_id
+
+            # Phase 2.8.1: canonical_key déjà calculé au début de la fonction
 
             # Créer nouveau CanonicalConcept (si pas de déduplication ou échec)
             query = """
@@ -552,10 +586,13 @@ class Neo4jClient:
                  ) AS aggregated_chunks
 
             // Créer CanonicalConcept (P1.3: ajout surface_form, P1.6: ajout chunk_ids)
+            // Phase 2.8.1: ajout canonical_key + status pour déduplication robuste
             CREATE (canonical:CanonicalConcept {
                 canonical_id: randomUUID(),
                 tenant_id: $tenant_id,
                 canonical_name: $canonical_name,
+                canonical_key: $canonical_key,
+                status: "PROVISIONAL",
                 name: $canonical_name,
                 surface_form: $surface_form,
                 concept_type: proto.concept_type,
@@ -583,6 +620,7 @@ class Neo4jClient:
                     proto_concept_id=proto_concept_id,
                     tenant_id=tenant_id,
                     canonical_name=canonical_name,
+                    canonical_key=canonical_key,  # Phase 2.8.1
                     surface_form=surface_form,
                     unified_definition=unified_definition,
                     quality_score=quality_score,
@@ -836,6 +874,222 @@ class Neo4jClient:
         except Exception as e:
             logger.error(f"[NEO4J:Stats] Error retrieving stats: {e}")
             return {"proto_count": 0, "published_count": 0, "links_count": 0}
+
+    # ========================================================================
+    # Phase 2.9 - Catalogue Hybride (Segment-Level Relations)
+    # ========================================================================
+
+    def get_top_concepts_by_occurrence(
+        self,
+        tenant_id: str,
+        limit: int = 15,
+        exclude_ids: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Phase 2.9: Récupère les concepts les plus fréquents cross-documents.
+
+        Utilisé pour enrichir le catalogue hybride avec des concepts globaux.
+
+        Args:
+            tenant_id: ID tenant
+            limit: Nombre max de concepts
+            exclude_ids: IDs à exclure (déjà dans le catalogue)
+
+        Returns:
+            Liste de concepts avec canonical_id, canonical_name, concept_type
+        """
+        if not self.is_connected():
+            logger.warning("[NEO4J:TopConcepts] Not connected, returning empty list")
+            return []
+
+        exclude_ids = exclude_ids or []
+
+        query = """
+        MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+        WHERE c.canonical_id IS NOT NULL
+        AND NOT c.canonical_id IN $exclude_ids
+        WITH c,
+             COALESCE(c.occurrence_count, 0) AS occ_count,
+             COALESCE(SIZE(c.chunk_ids), 0) AS chunk_count
+        // Priorité: occurrence_count si disponible, sinon chunk_ids count
+        WITH c, CASE WHEN occ_count > 0 THEN occ_count ELSE chunk_count END AS freq
+        WHERE freq > 0
+        RETURN c.canonical_id AS canonical_id,
+               c.canonical_name AS canonical_name,
+               c.concept_type AS concept_type,
+               c.surface_form AS surface_forms,
+               freq AS frequency
+        ORDER BY freq DESC
+        LIMIT $limit
+        """
+
+        try:
+            with self.driver.session(database=self.database) as session:
+                result = session.run(
+                    query,
+                    tenant_id=tenant_id,
+                    limit=limit,
+                    exclude_ids=exclude_ids
+                )
+
+                concepts = []
+                for record in result:
+                    surface_forms = record.get("surface_forms")
+                    if surface_forms and isinstance(surface_forms, str):
+                        surface_forms = [surface_forms]
+                    elif not surface_forms:
+                        surface_forms = []
+
+                    concepts.append({
+                        "canonical_id": record["canonical_id"],
+                        "canonical_name": record["canonical_name"],
+                        "concept_type": record["concept_type"] or "UNKNOWN",
+                        "surface_forms": surface_forms,
+                        "frequency": record["frequency"]
+                    })
+
+                logger.debug(
+                    f"[NEO4J:TopConcepts] Retrieved {len(concepts)} top concepts "
+                    f"(excluded {len(exclude_ids)})"
+                )
+                return concepts
+
+        except Exception as e:
+            logger.error(f"[NEO4J:TopConcepts] Error: {e}")
+            return []
+
+    def get_hub_concepts(
+        self,
+        tenant_id: str,
+        min_degree: int = 3,
+        limit: int = 10,
+        exclude_ids: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Phase 2.9: Récupère les concepts avec le plus de relations (hubs).
+
+        Les hubs sont des concepts déjà bien connectés dans le KG,
+        utiles pour créer des ponts entre segments.
+
+        Args:
+            tenant_id: ID tenant
+            min_degree: Degré minimum (nombre de relations)
+            limit: Nombre max de hubs
+            exclude_ids: IDs à exclure
+
+        Returns:
+            Liste de concepts hub avec degree
+        """
+        if not self.is_connected():
+            logger.warning("[NEO4J:HubConcepts] Not connected, returning empty list")
+            return []
+
+        exclude_ids = exclude_ids or []
+
+        # Neo4j 5.x: COUNT{} au lieu de SIZE() pour les patterns
+        query = """
+        MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+        WHERE c.canonical_id IS NOT NULL
+        AND NOT c.canonical_id IN $exclude_ids
+        WITH c,
+             COUNT { (c)<-[:HAS_SUBJECT]-(:RawAssertion) } AS subject_count,
+             COUNT { (c)<-[:HAS_OBJECT]-(:RawAssertion) } AS object_count
+        WITH c, subject_count + object_count AS degree
+        WHERE degree >= $min_degree
+        RETURN c.canonical_id AS canonical_id,
+               c.canonical_name AS canonical_name,
+               c.concept_type AS concept_type,
+               c.surface_form AS surface_forms,
+               degree
+        ORDER BY degree DESC
+        LIMIT $limit
+        """
+
+        try:
+            with self.driver.session(database=self.database) as session:
+                result = session.run(
+                    query,
+                    tenant_id=tenant_id,
+                    min_degree=min_degree,
+                    limit=limit,
+                    exclude_ids=exclude_ids
+                )
+
+                concepts = []
+                for record in result:
+                    surface_forms = record.get("surface_forms")
+                    if surface_forms and isinstance(surface_forms, str):
+                        surface_forms = [surface_forms]
+                    elif not surface_forms:
+                        surface_forms = []
+
+                    concepts.append({
+                        "canonical_id": record["canonical_id"],
+                        "canonical_name": record["canonical_name"],
+                        "concept_type": record["concept_type"] or "UNKNOWN",
+                        "surface_forms": surface_forms,
+                        "degree": record["degree"]
+                    })
+
+                logger.debug(
+                    f"[NEO4J:HubConcepts] Retrieved {len(concepts)} hub concepts "
+                    f"(min_degree={min_degree}, excluded {len(exclude_ids)})"
+                )
+                return concepts
+
+        except Exception as e:
+            logger.error(f"[NEO4J:HubConcepts] Error: {e}")
+            return []
+
+    def increment_occurrence_count(
+        self,
+        tenant_id: str,
+        canonical_id: str,
+        increment: int = 1
+    ) -> bool:
+        """
+        Phase 2.9: Incrémente le compteur d'occurrences d'un concept.
+
+        Appelé à chaque nouvelle mention d'un concept existant.
+
+        Args:
+            tenant_id: ID tenant
+            canonical_id: ID du concept
+            increment: Valeur d'incrémentation
+
+        Returns:
+            True si succès
+        """
+        if not self.is_connected():
+            return False
+
+        query = """
+        MATCH (c:CanonicalConcept {tenant_id: $tenant_id, canonical_id: $canonical_id})
+        SET c.occurrence_count = COALESCE(c.occurrence_count, 0) + $increment,
+            c.updated_at = datetime()
+        RETURN c.occurrence_count AS new_count
+        """
+
+        try:
+            with self.driver.session(database=self.database) as session:
+                result = session.run(
+                    query,
+                    tenant_id=tenant_id,
+                    canonical_id=canonical_id,
+                    increment=increment
+                )
+                record = result.single()
+                if record:
+                    logger.debug(
+                        f"[NEO4J:Occurrence] Incremented {canonical_id[:8]}... "
+                        f"to {record['new_count']}"
+                    )
+                    return True
+                return False
+
+        except Exception as e:
+            logger.error(f"[NEO4J:Occurrence] Error: {e}")
+            return False
 
 
 # Singleton instance

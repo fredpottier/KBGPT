@@ -871,12 +871,14 @@ def ingest_chunks(chunks, doc_metadata, file_uid, page_index):
             logger.error(f"❌ Qdrant upsert failed (page {page_index}): {e}")
 
 
-def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision: bool = True):
+def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision: bool = False):
     # Reconfigurer logger pour le contexte RQ worker avec lazy file creation
     global logger
     logger = setup_logging(LOGS_DIR, "ingest_pdf_debug.log", enable_console=False)
 
     # Premier log réel - c'est ici que le fichier sera créé
+    logger.info("")
+    logger.info("=" * 80)
     logger.info(f"🚀 Traitement: {pdf_path.name}")
     logger.info(f"📋 Document Type ID: {document_type_id or 'default'}")
     logger.info(f"🔍 Mode extraction: {'VISION (GPT-4 avec images)' if use_vision else 'TEXT-ONLY (LLM rapide)'}")
@@ -976,9 +978,11 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
         # ===== OSMOSE PURE : Extraction texte UNIQUEMENT (pas d'analyse LLM) =====
         # Comme PPTX : Texte brut → OSMOSE fait toute l'analyse sémantique
 
-        full_text = None
+        # FIX Phase 2.9: Ne pas écraser full_text si chargé depuis cache
+        if not loaded_from_cache:
+            full_text = None
 
-        if use_vision:
+        if not loaded_from_cache and use_vision:
             # ===== MODE VISION : Génération PNG + extraction texte basique =====
             logger.info("🖼️ [OSMOSE PURE] Mode VISION: Génération PNG des pages")
             images = convert_from_path(str(pdf_path))
@@ -1011,7 +1015,7 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
 
             logger.info(f"✅ [OSMOSE PURE] Texte extrait: {len(full_text) if full_text else 0} chars (AUCUNE analyse LLM)")
 
-        else:
+        elif not loaded_from_cache:
             # ===== MODE TEXT-ONLY : MegaParse extraction uniquement =====
             from knowbase.ingestion.parsers.megaparse_pdf import parse_pdf_with_megaparse
 
