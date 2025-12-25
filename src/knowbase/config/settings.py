@@ -61,6 +61,13 @@ class Settings(BaseSettings):
     qdrant_qa_collection: str = Field(default="rfp_qa", alias="QDRANT_QA_COLLECTION")
     hf_home: Path = Field(default=MODELS_DIR, alias="HF_HOME")
 
+    # Configuration GPU/Embeddings
+    gpu_unload_timeout_minutes: int = Field(
+        default=10,
+        alias="GPU_UNLOAD_TIMEOUT_MINUTES",
+        description="Timeout en minutes avant déchargement auto du modèle d'embedding GPU"
+    )
+
     # Configuration Redis (pour RQ jobs async)
     redis_host: str = Field(default="redis", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")

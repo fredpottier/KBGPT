@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 🌊 OSMOSE Phase 3.5 - Graph Panel
+ * OSMOS Phase 3.5 - Graph Panel
  *
  * Panel conteneur pour le Knowledge Graph avec contrôles.
  * Gère la visibilité, le redimensionnement et les interactions.

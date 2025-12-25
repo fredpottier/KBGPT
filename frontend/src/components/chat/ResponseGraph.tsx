@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * OSMOSE Phase 3.5 - Response Graph Component
+ * OSMOS Phase 3.5 - Response Graph Component
  *
  * Graphe intégré dans chaque réponse du chat.
  * Affichage en accordéon avec option d'agrandissement.

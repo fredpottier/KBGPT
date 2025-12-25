@@ -1,5 +1,9 @@
 'use client'
 
+/**
+ * OSMOS Copy Button - Dark Elegance Edition
+ */
+
 import { IconButton, useToast } from '@chakra-ui/react'
 import { CopyIcon, CheckIcon } from '@chakra-ui/icons'
 import { useState } from 'react'
@@ -19,18 +23,17 @@ export default function CopyButton({ text, size = 'xs', className }: CopyButtonP
       await navigator.clipboard.writeText(text)
       setIsCopied(true)
       toast({
-        title: 'Copied!',
-        description: 'Message copied to clipboard',
+        title: 'Copie',
+        description: 'Contenu copie dans le presse-papiers',
         status: 'success',
         duration: 2000,
         isClosable: true,
       })
-      // Reset after 2 seconds
       setTimeout(() => setIsCopied(false), 2000)
     } catch (err) {
       toast({
-        title: 'Copy failed',
-        description: 'Failed to copy to clipboard',
+        title: 'Erreur',
+        description: 'Impossible de copier dans le presse-papiers',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -41,18 +44,16 @@ export default function CopyButton({ text, size = 'xs', className }: CopyButtonP
   return (
     <IconButton
       className={className}
-      aria-label="Copy message"
+      aria-label="Copier"
       icon={isCopied ? <CheckIcon /> : <CopyIcon />}
       size={size}
       variant="ghost"
-      opacity={0}
-      transition="opacity 0.2s"
-      color={isCopied ? 'green.500' : 'gray.500'}
+      color={isCopied ? 'green.400' : 'text.muted'}
       _hover={{
-        opacity: 1,
-        color: isCopied ? 'green.600' : 'gray.700',
-        bg: 'gray.100'
+        color: isCopied ? 'green.300' : 'text.primary',
+        bg: 'bg.hover',
       }}
+      transition="all 0.2s"
       onClick={handleCopy}
     />
   )

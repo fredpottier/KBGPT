@@ -18,8 +18,9 @@ import re
 import uuid
 import logging
 from typing import List, Dict, Any, Optional
-from sentence_transformers import SentenceTransformer
 import tiktoken
+
+from knowbase.common.clients.embeddings import get_embedding_manager
 
 logger = logging.getLogger(__name__)
 
@@ -53,21 +54,15 @@ class TextChunker:
         """
         self.chunk_size = chunk_size
         self.overlap = overlap
+        self._model_name = model_name
 
-        # Init sentence transformer pour embeddings
-        # Auto-detect GPU (CUDA) si disponible, sinon fallback CPU
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        try:
-            self.model = SentenceTransformer(model_name, device=device)
-            logger.info(
-                f"[TextChunker] Loaded model: {model_name} "
-                f"(dim={self.model.get_sentence_embedding_dimension()}, device={device})"
-            )
-        except Exception as e:
-            logger.error(f"[TextChunker] Failed to load model {model_name}: {e}")
-            raise
+        # Utilise EmbeddingModelManager avec auto-unload (pas de création directe)
+        # Le modèle sera chargé lazily à la première utilisation
+        self._embedding_manager = get_embedding_manager()
+        logger.info(
+            f"[TextChunker] Initialized with model: {model_name} "
+            f"(using EmbeddingModelManager with auto-unload)"
+        )
 
         # Init tokenizer pour découpage précis
         try:
@@ -271,7 +266,7 @@ class TextChunker:
 
     def _generate_embeddings_batch(self, texts: List[str]) -> List[Any]:
         """
-        Générer embeddings pour batch de textes (plus efficace).
+        Générer embeddings pour batch de textes via EmbeddingModelManager.
 
         Args:
             texts: Liste de textes à embedder
@@ -279,47 +274,21 @@ class TextChunker:
         Returns:
             Liste embeddings (numpy arrays 1024D)
         """
-        import torch
         import numpy as np
 
-        # Déterminer device et batch size
-        is_cuda = next(self.model.parameters()).device.type == "cuda"
-        batch_size = 128 if is_cuda else 32
-
         try:
-            embeddings = self.model.encode(
+            # Utilise le manager qui gère le modèle avec auto-unload
+            embeddings = self._embedding_manager.encode(
                 texts,
-                batch_size=batch_size,
+                batch_size=128,
                 show_progress_bar=len(texts) > 100,
                 convert_to_numpy=True
             )
-            logger.debug(f"[TextChunker] Generated {len(embeddings)} embeddings (batch_size={batch_size})")
+            logger.debug(f"[TextChunker] Generated {len(embeddings)} embeddings via EmbeddingManager")
             return embeddings
 
         except Exception as e:
-            # Si erreur CUDA, basculer vers CPU et réessayer
-            if is_cuda and "CUDA" in str(e).upper():
-                logger.warning(f"[TextChunker] CUDA error, falling back to CPU: {e}")
-                try:
-                    # Déplacer modèle vers CPU
-                    self.model = self.model.to("cpu")
-                    torch.cuda.empty_cache()  # Libérer mémoire GPU
-                    logger.info("[TextChunker] Model moved to CPU, retrying embeddings...")
-
-                    embeddings = self.model.encode(
-                        texts,
-                        batch_size=32,  # Batch size CPU
-                        show_progress_bar=len(texts) > 100,
-                        convert_to_numpy=True
-                    )
-                    logger.info(f"[TextChunker] CPU fallback succeeded: {len(embeddings)} embeddings")
-                    return embeddings
-
-                except Exception as cpu_e:
-                    logger.error(f"[TextChunker] CPU fallback also failed: {cpu_e}")
-
-            else:
-                logger.error(f"[TextChunker] Error generating embeddings: {e}")
+            logger.error(f"[TextChunker] Error generating embeddings: {e}")
 
             # Fallback ultime: embeddings vides
             logger.warning(f"[TextChunker] Returning zero embeddings for {len(texts)} texts")

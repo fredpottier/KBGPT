@@ -1,9 +1,14 @@
 'use client'
 
+/**
+ * OSMOS Domain Context - Dark Elegance Edition
+ *
+ * Premium business context configuration
+ */
+
 import { useState, useEffect } from 'react'
 import {
   Box,
-  Container,
   Heading,
   Text,
   VStack,
@@ -16,15 +21,6 @@ import {
   Select,
   Button,
   useToast,
-  Card,
-  CardHeader,
-  CardBody,
-  Divider,
-  Badge,
-  Alert,
-  AlertIcon,
-  AlertTitle,
-  AlertDescription,
   Spinner,
   Tag,
   TagLabel,
@@ -45,8 +41,24 @@ import {
   ModalBody,
   ModalCloseButton,
   useDisclosure,
+  Icon,
+  Center,
 } from '@chakra-ui/react'
-import { FiSave, FiTrash2, FiEye, FiRefreshCw, FiGlobe } from 'react-icons/fi'
+import { motion } from 'framer-motion'
+import {
+  FiSave,
+  FiTrash2,
+  FiEye,
+  FiRefreshCw,
+  FiGlobe,
+  FiInfo,
+  FiCheckCircle,
+  FiAlertTriangle,
+  FiZap,
+  FiChevronDown,
+} from 'react-icons/fi'
+
+const MotionBox = motion(Box)
 
 interface DomainContext {
   tenant_id: string
@@ -75,7 +87,8 @@ interface FormData {
 }
 
 const INDUSTRY_OPTIONS = [
-  { value: 'healthcare', label: 'Santé / Healthcare' },
+  { value: 'regulatory', label: 'Reglementaire EU / Conformite' },
+  { value: 'healthcare', label: 'Sante / Healthcare' },
   { value: 'pharma_clinical', label: 'Pharma & Recherche Clinique (complet)' },
   { value: 'pharmaceutical', label: 'Pharmaceutique / Life Sciences' },
   { value: 'clinical_research', label: 'Recherche Clinique' },
@@ -84,15 +97,14 @@ const INDUSTRY_OPTIONS = [
   { value: 'retail', label: 'Retail / Commerce' },
   { value: 'manufacturing', label: 'Industrie / Manufacturing' },
   { value: 'technology', label: 'Technologie / IT' },
-  { value: 'energy', label: 'Énergie' },
+  { value: 'energy', label: 'Energie' },
   { value: 'logistics', label: 'Logistique / Transport' },
-  { value: 'education', label: 'Éducation' },
+  { value: 'education', label: 'Education' },
   { value: 'government', label: 'Secteur Public' },
   { value: 'legal', label: 'Juridique' },
   { value: 'other', label: 'Autre' },
 ]
 
-// Presets de suggestions par industrie
 interface IndustryPreset {
   descriptionPlaceholder: string
   subDomainsSuggestions: string[]
@@ -103,250 +115,123 @@ interface IndustryPreset {
 }
 
 const INDUSTRY_PRESETS: Record<string, IndustryPreset> = {
-  healthcare: {
-    descriptionPlaceholder: "Organisation spécialisée dans les soins de santé. Nous gérons des données médicales sensibles (dossiers patients, prescriptions, résultats d'examens) et devons respecter les normes de confidentialité (RGPD, HDS).",
-    subDomainsSuggestions: ['Télémédecine', 'Dossier patient', 'Imagerie médicale', 'Gestion hospitalière', 'Parcours de soins'],
-    keyConceptsSuggestions: ['Dossier Médical Partagé', 'Parcours patient', 'Consentement éclairé', 'Acte médical', 'Prescription'],
-    acronymsSuggestions: {
-      'DMP': 'Dossier Médical Partagé',
-      'HDS': 'Hébergeur de Données de Santé',
-      'PMSI': 'Programme de Médicalisation des Systèmes d\'Information',
-      'GHM': 'Groupe Homogène de Malades',
-      'ALD': 'Affection Longue Durée',
-    },
-    targetUsersSuggestions: ['Médecins', 'Infirmiers', 'Personnel administratif', 'Patients'],
-    documentTypesSuggestions: ['Comptes-rendus médicaux', 'Protocoles de soins', 'Ordonnances', 'Résultats d\'analyses'],
-  },
-  pharma_clinical: {
-    descriptionPlaceholder: "Organization specializing in pharmaceutical industry and clinical research. We analyze clinical studies (phases I-IV), regulatory files (MAA, pharmacovigilance), trial protocols, and efficacy/safety reports.",
+  regulatory: {
+    descriptionPlaceholder: "Base de connaissances reglementaire europeenne couvrant la protection des donnees (GDPR), la cybersecurite (NIS2, ENISA), l'intelligence artificielle (AI Act) et les droits fondamentaux. Documents officiels des autorites europeennes (EDPB, ENISA, CNIL) et frameworks internationaux (NIST).",
     subDomainsSuggestions: [
-      'R&D', 'Affaires réglementaires', 'Pharmacovigilance', 'Production', 'Qualité', 'Commercial',
-      'Oncologie', 'Cardiologie', 'Neurologie', 'Immunologie', 'Maladies rares', 'Vaccins', 'Dispositifs médicaux'
+      'Protection des donnees personnelles',
+      'Intelligence Artificielle',
+      'Cybersecurite',
+      'Transferts internationaux',
+      'Droits des personnes',
+      'Securite des systemes d\'information',
+      'Gestion des risques',
+      'Conformite reglementaire'
     ],
     keyConceptsSuggestions: [
-      'Autorisation de Mise sur le Marché', 'Pharmacovigilance', 'Brevet', 'Molécule', 'Formulation galénique',
-      'Phase clinique (I, II, III, IV)', 'Endpoint primaire / secondaire', 'Population ITT (Intent-to-Treat)',
-      'Population PP (Per-Protocol)', 'Critères d\'inclusion/exclusion', 'Randomisation', 'Double-aveugle',
-      'Placebo-contrôlé', 'Intervalle de confiance', 'Hazard Ratio', 'Overall Survival (OS)',
-      'Progression-Free Survival (PFS)', 'Événements indésirables (EI/AE)', 'Événements indésirables graves (EIG/SAE)'
+      'Donnees personnelles',
+      'Traitement de donnees',
+      'Base legale',
+      'Consentement',
+      'Interet legitime',
+      'Analyse d\'impact (AIPD/DPIA)',
+      'Privacy by Design',
+      'Systeme d\'IA a haut risque',
+      'Transparence algorithmique',
+      'Incident de securite',
+      'Violation de donnees',
+      'Mesures techniques et organisationnelles',
+      'Responsable de traitement',
+      'Sous-traitant',
+      'Transfert vers pays tiers',
+      'Decisions de conformite',
+      'Pseudonymisation',
+      'Chiffrement'
     ],
     acronymsSuggestions: {
-      'AMM': 'Autorisation de Mise sur le Marché',
-      'DCI': 'Dénomination Commune Internationale',
-      'RCP': 'Résumé des Caractéristiques du Produit',
-      'EMA': 'European Medicines Agency',
-      'FDA': 'Food and Drug Administration',
-      'GMP': 'Good Manufacturing Practices',
-      'ICH': 'International Council for Harmonisation',
-      'RCT': 'Randomized Controlled Trial',
-      'ITT': 'Intent-to-Treat',
-      'PP': 'Per-Protocol',
-      'OS': 'Overall Survival',
-      'PFS': 'Progression-Free Survival',
-      'ORR': 'Overall Response Rate',
-      'DLT': 'Dose-Limiting Toxicity',
-      'MTD': 'Maximum Tolerated Dose',
-      'AE': 'Adverse Event',
-      'SAE': 'Serious Adverse Event',
-      'ICF': 'Informed Consent Form',
-      'CRF': 'Case Report Form',
-      'IRB': 'Institutional Review Board',
-      'IND': 'Investigational New Drug',
-      'NDA': 'New Drug Application',
-      'MAA': 'Marketing Authorization Application',
+      'GDPR': 'General Data Protection Regulation (RGPD)',
+      'RGPD': 'Reglement General sur la Protection des Donnees',
+      'EDPB': 'European Data Protection Board (Comite Europeen de la Protection des Donnees)',
+      'EDPS': 'European Data Protection Supervisor',
+      'CNIL': 'Commission Nationale de l\'Informatique et des Libertes',
+      'DPO': 'Data Protection Officer (Delegue a la Protection des Donnees)',
+      'DPD': 'Delegue a la Protection des Donnees',
+      'AIPD': 'Analyse d\'Impact relative a la Protection des Donnees',
+      'DPIA': 'Data Protection Impact Assessment',
+      'AI Act': 'Artificial Intelligence Act (Reglement sur l\'Intelligence Artificielle)',
+      'NIS2': 'Network and Information Security Directive 2',
+      'ENISA': 'European Union Agency for Cybersecurity',
+      'NIST': 'National Institute of Standards and Technology',
+      'AI RMF': 'AI Risk Management Framework',
+      'BCR': 'Binding Corporate Rules (Regles d\'entreprise contraignantes)',
+      'SCC': 'Standard Contractual Clauses (Clauses Contractuelles Types)',
+      'CCT': 'Clauses Contractuelles Types',
+      'DPF': 'Data Privacy Framework (EU-US)',
+      'RSSI': 'Responsable de la Securite des Systemes d\'Information',
+      'PSSI': 'Politique de Securite des Systemes d\'Information',
+      'LLM': 'Large Language Model',
+      'GPAI': 'General Purpose AI (IA a usage general)',
+      'DSA': 'Digital Services Act',
+      'DMA': 'Digital Markets Act',
+      'eIDAS': 'Electronic Identification and Trust Services'
     },
-    targetUsersSuggestions: ['Chercheurs', 'Affaires réglementaires', 'Pharmacovigilants', 'Clinical Research Associates', 'Biostatisticiens', 'Medical Writers', 'Quality Assurance'],
-    documentTypesSuggestions: ['Protocoles d\'essai', 'Clinical Study Reports', 'Dossiers AMM', 'Rapports de pharmacovigilance', 'Statistical Analysis Plans', 'Formulaires de consentement'],
+    targetUsersSuggestions: [
+      'DPO / Delegues a la protection des donnees',
+      'RSSI / Responsables securite',
+      'Compliance Officers',
+      'Juristes specialises',
+      'Directeurs juridiques',
+      'Responsables conformite',
+      'Consultants GRC',
+      'Auditeurs',
+      'Risk Managers'
+    ],
+    documentTypesSuggestions: [
+      'Guidelines EDPB',
+      'Opinions EDPB',
+      'Rapports annuels',
+      'Threat Landscapes ENISA',
+      'Guides de securite',
+      'Frameworks de gestion des risques',
+      'Textes reglementaires',
+      'Analyses d\'impact',
+      'Recommandations',
+      'Statements officiels'
+    ],
   },
-  pharmaceutical: {
-    descriptionPlaceholder: "Entreprise pharmaceutique développant et commercialisant des médicaments. Nous gérons des données réglementaires (AMM, pharmacovigilance), des études cliniques et de la documentation scientifique.",
-    subDomainsSuggestions: ['R&D', 'Affaires réglementaires', 'Pharmacovigilance', 'Production', 'Qualité', 'Commercial'],
-    keyConceptsSuggestions: ['Autorisation de Mise sur le Marché', 'Pharmacovigilance', 'Brevet', 'Molécule', 'Formulation galénique'],
-    acronymsSuggestions: {
-      'AMM': 'Autorisation de Mise sur le Marché',
-      'DCI': 'Dénomination Commune Internationale',
-      'RCP': 'Résumé des Caractéristiques du Produit',
-      'EMA': 'European Medicines Agency',
-      'FDA': 'Food and Drug Administration',
-      'GMP': 'Good Manufacturing Practices',
-      'ICH': 'International Council for Harmonisation',
-    },
-    targetUsersSuggestions: ['Chercheurs', 'Affaires réglementaires', 'Pharmacovigilants', 'Quality Assurance'],
-    documentTypesSuggestions: ['Dossiers AMM', 'Rapports de pharmacovigilance', 'Fiches produit', 'Études de stabilité'],
+  healthcare: {
+    descriptionPlaceholder: "Organisation specialisee dans les soins de sante...",
+    subDomainsSuggestions: ['Telemedecine', 'Dossier patient', 'Imagerie medicale', 'Gestion hospitaliere', 'Parcours de soins'],
+    keyConceptsSuggestions: ['Dossier Medical Partage', 'Parcours patient', 'Consentement eclaire', 'Acte medical', 'Prescription'],
+    acronymsSuggestions: { 'DMP': 'Dossier Medical Partage', 'HDS': 'Hebergeur de Donnees de Sante', 'PMSI': 'Programme de Medicalisation' },
+    targetUsersSuggestions: ['Medecins', 'Infirmiers', 'Personnel administratif', 'Patients'],
+    documentTypesSuggestions: ['Comptes-rendus medicaux', 'Protocoles de soins', 'Ordonnances'],
   },
-  clinical_research: {
-    descriptionPlaceholder: "Organisation spécialisée dans la recherche clinique et le développement de médicaments. Nous analysons des études cliniques (phases I-IV), protocoles d'essais, rapports d'efficacité et de sécurité.",
-    subDomainsSuggestions: ['Oncologie', 'Cardiologie', 'Neurologie', 'Immunologie', 'Maladies rares', 'Vaccins'],
-    keyConceptsSuggestions: ['Phase clinique', 'Endpoint primaire', 'Population ITT', 'Randomisation', 'Double-aveugle', 'Hazard Ratio', 'Overall Survival', 'Progression-Free Survival'],
-    acronymsSuggestions: {
-      'RCT': 'Randomized Controlled Trial',
-      'ITT': 'Intent-to-Treat',
-      'PP': 'Per-Protocol',
-      'OS': 'Overall Survival',
-      'PFS': 'Progression-Free Survival',
-      'ORR': 'Overall Response Rate',
-      'DLT': 'Dose-Limiting Toxicity',
-      'MTD': 'Maximum Tolerated Dose',
-      'AE': 'Adverse Event',
-      'SAE': 'Serious Adverse Event',
-      'ICF': 'Informed Consent Form',
-      'CRF': 'Case Report Form',
-      'IRB': 'Institutional Review Board',
-    },
-    targetUsersSuggestions: ['Clinical Research Associates', 'Biostatisticiens', 'Medical Writers', 'Investigateurs'],
-    documentTypesSuggestions: ['Protocoles d\'essai', 'Clinical Study Reports', 'Formulaires de consentement', 'Statistical Analysis Plans'],
+  pharma_clinical: {
+    descriptionPlaceholder: "Organization specializing in pharmaceutical industry and clinical research...",
+    subDomainsSuggestions: ['R&D', 'Affaires reglementaires', 'Pharmacovigilance', 'Production', 'Qualite', 'Oncologie', 'Cardiologie'],
+    keyConceptsSuggestions: ['Autorisation de Mise sur le Marche', 'Phase clinique', 'Endpoint primaire', 'Population ITT', 'Randomisation'],
+    acronymsSuggestions: { 'AMM': 'Autorisation de Mise sur le Marche', 'ICH': 'International Council for Harmonisation', 'OS': 'Overall Survival' },
+    targetUsersSuggestions: ['Chercheurs', 'Affaires reglementaires', 'Clinical Research Associates', 'Biostatisticiens'],
+    documentTypesSuggestions: ['Protocoles d\'essai', 'Clinical Study Reports', 'Dossiers AMM'],
   },
   finance: {
-    descriptionPlaceholder: "Institution financière gérant des opérations bancaires, investissements et services financiers. Nous traitons des données réglementaires (Bâle III, MiFID II) et des analyses de marché.",
-    subDomainsSuggestions: ['Banque de détail', 'Asset Management', 'Trading', 'Conformité', 'Risk Management', 'Crédit'],
-    keyConceptsSuggestions: ['Ratio de solvabilité', 'Risque de crédit', 'Liquidité', 'KYC', 'AML', 'Stress test'],
-    acronymsSuggestions: {
-      'KYC': 'Know Your Customer',
-      'AML': 'Anti-Money Laundering',
-      'PNL': 'Profit and Loss',
-      'NAV': 'Net Asset Value',
-      'ROI': 'Return On Investment',
-      'VaR': 'Value at Risk',
-      'MiFID': 'Markets in Financial Instruments Directive',
-      'UCITS': 'Undertakings for Collective Investment in Transferable Securities',
-    },
+    descriptionPlaceholder: "Institution financiere gerant des operations bancaires...",
+    subDomainsSuggestions: ['Banque de detail', 'Asset Management', 'Trading', 'Conformite', 'Risk Management'],
+    keyConceptsSuggestions: ['Ratio de solvabilite', 'Risque de credit', 'Liquidite', 'KYC', 'AML'],
+    acronymsSuggestions: { 'KYC': 'Know Your Customer', 'AML': 'Anti-Money Laundering', 'VaR': 'Value at Risk' },
     targetUsersSuggestions: ['Traders', 'Analystes financiers', 'Risk managers', 'Compliance officers'],
-    documentTypesSuggestions: ['Rapports de gestion', 'Analyses de risque', 'Prospectus', 'États financiers'],
-  },
-  insurance: {
-    descriptionPlaceholder: "Compagnie d'assurance proposant des produits d'assurance vie, santé, et dommages. Nous gérons des contrats, sinistres et analyses actuarielles.",
-    subDomainsSuggestions: ['Assurance vie', 'Assurance santé', 'IARD', 'Réassurance', 'Actuariat', 'Indemnisation'],
-    keyConceptsSuggestions: ['Prime', 'Sinistre', 'Franchise', 'Provision technique', 'Table de mortalité', 'Solvabilité II'],
-    acronymsSuggestions: {
-      'IARD': 'Incendie, Accidents et Risques Divers',
-      'S/P': 'Sinistres sur Primes',
-      'PSAP': 'Provision pour Sinistres À Payer',
-      'SCR': 'Solvency Capital Requirement',
-      'MCR': 'Minimum Capital Requirement',
-      'ORSA': 'Own Risk and Solvency Assessment',
-    },
-    targetUsersSuggestions: ['Actuaires', 'Souscripteurs', 'Gestionnaires de sinistres', 'Agents commerciaux'],
-    documentTypesSuggestions: ['Contrats d\'assurance', 'Rapports de sinistres', 'Études actuarielles', 'Conditions générales'],
-  },
-  retail: {
-    descriptionPlaceholder: "Entreprise de distribution et commerce de détail. Nous gérons des catalogues produits, des données de vente et de logistique, ainsi que des analyses de comportement client.",
-    subDomainsSuggestions: ['E-commerce', 'Supply chain', 'Merchandising', 'CRM', 'Pricing', 'Fidélité'],
-    keyConceptsSuggestions: ['Panier moyen', 'Taux de conversion', 'Stock', 'Marge brute', 'Category management'],
-    acronymsSuggestions: {
-      'SKU': 'Stock Keeping Unit',
-      'UGS': 'Unité de Gestion de Stock',
-      'PLV': 'Publicité sur Lieu de Vente',
-      'NPS': 'Net Promoter Score',
-      'CAC': 'Coût d\'Acquisition Client',
-      'LTV': 'Lifetime Value',
-    },
-    targetUsersSuggestions: ['Category managers', 'Supply chain managers', 'Responsables marketing', 'Chefs de rayon'],
-    documentTypesSuggestions: ['Fiches produit', 'Analyses de ventes', 'Rapports de stock', 'Études de marché'],
-  },
-  manufacturing: {
-    descriptionPlaceholder: "Entreprise industrielle spécialisée dans la fabrication et production. Nous gérons des processus de production, qualité, maintenance et supply chain.",
-    subDomainsSuggestions: ['Production', 'Qualité', 'Maintenance', 'Supply chain', 'R&D', 'HSE'],
-    keyConceptsSuggestions: ['Ordre de fabrication', 'Gamme de production', 'Non-conformité', 'TRS', 'Lean manufacturing'],
-    acronymsSuggestions: {
-      'OEE': 'Overall Equipment Effectiveness',
-      'TRS': 'Taux de Rendement Synthétique',
-      'MES': 'Manufacturing Execution System',
-      'GMAO': 'Gestion de Maintenance Assistée par Ordinateur',
-      'HSE': 'Hygiène Sécurité Environnement',
-      'AMDEC': 'Analyse des Modes de Défaillance et de leurs Effets et Criticité',
-    },
-    targetUsersSuggestions: ['Responsables production', 'Qualiticiens', 'Techniciens maintenance', 'Ingénieurs méthodes'],
-    documentTypesSuggestions: ['Gammes de fabrication', 'Rapports de non-conformité', 'Fiches de maintenance', 'Cahiers des charges'],
+    documentTypesSuggestions: ['Rapports de gestion', 'Analyses de risque', 'Prospectus'],
   },
   technology: {
-    descriptionPlaceholder: "Entreprise technologique développant des logiciels et solutions IT. Nous gérons de la documentation technique, des spécifications et de l'architecture système.",
-    subDomainsSuggestions: ['Développement', 'Infrastructure', 'Cybersécurité', 'Cloud', 'Data', 'DevOps'],
+    descriptionPlaceholder: "Entreprise technologique developpant des logiciels...",
+    subDomainsSuggestions: ['Developpement', 'Infrastructure', 'Cybersecurite', 'Cloud', 'Data', 'DevOps'],
     keyConceptsSuggestions: ['Architecture microservices', 'API REST', 'CI/CD', 'Kubernetes', 'Machine Learning'],
-    acronymsSuggestions: {
-      'API': 'Application Programming Interface',
-      'CI/CD': 'Continuous Integration / Continuous Deployment',
-      'SaaS': 'Software as a Service',
-      'MVP': 'Minimum Viable Product',
-      'SLA': 'Service Level Agreement',
-      'RGPD': 'Règlement Général sur la Protection des Données',
-    },
-    targetUsersSuggestions: ['Développeurs', 'DevOps', 'Architectes', 'Product managers'],
-    documentTypesSuggestions: ['Spécifications techniques', 'Documentation API', 'Runbooks', 'Post-mortems'],
-  },
-  energy: {
-    descriptionPlaceholder: "Entreprise du secteur énergétique (production, distribution, ou services). Nous gérons des données de production, de consommation, de maintenance d'installations et de conformité environnementale.",
-    subDomainsSuggestions: ['Production', 'Distribution', 'Énergies renouvelables', 'Nucléaire', 'Smart grid', 'Efficacité énergétique'],
-    keyConceptsSuggestions: ['Mix énergétique', 'Capacité installée', 'Facteur de charge', 'Certificat vert', 'Bilan carbone'],
-    acronymsSuggestions: {
-      'GES': 'Gaz à Effet de Serre',
-      'EnR': 'Énergies Renouvelables',
-      'PV': 'Photovoltaïque',
-      'REE': 'Responsabilité Élargie du Producteur',
-      'CSPE': 'Contribution au Service Public de l\'Électricité',
-      'TURPE': 'Tarif d\'Utilisation des Réseaux Publics d\'Électricité',
-    },
-    targetUsersSuggestions: ['Ingénieurs exploitation', 'Traders énergie', 'Responsables environnement', 'Techniciens maintenance'],
-    documentTypesSuggestions: ['Rapports de production', 'Études d\'impact', 'Bilans énergétiques', 'Audits de conformité'],
-  },
-  logistics: {
-    descriptionPlaceholder: "Entreprise de logistique et transport. Nous gérons des flux de marchandises, entrepôts, livraisons et documentation douanière.",
-    subDomainsSuggestions: ['Transport routier', 'Transport maritime', 'Entreposage', 'Douane', 'Last mile', 'Reverse logistics'],
-    keyConceptsSuggestions: ['Incoterm', 'Lettre de voiture', 'Bon de livraison', 'Cross-docking', 'Taux de service'],
-    acronymsSuggestions: {
-      'WMS': 'Warehouse Management System',
-      'TMS': 'Transport Management System',
-      'BL': 'Bill of Lading',
-      'CMR': 'Convention relative au contrat de transport international de Marchandises par Route',
-      'DEB': 'Déclaration d\'Échanges de Biens',
-      'AWB': 'Air Waybill',
-    },
-    targetUsersSuggestions: ['Responsables logistique', 'Déclarants en douane', 'Chauffeurs', 'Gestionnaires d\'entrepôt'],
-    documentTypesSuggestions: ['Lettres de voiture', 'Documents douaniers', 'Bons de livraison', 'États de stock'],
-  },
-  education: {
-    descriptionPlaceholder: "Organisation éducative (université, école, centre de formation). Nous gérons des contenus pédagogiques, évaluations, parcours de formation et données étudiantes.",
-    subDomainsSuggestions: ['Formation initiale', 'Formation continue', 'E-learning', 'Recherche', 'Vie étudiante'],
-    keyConceptsSuggestions: ['Maquette pédagogique', 'ECTS', 'Compétence', 'Évaluation', 'Certification'],
-    acronymsSuggestions: {
-      'ECTS': 'European Credits Transfer System',
-      'LMS': 'Learning Management System',
-      'MOOC': 'Massive Open Online Course',
-      'VAE': 'Validation des Acquis de l\'Expérience',
-      'RNCP': 'Répertoire National des Certifications Professionnelles',
-    },
-    targetUsersSuggestions: ['Enseignants', 'Étudiants', 'Responsables pédagogiques', 'Administratifs'],
-    documentTypesSuggestions: ['Programmes de cours', 'Supports pédagogiques', 'Examens', 'Rapports de stage'],
-  },
-  government: {
-    descriptionPlaceholder: "Administration publique ou collectivité territoriale. Nous gérons des données citoyennes, des procédures administratives et des documents réglementaires.",
-    subDomainsSuggestions: ['État civil', 'Urbanisme', 'Social', 'Fiscalité', 'Marchés publics', 'Services aux citoyens'],
-    keyConceptsSuggestions: ['Délibération', 'Arrêté', 'Dématérialisation', 'RGPD', 'Open data'],
-    acronymsSuggestions: {
-      'DGFIP': 'Direction Générale des Finances Publiques',
-      'CAF': 'Caisse d\'Allocations Familiales',
-      'DSP': 'Délégation de Service Public',
-      'PLU': 'Plan Local d\'Urbanisme',
-      'CADA': 'Commission d\'Accès aux Documents Administratifs',
-    },
-    targetUsersSuggestions: ['Agents administratifs', 'Élus', 'Citoyens', 'Responsables de service'],
-    documentTypesSuggestions: ['Délibérations', 'Arrêtés', 'Comptes-rendus de conseil', 'Documents d\'urbanisme'],
-  },
-  legal: {
-    descriptionPlaceholder: "Cabinet juridique ou service juridique d'entreprise. Nous gérons des contrats, contentieux, veille juridique et documentation réglementaire.",
-    subDomainsSuggestions: ['Droit des affaires', 'Droit social', 'Propriété intellectuelle', 'Contentieux', 'M&A', 'Compliance'],
-    keyConceptsSuggestions: ['Contrat', 'Clause', 'Jurisprudence', 'Mise en demeure', 'Due diligence'],
-    acronymsSuggestions: {
-      'NDA': 'Non-Disclosure Agreement',
-      'LOI': 'Letter of Intent',
-      'SPA': 'Share Purchase Agreement',
-      'CGV': 'Conditions Générales de Vente',
-      'CNIL': 'Commission Nationale de l\'Informatique et des Libertés',
-    },
-    targetUsersSuggestions: ['Avocats', 'Juristes d\'entreprise', 'Paralegals', 'Compliance officers'],
-    documentTypesSuggestions: ['Contrats', 'Actes juridiques', 'Conclusions', 'Notes de veille'],
+    acronymsSuggestions: { 'API': 'Application Programming Interface', 'CI/CD': 'Continuous Integration / Continuous Deployment', 'SaaS': 'Software as a Service' },
+    targetUsersSuggestions: ['Developpeurs', 'DevOps', 'Architectes', 'Product managers'],
+    documentTypesSuggestions: ['Specifications techniques', 'Documentation API', 'Runbooks'],
   },
   other: {
-    descriptionPlaceholder: "Décrivez le domaine d'activité de votre organisation, les types de données que vous traitez, et les objectifs d'extraction de connaissances.",
+    descriptionPlaceholder: "Decrivez le domaine d'activite de votre organisation...",
     subDomainsSuggestions: [],
     keyConceptsSuggestions: [],
     acronymsSuggestions: {},
@@ -355,9 +240,80 @@ const INDUSTRY_PRESETS: Record<string, IndustryPreset> = {
   },
 }
 
+// Section Card Component
+const SectionCard = ({
+  title,
+  icon,
+  children,
+  actions,
+}: {
+  title: string
+  icon: any
+  children: React.ReactNode
+  actions?: React.ReactNode
+}) => (
+  <Box
+    bg="bg.secondary"
+    border="1px solid"
+    borderColor="border.default"
+    rounded="xl"
+    overflow="hidden"
+  >
+    <HStack
+      px={5}
+      py={4}
+      borderBottom="1px solid"
+      borderColor="border.default"
+      bg="bg.tertiary"
+      justify="space-between"
+    >
+      <HStack>
+        <Icon as={icon} boxSize={5} color="brand.400" />
+        <Text fontWeight="semibold" color="text.primary">{title}</Text>
+      </HStack>
+      {actions}
+    </HStack>
+    <Box p={5}>
+      {children}
+    </Box>
+  </Box>
+)
+
+// Status Badge
+const StatusBadge = ({ configured }: { configured: boolean }) => (
+  <HStack
+    spacing={1.5}
+    px={3}
+    py={1}
+    bg={configured ? 'rgba(34, 197, 94, 0.15)' : 'rgba(156, 163, 175, 0.15)'}
+    rounded="full"
+  >
+    <Icon as={configured ? FiCheckCircle : FiInfo} boxSize={3.5} color={configured ? 'green.400' : 'gray.400'} />
+    <Text fontSize="xs" fontWeight="medium" color={configured ? 'green.400' : 'gray.400'}>
+      {configured ? 'Configure' : 'Non configure'}
+    </Text>
+  </HStack>
+)
+
+// Input style
+const inputStyles = {
+  bg: "bg.tertiary",
+  border: "1px solid",
+  borderColor: "border.default",
+  rounded: "lg",
+  color: "text.primary",
+  _placeholder: { color: 'text.muted' },
+  _hover: { borderColor: 'border.active' },
+  _focus: {
+    borderColor: 'brand.500',
+    boxShadow: '0 0 0 1px var(--chakra-colors-brand-500)',
+  },
+}
+
 export default function DomainContextPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
   const [existingContext, setExistingContext] = useState<DomainContext | null>(null)
   const [previewPrompt, setPreviewPrompt] = useState<string>('')
   const [previewTokens, setPreviewTokens] = useState<number>(0)
@@ -375,7 +331,6 @@ export default function DomainContextPage() {
     context_priority: 'medium',
   })
 
-  // Temporary input states for adding items
   const [newSubDomain, setNewSubDomain] = useState('')
   const [newTargetUser, setNewTargetUser] = useState('')
   const [newDocType, setNewDocType] = useState('')
@@ -383,19 +338,17 @@ export default function DomainContextPage() {
   const [newAcronym, setNewAcronym] = useState('')
   const [newAcronymExpansion, setNewAcronymExpansion] = useState('')
 
-  // Get current industry preset
-  const currentPreset = formData.industry ? INDUSTRY_PRESETS[formData.industry] : null
+  const currentPreset = formData.industry ? INDUSTRY_PRESETS[formData.industry] || INDUSTRY_PRESETS.other : null
 
-  // Handler for industry change - updates placeholder suggestions
   const handleIndustryChange = (newIndustry: string) => {
     setFormData({ ...formData, industry: newIndustry })
   }
 
-  // Apply all suggestions from preset
   const applyAllSuggestions = () => {
     if (!currentPreset) return
     setFormData({
       ...formData,
+      domain_summary: formData.domain_summary || currentPreset.descriptionPlaceholder,
       sub_domains: [...new Set([...formData.sub_domains, ...currentPreset.subDomainsSuggestions])],
       key_concepts: [...new Set([...formData.key_concepts, ...currentPreset.keyConceptsSuggestions])],
       target_users: [...new Set([...formData.target_users, ...currentPreset.targetUsersSuggestions])],
@@ -404,7 +357,6 @@ export default function DomainContextPage() {
     })
   }
 
-  // Apply suggestions for a specific field
   const applySuggestions = (field: 'sub_domains' | 'key_concepts' | 'target_users' | 'document_types') => {
     if (!currentPreset) return
     const mapping: Record<string, string[]> = {
@@ -458,6 +410,7 @@ export default function DomainContextPage() {
   }
 
   const handlePreview = async () => {
+    setPreviewing(true)
     try {
       const response = await fetch('/api/domain-context/preview', {
         method: 'POST',
@@ -468,28 +421,15 @@ export default function DomainContextPage() {
         const data = await response.json()
         setPreviewPrompt(data.llm_injection_prompt)
         setPreviewTokens(data.estimated_tokens)
-        toast({
-          title: 'Aperçu généré',
-          status: 'success',
-          duration: 2000,
-        })
+        toast({ title: 'Apercu genere', status: 'success', duration: 2000, position: 'top' })
       } else {
-        const error = await response.json()
-        toast({
-          title: 'Erreur de prévisualisation',
-          description: error.detail || `Erreur ${response.status}`,
-          status: 'error',
-          duration: 5000,
-        })
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.detail || `Erreur serveur: ${response.status}`)
       }
     } catch (error: any) {
-      console.error('Error previewing:', error)
-      toast({
-        title: 'Erreur de connexion',
-        description: error.message || 'Impossible de contacter le serveur',
-        status: 'error',
-        duration: 5000,
-      })
+      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 5000, position: 'top' })
+    } finally {
+      setPreviewing(false)
     }
   }
 
@@ -497,9 +437,10 @@ export default function DomainContextPage() {
     if (!formData.domain_summary || !formData.industry) {
       toast({
         title: 'Champs requis manquants',
-        description: 'Le résumé du domaine et l\'industrie sont obligatoires.',
+        description: 'Le resume du domaine et l\'industrie sont obligatoires.',
         status: 'warning',
         duration: 3000,
+        position: 'top',
       })
       return
     }
@@ -515,23 +456,13 @@ export default function DomainContextPage() {
       if (response.ok) {
         const data = await response.json()
         setExistingContext(data)
-        toast({
-          title: 'Contexte sauvegardé',
-          description: 'Le Domain Context a été configuré avec succès.',
-          status: 'success',
-          duration: 3000,
-        })
+        toast({ title: 'Contexte sauvegarde', status: 'success', duration: 3000, position: 'top' })
       } else {
         const error = await response.json()
         throw new Error(error.detail || 'Erreur inconnue')
       }
     } catch (error: any) {
-      toast({
-        title: 'Erreur',
-        description: error.message,
-        status: 'error',
-        duration: 5000,
-      })
+      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 5000, position: 'top' })
     } finally {
       setSaving(false)
     }
@@ -543,22 +474,11 @@ export default function DomainContextPage() {
       if (response.status === 204 || response.ok) {
         setExistingContext(null)
         setFormData({
-          domain_summary: '',
-          industry: '',
-          sub_domains: [],
-          target_users: [],
-          document_types: [],
-          common_acronyms: {},
-          key_concepts: [],
-          context_priority: 'medium',
+          domain_summary: '', industry: '', sub_domains: [], target_users: [],
+          document_types: [], common_acronyms: {}, key_concepts: [], context_priority: 'medium',
         })
         setPreviewPrompt('')
-        toast({
-          title: 'Contexte supprimé',
-          description: 'L\'instance est maintenant en mode générique (domain-agnostic).',
-          status: 'info',
-          duration: 3000,
-        })
+        toast({ title: 'Contexte supprime', status: 'info', duration: 3000, position: 'top' })
         onDeleteClose()
       }
     } catch (error) {
@@ -566,7 +486,6 @@ export default function DomainContextPage() {
     }
   }
 
-  // Helper functions to add/remove items from arrays
   const addToArray = (field: keyof FormData, value: string) => {
     if (!value.trim()) return
     const currentArray = formData[field] as string[]
@@ -584,10 +503,7 @@ export default function DomainContextPage() {
     if (!newAcronym.trim() || !newAcronymExpansion.trim()) return
     setFormData({
       ...formData,
-      common_acronyms: {
-        ...formData.common_acronyms,
-        [newAcronym.trim().toUpperCase()]: newAcronymExpansion.trim()
-      }
+      common_acronyms: { ...formData.common_acronyms, [newAcronym.trim().toUpperCase()]: newAcronymExpansion.trim() }
     })
     setNewAcronym('')
     setNewAcronymExpansion('')
@@ -601,462 +517,490 @@ export default function DomainContextPage() {
 
   if (loading) {
     return (
-      <Container maxW="container.xl" py={8}>
+      <Center h="400px">
         <VStack spacing={4}>
-          <Spinner size="xl" />
-          <Text>Chargement du Domain Context...</Text>
+          <Spinner size="xl" color="brand.500" thickness="3px" />
+          <Text color="text.muted">Chargement du Domain Context...</Text>
         </VStack>
-      </Container>
+      </Center>
     )
   }
 
   return (
-    <Container maxW="container.xl" py={8}>
-      <VStack spacing={6} align="stretch">
-        {/* Header */}
-        <HStack justify="space-between" wrap="wrap" gap={4}>
-          <VStack align="start" spacing={1}>
-            <HStack>
-              <FiGlobe size={24} />
-              <Heading size="lg">Domain Context</Heading>
-              {existingContext && (
-                <Badge colorScheme="green" ml={2}>Configuré</Badge>
-              )}
-              {!existingContext && (
-                <Badge colorScheme="gray" ml={2}>Non configuré</Badge>
-              )}
-            </HStack>
-            <Text color="gray.600">
-              Configurez le contexte métier global de votre instance pour améliorer la précision de l'extraction.
-            </Text>
-          </VStack>
+    <Box maxW="1000px" mx="auto">
+      {/* Header */}
+      <MotionBox
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        mb={8}
+      >
+        <HStack justify="space-between" align="start" flexWrap="wrap" gap={4}>
+          <HStack spacing={3}>
+            <Box
+              w={10}
+              h={10}
+              rounded="lg"
+              bgGradient="linear(to-br, brand.500, accent.400)"
+              display="flex"
+              alignItems="center"
+              justifyContent="center"
+              boxShadow="0 0 20px rgba(99, 102, 241, 0.3)"
+            >
+              <Icon as={FiGlobe} boxSize={5} color="white" />
+            </Box>
+            <VStack align="start" spacing={0}>
+              <HStack>
+                <Text fontSize="2xl" fontWeight="bold" color="text.primary">
+                  Domain Context
+                </Text>
+                <StatusBadge configured={!!existingContext} />
+              </HStack>
+              <Text color="text.secondary">
+                Contexte metier pour l'extraction intelligente
+              </Text>
+            </VStack>
+          </HStack>
+
           <HStack>
             <Button
-              leftIcon={<FiRefreshCw />}
+              leftIcon={<Icon as={FiRefreshCw} />}
               variant="ghost"
+              color="text.secondary"
               onClick={loadDomainContext}
+              _hover={{ color: 'text.primary', bg: 'bg.hover' }}
             >
               Actualiser
             </Button>
             {existingContext && (
               <Button
-                leftIcon={<FiTrash2 />}
-                colorScheme="red"
-                variant="outline"
+                leftIcon={<Icon as={FiTrash2} />}
+                variant="ghost"
+                color="red.400"
                 onClick={onDeleteOpen}
+                _hover={{ bg: 'rgba(239, 68, 68, 0.1)' }}
               >
                 Supprimer
               </Button>
             )}
           </HStack>
         </HStack>
+      </MotionBox>
 
+      <VStack spacing={6} align="stretch">
         {/* Info Alert */}
-        <Alert status="info" borderRadius="md">
-          <AlertIcon />
-          <Box>
-            <AlertTitle>Comment ça fonctionne ?</AlertTitle>
-            <AlertDescription>
-              Le Domain Context est injecté automatiquement dans tous les prompts LLM lors de l'extraction de documents.
-              Il aide le système à mieux comprendre votre domaine métier, reconnaître les acronymes et concepts clés,
-              et produire des extractions plus précises.
-            </AlertDescription>
+        <MotionBox
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
+        >
+          <Box
+            p={4}
+            bg="rgba(99, 102, 241, 0.1)"
+            border="1px solid"
+            borderColor="rgba(99, 102, 241, 0.3)"
+            rounded="xl"
+          >
+            <HStack align="start" spacing={3}>
+              <Icon as={FiInfo} boxSize={5} color="brand.400" mt={0.5} />
+              <VStack align="start" spacing={1}>
+                <Text fontWeight="medium" color="brand.400">Comment ca fonctionne ?</Text>
+                <Text fontSize="sm" color="text.secondary">
+                  Le Domain Context est injecte automatiquement dans tous les prompts LLM lors de l'extraction.
+                  Il aide le systeme a mieux comprendre votre domaine metier et produire des extractions plus precises.
+                </Text>
+              </VStack>
+            </HStack>
           </Box>
-        </Alert>
+        </MotionBox>
 
         {/* Main Form */}
-        <Card>
-          <CardHeader>
-            <Heading size="md">Configuration du contexte</Heading>
-          </CardHeader>
-          <CardBody>
+        <MotionBox
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.2 }}
+        >
+          <SectionCard title="Configuration du contexte" icon={FiGlobe}>
             <VStack spacing={6} align="stretch">
-              {/* Industry - FIRST to drive suggestions */}
+              {/* Industry Select */}
               <FormControl isRequired>
-                <FormLabel>Industrie</FormLabel>
+                <FormLabel color="text.secondary" fontSize="sm">Industrie</FormLabel>
                 <Select
                   value={formData.industry}
                   onChange={(e) => handleIndustryChange(e.target.value)}
-                  placeholder="Sélectionnez une industrie"
+                  placeholder="Selectionnez une industrie"
+                  {...inputStyles}
+                  icon={<FiChevronDown />}
+                  sx={{ '> option': { bg: 'bg.secondary', color: 'text.primary' } }}
                 >
                   {INDUSTRY_OPTIONS.map(opt => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </Select>
-                <FormHelperText>
-                  Sélectionnez d'abord l'industrie pour obtenir des suggestions contextualisées
+                <FormHelperText color="text.muted">
+                  Selectionnez l'industrie pour obtenir des suggestions contextualisees
                 </FormHelperText>
               </FormControl>
 
-              {/* Apply all suggestions button */}
+              {/* Apply all suggestions */}
               {currentPreset && currentPreset.subDomainsSuggestions.length > 0 && (
-                <Alert status="info" borderRadius="md">
-                  <AlertIcon />
-                  <Box flex="1">
-                    <AlertTitle fontSize="sm">Suggestions disponibles pour cette industrie</AlertTitle>
-                    <AlertDescription fontSize="sm">
-                      Des suggestions de sous-domaines, concepts, acronymes et plus sont disponibles.
-                    </AlertDescription>
-                  </Box>
-                  <Button size="sm" colorScheme="blue" onClick={applyAllSuggestions}>
-                    Appliquer toutes les suggestions
-                  </Button>
-                </Alert>
+                <Box
+                  p={4}
+                  bg="rgba(34, 211, 238, 0.08)"
+                  border="1px solid"
+                  borderColor="rgba(34, 211, 238, 0.2)"
+                  rounded="lg"
+                >
+                  <HStack justify="space-between" flexWrap="wrap" gap={3}>
+                    <HStack>
+                      <Icon as={FiZap} color="accent.400" />
+                      <Text fontSize="sm" color="accent.400">
+                        Suggestions disponibles pour cette industrie
+                      </Text>
+                    </HStack>
+                    <Button
+                      size="sm"
+                      bg="accent.400"
+                      color="bg.primary"
+                      onClick={applyAllSuggestions}
+                      _hover={{ bg: 'accent.300' }}
+                    >
+                      Appliquer toutes les suggestions
+                    </Button>
+                  </HStack>
+                </Box>
               )}
 
               {/* Domain Summary */}
               <FormControl isRequired>
-                <FormLabel>Description du domaine</FormLabel>
+                <FormLabel color="text.secondary" fontSize="sm">Description du domaine</FormLabel>
                 <Textarea
                   value={formData.domain_summary}
                   onChange={(e) => setFormData({ ...formData, domain_summary: e.target.value })}
-                  placeholder={currentPreset?.descriptionPlaceholder || "Describe your organization's business domain, the types of data you process, and knowledge extraction objectives."}
+                  placeholder={currentPreset?.descriptionPlaceholder || "Decrivez votre domaine d'activite..."}
                   rows={4}
                   maxLength={500}
+                  {...inputStyles}
                 />
-                <FormHelperText>
-                  {formData.domain_summary.length}/500 caractères •
-                  <Text as="span" color="blue.500" ml={1}>
-                    Recommandé en anglais pour cohérence avec les prompts LLM
-                  </Text>
+                <FormHelperText color="text.muted">
+                  {formData.domain_summary.length}/500 caracteres
                 </FormHelperText>
               </FormControl>
 
               {/* Sub-domains */}
               <FormControl>
                 <HStack justify="space-between" mb={2}>
-                  <FormLabel mb={0}>Sous-domaines</FormLabel>
+                  <FormLabel color="text.secondary" fontSize="sm" mb={0}>Sous-domaines</FormLabel>
                   {currentPreset && currentPreset.subDomainsSuggestions.length > 0 && (
-                    <Button size="xs" variant="ghost" colorScheme="blue" onClick={() => applySuggestions('sub_domains')}>
-                      + Ajouter suggestions ({currentPreset.subDomainsSuggestions.length})
+                    <Button size="xs" variant="ghost" color="brand.400" onClick={() => applySuggestions('sub_domains')}>
+                      + Suggestions ({currentPreset.subDomainsSuggestions.length})
                     </Button>
                   )}
                 </HStack>
-                <HStack mb={2}>
+                <HStack mb={3}>
                   <Input
                     value={newSubDomain}
                     onChange={(e) => setNewSubDomain(e.target.value)}
-                    placeholder={currentPreset?.subDomainsSuggestions[0] ? `Ex: ${currentPreset.subDomainsSuggestions[0]}` : "Ex: sous-domaine d'expertise"}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        addToArray('sub_domains', newSubDomain)
-                        setNewSubDomain('')
-                      }
-                    }}
+                    placeholder="Ajouter un sous-domaine"
+                    {...inputStyles}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('sub_domains', newSubDomain); setNewSubDomain('') }}}
                   />
-                  <Button onClick={() => { addToArray('sub_domains', newSubDomain); setNewSubDomain('') }}>
+                  <Button onClick={() => { addToArray('sub_domains', newSubDomain); setNewSubDomain('') }} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
                     Ajouter
                   </Button>
                 </HStack>
                 <Wrap>
                   {formData.sub_domains.map(sd => (
                     <WrapItem key={sd}>
-                      <Tag colorScheme="blue">
+                      <Tag bg="rgba(99, 102, 241, 0.15)" color="brand.400" borderRadius="full">
                         <TagLabel>{sd}</TagLabel>
                         <TagCloseButton onClick={() => removeFromArray('sub_domains', sd)} />
                       </Tag>
                     </WrapItem>
                   ))}
                 </Wrap>
-                {currentPreset && currentPreset.subDomainsSuggestions.length > 0 && formData.sub_domains.length === 0 && (
-                  <FormHelperText>
-                    Suggestions: {currentPreset.subDomainsSuggestions.slice(0, 3).join(', ')}...
-                  </FormHelperText>
-                )}
               </FormControl>
 
               {/* Key Concepts */}
               <FormControl>
                 <HStack justify="space-between" mb={2}>
-                  <FormLabel mb={0}>Concepts clés à reconnaître</FormLabel>
+                  <FormLabel color="text.secondary" fontSize="sm" mb={0}>Concepts cles</FormLabel>
                   {currentPreset && currentPreset.keyConceptsSuggestions.length > 0 && (
-                    <Button size="xs" variant="ghost" colorScheme="purple" onClick={() => applySuggestions('key_concepts')}>
-                      + Ajouter suggestions ({currentPreset.keyConceptsSuggestions.length})
+                    <Button size="xs" variant="ghost" color="purple.400" onClick={() => applySuggestions('key_concepts')}>
+                      + Suggestions ({currentPreset.keyConceptsSuggestions.length})
                     </Button>
                   )}
                 </HStack>
-                <HStack mb={2}>
+                <HStack mb={3}>
                   <Input
                     value={newKeyConcept}
                     onChange={(e) => setNewKeyConcept(e.target.value)}
-                    placeholder={currentPreset?.keyConceptsSuggestions[0] ? `Ex: ${currentPreset.keyConceptsSuggestions[0]}` : "Ex: concept métier important"}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        addToArray('key_concepts', newKeyConcept)
-                        setNewKeyConcept('')
-                      }
-                    }}
+                    placeholder="Ajouter un concept"
+                    {...inputStyles}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('key_concepts', newKeyConcept); setNewKeyConcept('') }}}
                   />
-                  <Button onClick={() => { addToArray('key_concepts', newKeyConcept); setNewKeyConcept('') }}>
+                  <Button onClick={() => { addToArray('key_concepts', newKeyConcept); setNewKeyConcept('') }} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
                     Ajouter
                   </Button>
                 </HStack>
                 <Wrap>
                   {formData.key_concepts.map(kc => (
                     <WrapItem key={kc}>
-                      <Tag colorScheme="purple">
+                      <Tag bg="rgba(168, 85, 247, 0.15)" color="purple.400" borderRadius="full">
                         <TagLabel>{kc}</TagLabel>
                         <TagCloseButton onClick={() => removeFromArray('key_concepts', kc)} />
                       </Tag>
                     </WrapItem>
                   ))}
                 </Wrap>
-                {currentPreset && currentPreset.keyConceptsSuggestions.length > 0 && formData.key_concepts.length === 0 && (
-                  <FormHelperText>
-                    Suggestions: {currentPreset.keyConceptsSuggestions.slice(0, 3).join(', ')}...
-                  </FormHelperText>
-                )}
-                <FormHelperText>Ajoutez autant de concepts que nécessaire</FormHelperText>
               </FormControl>
-
-              <Divider />
 
               {/* Acronyms */}
               <FormControl>
                 <HStack justify="space-between" mb={2}>
-                  <FormLabel mb={0}>Acronymes du domaine</FormLabel>
+                  <FormLabel color="text.secondary" fontSize="sm" mb={0}>Acronymes</FormLabel>
                   {currentPreset && Object.keys(currentPreset.acronymsSuggestions).length > 0 && (
-                    <Button size="xs" variant="ghost" colorScheme="teal" onClick={applyAcronymsSuggestions}>
-                      + Ajouter suggestions ({Object.keys(currentPreset.acronymsSuggestions).length})
+                    <Button size="xs" variant="ghost" color="teal.400" onClick={applyAcronymsSuggestions}>
+                      + Suggestions ({Object.keys(currentPreset.acronymsSuggestions).length})
                     </Button>
                   )}
                 </HStack>
-                <HStack mb={2}>
+                <HStack mb={3}>
                   <Input
                     value={newAcronym}
                     onChange={(e) => setNewAcronym(e.target.value)}
-                    placeholder={currentPreset && Object.keys(currentPreset.acronymsSuggestions)[0] ? `Ex: ${Object.keys(currentPreset.acronymsSuggestions)[0]}` : "Acronyme"}
-                    width="150px"
+                    placeholder="Ex: API"
+                    width="120px"
+                    {...inputStyles}
                   />
                   <Input
                     value={newAcronymExpansion}
                     onChange={(e) => setNewAcronymExpansion(e.target.value)}
-                    placeholder={currentPreset && Object.values(currentPreset.acronymsSuggestions)[0] ? `Ex: ${Object.values(currentPreset.acronymsSuggestions)[0]}` : "Expansion complète"}
+                    placeholder="Ex: Application Programming Interface"
                     flex={1}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        addAcronym()
-                      }
-                    }}
+                    {...inputStyles}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAcronym() }}}
                   />
-                  <Button onClick={addAcronym}>Ajouter</Button>
+                  <Button onClick={addAcronym} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
+                    Ajouter
+                  </Button>
                 </HStack>
                 <Wrap>
                   {Object.entries(formData.common_acronyms).map(([key, value]) => (
                     <WrapItem key={key}>
-                      <Tag colorScheme="teal">
+                      <Tag bg="rgba(20, 184, 166, 0.15)" color="teal.400" borderRadius="full">
                         <TagLabel><strong>{key}</strong>: {value}</TagLabel>
                         <TagCloseButton onClick={() => removeAcronym(key)} />
                       </Tag>
                     </WrapItem>
                   ))}
                 </Wrap>
-                {currentPreset && Object.keys(currentPreset.acronymsSuggestions).length > 0 && Object.keys(formData.common_acronyms).length === 0 && (
-                  <FormHelperText>
-                    Suggestions: {Object.keys(currentPreset.acronymsSuggestions).slice(0, 4).join(', ')}...
-                  </FormHelperText>
-                )}
-                <FormHelperText>Ajoutez autant d'acronymes que nécessaire (max 100)</FormHelperText>
               </FormControl>
-
-              <Divider />
 
               {/* Priority */}
               <FormControl>
-                <FormLabel>Priorité d'injection</FormLabel>
+                <FormLabel color="text.secondary" fontSize="sm">Priorite d'injection</FormLabel>
                 <Select
                   value={formData.context_priority}
                   onChange={(e) => setFormData({ ...formData, context_priority: e.target.value as any })}
+                  {...inputStyles}
+                  sx={{ '> option': { bg: 'bg.secondary', color: 'text.primary' } }}
                 >
-                  <option value="low">Basse - Industrie + description seulement (~50 tokens)</option>
-                  <option value="medium">Moyenne - + 5 sous-domaines, 8 concepts, 5 acronymes (~150 tokens)</option>
-                  <option value="high">Haute - + 10 sous-domaines, 15 concepts, 20 acronymes (~300 tokens)</option>
+                  <option value="low">Basse - ~50 tokens</option>
+                  <option value="medium">Moyenne - ~150 tokens</option>
+                  <option value="high">Haute - ~300 tokens</option>
                 </Select>
-                <FormHelperText>
-                  Plus la priorité est haute, plus le contexte injecté est détaillé (mais consomme plus de tokens)
-                </FormHelperText>
               </FormControl>
 
-              {/* Target Users (optional) */}
+              {/* Advanced Options */}
               <Accordion allowToggle>
                 <AccordionItem border="none">
-                  <AccordionButton px={0}>
-                    <Box flex="1" textAlign="left">
-                      <Text fontWeight="medium">Options avancées</Text>
-                    </Box>
-                    <AccordionIcon />
+                  <AccordionButton px={0} _hover={{ bg: 'transparent' }}>
+                    <Text fontWeight="medium" color="text.secondary">Options avancees</Text>
+                    <AccordionIcon color="text.muted" ml={2} />
                   </AccordionButton>
                   <AccordionPanel px={0}>
                     <VStack spacing={4} align="stretch">
+                      {/* Target Users */}
                       <FormControl>
                         <HStack justify="space-between" mb={2}>
-                          <FormLabel mb={0}>Utilisateurs cibles</FormLabel>
+                          <FormLabel color="text.secondary" fontSize="sm" mb={0}>Utilisateurs cibles</FormLabel>
                           {currentPreset && currentPreset.targetUsersSuggestions.length > 0 && (
-                            <Button size="xs" variant="ghost" colorScheme="orange" onClick={() => applySuggestions('target_users')}>
-                              + Ajouter suggestions ({currentPreset.targetUsersSuggestions.length})
+                            <Button size="xs" variant="ghost" color="orange.400" onClick={() => applySuggestions('target_users')}>
+                              + Suggestions
                             </Button>
                           )}
                         </HStack>
-                        <HStack mb={2}>
+                        <HStack mb={3}>
                           <Input
                             value={newTargetUser}
                             onChange={(e) => setNewTargetUser(e.target.value)}
-                            placeholder={currentPreset?.targetUsersSuggestions[0] ? `Ex: ${currentPreset.targetUsersSuggestions[0]}` : "Ex: type d'utilisateur"}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault()
-                                addToArray('target_users', newTargetUser)
-                                setNewTargetUser('')
-                              }
-                            }}
+                            placeholder="Type d'utilisateur"
+                            {...inputStyles}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('target_users', newTargetUser); setNewTargetUser('') }}}
                           />
-                          <Button onClick={() => { addToArray('target_users', newTargetUser); setNewTargetUser('') }}>
+                          <Button onClick={() => { addToArray('target_users', newTargetUser); setNewTargetUser('') }} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
                             Ajouter
                           </Button>
                         </HStack>
                         <Wrap>
                           {formData.target_users.map(tu => (
                             <WrapItem key={tu}>
-                              <Tag colorScheme="orange">
+                              <Tag bg="rgba(249, 115, 22, 0.15)" color="orange.400" borderRadius="full">
                                 <TagLabel>{tu}</TagLabel>
                                 <TagCloseButton onClick={() => removeFromArray('target_users', tu)} />
                               </Tag>
                             </WrapItem>
                           ))}
                         </Wrap>
-                        {currentPreset && currentPreset.targetUsersSuggestions.length > 0 && formData.target_users.length === 0 && (
-                          <FormHelperText>
-                            Suggestions: {currentPreset.targetUsersSuggestions.slice(0, 3).join(', ')}...
-                          </FormHelperText>
-                        )}
                       </FormControl>
 
+                      {/* Document Types */}
                       <FormControl>
                         <HStack justify="space-between" mb={2}>
-                          <FormLabel mb={0}>Types de documents traités</FormLabel>
+                          <FormLabel color="text.secondary" fontSize="sm" mb={0}>Types de documents</FormLabel>
                           {currentPreset && currentPreset.documentTypesSuggestions.length > 0 && (
-                            <Button size="xs" variant="ghost" colorScheme="cyan" onClick={() => applySuggestions('document_types')}>
-                              + Ajouter suggestions ({currentPreset.documentTypesSuggestions.length})
+                            <Button size="xs" variant="ghost" color="cyan.400" onClick={() => applySuggestions('document_types')}>
+                              + Suggestions
                             </Button>
                           )}
                         </HStack>
-                        <HStack mb={2}>
+                        <HStack mb={3}>
                           <Input
                             value={newDocType}
                             onChange={(e) => setNewDocType(e.target.value)}
-                            placeholder={currentPreset?.documentTypesSuggestions[0] ? `Ex: ${currentPreset.documentTypesSuggestions[0]}` : "Ex: type de document"}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault()
-                                addToArray('document_types', newDocType)
-                                setNewDocType('')
-                              }
-                            }}
+                            placeholder="Type de document"
+                            {...inputStyles}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('document_types', newDocType); setNewDocType('') }}}
                           />
-                          <Button onClick={() => { addToArray('document_types', newDocType); setNewDocType('') }}>
+                          <Button onClick={() => { addToArray('document_types', newDocType); setNewDocType('') }} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
                             Ajouter
                           </Button>
                         </HStack>
                         <Wrap>
                           {formData.document_types.map(dt => (
                             <WrapItem key={dt}>
-                              <Tag colorScheme="cyan">
+                              <Tag bg="rgba(34, 211, 238, 0.15)" color="cyan.400" borderRadius="full">
                                 <TagLabel>{dt}</TagLabel>
                                 <TagCloseButton onClick={() => removeFromArray('document_types', dt)} />
                               </Tag>
                             </WrapItem>
                           ))}
                         </Wrap>
-                        {currentPreset && currentPreset.documentTypesSuggestions.length > 0 && formData.document_types.length === 0 && (
-                          <FormHelperText>
-                            Suggestions: {currentPreset.documentTypesSuggestions.slice(0, 3).join(', ')}...
-                          </FormHelperText>
-                        )}
                       </FormControl>
                     </VStack>
                   </AccordionPanel>
                 </AccordionItem>
               </Accordion>
             </VStack>
-          </CardBody>
-        </Card>
+          </SectionCard>
+        </MotionBox>
 
         {/* Preview Section */}
-        <Card>
-          <CardHeader>
-            <HStack justify="space-between">
-              <Heading size="md">Aperçu du prompt d'injection</Heading>
+        <MotionBox
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.3 }}
+        >
+          <SectionCard
+            title="Apercu du prompt"
+            icon={FiEye}
+            actions={
               <Button
-                leftIcon={<FiEye />}
-                onClick={handlePreview}
                 size="sm"
+                leftIcon={<Icon as={FiEye} />}
+                onClick={handlePreview}
                 isDisabled={!formData.domain_summary || !formData.industry}
+                isLoading={previewing}
+                loadingText="Generation..."
+                bg="bg.hover"
+                _hover={{ bg: 'brand.500', color: 'white' }}
               >
-                Générer l'aperçu
+                Generer
               </Button>
-            </HStack>
-          </CardHeader>
-          <CardBody>
+            }
+          >
             {previewPrompt ? (
               <VStack align="stretch" spacing={3}>
-                <Code p={4} borderRadius="md" whiteSpace="pre-wrap" display="block">
+                <Code
+                  p={4}
+                  bg="bg.tertiary"
+                  rounded="lg"
+                  whiteSpace="pre-wrap"
+                  display="block"
+                  color="text.secondary"
+                  border="1px solid"
+                  borderColor="border.default"
+                >
                   {previewPrompt}
                 </Code>
-                <Text fontSize="sm" color="gray.600">
-                  Tokens estimés: ~{previewTokens}
+                <Text fontSize="sm" color="text.muted">
+                  Tokens estimes: ~{previewTokens}
                 </Text>
               </VStack>
             ) : (
-              <Text color="gray.500">
-                Cliquez sur "Générer l'aperçu" pour voir le prompt qui sera injecté dans les LLM.
+              <Text color="text.muted" textAlign="center" py={4}>
+                Cliquez sur "Generer" pour voir le prompt qui sera injecte dans les LLM.
               </Text>
             )}
-          </CardBody>
-        </Card>
+          </SectionCard>
+        </MotionBox>
 
         {/* Save Button */}
-        <HStack justify="flex-end">
-          <Button
-            leftIcon={<FiSave />}
-            colorScheme="blue"
-            size="lg"
-            onClick={handleSave}
-            isLoading={saving}
-            isDisabled={!formData.domain_summary || !formData.industry}
-          >
-            {existingContext ? 'Mettre à jour' : 'Sauvegarder'}
-          </Button>
-        </HStack>
-
-        {/* Delete Confirmation Modal */}
-        <Modal isOpen={isDeleteOpen} onClose={onDeleteClose}>
-          <ModalOverlay />
-          <ModalContent>
-            <ModalHeader>Supprimer le Domain Context ?</ModalHeader>
-            <ModalCloseButton />
-            <ModalBody>
-              <Text>
-                Cette action supprimera le contexte métier configuré. L'instance reviendra en mode
-                générique (domain-agnostic) et les extractions futures seront moins spécialisées.
-              </Text>
-              <Text mt={2} fontWeight="bold">
-                Les documents déjà importés ne seront pas affectés.
-              </Text>
-            </ModalBody>
-            <ModalFooter>
-              <Button variant="ghost" mr={3} onClick={onDeleteClose}>
-                Annuler
-              </Button>
-              <Button colorScheme="red" onClick={handleDelete}>
-                Supprimer
-              </Button>
-            </ModalFooter>
-          </ModalContent>
-        </Modal>
+        <MotionBox
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3, delay: 0.4 }}
+        >
+          <HStack justify="flex-end">
+            <Button
+              leftIcon={<Icon as={FiSave} />}
+              size="lg"
+              bg="brand.500"
+              color="white"
+              onClick={handleSave}
+              isLoading={saving}
+              loadingText="Sauvegarde..."
+              isDisabled={!formData.domain_summary || !formData.industry}
+              _hover={{ bg: 'brand.600', transform: 'translateY(-2px)', boxShadow: '0 0 20px rgba(99, 102, 241, 0.4)' }}
+              _active={{ transform: 'translateY(0)' }}
+              transition="all 0.2s"
+            >
+              {existingContext ? 'Mettre a jour' : 'Sauvegarder'}
+            </Button>
+          </HStack>
+        </MotionBox>
       </VStack>
-    </Container>
+
+      {/* Delete Modal */}
+      <Modal isOpen={isDeleteOpen} onClose={onDeleteClose} isCentered>
+        <ModalOverlay bg="rgba(0, 0, 0, 0.7)" backdropFilter="blur(4px)" />
+        <ModalContent bg="bg.secondary" border="1px solid" borderColor="border.default" rounded="xl">
+          <ModalHeader>
+            <HStack>
+              <Icon as={FiAlertTriangle} color="red.400" />
+              <Text color="text.primary">Supprimer le Domain Context ?</Text>
+            </HStack>
+          </ModalHeader>
+          <ModalCloseButton color="text.muted" />
+          <ModalBody>
+            <Text color="text.secondary">
+              Cette action supprimera le contexte metier configure. L'instance reviendra en mode generique.
+            </Text>
+            <Text mt={3} fontWeight="medium" color="text.primary">
+              Les documents deja importes ne seront pas affectes.
+            </Text>
+          </ModalBody>
+          <ModalFooter gap={3}>
+            <Button variant="ghost" onClick={onDeleteClose} _hover={{ bg: 'bg.hover' }}>
+              Annuler
+            </Button>
+            <Button bg="red.500" color="white" onClick={handleDelete} _hover={{ bg: 'red.600' }}>
+              Supprimer
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    </Box>
   )
 }

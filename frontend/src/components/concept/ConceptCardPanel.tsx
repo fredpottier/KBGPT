@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 🌊 OSMOSE Phase 3.5 - Concept Card Panel
+ * OSMOS Phase 3.5 - Concept Card Panel
  *
  * Panel slide-in affichant la carte d'identité complète d'un concept.
  * S'ouvre au clic sur un noeud du Knowledge Graph.

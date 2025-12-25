@@ -468,9 +468,10 @@ class OsmoseIntegrationService:
             from knowbase.common.clients import ensure_qdrant_collection
             ensure_qdrant_collection(self.config.proto_kg_collection, 1024)  # multilingual-e5-large
 
-            # Encoder les concepts avec multilingual-e5-large
-            from sentence_transformers import SentenceTransformer
-            embedder = SentenceTransformer("intfloat/multilingual-e5-large")
+            # Encoder les concepts avec multilingual-e5-large (via EmbeddingModelManager)
+            from knowbase.common.clients.embeddings import get_embedding_manager
+            embedding_manager = get_embedding_manager()
+            embedder = embedding_manager.get_model()  # Utilise le manager avec auto-unload
 
             points = []
             for i, concept in enumerate(canonical_concepts):

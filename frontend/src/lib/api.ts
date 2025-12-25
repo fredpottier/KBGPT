@@ -228,7 +228,7 @@ export const api = {
     solutions: () => apiClient.get('/solutions'),
   },
 
-  // Living Ontology - OSMOSE Phase 2.3
+  // Living Ontology - OSMOS Phase 2.3
   livingOntology: {
     stats: () => apiClient.get('/living-ontology/stats'),
     types: () => apiClient.get('/living-ontology/types'),
@@ -316,6 +316,45 @@ export const api = {
       apiClient.get(`/concepts/search?q=${encodeURIComponent(query)}&limit=${limit}`),
     related: (conceptId: string, maxDepth: number = 2) =>
       apiClient.get(`/concepts/${conceptId}/related?max_depth=${maxDepth}`),
+  },
+
+  // Claims - Phase 2.11 OSMOSE KG/RAG Contract
+  claims: {
+    // Search claims with filters
+    search: (params?: {
+      query?: string
+      subject_concept_id?: string
+      claim_type?: string
+      maturity?: 'CANDIDATE' | 'VALIDATED' | 'CONFLICTING' | 'CONTEXT_DEPENDENT' | 'SUPERSEDED'
+      min_confidence?: number
+      limit?: number
+      offset?: number
+    }) => apiClient.post('/claims/search', params || {}),
+
+    // Get claims for a concept
+    forConcept: (conceptId: string, claimTypes?: string, includeConflicting: boolean = true) => {
+      const params = new URLSearchParams()
+      if (claimTypes) params.append('claim_types', claimTypes)
+      params.append('include_conflicting', includeConflicting.toString())
+      return apiClient.get(`/claims/concept/${conceptId}?${params.toString()}`)
+    },
+
+    // Get KG/RAG Contract for a concept
+    kgRagContract: (conceptId: string) => apiClient.get(`/claims/concept/${conceptId}/kg-rag`),
+
+    // Get all conflicts
+    conflicts: () => apiClient.get('/claims/conflicts'),
+
+    // Get claim types
+    types: () => apiClient.get('/claims/claim-types'),
+
+    // Trigger consolidation
+    consolidate: (params?: {
+      subject_concept_id?: string
+      claim_type?: string
+      doc_id?: string
+      force?: boolean
+    }) => apiClient.post('/claims/consolidate', params || {}),
   },
 
   // Sessions - Memory Layer (Phase 2.5)

@@ -72,6 +72,32 @@ from .llm_claim_extractor import (
     compute_scope_key,
     compute_claim_fingerprint,
 )
+# Phase 2.11 - RawClaim Writer
+from .raw_claim_writer import (
+    RawClaimWriter,
+    get_raw_claim_writer,
+    compute_claim_fingerprint as compute_raw_claim_fingerprint,
+)
+# Phase 2.11 - Claim Consolidator
+from .claim_consolidator import (
+    ClaimConsolidator,
+    get_claim_consolidator,
+)
+# Phase 2.11 - CanonicalClaim Writer
+from .canonical_claim_writer import (
+    CanonicalClaimWriter,
+    get_canonical_claim_writer,
+)
+# Phase 2.8/2.10 - Relation Consolidator
+from .relation_consolidator import (
+    RelationConsolidator,
+    get_relation_consolidator,
+)
+# Phase 2.8/2.10 - CanonicalRelation Writer
+from .canonical_relation_writer import (
+    CanonicalRelationWriter,
+    get_canonical_relation_writer,
+)
 
 __all__ = [
     # Types de base
@@ -132,4 +158,20 @@ __all__ = [
     "get_claim_extractor",
     "compute_scope_key",
     "compute_claim_fingerprint",
+    # Phase 2.11 - RawClaim Writer
+    "RawClaimWriter",
+    "get_raw_claim_writer",
+    "compute_raw_claim_fingerprint",
+    # Phase 2.11 - Claim Consolidator
+    "ClaimConsolidator",
+    "get_claim_consolidator",
+    # Phase 2.11 - CanonicalClaim Writer
+    "CanonicalClaimWriter",
+    "get_canonical_claim_writer",
+    # Phase 2.8/2.10 - Relation Consolidator
+    "RelationConsolidator",
+    "get_relation_consolidator",
+    # Phase 2.8/2.10 - CanonicalRelation Writer
+    "CanonicalRelationWriter",
+    "get_canonical_relation_writer",
 ]

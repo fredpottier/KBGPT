@@ -78,12 +78,13 @@ async def admin_health(
     **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
 
     Returns:
-        Dict avec statut de chaque composant
+        Dict avec statut de chaque composant (Qdrant, Neo4j, Redis, PostgreSQL)
     """
     health_status = {
         "qdrant": {"status": "unknown", "message": ""},
         "neo4j": {"status": "unknown", "message": ""},
         "redis": {"status": "unknown", "message": ""},
+        "postgres": {"status": "unknown", "message": ""},
     }
 
     # Check Qdrant
@@ -139,6 +140,29 @@ async def admin_health(
         }
     except Exception as e:
         health_status["redis"] = {"status": "unhealthy", "message": str(e)}
+
+    # Check PostgreSQL
+    try:
+        from knowbase.db import get_db
+        from knowbase.db.models import Session, SessionMessage, User
+        from knowbase.db.base import is_sqlite
+
+        db = next(get_db())
+        try:
+            # Compter sessions et messages
+            sessions_count = db.query(Session).count()
+            messages_count = db.query(SessionMessage).count()
+            users_count = db.query(User).count()
+
+            db_type = "SQLite" if is_sqlite else "PostgreSQL"
+            health_status["postgres"] = {
+                "status": "healthy",
+                "message": f"{db_type}: {users_count} users, {sessions_count} sessions, {messages_count} messages",
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        health_status["postgres"] = {"status": "unhealthy", "message": str(e)}
 
     all_healthy = all(c["status"] == "healthy" for c in health_status.values())
 
@@ -360,6 +384,113 @@ async def deduplicate_entities(
     except Exception as e:
         logger.error(f"❌ Erreur dé-duplication: {e}")
         raise HTTPException(status_code=500, detail=f"Erreur dé-duplication: {str(e)}")
+
+
+# ============================================================================
+# GPU / Embedding Model Management (Development)
+# ============================================================================
+
+class GPUStatusResponse(BaseModel):
+    """Réponse statut GPU/Embedding."""
+    model_loaded: bool
+    model_name: Optional[str] = None
+    device: Optional[str] = None
+    idle_seconds: Optional[int] = None
+    timeout_seconds: int
+    gpu_available: bool = False
+    gpu_memory_allocated_gb: Optional[float] = None
+    gpu_memory_reserved_gb: Optional[float] = None
+
+
+@router.get(
+    "/gpu/status",
+    response_model=GPUStatusResponse,
+    summary="Statut modèle embedding GPU",
+    description="Retourne le statut du modèle d'embedding et la mémoire GPU utilisée."
+)
+async def get_gpu_status():
+    """
+    Récupère le statut du modèle d'embedding et de la mémoire GPU.
+
+    Returns:
+        Statut du modèle et mémoire GPU
+    """
+    from knowbase.common.clients.embeddings import get_embedding_status
+
+    status = get_embedding_status()
+
+    # Ajouter info GPU si disponible
+    gpu_available = False
+    gpu_memory_allocated = None
+    gpu_memory_reserved = None
+
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu_available = True
+            gpu_memory_allocated = round(torch.cuda.memory_allocated() / 1024**3, 2)
+            gpu_memory_reserved = round(torch.cuda.memory_reserved() / 1024**3, 2)
+    except ImportError:
+        pass
+
+    return GPUStatusResponse(
+        model_loaded=status["model_loaded"],
+        model_name=status["model_name"],
+        device=status["device"],
+        idle_seconds=status["idle_seconds"],
+        timeout_seconds=status["timeout_seconds"],
+        gpu_available=gpu_available,
+        gpu_memory_allocated_gb=gpu_memory_allocated,
+        gpu_memory_reserved_gb=gpu_memory_reserved
+    )
+
+
+@router.post(
+    "/gpu/unload",
+    summary="Décharger modèle embedding GPU",
+    description="Force le déchargement du modèle d'embedding pour libérer la mémoire GPU."
+)
+async def unload_gpu_model():
+    """
+    Force le déchargement du modèle d'embedding et libère la mémoire GPU.
+
+    Utile en développement pour libérer la RAM GPU quand le modèle n'est plus utilisé.
+
+    Returns:
+        Confirmation du déchargement
+    """
+    from knowbase.common.clients.embeddings import unload_embedding_model, get_embedding_status
+
+    # Récupérer statut avant
+    status_before = get_embedding_status()
+
+    if not status_before["model_loaded"]:
+        return {
+            "success": True,
+            "message": "Aucun modèle chargé",
+            "model_was_loaded": False
+        }
+
+    # Décharger
+    unload_embedding_model()
+
+    # Vérifier mémoire GPU après
+    gpu_memory_after = None
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu_memory_after = round(torch.cuda.memory_allocated() / 1024**3, 2)
+    except ImportError:
+        pass
+
+    logger.info(f"🔌 Modèle embedding déchargé manuellement: {status_before['model_name']}")
+
+    return {
+        "success": True,
+        "message": f"Modèle {status_before['model_name']} déchargé",
+        "model_was_loaded": True,
+        "gpu_memory_allocated_gb_after": gpu_memory_after
+    }
 
 
 __all__ = ["router"]

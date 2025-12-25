@@ -1,5 +1,5 @@
 /**
- * 🌊 OSMOSE Phase 3.5 - Graph Components
+ * OSMOS Phase 3.5 - Graph Components
  *
  * Export centralisé des composants graphe.
  */

@@ -42,6 +42,7 @@ class AgentState(BaseModel):
     document_id: str
     tenant_id: str = "default"
     full_text: Optional[str] = None  # Texte complet pour filtrage contextuel
+    input_text: Optional[str] = None  # Phase 2.9: Texte complet pour extraction doc-level (alias full_text)
     document_name: Optional[str] = None  # Phase 2: Nom document pour relation extraction
     document_context: Optional[str] = None  # Phase 1.8: Résumé document pour désambiguïsation concepts
     technical_density_hint: float = 0.5  # Phase 1.8.2: Hint LLM (0-1) pour ajuster stratégie extraction
@@ -65,6 +66,9 @@ class AgentState(BaseModel):
 
     # Phase 2: Stats extraction relations
     relation_extraction_stats: Dict[str, Any] = Field(default_factory=dict)
+
+    # Phase 2.9.4: Résultats extraction (segment-level + doc-level)
+    extraction_results: Dict[str, Any] = Field(default_factory=dict)
 
     # Phase 1.6: Cross-référence Neo4j ↔ Qdrant
     concept_to_chunk_ids: Dict[str, List[str]] = Field(default_factory=dict)  # {"proto-123": ["chunk-456"]}

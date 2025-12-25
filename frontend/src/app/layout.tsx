@@ -7,8 +7,8 @@ import MainLayout from '@/components/layout/MainLayout'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'SAP Knowledge Base',
-  description: 'Intelligent document search and chat interface for SAP knowledge base',
+  title: 'OSMOS - Le Cortex Documentaire',
+  description: 'OSMOSE - Intelligence sémantique avancée pour la recherche documentaire',
   icons: {
     icon: '/favicon.ico',
   },

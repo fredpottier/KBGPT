@@ -57,28 +57,19 @@ def get_qdrant_client() -> QdrantClient:
     return QdrantClient(url=url)
 
 
-@lru_cache(maxsize=None)
 def get_sentence_transformer(
     model_name: Optional[str] = None,
     device: Optional[str] = None,
     cache_folder: Optional[str] = None,
 ) -> SentenceTransformer:
-    """Return a cached SentenceTransformer instance for the requested model/device."""
-    name = model_name or os.getenv("EMB_MODEL_NAME", "intfloat/multilingual-e5-large")
-    kwargs: dict[str, object] = {}
+    """
+    DEPRECATED: Redirige vers EmbeddingModelManager pour auto-unload GPU.
 
-    # Auto-detect GPU (CUDA) si device non spécifié
-    if device is None:
-        try:
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        except ImportError:
-            device = "cpu"
-
-    kwargs["device"] = device
-    if cache_folder is not None:
-        kwargs["cache_folder"] = cache_folder
-    return SentenceTransformer(name, **kwargs)
+    Utilisez plutôt:
+        from knowbase.common.clients.embeddings import get_sentence_transformer
+    """
+    from knowbase.common.clients.embeddings import get_sentence_transformer as _get_st
+    return _get_st(model_name=model_name, device=device, cache_folder=cache_folder)
 
 
 def ensure_qdrant_collection(

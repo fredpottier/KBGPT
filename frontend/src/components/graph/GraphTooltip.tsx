@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 🌊 OSMOSE Phase 3.5 - Graph Tooltip
+ * OSMOS Phase 3.5 - Graph Tooltip
  *
  * Tooltip enrichi affiché au survol d'un noeud du graphe.
  * Affiche les informations clés du concept avec style.

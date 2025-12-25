@@ -92,7 +92,7 @@ function Reset-GrafanaPassword {
     while ($attempt -lt $maxAttempts -and -not $grafanaReady) {
         $attempt++
         try {
-            $response = Invoke-WebRequest -Uri "http://localhost:3001/api/health" -TimeoutSec 2 -ErrorAction SilentlyContinue
+            $response = Invoke-WebRequest -Uri "http://localhost:3001/api/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue
             if ($response.StatusCode -eq 200) {
                 $grafanaReady = $true
             }

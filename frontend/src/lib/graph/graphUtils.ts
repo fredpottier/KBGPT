@@ -1,5 +1,5 @@
 /**
- * 🌊 OSMOSE Phase 3.5 - Utilitaires Graph D3.js
+ * OSMOS Phase 3.5 - Utilitaires Graph D3.js
  *
  * Fonctions utilitaires pour la manipulation et transformation des données de graphe.
  */

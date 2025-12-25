@@ -16,6 +16,7 @@ import re
 from typing import List, Dict, Any, Optional
 import asyncio
 
+from knowbase.common.llm_router import TaskType
 from .types import (
     ConceptKind,
     ConceptClassification,
@@ -319,14 +320,13 @@ class ConceptKindClassifier:
         # Construire prompt
         user_prompt = CLASSIFICATION_USER_PROMPT_TEMPLATE.format(input_json=input_json)
 
-        # Appel LLM
-        response = await self.llm_router.call_async(
-            task="concept_classification",
+        # Appel LLM (utilise FAST_CLASSIFICATION pour classification rapide de concepts)
+        response = await self.llm_router.acomplete(
+            task_type=TaskType.FAST_CLASSIFICATION,
             messages=[
                 {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            model=self.model,
             temperature=0.1,
             max_tokens=2000
         )

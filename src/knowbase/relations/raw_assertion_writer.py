@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 from ulid import ULID
 
 from knowbase.common.clients.neo4j_client import Neo4jClient
+from knowbase.config.settings import get_settings
 from knowbase.relations.types import (
     RawAssertion,
     RawAssertionFlags,
@@ -155,7 +156,14 @@ class RawAssertionWriter:
             prompt_hash: Hash of the prompt used
             model_used: LLM model used
         """
-        self.neo4j_client = neo4j_client or Neo4jClient()
+        if neo4j_client is None:
+            settings = get_settings()
+            neo4j_client = Neo4jClient(
+                uri=settings.neo4j_uri,
+                user=settings.neo4j_user,
+                password=settings.neo4j_password
+            )
+        self.neo4j_client = neo4j_client
         self.tenant_id = tenant_id
         self.extractor_version = extractor_version
         self.prompt_hash = prompt_hash

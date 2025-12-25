@@ -1,5 +1,9 @@
 'use client'
 
+/**
+ * OSMOS Thumbnail Carousel - Dark Elegance Edition
+ */
+
 import {
   Box,
   HStack,
@@ -13,14 +17,16 @@ import {
   VStack,
   useDisclosure,
   IconButton,
+  Icon,
 } from '@chakra-ui/react'
 import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import { useState, useRef } from 'react'
 import { SearchChunk } from '@/types/api'
+import { FiImage } from 'react-icons/fi'
 
 interface ThumbnailCarouselProps {
   chunks: SearchChunk[]
-  synthesizedAnswer?: string // Ajout pour filtrer selon les slides mentionnés
+  synthesizedAnswer?: string
 }
 
 export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: ThumbnailCarouselProps) {
@@ -28,35 +34,30 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
   const [selectedImage, setSelectedImage] = useState<SearchChunk | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Fonction pour extraire les numéros de slides mentionnés dans la réponse synthétisée
   const extractMentionedSlides = (answer: string): Set<string> => {
     const mentionedSlides = new Set<string>()
 
-    // Patterns pour capturer les références aux slides
     const patterns = [
-      /slide\s+(\d+)/gi,                    // "slide 36"
-      /slides\s+(\d+)-(\d+)/gi,             // "slides 71-73"
-      /slides\s+(\d+),\s*(\d+)/gi,          // "slides 71, 72"
-      /slides\s+(\d+)\s+et\s+(\d+)/gi,      // "slides 71 et 72"
-      /slides\s+(\d+)\s+à\s+(\d+)/gi,       // "slides 71 à 73"
+      /slide\s+(\d+)/gi,
+      /slides\s+(\d+)-(\d+)/gi,
+      /slides\s+(\d+),\s*(\d+)/gi,
+      /slides\s+(\d+)\s+et\s+(\d+)/gi,
+      /slides\s+(\d+)\s+à\s+(\d+)/gi,
     ]
 
     patterns.forEach(pattern => {
       let match
       while ((match = pattern.exec(answer)) !== null) {
         if (pattern.source.includes('-')) {
-          // Range de slides (ex: "slides 71-73")
           const start = parseInt(match[1])
           const end = parseInt(match[2])
           for (let i = start; i <= end; i++) {
             mentionedSlides.add(i.toString())
           }
         } else if (match[2]) {
-          // Deux slides séparés (ex: "slides 71, 72")
           mentionedSlides.add(match[1])
           mentionedSlides.add(match[2])
         } else {
-          // Un seul slide (ex: "slide 36")
           mentionedSlides.add(match[1])
         }
       }
@@ -65,11 +66,9 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
     return mentionedSlides
   }
 
-  // Filter chunks that have thumbnail images
   const allChunksWithImages = chunks.filter(chunk => chunk.slide_image_url)
   let chunksWithImages = allChunksWithImages
 
-  // Si on a une réponse synthétisée, filtrer selon les slides mentionnés
   if (synthesizedAnswer) {
     const mentionedSlides = extractMentionedSlides(synthesizedAnswer)
     if (mentionedSlides.size > 0) {
@@ -108,39 +107,46 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
   return (
     <>
       <Box position="relative" w="full">
-        <Text fontSize="xs" fontWeight="medium" mb={1} color="gray.500">
-          Aperçus
-        </Text>
+        <HStack spacing={2} mb={2}>
+          <Icon as={FiImage} boxSize={4} color="text.muted" />
+          <Text fontSize="xs" fontWeight="medium" color="text.muted">
+            Apercus
+          </Text>
+        </HStack>
 
         <Box position="relative">
           {/* Left scroll button */}
           {chunksWithImages.length > 4 && (
             <IconButton
-              aria-label="Scroll left"
-              icon={<ChevronLeftIcon boxSize={3} />}
+              aria-label="Defiler a gauche"
+              icon={<ChevronLeftIcon boxSize={4} />}
               position="absolute"
-              left={-1}
+              left={-2}
               top="50%"
               transform="translateY(-50%)"
               zIndex={2}
-              bg="white"
-              shadow="sm"
+              bg="bg.secondary"
+              border="1px solid"
+              borderColor="border.default"
+              color="text.primary"
               borderRadius="full"
-              size="xs"
-              minW={5}
-              h={5}
+              size="sm"
+              _hover={{
+                bg: 'bg.hover',
+                borderColor: 'border.active',
+              }}
               onClick={() => scroll('left')}
             />
           )}
 
-          {/* Carousel container - compact */}
+          {/* Carousel container */}
           <Box
             ref={scrollRef}
             display="flex"
-            gap={2}
+            gap={3}
             overflowX="auto"
-            py={1}
-            px={4}
+            py={2}
+            px={chunksWithImages.length > 4 ? 6 : 1}
             css={{
               scrollbarWidth: 'none',
               '&::-webkit-scrollbar': {
@@ -156,19 +162,23 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
                 onClick={() => handleImageClick(chunk)}
                 _hover={{
                   transform: 'scale(1.03)',
-                  shadow: 'md'
                 }}
                 transition="all 0.2s"
               >
-                <VStack spacing={0.5} align="center">
+                <VStack spacing={1} align="center">
                   <Box
                     position="relative"
-                    borderRadius="sm"
+                    borderRadius="lg"
                     overflow="hidden"
                     border="1px solid"
-                    borderColor="gray.200"
-                    w="100px"
-                    h="65px"
+                    borderColor="border.default"
+                    w="120px"
+                    h="75px"
+                    bg="bg.tertiary"
+                    _hover={{
+                      borderColor: 'brand.500',
+                      boxShadow: '0 0 10px rgba(99, 102, 241, 0.3)',
+                    }}
                   >
                     <Image
                       src={chunk.slide_image_url}
@@ -180,21 +190,30 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
                         <Box
                           w="full"
                           h="full"
-                          bg="gray.100"
+                          bg="bg.tertiary"
                           display="flex"
                           alignItems="center"
                           justifyContent="center"
                         >
-                          <Text fontSize="2xs" color="gray.400">
+                          <Text fontSize="xs" color="text.muted">
                             N/A
                           </Text>
                         </Box>
                       }
                     />
                   </Box>
-                  <Text fontSize="2xs" color="gray.500">
-                    Slide {chunk.slide_index}
-                  </Text>
+                  <HStack
+                    px={2}
+                    py={0.5}
+                    bg="bg.tertiary"
+                    rounded="full"
+                    border="1px solid"
+                    borderColor="border.default"
+                  >
+                    <Text fontSize="2xs" color="text.muted">
+                      Slide {chunk.slide_index}
+                    </Text>
+                  </HStack>
                 </VStack>
               </Box>
             ))}
@@ -203,19 +222,23 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
           {/* Right scroll button */}
           {chunksWithImages.length > 4 && (
             <IconButton
-              aria-label="Scroll right"
-              icon={<ChevronRightIcon boxSize={3} />}
+              aria-label="Defiler a droite"
+              icon={<ChevronRightIcon boxSize={4} />}
               position="absolute"
-              right={-1}
+              right={-2}
               top="50%"
               transform="translateY(-50%)"
               zIndex={2}
-              bg="white"
-              shadow="sm"
+              bg="bg.secondary"
+              border="1px solid"
+              borderColor="border.default"
+              color="text.primary"
               borderRadius="full"
-              size="xs"
-              minW={5}
-              h={5}
+              size="sm"
+              _hover={{
+                bg: 'bg.hover',
+                borderColor: 'border.active',
+              }}
               onClick={() => scroll('right')}
             />
           )}
@@ -223,26 +246,40 @@ export default function ThumbnailCarousel({ chunks, synthesizedAnswer }: Thumbna
       </Box>
 
       {/* Modal for enlarged image */}
-      <Modal isOpen={isOpen} onClose={onClose} size="6xl">
-        <ModalOverlay />
-        <ModalContent maxW="80vw" maxH="80vh">
-          <ModalCloseButton />
-          <ModalBody p={4}>
+      <Modal isOpen={isOpen} onClose={onClose} size="6xl" isCentered>
+        <ModalOverlay bg="rgba(0, 0, 0, 0.85)" backdropFilter="blur(8px)" />
+        <ModalContent
+          bg="bg.secondary"
+          border="1px solid"
+          borderColor="border.default"
+          rounded="xl"
+          maxW="85vw"
+          maxH="90vh"
+          overflow="hidden"
+        >
+          <ModalCloseButton color="text.muted" zIndex={10} />
+          <ModalBody p={6}>
             {selectedImage && (
               <VStack spacing={4} align="center">
-                <Image
-                  src={selectedImage.slide_image_url}
-                  alt={`Slide ${selectedImage.slide_index}`}
-                  maxW="100%"
-                  maxH="70vh"
-                  objectFit="contain"
-                  borderRadius="md"
-                />
+                <Box
+                  borderRadius="lg"
+                  overflow="hidden"
+                  border="1px solid"
+                  borderColor="border.default"
+                >
+                  <Image
+                    src={selectedImage.slide_image_url}
+                    alt={`Slide ${selectedImage.slide_index}`}
+                    maxW="100%"
+                    maxH="70vh"
+                    objectFit="contain"
+                  />
+                </Box>
                 <VStack spacing={1} align="center">
-                  <Text fontSize="lg" fontWeight="semibold" color="gray.700">
+                  <Text fontSize="lg" fontWeight="semibold" color="text.primary">
                     Slide {selectedImage.slide_index}
                   </Text>
-                  <Text fontSize="sm" color="gray.600" textAlign="center">
+                  <Text fontSize="sm" color="text.secondary" textAlign="center">
                     {getDocumentName(selectedImage.source_file)}
                   </Text>
                 </VStack>

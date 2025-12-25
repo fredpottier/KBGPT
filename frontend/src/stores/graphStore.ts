@@ -1,5 +1,5 @@
 /**
- * 🌊 OSMOSE Phase 3.5 - Graph Store (Zustand)
+ * OSMOS Phase 3.5 - Graph Store (Zustand)
  *
  * Store de gestion d'état pour le Knowledge Graph D3.js.
  * Gère les noeuds, arêtes, interactions et accumulation de concepts par session.

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 🌊 OSMOSE Phase 3.5 - Knowledge Graph D3.js
+ * OSMOS Phase 3.5 - Knowledge Graph D3.js
  *
  * Composant de visualisation du Knowledge Graph avec D3.js force-directed layout.
  * Affiche les concepts et leurs relations avec couleurs selon le rôle.

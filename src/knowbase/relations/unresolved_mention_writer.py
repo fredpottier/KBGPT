@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from ulid import ULID
 
 from knowbase.common.clients.neo4j_client import Neo4jClient
+from knowbase.config.settings import get_settings
 from knowbase.relations.llm_relation_extractor import UnresolvedMention
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,14 @@ class UnresolvedMentionWriter:
             neo4j_client: Neo4j client instance (creates one if not provided)
             tenant_id: Tenant ID for multi-tenancy
         """
-        self.neo4j_client = neo4j_client or Neo4jClient()
+        if neo4j_client is None:
+            settings = get_settings()
+            neo4j_client = Neo4jClient(
+                uri=settings.neo4j_uri,
+                user=settings.neo4j_user,
+                password=settings.neo4j_password
+            )
+        self.neo4j_client = neo4j_client
         self.tenant_id = tenant_id
 
         self._stats = {

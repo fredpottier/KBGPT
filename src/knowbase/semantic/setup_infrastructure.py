@@ -167,9 +167,166 @@ async def setup_neo4j_proto_kg():
             """)
             logger.info("  ✅ Index CandidateRelation.status créé")
 
+            # ===================================
+            # PHASE 2.8 - RawAssertion Schema
+            # ===================================
+
+            # RawAssertion.raw_assertion_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT raw_assertion_id_unique IF NOT EXISTS
+                FOR (ra:RawAssertion) REQUIRE ra.raw_assertion_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint RawAssertion.raw_assertion_id créée")
+
+            # RawAssertion.raw_fingerprint UNIQUE (dedup)
+            await session.run("""
+                CREATE CONSTRAINT raw_assertion_fingerprint_unique IF NOT EXISTS
+                FOR (ra:RawAssertion) REQUIRE ra.raw_fingerprint IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint RawAssertion.raw_fingerprint créée")
+
+            # RawAssertion.tenant_id (multi-tenancy)
+            await session.run("""
+                CREATE INDEX raw_assertion_tenant_idx IF NOT EXISTS
+                FOR (ra:RawAssertion) ON (ra.tenant_id)
+            """)
+            logger.info("  ✅ Index RawAssertion.tenant_id créé")
+
+            # RawAssertion.source_doc_id (filtrage par doc)
+            await session.run("""
+                CREATE INDEX raw_assertion_doc_idx IF NOT EXISTS
+                FOR (ra:RawAssertion) ON (ra.source_doc_id)
+            """)
+            logger.info("  ✅ Index RawAssertion.source_doc_id créé")
+
+            # RawAssertion.relation_type (filtrage par type Phase 2.10)
+            await session.run("""
+                CREATE INDEX raw_assertion_type_idx IF NOT EXISTS
+                FOR (ra:RawAssertion) ON (ra.relation_type)
+            """)
+            logger.info("  ✅ Index RawAssertion.relation_type créé")
+
+            # ===================================
+            # PHASE 2.8 - CanonicalRelation Schema
+            # ===================================
+
+            # CanonicalRelation.canonical_relation_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT canonical_relation_id_unique IF NOT EXISTS
+                FOR (cr:CanonicalRelation) REQUIRE cr.canonical_relation_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint CanonicalRelation.canonical_relation_id créée")
+
+            # CanonicalRelation.tenant_id (multi-tenancy)
+            await session.run("""
+                CREATE INDEX canonical_relation_tenant_idx IF NOT EXISTS
+                FOR (cr:CanonicalRelation) ON (cr.tenant_id)
+            """)
+            logger.info("  ✅ Index CanonicalRelation.tenant_id créé")
+
+            # CanonicalRelation.relation_type (filtrage)
+            await session.run("""
+                CREATE INDEX canonical_relation_type_idx IF NOT EXISTS
+                FOR (cr:CanonicalRelation) ON (cr.relation_type)
+            """)
+            logger.info("  ✅ Index CanonicalRelation.relation_type créé")
+
+            # CanonicalRelation.maturity (filtrage VALIDATED/CANDIDATE)
+            await session.run("""
+                CREATE INDEX canonical_relation_maturity_idx IF NOT EXISTS
+                FOR (cr:CanonicalRelation) ON (cr.maturity)
+            """)
+            logger.info("  ✅ Index CanonicalRelation.maturity créé")
+
+            # ===================================
+            # PHASE 2.11 - RawClaim Schema
+            # ===================================
+
+            # RawClaim.raw_claim_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT raw_claim_id_unique IF NOT EXISTS
+                FOR (rc:RawClaim) REQUIRE rc.raw_claim_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint RawClaim.raw_claim_id créée")
+
+            # RawClaim.raw_fingerprint UNIQUE (dedup)
+            await session.run("""
+                CREATE CONSTRAINT raw_claim_fingerprint_unique IF NOT EXISTS
+                FOR (rc:RawClaim) REQUIRE rc.raw_fingerprint IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint RawClaim.raw_fingerprint créée")
+
+            # RawClaim.tenant_id (multi-tenancy)
+            await session.run("""
+                CREATE INDEX raw_claim_tenant_idx IF NOT EXISTS
+                FOR (rc:RawClaim) ON (rc.tenant_id)
+            """)
+            logger.info("  ✅ Index RawClaim.tenant_id créé")
+
+            # RawClaim.subject_concept_id (jointure concepts)
+            await session.run("""
+                CREATE INDEX raw_claim_subject_idx IF NOT EXISTS
+                FOR (rc:RawClaim) ON (rc.subject_concept_id)
+            """)
+            logger.info("  ✅ Index RawClaim.subject_concept_id créé")
+
+            # RawClaim.claim_type (filtrage par type de claim)
+            await session.run("""
+                CREATE INDEX raw_claim_type_idx IF NOT EXISTS
+                FOR (rc:RawClaim) ON (rc.claim_type)
+            """)
+            logger.info("  ✅ Index RawClaim.claim_type créé")
+
+            # RawClaim.source_doc_id (filtrage par doc)
+            await session.run("""
+                CREATE INDEX raw_claim_doc_idx IF NOT EXISTS
+                FOR (rc:RawClaim) ON (rc.source_doc_id)
+            """)
+            logger.info("  ✅ Index RawClaim.source_doc_id créé")
+
+            # ===================================
+            # PHASE 2.11 - CanonicalClaim Schema
+            # ===================================
+
+            # CanonicalClaim.canonical_claim_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT canonical_claim_id_unique IF NOT EXISTS
+                FOR (cc:CanonicalClaim) REQUIRE cc.canonical_claim_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint CanonicalClaim.canonical_claim_id créée")
+
+            # CanonicalClaim.tenant_id (multi-tenancy)
+            await session.run("""
+                CREATE INDEX canonical_claim_tenant_idx IF NOT EXISTS
+                FOR (cc:CanonicalClaim) ON (cc.tenant_id)
+            """)
+            logger.info("  ✅ Index CanonicalClaim.tenant_id créé")
+
+            # CanonicalClaim.subject_concept_id (jointure concepts)
+            await session.run("""
+                CREATE INDEX canonical_claim_subject_idx IF NOT EXISTS
+                FOR (cc:CanonicalClaim) ON (cc.subject_concept_id)
+            """)
+            logger.info("  ✅ Index CanonicalClaim.subject_concept_id créé")
+
+            # CanonicalClaim.claim_type (filtrage par type)
+            await session.run("""
+                CREATE INDEX canonical_claim_type_idx IF NOT EXISTS
+                FOR (cc:CanonicalClaim) ON (cc.claim_type)
+            """)
+            logger.info("  ✅ Index CanonicalClaim.claim_type créé")
+
+            # CanonicalClaim.maturity (filtrage VALIDATED/CANDIDATE/CONFLICTING)
+            await session.run("""
+                CREATE INDEX canonical_claim_maturity_idx IF NOT EXISTS
+                FOR (cc:CanonicalClaim) ON (cc.maturity)
+            """)
+            logger.info("  ✅ Index CanonicalClaim.maturity créé")
+
         logger.info("[OSMOSE] ✅ Neo4j Proto-KG Schema V2.1 configuré avec succès")
         logger.info("  📊 Labels: Document, Topic, Concept, CanonicalConcept, CandidateEntity, CandidateRelation")
-        logger.info("  🔍 Total: 6 constraints + 11 indexes")
+        logger.info("  📊 Labels Phase 2: RawAssertion, CanonicalRelation, RawClaim, CanonicalClaim")
+        logger.info("  🔍 Total: 14 constraints + 26 indexes")
 
     except Exception as e:
         logger.error(f"[OSMOSE] ❌ Erreur setup Neo4j: {e}")

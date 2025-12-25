@@ -904,6 +904,129 @@ class SessionMessage(Base):
         return f"<SessionMessage(id={self.id}, role='{self.role}', content='{content_preview}')>"
 
 
+# ============================================================================
+# Domain Context - Configuration Métier
+# ============================================================================
+
+
+class DomainContext(Base):
+    """
+    Profil de contexte métier pour un tenant.
+
+    Stocke la configuration du domaine métier (industrie, acronymes, concepts clés)
+    pour injection dynamique dans les prompts LLM.
+
+    Migré depuis Neo4j vers PostgreSQL pour:
+    - Survie aux purges du Knowledge Graph
+    - Cohérence avec autres métadonnées (users, entity types)
+    - Backup/restore simplifié
+    """
+
+    __tablename__ = "domain_contexts"
+
+    # Primary key
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        comment="UUID du domain context"
+    )
+
+    # Tenant (unique constraint)
+    tenant_id = Column(
+        String(50),
+        nullable=False,
+        unique=True,
+        index=True,
+        comment="Tenant ID (unique - un contexte par tenant)"
+    )
+
+    # Informations domaine
+    domain_summary = Column(
+        Text,
+        nullable=False,
+        comment="Résumé concis du domaine métier (1-2 phrases)"
+    )
+
+    industry = Column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Industrie principale (regulatory, pharmaceutical, technology, etc.)"
+    )
+
+    # Listes stockées en JSON
+    sub_domains = Column(
+        Text,
+        nullable=True,
+        default="[]",
+        comment="JSON array des sous-domaines"
+    )
+
+    target_users = Column(
+        Text,
+        nullable=True,
+        default="[]",
+        comment="JSON array des profils utilisateurs cibles"
+    )
+
+    document_types = Column(
+        Text,
+        nullable=True,
+        default="[]",
+        comment="JSON array des types de documents traités"
+    )
+
+    common_acronyms = Column(
+        Text,
+        nullable=True,
+        default="{}",
+        comment="JSON object acronymes → expansions"
+    )
+
+    key_concepts = Column(
+        Text,
+        nullable=True,
+        default="[]",
+        comment="JSON array des concepts clés du domaine"
+    )
+
+    # Configuration injection
+    context_priority = Column(
+        String(20),
+        nullable=False,
+        default="medium",
+        comment="Priorité injection: low | medium | high"
+    )
+
+    llm_injection_prompt = Column(
+        Text,
+        nullable=False,
+        comment="Texte prêt pour injection dans prompts système LLM"
+    )
+
+    # Timestamps
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        comment="Date création"
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        comment="Date dernière modification"
+    )
+
+    def __repr__(self) -> str:
+        return f"<DomainContext(tenant_id='{self.tenant_id}', industry='{self.industry}')>"
+
+
 __all__ = [
     "EntityTypeRegistry",
     "DocumentType",
@@ -911,5 +1034,6 @@ __all__ = [
     "User",
     "AuditLog",
     "Session",
-    "SessionMessage"
+    "SessionMessage",
+    "DomainContext"
 ]

@@ -1,5 +1,5 @@
 /**
- * 🌊 OSMOSE Phase 3.5 - Concept Components
+ * OSMOS Phase 3.5 - Concept Components
  *
  * Export centralisé des composants concept.
  */

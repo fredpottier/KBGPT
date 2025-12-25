@@ -22,9 +22,9 @@ import re
 from collections import defaultdict
 import numpy as np
 
-# P1.2: Import singleton SentenceTransformer (évite memory leak 4.2GB → 1GB)
+# Import via EmbeddingModelManager (avec auto-unload après inactivité)
 try:
-    from knowbase.common.clients.shared_clients import get_sentence_transformer
+    from knowbase.common.clients.embeddings import get_sentence_transformer
 except ImportError:
     get_sentence_transformer = None
     logging.warning(

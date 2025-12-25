@@ -1,10 +1,13 @@
 'use client'
 
+/**
+ * OSMOS Search Result Display - Dark Elegance Edition
+ */
+
 import {
   VStack,
   Box,
   Text,
-  Divider,
   Modal,
   ModalOverlay,
   ModalContent,
@@ -12,6 +15,8 @@ import {
   ModalCloseButton,
   Image,
   useDisclosure,
+  Icon,
+  HStack,
 } from '@chakra-ui/react'
 import { SearchResponse, SearchChunk, ExplorationIntelligence } from '@/types/api'
 import { useState } from 'react'
@@ -19,6 +24,7 @@ import ThumbnailCarousel from './ThumbnailCarousel'
 import SynthesizedAnswer from './SynthesizedAnswer'
 import SourcesSection from './SourcesSection'
 import type { GraphData } from '@/types/graph'
+import { FiAlertTriangle, FiFileText } from 'react-icons/fi'
 
 interface SearchResultDisplayProps {
   searchResult: SearchResponse
@@ -27,7 +33,12 @@ interface SearchResultDisplayProps {
   onSearch?: (query: string) => void
 }
 
-export default function SearchResultDisplay({ searchResult, graphData, explorationIntelligence, onSearch }: SearchResultDisplayProps) {
+export default function SearchResultDisplay({
+  searchResult,
+  graphData,
+  explorationIntelligence,
+  onSearch,
+}: SearchResultDisplayProps) {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [selectedImage, setSelectedImage] = useState<SearchChunk | null>(null)
 
@@ -43,49 +54,47 @@ export default function SearchResultDisplay({ searchResult, graphData, explorati
   if (searchResult.status === 'no_results') {
     return (
       <Box
-        p={3}
-        bg="yellow.50"
-        borderRadius="md"
+        p={4}
+        bg="rgba(251, 191, 36, 0.1)"
+        borderRadius="lg"
         border="1px solid"
-        borderColor="yellow.200"
-        textAlign="center"
+        borderColor="orange.500"
       >
-        <Text fontSize="sm" fontWeight="medium" color="yellow.800" mb={1}>
-          Aucun résultat trouvé
-        </Text>
-        <Text fontSize="xs" color="yellow.700">
-          {searchResult.message || "Aucune information pertinente n'a été trouvée dans la base de connaissances."}
-        </Text>
+        <HStack spacing={3}>
+          <Icon as={FiAlertTriangle} boxSize={5} color="orange.400" />
+          <VStack align="start" spacing={0}>
+            <Text fontSize="sm" fontWeight="medium" color="orange.400">
+              Aucun resultat trouve
+            </Text>
+            <Text fontSize="xs" color="text.secondary">
+              {searchResult.message || "Aucune information pertinente n'a ete trouvee dans la base de connaissances."}
+            </Text>
+          </VStack>
+        </HStack>
       </Box>
     )
   }
 
   return (
-    <VStack spacing={3} align="stretch" w="full">
+    <VStack spacing={4} align="stretch" w="full">
       {/* Thumbnail Carousel */}
       {searchResult.results && searchResult.results.length > 0 && (
-        <>
-          <ThumbnailCarousel
-            chunks={searchResult.results}
-            synthesizedAnswer={searchResult.synthesis?.synthesized_answer}
-          />
-          <Divider />
-        </>
+        <ThumbnailCarousel
+          chunks={searchResult.results}
+          synthesizedAnswer={searchResult.synthesis?.synthesized_answer}
+        />
       )}
 
-      {/* Synthesized Answer (avec Knowledge Graph intégré) */}
+      {/* Synthesized Answer (with integrated Knowledge Graph) */}
       {searchResult.synthesis && (
-        <>
-          <SynthesizedAnswer
-            synthesis={searchResult.synthesis}
-            chunks={searchResult.results}
-            onSlideClick={handleSlideClick}
-            graphData={graphData}
-            explorationIntelligence={explorationIntelligence}
-            onSearch={onSearch}
-          />
-          <Divider />
-        </>
+        <SynthesizedAnswer
+          synthesis={searchResult.synthesis}
+          chunks={searchResult.results}
+          onSlideClick={handleSlideClick}
+          graphData={graphData}
+          explorationIntelligence={explorationIntelligence}
+          onSearch={onSearch}
+        />
       )}
 
       {/* Sources Section */}
@@ -96,26 +105,31 @@ export default function SearchResultDisplay({ searchResult, graphData, explorati
       {/* Fallback: show raw results if no synthesis */}
       {!searchResult.synthesis && searchResult.results && searchResult.results.length > 0 && (
         <Box>
-          <Text fontSize="xs" fontWeight="medium" mb={2} color="gray.600">
-            Résultats
-          </Text>
-          <VStack spacing={1} align="stretch">
+          <HStack spacing={2} mb={3}>
+            <Icon as={FiFileText} boxSize={4} color="text.muted" />
+            <Text fontSize="xs" fontWeight="medium" color="text.muted">
+              Resultats
+            </Text>
+          </HStack>
+          <VStack spacing={2} align="stretch">
             {searchResult.results.slice(0, 5).map((result, index) => (
               <Box
                 key={index}
-                p={2}
-                bg="gray.50"
-                borderRadius="sm"
+                p={3}
+                bg="bg.secondary"
+                borderRadius="lg"
                 border="1px solid"
-                borderColor="gray.200"
+                borderColor="border.default"
+                _hover={{ borderColor: 'border.active' }}
+                transition="all 0.2s"
               >
-                <Text fontSize="xs" mb={1} color="gray.700">
+                <Text fontSize="sm" mb={2} color="text.primary" lineHeight="tall">
                   {result.text.length > 150
                     ? result.text.substring(0, 150) + '...'
                     : result.text
                   }
                 </Text>
-                <Text fontSize="2xs" color="gray.400">
+                <Text fontSize="xs" color="text.muted">
                   {result.source_file.split('/').pop()}
                   {result.slide_index && ` • slide ${result.slide_index}`}
                 </Text>
@@ -126,26 +140,40 @@ export default function SearchResultDisplay({ searchResult, graphData, explorati
       )}
 
       {/* Modal for enlarged image when slide number is clicked */}
-      <Modal isOpen={isOpen} onClose={onClose} size="6xl">
-        <ModalOverlay />
-        <ModalContent maxW="80vw" maxH="80vh">
-          <ModalCloseButton />
-          <ModalBody p={4}>
+      <Modal isOpen={isOpen} onClose={onClose} size="6xl" isCentered>
+        <ModalOverlay bg="rgba(0, 0, 0, 0.85)" backdropFilter="blur(8px)" />
+        <ModalContent
+          bg="bg.secondary"
+          border="1px solid"
+          borderColor="border.default"
+          rounded="xl"
+          maxW="85vw"
+          maxH="90vh"
+          overflow="hidden"
+        >
+          <ModalCloseButton color="text.muted" zIndex={10} />
+          <ModalBody p={6}>
             {selectedImage && (
               <VStack spacing={4} align="center">
-                <Image
-                  src={selectedImage.slide_image_url}
-                  alt={`Slide ${selectedImage.slide_index}`}
-                  maxW="100%"
-                  maxH="70vh"
-                  objectFit="contain"
-                  borderRadius="md"
-                />
+                <Box
+                  borderRadius="lg"
+                  overflow="hidden"
+                  border="1px solid"
+                  borderColor="border.default"
+                >
+                  <Image
+                    src={selectedImage.slide_image_url}
+                    alt={`Slide ${selectedImage.slide_index}`}
+                    maxW="100%"
+                    maxH="70vh"
+                    objectFit="contain"
+                  />
+                </Box>
                 <VStack spacing={1} align="center">
-                  <Text fontSize="lg" fontWeight="semibold" color="gray.700">
+                  <Text fontSize="lg" fontWeight="semibold" color="text.primary">
                     Slide {selectedImage.slide_index}
                   </Text>
-                  <Text fontSize="sm" color="gray.600" textAlign="center">
+                  <Text fontSize="sm" color="text.secondary" textAlign="center">
                     {getDocumentName(selectedImage.source_file)}
                   </Text>
                 </VStack>

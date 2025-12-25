@@ -616,7 +616,8 @@ Analyze this document and provide JSON response:"""
             initial_state = AgentState(
                 document_id=document_id,
                 tenant_id=tenant,
-                full_text=text_content  # Stocker texte complet pour filtrage contextuel
+                full_text=text_content,  # Stocker texte complet pour filtrage contextuel
+                input_text=text_content  # Phase 2.9: Texte pour extraction doc-level
             )
 
             logger.info(

@@ -1,5 +1,5 @@
 /**
- * OSMOSE Phase 3.5 - Chat Components
+ * OSMOS Phase 3.5 - Chat Components
  *
  * Export centralise des composants chat.
  */

@@ -1,17 +1,22 @@
 'use client'
 
+/**
+ * OSMOS Synthesized Answer - Dark Elegance Edition
+ */
+
 import {
   Box,
   Text,
   VStack,
-  Badge,
-  Divider,
   Flex,
+  HStack,
+  Icon,
 } from '@chakra-ui/react'
 import { SynthesisResult, SearchChunk, ExplorationIntelligence } from '@/types/api'
 import CopyButton from './CopyButton'
 import { ResponseGraph } from '@/components/chat'
 import type { GraphData } from '@/types/graph'
+import { FiCheckCircle, FiAlertCircle, FiAlertTriangle } from 'react-icons/fi'
 
 interface SynthesizedAnswerProps {
   synthesis: SynthesisResult
@@ -22,18 +27,36 @@ interface SynthesizedAnswerProps {
   onSearch?: (query: string) => void
 }
 
-export default function SynthesizedAnswer({ synthesis, chunks, onSlideClick, graphData, explorationIntelligence, onSearch }: SynthesizedAnswerProps) {
-  const getConfidenceColor = (confidence: number) => {
-    if (confidence >= 0.7) return 'green'
-    if (confidence >= 0.5) return 'yellow'
-    return 'red'
+export default function SynthesizedAnswer({
+  synthesis,
+  chunks,
+  onSlideClick,
+  graphData,
+  explorationIntelligence,
+  onSearch,
+}: SynthesizedAnswerProps) {
+  const getConfidenceConfig = (confidence: number) => {
+    if (confidence >= 0.7) return {
+      color: 'green.400',
+      bg: 'rgba(34, 197, 94, 0.15)',
+      icon: FiCheckCircle,
+      label: 'Tres fiable'
+    }
+    if (confidence >= 0.5) return {
+      color: 'yellow.400',
+      bg: 'rgba(250, 204, 21, 0.15)',
+      icon: FiAlertTriangle,
+      label: 'Fiable'
+    }
+    return {
+      color: 'red.400',
+      bg: 'rgba(239, 68, 68, 0.15)',
+      icon: FiAlertCircle,
+      label: 'Peu fiable'
+    }
   }
 
-  const getConfidenceLabel = (confidence: number) => {
-    if (confidence >= 0.7) return 'Très fiable'
-    if (confidence >= 0.5) return 'Fiable'
-    return 'Peu fiable'
-  }
+  const confidenceConfig = getConfidenceConfig(synthesis.confidence)
 
   // Function to render text with clickable slide references
   const renderAnswerWithClickableSlides = (text: string) => {
@@ -50,50 +73,42 @@ export default function SynthesizedAnswer({ synthesis, chunks, onSlideClick, gra
     })
 
     // Split text by slide references and create clickable elements
-    // Pattern étendu pour gérer: "slide 78", "slides 78", "slides 78 et 79", etc.
     const slidePattern = /\b(?:slides?)\s+(\d+)(?:\s+et\s+(\d+))?(?:\s*[-,]\s*(\d+))?(?:\s+à\s+(\d+))?\b/gi
     const parts: Array<string | JSX.Element> = []
     let lastIndex = 0
     let match
 
     while ((match = slidePattern.exec(text)) !== null) {
-      // Extract all slide numbers from the match
       const slideNumbers = [match[1], match[2], match[3], match[4]].filter(Boolean)
 
-      // Add text before the match
       if (match.index > lastIndex) {
         parts.push(text.substring(lastIndex, match.index))
       }
 
-      // Process the entire match to create clickable parts
       const fullMatch = match[0]
       const matchParts = []
       let currentIndex = 0
 
-      // For each slide number, make it clickable if chunk exists
       for (const slideNumber of slideNumbers) {
         const chunk = slideToChunk.get(slideNumber)
-        const slideText = `slide ${slideNumber}`
 
-        // Find where this slide number appears in the full match
         const slideIndex = fullMatch.indexOf(slideNumber, currentIndex)
 
-        // Add text before the slide number
         if (slideIndex > currentIndex) {
           matchParts.push(fullMatch.substring(currentIndex, slideIndex))
         }
 
-        // Add clickable slide number
         if (chunk) {
           matchParts.push(
             <Text
               key={`slide-${match.index}-${slideNumber}`}
               as="span"
-              color="blue.600"
+              color="brand.400"
               textDecoration="underline"
               cursor="pointer"
-              _hover={{ color: "blue.800", textDecoration: "underline" }}
+              _hover={{ color: 'brand.300' }}
               onClick={() => onSlideClick(chunk)}
+              transition="color 0.2s"
             >
               {slideNumber}
             </Text>
@@ -105,18 +120,15 @@ export default function SynthesizedAnswer({ synthesis, chunks, onSlideClick, gra
         currentIndex = slideIndex + slideNumber.length
       }
 
-      // Add remaining text from the match
       if (currentIndex < fullMatch.length) {
         matchParts.push(fullMatch.substring(currentIndex))
       }
 
-      // Add all parts of this match
       parts.push(...matchParts)
 
       lastIndex = match.index + match[0].length
     }
 
-    // Add remaining text
     if (lastIndex < text.length) {
       parts.push(text.substring(lastIndex))
     }
@@ -126,34 +138,39 @@ export default function SynthesizedAnswer({ synthesis, chunks, onSlideClick, gra
 
   return (
     <Box w="full">
-      <VStack spacing={2} align="stretch">
-        {/* Synthesized answer - ultra compact, pas de header */}
+      <VStack spacing={3} align="stretch">
+        {/* Synthesized answer */}
         <Box
-          bg="gray.50"
-          p={2}
-          borderRadius="sm"
+          bg="bg.secondary"
+          p={4}
+          borderRadius="lg"
           border="1px solid"
-          borderColor="gray.200"
+          borderColor="border.default"
           position="relative"
         >
           <Text
-            fontSize="xs"
-            lineHeight="1.4"
+            fontSize="sm"
+            lineHeight="1.6"
             whiteSpace="pre-wrap"
-            color="gray.700"
+            color="text.primary"
           >
             {renderAnswerWithClickableSlides(synthesis.synthesized_answer)}
           </Text>
 
-          {/* Copy + confidence inline */}
-          <Flex justify="space-between" align="center" mt={1.5}>
-            <Badge
-              colorScheme={getConfidenceColor(synthesis.confidence)}
-              variant="subtle"
-              fontSize="2xs"
+          {/* Copy + confidence */}
+          <Flex justify="space-between" align="center" mt={3} pt={3} borderTop="1px solid" borderColor="border.default">
+            <HStack
+              px={2}
+              py={1}
+              bg={confidenceConfig.bg}
+              rounded="md"
+              spacing={1.5}
             >
-              {Math.round(synthesis.confidence * 100)}%
-            </Badge>
+              <Icon as={confidenceConfig.icon} boxSize={3.5} color={confidenceConfig.color} />
+              <Text fontSize="xs" fontWeight="medium" color={confidenceConfig.color}>
+                {Math.round(synthesis.confidence * 100)}%
+              </Text>
+            </HStack>
             <CopyButton
               text={synthesis.synthesized_answer}
               className="copy-answer-button"
@@ -161,7 +178,7 @@ export default function SynthesizedAnswer({ synthesis, chunks, onSlideClick, gra
           </Flex>
         </Box>
 
-        {/* Knowledge Graph - APRÈS la réponse */}
+        {/* Knowledge Graph */}
         {graphData && graphData.nodes.length > 0 && (
           <ResponseGraph
             graphData={graphData}

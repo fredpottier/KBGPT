@@ -82,7 +82,8 @@ def init_db() -> None:
         User,
         AuditLog,
         Session,
-        SessionMessage
+        SessionMessage,
+        DomainContext
     )
 
     # Créer toutes les tables
