@@ -1,9 +1,9 @@
 # 🌊 OSMOSE Phase 2 - Tracking Opérationnel
 
-**Version:** 1.1
+**Version:** 1.2
 **Date Création:** 2025-11-16
-**Dernière MAJ:** 2025-12-18
-**Status Global:** 🟢 IN PROGRESS - Semaine 14 (45%)
+**Dernière MAJ:** 2025-12-26
+**Status Global:** 🟢 IN PROGRESS - Semaine 16 (65%)
 
 ---
 
@@ -14,7 +14,7 @@ Phase 2 : Intelligence Relationnelle Avancée
 ════════════════════════════════════════════
 
 Durée : 11 semaines (Semaines 14-24)
-Progress Global : [█████████░░░░░░░░░░░] 45%
+Progress Global : [█████████████░░░░░░░] 65%
 
 Architecture : 1 instance = 1 client (isolation totale)
 
@@ -22,6 +22,11 @@ Composants :
 ├─ 🟢 POC Concept Explainer         : ✅ COMPLÉTÉ (100%)
 ├─ 🔵 DomainContextPersonalizer     : ⏸️ OPTIONNEL (simplifié)
 ├─ 🟢 RelationExtractionEngine      : ✅ COMPLÉTÉ (95%) - Intégré pipeline
+├─ 🟢 Phase 2.3 InferenceEngine     : ✅ COMPLÉTÉ (100%) - Graph-Guided RAG
+├─ 🟢 Phase 2.5 Memory Layer        : ✅ COMPLÉTÉ (100%) - Sessions, Context
+├─ 🟢 Phase 2.7 Concept Matching    : ✅ COMPLÉTÉ (100%) - 3 paliers
+├─ 🟢 Phase 2.8-2.11 Relations V3   : ✅ COMPLÉTÉ (100%) - Claims MVP
+├─ 🟢 Phase 2.12 Entity Resolution  : ✅ COMPLÉTÉ (100%) - v1.1 Production
 ├─ 🟡 TaxonomyBuilder               : ⏸️ NOT STARTED
 ├─ 🟡 TemporalDiffEngine            : ⏸️ NOT STARTED (KILLER FEATURE)
 ├─ 🟡 RelationInferenceEngine       : ⏸️ NOT STARTED
