@@ -242,8 +242,12 @@ networks:
     driver: bridge
 
 volumes:
-  qdrant_data: # volume Docker local (resout l'erreur Qdrant)
-  redis_data: # volume Docker pour la persistance Redis
-  frontend_node_modules: # volume Docker pour éviter les conflits de permissions npm
-  frontend_next_build: # volume Docker pour .next (évite problèmes permissions Windows)
+  qdrant_data:
+    name: knowbase_qdrant_data  # Doit matcher docker-compose.infra.yml
+  redis_data:
+    name: knowbase_redis_data   # Doit matcher docker-compose.infra.yml
+  frontend_node_modules:
+    name: knowbase_frontend_node_modules
+  frontend_next_build:
+    name: knowbase_frontend_next_build
 

@@ -36,6 +36,7 @@ from knowbase.ingestion.text_chunker import get_text_chunker  # Phase 1.6: Chunk
 from knowbase.common.clients.qdrant_client import upsert_chunks  # Phase 1.6: Qdrant
 from knowbase.common.llm_router import LLMRouter, TaskType  # Phase 1.8: Document Context
 from knowbase.ontology.domain_context_injector import get_domain_context_injector  # Domain Context injection
+from knowbase.entity_resolution.deferred_reevaluator import get_deferred_reevaluator  # Phase 2.12: Entity Resolution
 
 # Logger pour ce module (pas de manipulation du root logger pour eviter les doublons)
 logger = logging.getLogger(__name__)
@@ -913,6 +914,16 @@ Analyze this document and provide JSON response:"""
                     f"[OSMOSE AGENTIQUE] ✅ Document {document_id} processed successfully: "
                     f"{result.canonical_concepts} concepts promoted in {osmose_duration:.1f}s"
                 )
+
+                # Phase 2.12: Notify Entity Resolution for reevaluation trigger
+                try:
+                    reevaluator = get_deferred_reevaluator(tenant_id or "default")
+                    should_reevaluate = reevaluator.notify_document_ingested()
+                    if should_reevaluate:
+                        # Trigger async reevaluation (non-blocking)
+                        asyncio.create_task(self._trigger_entity_resolution_reevaluation(tenant_id))
+                except Exception as er_error:
+                    logger.warning(f"[OSMOSE AGENTIQUE] Entity resolution notification failed: {er_error}")
             else:
                 logger.error(
                     f"[OSMOSE AGENTIQUE] ❌ Document {document_id} processing failed: "
@@ -945,6 +956,33 @@ Analyze this document and provide JSON response:"""
             result.total_duration_seconds = asyncio.get_event_loop().time() - start_time
 
             return result
+
+    async def _trigger_entity_resolution_reevaluation(
+        self,
+        tenant_id: Optional[str] = None
+    ) -> None:
+        """
+        Trigger async entity resolution reevaluation.
+
+        Phase 2.12: Called when document count threshold is reached.
+        Non-blocking - runs in background.
+
+        Args:
+            tenant_id: Tenant ID
+        """
+        try:
+            from knowbase.entity_resolution.deferred_reevaluator import run_reevaluation_job
+            result = await run_reevaluation_job(
+                tenant_id=tenant_id or "default",
+                dry_run=False
+            )
+            logger.info(
+                f"[OSMOSE AGENTIQUE:EntityResolution] Reevaluation complete: "
+                f"{result.promoted_to_auto} promoted to AUTO, "
+                f"{result.still_deferred} still deferred"
+            )
+        except Exception as e:
+            logger.warning(f"[OSMOSE AGENTIQUE:EntityResolution] Reevaluation failed: {e}")
 
 
 # Helper function pour compatibility
