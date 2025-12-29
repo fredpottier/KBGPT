@@ -2,6 +2,7 @@
 
 /**
  * OSMOS Search Result Display - Dark Elegance Edition
+ * avec Answer+Proof Integration
  */
 
 import {
@@ -17,20 +18,53 @@ import {
   useDisclosure,
   Icon,
   HStack,
+  Badge,
+  Tooltip,
 } from '@chakra-ui/react'
-import { SearchResponse, SearchChunk, ExplorationIntelligence } from '@/types/api'
+import {
+  SearchResponse,
+  SearchChunk,
+  ExplorationIntelligence,
+  ConfidenceResult,
+  KnowledgeProofSummary,
+  ReasoningTrace,
+  CoverageMap,
+} from '@/types/api'
 import { useState } from 'react'
 import ThumbnailCarousel from './ThumbnailCarousel'
 import SynthesizedAnswer from './SynthesizedAnswer'
 import SourcesSection from './SourcesSection'
+import KnowledgeProofPanel from '../chat/KnowledgeProofPanel'
+import ReasoningTracePanel from '../chat/ReasoningTracePanel'
+import CoverageMapPanel from '../chat/CoverageMapPanel'
 import type { GraphData } from '@/types/graph'
-import { FiAlertTriangle, FiFileText } from 'react-icons/fi'
+import {
+  FiAlertTriangle,
+  FiFileText,
+  FiCheckCircle,
+  FiAlertCircle,
+  FiXCircle,
+  FiHelpCircle,
+} from 'react-icons/fi'
 
 interface SearchResultDisplayProps {
   searchResult: SearchResponse
   graphData?: GraphData
   explorationIntelligence?: ExplorationIntelligence
   onSearch?: (query: string) => void
+}
+
+// Configuration du badge de confiance (Bloc A)
+const CONFIDENCE_BADGE_CONFIG: Record<string, {
+  icon: any
+  colorScheme: string
+  color: string
+}> = {
+  established: { icon: FiCheckCircle, colorScheme: 'green', color: 'green.400' },
+  partial: { icon: FiAlertCircle, colorScheme: 'yellow', color: 'yellow.400' },
+  debate: { icon: FiAlertTriangle, colorScheme: 'orange', color: 'orange.400' },
+  incomplete: { icon: FiXCircle, colorScheme: 'red', color: 'red.400' },
+  out_of_scope: { icon: FiHelpCircle, colorScheme: 'gray', color: 'gray.400' },
 }
 
 export default function SearchResultDisplay({
@@ -85,6 +119,11 @@ export default function SearchResultDisplay({
         />
       )}
 
+      {/* Bloc A: Badge de confiance */}
+      {searchResult.confidence && (
+        <ConfidenceBadge confidence={searchResult.confidence} />
+      )}
+
       {/* Synthesized Answer (with integrated Knowledge Graph) */}
       {searchResult.synthesis && (
         <SynthesizedAnswer
@@ -96,6 +135,24 @@ export default function SearchResultDisplay({
           onSearch={onSearch}
         />
       )}
+
+      {/* Answer+Proof Panels (Blocs B, C, D) */}
+      <VStack spacing={3} align="stretch">
+        {/* Bloc B: Knowledge Proof Summary */}
+        {searchResult.knowledge_proof && (
+          <KnowledgeProofPanel proof={searchResult.knowledge_proof} />
+        )}
+
+        {/* Bloc C: Reasoning Trace */}
+        {searchResult.reasoning_trace && (
+          <ReasoningTracePanel trace={searchResult.reasoning_trace} />
+        )}
+
+        {/* Bloc D: Coverage Map */}
+        {searchResult.coverage_map && (
+          <CoverageMapPanel coverage={searchResult.coverage_map} />
+        )}
+      </VStack>
 
       {/* Sources Section */}
       {searchResult.synthesis && (
@@ -183,5 +240,84 @@ export default function SearchResultDisplay({
         </ModalContent>
       </Modal>
     </VStack>
+  )
+}
+
+// Composant Badge de Confiance (Bloc A)
+interface ConfidenceBadgeProps {
+  confidence: ConfidenceResult
+}
+
+function ConfidenceBadge({ confidence }: ConfidenceBadgeProps) {
+  // Utiliser out_of_scope si hors perimetre, sinon l'etat epistemique
+  const stateKey = confidence.contract_state === 'out_of_scope'
+    ? 'out_of_scope'
+    : confidence.epistemic_state
+
+  const config = CONFIDENCE_BADGE_CONFIG[stateKey] || CONFIDENCE_BADGE_CONFIG.incomplete
+
+  return (
+    <Box
+      p={3}
+      bg="bg.secondary"
+      borderRadius="lg"
+      border="1px solid"
+      borderColor="border.default"
+    >
+      <HStack spacing={3} justify="space-between">
+        <HStack spacing={2}>
+          <Icon as={config.icon} color={config.color} boxSize={5} />
+          <VStack align="start" spacing={0}>
+            <HStack spacing={2}>
+              <Text fontSize="sm" fontWeight="medium" color="text.primary">
+                {confidence.badge}
+              </Text>
+              <Badge colorScheme={config.colorScheme} fontSize="2xs">
+                {confidence.epistemic_state}
+              </Badge>
+            </HStack>
+            <Text fontSize="xs" color="text.muted">
+              {confidence.micro_text}
+            </Text>
+          </VStack>
+        </HStack>
+
+        {/* CTA optionnel */}
+        {confidence.cta && (
+          <Tooltip label={confidence.cta.action} placement="top" fontSize="xs">
+            <Text
+              fontSize="xs"
+              color="brand.400"
+              cursor="pointer"
+              _hover={{ textDecoration: 'underline' }}
+            >
+              {confidence.cta.label}
+            </Text>
+          </Tooltip>
+        )}
+      </HStack>
+
+      {/* Warnings */}
+      {confidence.warnings.length > 0 && (
+        <VStack align="start" mt={2} spacing={0.5}>
+          {confidence.warnings.map((warning, idx) => (
+            <Text key={idx} fontSize="2xs" color="yellow.400">
+              {warning}
+            </Text>
+          ))}
+        </VStack>
+      )}
+
+      {/* Blockers */}
+      {confidence.blockers.length > 0 && (
+        <VStack align="start" mt={2} spacing={0.5}>
+          {confidence.blockers.map((blocker, idx) => (
+            <Text key={idx} fontSize="2xs" color="red.400">
+              {blocker}
+            </Text>
+          ))}
+        </VStack>
+      )}
+    </Box>
   )
 }

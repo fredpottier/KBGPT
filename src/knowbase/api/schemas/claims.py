@@ -208,6 +208,16 @@ class ConsolidationRequest(BaseModel):
     doc_id: Optional[str] = None
     force: bool = Field(default=False, description="Force reconsolidation")
 
+    # Separation Claims vs Relations
+    consolidate_claims: bool = Field(
+        default=True,
+        description="Consolidate RawClaims into CanonicalClaims"
+    )
+    consolidate_relations: bool = Field(
+        default=True,
+        description="Consolidate RawAssertions into CanonicalRelations"
+    )
+
 
 class ConsolidationResponse(BaseModel):
     """Response from consolidation."""
@@ -215,3 +225,37 @@ class ConsolidationResponse(BaseModel):
     relations_consolidated: int
     conflicts_detected: int
     execution_time_ms: float
+
+    # Detailed stats
+    claims_validated: int = 0
+    claims_candidate: int = 0
+    relations_validated: int = 0
+    relations_candidate: int = 0
+
+
+class ConsolidationStatsResponse(BaseModel):
+    """Statistics about current consolidation state."""
+    # Raw counts
+    raw_claims_count: int = 0
+    raw_assertions_count: int = 0
+
+    # Canonical counts
+    canonical_claims_count: int = 0
+    canonical_relations_count: int = 0
+
+    # Claims by maturity
+    claims_validated: int = 0
+    claims_candidate: int = 0
+    claims_conflicting: int = 0
+    claims_context_dependent: int = 0
+
+    # Relations by maturity
+    relations_validated: int = 0
+    relations_candidate: int = 0
+    relations_ambiguous: int = 0
+
+    # Relation types distribution
+    relation_types: dict = Field(default_factory=dict)
+
+    # Last consolidation info
+    last_consolidation_at: Optional[datetime] = None

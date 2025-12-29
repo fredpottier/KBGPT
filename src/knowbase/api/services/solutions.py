@@ -5,7 +5,7 @@ Service de gestion des solutions (domain-agnostic) avec support pour les nouvell
 import yaml
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 from knowbase.common.logging import setup_logging
 from openai.types.chat import (
     ChatCompletionMessageParam,
@@ -20,7 +20,7 @@ class SolutionsManager:
 
     def __init__(self):
         self.config_path = Path(__file__).parent.parent.parent.parent.parent / "config" / "ontologies" / "solutions.yaml"
-        self.llm_router = LLMRouter()
+        self.llm_router = get_llm_router()
         self._solutions_cache = None
 
     def _load_solutions(self) -> Dict[str, Any]:

@@ -30,43 +30,53 @@ from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 from knowbase.semantic.inference import InferenceEngine, InsightType
 
-# Palier 2 - Semantic Search
-QDRANT_CONCEPTS_COLLECTION = "knowwhere_concepts"
+# Palier 2 - Semantic Search (importe depuis concept_embedding_service)
+from knowbase.semantic.concept_embedding_service import (
+    QDRANT_CONCEPTS_COLLECTION,
+    get_concept_embedding_service,
+    ConceptSemanticStatus,
+)
 
 # ============================================================================
 # Phase 2.7 - Concept Matching Engine (Palier 1: Full-Text Neo4j)
 # ============================================================================
 
-# Stopwords FR/EN pour tokenization
-STOPWORDS_FR = {
-    "le", "la", "les", "un", "une", "des", "du", "de", "d", "l",
-    "et", "ou", "mais", "donc", "car", "ni", "que", "qui", "quoi",
-    "ce", "cette", "ces", "mon", "ma", "mes", "ton", "ta", "tes",
-    "son", "sa", "ses", "notre", "nos", "votre", "vos", "leur", "leurs",
-    "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles",
-    "me", "te", "se", "lui", "y", "en",
-    "est", "sont", "a", "ont", "fait", "faire", "être", "avoir",
-    "pour", "par", "avec", "sans", "dans", "sur", "sous", "entre",
-    "vers", "chez", "avant", "après", "pendant", "depuis",
-    "quel", "quelle", "quels", "quelles", "comment", "pourquoi", "quand",
-    "plus", "moins", "très", "bien", "aussi", "comme", "tout", "tous",
-}
+# Stopwords multilingues via NLTK (32 langues supportées)
+def _load_multilingual_stopwords() -> set:
+    """
+    Charge les stopwords de toutes les langues NLTK disponibles.
 
-STOPWORDS_EN = {
-    "the", "a", "an", "and", "or", "but", "if", "then", "else",
-    "when", "where", "why", "how", "what", "which", "who", "whom",
-    "this", "that", "these", "those", "is", "are", "was", "were",
-    "be", "been", "being", "have", "has", "had", "do", "does", "did",
-    "will", "would", "could", "should", "may", "might", "must", "shall",
-    "can", "need", "dare", "ought", "used", "to", "of", "in", "for",
-    "on", "with", "at", "by", "from", "up", "about", "into", "through",
-    "during", "before", "after", "above", "below", "between", "under",
-    "again", "further", "once", "here", "there", "all", "each", "few",
-    "more", "most", "other", "some", "such", "no", "nor", "not", "only",
-    "own", "same", "so", "than", "too", "very", "just", "also",
-}
+    Retourne l'union de tous les stopwords pour supporter
+    les questions en n'importe quelle langue sans détection.
+    """
+    try:
+        from nltk.corpus import stopwords as nltk_stopwords
+        all_stopwords = set()
+        for lang in nltk_stopwords.fileids():
+            try:
+                all_stopwords.update(nltk_stopwords.words(lang))
+            except Exception:
+                pass
 
-STOPWORDS = STOPWORDS_FR | STOPWORDS_EN
+        # Ajouter quelques stopwords supplémentaires courants
+        # (fragments de mots interrogatifs, contractions, etc.)
+        extras = {"qu", "ce", "cet", "d", "l", "n", "s", "t", "j", "m"}
+        all_stopwords.update(extras)
+
+        # Note: logger pas encore disponible ici, on log silencieusement
+        return all_stopwords
+
+    except Exception:
+        # Fallback minimal FR/EN si NLTK indisponible
+        return {
+            "le", "la", "les", "de", "du", "des", "un", "une", "et", "ou",
+            "the", "a", "an", "of", "to", "in", "for", "on", "with", "and", "or",
+            "is", "are", "was", "were", "be", "been", "have", "has", "had",
+            "ce", "cette", "qui", "que", "quoi", "est", "sont",
+        }
+
+# Cache des stopwords (chargés une seule fois)
+STOPWORDS = _load_multilingual_stopwords()
 
 
 def tokenize_query(query: str, min_length: int = 2) -> List[str]:
@@ -74,22 +84,20 @@ def tokenize_query(query: str, min_length: int = 2) -> List[str]:
     Tokenize et normalise une requête utilisateur.
 
     - Lowercase
-    - Supprime ponctuation sauf tirets internes
+    - Supprime ponctuation
+    - Sépare les mots composés (tirets)
     - Filtre stopwords FR/EN
     - Garde les tokens courts (AI, NIS2, IoT) si min_length=2
     """
     # Lowercase et nettoyage basique
     query_clean = query.lower()
 
-    # Remplacer ponctuation par espaces (garder tirets internes aux mots)
-    query_clean = re.sub(r"[^\w\s\-]", " ", query_clean)
+    # Remplacer ponctuation ET tirets par espaces (sépare "est-ce" en "est" "ce")
+    query_clean = re.sub(r"[^\w\s]", " ", query_clean)
 
     # Split et filtrer
     tokens = []
     for token in query_clean.split():
-        # Nettoyer tirets en début/fin
-        token = token.strip("-")
-
         if len(token) < min_length:
             continue
         if token in STOPWORDS:
@@ -128,8 +136,9 @@ class EnrichmentLevel(str, Enum):
 @dataclass
 class GraphContext:
     """Contexte KG extrait pour enrichir la recherche."""
-    # Concepts identifiés dans la question
+    # Concepts identifiés dans la question (avec canonical_id)
     query_concepts: List[str] = field(default_factory=list)
+    query_concept_ids: List[str] = field(default_factory=list)  # canonical_ids
 
     # Concepts liés (voisins directs dans le KG)
     related_concepts: List[Dict[str, Any]] = field(default_factory=list)
@@ -147,17 +156,32 @@ class GraphContext:
     enrichment_level: str = "none"
     processing_time_ms: float = 0.0
 
+    # 🌊 Phase 2.12: Métadonnées de visibilité (Couche 3)
+    visibility_profile: str = "balanced"
+    visibility_filtered_count: int = 0
+
+    # 🌊 Phase 2.13: Statut semantic pour observabilité
+    concept_semantic_status: Optional[ConceptSemanticStatus] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convertit en dictionnaire pour la réponse API."""
-        return {
+        result = {
             "query_concepts": self.query_concepts,
+            "query_concept_ids": self.query_concept_ids,
             "related_concepts": self.related_concepts,
             "transitive_relations": self.transitive_relations,
             "thematic_cluster": self.thematic_cluster,
             "bridge_concepts": self.bridge_concepts,
             "enrichment_level": self.enrichment_level,
             "processing_time_ms": self.processing_time_ms,
+            # 🌊 Phase 2.12: Info profil visibilité
+            "visibility_profile": self.visibility_profile,
+            "visibility_filtered_count": self.visibility_filtered_count,
         }
+        # 🌊 Phase 2.13: Statut semantic
+        if self.concept_semantic_status:
+            result["concept_semantic_status"] = self.concept_semantic_status.to_dict()
+        return result
 
     def get_expansion_terms(self) -> List[str]:
         """Retourne les termes d'expansion pour la recherche."""
@@ -196,6 +220,9 @@ class GraphGuidedSearchService:
     Enrichit les résultats de recherche vectorielle avec des insights
     du KG pour une meilleure compréhension contextuelle.
 
+    🌊 Phase 2.12: Intègre le VisibilityService pour filtrer les relations
+    selon le profil de visibilité du tenant (Couche 3 de l'architecture agnostique).
+
     ⚠️ PERFORMANCE WARNING:
     - EnrichmentLevel.NONE   : 0ms (pas d'enrichissement)
     - EnrichmentLevel.LIGHT  : ~100ms (concepts liés uniquement)
@@ -212,6 +239,7 @@ class GraphGuidedSearchService:
         self._neo4j_client = None
         self._qdrant_client = None
         self._embedder = None
+        self._visibility_service = None
 
     @property
     def inference_engine(self) -> InferenceEngine:
@@ -245,6 +273,11 @@ class GraphGuidedSearchService:
             config = get_semantic_config()
             self._embedder = get_embedder(config)
         return self._embedder
+
+    def get_visibility_service(self, tenant_id: str = "default"):
+        """Lazy loading du VisibilityService pour un tenant."""
+        from knowbase.api.services.visibility_service import get_visibility_service
+        return get_visibility_service(tenant_id=tenant_id)
 
     async def search_concepts_semantic(
         self,
@@ -419,11 +452,34 @@ class GraphGuidedSearchService:
         """
         Phase 2.7 - Concept Matching Engine (Palier 1 + 2: Fusion Lex-Sem)
 
+        Wrapper pour compatibilité - retourne uniquement les noms.
+        Utiliser extract_concepts_from_query_v2() pour avoir les IDs.
+        """
+        result = await self.extract_concepts_from_query_v2(
+            query=query,
+            tenant_id=tenant_id,
+            top_k=top_k,
+            max_per_type=max_per_type,
+            use_semantic=use_semantic,
+        )
+        return result["names"]
+
+    async def extract_concepts_from_query_v2(
+        self,
+        query: str,
+        tenant_id: str = "default",
+        top_k: int = 10,
+        max_per_type: int = 4,
+        use_semantic: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Phase 2.13 - Concept Matching Engine v2 (avec IDs et observabilité)
+
         Extrait les concepts pertinents de la question via:
         - Palier 1: Recherche full-text Neo4j (mots exacts)
-        - Palier 2: Recherche sémantique Qdrant (multilingual)
+        - Palier 2: Recherche sémantique Qdrant (multilingual cross-lingual)
 
-        Fusion: Reciprocal Rank Fusion (RRF) pour combiner les deux rankings.
+        Fusion: Reciprocal Rank Fusion (RRF) avec garde-fous sémantiques.
 
         Args:
             query: Question utilisateur
@@ -433,15 +489,43 @@ class GraphGuidedSearchService:
             use_semantic: Activer Palier 2 (default: True)
 
         Returns:
-            Liste des noms de concepts triés par pertinence
+            Dict avec:
+            - names: Liste des noms de concepts
+            - ids: Liste des canonical_ids correspondants
+            - semantic_status: ConceptSemanticStatus
+            - details: Info détaillées pour debug
         """
         import time
         start_time = time.time()
 
         # =====================================================================
+        # Étape 0: Vérifier le statut semantic (mode dégradé)
+        # =====================================================================
+        semantic_status = None
+        semantic_available = False
+
+        if use_semantic:
+            try:
+                service = get_concept_embedding_service()
+                semantic_status = service.get_status(tenant_id)
+                semantic_available = semantic_status.available
+
+                if not semantic_available:
+                    logger.warning(
+                        f"[OSMOSE] Semantic search unavailable: {semantic_status.message}. "
+                        f"Falling back to lexical-only mode (cross-lingual matching disabled)"
+                    )
+            except Exception as e:
+                logger.warning(f"[OSMOSE] Failed to check semantic status: {e}")
+                semantic_status = ConceptSemanticStatus(
+                    available=False,
+                    message=f"Service error: {str(e)}"
+                )
+
+        # =====================================================================
         # Étape 1: Exécuter Palier 1 + Palier 2 en parallèle
         # =====================================================================
-        if use_semantic:
+        if use_semantic and semantic_available:
             lex_task = self._search_concepts_lexical(query, tenant_id, top_k=50)
             sem_task = self.search_concepts_semantic(query, tenant_id, top_k=30)
 
@@ -451,55 +535,102 @@ class GraphGuidedSearchService:
             sem_results = []
 
         # =====================================================================
-        # Étape 2: Fusion avec Reciprocal Rank Fusion (RRF)
+        # Étape 2: Fusion par canonical_id avec RRF + garde-fous
         # =====================================================================
-        # RRF: score(d) = sum( 1 / (k + rank(d)) ) pour chaque système
-        # k=60 est la constante standard
         RRF_K = 60
 
-        # Construire le dictionnaire de fusion
+        # Garde-fous sémantiques
+        MIN_SEMANTIC_SCORE = 0.78  # Seuil minimum pour considérer un résultat pertinent
+        MIN_SEMANTIC_HITS = 3  # Minimum de hits sémantiques pour considérer le boost
+        SEMANTIC_BOOST = 1.2  # Boost si concept trouvé par les 2 paliers
+
+        # Filtrer les résultats sémantiques sous le seuil de pertinence
+        # (évite d'afficher des concepts hors-sujet pour des questions hors-scope)
+        sem_results_filtered = [
+            r for r in sem_results if r.get("sem_score", 0) >= MIN_SEMANTIC_SCORE
+        ]
+        filtered_count = len(sem_results) - len(sem_results_filtered)
+        if filtered_count > 0:
+            logger.debug(
+                f"[OSMOSE] Filtered {filtered_count} low-score semantic results "
+                f"(threshold={MIN_SEMANTIC_SCORE})"
+            )
+        sem_results = sem_results_filtered
+
+        # Dictionnaire de fusion par canonical_id
         concept_scores: Dict[str, Dict[str, Any]] = {}
 
-        # Ajouter les résultats lexicaux (déjà triés par lex_adj)
+        # Ajouter les résultats lexicaux (par id si disponible, sinon par nom)
         for rank, c in enumerate(lex_results, start=1):
+            concept_id = c.get("id") or c["name"]  # Fallback sur nom si pas d'ID
             name = c["name"]
-            if name not in concept_scores:
-                concept_scores[name] = {
+
+            if concept_id not in concept_scores:
+                concept_scores[concept_id] = {
+                    "id": concept_id,
                     "name": name,
                     "type": c["type"],
                     "quality": c["quality"],
                     "popularity": c["popularity"],
-                    "lex_rank": rank,
+                    "lex_rank": None,
                     "sem_rank": None,
                     "rrf_score": 0.0,
+                    "has_lex": False,
+                    "has_sem": False,
                 }
-            concept_scores[name]["lex_rank"] = rank
-            concept_scores[name]["rrf_score"] += 1.0 / (RRF_K + rank)
+            concept_scores[concept_id]["lex_rank"] = rank
+            concept_scores[concept_id]["has_lex"] = True
+            concept_scores[concept_id]["rrf_score"] += 1.0 / (RRF_K + rank)
 
-        # Ajouter les résultats sémantiques (triés par sem_score)
+        # Ajouter les résultats sémantiques (par concept_id)
         for rank, c in enumerate(sem_results, start=1):
+            concept_id = c.get("concept_id") or c["canonical_name"]
             name = c["canonical_name"]
-            if name not in concept_scores:
-                concept_scores[name] = {
+
+            if concept_id not in concept_scores:
+                concept_scores[concept_id] = {
+                    "id": concept_id,
                     "name": name,
                     "type": c["concept_type"],
                     "quality": c["quality_score"],
                     "popularity": c["popularity"],
                     "lex_rank": None,
-                    "sem_rank": rank,
+                    "sem_rank": None,
                     "rrf_score": 0.0,
+                    "has_lex": False,
+                    "has_sem": False,
                 }
-            concept_scores[name]["sem_rank"] = rank
-            concept_scores[name]["rrf_score"] += 1.0 / (RRF_K + rank)
+            concept_scores[concept_id]["sem_rank"] = rank
+            concept_scores[concept_id]["has_sem"] = True
+            concept_scores[concept_id]["rrf_score"] += 1.0 / (RRF_K + rank)
 
         # =====================================================================
-        # Étape 3: Ranking final avec qualité + popularité
+        # Étape 3: Appliquer le boost sémantique si assez de hits
         # =====================================================================
         candidates = list(concept_scores.values())
 
         if not candidates:
+            elapsed_ms = (time.time() - start_time) * 1000
             logger.info(f"[OSMOSE] No concepts found for: {query[:50]}...")
-            return []
+            return {
+                "names": [],
+                "ids": [],
+                "semantic_status": semantic_status,
+                "details": {
+                    "lex_count": 0,
+                    "sem_count": 0,
+                    "fusion_count": 0,
+                    "elapsed_ms": elapsed_ms,
+                },
+            }
+
+        # Appliquer le boost sémantique si garde-fou respecté
+        sem_only_count = sum(1 for c in candidates if c["has_sem"] and not c["has_lex"])
+        if len(sem_results) >= MIN_SEMANTIC_HITS:
+            for c in candidates:
+                if c["has_lex"] and c["has_sem"]:
+                    # Concept trouvé par les deux systèmes = boost
+                    c["rrf_score"] *= SEMANTIC_BOOST
 
         # Normaliser RRF, popularity, quality
         rrf_values = [c["rrf_score"] for c in candidates]
@@ -525,12 +656,14 @@ class GraphGuidedSearchService:
         # Étape 4: Diversity re-ranking
         # =====================================================================
         final_concepts = []
+        final_ids = []
         type_counts: Dict[str, int] = defaultdict(int)
 
         for c in candidates:
             ctype = c["type"]
             if type_counts[ctype] < max_per_type:
                 final_concepts.append(c["name"])
+                final_ids.append(c["id"])
                 type_counts[ctype] += 1
 
             if len(final_concepts) >= top_k:
@@ -539,10 +672,23 @@ class GraphGuidedSearchService:
         elapsed_ms = (time.time() - start_time) * 1000
         logger.info(
             f"[OSMOSE] Concept matching (RRF): {len(final_concepts)} concepts in {elapsed_ms:.1f}ms "
-            f"(lex={len(lex_results)}, sem={len(sem_results)}, fusion={len(candidates)})"
+            f"(lex={len(lex_results)}, sem={len(sem_results)}, fusion={len(candidates)}, "
+            f"sem_only={sem_only_count}, semantic_available={semantic_available})"
         )
 
-        return final_concepts
+        return {
+            "names": final_concepts,
+            "ids": final_ids,
+            "semantic_status": semantic_status,
+            "details": {
+                "lex_count": len(lex_results),
+                "sem_count": len(sem_results),
+                "fusion_count": len(candidates),
+                "sem_only_count": sem_only_count,
+                "semantic_available": semantic_available,
+                "elapsed_ms": elapsed_ms,
+            },
+        }
 
     async def get_related_concepts(
         self,
@@ -552,20 +698,50 @@ class GraphGuidedSearchService:
     ) -> List[Dict[str, Any]]:
         """
         Récupère les concepts directement liés dans le KG.
+
+        🌊 Phase 2.12: Les relations sont filtrées selon le profil de visibilité
+        du tenant (Couche 3 de l'architecture agnostique KG).
         """
         if not concept_names:
             return []
 
+        # 🌊 Phase 2.12: Récupérer les paramètres du profil de visibilité
+        try:
+            visibility_service = self.get_visibility_service(tenant_id)
+            profile_id = visibility_service.get_profile_for_tenant(tenant_id)
+            profile = visibility_service.get_profile(profile_id)
+            profile_settings = profile.settings
+
+            min_confidence = profile_settings.min_confidence
+            min_source_count = profile_settings.min_source_count
+            allowed_maturities = profile_settings.allowed_maturities
+
+            logger.debug(
+                f"[OSMOSE] Visibility profile '{profile_id}': "
+                f"min_confidence={min_confidence}, min_source_count={min_source_count}"
+            )
+        except Exception as e:
+            logger.warning(f"[OSMOSE] Could not load visibility profile, using defaults: {e}")
+            min_confidence = 0.5
+            min_source_count = 1
+            allowed_maturities = ["VALIDATED", "CANDIDATE"]
+
+        # Requête avec filtres de visibilité
         cypher = """
         UNWIND $concepts AS concept_name
         MATCH (c:CanonicalConcept {canonical_name: concept_name, tenant_id: $tenant_id})
         MATCH (c)-[r]-(related:CanonicalConcept)
         WHERE related.tenant_id = $tenant_id
+          AND coalesce(r.confidence, 0.5) >= $min_confidence
+          AND coalesce(r.source_count, 1) >= $min_source_count
+          AND coalesce(r.maturity, 'CANDIDATE') IN $allowed_maturities
         RETURN DISTINCT
             concept_name AS source,
             related.canonical_name AS concept,
             type(r) AS relation_type,
-            r.confidence AS confidence
+            r.confidence AS confidence,
+            r.maturity AS maturity,
+            r.source_count AS source_count
         ORDER BY r.confidence DESC
         LIMIT $limit
         """
@@ -574,6 +750,9 @@ class GraphGuidedSearchService:
             results = self.neo4j_client.execute_query(cypher, {
                 "concepts": concept_names,
                 "tenant_id": tenant_id,
+                "min_confidence": min_confidence,
+                "min_source_count": min_source_count,
+                "allowed_maturities": allowed_maturities,
                 "limit": len(concept_names) * max_per_concept
             })
 
@@ -583,8 +762,14 @@ class GraphGuidedSearchService:
                     "source": record.get("source"),
                     "concept": record.get("concept"),
                     "relation": record.get("relation_type"),
-                    "confidence": record.get("confidence", 0.5)
+                    "confidence": record.get("confidence", 0.5),
+                    "maturity": record.get("maturity", "CANDIDATE"),
+                    "source_count": record.get("source_count", 1)
                 })
+
+            logger.info(
+                f"[OSMOSE] Related concepts: {len(related)} (profile={profile_id})"
+            )
 
             return related
 
@@ -705,6 +890,8 @@ class GraphGuidedSearchService:
         """
         Construit le contexte KG complet pour une requête.
 
+        🌊 Phase 2.12: Le contexte respecte le profil de visibilité du tenant.
+
         Args:
             query: Question de l'utilisateur
             tenant_id: Tenant ID
@@ -718,20 +905,38 @@ class GraphGuidedSearchService:
 
         context = GraphContext(enrichment_level=enrichment_level.value)
 
+        # 🌊 Phase 2.12: Récupérer le profil de visibilité actif
+        try:
+            visibility_service = self.get_visibility_service(tenant_id)
+            context.visibility_profile = visibility_service.get_profile_for_tenant(tenant_id)
+        except Exception as e:
+            logger.warning(f"[OSMOSE] Could not get visibility profile: {e}")
+            context.visibility_profile = "balanced"
+
         if enrichment_level == EnrichmentLevel.NONE:
             return context
 
-        # Étape 1: Extraire les concepts de la question
-        context.query_concepts = await self.extract_concepts_from_query(
+        # Étape 1: Extraire les concepts de la question (avec IDs et statut semantic)
+        extraction_result = await self.extract_concepts_from_query_v2(
             query, tenant_id
         )
+
+        context.query_concepts = extraction_result["names"]
+        context.query_concept_ids = extraction_result["ids"]
+        context.concept_semantic_status = extraction_result.get("semantic_status")
 
         if not context.query_concepts:
             logger.info(f"[OSMOSE] No concepts found in query: {query[:50]}...")
             context.processing_time_ms = (time.time() - start_time) * 1000
             return context
 
-        logger.info(f"[OSMOSE] Query concepts: {context.query_concepts}")
+        # Log avec info semantic
+        details = extraction_result.get("details", {})
+        logger.info(
+            f"[OSMOSE] Query concepts: {context.query_concepts} "
+            f"(semantic={'ON' if details.get('semantic_available') else 'OFF'}, "
+            f"sem_only={details.get('sem_only_count', 0)})"
+        )
 
         # Étape 2: Concepts liés (tous niveaux sauf NONE)
         context.related_concepts = await self.get_related_concepts(

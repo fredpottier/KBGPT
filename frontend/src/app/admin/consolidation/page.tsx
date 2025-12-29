@@ -1,21 +1,21 @@
 'use client'
 
 /**
- * OSMOS Consolidation Dashboard - Phase 2.11
+ * OSMOSE Consolidation Dashboard - Phase 2.11 v2
  *
  * Administration page for managing Knowledge Graph consolidation:
- * - Trigger consolidation of RawClaims → CanonicalClaims
- * - Trigger consolidation of RawAssertions → CanonicalRelations
- * - View statistics and conflicts
- * - Monitor KG/RAG Contract status
+ * - Tab Claims: RawClaims → CanonicalClaims
+ * - Tab Relations: RawAssertions → CanonicalRelations
+ * - Global "Consolidate All" button
+ * - Comprehensive statistics for both
+ *
+ * Future: Automation settings (every X imports, every X days)
  */
 
 import { useState } from 'react'
 import {
   Box,
   Button,
-  Grid,
-  GridItem,
   HStack,
   Icon,
   Text,
@@ -24,14 +24,15 @@ import {
   Center,
   SimpleGrid,
   Badge,
-  Divider,
   Alert,
   AlertIcon,
   AlertTitle,
   AlertDescription,
-  Progress,
-  Tooltip,
-  useToast,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
   Table,
   Thead,
   Tbody,
@@ -39,6 +40,13 @@ import {
   Th,
   Td,
   TableContainer,
+  Stat,
+  StatLabel,
+  StatNumber,
+  StatHelpText,
+  useToast,
+  Tooltip,
+  Progress,
 } from '@chakra-ui/react'
 import { motion } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -50,11 +58,11 @@ import {
   FiLayers,
   FiGitMerge,
   FiZap,
-  FiActivity,
   FiArrowRight,
-  FiClock,
-  FiFileText,
   FiTarget,
+  FiLink,
+  FiFileText,
+  FiPlay,
 } from 'react-icons/fi'
 import { apiClient } from '@/lib/api'
 
@@ -62,15 +70,18 @@ const MotionBox = motion(Box)
 
 // Types
 interface ConsolidationStats {
-  raw_claims: number
-  canonical_claims: number
-  raw_assertions: number
-  canonical_relations: number
-  validated_claims: number
-  candidate_claims: number
-  conflicting_claims: number
-  validated_relations: number
-  candidate_relations: number
+  raw_claims_count: number
+  raw_assertions_count: number
+  canonical_claims_count: number
+  canonical_relations_count: number
+  claims_validated: number
+  claims_candidate: number
+  claims_conflicting: number
+  claims_context_dependent: number
+  relations_validated: number
+  relations_candidate: number
+  relations_ambiguous: number
+  relation_types: Record<string, number>
 }
 
 interface ConflictInfo {
@@ -78,7 +89,6 @@ interface ConflictInfo {
   subject_concept_id: string
   subject_name?: string
   conflicting_values: string[]
-  resolution_suggestion?: string
 }
 
 interface ConsolidationResult {
@@ -86,6 +96,10 @@ interface ConsolidationResult {
   relations_consolidated: number
   conflicts_detected: number
   execution_time_ms: number
+  claims_validated: number
+  claims_candidate: number
+  relations_validated: number
+  relations_candidate: number
 }
 
 // Stat Card Component
@@ -95,272 +109,506 @@ const StatCard = ({
   subtitle,
   icon,
   color = 'brand',
-  delay = 0,
 }: {
   title: string
   value: string | number
   subtitle?: string
   icon: any
   color?: string
-  delay?: number
 }) => (
-  <MotionBox
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.4, delay }}
-  >
-    <Box
-      bg="bg.secondary"
-      border="1px solid"
-      borderColor="border.default"
-      rounded="xl"
-      p={5}
-      position="relative"
-      overflow="hidden"
-      _hover={{
-        borderColor: `${color}.500`,
-        transform: 'translateY(-2px)',
-        boxShadow: `0 0 20px rgba(99, 102, 241, 0.1)`,
-      }}
-      transition="all 0.2s"
-    >
-      <HStack spacing={4}>
-        <Box
-          w={12}
-          h={12}
-          rounded="xl"
-          bg={`rgba(99, 102, 241, 0.15)`}
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-        >
-          <Icon as={icon} boxSize={6} color={`${color}.400`} />
-        </Box>
-        <VStack align="start" spacing={0} flex={1}>
-          <Text fontSize="xs" color="text.muted" textTransform="uppercase" letterSpacing="wide">
-            {title}
-          </Text>
-          <Text fontSize="2xl" fontWeight="bold" color="text.primary">
-            {value}
-          </Text>
-          {subtitle && (
-            <Text fontSize="xs" color="text.muted">
-              {subtitle}
-            </Text>
-          )}
-        </VStack>
-      </HStack>
-    </Box>
-  </MotionBox>
-)
-
-// Maturity Badge Component
-const MaturityBadge = ({ maturity, count }: { maturity: string; count: number }) => {
-  const colorScheme = {
-    VALIDATED: 'green',
-    CANDIDATE: 'yellow',
-    CONFLICTING: 'red',
-    CONTEXT_DEPENDENT: 'purple',
-    SUPERSEDED: 'gray',
-    AMBIGUOUS_TYPE: 'orange',
-  }[maturity] || 'gray'
-
-  return (
-    <Badge colorScheme={colorScheme} px={2} py={1} rounded="md" fontSize="xs">
-      {maturity}: {count}
-    </Badge>
-  )
-}
-
-// Section Card
-const SectionCard = ({
-  title,
-  icon,
-  children,
-  delay = 0,
-  action,
-}: {
-  title: string
-  icon: any
-  children: React.ReactNode
-  delay?: number
-  action?: React.ReactNode
-}) => (
-  <MotionBox
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.4, delay }}
-  >
-    <Box
-      bg="bg.secondary"
-      border="1px solid"
-      borderColor="border.default"
-      rounded="xl"
-      overflow="hidden"
-    >
-      <HStack
-        px={5}
-        py={4}
-        borderBottom="1px solid"
-        borderColor="border.default"
-        bg="bg.tertiary"
-        justify="space-between"
-      >
-        <HStack>
-          <Icon as={icon} boxSize={5} color="brand.400" />
-          <Text fontWeight="semibold" color="text.primary">
-            {title}
-          </Text>
-        </HStack>
-        {action}
-      </HStack>
-      <Box p={5}>
-        {children}
-      </Box>
-    </Box>
-  </MotionBox>
-)
-
-// Consolidation Flow Diagram
-const ConsolidationFlowDiagram = () => (
   <Box
-    bg="bg.tertiary"
-    rounded="xl"
-    p={6}
+    bg="bg.secondary"
     border="1px solid"
     borderColor="border.default"
+    rounded="xl"
+    p={4}
+    _hover={{
+      borderColor: `${color}.500`,
+      transform: 'translateY(-2px)',
+    }}
+    transition="all 0.2s"
   >
-    <HStack spacing={4} justify="center" align="center" flexWrap="wrap">
-      <VStack spacing={1}>
-        <Box
-          px={4}
-          py={2}
-          bg="yellow.900"
-          border="1px solid"
-          borderColor="yellow.600"
-          rounded="lg"
-        >
-          <Text fontSize="sm" fontWeight="medium" color="yellow.200">
-            RawClaim / RawAssertion
+    <HStack spacing={3}>
+      <Box
+        w={10}
+        h={10}
+        rounded="lg"
+        bg={`rgba(99, 102, 241, 0.15)`}
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
+      >
+        <Icon as={icon} boxSize={5} color={`${color}.400`} />
+      </Box>
+      <VStack align="start" spacing={0} flex={1}>
+        <Text fontSize="xs" color="text.muted" textTransform="uppercase">
+          {title}
+        </Text>
+        <Text fontSize="xl" fontWeight="bold" color="text.primary">
+          {value}
+        </Text>
+        {subtitle && (
+          <Text fontSize="xs" color="text.muted">
+            {subtitle}
           </Text>
-        </Box>
-        <Text fontSize="xs" color="text.muted">Extraction</Text>
-      </VStack>
-
-      <Icon as={FiArrowRight} boxSize={5} color="text.muted" />
-
-      <VStack spacing={1}>
-        <Box
-          px={4}
-          py={2}
-          bg="brand.900"
-          border="1px solid"
-          borderColor="brand.500"
-          rounded="lg"
-        >
-          <Text fontSize="sm" fontWeight="medium" color="brand.200">
-            Consolidation
-          </Text>
-        </Box>
-        <Text fontSize="xs" color="text.muted">Groupement + Maturite</Text>
-      </VStack>
-
-      <Icon as={FiArrowRight} boxSize={5} color="text.muted" />
-
-      <VStack spacing={1}>
-        <Box
-          px={4}
-          py={2}
-          bg="green.900"
-          border="1px solid"
-          borderColor="green.500"
-          rounded="lg"
-        >
-          <Text fontSize="sm" fontWeight="medium" color="green.200">
-            CanonicalClaim / CanonicalRelation
-          </Text>
-        </Box>
-        <Text fontSize="xs" color="text.muted">Knowledge Graph</Text>
+        )}
       </VStack>
     </HStack>
   </Box>
 )
 
+// Flow Diagram Component
+const FlowDiagram = ({ type }: { type: 'claims' | 'relations' }) => {
+  const isRelations = type === 'relations'
+  return (
+    <HStack spacing={3} justify="center" py={4} flexWrap="wrap">
+      <Box
+        px={3}
+        py={2}
+        bg="yellow.900"
+        border="1px solid"
+        borderColor="yellow.600"
+        rounded="lg"
+      >
+        <Text fontSize="sm" fontWeight="medium" color="yellow.200">
+          {isRelations ? 'RawAssertion' : 'RawClaim'}
+        </Text>
+      </Box>
+      <Icon as={FiArrowRight} boxSize={4} color="text.muted" />
+      <Box
+        px={3}
+        py={2}
+        bg="brand.900"
+        border="1px solid"
+        borderColor="brand.500"
+        rounded="lg"
+      >
+        <Text fontSize="sm" fontWeight="medium" color="brand.200">
+          Consolidation
+        </Text>
+      </Box>
+      <Icon as={FiArrowRight} boxSize={4} color="text.muted" />
+      <Box
+        px={3}
+        py={2}
+        bg="green.900"
+        border="1px solid"
+        borderColor="green.500"
+        rounded="lg"
+      >
+        <Text fontSize="sm" fontWeight="medium" color="green.200">
+          {isRelations ? 'CanonicalRelation' : 'CanonicalClaim'}
+        </Text>
+      </Box>
+      {isRelations && (
+        <>
+          <Icon as={FiArrowRight} boxSize={4} color="text.muted" />
+          <Box
+            px={3}
+            py={2}
+            bg="purple.900"
+            border="1px solid"
+            borderColor="purple.500"
+            rounded="lg"
+          >
+            <Text fontSize="sm" fontWeight="medium" color="purple.200">
+              Typed Edges
+            </Text>
+          </Box>
+        </>
+      )}
+    </HStack>
+  )
+}
+
+// Claims Tab Content
+const ClaimsTab = ({
+  stats,
+  conflicts,
+  claimTypes,
+  onConsolidate,
+  isConsolidating,
+  lastResult,
+}: {
+  stats: ConsolidationStats | null
+  conflicts: ConflictInfo[]
+  claimTypes: string[]
+  onConsolidate: () => void
+  isConsolidating: boolean
+  lastResult: ConsolidationResult | null
+}) => (
+  <VStack spacing={6} align="stretch">
+    {/* Flow Diagram */}
+    <Box bg="bg.tertiary" rounded="xl" border="1px solid" borderColor="border.default">
+      <FlowDiagram type="claims" />
+    </Box>
+
+    {/* Action Button */}
+    <HStack justify="space-between">
+      <Text color="text.secondary" fontSize="sm">
+        Consolide les RawClaims en CanonicalClaims avec calcul de maturité
+      </Text>
+      <Button
+        leftIcon={<FiPlay />}
+        colorScheme="brand"
+        onClick={onConsolidate}
+        isLoading={isConsolidating}
+        loadingText="Consolidation..."
+      >
+        Consolider Claims
+      </Button>
+    </HStack>
+
+    {/* Last Result */}
+    {lastResult && lastResult.claims_consolidated > 0 && (
+      <Alert status="success" variant="subtle" rounded="xl" bg="green.900" border="1px solid" borderColor="green.600">
+        <AlertIcon color="green.400" />
+        <Box>
+          <AlertTitle color="green.200">Claims consolidés</AlertTitle>
+          <AlertDescription color="green.300">
+            {lastResult.claims_consolidated} claims ({lastResult.claims_validated} validés, {lastResult.claims_candidate} candidats, {lastResult.conflicts_detected} conflits)
+          </AlertDescription>
+        </Box>
+      </Alert>
+    )}
+
+    {/* Stats Grid */}
+    <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
+      <StatCard
+        title="RawClaims"
+        value={stats?.raw_claims_count || 0}
+        subtitle="Avant consolidation"
+        icon={FiFileText}
+        color="yellow"
+      />
+      <StatCard
+        title="CanonicalClaims"
+        value={stats?.canonical_claims_count || 0}
+        subtitle="Après consolidation"
+        icon={FiTarget}
+        color="green"
+      />
+      <StatCard
+        title="Validés"
+        value={stats?.claims_validated || 0}
+        subtitle="Multi-source"
+        icon={FiCheckCircle}
+        color="green"
+      />
+      <StatCard
+        title="Conflits"
+        value={stats?.claims_conflicting || 0}
+        subtitle="À résoudre"
+        icon={FiAlertTriangle}
+        color="red"
+      />
+    </SimpleGrid>
+
+    {/* Conflicts Table */}
+    {conflicts.length > 0 && (
+      <Box bg="bg.secondary" border="1px solid" borderColor="border.default" rounded="xl" overflow="hidden">
+        <HStack px={4} py={3} bg="bg.tertiary" borderBottom="1px solid" borderColor="border.default">
+          <Icon as={FiAlertTriangle} color="red.400" />
+          <Text fontWeight="semibold" color="text.primary">Conflits détectés</Text>
+          <Badge colorScheme="red">{conflicts.length}</Badge>
+        </HStack>
+        <TableContainer>
+          <Table variant="simple" size="sm">
+            <Thead>
+              <Tr>
+                <Th color="text.muted">Concept</Th>
+                <Th color="text.muted">Type</Th>
+                <Th color="text.muted">Valeurs en conflit</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {conflicts.slice(0, 5).map((conflict, idx) => (
+                <Tr key={idx}>
+                  <Td>
+                    <Text color="text.primary" fontWeight="medium">
+                      {conflict.subject_name || conflict.subject_concept_id}
+                    </Text>
+                  </Td>
+                  <Td><Badge colorScheme="purple">{conflict.claim_type}</Badge></Td>
+                  <Td>
+                    <HStack spacing={1} flexWrap="wrap">
+                      {conflict.conflicting_values.slice(0, 3).map((val, i) => (
+                        <Badge key={i} colorScheme="red" variant="subtle" fontSize="xs">{val}</Badge>
+                      ))}
+                    </HStack>
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        </TableContainer>
+      </Box>
+    )}
+
+    {/* KG/RAG Contract Explanation */}
+    <Box bg="bg.secondary" border="1px solid" borderColor="border.default" rounded="xl" p={5}>
+      <HStack mb={4}>
+        <Icon as={FiZap} color="brand.400" />
+        <Text fontWeight="semibold" color="text.primary">KG/RAG Contract</Text>
+      </HStack>
+      <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+        <Box p={3} bg="green.900" rounded="lg" borderLeft="3px solid" borderColor="green.400">
+          <Text fontSize="sm" fontWeight="medium" color="green.200">VALIDATED = Facts</Text>
+          <Text fontSize="xs" color="green.300">Affirmer sans hedging</Text>
+        </Box>
+        <Box p={3} bg="yellow.900" rounded="lg" borderLeft="3px solid" borderColor="yellow.400">
+          <Text fontSize="sm" fontWeight="medium" color="yellow.200">CANDIDATE = Suggestions</Text>
+          <Text fontSize="xs" color="yellow.300">Utiliser du hedging</Text>
+        </Box>
+        <Box p={3} bg="red.900" rounded="lg" borderLeft="3px solid" borderColor="red.400">
+          <Text fontSize="sm" fontWeight="medium" color="red.200">CONFLICTING = Conflits</Text>
+          <Text fontSize="xs" color="red.300">Mentionner le désaccord</Text>
+        </Box>
+      </SimpleGrid>
+    </Box>
+  </VStack>
+)
+
+// Relations Tab Content
+const RelationsTab = ({
+  stats,
+  onConsolidate,
+  isConsolidating,
+  lastResult,
+}: {
+  stats: ConsolidationStats | null
+  onConsolidate: () => void
+  isConsolidating: boolean
+  lastResult: ConsolidationResult | null
+}) => (
+  <VStack spacing={6} align="stretch">
+    {/* Flow Diagram */}
+    <Box bg="bg.tertiary" rounded="xl" border="1px solid" borderColor="border.default">
+      <FlowDiagram type="relations" />
+    </Box>
+
+    {/* Action Button */}
+    <HStack justify="space-between">
+      <Text color="text.secondary" fontSize="sm">
+        Consolide les RawAssertions en CanonicalRelations et crée les typed edges
+      </Text>
+      <Button
+        leftIcon={<FiPlay />}
+        colorScheme="brand"
+        onClick={onConsolidate}
+        isLoading={isConsolidating}
+        loadingText="Consolidation..."
+      >
+        Consolider Relations
+      </Button>
+    </HStack>
+
+    {/* Last Result */}
+    {lastResult && lastResult.relations_consolidated > 0 && (
+      <Alert status="success" variant="subtle" rounded="xl" bg="green.900" border="1px solid" borderColor="green.600">
+        <AlertIcon color="green.400" />
+        <Box>
+          <AlertTitle color="green.200">Relations consolidées</AlertTitle>
+          <AlertDescription color="green.300">
+            {lastResult.relations_consolidated} relations ({lastResult.relations_validated} validées, {lastResult.relations_candidate} candidates)
+          </AlertDescription>
+        </Box>
+      </Alert>
+    )}
+
+    {/* Stats Grid */}
+    <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
+      <StatCard
+        title="RawAssertions"
+        value={stats?.raw_assertions_count || 0}
+        subtitle="Avant consolidation"
+        icon={FiFileText}
+        color="yellow"
+      />
+      <StatCard
+        title="CanonicalRelations"
+        value={stats?.canonical_relations_count || 0}
+        subtitle="Après consolidation"
+        icon={FiLink}
+        color="green"
+      />
+      <StatCard
+        title="Validées"
+        value={stats?.relations_validated || 0}
+        subtitle="Typed edges créés"
+        icon={FiCheckCircle}
+        color="green"
+      />
+      <StatCard
+        title="Candidates"
+        value={stats?.relations_candidate || 0}
+        subtitle="Single source"
+        icon={FiTarget}
+        color="yellow"
+      />
+    </SimpleGrid>
+
+    {/* Relation Types Distribution */}
+    {stats?.relation_types && Object.keys(stats.relation_types).length > 0 && (
+      <Box bg="bg.secondary" border="1px solid" borderColor="border.default" rounded="xl" overflow="hidden">
+        <HStack px={4} py={3} bg="bg.tertiary" borderBottom="1px solid" borderColor="border.default">
+          <Icon as={FiLayers} color="brand.400" />
+          <Text fontWeight="semibold" color="text.primary">Types de relations</Text>
+          <Badge colorScheme="brand">{Object.keys(stats.relation_types).length}</Badge>
+        </HStack>
+        <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3} p={4}>
+          {Object.entries(stats.relation_types).slice(0, 8).map(([type, count]) => (
+            <HStack
+              key={type}
+              p={2}
+              bg="bg.tertiary"
+              rounded="lg"
+              justify="space-between"
+            >
+              <Text fontSize="sm" color="text.primary" fontWeight="medium">
+                {type}
+              </Text>
+              <Badge colorScheme="brand">{count}</Badge>
+            </HStack>
+          ))}
+        </SimpleGrid>
+      </Box>
+    )}
+
+    {/* Maturity Explanation */}
+    <Box bg="bg.secondary" border="1px solid" borderColor="border.default" rounded="xl" p={5}>
+      <HStack mb={4}>
+        <Icon as={FiDatabase} color="brand.400" />
+        <Text fontWeight="semibold" color="text.primary">Maturité des Relations</Text>
+      </HStack>
+      <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+        <Box p={3} bg="green.900" rounded="lg" borderLeft="3px solid" borderColor="green.400">
+          <Text fontSize="sm" fontWeight="medium" color="green.200">VALIDATED</Text>
+          <Text fontSize="xs" color="green.300">2+ sources distinctes → Typed edge créé</Text>
+        </Box>
+        <Box p={3} bg="yellow.900" rounded="lg" borderLeft="3px solid" borderColor="yellow.400">
+          <Text fontSize="sm" fontWeight="medium" color="yellow.200">CANDIDATE</Text>
+          <Text fontSize="xs" color="yellow.300">1 seule source → Pas de typed edge</Text>
+        </Box>
+        <Box p={3} bg="orange.900" rounded="lg" borderLeft="3px solid" borderColor="orange.400">
+          <Text fontSize="sm" fontWeight="medium" color="orange.200">AMBIGUOUS_TYPE</Text>
+          <Text fontSize="xs" color="orange.300">Type incertain (delta &lt; 0.15)</Text>
+        </Box>
+      </SimpleGrid>
+    </Box>
+  </VStack>
+)
+
 export default function ConsolidationPage() {
   const toast = useToast()
   const queryClient = useQueryClient()
-  const [lastResult, setLastResult] = useState<ConsolidationResult | null>(null)
+  const [lastClaimsResult, setLastClaimsResult] = useState<ConsolidationResult | null>(null)
+  const [lastRelationsResult, setLastRelationsResult] = useState<ConsolidationResult | null>(null)
+  const [lastAllResult, setLastAllResult] = useState<ConsolidationResult | null>(null)
 
   // Fetch consolidation stats
   const {
-    data: statsResponse,
+    data: statsData,
     isLoading: statsLoading,
-    error: statsError,
     refetch: refetchStats,
   } = useQuery({
     queryKey: ['consolidation', 'stats'],
     queryFn: async () => {
-      // Fetch counts from Neo4j via API
-      const [claimsRes, conflictsRes, claimTypesRes] = await Promise.all([
-        apiClient.post('/claims/search', { limit: 1 }),
+      const [statsRes, conflictsRes, claimTypesRes] = await Promise.all([
+        apiClient.get<ConsolidationStats>('/claims/stats'),
         apiClient.get('/claims/conflicts'),
         apiClient.get('/claims/claim-types'),
       ])
-
-      // Build stats object
-      const stats: ConsolidationStats = {
-        raw_claims: 0,  // Would need separate endpoint
-        canonical_claims: claimsRes.data?.total || 0,
-        raw_assertions: 0,  // Would need separate endpoint
-        canonical_relations: 0,  // Would need separate endpoint
-        validated_claims: 0,
-        candidate_claims: 0,
-        conflicting_claims: conflictsRes.data?.total_conflicts || 0,
-        validated_relations: 0,
-        candidate_relations: 0,
+      return {
+        stats: statsRes.data,
+        conflicts: conflictsRes.data?.conflicts || [],
+        claimTypes: claimTypesRes.data || [],
       }
-
-      return { stats, conflicts: conflictsRes.data?.conflicts || [], claimTypes: claimTypesRes.data || [] }
     },
     refetchInterval: 30000,
   })
 
-  // Consolidation mutation
-  const consolidateMutation = useMutation({
+  // Consolidate Claims only
+  const consolidateClaimsMutation = useMutation({
     mutationFn: async () => {
       const response = await apiClient.post<ConsolidationResult>('/claims/consolidate', {
-        force: false,
+        consolidate_claims: true,
+        consolidate_relations: false,
       })
-      if (!response.success) {
-        throw new Error(response.error || 'Consolidation failed')
-      }
+      if (!response.success) throw new Error(response.error || 'Consolidation failed')
       return response.data
     },
     onSuccess: (data) => {
-      setLastResult(data!)
+      setLastClaimsResult(data!)
       queryClient.invalidateQueries({ queryKey: ['consolidation'] })
       toast({
-        title: 'Consolidation terminee',
-        description: `${data!.claims_consolidated} claims, ${data!.relations_consolidated} relations consolidees`,
+        title: 'Claims consolidés',
+        description: `${data!.claims_consolidated} claims traités`,
         status: 'success',
-        duration: 5000,
-        isClosable: true,
+        duration: 4000,
       })
     },
     onError: (error: any) => {
-      toast({
-        title: 'Erreur de consolidation',
-        description: error.message,
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      })
+      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 5000 })
     },
   })
 
-  const stats = statsResponse?.stats
-  const conflicts = statsResponse?.conflicts || []
-  const claimTypes = statsResponse?.claimTypes || []
+  // Consolidate Relations only
+  const consolidateRelationsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post<ConsolidationResult>('/claims/consolidate', {
+        consolidate_claims: false,
+        consolidate_relations: true,
+      })
+      if (!response.success) throw new Error(response.error || 'Consolidation failed')
+      return response.data
+    },
+    onSuccess: (data) => {
+      setLastRelationsResult(data!)
+      queryClient.invalidateQueries({ queryKey: ['consolidation'] })
+      toast({
+        title: 'Relations consolidées',
+        description: `${data!.relations_consolidated} relations traitées`,
+        status: 'success',
+        duration: 4000,
+      })
+    },
+    onError: (error: any) => {
+      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 5000 })
+    },
+  })
+
+  // Consolidate All
+  const consolidateAllMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post<ConsolidationResult>('/claims/consolidate', {
+        consolidate_claims: true,
+        consolidate_relations: true,
+      })
+      if (!response.success) throw new Error(response.error || 'Consolidation failed')
+      return response.data
+    },
+    onSuccess: (data) => {
+      setLastAllResult(data!)
+      setLastClaimsResult(data!)
+      setLastRelationsResult(data!)
+      queryClient.invalidateQueries({ queryKey: ['consolidation'] })
+      toast({
+        title: 'Consolidation complète',
+        description: `${data!.claims_consolidated} claims, ${data!.relations_consolidated} relations`,
+        status: 'success',
+        duration: 5000,
+      })
+    },
+    onError: (error: any) => {
+      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 5000 })
+    },
+  })
+
+  const isAnyConsolidating =
+    consolidateClaimsMutation.isPending ||
+    consolidateRelationsMutation.isPending ||
+    consolidateAllMutation.isPending
 
   if (statsLoading) {
     return (
@@ -373,6 +621,10 @@ export default function ConsolidationPage() {
     )
   }
 
+  const stats = statsData?.stats || null
+  const conflicts = statsData?.conflicts || []
+  const claimTypes = statsData?.claimTypes || []
+
   return (
     <Box maxW="1400px" mx="auto">
       {/* Header */}
@@ -380,9 +632,9 @@ export default function ConsolidationPage() {
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        mb={8}
+        mb={6}
       >
-        <HStack spacing={3} justify="space-between" flexWrap="wrap">
+        <HStack spacing={3} justify="space-between" flexWrap="wrap" gap={4}>
           <HStack spacing={3}>
             <Box
               w={10}
@@ -398,289 +650,130 @@ export default function ConsolidationPage() {
             </Box>
             <VStack align="start" spacing={0}>
               <Text fontSize="2xl" fontWeight="bold" color="text.primary">
-                Consolidation Knowledge Graph
+                Consolidation
               </Text>
-              <Text color="text.secondary">
-                Agregation des assertions brutes en connaissances canoniques
+              <Text color="text.secondary" fontSize="sm">
+                Agrégation des extractions brutes en connaissances canoniques
               </Text>
             </VStack>
           </HStack>
 
-          <Button
-            leftIcon={<FiRefreshCw />}
-            colorScheme="brand"
-            size="lg"
-            onClick={() => consolidateMutation.mutate()}
-            isLoading={consolidateMutation.isPending}
-            loadingText="Consolidation..."
-            _hover={{
-              transform: 'translateY(-2px)',
-              boxShadow: '0 0 20px rgba(99, 102, 241, 0.4)',
-            }}
-          >
-            Lancer la consolidation
-          </Button>
+          <Tooltip label="Consolide Claims ET Relations en une seule opération">
+            <Button
+              leftIcon={<FiRefreshCw />}
+              colorScheme="brand"
+              size="lg"
+              onClick={() => consolidateAllMutation.mutate()}
+              isLoading={consolidateAllMutation.isPending}
+              loadingText="Consolidation..."
+              _hover={{
+                transform: 'translateY(-2px)',
+                boxShadow: '0 0 20px rgba(99, 102, 241, 0.4)',
+              }}
+            >
+              Tout consolider
+            </Button>
+          </Tooltip>
         </HStack>
       </MotionBox>
 
-      {/* Last Result Alert */}
-      {lastResult && (
-        <MotionBox
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          mb={6}
-        >
-          <Alert
-            status="success"
-            variant="subtle"
-            rounded="xl"
-            bg="green.900"
-            borderColor="green.600"
-            border="1px solid"
-          >
+      {/* Global Result Alert */}
+      {lastAllResult && (
+        <MotionBox initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} mb={6}>
+          <Alert status="success" variant="subtle" rounded="xl" bg="green.900" border="1px solid" borderColor="green.600">
             <AlertIcon color="green.400" />
             <Box flex="1">
-              <AlertTitle color="green.200">Consolidation reussie</AlertTitle>
+              <AlertTitle color="green.200">Consolidation complète réussie</AlertTitle>
               <AlertDescription color="green.300">
-                {lastResult.claims_consolidated} claims et {lastResult.relations_consolidated} relations
-                consolides en {(lastResult.execution_time_ms / 1000).toFixed(2)}s.
-                {lastResult.conflicts_detected > 0 && (
-                  <Text as="span" color="orange.300">
-                    {' '}{lastResult.conflicts_detected} conflits detectes.
-                  </Text>
-                )}
+                {lastAllResult.claims_consolidated} claims et {lastAllResult.relations_consolidated} relations
+                consolidés en {(lastAllResult.execution_time_ms / 1000).toFixed(2)}s
               </AlertDescription>
             </Box>
           </Alert>
         </MotionBox>
       )}
 
-      {/* Flow Diagram */}
+      {/* Tabs */}
       <MotionBox
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1 }}
-        mb={6}
       >
-        <ConsolidationFlowDiagram />
+        <Tabs variant="soft-rounded" colorScheme="brand">
+          <TabList mb={6} bg="bg.secondary" p={2} rounded="xl" border="1px solid" borderColor="border.default">
+            <Tab
+              _selected={{ bg: 'brand.500', color: 'white' }}
+              color="text.secondary"
+              fontWeight="medium"
+            >
+              <HStack>
+                <Icon as={FiTarget} />
+                <Text>Claims</Text>
+                <Badge colorScheme="brand" variant="subtle">{stats?.canonical_claims_count || 0}</Badge>
+              </HStack>
+            </Tab>
+            <Tab
+              _selected={{ bg: 'brand.500', color: 'white' }}
+              color="text.secondary"
+              fontWeight="medium"
+            >
+              <HStack>
+                <Icon as={FiLink} />
+                <Text>Relations</Text>
+                <Badge colorScheme="brand" variant="subtle">{stats?.canonical_relations_count || 0}</Badge>
+              </HStack>
+            </Tab>
+          </TabList>
+
+          <TabPanels>
+            <TabPanel p={0}>
+              <ClaimsTab
+                stats={stats}
+                conflicts={conflicts}
+                claimTypes={claimTypes}
+                onConsolidate={() => consolidateClaimsMutation.mutate()}
+                isConsolidating={consolidateClaimsMutation.isPending}
+                lastResult={lastClaimsResult}
+              />
+            </TabPanel>
+            <TabPanel p={0}>
+              <RelationsTab
+                stats={stats}
+                onConsolidate={() => consolidateRelationsMutation.mutate()}
+                isConsolidating={consolidateRelationsMutation.isPending}
+                lastResult={lastRelationsResult}
+              />
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
       </MotionBox>
 
-      {/* Statistics Cards */}
-      <SimpleGrid columns={{ base: 1, md: 2, xl: 4 }} spacing={4} mb={6}>
-        <StatCard
-          title="Claims Canoniques"
-          value={stats?.canonical_claims || 0}
-          subtitle="Assertions unaires consolidees"
-          icon={FiTarget}
-          delay={0.2}
-        />
-        <StatCard
-          title="Claims Valides"
-          value={stats?.validated_claims || '-'}
-          subtitle="Multi-source confirmes"
-          icon={FiCheckCircle}
-          color="green"
-          delay={0.3}
-        />
-        <StatCard
-          title="Conflits"
-          value={stats?.conflicting_claims || 0}
-          subtitle="Valeurs contradictoires"
-          icon={FiAlertTriangle}
-          color="red"
-          delay={0.4}
-        />
-        <StatCard
-          title="Types de Claims"
-          value={claimTypes.length}
-          subtitle="Categories detectees"
-          icon={FiLayers}
-          color="purple"
-          delay={0.5}
-        />
-      </SimpleGrid>
-
-      <Grid templateColumns={{ base: '1fr', lg: '2fr 1fr' }} gap={6}>
-        {/* Conflicts Table */}
-        <SectionCard
-          title="Conflits detectes"
-          icon={FiAlertTriangle}
-          delay={0.6}
-          action={
-            <Badge colorScheme="red" fontSize="sm">
-              {conflicts.length} conflits
-            </Badge>
-          }
-        >
-          {conflicts.length === 0 ? (
-            <Center py={8}>
-              <VStack spacing={2}>
-                <Icon as={FiCheckCircle} boxSize={10} color="green.400" />
-                <Text color="text.muted">Aucun conflit detecte</Text>
-                <Text fontSize="sm" color="text.muted">
-                  Toutes les valeurs sont coherentes
-                </Text>
-              </VStack>
-            </Center>
-          ) : (
-            <TableContainer>
-              <Table variant="simple" size="sm">
-                <Thead>
-                  <Tr>
-                    <Th color="text.muted">Concept</Th>
-                    <Th color="text.muted">Type</Th>
-                    <Th color="text.muted">Valeurs en conflit</Th>
-                  </Tr>
-                </Thead>
-                <Tbody>
-                  {conflicts.slice(0, 10).map((conflict: ConflictInfo, idx: number) => (
-                    <Tr key={idx}>
-                      <Td>
-                        <Text color="text.primary" fontWeight="medium">
-                          {conflict.subject_name || conflict.subject_concept_id}
-                        </Text>
-                      </Td>
-                      <Td>
-                        <Badge colorScheme="purple">{conflict.claim_type}</Badge>
-                      </Td>
-                      <Td>
-                        <HStack spacing={2} flexWrap="wrap">
-                          {conflict.conflicting_values.map((val, i) => (
-                            <Badge key={i} colorScheme="red" variant="subtle">
-                              {val}
-                            </Badge>
-                          ))}
-                        </HStack>
-                      </Td>
-                    </Tr>
-                  ))}
-                </Tbody>
-              </Table>
-              {conflicts.length > 10 && (
-                <Text fontSize="sm" color="text.muted" mt={3} textAlign="center">
-                  ... et {conflicts.length - 10} autres conflits
-                </Text>
-              )}
-            </TableContainer>
-          )}
-        </SectionCard>
-
-        {/* Claim Types & Info */}
-        <VStack spacing={6} align="stretch">
-          {/* Claim Types */}
-          <SectionCard title="Types de Claims" icon={FiLayers} delay={0.7}>
-            {claimTypes.length === 0 ? (
-              <Text color="text.muted" fontSize="sm">
-                Aucun type de claim trouve
-              </Text>
-            ) : (
-              <VStack align="stretch" spacing={2}>
-                {claimTypes.slice(0, 10).map((type: string, idx: number) => (
-                  <HStack
-                    key={idx}
-                    p={2}
-                    bg="bg.tertiary"
-                    rounded="lg"
-                    justify="space-between"
-                  >
-                    <Text fontSize="sm" color="text.primary">
-                      {type}
-                    </Text>
-                    <Icon as={FiTarget} color="brand.400" boxSize={4} />
-                  </HStack>
-                ))}
-                {claimTypes.length > 10 && (
-                  <Text fontSize="xs" color="text.muted" textAlign="center">
-                    +{claimTypes.length - 10} autres types
-                  </Text>
-                )}
-              </VStack>
-            )}
-          </SectionCard>
-
-          {/* KG/RAG Contract Info */}
-          <SectionCard title="KG/RAG Contract" icon={FiZap} delay={0.8}>
-            <VStack align="stretch" spacing={3}>
-              <Box p={3} bg="green.900" rounded="lg" borderLeft="3px solid" borderColor="green.400">
-                <Text fontSize="sm" fontWeight="medium" color="green.200">
-                  VALIDATED = KG Facts
-                </Text>
-                <Text fontSize="xs" color="green.300">
-                  Le LLM peut affirmer directement ces faits
-                </Text>
-              </Box>
-
-              <Box p={3} bg="yellow.900" rounded="lg" borderLeft="3px solid" borderColor="yellow.400">
-                <Text fontSize="sm" fontWeight="medium" color="yellow.200">
-                  CANDIDATE = RAG Suggestions
-                </Text>
-                <Text fontSize="xs" color="yellow.300">
-                  Le LLM doit utiliser du hedging ("selon certaines sources...")
-                </Text>
-              </Box>
-
-              <Box p={3} bg="red.900" rounded="lg" borderLeft="3px solid" borderColor="red.400">
-                <Text fontSize="sm" fontWeight="medium" color="red.200">
-                  CONFLICTING = Conflits
-                </Text>
-                <Text fontSize="xs" color="red.300">
-                  Le LLM doit mentionner le desaccord entre sources
-                </Text>
-              </Box>
-            </VStack>
-          </SectionCard>
-        </VStack>
-      </Grid>
-
-      {/* Help Section */}
+      {/* Future: Automation Settings */}
       <MotionBox
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.9 }}
-        mt={6}
+        transition={{ duration: 0.4, delay: 0.3 }}
+        mt={8}
       >
         <Box
           bg="bg.secondary"
-          border="1px solid"
+          border="1px dashed"
           borderColor="border.default"
           rounded="xl"
           p={5}
+          opacity={0.7}
         >
-          <HStack spacing={3} mb={4}>
-            <Icon as={FiFileText} color="brand.400" />
-            <Text fontWeight="semibold" color="text.primary">
-              Qu'est-ce que la consolidation ?
-            </Text>
+          <HStack spacing={3}>
+            <Icon as={FiZap} color="text.muted" />
+            <VStack align="start" spacing={0}>
+              <Text fontWeight="medium" color="text.muted">
+                Automatisation (à venir)
+              </Text>
+              <Text fontSize="sm" color="text.muted">
+                Configuration pour consolider automatiquement tous les X imports ou X jours
+              </Text>
+            </VStack>
           </HStack>
-          <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
-            <VStack align="start" spacing={2}>
-              <Text fontSize="sm" fontWeight="medium" color="brand.300">
-                1. Groupement
-              </Text>
-              <Text fontSize="sm" color="text.muted">
-                Les assertions brutes extraites de differents documents sont groupees
-                par cle unique (sujet, type, scope).
-              </Text>
-            </VStack>
-            <VStack align="start" spacing={2}>
-              <Text fontSize="sm" fontWeight="medium" color="brand.300">
-                2. Calcul de maturite
-              </Text>
-              <Text fontSize="sm" color="text.muted">
-                Chaque groupe est evalue : VALIDATED si multi-source coherent,
-                CONFLICTING si valeurs contradictoires, CANDIDATE sinon.
-              </Text>
-            </VStack>
-            <VStack align="start" spacing={2}>
-              <Text fontSize="sm" fontWeight="medium" color="brand.300">
-                3. Knowledge Graph
-              </Text>
-              <Text fontSize="sm" color="text.muted">
-                Les connaissances canoniques sont stockees dans Neo4j avec
-                leurs sources, permettant le KG/RAG Contract.
-              </Text>
-            </VStack>
-          </SimpleGrid>
         </Box>
       </MotionBox>
     </Box>

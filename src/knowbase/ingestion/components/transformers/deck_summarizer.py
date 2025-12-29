@@ -7,7 +7,7 @@ Module extrait de pptx_pipeline.py pour réutilisabilité.
 from typing import List, Dict, Any, Optional
 import logging
 
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 from knowbase.config.prompts_loader import load_prompts, select_prompt, render_prompt
 from ..utils.text_utils import recursive_chunk
 
@@ -34,7 +34,7 @@ def summarize_large_pptx(
         Utilise un chunking récursif pour les très grands decks
     """
     if llm_router is None:
-        llm_router = LLMRouter()
+        llm_router = get_llm_router()
 
     all_text = "\n\n".join(
         (slide.get("text", "") + "\n" + slide.get("notes", "")).strip()

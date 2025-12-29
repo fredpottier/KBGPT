@@ -3,7 +3,9 @@ Phase 2.8/2.10 - Relation Consolidator
 
 Consolidates RawAssertions into CanonicalRelations by grouping and computing maturity.
 
-Grouping key: (subject_concept_id, object_concept_id, relation_type)
+Grouping key: (subject_concept_id, object_concept_id, predicate_norm)
+Note: Uses predicate_norm (normalized predicate) instead of relation_type for finer granularity
+      and backwards compatibility with RawAssertions that don't have relation_type.
 
 Maturity levels:
 - CANDIDATE: Single source
@@ -14,6 +16,7 @@ Maturity levels:
 
 Author: Claude Code
 Date: 2025-12-24
+Updated: 2025-12-26 - Use predicate_norm for grouping instead of relation_type
 """
 
 import hashlib
@@ -39,7 +42,7 @@ logger = logging.getLogger(__name__)
 def compute_canonical_relation_id(
     tenant_id: str,
     subject_id: str,
-    relation_type: str,
+    predicate_norm: str,
     object_id: str
 ) -> str:
     """
@@ -48,13 +51,13 @@ def compute_canonical_relation_id(
     Args:
         tenant_id: Tenant ID
         subject_id: Subject concept ID
-        relation_type: Relation type
+        predicate_norm: Normalized predicate (e.g., "requires", "uses")
         object_id: Object concept ID
 
     Returns:
         SHA1 hash prefix (16 chars)
     """
-    content = f"{tenant_id}|{subject_id}|{relation_type}|{object_id}"
+    content = f"{tenant_id}|{subject_id}|{predicate_norm}|{object_id}"
     return hashlib.sha1(content.encode()).hexdigest()[:16]
 
 
@@ -186,21 +189,25 @@ class RelationConsolidator:
             assertions: List of RawAssertion dicts
 
         Returns:
-            Dict mapping (subject_id, object_id, relation_type) to list of assertions
+            Dict mapping (subject_id, object_id, predicate_norm) to list of assertions
         """
         groups: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
 
         for assertion in assertions:
-            rel_type = assertion.get("relation_type")
-            if not rel_type:
-                # Skip assertions without relation_type
+            # Use predicate_norm for grouping (more granular, always available)
+            predicate_norm = assertion.get("predicate_norm")
+            if not predicate_norm:
+                # Skip assertions without predicate_norm
                 continue
 
-            key = (
-                assertion.get("subject_concept_id", ""),
-                assertion.get("object_concept_id", ""),
-                rel_type
-            )
+            subject_id = assertion.get("subject_concept_id", "")
+            object_id = assertion.get("object_concept_id", "")
+
+            if not subject_id or not object_id:
+                # Skip incomplete assertions
+                continue
+
+            key = (subject_id, object_id, predicate_norm)
             groups[key].append(assertion)
 
         return dict(groups)
@@ -287,13 +294,13 @@ class RelationConsolidator:
         Consolidate a group of assertions into a CanonicalRelation.
 
         Args:
-            key: (subject_id, object_id, relation_type) tuple
+            key: (subject_id, object_id, predicate_norm) tuple
             assertions: List of assertions in the group
 
         Returns:
             CanonicalRelation instance
         """
-        subject_id, object_id, relation_type_str = key
+        subject_id, object_id, predicate_norm = key
 
         # Compute maturity
         maturity = self.compute_maturity(assertions)
@@ -323,21 +330,19 @@ class RelationConsolidator:
         first_seen = min(created_dates) if created_dates else datetime.utcnow()
         last_seen = max(created_dates) if created_dates else datetime.utcnow()
 
-        # Compute canonical ID
+        # Compute canonical ID using predicate_norm
         canonical_id = compute_canonical_relation_id(
-            self.tenant_id, subject_id, relation_type_str, object_id
+            self.tenant_id, subject_id, predicate_norm, object_id
         )
 
-        # Parse relation type
-        try:
-            relation_type = RelationType(relation_type_str)
-        except ValueError:
-            relation_type = RelationType.UNKNOWN
+        # Infer relation_type from predicate_norm or use explicit if available
+        relation_type = self._infer_relation_type(predicate_norm, assertions)
 
         return CanonicalRelation(
             canonical_relation_id=canonical_id,
             tenant_id=self.tenant_id,
             relation_type=relation_type,
+            predicate_norm=predicate_norm,
             subject_concept_id=subject_id,
             object_concept_id=object_id,
             distinct_documents=len(doc_ids),
@@ -352,9 +357,104 @@ class RelationConsolidator:
             quality_score=median(confidences) if confidences else 0.0,
             maturity=maturity,
             status=RelationStatus.ACTIVE,
-            mapping_version="v2.10",
+            mapping_version="v2.11",
             last_rebuilt_at=datetime.utcnow()
         )
+
+    def _infer_relation_type(
+        self,
+        predicate_norm: str,
+        assertions: List[Dict[str, Any]]
+    ) -> RelationType:
+        """
+        Infer relation type from predicate_norm or explicit relation_type in assertions.
+
+        Args:
+            predicate_norm: Normalized predicate
+            assertions: List of assertions (may have explicit relation_type)
+
+        Returns:
+            RelationType enum value
+        """
+        # First, check if any assertion has explicit relation_type
+        for a in assertions:
+            rel_type = a.get("relation_type")
+            if rel_type:
+                try:
+                    return RelationType(rel_type)
+                except ValueError:
+                    pass
+
+        # Infer from predicate_norm using keyword mapping
+        predicate_lower = predicate_norm.lower()
+
+        # Mapping: predicate keywords → RelationType (using existing enum values)
+        mapping = {
+            # Dependencies
+            RelationType.REQUIRES: [
+                "requires", "must comply with", "needs", "depends on", "necessitates",
+                "is based on", "based on", "derives from", "built on"
+            ],
+            RelationType.USES: [
+                "uses", "utilizes", "employs", "can be used for", "leverages"
+            ],
+
+            # Structural
+            RelationType.PART_OF: [
+                "includes", "include", "contains", "encompasses", "comprises",
+                "is part of", "part of", "belongs to"
+            ],
+            RelationType.SUBTYPE_OF: [
+                "is a type of", "type of", "is a kind of", "subtype of"
+            ],
+
+            # Integration
+            RelationType.INTEGRATES_WITH: [
+                "integrates with", "integrates", "connects to", "interfaces with",
+                "implements", "implement", "realizes"
+            ],
+            RelationType.EXTENDS: [
+                "extends", "expands", "augments", "enhances", "supplements"
+            ],
+
+            # Capabilities
+            RelationType.ENABLES: [
+                "enables", "provides", "offers", "supplies", "delivers", "allows"
+            ],
+
+            # Governance
+            RelationType.APPLIES_TO: [
+                "applies to", "applies", "is applicable to", "governs", "regulates"
+            ],
+
+            # Causality
+            RelationType.CAUSES: [
+                "causes", "affects", "affect", "impacts", "influences", "can lead to",
+                "results in", "leads to"
+            ],
+            RelationType.PREVENTS: [
+                "prevents", "blocks", "stops", "mitigates", "reduces"
+            ],
+
+            # Associations
+            RelationType.ASSOCIATED_WITH: [
+                "is linked to", "is related to", "refers to", "relates to",
+                "associated with", "connected to", "involves"
+            ],
+
+            # Conflicts
+            RelationType.CONFLICTS_WITH: [
+                "conflicts with", "contradicts", "opposes"
+            ],
+        }
+
+        for rel_type, keywords in mapping.items():
+            for keyword in keywords:
+                if keyword in predicate_lower or predicate_lower in keyword:
+                    return rel_type
+
+        # Default fallback for unmapped predicates
+        return RelationType.ASSOCIATED_WITH
 
     def consolidate_all(
         self,

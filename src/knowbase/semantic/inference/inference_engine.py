@@ -184,8 +184,8 @@ class InferenceEngine:
         """Lazy loading du LLMRouter."""
         if self._llm_router is None:
             try:
-                from knowbase.common.llm_router import LLMRouter
-                self._llm_router = LLMRouter()
+                from knowbase.common.llm_router import get_llm_router
+                self._llm_router = get_llm_router()
             except Exception as e:
                 logger.warning(f"[OSMOSE] LLMRouter not available: {e}")
         return self._llm_router

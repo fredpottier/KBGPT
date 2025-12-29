@@ -10,7 +10,7 @@ import json
 import re
 from .models import SemanticProfile, ComplexityZone
 from .config import get_semantic_config
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class SemanticDocumentProfiler:
         """Initialise le profiler avec la configuration"""
         self.config = get_semantic_config()
         self.profiler_config = self.config.profiling
-        self.llm_router = LLMRouter()
+        self.llm_router = get_llm_router()
         logger.info("[OSMOSE] SemanticDocumentProfiler V2.1 initialisé")
 
     async def profile_document(

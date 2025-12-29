@@ -15,7 +15,6 @@ import {
   VStack,
   IconButton,
   useToast,
-  Select,
   Tooltip,
 } from '@chakra-ui/react'
 import { AttachmentIcon } from '@chakra-ui/icons'
@@ -259,7 +258,7 @@ const MessageBubble = ({
             _hover={{
               borderColor: isUser ? 'transparent' : 'border.active',
             }}
-            css={isUser ? {} : {
+            css={{
               '&:hover .message-actions': { opacity: 1 },
             }}
           >
@@ -274,12 +273,36 @@ const MessageBubble = ({
               <Text
                 fontSize="sm"
                 color={isUser ? 'white' : 'text.primary'}
-                whiteSpace="pre-wrap"
+                whiteSpace="pre-line"
                 wordBreak="break-word"
                 lineHeight="tall"
+                userSelect="text"
+                cursor="text"
               >
-                {message.content}
+                {message.content.trim()}
               </Text>
+            )}
+
+            {/* Actions pour messages utilisateur */}
+            {isUser && (
+              <HStack
+                className="message-actions"
+                opacity={0}
+                transition="opacity 0.2s"
+                spacing={1}
+                mt={2}
+                pt={2}
+                borderTop="1px solid"
+                borderColor="whiteAlpha.300"
+              >
+                <CopyButton
+                  text={message.content}
+                  size="xs"
+                  variant="ghost"
+                  color="whiteAlpha.700"
+                  _hover={{ bg: 'whiteAlpha.200', color: 'white' }}
+                />
+              </HStack>
             )}
 
             {/* Actions pour messages assistant */}
@@ -502,7 +525,6 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
-  const [selectedSolution, setSelectedSolution] = useState<string>('')
   const [useGraphContext, setUseGraphContext] = useState<boolean>(true)
   const [graphEnrichmentLevel, setGraphEnrichmentLevel] = useState<GraphEnrichmentLevel>('standard')
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -517,10 +539,8 @@ export default function ChatPage() {
   } = useDisclosure()
   const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null)
 
-  const { data: solutionsResponse, isLoading: solutionsLoading } = useQuery({
-    queryKey: ['solutions'],
-    queryFn: () => api.search.solutions(),
-  })
+  // Ref pour tracker si une mutation est en cours (evite probleme de timing avec useEffect)
+  const isSendingRef = useRef(false)
 
   const { data: messagesResponse } = useQuery({
     queryKey: ['session-messages', currentSessionId],
@@ -531,13 +551,17 @@ export default function ChatPage() {
   useEffect(() => {
     if (messagesResponse?.success && messagesResponse.data) {
       const sessionMessages = (messagesResponse.data as { messages: any[] }).messages || []
-      setMessages(sessionMessages.map((msg: any) => ({
-        id: msg.id,
-        content: msg.content,
-        role: msg.role as 'user' | 'assistant',
-        timestamp: msg.created_at,
-        feedback_rating: msg.feedback_rating,
-      })))
+      // Ne pas ecraser les messages locaux si on est en train d'envoyer un nouveau message
+      // Cela evite le flash de l'EmptyState lors de la creation d'une nouvelle session
+      if (sessionMessages.length > 0 || !isSendingRef.current) {
+        setMessages(sessionMessages.map((msg: any) => ({
+          id: msg.id,
+          content: msg.content,
+          role: msg.role as 'user' | 'assistant',
+          timestamp: msg.created_at,
+          feedback_rating: msg.feedback_rating,
+        })))
+      }
     }
   }, [messagesResponse])
 
@@ -591,6 +615,7 @@ export default function ChatPage() {
 
   const sendMessageMutation = useMutation({
     mutationFn: async (message: string) => {
+      isSendingRef.current = true
       let sessionId = currentSessionId
       if (!sessionId) {
         const sessionResponse = await api.sessions.create()
@@ -608,7 +633,7 @@ export default function ChatPage() {
         message,
         undefined,
         undefined,
-        selectedSolution || undefined,
+        undefined,  // solution - legacy, plus utilisé
         useGraphContext,
         useGraphContext ? graphEnrichmentLevel : undefined,
         sessionId
@@ -617,6 +642,7 @@ export default function ChatPage() {
       return { response, sessionId }
     },
     onSuccess: async ({ response, sessionId }) => {
+      isSendingRef.current = false
       if (response.success) {
         const searchResult = response.data as SearchResponse
 
@@ -671,6 +697,7 @@ export default function ChatPage() {
       }
     },
     onError: () => {
+      isSendingRef.current = false
       toast({
         title: 'Erreur',
         description: 'Échec de l\'envoi du message',
@@ -814,7 +841,7 @@ export default function ChatPage() {
           {messages.length === 0 ? (
             <EmptyState useGraphContext={useGraphContext} />
           ) : (
-            <VStack spacing={6} align="stretch" maxW="900px" mx="auto">
+            <VStack spacing={4} align="stretch" maxW="1200px" mx="auto">
               <AnimatePresence mode="popLayout">
                 {messages.map((message) => (
                   <MessageBubble
@@ -845,39 +872,16 @@ export default function ChatPage() {
           borderColor="border.default"
           p={4}
         >
-          <VStack spacing={3} maxW="900px" mx="auto">
+          <VStack spacing={3} maxW="1200px" mx="auto">
             {/* Contrôles Knowledge Graph */}
-            <HStack w="full" justify="space-between">
+            <Box w="full">
               <GraphToggle
                 enabled={useGraphContext}
                 onChange={setUseGraphContext}
                 level={graphEnrichmentLevel}
                 onLevelChange={setGraphEnrichmentLevel}
               />
-
-              <Select
-                placeholder="Toutes les solutions"
-                value={selectedSolution}
-                onChange={(e) => setSelectedSolution(e.target.value)}
-                size="sm"
-                bg="bg.tertiary"
-                border="1px solid"
-                borderColor="border.default"
-                rounded="lg"
-                isDisabled={solutionsLoading}
-                maxW="200px"
-                _hover={{ borderColor: 'brand.500' }}
-                _focus={{ borderColor: 'brand.500', boxShadow: '0 0 0 1px var(--chakra-colors-brand-500)' }}
-              >
-                {solutionsResponse?.success &&
-                  Array.isArray(solutionsResponse.data) &&
-                  solutionsResponse.data.map((solution: string) => (
-                    <option key={solution} value={solution}>
-                      {solution}
-                    </option>
-                  ))}
-              </Select>
-            </HStack>
+            </Box>
 
             {/* Input principal */}
             <HStack

@@ -3,6 +3,8 @@ Gestionnaire de modèles d'embedding avec déchargement automatique GPU.
 
 Phase 2.x: Ajout du mécanisme de timeout pour libérer la mémoire GPU
 après une période d'inactivité (utile en développement).
+
+Mode Burst: Support pour basculer vers un service embeddings distant (EC2 Spot).
 """
 
 from __future__ import annotations
@@ -11,7 +13,10 @@ import gc
 import logging
 import threading
 import time
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+
+import numpy as np
+import requests
 
 from knowbase.config.settings import get_settings
 
@@ -55,6 +60,11 @@ class EmbeddingModelManager:
         self._model_lock = threading.Lock()
         self._monitor_thread: Optional[threading.Thread] = None
         self._stop_monitor = threading.Event()
+
+        # === Mode Burst ===
+        self._burst_mode = False
+        self._burst_endpoint: Optional[str] = None
+        self._burst_timeout: int = 120  # Timeout HTTP en secondes (augmenté pour gros batches)
 
         # Timeout configurable (défaut: 10 minutes)
         settings = get_settings()
@@ -127,23 +137,242 @@ class EmbeddingModelManager:
         self,
         sentences: List[str],
         **kwargs
-    ):
+    ) -> np.ndarray:
         """
         Encode des phrases avec le modèle d'embedding.
 
+        En mode Burst, utilise le service distant EC2 Spot.
+        Sinon, utilise le modèle local.
+
         Args:
             sentences: Liste de phrases à encoder
-            **kwargs: Arguments passés à model.encode()
+            **kwargs: Arguments passés à model.encode() (ignorés en mode burst)
 
         Returns:
             Embeddings numpy array
         """
+        # === Mode Burst : utiliser le service distant ===
+        if self._burst_mode and self._burst_endpoint:
+            return self._encode_remote(sentences)
+
+        # === Mode Normal : utiliser le modèle local ===
         model = self.get_model()
 
         with self._model_lock:
             self._last_access_time = time.time()
 
         return model.encode(sentences, **kwargs)
+
+    def _encode_remote(
+        self,
+        sentences: List[str],
+        max_batch_size: int = None,  # Auto-détecté selon config Burst
+        max_batch_chars: int = None,  # Auto-détecté selon config Burst
+        max_text_chars: int = 1500,
+        max_concurrent: int = None,  # Auto-détecté selon config Burst
+        max_retries: int = 3
+    ) -> np.ndarray:
+        """
+        Encode les textes via le service embeddings distant (EC2 Spot).
+
+        Utilise l'API Text Embeddings Inference (TEI) de HuggingFace.
+        Batching adaptatif + requêtes parallèles pour performance optimale.
+
+        Inclut un circuit breaker pour arrêter en cas d'échecs consécutifs.
+
+        Args:
+            sentences: Liste de textes à encoder
+            max_batch_size: Nombre max de textes par batch (auto: 4 Burst, 8 local)
+            max_batch_chars: Taille max en caractères par batch (auto: 6KB Burst, 12KB local)
+            max_text_chars: Taille max par texte individuel (défaut: 1500)
+            max_concurrent: Nombre max de requêtes parallèles (auto-détecté si None)
+            max_retries: Nombre de tentatives en cas d'erreur (défaut: 3)
+
+        Returns:
+            Embeddings numpy array
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed, CancelledError
+
+        # Auto-détection config selon mode Burst
+        circuit_breaker_threshold = 5  # Défaut
+        try:
+            from knowbase.ingestion.burst.provider_switch import get_burst_concurrency_config
+            config = get_burst_concurrency_config()
+            if max_concurrent is None:
+                max_concurrent = config.get("max_concurrent_embeddings", 6)
+            if max_batch_size is None:
+                max_batch_size = config.get("embedding_batch_size", 4)
+            if max_batch_chars is None:
+                max_batch_chars = config.get("embedding_batch_chars", 6000)
+            circuit_breaker_threshold = config.get("circuit_breaker_threshold", 5)
+        except ImportError:
+            if max_concurrent is None:
+                max_concurrent = 6
+            if max_batch_size is None:
+                max_batch_size = 8
+            if max_batch_chars is None:
+                max_batch_chars = 12000
+
+        if not sentences:
+            return np.array([])
+
+        # Tronquer les textes trop longs (TEI max_input_length ~512 tokens ≈ 1500 chars)
+        truncated = [
+            text[:max_text_chars] if len(text) > max_text_chars else text
+            for text in sentences
+        ]
+
+        # Créer les batches avec limite de caractères
+        batches = []
+        current_batch = []
+        current_chars = 0
+
+        for text in truncated:
+            text_len = len(text)
+            if current_batch and (
+                len(current_batch) >= max_batch_size or
+                current_chars + text_len > max_batch_chars
+            ):
+                batches.append(current_batch)
+                current_batch = []
+                current_chars = 0
+            current_batch.append(text)
+            current_chars += text_len
+
+        if current_batch:
+            batches.append(current_batch)
+
+        total_batches = len(batches)
+        start_time = time.time()
+        logger.info(
+            f"[EMBEDDINGS:BURST] {len(truncated)} texts → {total_batches} batches "
+            f"(size={max_batch_size}, chars={max_batch_chars}, concurrent={max_concurrent})"
+        )
+
+        # Circuit breaker state
+        consecutive_failures = 0
+        circuit_broken = False
+
+        def encode_batch_with_retry(batch_idx: int, batch: List[str]) -> tuple:
+            """Encode un batch avec retry en cas d'erreur."""
+            nonlocal consecutive_failures, circuit_broken
+
+            # Check circuit breaker before starting
+            if circuit_broken:
+                raise RuntimeError("Circuit breaker tripped - too many consecutive failures")
+
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    response = requests.post(
+                        f"{self._burst_endpoint}/embed",
+                        json={"inputs": batch},
+                        timeout=self._burst_timeout,
+                        headers={"Content-Type": "application/json"}
+                    )
+                    response.raise_for_status()
+                    # Success - reset consecutive failures
+                    consecutive_failures = 0
+                    return batch_idx, np.array(response.json())
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 2  # Backoff: 2s, 4s, 6s
+                        logger.warning(
+                            f"[EMBEDDINGS:BURST] Batch {batch_idx+1} attempt {attempt+1} failed, "
+                            f"retrying in {wait_time}s..."
+                        )
+                        time.sleep(wait_time)
+
+            # All retries failed - increment consecutive failures
+            consecutive_failures += 1
+            if consecutive_failures >= circuit_breaker_threshold:
+                circuit_broken = True
+                logger.error(
+                    f"[EMBEDDINGS:BURST] ⚡ Circuit breaker tripped after {consecutive_failures} "
+                    f"consecutive failures"
+                )
+            raise last_error
+
+        # Exécuter les batches en parallèle
+        results = [None] * total_batches
+        completed = 0
+        errors = 0
+
+        with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+            futures = {
+                executor.submit(encode_batch_with_retry, idx, batch): idx
+                for idx, batch in enumerate(batches)
+            }
+
+            for future in as_completed(futures):
+                batch_idx = futures[future]
+                try:
+                    idx, embeddings = future.result()
+                    results[idx] = embeddings
+                    completed += 1
+
+                    # Log progression tous les 10% ou 100 batches
+                    if total_batches > 50 and completed % max(1, total_batches // 10) == 0:
+                        elapsed = time.time() - start_time
+                        rate = completed / elapsed if elapsed > 0 else 0
+                        eta = (total_batches - completed) / rate if rate > 0 else 0
+                        logger.info(
+                            f"[EMBEDDINGS:BURST] Progress: {completed}/{total_batches} "
+                            f"({100*completed//total_batches}%) - ETA: {eta:.0f}s"
+                        )
+
+                except RuntimeError as e:
+                    if "Circuit breaker" in str(e):
+                        # Cancel remaining futures
+                        for f in futures:
+                            f.cancel()
+                        logger.error(f"[EMBEDDINGS:BURST] Aborting - circuit breaker active")
+                        raise
+                    errors += 1
+                    raise
+                except requests.exceptions.Timeout:
+                    errors += 1
+                    logger.error(
+                        f"[EMBEDDINGS:BURST] Timeout on batch {batch_idx+1}/{total_batches} "
+                        f"after {max_retries} retries (consecutive_failures={consecutive_failures})"
+                    )
+                    if circuit_broken:
+                        # Cancel remaining futures
+                        for f in futures:
+                            f.cancel()
+                        raise RuntimeError(f"Circuit breaker: {consecutive_failures} consecutive failures")
+                    raise
+                except requests.exceptions.ConnectionError as e:
+                    errors += 1
+                    logger.error(f"[EMBEDDINGS:BURST] Connection error on batch {batch_idx+1}: {e}")
+                    if circuit_broken:
+                        for f in futures:
+                            f.cancel()
+                        raise RuntimeError(f"Circuit breaker: {consecutive_failures} consecutive failures")
+                    raise
+                except CancelledError:
+                    # Batch was cancelled due to circuit breaker
+                    pass
+                except Exception as e:
+                    errors += 1
+                    logger.error(f"[EMBEDDINGS:BURST] Error on batch {batch_idx+1}: {e}")
+                    raise
+
+        # Vérifier que tous les résultats sont présents
+        valid_results = [r for r in results if r is not None]
+        if len(valid_results) != total_batches:
+            raise RuntimeError(
+                f"[EMBEDDINGS:BURST] Incomplete: {len(valid_results)}/{total_batches} batches succeeded"
+            )
+
+        embeddings = np.vstack(valid_results) if valid_results else np.array([])
+        elapsed = time.time() - start_time
+        logger.info(
+            f"[EMBEDDINGS:BURST] ✅ Encoded {len(truncated)} texts → {embeddings.shape} "
+            f"in {elapsed:.1f}s ({len(truncated)/elapsed:.0f} texts/s)"
+        )
+        return embeddings
 
     def unload_model(self):
         """
@@ -246,8 +475,62 @@ class EmbeddingModelManager:
                 "timeout_seconds": self._timeout_seconds
             }
 
+    # =========================================================================
+    # Mode Burst - Basculement vers EC2 Spot
+    # =========================================================================
+
+    def enable_burst_mode(self, embeddings_url: str, timeout: int = 60):
+        """
+        Active le mode Burst : embeddings calculés sur EC2 Spot.
+
+        En mode Burst :
+        - Les appels encode() sont redirigés vers le service distant
+        - Le modèle local est déchargé pour libérer le GPU
+
+        Args:
+            embeddings_url: URL du service embeddings (ex: http://ec2-xxx:8001)
+            timeout: Timeout HTTP en secondes (défaut: 60)
+        """
+        self._burst_mode = True
+        self._burst_endpoint = embeddings_url.rstrip("/")
+        self._burst_timeout = timeout
+
+        # Décharger le modèle local pour libérer le GPU
+        self.unload_model()
+
+        logger.info(f"[EMBEDDINGS] 🚀 Burst mode ENABLED → {embeddings_url}")
+
+    def disable_burst_mode(self):
+        """
+        Désactive le mode Burst, retour au GPU local.
+        Le modèle local sera rechargé au prochain appel encode().
+        """
+        if not self._burst_mode:
+            logger.debug("[EMBEDDINGS] Burst mode already disabled")
+            return
+
+        self._burst_mode = False
+        self._burst_endpoint = None
+
+        logger.info("[EMBEDDINGS] ⏹️ Burst mode DISABLED → Local GPU")
+
+    def is_burst_mode_active(self) -> bool:
+        """Vérifie si le mode Burst est actif."""
+        return self._burst_mode and self._burst_endpoint is not None
+
+    def get_burst_status(self) -> Dict[str, Any]:
+        """Retourne le statut du mode Burst."""
+        return {
+            "burst_mode": self._burst_mode,
+            "burst_endpoint": self._burst_endpoint,
+            "burst_timeout": self._burst_timeout if self._burst_mode else None
+        }
+
     def get_sentence_embedding_dimension(self) -> Optional[int]:
         """Retourne la dimension des embeddings (charge le modèle si nécessaire)."""
+        # En mode burst, on ne peut pas connaître la dimension sans appeler le service
+        if self._burst_mode:
+            return None
         model = self.get_model()
         return model.get_sentence_embedding_dimension()
 

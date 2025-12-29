@@ -1,12 +1,17 @@
 """
-Phase 2.8/2.10 - CanonicalRelation Writer for Neo4j
+Phase 2.8/2.10/2.12 - CanonicalRelation Writer for Neo4j
 
 Persists CanonicalRelation nodes to Neo4j with MERGE for upsert.
-Creates typed edges for VALIDATED relations (REQUIRES, USES, etc.).
+Creates typed edges for ALL relations with maturity metadata (agnostic architecture).
 Links to RawAssertions via AGGREGATES edges.
+
+Architecture: KG Agnostique (voir doc/ongoing/KG_AGNOSTIC_ARCHITECTURE.md)
+- Couche 1-2 (Stockage/Topologie): Toutes les arêtes sont créées
+- Couche 3 (Politique): Filtrage externe selon domaine/tenant
 
 Author: Claude Code
 Date: 2025-12-24
+Updated: 2025-12-26 - Architecture agnostique, arêtes pour toutes maturités
 """
 
 import json
@@ -30,10 +35,15 @@ class CanonicalRelationWriter:
     """
     Writes CanonicalRelation nodes to Neo4j.
 
+    Architecture Agnostique (Couches 1-2):
+    - Stocke TOUTES les relations indépendamment de leur maturité
+    - Crée des arêtes typées navigables pour TOUTES les relations
+    - Les métadonnées (maturity, confidence) permettent le filtrage politique
+
     Implements:
     - MERGE for upsert (create or update)
     - AGGREGATES edges linking to RawAssertions
-    - Typed direct edges for VALIDATED relations (REQUIRES, USES, etc.)
+    - Typed direct edges for ALL relations (REQUIRES, USES, etc.) with metadata
     - RELATES_FROM/RELATES_TO edges to CanonicalConcepts
     """
 
@@ -100,9 +110,9 @@ class CanonicalRelationWriter:
             # Link to supporting RawAssertions
             self._link_to_raw_assertions(relation)
 
-            # Create typed edge for VALIDATED relations
-            if relation.maturity == RelationMaturity.VALIDATED:
-                self._create_typed_edge(relation)
+            # Create typed edge for ALL relations (architecture agnostique)
+            # La maturité est stockée sur l'arête pour filtrage politique ultérieur
+            self._create_typed_edge(relation)
 
             logger.debug(f"[CanonicalRelationWriter] Written: {relation.canonical_relation_id}")
             return relation.canonical_relation_id
@@ -119,6 +129,7 @@ class CanonicalRelationWriter:
         ON CREATE SET
             cr.tenant_id = $tenant_id,
             cr.relation_type = $relation_type,
+            cr.predicate_norm = $predicate_norm,
             cr.subject_concept_id = $subject_concept_id,
             cr.object_concept_id = $object_concept_id,
             cr.distinct_documents = $distinct_documents,
@@ -170,6 +181,7 @@ class CanonicalRelationWriter:
             "canonical_relation_id": relation.canonical_relation_id,
             "tenant_id": relation.tenant_id,
             "relation_type": relation_type_str,
+            "predicate_norm": relation.predicate_norm,
             "subject_concept_id": relation.subject_concept_id,
             "object_concept_id": relation.object_concept_id,
             "distinct_documents": relation.distinct_documents,
@@ -250,25 +262,40 @@ class CanonicalRelationWriter:
 
     def _create_typed_edge(self, relation: CanonicalRelation) -> None:
         """
-        Create typed direct edge between concepts for VALIDATED relations.
+        Create typed direct edge between concepts for ALL relations.
 
-        For example: (Subject)-[:REQUIRES]->(Object)
+        Architecture Agnostique:
+        - L'arête est TOUJOURS créée (Couche 2: Topologie)
+        - Les métadonnées permettent le filtrage politique (Couche 3)
+        - La visibilité finale dépend du domaine/tenant
+
+        Métadonnées sur l'arête:
+        - canonical_relation_id: Lien vers le nœud CanonicalRelation (audit)
+        - maturity: CANDIDATE | VALIDATED | CONTEXT_DEPENDENT | etc.
+        - confidence: Score de confiance (0.0 - 1.0)
+        - source_count: Nombre de documents sources
+        - first_seen / last_seen: Timestamps de provenance
+
+        For example: (Subject)-[:REQUIRES {maturity: "CANDIDATE", confidence: 0.87}]->(Object)
         """
         relation_type_str = relation.relation_type.value if isinstance(relation.relation_type, RelationType) else str(relation.relation_type)
+        maturity_str = relation.maturity.value if isinstance(relation.maturity, RelationMaturity) else str(relation.maturity)
 
-        # Map relation types to Neo4j edge types
-        # Note: APOC or dynamic edge creation would be ideal, but we use explicit types
+        # Build edge with full metadata for policy filtering
+        # NOTE: RETURN is required for the Neo4j Python driver to commit the transaction
         query = f"""
         MATCH (s:CanonicalConcept {{canonical_id: $subject_id, tenant_id: $tenant_id}})
         MATCH (o:CanonicalConcept {{canonical_id: $object_id, tenant_id: $tenant_id}})
-        MERGE (s)-[r:{relation_type_str} {{
-            canonical_relation_id: $canonical_relation_id,
-            confidence: $confidence,
-            maturity: $maturity
-        }}]->(o)
+        MERGE (s)-[r:{relation_type_str} {{canonical_relation_id: $canonical_relation_id}}]->(o)
+        SET r.maturity = $maturity,
+            r.confidence = $confidence,
+            r.source_count = $source_count,
+            r.first_seen = $first_seen,
+            r.last_seen = $last_seen,
+            r.predicate_norm = $predicate_norm,
+            r.last_updated = datetime()
+        RETURN count(r) AS created
         """
-
-        maturity_str = relation.maturity.value if isinstance(relation.maturity, RelationMaturity) else str(relation.maturity)
 
         try:
             self._execute_query(query, {
@@ -276,8 +303,12 @@ class CanonicalRelationWriter:
                 "object_id": relation.object_concept_id,
                 "tenant_id": relation.tenant_id,
                 "canonical_relation_id": relation.canonical_relation_id,
+                "maturity": maturity_str,
                 "confidence": relation.confidence_p50,
-                "maturity": maturity_str
+                "source_count": relation.distinct_documents,
+                "first_seen": relation.first_seen_utc.isoformat() if relation.first_seen_utc else datetime.utcnow().isoformat(),
+                "last_seen": relation.last_seen_utc.isoformat() if relation.last_seen_utc else datetime.utcnow().isoformat(),
+                "predicate_norm": relation.predicate_norm
             })
             self._stats["typed_edges"] += 1
         except Exception as e:

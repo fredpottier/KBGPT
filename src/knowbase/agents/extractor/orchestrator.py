@@ -118,24 +118,48 @@ class ExtractorOrchestrator(BaseAgent):
         self.low_quality_ner_entity_threshold = config.get("low_quality_ner_entities", 3) if config else 3
         self.low_quality_ner_token_threshold = config.get("low_quality_ner_tokens", 200) if config else 200
 
-        # Configuration parallélisation (optimisé pour 8 vCPU)
+        # Configuration parallélisation (dynamique selon mode Burst)
         self.max_parallel_segments = int(os.getenv("MAX_PARALLEL_SEGMENTS", "5"))
-
-        # Rate limiter LLM (selon tier OpenAI)
-        max_rpm = int(os.getenv("OPENAI_MAX_RPM", "500"))
-        # Heuristique: max_rpm / 60s * 20s avg_call_duration = concurrent calls
-        max_concurrent_llm = min(max_rpm // 3, self.max_parallel_segments)
-        self.llm_semaphore = Semaphore(max_concurrent_llm)
+        self._init_llm_semaphore()
 
         # Lazy-init pour MultilingualConceptExtractor (créé au premier appel)
         self._concept_extractor = None
         self._llm_router = None
         self._semantic_config = None
 
-        logger.info(
-            f"[EXTRACTOR] Initialized with routing thresholds (NO_LLM<3, SMALL≤8, BIG>8), "
-            f"max_parallel={self.max_parallel_segments}, rate_limit={max_concurrent_llm} concurrent LLM calls"
-        )
+    def _init_llm_semaphore(self):
+        """
+        Initialise le semaphore LLM selon le mode (normal ou Burst).
+
+        En mode Burst (vLLM sur EC2): concurrence élevée (pas de rate limiting)
+        En mode normal (OpenAI): concurrence limitée par RPM
+        """
+        try:
+            from knowbase.ingestion.burst.provider_switch import is_burst_mode_active, get_burst_concurrency_config
+            if is_burst_mode_active():
+                config = get_burst_concurrency_config()
+                max_concurrent_llm = config["max_concurrent_llm"]
+                self.max_parallel_segments = config["max_parallel_segments"]
+                logger.info(
+                    f"[EXTRACTOR] 🚀 Mode BURST: max_parallel={self.max_parallel_segments}, "
+                    f"concurrent_llm={max_concurrent_llm} (vLLM sans rate limit)"
+                )
+            else:
+                max_rpm = int(os.getenv("OPENAI_MAX_RPM", "500"))
+                max_concurrent_llm = min(max_rpm // 3, self.max_parallel_segments)
+                logger.info(
+                    f"[EXTRACTOR] Mode normal: max_parallel={self.max_parallel_segments}, "
+                    f"rate_limit={max_concurrent_llm} concurrent LLM calls"
+                )
+        except ImportError:
+            max_rpm = int(os.getenv("OPENAI_MAX_RPM", "500"))
+            max_concurrent_llm = min(max_rpm // 3, self.max_parallel_segments)
+            logger.info(
+                f"[EXTRACTOR] Initialized with routing thresholds (NO_LLM<3, SMALL≤8, BIG>8), "
+                f"max_parallel={self.max_parallel_segments}, rate_limit={max_concurrent_llm} concurrent LLM calls"
+            )
+
+        self.llm_semaphore = Semaphore(max_concurrent_llm)
 
     def _get_concept_extractor(self):
         """

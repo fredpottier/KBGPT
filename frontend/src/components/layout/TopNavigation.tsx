@@ -31,6 +31,7 @@ import {
   FiGlobe,
   FiShare2,
   FiSliders,
+  FiCloud,
 } from 'react-icons/fi'
 
 // Configuration des menus
@@ -57,8 +58,10 @@ const navigationConfig = {
     items: [
       { label: 'Dashboard', href: '/admin', icon: FiHome },
       { label: 'Domain Context', href: '/admin/domain-context', icon: FiGlobe },
+      { label: 'Profil Visibilite', href: '/admin/visibility-profile', icon: FiSliders },
       { label: 'Consolidation KG', href: '/admin/consolidation', icon: FiShare2 },
-      { label: 'Configuration', href: '/admin/settings', icon: FiSliders },
+      { label: 'Mode Burst (Spot)', href: '/admin/burst', icon: FiCloud },
+      { label: 'Configuration', href: '/admin/settings', icon: FiSettings },
     ],
   },
 }

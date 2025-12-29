@@ -39,6 +39,8 @@ import {
   FiArrowRight,
   FiActivity,
   FiZap,
+  FiSliders,
+  FiCloud,
 } from 'react-icons/fi'
 
 const MotionBox = motion(Box)
@@ -530,10 +532,24 @@ export default function AdminDashboard() {
                 delay={0.5}
               />
               <QuickActionButton
+                label="Profil Visibilite"
+                icon={FiSliders}
+                href="/admin/visibility-profile"
+                color="purple"
+                delay={0.55}
+              />
+              <QuickActionButton
+                label="Mode Burst"
+                icon={FiCloud}
+                href="/admin/burst"
+                color="orange"
+                delay={0.6}
+              />
+              <QuickActionButton
                 label="Configuration"
                 icon={FiSettings}
                 href="/admin/settings"
-                delay={0.6}
+                delay={0.65}
               />
             </VStack>
           </MotionBox>

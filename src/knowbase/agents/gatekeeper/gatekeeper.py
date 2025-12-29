@@ -730,15 +730,26 @@ class GatekeeperDelegate(BaseAgent):
             batch = pending_concepts[start_idx:end_idx]
             batches.append((batch_idx, batch))
 
+        # Déterminer concurrence selon mode (Burst = élevée, Normal = limitée)
+        try:
+            from knowbase.ingestion.burst.provider_switch import is_burst_mode_active, get_burst_concurrency_config
+            if is_burst_mode_active():
+                config = get_burst_concurrency_config()
+                max_concurrent_batches = config["max_concurrent_batches"]
+            else:
+                max_concurrent_batches = 5
+        except ImportError:
+            max_concurrent_batches = 5
+
         logger.info(
             f"[GATEKEEPER:BatchAsync] Processing {total_batches} batches in parallel "
-            f"(max_concurrent=5, batch_size={batch_size})..."
+            f"(max_concurrent={max_concurrent_batches}, batch_size={batch_size})..."
         )
 
         # Utiliser asyncio pour traiter les batches en parallèle
         async def process_all_batches():
             """Traite tous les batches en parallèle avec semaphore pour rate limiting."""
-            semaphore = asyncio.Semaphore(5)  # Max 5 batches simultanés
+            semaphore = asyncio.Semaphore(max_concurrent_batches)
 
             async def process_batch(batch_idx, batch):
                 async with semaphore:

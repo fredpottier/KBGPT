@@ -19,7 +19,7 @@ from knowbase.common.clients import (
     get_qdrant_client,
     get_sentence_transformer,
 )
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import get_llm_router, TaskType
 from knowbase.ingestion.extraction_cache import get_cache_manager
 
 from knowbase.config.paths import ensure_directories
@@ -89,7 +89,7 @@ def banner_paths():
 # ===================
 # Clients & Models
 # ===================
-llm_router = LLMRouter()
+# Note: get_llm_router() retourne le singleton avec support Burst Mode
 qdrant_client = get_qdrant_client()
 model = get_sentence_transformer(MODEL_NAME)
 EMB_SIZE = model.get_sentence_embedding_dimension() or 1024
@@ -162,7 +162,7 @@ def analyze_pdf_metadata(pdf_text: str, source_name: str) -> dict:
             ),
         }
         messages: list[ChatCompletionMessageParam] = [system_message, user_message]
-        raw = llm_router.complete(TaskType.METADATA_EXTRACTION, messages)
+        raw = get_llm_router().complete(TaskType.METADATA_EXTRACTION, messages)
         cleaned = clean_gpt_response(raw)
         meta = json.loads(cleaned) if cleaned else {}
         logger.debug(
@@ -252,7 +252,7 @@ def ask_gpt_page_analysis_text_only(
         messages: list[ChatCompletionMessageParam] = [system_message, user_message]
 
         # Utiliser TaskType.LONG_TEXT_SUMMARY au lieu de VISION (LLM plus rapide et moins coûteux)
-        raw = llm_router.complete(TaskType.LONG_TEXT_SUMMARY, messages, temperature=0.2, max_tokens=8000)
+        raw = get_llm_router().complete(TaskType.LONG_TEXT_SUMMARY, messages, temperature=0.2, max_tokens=8000)
         logger.debug(f"Page {page_index} [TEXT-ONLY]: LLM raw response (first 500 chars): {raw[:500] if raw else 'EMPTY'}")
 
         cleaned = clean_gpt_response(raw)
@@ -439,7 +439,7 @@ def ask_gpt_block_analysis_text_only(
         logger.debug(f"Bloc {block_index} [PROMPT]: {analysis_text[:600]}")
 
         # Utiliser TaskType.KNOWLEDGE_EXTRACTION (les paramètres viennent du YAML)
-        raw = llm_router.complete(
+        raw = get_llm_router().complete(
             TaskType.KNOWLEDGE_EXTRACTION,
             messages
             # temperature et max_tokens sont définis dans config/llm_models.yaml
@@ -820,7 +820,7 @@ def ask_gpt_slide_analysis(
             ),
         }
         messages: list[ChatCompletionMessageParam] = [system_message, prompt]
-        raw = llm_router.complete(TaskType.VISION, messages)
+        raw = get_llm_router().complete(TaskType.VISION, messages)
         logger.debug(f"Page {slide_index}: LLM raw response (first 500 chars): {raw[:500] if raw else 'EMPTY'}")
         cleaned = clean_gpt_response(raw)
         logger.debug(f"Page {slide_index}: cleaned response (first 500 chars): {cleaned[:500] if cleaned else 'EMPTY'}")

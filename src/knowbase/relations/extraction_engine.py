@@ -356,10 +356,10 @@ class RelationExtractionEngine:
         """Lazy load LLMRelationExtractor (LLM-first)."""
         if self._llm_extractor is None:
             from knowbase.relations.llm_relation_extractor import LLMRelationExtractor
-            from knowbase.common.llm_router import LLMRouter
+            from knowbase.common.llm_router import get_llm_router
 
             if self._llm_router is None:
-                self._llm_router = LLMRouter()
+                self._llm_router = get_llm_router()
 
             self._llm_extractor = LLMRelationExtractor(
                 llm_router=self._llm_router,

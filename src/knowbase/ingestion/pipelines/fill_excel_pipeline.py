@@ -13,7 +13,7 @@ from knowbase.common.clients import (
     get_qdrant_client,
     get_sentence_transformer,
 )
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 
 from knowbase.config.settings import get_settings
 from knowbase.config.paths import ensure_directories
@@ -44,7 +44,7 @@ KB_CONFIDENCE_THRESHOLD = 0.70
 
 # Custom HTTP client to ignore system envs (e.g., proxies)
 model = get_sentence_transformer(EMB_MODEL_NAME)
-llm_router = LLMRouter()
+llm_router = get_llm_router()
 qdrant_client = get_qdrant_client()
 
 

@@ -56,15 +56,17 @@ class SuggestedQuestion:
 
 @dataclass
 class ResearchAxisDTO:
-    """DTO pour un axe de recherche (depuis ResearchAxesEngine)."""
+    """DTO pour un axe de recherche (depuis ResearchAxesEngine v2)."""
     axis_id: str
-    axis_type: str
-    title: str
-    justification: str
-    contextual_question: str
-    concepts_involved: List[str] = field(default_factory=list)
+    role: str  # "actionnable", "risk", "structure"
+    short_label: str
+    full_question: str
+    source_concept: str
+    target_concept: str
+    relation_type: str
     relevance_score: float = 0.5
-    data_source: str = ""
+    confidence: float = 0.5
+    explainer_trace: str = ""
     search_query: str = ""
 
 
@@ -131,6 +133,7 @@ class ExplorationIntelligenceService:
         graph_context: Dict[str, Any],
         chunks: List[Dict[str, Any]],
         session_history: Optional[List[Dict[str, Any]]] = None,
+        tenant_id: str = "default",
     ) -> ExplorationIntelligence:
         """
         Génère l'intelligence d'exploration complète.
@@ -141,6 +144,7 @@ class ExplorationIntelligenceService:
             graph_context: Contexte du Knowledge Graph
             chunks: Chunks utilisés pour la réponse
             session_history: Historique de session (optionnel)
+            tenant_id: Tenant ID
 
         Returns:
             ExplorationIntelligence avec explications, suggestions, questions et axes
@@ -163,71 +167,75 @@ class ExplorationIntelligenceService:
                 doc_name = source_file.split("/")[-1].replace(".pptx", "").replace(".pdf", "")
                 unique_docs.add(doc_name)
 
-        # 🌊 Phase 3.5: Générer les axes de recherche via ResearchAxesEngine
-        # ⚠️ DÉSACTIVÉ TEMPORAIREMENT - ResearchAxesEngine utilise InferenceEngine+NetworkX
-        # qui charge tout le graphe (45k+ nœuds) et prend ~12 secondes.
-        # TODO: Optimiser InferenceEngine ou précalculer les signaux
-        ENABLE_RESEARCH_AXES = False  # Set to True once NetworkX is optimized
+        # 🌊 Phase 3.5+: Générer les axes de recherche via ResearchAxesEngine v2
+        # ✅ RÉACTIVÉ - Le nouveau v2 utilise des requêtes Cypher directes (pas de NetworkX)
+        ENABLE_RESEARCH_AXES = True
 
-        if not ENABLE_RESEARCH_AXES:
-            logger.info("[EXPLORATION] ResearchAxesEngine disabled for performance")
-        elif ENABLE_RESEARCH_AXES:
-            pass  # Skip to avoid the try block
-
-        try:
-            if not ENABLE_RESEARCH_AXES:
-                raise Exception("ResearchAxesEngine disabled")
-            # Convertir chunks en format attendu
-            chunks_data = [
-                {
-                    "source_file": c.get("source_file", ""),
-                    "slide_index": c.get("slide_index"),
-                    "text": c.get("text", ""),
-                }
-                for c in chunks
-            ]
-
-            # Appel async du ResearchAxesEngine
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        if ENABLE_RESEARCH_AXES:
             try:
-                axes_result = loop.run_until_complete(
-                    self.research_axes_engine.generate_research_axes(
-                        query=query,
-                        synthesis_answer=synthesis_answer,
-                        query_concepts=query_concepts,
-                        related_concepts=related_concepts,
-                        chunks=chunks_data,
-                        session_history=session_history,
+                # Convertir chunks en format attendu
+                chunks_data = [
+                    {
+                        "source_file": c.get("source_file", ""),
+                        "slide_index": c.get("slide_index"),
+                        "text": c.get("text", ""),
+                    }
+                    for c in chunks
+                ]
+
+                # Appel async du ResearchAxesEngine v2
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    axes_result = loop.run_until_complete(
+                        self.research_axes_engine.generate_research_axes(
+                            query=query,
+                            synthesis_answer=synthesis_answer,
+                            query_concepts=query_concepts,
+                            graph_context=graph_context,
+                            chunks=chunks_data,
+                            tenant_id=tenant_id,
+                        )
                     )
-                )
 
-                # Convertir en DTOs
-                for axis in axes_result.axes:
-                    result.research_axes.append(ResearchAxisDTO(
-                        axis_id=axis.axis_id,
-                        axis_type=axis.axis_type.value,
-                        title=axis.title,
-                        justification=axis.justification,
-                        contextual_question=axis.contextual_question,
-                        concepts_involved=axis.concepts_involved,
-                        relevance_score=axis.relevance_score,
-                        data_source=axis.data_source,
-                        search_query=axis.search_query,
-                    ))
+                    # Convertir en DTOs (nouvelle structure v2)
+                    for axis in axes_result.axes:
+                        result.research_axes.append(ResearchAxisDTO(
+                            axis_id=axis.axis_id,
+                            role=axis.role.value,
+                            short_label=axis.short_label,
+                            full_question=axis.full_question,
+                            source_concept=axis.source_concept,
+                            target_concept=axis.target_concept,
+                            relation_type=axis.relation_type,
+                            relevance_score=axis.relevance_score,
+                            confidence=axis.confidence,
+                            explainer_trace=axis.explainer_trace,
+                            search_query=axis.search_query,
+                        ))
 
-                logger.info(
-                    f"[EXPLORATION] ResearchAxesEngine generated {len(result.research_axes)} axes "
-                    f"(signals: {axes_result.signals_collected})"
-                )
+                    logger.info(
+                        f"[EXPLORATION] ResearchAxesEngine v2: {len(result.research_axes)} axes "
+                        f"(roles: {axes_result.roles_distribution}, {axes_result.processing_time_ms:.1f}ms)"
+                    )
 
-            finally:
-                loop.close()
+                finally:
+                    loop.close()
 
-        except Exception as e:
-            logger.warning(f"[EXPLORATION] ResearchAxesEngine failed: {e}")
+            except Exception as e:
+                logger.warning(f"[EXPLORATION] ResearchAxesEngine failed: {e}")
 
-        # Génération LLM legacy pour explications et suggestions
+        # Décision : si le KG n'a pas trouvé de relations pertinentes,
+        # mieux vaut ne pas proposer de questions que des questions non pertinentes
+        kg_has_results = len(result.research_axes) > 0
+
+        if not kg_has_results:
+            logger.info(
+                "[EXPLORATION] KG found no relevant relations - skipping suggested questions "
+                "(better no suggestions than irrelevant ones)"
+            )
+
+        # Génération LLM pour explications de concepts (toujours utile)
         try:
             exploration_data = self._generate_all_intelligence(
                 query=query,
@@ -243,32 +251,31 @@ class ExplorationIntelligenceService:
                 list(unique_docs)
             )
 
+            # Suggestions d'exploration basées sur les concepts liés (pas les questions)
             result.exploration_suggestions = self._parse_exploration_suggestions(
                 exploration_data.get("exploration_suggestions", [])
             )
 
-            result.suggested_questions = self._parse_suggested_questions(
-                exploration_data.get("suggested_questions", [])
-            )
-
-            # Compléter avec fallback si le LLM n'a pas généré assez de contenu
-            if not result.exploration_suggestions and not result.suggested_questions:
-                logger.info("[EXPLORATION] LLM returned empty results, using fallback")
-                fallback = self._generate_fallback_intelligence(
-                    query_concepts, related_concepts, list(unique_docs),
-                    query=query, synthesis_answer=synthesis_answer
+            # Questions suggérées : UNIQUEMENT si le KG a trouvé des relations pertinentes
+            if kg_has_results:
+                result.suggested_questions = self._parse_suggested_questions(
+                    exploration_data.get("suggested_questions", [])
                 )
-                result.exploration_suggestions = fallback.exploration_suggestions
-                result.suggested_questions = fallback.suggested_questions
+            # Sinon : pas de suggested_questions (liste vide par défaut)
 
         except Exception as e:
             logger.error(f"[EXPLORATION] Error generating LLM intelligence: {e}", exc_info=True)
-            result_fallback = self._generate_fallback_intelligence(
-                query_concepts, related_concepts, list(unique_docs),
-                query=query, synthesis_answer=synthesis_answer
-            )
-            result.exploration_suggestions = result_fallback.exploration_suggestions
-            result.suggested_questions = result_fallback.suggested_questions
+            # En cas d'erreur, on utilise le fallback minimal (explications seulement)
+            if query_concepts:
+                for concept in query_concepts[:3]:
+                    result.concept_explanations[concept] = ConceptExplanation(
+                        concept_id=concept.lower().replace(" ", "_"),
+                        concept_name=concept,
+                        why_used="Concept mentionné dans votre question",
+                        role_in_answer="central",
+                        source_documents=list(unique_docs)[:2],
+                        confidence=0.9
+                    )
 
         result.processing_time_ms = (time.time() - start_time) * 1000
         logger.info(

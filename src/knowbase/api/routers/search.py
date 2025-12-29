@@ -40,6 +40,13 @@ def search(
     - `standard`: Concepts + relations transitives (~100ms)
     - `deep`: Tout (concepts, transitives, clusters, bridges) (~200ms)
 
+    **Filtrage par visibilité (Phase 2.12):**
+    Les relations sont filtrées selon le profil de visibilité du tenant:
+    - `verified`: Uniquement faits validés (2+ sources, confiance >= 0.90)
+    - `balanced`: Équilibre qualité/quantité (défaut, confiance >= 0.70)
+    - `exploratory`: Maximum de connexions (confiance >= 0.40)
+    - `full_access`: Accès admin complet (pas de filtre)
+
     **Sécurité**: Requiert authentification JWT (tous rôles).
     """
     settings = get_settings()

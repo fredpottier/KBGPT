@@ -1,0 +1,672 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'OSMOSE Burst - EC2 Spot Fleet for Qwen 2.5 14B AWQ + Embeddings'
+
+# ============================================================================
+# OSMOSE KnowWhere - Burst Mode Infrastructure v2.0
+#
+# Optimisé pour Qwen 2.5 14B AWQ sur instances g6/g6e avec Deep Learning AMI.
+# L'AMI Deep Learning inclut les drivers NVIDIA préinstallés = boot rapide.
+#
+# Modèles:
+#   - vLLM: Qwen/Qwen2.5-14B-Instruct-AWQ (~8GB VRAM)
+#   - TEI: intfloat/multilingual-e5-large (~2GB VRAM)
+#   - Total: ~10-12GB sur GPU 24GB (L4/A10G)
+#
+# Usage:
+#   1. BurstOrchestrator crée ce stack
+#   2. Instance boot avec DLAMI (drivers ready)
+#   3. Docker démarre vLLM + TEI
+#   4. Pipeline local appelle les APIs
+#   5. Stack supprimé à la fin du batch
+# ============================================================================
+
+Parameters:
+  BatchId:
+    Type: String
+    Description: Identifiant unique du batch
+
+  # === Modèles ===
+  VllmModel:
+    Type: String
+    Default: "Qwen/Qwen2.5-14B-Instruct-AWQ"
+    Description: Modèle HuggingFace pour vLLM (AWQ quantifié)
+
+  EmbeddingsModel:
+    Type: String
+    Default: "intfloat/multilingual-e5-large"
+    Description: Modèle HuggingFace pour embeddings
+
+  # === Configuration vLLM pour AWQ ===
+  VllmQuantization:
+    Type: String
+    Default: "awq"
+    AllowedValues: ["awq", "gptq", "squeezellm", "none"]
+    Description: Méthode de quantification (awq pour 14B AWQ)
+
+  VllmDtype:
+    Type: String
+    Default: "half"
+    AllowedValues: ["half", "float16", "bfloat16", "auto"]
+    Description: Type de données pour inférence
+
+  VllmGpuMemoryUtilization:
+    Type: String
+    Default: "0.85"
+    Description: Fraction mémoire GPU pour vLLM (0.0-1.0)
+
+  VllmMaxModelLen:
+    Type: Number
+    Default: 8192
+    Description: Longueur max du contexte
+
+  VllmMaxNumSeqs:
+    Type: Number
+    Default: 32
+    Description: Nombre max de séquences concurrentes
+
+  # === Ports ===
+  VllmPort:
+    Type: Number
+    Default: 8000
+    Description: Port pour vLLM API
+
+  EmbeddingsPort:
+    Type: Number
+    Default: 8001
+    Description: Port pour Embeddings API
+
+  # === Spot Configuration ===
+  SpotMaxPrice:
+    Type: String
+    Default: "1.20"
+    Description: Prix maximum Spot par heure (g6.2xlarge ~$0.70-0.90)
+
+  # === Réseau ===
+  VpcId:
+    Type: String
+    Default: ""
+    Description: VPC ID (vide = VPC par défaut)
+
+  SubnetId:
+    Type: String
+    Default: ""
+    Description: Subnet ID (vide = subnet par défaut)
+
+  # === AMI ===
+  # AMI Golden OSMOSE v5 avec vLLM + TEI préinstallés (évite SSM lookup)
+  AmiId:
+    Type: String
+    Default: "ami-04235317b5d52f6c3"
+    Description: AMI ID (Golden v5 avec Qwen 14B AWQ + TEI préchargés)
+
+Conditions:
+  UseDefaultVpc: !Equals [!Ref VpcId, ""]
+  UseDefaultSubnet: !Equals [!Ref SubnetId, ""]
+
+Resources:
+  # ============================================================================
+  # Security Group
+  # ============================================================================
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "OSMOSE Burst Security Group - ${BatchId}"
+      VpcId: !If [UseDefaultVpc, !Ref "AWS::NoValue", !Ref VpcId]
+      SecurityGroupIngress:
+        # vLLM API
+        - IpProtocol: tcp
+          FromPort: !Ref VllmPort
+          ToPort: !Ref VllmPort
+          CidrIp: 0.0.0.0/0
+          Description: vLLM API (OpenAI compatible)
+        # Embeddings API
+        - IpProtocol: tcp
+          FromPort: !Ref EmbeddingsPort
+          ToPort: !Ref EmbeddingsPort
+          CidrIp: 0.0.0.0/0
+          Description: Text Embeddings Inference API
+        # Health endpoint
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+          Description: Health check endpoint
+        # SSH (debug)
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access (debug)
+      Tags:
+        - Key: Name
+          Value: !Sub "knowwhere-burst-sg-${BatchId}"
+        - Key: Project
+          Value: KnowWhere
+        - Key: Component
+          Value: Burst
+
+  # ============================================================================
+  # IAM Roles
+  # ============================================================================
+  SpotFleetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "knowwhere-burst-fleet-${BatchId}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: spotfleet.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetTaggingRole
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "knowwhere-burst-instance-${BatchId}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Accès lecture S3 pour modèles cache (optionnel)
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "knowwhere-burst-profile-${BatchId}"
+      Roles:
+        - !Ref InstanceRole
+
+  # ============================================================================
+  # Spot Fleet - g6/g6e pour Qwen 14B AWQ
+  # ============================================================================
+  SpotFleet:
+    Type: AWS::EC2::SpotFleet
+    Properties:
+      SpotFleetRequestConfigData:
+        IamFleetRole: !GetAtt SpotFleetRole.Arn
+        TargetCapacity: 1
+        AllocationStrategy: capacityOptimized
+        Type: maintain
+        TerminateInstancesWithExpiration: true
+        SpotPrice: !Ref SpotMaxPrice
+        ReplaceUnhealthyInstances: true
+
+        LaunchSpecifications:
+          # ================================================================
+          # g6.2xlarge - NVIDIA L4 24GB (Préféré pour 14B AWQ)
+          # ================================================================
+          - InstanceType: g6.2xlarge
+            # AMI Golden OSMOSE v5 - Qwen 14B AWQ + TEI préchargés
+            ImageId: !Ref AmiId
+            # NetworkInterfaces avec SubnetId explicite (requis pour SpotFleet)
+            NetworkInterfaces:
+              - DeviceIndex: 0
+                SubnetId: subnet-3320d458
+                Groups:
+                  - !GetAtt SecurityGroup.GroupId
+                AssociatePublicIpAddress: true
+                DeleteOnTermination: true
+            IamInstanceProfile:
+              Arn: !GetAtt InstanceProfile.Arn
+            TagSpecifications:
+              - ResourceType: instance
+                Tags:
+                  - Key: Name
+                    Value: !Sub "knowwhere-burst-${BatchId}"
+                  - Key: Project
+                    Value: KnowWhere
+                  - Key: Component
+                    Value: Burst
+                  - Key: BatchId
+                    Value: !Ref BatchId
+                  - Key: Model
+                    Value: !Ref VllmModel
+            UserData:
+              Fn::Base64: !Sub |
+                #!/bin/bash
+                set -ex
+
+                # ============================================
+                # OSMOSE Burst Instance Bootstrap
+                # Deep Learning AMI - Drivers déjà installés
+                # ============================================
+
+                exec > >(tee /var/log/user-data.log) 2>&1
+                echo "=== OSMOSE Burst Bootstrap ==="
+                echo "Starting at $(date)"
+                echo "Instance type: $(curl -s http://169.254.169.254/latest/meta-data/instance-type)"
+
+                # Variables
+                VLLM_MODEL="${VllmModel}"
+                EMBEDDINGS_MODEL="${EmbeddingsModel}"
+                VLLM_PORT="${VllmPort}"
+                EMB_PORT="${EmbeddingsPort}"
+                VLLM_QUANTIZATION="${VllmQuantization}"
+                VLLM_DTYPE="${VllmDtype}"
+                VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
+                VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
+                VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
+
+                # ============================================
+                # Docker Setup (DLAMI a Docker préinstallé)
+                # ============================================
+                echo "Setting up Docker..."
+
+                # Sur Ubuntu DLAMI, Docker est déjà installé
+                if ! command -v docker &> /dev/null; then
+                    apt-get update && apt-get install -y docker.io
+                fi
+
+                systemctl start docker
+                systemctl enable docker
+
+                # NVIDIA Container Toolkit (devrait être présent sur DLAMI)
+                if ! command -v nvidia-container-toolkit &> /dev/null; then
+                    echo "Installing NVIDIA Container Toolkit..."
+                    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+                    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
+                    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
+                        tee /etc/apt/sources.list.d/nvidia-docker.list
+                    apt-get update && apt-get install -y nvidia-container-toolkit
+                    nvidia-ctk runtime configure --runtime=docker
+                    systemctl restart docker
+                fi
+
+                # Vérifier GPU disponible
+                echo "Checking GPU..."
+                nvidia-smi
+
+                # ============================================
+                # Start vLLM with AWQ quantization
+                # ============================================
+                echo "Starting vLLM server..."
+                echo "  Model: $VLLM_MODEL"
+                echo "  Quantization: $VLLM_QUANTIZATION"
+                echo "  GPU Memory: $VLLM_GPU_MEM"
+
+                # Construire les arguments vLLM
+                VLLM_ARGS="--model $VLLM_MODEL"
+                VLLM_ARGS="$VLLM_ARGS --max-model-len $VLLM_MAX_MODEL_LEN"
+                VLLM_ARGS="$VLLM_ARGS --gpu-memory-utilization $VLLM_GPU_MEM"
+                VLLM_ARGS="$VLLM_ARGS --max-num-seqs $VLLM_MAX_NUM_SEQS"
+                VLLM_ARGS="$VLLM_ARGS --trust-remote-code"
+
+                # Ajouter quantization si spécifiée (obligatoire pour AWQ)
+                if [ "$VLLM_QUANTIZATION" != "none" ]; then
+                    VLLM_ARGS="$VLLM_ARGS --quantization $VLLM_QUANTIZATION"
+                fi
+
+                # Ajouter dtype
+                VLLM_ARGS="$VLLM_ARGS --dtype $VLLM_DTYPE"
+
+                echo "vLLM args: $VLLM_ARGS"
+
+                docker run -d \
+                  --gpus all \
+                  --name vllm \
+                  --restart unless-stopped \
+                  -p $VLLM_PORT:8000 \
+                  -v /home/ubuntu/.cache/huggingface:/root/.cache/huggingface \
+                  -e HF_HOME=/root/.cache/huggingface \
+                  vllm/vllm-openai:latest \
+                  $VLLM_ARGS
+
+                # ============================================
+                # Start Text Embeddings Inference (TEI)
+                # ============================================
+                echo "Starting TEI server with model: $EMBEDDINGS_MODEL"
+
+                docker run -d \
+                  --gpus all \
+                  --name embeddings \
+                  --restart unless-stopped \
+                  -p $EMB_PORT:80 \
+                  -v /home/ubuntu/.cache/huggingface:/data \
+                  ghcr.io/huggingface/text-embeddings-inference:1.5 \
+                  --model-id $EMBEDDINGS_MODEL
+
+                # ============================================
+                # Health Check Endpoint
+                # ============================================
+                echo "Creating health check endpoint..."
+
+                cat > /opt/health.py << 'HEALTHEOF'
+                #!/usr/bin/env python3
+                """
+                Health endpoint pour OSMOSE Burst.
+                Vérifie que vLLM ET TEI sont prêts avant de retourner healthy.
+                """
+                from http.server import HTTPServer, BaseHTTPRequestHandler
+                import json
+                import urllib.request
+                import urllib.error
+                import os
+
+                VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
+                EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
+
+                class HealthHandler(BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        vllm_ok = False
+                        vllm_msg = "not checked"
+                        emb_ok = False
+                        emb_msg = "not checked"
+
+                        # Check vLLM - /health retourne 200 quand modèle chargé
+                        try:
+                            resp = urllib.request.urlopen(
+                                f"http://localhost:{VLLM_PORT}/health",
+                                timeout=10
+                            )
+                            vllm_ok = resp.status == 200
+                            vllm_msg = "ready" if vllm_ok else f"status {resp.status}"
+                        except urllib.error.URLError as e:
+                            vllm_msg = f"connection error: {e.reason}"
+                        except Exception as e:
+                            vllm_msg = f"error: {str(e)}"
+
+                        # Check TEI
+                        try:
+                            resp = urllib.request.urlopen(
+                                f"http://localhost:{EMB_PORT}/health",
+                                timeout=10
+                            )
+                            emb_ok = resp.status == 200
+                            emb_msg = "ready" if emb_ok else f"status {resp.status}"
+                        except urllib.error.URLError as e:
+                            emb_msg = f"connection error: {e.reason}"
+                        except Exception as e:
+                            emb_msg = f"error: {str(e)}"
+
+                        status = {
+                            "vllm": {"healthy": vllm_ok, "message": vllm_msg},
+                            "embeddings": {"healthy": emb_ok, "message": emb_msg},
+                            "healthy": vllm_ok and emb_ok
+                        }
+
+                        if status["healthy"]:
+                            self.send_response(200)
+                        else:
+                            self.send_response(503)
+
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps(status, indent=2).encode())
+
+                    def log_message(self, format, *args):
+                        # Log requests pour debug
+                        print(f"Health check: {args[0]}")
+
+                if __name__ == "__main__":
+                    print(f"Health endpoint starting on port 8080...")
+                    print(f"  vLLM port: {VLLM_PORT}")
+                    print(f"  Embeddings port: {EMB_PORT}")
+                    server = HTTPServer(("", 8080), HealthHandler)
+                    server.serve_forever()
+                HEALTHEOF
+
+                chmod +x /opt/health.py
+
+                # Lancer health endpoint avec les bons ports
+                VLLM_PORT=$VLLM_PORT EMB_PORT=$EMB_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
+
+                # ============================================
+                # Monitor les containers au démarrage
+                # ============================================
+                echo "Waiting for containers to start..."
+                sleep 30
+
+                echo "Container status:"
+                docker ps -a
+
+                echo "vLLM logs (last 20 lines):"
+                docker logs vllm --tail 20 || true
+
+                echo "TEI logs (last 20 lines):"
+                docker logs embeddings --tail 20 || true
+
+                # ============================================
+                # Done
+                # ============================================
+                echo "=== Bootstrap complete at $(date) ==="
+                echo "vLLM: http://localhost:$VLLM_PORT"
+                echo "Embeddings: http://localhost:$EMB_PORT"
+                echo "Health: http://localhost:8080"
+
+          # ================================================================
+          # g6e.xlarge - NVIDIA L4 24GB (Alternative efficace)
+          # ================================================================
+          - InstanceType: g6e.xlarge
+            ImageId: !Ref AmiId
+            NetworkInterfaces:
+              - DeviceIndex: 0
+                SubnetId: subnet-3320d458
+                Groups:
+                  - !GetAtt SecurityGroup.GroupId
+                AssociatePublicIpAddress: true
+                DeleteOnTermination: true
+            IamInstanceProfile:
+              Arn: !GetAtt InstanceProfile.Arn
+            TagSpecifications:
+              - ResourceType: instance
+                Tags:
+                  - Key: Name
+                    Value: !Sub "knowwhere-burst-${BatchId}"
+                  - Key: Project
+                    Value: KnowWhere
+            # Même UserData que g6.2xlarge (référence via Sub)
+            UserData:
+              Fn::Base64: !Sub |
+                #!/bin/bash
+                set -ex
+                exec > >(tee /var/log/user-data.log) 2>&1
+                echo "=== OSMOSE Burst Bootstrap (g6e.xlarge) ==="
+
+                VLLM_MODEL="${VllmModel}"
+                EMBEDDINGS_MODEL="${EmbeddingsModel}"
+                VLLM_PORT="${VllmPort}"
+                EMB_PORT="${EmbeddingsPort}"
+                VLLM_QUANTIZATION="${VllmQuantization}"
+                VLLM_DTYPE="${VllmDtype}"
+                VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
+                VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
+                VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
+
+                # Docker setup
+                if ! command -v docker &> /dev/null; then
+                    apt-get update && apt-get install -y docker.io
+                fi
+                systemctl start docker && systemctl enable docker
+
+                # NVIDIA toolkit
+                if ! command -v nvidia-container-toolkit &> /dev/null; then
+                    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+                    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
+                    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
+                        tee /etc/apt/sources.list.d/nvidia-docker.list
+                    apt-get update && apt-get install -y nvidia-container-toolkit
+                    nvidia-ctk runtime configure --runtime=docker
+                    systemctl restart docker
+                fi
+
+                nvidia-smi
+
+                # vLLM avec AWQ
+                VLLM_ARGS="--model $VLLM_MODEL --max-model-len $VLLM_MAX_MODEL_LEN"
+                VLLM_ARGS="$VLLM_ARGS --gpu-memory-utilization $VLLM_GPU_MEM"
+                VLLM_ARGS="$VLLM_ARGS --max-num-seqs $VLLM_MAX_NUM_SEQS --trust-remote-code"
+                [ "$VLLM_QUANTIZATION" != "none" ] && VLLM_ARGS="$VLLM_ARGS --quantization $VLLM_QUANTIZATION"
+                VLLM_ARGS="$VLLM_ARGS --dtype $VLLM_DTYPE"
+
+                docker run -d --gpus all --name vllm --restart unless-stopped \
+                  -p $VLLM_PORT:8000 -v /home/ubuntu/.cache/huggingface:/root/.cache/huggingface \
+                  vllm/vllm-openai:latest $VLLM_ARGS
+
+                # TEI
+                docker run -d --gpus all --name embeddings --restart unless-stopped \
+                  -p $EMB_PORT:80 -v /home/ubuntu/.cache/huggingface:/data \
+                  ghcr.io/huggingface/text-embeddings-inference:1.5 --model-id $EMBEDDINGS_MODEL
+
+                # Health endpoint
+                cat > /opt/health.py << 'EOF'
+                #!/usr/bin/env python3
+                from http.server import HTTPServer, BaseHTTPRequestHandler
+                import json, urllib.request, os
+                VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
+                EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
+                class H(BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        v = e = False
+                        try: v = urllib.request.urlopen(f"http://localhost:{VLLM_PORT}/health", timeout=10).status == 200
+                        except: pass
+                        try: e = urllib.request.urlopen(f"http://localhost:{EMB_PORT}/health", timeout=10).status == 200
+                        except: pass
+                        self.send_response(200 if v and e else 503)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"vllm": v, "embeddings": e, "healthy": v and e}).encode())
+                    def log_message(self, *a): pass
+                HTTPServer(("", 8080), H).serve_forever()
+                EOF
+                chmod +x /opt/health.py
+                VLLM_PORT=$VLLM_PORT EMB_PORT=$EMB_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
+
+                echo "Bootstrap complete"
+
+          # ================================================================
+          # g5.2xlarge - NVIDIA A10G 24GB (Fallback)
+          # ================================================================
+          - InstanceType: g5.2xlarge
+            ImageId: !Ref AmiId
+            NetworkInterfaces:
+              - DeviceIndex: 0
+                SubnetId: subnet-3320d458
+                Groups:
+                  - !GetAtt SecurityGroup.GroupId
+                AssociatePublicIpAddress: true
+                DeleteOnTermination: true
+            IamInstanceProfile:
+              Arn: !GetAtt InstanceProfile.Arn
+            TagSpecifications:
+              - ResourceType: instance
+                Tags:
+                  - Key: Name
+                    Value: !Sub "knowwhere-burst-${BatchId}"
+                  - Key: Project
+                    Value: KnowWhere
+            UserData:
+              Fn::Base64: !Sub |
+                #!/bin/bash
+                set -ex
+                exec > >(tee /var/log/user-data.log) 2>&1
+                echo "=== OSMOSE Burst Bootstrap (g5.2xlarge fallback) ==="
+
+                VLLM_MODEL="${VllmModel}"
+                EMBEDDINGS_MODEL="${EmbeddingsModel}"
+                VLLM_PORT="${VllmPort}"
+                EMB_PORT="${EmbeddingsPort}"
+                VLLM_QUANTIZATION="${VllmQuantization}"
+                VLLM_DTYPE="${VllmDtype}"
+                VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
+                VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
+                VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
+
+                if ! command -v docker &> /dev/null; then
+                    apt-get update && apt-get install -y docker.io
+                fi
+                systemctl start docker && systemctl enable docker
+
+                if ! command -v nvidia-container-toolkit &> /dev/null; then
+                    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+                    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
+                    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
+                        tee /etc/apt/sources.list.d/nvidia-docker.list
+                    apt-get update && apt-get install -y nvidia-container-toolkit
+                    nvidia-ctk runtime configure --runtime=docker
+                    systemctl restart docker
+                fi
+
+                nvidia-smi
+
+                VLLM_ARGS="--model $VLLM_MODEL --max-model-len $VLLM_MAX_MODEL_LEN"
+                VLLM_ARGS="$VLLM_ARGS --gpu-memory-utilization $VLLM_GPU_MEM"
+                VLLM_ARGS="$VLLM_ARGS --max-num-seqs $VLLM_MAX_NUM_SEQS --trust-remote-code"
+                [ "$VLLM_QUANTIZATION" != "none" ] && VLLM_ARGS="$VLLM_ARGS --quantization $VLLM_QUANTIZATION"
+                VLLM_ARGS="$VLLM_ARGS --dtype $VLLM_DTYPE"
+
+                docker run -d --gpus all --name vllm --restart unless-stopped \
+                  -p $VLLM_PORT:8000 -v /home/ubuntu/.cache/huggingface:/root/.cache/huggingface \
+                  vllm/vllm-openai:latest $VLLM_ARGS
+
+                docker run -d --gpus all --name embeddings --restart unless-stopped \
+                  -p $EMB_PORT:80 -v /home/ubuntu/.cache/huggingface:/data \
+                  ghcr.io/huggingface/text-embeddings-inference:1.5 --model-id $EMBEDDINGS_MODEL
+
+                cat > /opt/health.py << 'EOF'
+                #!/usr/bin/env python3
+                from http.server import HTTPServer, BaseHTTPRequestHandler
+                import json, urllib.request, os
+                VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
+                EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
+                class H(BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        v = e = False
+                        try: v = urllib.request.urlopen(f"http://localhost:{VLLM_PORT}/health", timeout=10).status == 200
+                        except: pass
+                        try: e = urllib.request.urlopen(f"http://localhost:{EMB_PORT}/health", timeout=10).status == 200
+                        except: pass
+                        self.send_response(200 if v and e else 503)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"vllm": v, "embeddings": e, "healthy": v and e}).encode())
+                    def log_message(self, *a): pass
+                HTTPServer(("", 8080), H).serve_forever()
+                EOF
+                chmod +x /opt/health.py
+                VLLM_PORT=$VLLM_PORT EMB_PORT=$EMB_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
+
+                echo "Bootstrap complete"
+
+Outputs:
+  SpotFleetId:
+    Description: ID du Spot Fleet
+    Value: !Ref SpotFleet
+
+  SecurityGroupId:
+    Description: ID du Security Group
+    Value: !Ref SecurityGroup
+
+  VllmPort:
+    Description: Port vLLM
+    Value: !Ref VllmPort
+
+  EmbeddingsPort:
+    Description: Port Embeddings
+    Value: !Ref EmbeddingsPort
+
+  VllmModel:
+    Description: Modèle vLLM utilisé
+    Value: !Ref VllmModel
+
+  VllmQuantization:
+    Description: Méthode de quantification
+    Value: !Ref VllmQuantization

@@ -1,75 +1,258 @@
 """
-🌊 OSMOSE Research Axes Engine - Phase 3.5
+🌊 OSMOSE Research Axes Engine v2 - Phase 3.5+
 
-Service qui génère des axes de recherche structurés et contextuels
-en utilisant les signaux de découverte existants (InferenceEngine).
+Service qui génère des axes de recherche contextuels et diversifiés
+en explorant le Knowledge Graph à partir des focus_concepts.
 
-Contrairement à l'ExplorationIntelligenceService qui génère des suggestions
-isolées, ce service produit des "axes de recherche" cohérents qui:
-1. Sont basés sur des données réelles du KG (pas d'hallucination)
-2. Fournissent une justification claire (pourquoi cet axe)
-3. Génèrent des questions contextuelles (pas juste un mot clé)
-4. Maintiennent le fil de la conversation
+Architecture v2 (validée):
+- FocusConcepts avec canonical_id et origine (question/answer/chunks)
+- Requête Cypher UNWIND batch avec CALL wrapper
+- Scoring 3-critères: confidence + anchor_bonus + role_bonus - degree_penalty
+- Sélection 2-pass pour diversification réelle par rôle
+- Templates FR avec short_label, full_question et explainer_trace
+- Cache degree threshold pour éviter les hubs
 
-Architecture:
-- Collecte de signaux depuis InferenceEngine (bridges, weak signals, clusters)
-- Analyse de continuité documentaire (slides suivantes/précédentes)
-- Mémoire de session (concepts non explorés)
-- Synthèse LLM pour formuler les axes
+Roles des axes:
+- ACTIONNABLE: Relations REQUIRES, ENABLES (actions à entreprendre)
+- RISK: Relations CAUSES, CONFLICTS_WITH (risques à considérer)
+- STRUCTURE: Relations PART_OF, SUBTYPE_OF (comprendre le contexte)
 """
 
 from __future__ import annotations
 
-from typing import List, Dict, Any, Optional, Set
+import asyncio
+import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional, Set, Tuple
 import logging
-import time
 
 logger = logging.getLogger(__name__)
 
 
-class AxisType(str, Enum):
-    """Types d'axes de recherche."""
-    BRIDGE_CONNECTION = "bridge"      # Connexion entre domaines
-    WEAK_SIGNAL = "weak_signal"       # Concept émergent sous-exploré
-    CLUSTER_DEEP_DIVE = "cluster"     # Approfondissement thématique
-    DOC_CONTINUITY = "continuity"     # Suite logique document
-    UNEXPLORED = "unexplored"         # Concept mentionné non exploré
-    TRANSITIVE = "transitive"         # Relation indirecte découverte
+# =============================================================================
+# Enums et Constantes
+# =============================================================================
+
+class AxisRole(str, Enum):
+    """Rôles fonctionnels des axes de recherche."""
+    ACTIONNABLE = "actionnable"  # REQUIRES, ENABLES -> actions
+    RISK = "risk"                # CAUSES, CONFLICTS_WITH -> risques
+    STRUCTURE = "structure"      # PART_OF, SUBTYPE_OF -> contexte
+
+
+class FocusOrigin(str, Enum):
+    """Origine d'un focus concept (pour scoring anchor)."""
+    QUESTION = "question"        # Extrait de la question -> poids fort
+    EARLY_ANSWER = "early_answer"  # Début de la synthèse -> poids moyen
+    CHUNKS = "chunks"            # Chunks sources -> poids faible
+
+
+# Mapping relation_type -> role
+RELATION_TO_ROLE: Dict[str, AxisRole] = {
+    # Actionnable: ce qu'il faut pour agir
+    "REQUIRES": AxisRole.ACTIONNABLE,
+    "ENABLES": AxisRole.ACTIONNABLE,
+    "DEPENDS_ON": AxisRole.ACTIONNABLE,
+    "IMPLEMENTS": AxisRole.ACTIONNABLE,
+
+    # Risk: ce qui peut mal tourner
+    "CAUSES": AxisRole.RISK,
+    "CONFLICTS_WITH": AxisRole.RISK,
+    "CONTRADICTS": AxisRole.RISK,
+    "THREATENS": AxisRole.RISK,
+    "AFFECTS": AxisRole.RISK,
+
+    # Structure: comprendre le contexte
+    "PART_OF": AxisRole.STRUCTURE,
+    "SUBTYPE_OF": AxisRole.STRUCTURE,
+    "BELONGS_TO": AxisRole.STRUCTURE,
+    "COMPONENT_OF": AxisRole.STRUCTURE,
+    "INSTANCE_OF": AxisRole.STRUCTURE,
+    "CATEGORIZED_AS": AxisRole.STRUCTURE,
+}
+
+# Relations autorisées pour la recherche (typed edges)
+ALLOWED_RELATIONS = list(RELATION_TO_ROLE.keys()) + ["RELATED_TO"]
+
+# Nombre d'axes par rôle pour la diversification
+AXES_PER_ROLE = {
+    AxisRole.ACTIONNABLE: 1,
+    AxisRole.RISK: 1,
+    AxisRole.STRUCTURE: 1,
+}
+
+# Bonus de scoring par origine
+ANCHOR_BONUS = {
+    FocusOrigin.QUESTION: 0.3,
+    FocusOrigin.EARLY_ANSWER: 0.15,
+    FocusOrigin.CHUNKS: 0.0,
+}
+
+# Templates FR pour les axes
+TEMPLATES_FR: Dict[str, Dict[str, str]] = {
+    # Actionnable
+    "REQUIRES": {
+        "short": "Prérequis: {target}",
+        "full": "Quels sont les prérequis liés à {target} pour mettre en œuvre {source} ?",
+    },
+    "ENABLES": {
+        "short": "Rendu possible: {target}",
+        "full": "Comment {source} permet-il d'activer ou d'améliorer {target} ?",
+    },
+    "DEPENDS_ON": {
+        "short": "Dépendance: {target}",
+        "full": "Quelles sont les dépendances de {source} envers {target} ?",
+    },
+    "IMPLEMENTS": {
+        "short": "Implémentation: {target}",
+        "full": "Comment {source} implémente-t-il concrètement {target} ?",
+    },
+
+    # Risk
+    "CAUSES": {
+        "short": "Impact: {target}",
+        "full": "Quels impacts ou conséquences {source} peut-il avoir sur {target} ?",
+    },
+    "CONFLICTS_WITH": {
+        "short": "Conflit: {target}",
+        "full": "Quels conflits potentiels existent entre {source} et {target} ?",
+    },
+    "CONTRADICTS": {
+        "short": "Contradiction: {target}",
+        "full": "En quoi {source} contredit-il ou s'oppose-t-il à {target} ?",
+    },
+    "THREATENS": {
+        "short": "Risque: {target}",
+        "full": "Quels risques {source} fait-il peser sur {target} ?",
+    },
+    "AFFECTS": {
+        "short": "Effet sur: {target}",
+        "full": "Comment {source} affecte-t-il {target} et quelles précautions prendre ?",
+    },
+
+    # Structure
+    "PART_OF": {
+        "short": "Composant de: {target}",
+        "full": "Quelle est la place de {source} au sein de {target} ?",
+    },
+    "SUBTYPE_OF": {
+        "short": "Type de: {target}",
+        "full": "En tant que sous-type de {target}, quelles sont les spécificités de {source} ?",
+    },
+    "BELONGS_TO": {
+        "short": "Appartient à: {target}",
+        "full": "Comment {source} s'intègre-t-il dans {target} ?",
+    },
+    "COMPONENT_OF": {
+        "short": "Élément de: {target}",
+        "full": "Quel rôle joue {source} en tant que composant de {target} ?",
+    },
+    "INSTANCE_OF": {
+        "short": "Instance de: {target}",
+        "full": "Quelles caractéristiques de {target} retrouve-t-on dans {source} ?",
+    },
+    "CATEGORIZED_AS": {
+        "short": "Catégorie: {target}",
+        "full": "Quels autres éléments de la catégorie {target} sont liés à {source} ?",
+    },
+
+    # Fallback pour RELATED_TO
+    "RELATED_TO": {
+        "short": "Lié à: {target}",
+        "full": "Quel est le lien entre {source} et {target} ?",
+    },
+}
+
+
+# =============================================================================
+# Dataclasses
+# =============================================================================
+
+@dataclass
+class FocusConcept:
+    """Concept focus avec canonical_id pour les requêtes KG."""
+    canonical_id: str
+    name: str
+    weight: float = 1.0
+    origin: FocusOrigin = FocusOrigin.CHUNKS
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "canonical_id": self.canonical_id,
+            "name": self.name,
+            "weight": self.weight,
+            "origin": self.origin.value,
+        }
+
+
+@dataclass
+class ResearchAxisCandidate:
+    """Candidat intermédiaire pour le scoring avant sélection."""
+    # Identifiant unique: source_id|relation_type|target_id|direction
+    candidate_key: str
+
+    # Données de base
+    source_id: str
+    source_name: str
+    target_id: str
+    target_name: str
+    relation_type: str
+    relation_id: str
+    direction: str  # 'outgoing' ou 'incoming'
+
+    # Scoring
+    confidence: float
+    focus_weight: float
+    focus_origin: FocusOrigin
+    role: AxisRole
+
+    # Score calculé
+    score: float = 0.0
+
+    # Pour l'explainer
+    trace: str = ""
 
 
 @dataclass
 class ResearchAxis:
-    """Un axe de recherche structuré."""
+    """Axe de recherche final avec question contextuelle."""
 
     axis_id: str
-    axis_type: AxisType
+    role: AxisRole
 
-    # Contenu principal
-    title: str                          # Titre court et accrocheur
-    justification: str                  # Pourquoi cet axe est pertinent
-    contextual_question: str            # Question complète et contextuelle
+    # Labels générés
+    short_label: str
+    full_question: str
 
-    # Méta-données
-    concepts_involved: List[str] = field(default_factory=list)
-    relevance_score: float = 0.5        # Score de pertinence 0-1
-    data_source: str = ""               # D'où vient ce signal
+    # Concepts impliqués
+    source_concept: str
+    target_concept: str
+    relation_type: str
 
-    # Pour l'action
-    search_query: str = ""              # Query optimisée pour la recherche
+    # Scoring et métadonnées
+    relevance_score: float
+    confidence: float
+
+    # Explainer: trace du chemin KG
+    explainer_trace: str
+
+    # Pour la recherche
+    search_query: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convertit en dictionnaire pour l'API."""
         return {
             "axis_id": self.axis_id,
-            "axis_type": self.axis_type.value,
-            "title": self.title,
-            "justification": self.justification,
-            "contextual_question": self.contextual_question,
-            "concepts_involved": self.concepts_involved,
+            "role": self.role.value,
+            "short_label": self.short_label,
+            "full_question": self.full_question,
+            "source_concept": self.source_concept,
+            "target_concept": self.target_concept,
+            "relation_type": self.relation_type,
             "relevance_score": self.relevance_score,
-            "data_source": self.data_source,
+            "confidence": self.confidence,
+            "explainer_trace": self.explainer_trace,
             "search_query": self.search_query,
         }
 
@@ -80,147 +263,585 @@ class ResearchAxesResult:
 
     axes: List[ResearchAxis] = field(default_factory=list)
 
-    # Contexte utilisé pour générer les axes
+    # Contexte
     query_context: str = ""
-    answer_summary: str = ""
+    focus_concepts_count: int = 0
 
     # Métriques
     processing_time_ms: float = 0.0
-    signals_collected: Dict[str, int] = field(default_factory=dict)
+    candidates_found: int = 0
+    roles_distribution: Dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convertit en dictionnaire pour l'API."""
         return {
             "axes": [a.to_dict() for a in self.axes],
             "query_context": self.query_context,
-            "answer_summary": self.answer_summary,
+            "focus_concepts_count": self.focus_concepts_count,
             "processing_time_ms": self.processing_time_ms,
-            "signals_collected": self.signals_collected,
+            "candidates_found": self.candidates_found,
+            "roles_distribution": self.roles_distribution,
         }
 
 
+# =============================================================================
+# Research Axes Engine v2
+# =============================================================================
+
 class ResearchAxesEngine:
     """
-    🌊 Moteur de génération d'axes de recherche.
+    🌊 Moteur de génération d'axes de recherche v2.
 
-    Utilise les signaux de découverte (InferenceEngine) et le contexte
-    de la conversation pour générer des axes de recherche pertinents.
+    Utilise les focus_concepts avec canonical_id pour explorer
+    le Knowledge Graph et générer des suggestions contextuelles
+    et diversifiées par rôle (actionnable, risk, structure).
     """
 
     def __init__(
         self,
-        inference_engine=None,
-        llm_router=None,
         max_axes: int = 3,
+        min_confidence: float = 0.3,
+        degree_penalty_percentile: float = 0.95,  # Top 5% = hubs
     ):
-        """
-        Initialise le ResearchAxesEngine.
-
-        Args:
-            inference_engine: InferenceEngine pour la découverte
-            llm_router: LLMRouter pour la synthèse
-            max_axes: Nombre max d'axes à retourner
-        """
-        self._inference_engine = inference_engine
-        self._llm_router = llm_router
+        self._neo4j_client = None
         self.max_axes = max_axes
+        self.min_confidence = min_confidence
+        self.degree_penalty_percentile = degree_penalty_percentile
+
+        # Cache pour le degree threshold
+        self._degree_threshold_cache: Dict[str, Tuple[int, float]] = {}
+        self._degree_cache_ttl = 300  # 5 minutes
+
         self._axis_counter = 0
 
-        logger.info("[OSMOSE] ResearchAxesEngine initialized")
+        logger.info("[OSMOSE] ResearchAxesEngine v2 initialized")
 
     @property
-    def inference_engine(self):
-        """Lazy loading de l'InferenceEngine."""
-        if self._inference_engine is None:
-            from knowbase.semantic.inference.inference_engine import InferenceEngine
-            self._inference_engine = InferenceEngine()
-        return self._inference_engine
+    def neo4j_client(self):
+        """Lazy loading du client Neo4j."""
+        if self._neo4j_client is None:
+            from knowbase.neo4j_custom.client import get_neo4j_client
+            self._neo4j_client = get_neo4j_client()
+        return self._neo4j_client
 
-    @property
-    def llm_router(self):
-        """Lazy loading du LLMRouter."""
-        if self._llm_router is None:
-            from knowbase.common.llm_router import get_llm_router
-            self._llm_router = get_llm_router()
-        return self._llm_router
-
-    def _generate_axis_id(self, axis_type: AxisType) -> str:
+    def _generate_axis_id(self, role: AxisRole) -> str:
         """Génère un ID unique pour un axe."""
         self._axis_counter += 1
-        return f"axis_{axis_type.value[:4]}_{self._axis_counter:04d}"
+        return f"axis_{role.value[:4]}_{self._axis_counter:04d}"
+
+    # -------------------------------------------------------------------------
+    # Extraction des Focus Concepts
+    # -------------------------------------------------------------------------
+
+    async def extract_focus_concepts(
+        self,
+        query_concepts: List[str],
+        graph_context: Dict[str, Any],
+        synthesis_answer: str = "",
+        chunks: List[Dict[str, Any]] = None,
+        tenant_id: str = "default",
+    ) -> List[FocusConcept]:
+        """
+        Extrait les focus concepts avec leurs canonical_id et origine.
+
+        Sources:
+        1. query_concepts -> origine QUESTION (poids fort)
+        2. concepts du début de la réponse -> origine EARLY_ANSWER (poids moyen)
+        3. concepts des chunks -> origine CHUNKS (poids faible)
+        """
+        focus_concepts: Dict[str, FocusConcept] = {}
+
+        # 1. Query concepts (origine QUESTION)
+        # Récupérer les canonical_id depuis Neo4j
+        if query_concepts:
+            query_ids = await self._get_canonical_ids(query_concepts, tenant_id)
+            for name, cid in query_ids.items():
+                focus_concepts[cid] = FocusConcept(
+                    canonical_id=cid,
+                    name=name,
+                    weight=1.0,
+                    origin=FocusOrigin.QUESTION,
+                )
+
+        # 2. Related concepts du graph_context (origine EARLY_ANSWER)
+        related = graph_context.get("related_concepts", [])
+        if related:
+            related_names = [r.get("concept", "") for r in related[:5] if r.get("concept")]
+            related_ids = await self._get_canonical_ids(related_names, tenant_id)
+            for name, cid in related_ids.items():
+                if cid not in focus_concepts:
+                    focus_concepts[cid] = FocusConcept(
+                        canonical_id=cid,
+                        name=name,
+                        weight=0.7,
+                        origin=FocusOrigin.EARLY_ANSWER,
+                    )
+
+        # 3. Concepts des chunks (origine CHUNKS) - optionnel
+        if chunks:
+            chunk_concepts = set()
+            for chunk in chunks[:5]:
+                payload = chunk.get("payload", chunk)
+                concepts = payload.get("concepts", [])
+                if isinstance(concepts, list):
+                    chunk_concepts.update(concepts[:3])
+
+            if chunk_concepts:
+                chunk_ids = await self._get_canonical_ids(list(chunk_concepts), tenant_id)
+                for name, cid in chunk_ids.items():
+                    if cid not in focus_concepts:
+                        focus_concepts[cid] = FocusConcept(
+                            canonical_id=cid,
+                            name=name,
+                            weight=0.5,
+                            origin=FocusOrigin.CHUNKS,
+                        )
+
+        result = list(focus_concepts.values())
+        logger.info(
+            f"[OSMOSE] Extracted {len(result)} focus concepts: "
+            f"{sum(1 for f in result if f.origin == FocusOrigin.QUESTION)} question, "
+            f"{sum(1 for f in result if f.origin == FocusOrigin.EARLY_ANSWER)} early_answer, "
+            f"{sum(1 for f in result if f.origin == FocusOrigin.CHUNKS)} chunks"
+        )
+
+        return result
+
+    async def _get_canonical_ids(
+        self,
+        concept_names: List[str],
+        tenant_id: str
+    ) -> Dict[str, str]:
+        """Récupère les canonical_id pour une liste de noms de concepts."""
+        if not concept_names:
+            return {}
+
+        cypher = """
+        UNWIND $names AS name
+        MATCH (c:CanonicalConcept {tenant_id: $tid})
+        WHERE c.canonical_name = name OR toLower(c.canonical_name) = toLower(name)
+        RETURN c.canonical_name AS name, c.canonical_id AS id
+        """
+
+        try:
+            results = self.neo4j_client.execute_query(cypher, {
+                "names": concept_names,
+                "tid": tenant_id,
+            })
+
+            return {r["name"]: r["id"] for r in results if r.get("id")}
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE] Failed to get canonical IDs: {e}")
+            return {}
+
+    # -------------------------------------------------------------------------
+    # Requête Cypher UNWIND avec CALL wrapper
+    # -------------------------------------------------------------------------
+
+    async def query_kg_relations(
+        self,
+        focus_concepts: List[FocusConcept],
+        tenant_id: str,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """
+        Exécute la requête UNWIND batch avec CALL wrapper.
+
+        Récupère les relations sortantes (concept -> target) et entrantes
+        (target -> concept) pour les relations structurelles (PART_OF, SUBTYPE_OF).
+        """
+        if not focus_concepts:
+            return []
+
+        # Préparer les paramètres
+        focus_params = [
+            {
+                "id": f.canonical_id,
+                "weight": f.weight,
+                "origin": f.origin.value,
+            }
+            for f in focus_concepts
+        ]
+
+        # Requête avec CALL wrapper pour UNION + ORDER BY/LIMIT
+        cypher = """
+        CALL {
+            UNWIND $focus AS f
+            MATCH (c:CanonicalConcept {tenant_id: $tid, canonical_id: f.id})-[r]->(t:CanonicalConcept)
+            WHERE type(r) IN $allowed_rels AND coalesce(r.confidence, 0.5) >= $min_conf
+            RETURN
+                f.id AS source_id,
+                c.canonical_name AS source_name,
+                t.canonical_id AS target_id,
+                t.canonical_name AS target_name,
+                type(r) AS rel,
+                coalesce(r.confidence, 0.5) AS conf,
+                coalesce(r.canonical_relation_id, '') AS rel_id,
+                f.weight AS focus_weight,
+                f.origin AS focus_origin,
+                'outgoing' AS direction
+
+            UNION ALL
+
+            UNWIND $focus AS f
+            MATCH (t:CanonicalConcept)-[r]->(c:CanonicalConcept {tenant_id: $tid, canonical_id: f.id})
+            WHERE type(r) IN ['PART_OF', 'SUBTYPE_OF', 'BELONGS_TO', 'COMPONENT_OF']
+              AND coalesce(r.confidence, 0.5) >= $min_conf
+            RETURN
+                f.id AS source_id,
+                c.canonical_name AS source_name,
+                t.canonical_id AS target_id,
+                t.canonical_name AS target_name,
+                type(r) AS rel,
+                coalesce(r.confidence, 0.5) AS conf,
+                coalesce(r.canonical_relation_id, '') AS rel_id,
+                f.weight AS focus_weight,
+                f.origin AS focus_origin,
+                'incoming' AS direction
+        }
+        RETURN * ORDER BY conf DESC LIMIT $limit
+        """
+
+        try:
+            results = self.neo4j_client.execute_query(cypher, {
+                "focus": focus_params,
+                "tid": tenant_id,
+                "allowed_rels": ALLOWED_RELATIONS,
+                "min_conf": self.min_confidence,
+                "limit": limit,
+            })
+
+            logger.info(f"[OSMOSE] KG query returned {len(results)} relations")
+            return results
+
+        except Exception as e:
+            logger.error(f"[OSMOSE] KG query failed: {e}")
+            return []
+
+    # -------------------------------------------------------------------------
+    # Scoring des candidats
+    # -------------------------------------------------------------------------
+
+    async def score_candidates(
+        self,
+        raw_relations: List[Dict[str, Any]],
+        focus_concepts: List[FocusConcept],
+        tenant_id: str,
+    ) -> List[ResearchAxisCandidate]:
+        """
+        Score les relations avec les 3 critères:
+        - confidence * 2
+        - anchor_bonus (selon origine)
+        - role_bonus (pour diversité)
+        - degree_penalty (pour éviter hubs)
+
+        Utilise une clé unique pour dédupliquer.
+        """
+        if not raw_relations:
+            return []
+
+        # Récupérer le threshold de degree pour pénaliser les hubs
+        degree_threshold = await self._get_degree_threshold(tenant_id)
+
+        # Index des focus concepts par ID
+        focus_index = {f.canonical_id: f for f in focus_concepts}
+
+        # Dédupliquer par clé unique et scorer
+        candidates_by_key: Dict[str, ResearchAxisCandidate] = {}
+
+        for rel in raw_relations:
+            source_id = rel.get("source_id", "")
+            target_id = rel.get("target_id", "")
+            relation_type = rel.get("rel", "RELATED_TO")
+            direction = rel.get("direction", "outgoing")
+
+            # Clé unique
+            candidate_key = f"{source_id}|{relation_type}|{target_id}|{direction}"
+
+            if candidate_key in candidates_by_key:
+                continue
+
+            # Déterminer le rôle
+            role = RELATION_TO_ROLE.get(relation_type, AxisRole.STRUCTURE)
+
+            # Récupérer l'origine du focus
+            focus_origin_str = rel.get("focus_origin", "chunks")
+            try:
+                focus_origin = FocusOrigin(focus_origin_str)
+            except ValueError:
+                focus_origin = FocusOrigin.CHUNKS
+
+            confidence = rel.get("conf", 0.5)
+            focus_weight = rel.get("focus_weight", 1.0)
+
+            # Calculer le score
+            score = (
+                confidence * 2.0  # Confidence pondérée
+                + ANCHOR_BONUS.get(focus_origin, 0.0)  # Bonus anchor
+                + 0.1 * focus_weight  # Poids du focus
+            )
+
+            # TODO: Ajouter degree_penalty quand on a la métrique degree sur les nœuds
+            # Pour l'instant, on ne pénalise pas les hubs
+
+            # Trace pour l'explainer
+            source_name = rel.get("source_name", "")
+            target_name = rel.get("target_name", "")
+            trace = f"{source_name} --[{relation_type}]--> {target_name}"
+            if direction == "incoming":
+                trace = f"{target_name} --[{relation_type}]--> {source_name}"
+
+            candidate = ResearchAxisCandidate(
+                candidate_key=candidate_key,
+                source_id=source_id,
+                source_name=source_name,
+                target_id=target_id,
+                target_name=target_name,
+                relation_type=relation_type,
+                relation_id=rel.get("rel_id", ""),
+                direction=direction,
+                confidence=confidence,
+                focus_weight=focus_weight,
+                focus_origin=focus_origin,
+                role=role,
+                score=score,
+                trace=trace,
+            )
+
+            candidates_by_key[candidate_key] = candidate
+
+        candidates = list(candidates_by_key.values())
+        logger.info(f"[OSMOSE] Scored {len(candidates)} unique candidates")
+
+        return candidates
+
+    async def _get_degree_threshold(self, tenant_id: str) -> int:
+        """
+        Récupère le threshold de degree (95e percentile) pour pénaliser les hubs.
+        Utilise un cache de 5 minutes.
+        """
+        now = time.time()
+
+        # Vérifier le cache
+        if tenant_id in self._degree_threshold_cache:
+            cached_threshold, cached_time = self._degree_threshold_cache[tenant_id]
+            if now - cached_time < self._degree_cache_ttl:
+                return cached_threshold
+
+        # Calculer le threshold
+        cypher = """
+        MATCH (c:CanonicalConcept {tenant_id: $tid})
+        WITH c, size((c)--()) AS degree
+        RETURN percentileCont(degree, $percentile) AS threshold
+        """
+
+        try:
+            results = self.neo4j_client.execute_query(cypher, {
+                "tid": tenant_id,
+                "percentile": self.degree_penalty_percentile,
+            })
+
+            threshold = int(results[0].get("threshold", 100)) if results else 100
+            self._degree_threshold_cache[tenant_id] = (threshold, now)
+
+            logger.debug(f"[OSMOSE] Degree threshold for {tenant_id}: {threshold}")
+            return threshold
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE] Failed to get degree threshold: {e}")
+            return 100  # Default
+
+    # -------------------------------------------------------------------------
+    # Sélection 2-pass par rôle
+    # -------------------------------------------------------------------------
+
+    def select_diverse_axes(
+        self,
+        candidates: List[ResearchAxisCandidate],
+    ) -> List[ResearchAxisCandidate]:
+        """
+        Sélection 2-pass pour garantir la diversification par rôle.
+
+        Pass 1: Prendre le meilleur candidat de chaque rôle
+        Pass 2: Compléter avec les meilleurs restants si < max_axes
+        """
+        if not candidates:
+            return []
+
+        # Trier par score décroissant
+        sorted_candidates = sorted(candidates, key=lambda c: c.score, reverse=True)
+
+        selected: List[ResearchAxisCandidate] = []
+        used_keys: Set[str] = set()
+
+        # Pass 1: Un par rôle
+        for role in [AxisRole.ACTIONNABLE, AxisRole.RISK, AxisRole.STRUCTURE]:
+            quota = AXES_PER_ROLE.get(role, 1)
+            count = 0
+
+            for candidate in sorted_candidates:
+                if candidate.role == role and candidate.candidate_key not in used_keys:
+                    selected.append(candidate)
+                    used_keys.add(candidate.candidate_key)
+                    count += 1
+                    if count >= quota:
+                        break
+
+        # Pass 2: Compléter si nécessaire
+        if len(selected) < self.max_axes:
+            for candidate in sorted_candidates:
+                if candidate.candidate_key not in used_keys:
+                    selected.append(candidate)
+                    used_keys.add(candidate.candidate_key)
+                    if len(selected) >= self.max_axes:
+                        break
+
+        logger.info(
+            f"[OSMOSE] Selected {len(selected)} axes: "
+            f"actionnable={sum(1 for s in selected if s.role == AxisRole.ACTIONNABLE)}, "
+            f"risk={sum(1 for s in selected if s.role == AxisRole.RISK)}, "
+            f"structure={sum(1 for s in selected if s.role == AxisRole.STRUCTURE)}"
+        )
+
+        return selected
+
+    # -------------------------------------------------------------------------
+    # Génération des axes finaux avec templates FR
+    # -------------------------------------------------------------------------
+
+    def generate_axes(
+        self,
+        selected_candidates: List[ResearchAxisCandidate],
+    ) -> List[ResearchAxis]:
+        """
+        Génère les axes finaux avec les templates FR.
+        """
+        axes = []
+
+        for candidate in selected_candidates:
+            # Récupérer le template
+            templates = TEMPLATES_FR.get(
+                candidate.relation_type,
+                TEMPLATES_FR["RELATED_TO"]
+            )
+
+            # Construire les labels
+            short_label = templates["short"].format(
+                source=candidate.source_name,
+                target=candidate.target_name,
+            )
+
+            full_question = templates["full"].format(
+                source=candidate.source_name,
+                target=candidate.target_name,
+            )
+
+            # Search query
+            search_query = f"{candidate.source_name} {candidate.target_name}"
+
+            axis = ResearchAxis(
+                axis_id=self._generate_axis_id(candidate.role),
+                role=candidate.role,
+                short_label=short_label,
+                full_question=full_question,
+                source_concept=candidate.source_name,
+                target_concept=candidate.target_name,
+                relation_type=candidate.relation_type,
+                relevance_score=min(candidate.score / 3.0, 1.0),  # Normaliser 0-1
+                confidence=candidate.confidence,
+                explainer_trace=candidate.trace,
+                search_query=search_query,
+            )
+
+            axes.append(axis)
+
+        return axes
+
+    # -------------------------------------------------------------------------
+    # Point d'entrée principal
+    # -------------------------------------------------------------------------
 
     async def generate_research_axes(
         self,
         query: str,
         synthesis_answer: str,
         query_concepts: List[str],
-        related_concepts: List[Dict[str, Any]],
-        chunks: List[Dict[str, Any]],
-        session_history: Optional[List[Dict[str, Any]]] = None,
+        graph_context: Dict[str, Any],
+        chunks: List[Dict[str, Any]] = None,
         tenant_id: str = "default",
     ) -> ResearchAxesResult:
         """
-        Génère des axes de recherche basés sur les signaux disponibles.
+        Génère des axes de recherche contextuels et diversifiés.
 
         Args:
             query: Question de l'utilisateur
             synthesis_answer: Réponse synthétisée
             query_concepts: Concepts identifiés dans la query
-            related_concepts: Concepts liés depuis le KG
+            graph_context: Contexte KG (related_concepts, etc.)
             chunks: Chunks utilisés pour la réponse
-            session_history: Historique de la session (questions précédentes)
             tenant_id: Tenant ID
 
         Returns:
             ResearchAxesResult avec les axes générés
         """
         start_time = time.time()
+
         result = ResearchAxesResult(
-            query_context=query,
-            answer_summary=synthesis_answer[:200] if synthesis_answer else "",
+            query_context=query[:200],
         )
 
-        # Collecter les signaux depuis différentes sources
-        signals = await self._collect_signals(
-            query_concepts=query_concepts,
-            related_concepts=related_concepts,
-            chunks=chunks,
-            session_history=session_history,
-            tenant_id=tenant_id,
-        )
-
-        result.signals_collected = {
-            "bridges": len(signals.get("bridges", [])),
-            "weak_signals": len(signals.get("weak_signals", [])),
-            "clusters": len(signals.get("clusters", [])),
-            "doc_continuity": len(signals.get("doc_continuity", [])),
-            "unexplored": len(signals.get("unexplored", [])),
-        }
-
-        logger.info(f"[OSMOSE] Signals collected: {result.signals_collected}")
-
-        # Générer les axes à partir des signaux
-        candidate_axes = await self._generate_axes_from_signals(
-            signals=signals,
-            query=query,
-            synthesis_answer=synthesis_answer,
-            query_concepts=query_concepts,
-        )
-
-        # Trier par pertinence et limiter
-        candidate_axes.sort(key=lambda x: x.relevance_score, reverse=True)
-        result.axes = candidate_axes[:self.max_axes]
-
-        # Si pas assez d'axes, générer des fallbacks
-        if len(result.axes) < 2:
-            fallback_axes = self._generate_fallback_axes(
-                query=query,
-                synthesis_answer=synthesis_answer,
+        try:
+            # 1. Extraire les focus concepts avec canonical_id
+            focus_concepts = await self.extract_focus_concepts(
                 query_concepts=query_concepts,
-                existing_count=len(result.axes),
+                graph_context=graph_context,
+                synthesis_answer=synthesis_answer,
+                chunks=chunks,
+                tenant_id=tenant_id,
             )
-            result.axes.extend(fallback_axes)
-            result.axes = result.axes[:self.max_axes]
+
+            result.focus_concepts_count = len(focus_concepts)
+
+            if not focus_concepts:
+                logger.info("[OSMOSE] No focus concepts found, returning empty result")
+                result.processing_time_ms = (time.time() - start_time) * 1000
+                return result
+
+            # 2. Requête KG batch avec UNWIND
+            raw_relations = await self.query_kg_relations(
+                focus_concepts=focus_concepts,
+                tenant_id=tenant_id,
+            )
+
+            if not raw_relations:
+                logger.info("[OSMOSE] No relations found in KG")
+                result.processing_time_ms = (time.time() - start_time) * 1000
+                return result
+
+            # 3. Scorer les candidats
+            candidates = await self.score_candidates(
+                raw_relations=raw_relations,
+                focus_concepts=focus_concepts,
+                tenant_id=tenant_id,
+            )
+
+            result.candidates_found = len(candidates)
+
+            # 4. Sélection 2-pass diversifiée
+            selected = self.select_diverse_axes(candidates)
+
+            # 5. Générer les axes finaux
+            result.axes = self.generate_axes(selected)
+
+            # Métriques
+            result.roles_distribution = {
+                "actionnable": sum(1 for a in result.axes if a.role == AxisRole.ACTIONNABLE),
+                "risk": sum(1 for a in result.axes if a.role == AxisRole.RISK),
+                "structure": sum(1 for a in result.axes if a.role == AxisRole.STRUCTURE),
+            }
+
+        except Exception as e:
+            logger.error(f"[OSMOSE] Research axes generation failed: {e}", exc_info=True)
 
         result.processing_time_ms = (time.time() - start_time) * 1000
 
@@ -231,414 +852,11 @@ class ResearchAxesEngine:
 
         return result
 
-    async def _collect_signals(
-        self,
-        query_concepts: List[str],
-        related_concepts: List[Dict[str, Any]],
-        chunks: List[Dict[str, Any]],
-        session_history: Optional[List[Dict[str, Any]]],
-        tenant_id: str,
-    ) -> Dict[str, List[Any]]:
-        """
-        Collecte les signaux depuis différentes sources.
-        """
-        signals = {
-            "bridges": [],
-            "weak_signals": [],
-            "clusters": [],
-            "doc_continuity": [],
-            "unexplored": [],
-        }
 
-        try:
-            # 1. Concepts ponts (bridges)
-            bridges = await self.inference_engine.discover_bridge_concepts(
-                tenant_id=tenant_id,
-                max_results=5,
-            )
-            # Filtrer pour garder ceux liés aux concepts de la query
-            for bridge in bridges:
-                if self._is_relevant_to_concepts(bridge, query_concepts, related_concepts):
-                    signals["bridges"].append(bridge)
-
-            # 2. Weak signals
-            weak_signals = await self.inference_engine.discover_weak_signals(
-                tenant_id=tenant_id,
-                max_results=5,
-            )
-            for ws in weak_signals:
-                if self._is_relevant_to_concepts(ws, query_concepts, related_concepts):
-                    signals["weak_signals"].append(ws)
-
-            # 3. Clusters thématiques
-            clusters = await self.inference_engine.discover_hidden_clusters(
-                tenant_id=tenant_id,
-                max_results=3,
-            )
-            for cluster in clusters:
-                if self._is_relevant_to_concepts(cluster, query_concepts, related_concepts):
-                    signals["clusters"].append(cluster)
-
-        except Exception as e:
-            logger.warning(f"[OSMOSE] Error collecting inference signals: {e}")
-
-        # 4. Continuité documentaire (slides suivantes)
-        signals["doc_continuity"] = self._extract_doc_continuity(chunks)
-
-        # 5. Concepts mentionnés mais non explorés
-        if session_history:
-            signals["unexplored"] = self._find_unexplored_concepts(
-                session_history=session_history,
-                current_concepts=query_concepts,
-                related_concepts=related_concepts,
-            )
-
-        return signals
-
-    def _is_relevant_to_concepts(
-        self,
-        insight,
-        query_concepts: List[str],
-        related_concepts: List[Dict[str, Any]],
-    ) -> bool:
-        """
-        Vérifie si un insight est pertinent par rapport aux concepts actuels.
-        """
-        # Extraire les noms des concepts liés
-        related_names = set()
-        for rc in related_concepts:
-            if isinstance(rc, dict):
-                name = rc.get("concept", rc.get("name", ""))
-                if name:
-                    related_names.add(name.lower())
-
-        # Vérifier si les concepts de l'insight sont liés
-        insight_concepts = insight.concepts_involved if hasattr(insight, 'concepts_involved') else []
-
-        for ic in insight_concepts:
-            ic_lower = ic.lower()
-            # Match avec concepts de la query
-            for qc in query_concepts:
-                if qc.lower() in ic_lower or ic_lower in qc.lower():
-                    return True
-            # Match avec concepts liés
-            if ic_lower in related_names:
-                return True
-
-        return False
-
-    def _extract_doc_continuity(
-        self,
-        chunks: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        """
-        Extrait les opportunités de continuité documentaire.
-        """
-        continuity = []
-
-        seen_docs = {}
-        for chunk in chunks:
-            source = chunk.get("source_file", "")
-            slide_idx = chunk.get("slide_index")
-
-            if source and slide_idx:
-                if source not in seen_docs:
-                    seen_docs[source] = []
-                seen_docs[source].append(slide_idx)
-
-        # Pour chaque document, suggérer la suite
-        for source, slides in seen_docs.items():
-            max_slide = max(slides) if slides else 0
-            doc_name = source.split("/")[-1].replace(".pptx", "").replace(".pdf", "")
-
-            if max_slide > 0:
-                continuity.append({
-                    "document": doc_name,
-                    "source_file": source,
-                    "current_slide": max_slide,
-                    "suggestion": f"Voir la suite dans {doc_name} (slide {max_slide + 1}+)",
-                })
-
-        return continuity
-
-    def _find_unexplored_concepts(
-        self,
-        session_history: List[Dict[str, Any]],
-        current_concepts: List[str],
-        related_concepts: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        """
-        Trouve les concepts mentionnés dans les réponses mais jamais recherchés.
-        """
-        # Concepts déjà recherchés (dans les questions)
-        searched = set()
-        for entry in session_history:
-            if "query" in entry:
-                words = entry["query"].lower().split()
-                searched.update(words)
-
-        # Concepts actuellement mentionnés
-        mentioned = set(c.lower() for c in current_concepts)
-        for rc in related_concepts:
-            if isinstance(rc, dict):
-                name = rc.get("concept", rc.get("name", ""))
-                if name:
-                    mentioned.add(name.lower())
-
-        # Trouver ceux jamais explorés
-        unexplored = []
-        for concept in mentioned:
-            if concept not in searched and len(concept) > 3:
-                unexplored.append({
-                    "concept": concept,
-                    "reason": "Mentionné dans les résultats mais non exploré",
-                })
-
-        return unexplored[:5]
-
-    async def _generate_axes_from_signals(
-        self,
-        signals: Dict[str, List[Any]],
-        query: str,
-        synthesis_answer: str,
-        query_concepts: List[str],
-    ) -> List[ResearchAxis]:
-        """
-        Génère des axes de recherche à partir des signaux collectés.
-        """
-        axes = []
-
-        # 1. Axes depuis les bridges
-        for bridge in signals.get("bridges", [])[:2]:
-            axis = self._create_bridge_axis(bridge, query, query_concepts)
-            if axis:
-                axes.append(axis)
-
-        # 2. Axes depuis les weak signals
-        for ws in signals.get("weak_signals", [])[:2]:
-            axis = self._create_weak_signal_axis(ws, query, query_concepts)
-            if axis:
-                axes.append(axis)
-
-        # 3. Axes depuis les clusters
-        for cluster in signals.get("clusters", [])[:1]:
-            axis = self._create_cluster_axis(cluster, query, query_concepts)
-            if axis:
-                axes.append(axis)
-
-        # 4. Axes depuis la continuité documentaire
-        for cont in signals.get("doc_continuity", [])[:1]:
-            axis = self._create_continuity_axis(cont, query)
-            if axis:
-                axes.append(axis)
-
-        # 5. Axes depuis les concepts non explorés
-        for unexpl in signals.get("unexplored", [])[:1]:
-            axis = self._create_unexplored_axis(unexpl, query, synthesis_answer)
-            if axis:
-                axes.append(axis)
-
-        return axes
-
-    def _create_bridge_axis(
-        self,
-        bridge,
-        query: str,
-        query_concepts: List[str],
-    ) -> Optional[ResearchAxis]:
-        """Crée un axe de recherche depuis un concept pont."""
-        concept_name = bridge.concepts_involved[0] if bridge.concepts_involved else ""
-        if not concept_name:
-            return None
-
-        # Construire une question contextuelle
-        context_concept = query_concepts[0] if query_concepts else "ce sujet"
-
-        return ResearchAxis(
-            axis_id=self._generate_axis_id(AxisType.BRIDGE_CONNECTION),
-            axis_type=AxisType.BRIDGE_CONNECTION,
-            title=f"Connexion via {concept_name}",
-            justification=f"{concept_name} connecte plusieurs domaines thématiques et pourrait révéler des liens non évidents.",
-            contextual_question=f"Comment {concept_name} est-il lié à {context_concept} et quels autres domaines connecte-t-il ?",
-            concepts_involved=[concept_name],
-            relevance_score=min(bridge.importance * 1.2, 1.0),
-            data_source="InferenceEngine.bridge_concepts",
-            search_query=f"{concept_name} {context_concept}",
-        )
-
-    def _create_weak_signal_axis(
-        self,
-        weak_signal,
-        query: str,
-        query_concepts: List[str],
-    ) -> Optional[ResearchAxis]:
-        """Crée un axe de recherche depuis un weak signal."""
-        concept_name = weak_signal.concepts_involved[0] if weak_signal.concepts_involved else ""
-        if not concept_name:
-            return None
-
-        context_concept = query_concepts[0] if query_concepts else "votre recherche"
-
-        return ResearchAxis(
-            axis_id=self._generate_axis_id(AxisType.WEAK_SIGNAL),
-            axis_type=AxisType.WEAK_SIGNAL,
-            title=f"Signal émergent : {concept_name}",
-            justification=f"{concept_name} est peu mentionné mais fortement connecté - un concept potentiellement sous-exploré.",
-            contextual_question=f"Quel est le rôle de {concept_name} dans le contexte de {context_concept} ?",
-            concepts_involved=[concept_name],
-            relevance_score=weak_signal.importance,
-            data_source="InferenceEngine.weak_signals",
-            search_query=f"{concept_name} {context_concept}",
-        )
-
-    def _create_cluster_axis(
-        self,
-        cluster,
-        query: str,
-        query_concepts: List[str],
-    ) -> Optional[ResearchAxis]:
-        """Crée un axe de recherche depuis un cluster thématique."""
-        if not cluster.concepts_involved:
-            return None
-
-        main_concept = cluster.concepts_involved[0]
-        other_concepts = cluster.concepts_involved[1:3]
-
-        return ResearchAxis(
-            axis_id=self._generate_axis_id(AxisType.CLUSTER_DEEP_DIVE),
-            axis_type=AxisType.CLUSTER_DEEP_DIVE,
-            title=f"Groupe thématique : {main_concept}",
-            justification=f"Un groupe de concepts fortement liés ({', '.join(other_concepts[:2])}, ...) forme une thématique cohérente.",
-            contextual_question=f"Quels sont les aspects clés du domaine autour de {main_concept} ?",
-            concepts_involved=cluster.concepts_involved[:5],
-            relevance_score=cluster.confidence,
-            data_source="InferenceEngine.hidden_clusters",
-            search_query=f"{main_concept} {' '.join(other_concepts[:2])}",
-        )
-
-    def _create_continuity_axis(
-        self,
-        continuity: Dict[str, Any],
-        query: str,
-    ) -> Optional[ResearchAxis]:
-        """Crée un axe de recherche depuis la continuité documentaire."""
-        doc_name = continuity.get("document", "")
-        current_slide = continuity.get("current_slide", 0)
-
-        if not doc_name:
-            return None
-
-        return ResearchAxis(
-            axis_id=self._generate_axis_id(AxisType.DOC_CONTINUITY),
-            axis_type=AxisType.DOC_CONTINUITY,
-            title=f"Suite dans {doc_name}",
-            justification=f"La réponse utilise des informations de ce document - la suite pourrait contenir des détails complémentaires.",
-            contextual_question=f"Quelles informations supplémentaires trouve-t-on après la slide {current_slide} de {doc_name} ?",
-            concepts_involved=[doc_name],
-            relevance_score=0.7,
-            data_source="document_continuity",
-            search_query=f"document:{doc_name}",
-        )
-
-    def _create_unexplored_axis(
-        self,
-        unexplored: Dict[str, Any],
-        query: str,
-        synthesis_answer: str,
-    ) -> Optional[ResearchAxis]:
-        """Crée un axe de recherche depuis un concept non exploré."""
-        concept = unexplored.get("concept", "")
-        if not concept:
-            return None
-
-        # Extraire un bout de contexte de la réponse
-        context_snippet = ""
-        if synthesis_answer and concept.lower() in synthesis_answer.lower():
-            idx = synthesis_answer.lower().find(concept.lower())
-            start = max(0, idx - 30)
-            end = min(len(synthesis_answer), idx + len(concept) + 30)
-            context_snippet = synthesis_answer[start:end].strip()
-
-        justification = f"'{concept}' a été mentionné dans les résultats mais n'a pas été exploré directement."
-        if context_snippet:
-            justification = f"'{concept}' apparaît dans le contexte : \"...{context_snippet}...\""
-
-        return ResearchAxis(
-            axis_id=self._generate_axis_id(AxisType.UNEXPLORED),
-            axis_type=AxisType.UNEXPLORED,
-            title=f"À approfondir : {concept}",
-            justification=justification,
-            contextual_question=f"Pouvez-vous détailler ce qu'est {concept} et son importance dans ce contexte ?",
-            concepts_involved=[concept],
-            relevance_score=0.6,
-            data_source="session_memory",
-            search_query=f"{concept} définition rôle",
-        )
-
-    def _generate_fallback_axes(
-        self,
-        query: str,
-        synthesis_answer: str,
-        query_concepts: List[str],
-        existing_count: int,
-    ) -> List[ResearchAxis]:
-        """
-        Génère des axes de fallback quand pas assez de signaux.
-        """
-        axes = []
-        needed = self.max_axes - existing_count
-
-        # Fallback 1: Demander des exemples concrets
-        if needed > 0:
-            context = query_concepts[0] if query_concepts else "ce sujet"
-            axes.append(ResearchAxis(
-                axis_id=self._generate_axis_id(AxisType.UNEXPLORED),
-                axis_type=AxisType.UNEXPLORED,
-                title="Cas pratiques",
-                justification="Des exemples concrets permettent de mieux comprendre l'application.",
-                contextual_question=f"Pouvez-vous donner des exemples concrets d'utilisation de {context} ?",
-                concepts_involved=query_concepts[:2],
-                relevance_score=0.5,
-                data_source="fallback",
-                search_query=f"{context} exemple cas pratique",
-            ))
-            needed -= 1
-
-        # Fallback 2: Explorer les prérequis
-        if needed > 0 and query_concepts:
-            concept = query_concepts[0]
-            axes.append(ResearchAxis(
-                axis_id=self._generate_axis_id(AxisType.TRANSITIVE),
-                axis_type=AxisType.TRANSITIVE,
-                title=f"Prérequis pour {concept}",
-                justification="Comprendre les bases permet d'approfondir plus efficacement.",
-                contextual_question=f"Quels sont les prérequis et concepts fondamentaux pour comprendre {concept} ?",
-                concepts_involved=[concept],
-                relevance_score=0.4,
-                data_source="fallback",
-                search_query=f"{concept} prérequis fondamentaux bases",
-            ))
-            needed -= 1
-
-        # Fallback 3: Comparaison avec alternatives
-        if needed > 0 and query_concepts:
-            concept = query_concepts[0]
-            axes.append(ResearchAxis(
-                axis_id=self._generate_axis_id(AxisType.BRIDGE_CONNECTION),
-                axis_type=AxisType.BRIDGE_CONNECTION,
-                title=f"Alternatives à {concept}",
-                justification="Comparer avec des solutions similaires aide à faire un choix éclairé.",
-                contextual_question=f"Quelles sont les alternatives ou solutions similaires à {concept} ?",
-                concepts_involved=[concept],
-                relevance_score=0.4,
-                data_source="fallback",
-                search_query=f"{concept} alternative comparaison vs",
-            ))
-
-        return axes
-
-
+# =============================================================================
 # Singleton
+# =============================================================================
+
 _engine_instance: Optional[ResearchAxesEngine] = None
 
 
@@ -654,6 +872,9 @@ __all__ = [
     "ResearchAxesEngine",
     "ResearchAxesResult",
     "ResearchAxis",
-    "AxisType",
+    "ResearchAxisCandidate",
+    "FocusConcept",
+    "AxisRole",
+    "FocusOrigin",
     "get_research_axes_engine",
 ]

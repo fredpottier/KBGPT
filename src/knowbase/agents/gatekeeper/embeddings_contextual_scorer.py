@@ -22,11 +22,11 @@ import re
 from collections import defaultdict
 import numpy as np
 
-# Import via EmbeddingModelManager (avec auto-unload après inactivité)
+# Import via EmbeddingModelManager (avec auto-unload après inactivité ET support Burst)
 try:
-    from knowbase.common.clients.embeddings import get_sentence_transformer
+    from knowbase.common.clients.embeddings import get_embedding_manager
 except ImportError:
-    get_sentence_transformer = None
+    get_embedding_manager = None
     logging.warning(
         "[OSMOSE] sentence-transformers non installé. "
         "Installer avec: pip install sentence-transformers"
@@ -171,23 +171,53 @@ class EmbeddingsContextualScorer:
         self.enable_multi_occurrence = enable_multi_occurrence
         self.languages = languages or ["en", "fr", "de", "es"]
 
-        # P1.2: Initialiser SentenceTransformer via singleton (memory leak protection)
-        if get_sentence_transformer is None:
+        # P1.2: Initialiser via EmbeddingModelManager (singleton + support Burst EC2 Spot)
+        if get_embedding_manager is None:
             raise ImportError(
                 "sentence-transformers non installé. "
                 "Installer avec: pip install sentence-transformers"
             )
 
-        logger.info(f"[OSMOSE] Initialisation EmbeddingsContextualScorer (model={model_name}, P1.2 singleton)")
-        self.model = get_sentence_transformer(model_name=model_name)
+        logger.info(f"[OSMOSE] Initialisation EmbeddingsContextualScorer (model={model_name}, P1.2 singleton + Burst)")
+        self._embedding_manager = get_embedding_manager()
 
-        # Encoder concepts de référence (cache)
+        # Garder référence au modèle pour get_sentence_embedding_dimension() si nécessaire
+        # Mais utiliser self._encode() pour les encodages (supporte Burst)
+        self.model_name = model_name
+
+        # Encoder concepts de référence (cache) - utilise Burst si actif
         self.reference_embeddings = self._encode_reference_concepts()
 
         logger.info(
             f"[OSMOSE] EmbeddingsContextualScorer initialisé "
             f"(languages={self.languages}, window={context_window})"
         )
+
+    def _encode(self, texts: List[str], **kwargs) -> np.ndarray:
+        """
+        Encode texts via EmbeddingModelManager (supporte Burst EC2 Spot).
+
+        En mode Burst, les embeddings sont calculés sur EC2 Spot.
+        Sinon, utilise le modèle local.
+
+        Args:
+            texts: Liste de textes à encoder
+            **kwargs: Arguments supplémentaires (ignorés en mode Burst)
+
+        Returns:
+            np.ndarray: Embeddings
+        """
+        if not texts:
+            return np.array([])
+
+        # Utiliser le manager qui gère automatiquement Burst vs Local
+        embeddings = self._embedding_manager.encode(texts)
+
+        # Convertir en numpy si nécessaire (Burst retourne déjà numpy)
+        if not isinstance(embeddings, np.ndarray):
+            embeddings = np.array(embeddings)
+
+        return embeddings
 
     def score_entities(
         self,
@@ -246,17 +276,15 @@ class EmbeddingsContextualScorer:
                 current_idx += len(contexts)
 
         # BATCHING: Encoder TOUS les contextes en une seule fois (×3-5 speedup!)
+        # Utilise Burst EC2 Spot si actif, sinon modèle local
         if all_contexts_flat:
+            burst_mode = self._embedding_manager.is_burst_mode_active()
             logger.info(
                 f"[OSMOSE] Batch encoding {len(all_contexts_flat)} contexts "
-                f"for {len(all_contexts_by_entity)} entities (batching enabled)"
+                f"for {len(all_contexts_by_entity)} entities "
+                f"(burst={'EC2' if burst_mode else 'LOCAL'})"
             )
-            all_embeddings = self.model.encode(
-                all_contexts_flat,
-                convert_to_numpy=True,
-                batch_size=32,
-                show_progress_bar=False  # Désactiver progress bars (logs propres + ×1.2 speedup)
-            )
+            all_embeddings = self._encode(all_contexts_flat)
         else:
             all_embeddings = None
 
@@ -439,8 +467,8 @@ class EmbeddingsContextualScorer:
         if not contexts:
             return {"PRIMARY": 0.0, "COMPETITOR": 0.0, "SECONDARY": 0.5}
 
-        # Encoder tous les contextes (batch encoding pour efficacité)
-        context_embeddings = self.model.encode(contexts, convert_to_numpy=True)
+        # Encoder tous les contextes (batch encoding pour efficacité, supporte Burst)
+        context_embeddings = self._encode(contexts)
 
         # Weights: décroissance exponentielle pour mentions tardives
         # Première mention = poids 1.0, dernière = poids 0.5
@@ -525,8 +553,8 @@ class EmbeddingsContextualScorer:
 
                 paraphrases = paraphrases_by_lang[lang]
 
-                # Encoder toutes les paraphrases
-                embeddings = self.model.encode(paraphrases, convert_to_numpy=True)
+                # Encoder toutes les paraphrases (supporte Burst)
+                embeddings = self._encode(paraphrases)
 
                 # Agréger (moyenne)
                 aggregated = np.mean(embeddings, axis=0)

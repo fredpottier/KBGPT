@@ -23,6 +23,9 @@ from .concept_density_detector import ConceptDensityDetector, ExtractionMethod
 # Domain Context injection (Phase 2 - Domain Agnostic)
 from knowbase.ontology.domain_context_injector import get_domain_context_injector
 
+# Dual LLM Logger pour benchmark OpenAI vs vLLM
+from knowbase.common.dual_llm_logger import DualLLMLogger
+
 logger = logging.getLogger(__name__)
 
 
@@ -384,12 +387,25 @@ class MultilingualConceptExtractor:
             # Appel LLM async pour parallélisation
             from knowbase.common.llm_router import TaskType
 
-            response_text = await self.llm_router.acomplete(
-                task_type=TaskType.KNOWLEDGE_EXTRACTION,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=self.extraction_config.llm["temperature"],
-                max_tokens=self.extraction_config.llm["max_tokens"]
-            )
+            # Vérifier si dual-logging est activé (benchmark OpenAI vs vLLM)
+            dual_logger = DualLLMLogger.get_instance()
+            if dual_logger.is_enabled():
+                # Mode dual: appelle OpenAI + vLLM en parallèle, retourne OpenAI
+                response_text = await dual_logger.dual_call_async(
+                    llm_router=self.llm_router,
+                    task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=self.extraction_config.llm["temperature"],
+                    max_tokens=self.extraction_config.llm["max_tokens"]
+                )
+            else:
+                # Mode normal
+                response_text = await self.llm_router.acomplete(
+                    task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=self.extraction_config.llm["temperature"],
+                    max_tokens=self.extraction_config.llm["max_tokens"]
+                )
 
             # Parser JSON response
             concepts_data = self._parse_llm_response(response_text)

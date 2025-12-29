@@ -35,12 +35,10 @@ logger = logging.getLogger(__name__)
 # LLM Router pour traduction
 _llm_router = None
 
-def get_llm_router() -> LLMRouter:
-    """Singleton pour le LLM Router."""
-    global _llm_router
-    if _llm_router is None:
-        _llm_router = LLMRouter()
-    return _llm_router
+def get_local_llm_router() -> LLMRouter:
+    """Utilise le singleton global du LLMRouter."""
+    from knowbase.common.llm_router import get_llm_router as get_global_llm_router
+    return get_global_llm_router()
 
 router = APIRouter(prefix="/domain-context", tags=["domain-context"])
 
@@ -99,7 +97,7 @@ def _translate_content_to_english(
     logger.info(f"[DomainContext] Detected language: {detected_lang}, translating to English...")
 
     try:
-        router = get_llm_router()
+        router = get_local_llm_router()
 
         # Préparer le contenu à traduire en un seul appel
         translation_input = {
@@ -199,7 +197,7 @@ def _generate_prompt_via_llm(
     Returns:
         Prompt d'injection généré par le LLM
     """
-    router = get_llm_router()
+    router = get_local_llm_router()
 
     # Token budget selon priorité
     token_budgets = {

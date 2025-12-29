@@ -161,24 +161,32 @@ class TextChunker:
                 })
 
             # ===== PARTIE 2: Chunks Concept-Focused (Si Hybride Activé) =====
+            # IMPORTANT: Wrap in try/except to not lose generic chunks if concept-focused fails
             if use_hybrid and concepts:
-                concept_focused_chunks = self._create_concept_focused_chunks(
-                    text=text,
-                    document_id=document_id,
-                    document_name=document_name,
-                    segment_id=segment_id,
-                    concepts=concepts,
-                    tenant_id=tenant_id,
-                    start_index=len(all_chunks)  # Continuer numérotation après generics
-                )
+                try:
+                    concept_focused_chunks = self._create_concept_focused_chunks(
+                        text=text,
+                        document_id=document_id,
+                        document_name=document_name,
+                        segment_id=segment_id,
+                        concepts=concepts,
+                        tenant_id=tenant_id,
+                        start_index=len(all_chunks)  # Continuer numérotation après generics
+                    )
 
-                all_chunks.extend(concept_focused_chunks)
+                    all_chunks.extend(concept_focused_chunks)
 
-                logger.info(
-                    f"[TextChunker:Hybrid] Generated {len(generic_chunks)} generic + "
-                    f"{len(concept_focused_chunks)} concept-focused chunks "
-                    f"({len(all_chunks)} total)"
-                )
+                    logger.info(
+                        f"[TextChunker:Hybrid] Generated {len(generic_chunks)} generic + "
+                        f"{len(concept_focused_chunks)} concept-focused chunks "
+                        f"({len(all_chunks)} total)"
+                    )
+                except Exception as e:
+                    # Concept-focused failed (likely embedding timeout), but keep generic chunks
+                    logger.warning(
+                        f"[TextChunker:Hybrid] Concept-focused chunks failed ({e}), "
+                        f"keeping {len(generic_chunks)} generic chunks only"
+                    )
             else:
                 logger.info(
                     f"[TextChunker:Generic] Generated {len(all_chunks)} generic chunks "

@@ -320,6 +320,8 @@ class LLMDispatcher(BaseAgent):
         """
         Vérifie rate limit pour model_tier.
 
+        En mode Burst (vLLM sur EC2), les limites sont beaucoup plus élevées.
+
         Args:
             model_tier: SMALL, BIG, VISION
 
@@ -333,8 +335,17 @@ class LLMDispatcher(BaseAgent):
         while timestamps and now - timestamps[0] > 60:
             timestamps.popleft()
 
-        # Vérifier limite
-        limit = self.rate_limits[model_tier]
+        # Vérifier limite (dynamique selon mode Burst)
+        try:
+            from knowbase.ingestion.burst.provider_switch import is_burst_mode_active, get_burst_concurrency_config
+            if is_burst_mode_active():
+                config = get_burst_concurrency_config()
+                limit = config["rate_limits"].get(model_tier, 10000)
+            else:
+                limit = self.rate_limits[model_tier]
+        except ImportError:
+            limit = self.rate_limits[model_tier]
+
         if len(timestamps) >= limit:
             return False
 

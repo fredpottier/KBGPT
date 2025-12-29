@@ -235,15 +235,16 @@ class CanonicalRelation(BaseModel):
     """
     Relation canonique agrégée (Phase 2.8).
 
-    Vue reconstruite à partir des RawAssertions. Clé: (subject, object, relation_type).
+    Vue reconstruite à partir des RawAssertions. Clé: (subject, object, predicate_norm).
     """
 
     # Identité (hash stable)
-    canonical_relation_id: str = Field(description="sha1(tenant|subject|type|object)[:16]")
+    canonical_relation_id: str = Field(description="sha1(tenant|subject|predicate_norm|object)[:16]")
     tenant_id: str = Field(default="default")
 
     # Relation normalisée
-    relation_type: RelationType
+    relation_type: RelationType = Field(description="Inferred or explicit relation type category")
+    predicate_norm: str = Field(default="", description="Normalized predicate - grouping key")
     subject_concept_id: str = Field(description="Cache - source of truth = edges RELATES_FROM")
     object_concept_id: str = Field(description="Cache - source of truth = edges RELATES_TO")
 

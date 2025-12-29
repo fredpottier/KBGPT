@@ -34,7 +34,7 @@ from knowbase.semantic.segmentation.topic_segmenter import get_topic_segmenter
 from knowbase.semantic.config import get_semantic_config
 from knowbase.ingestion.text_chunker import get_text_chunker  # Phase 1.6: Chunking
 from knowbase.common.clients.qdrant_client import upsert_chunks  # Phase 1.6: Qdrant
-from knowbase.common.llm_router import LLMRouter, TaskType  # Phase 1.8: Document Context
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router  # Phase 1.8: Document Context
 from knowbase.ontology.domain_context_injector import get_domain_context_injector  # Domain Context injection
 from knowbase.entity_resolution.deferred_reevaluator import get_deferred_reevaluator  # Phase 2.12: Entity Resolution
 
@@ -115,9 +115,9 @@ class OsmoseAgentiqueService:
         return self.text_chunker
 
     def _get_llm_router(self) -> LLMRouter:
-        """Lazy init du LLMRouter (Phase 1.8)."""
+        """Lazy init du LLMRouter singleton (Phase 1.8, avec support Burst Mode)."""
         if self.llm_router is None:
-            self.llm_router = LLMRouter()
+            self.llm_router = get_llm_router()  # Singleton avec Burst Mode
             logger.info("[OSMOSE AGENTIQUE] LLMRouter initialized (Phase 1.8)")
 
         return self.llm_router

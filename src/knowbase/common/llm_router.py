@@ -26,6 +26,13 @@ try:
 except ImportError:
     SAGEMAKER_AVAILABLE = False
 
+# Import conditionnel httpx pour vLLM client
+try:
+    import httpx
+    HTTPX_AVAILABLE = True
+except ImportError:
+    HTTPX_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,7 +50,13 @@ class TaskType(Enum):
 
 
 class LLMRouter:
-    """Routeur intelligent pour les appels LLM selon le type de tâche."""
+    """
+    Routeur intelligent pour les appels LLM selon le type de tâche.
+
+    Supporte le mode Burst pour déporter les appels LLM vers EC2 Spot.
+    En mode Burst, toutes les tâches texte sont redirigées vers vLLM distant,
+    sauf Vision qui reste sur GPT-4o.
+    """
 
     def __init__(self, config_path: Optional[Path] = None):
         self.settings = get_settings()
@@ -51,6 +64,15 @@ class LLMRouter:
         self._async_openai_client = None
         self._anthropic_client = None
         self._sagemaker_client = None
+        self._vllm_client = None
+        self._async_vllm_client = None
+
+        # === Mode Burst ===
+        self._burst_mode = False
+        self._burst_endpoint: Optional[str] = None
+        self._burst_vllm_client = None
+        self._burst_async_vllm_client = None
+        self._burst_model: str = "Qwen/Qwen2.5-7B-Instruct"  # Modèle par défaut sur EC2
 
         # Configuration dynamique
         self._config = self._load_config(config_path)
@@ -121,7 +143,94 @@ class LLMRouter:
             providers["sagemaker"] = False
             logger.debug(f"✗ SageMaker provider indisponible: {e}")
 
+        # Test vLLM (EC2 burst mode)
+        vllm_url = os.getenv("VLLM_URL", "").strip()
+        if vllm_url:
+            try:
+                # Test de connectivité basique vers vLLM
+                if HTTPX_AVAILABLE:
+                    with httpx.Client(timeout=5.0) as client:
+                        response = client.get(f"{vllm_url}/health")
+                        if response.status_code == 200:
+                            providers["vllm"] = True
+                            logger.info(f"✓ vLLM provider disponible ({vllm_url})")
+                        else:
+                            providers["vllm"] = False
+                            logger.debug(f"✗ vLLM health check failed: {response.status_code}")
+                else:
+                    # httpx non disponible, on suppose que vLLM est ok si URL configurée
+                    providers["vllm"] = True
+                    logger.debug(f"✓ vLLM provider configuré (URL: {vllm_url}, no health check)")
+            except Exception as e:
+                providers["vllm"] = False
+                logger.debug(f"✗ vLLM provider indisponible: {e}")
+        else:
+            providers["vllm"] = False
+            logger.debug("✗ vLLM provider non configuré (VLLM_URL manquant)")
+
         return providers
+
+    # =========================================================================
+    # Mode Burst - Basculement dynamique vers EC2 Spot
+    # =========================================================================
+
+    def enable_burst_mode(self, vllm_url: str, model: Optional[str] = None):
+        """
+        Active le mode Burst : redirige les appels LLM vers EC2 Spot.
+
+        En mode Burst :
+        - Toutes les tâches texte (metadata, summary, enrichment, etc.) → vLLM distant
+        - Les tâches VISION restent sur GPT-4o (gating préserve les coûts)
+
+        Args:
+            vllm_url: URL du serveur vLLM (ex: http://ec2-xxx:8000)
+            model: Modèle vLLM à utiliser (défaut: Qwen/Qwen2.5-7B-Instruct)
+        """
+        from openai import OpenAI, AsyncOpenAI
+
+        self._burst_mode = True
+        self._burst_endpoint = vllm_url.rstrip("/")
+        self._burst_model = model or "Qwen/Qwen2.5-7B-Instruct"
+
+        # Créer clients vLLM dédiés au mode burst
+        self._burst_vllm_client = OpenAI(
+            api_key="EMPTY",  # vLLM n'utilise pas d'API key
+            base_url=f"{self._burst_endpoint}/v1"
+        )
+        self._burst_async_vllm_client = AsyncOpenAI(
+            api_key="EMPTY",
+            base_url=f"{self._burst_endpoint}/v1"
+        )
+
+        logger.info(f"[LLM_ROUTER] 🚀 Burst mode ENABLED → {vllm_url} (model: {self._burst_model})")
+
+    def disable_burst_mode(self):
+        """
+        Désactive le mode Burst, retour aux providers normaux.
+        """
+        if not self._burst_mode:
+            logger.debug("[LLM_ROUTER] Burst mode already disabled")
+            return
+
+        self._burst_mode = False
+        self._burst_endpoint = None
+        self._burst_vllm_client = None
+        self._burst_async_vllm_client = None
+
+        logger.info("[LLM_ROUTER] ⏹️ Burst mode DISABLED → Normal providers")
+
+    def is_burst_mode_active(self) -> bool:
+        """Vérifie si le mode Burst est actif."""
+        return self._burst_mode and self._burst_vllm_client is not None
+
+    def get_burst_status(self) -> Dict[str, Any]:
+        """Retourne le statut du mode Burst."""
+        return {
+            "burst_mode": self._burst_mode,
+            "burst_endpoint": self._burst_endpoint,
+            "burst_model": self._burst_model if self._burst_mode else None,
+            "client_ready": self._burst_vllm_client is not None
+        }
 
     @property
     def openai_client(self):
@@ -151,6 +260,35 @@ class LLMRouter:
             self._sagemaker_client = boto3.client('sagemaker-runtime')
         return self._sagemaker_client
 
+    @property
+    def vllm_client(self):
+        """Client vLLM paresseux (API OpenAI-compatible)."""
+        if self._vllm_client is None:
+            vllm_url = os.getenv("VLLM_URL", "").strip()
+            if not vllm_url:
+                raise ValueError("VLLM_URL not configured")
+            # vLLM expose une API OpenAI-compatible, on utilise le client OpenAI
+            from openai import OpenAI
+            self._vllm_client = OpenAI(
+                api_key="EMPTY",  # vLLM n'utilise pas d'API key
+                base_url=f"{vllm_url}/v1"
+            )
+        return self._vllm_client
+
+    @property
+    def async_vllm_client(self):
+        """Client vLLM async paresseux."""
+        if self._async_vllm_client is None:
+            vllm_url = os.getenv("VLLM_URL", "").strip()
+            if not vllm_url:
+                raise ValueError("VLLM_URL not configured")
+            from openai import AsyncOpenAI
+            self._async_vllm_client = AsyncOpenAI(
+                api_key="EMPTY",
+                base_url=f"{vllm_url}/v1"
+            )
+        return self._async_vllm_client
+
     def _get_provider_for_model(self, model: str) -> str:
         """Détecte automatiquement le provider d'un modèle."""
         # Vérification dans la config d'abord
@@ -167,6 +305,12 @@ class LLMRouter:
             return "anthropic"
         elif model in ["llama3.1:70b", "qwen2.5:32b", "qwen2.5:7b", "llava:34b", "phi3:3.8b"]:
             return "sagemaker"
+        # vLLM models (Qwen, Llama served via vLLM on EC2)
+        elif model.startswith(("Qwen/", "meta-llama/", "mistralai/")):
+            return "vllm"
+        elif "vllm:" in model:
+            # Syntaxe explicite: "vllm:Qwen/Qwen2.5-7B-Instruct"
+            return "vllm"
         else:
             # Fallback vers OpenAI par défaut
             return "openai"
@@ -235,12 +379,25 @@ class LLMRouter:
         logger.debug(f"[LLM_ROUTER] Task: {task_type.value}, Model: {model}, Provider: {provider}, Temp: {temperature}, Tokens: {max_tokens}")
 
         try:
+            # === Mode Burst : rediriger vers EC2 Spot (sauf Vision) ===
+            if self._burst_mode and self._burst_vllm_client:
+                # Vision reste TOUJOURS sur GPT-4o (avec gating)
+                if task_type == TaskType.VISION:
+                    logger.debug(f"[LLM_ROUTER:BURST] Vision task → GPT-4o (preserved)")
+                    return self._call_openai(model, messages, temperature, max_tokens, task_type, **kwargs)
+                else:
+                    logger.debug(f"[LLM_ROUTER:BURST] Text task → {self._burst_endpoint} ({self._burst_model})")
+                    return self._call_burst_vllm(messages, temperature, max_tokens, task_type, **kwargs)
+
+            # === Mode Normal ===
             if provider == "openai":
                 return self._call_openai(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "anthropic":
                 return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "sagemaker":
                 return self._call_sagemaker(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "vllm":
+                return self._call_vllm(model, messages, temperature, max_tokens, task_type, **kwargs)
             else:
                 raise ValueError(f"Provider {provider} non supporté")
 
@@ -290,6 +447,17 @@ class LLMRouter:
         logger.debug(f"[LLM_ROUTER:ASYNC] Task: {task_type.value}, Model: {model}, Provider: {provider}, Temp: {temperature}, Tokens: {max_tokens}")
 
         try:
+            # === Mode Burst : rediriger vers EC2 Spot (sauf Vision) ===
+            if self._burst_mode and self._burst_async_vllm_client:
+                # Vision reste TOUJOURS sur GPT-4o (avec gating)
+                if task_type == TaskType.VISION:
+                    logger.debug(f"[LLM_ROUTER:ASYNC:BURST] Vision task → GPT-4o (preserved)")
+                    return await self._call_openai_async(model, messages, temperature, max_tokens, task_type, **kwargs)
+                else:
+                    logger.debug(f"[LLM_ROUTER:ASYNC:BURST] Text task → {self._burst_endpoint} ({self._burst_model})")
+                    return await self._call_burst_vllm_async(messages, temperature, max_tokens, task_type, **kwargs)
+
+            # === Mode Normal ===
             if provider == "openai":
                 return await self._call_openai_async(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "anthropic":
@@ -300,6 +468,8 @@ class LLMRouter:
                 # TODO: Implémenter version async pour SageMaker si nécessaire
                 logger.warning("[LLM_ROUTER:ASYNC] SageMaker async not implemented, falling back to sync")
                 return self._call_sagemaker(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "vllm":
+                return await self._call_vllm_async(model, messages, temperature, max_tokens, task_type, **kwargs)
             else:
                 raise ValueError(f"Provider {provider} non supporté")
 
@@ -566,6 +736,207 @@ class LLMRouter:
         else:
             logger.warning(f"Format de réponse SageMaker inattendu pour {model}: {result}")
             return str(result)
+
+    def _call_vllm(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        task_type: TaskType,
+        **kwargs
+    ) -> str:
+        """
+        Appel vers vLLM (API OpenAI-compatible).
+
+        vLLM expose une API compatible OpenAI, donc on utilise le client OpenAI
+        avec une base_url différente pointant vers le serveur vLLM.
+        """
+        # Nettoyer le nom du modèle si préfixé par "vllm:"
+        actual_model = model.replace("vllm:", "") if model.startswith("vllm:") else model
+
+        # Filtrer les paramètres internes
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
+
+        # Retirer response_format si le modèle ne le supporte pas
+        # (certains modèles vLLM ne supportent pas le JSON mode)
+        if 'response_format' in api_kwargs:
+            # vLLM supporte response_format pour certains modèles Qwen
+            if not any(x in actual_model.lower() for x in ['qwen', 'mistral']):
+                api_kwargs.pop('response_format', None)
+                logger.debug(f"[vLLM] Removed response_format for model {actual_model}")
+
+        try:
+            response = self.vllm_client.chat.completions.create(
+                model=actual_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **api_kwargs
+            )
+
+            # Log et tracking des métriques de tokens
+            if response.usage:
+                prompt_tokens = response.usage.prompt_tokens
+                completion_tokens = response.usage.completion_tokens
+                total_tokens = response.usage.total_tokens
+                logger.info(f"[TOKENS:vLLM] {actual_model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
+
+                # Tracking pour analyse des coûts (vLLM = coût compute, pas API)
+                track_tokens(f"vllm/{actual_model}", task_type.value, prompt_tokens, completion_tokens)
+
+            return response.choices[0].message.content or ""
+
+        except Exception as e:
+            logger.error(f"[vLLM] Error calling {actual_model}: {e}")
+            raise
+
+    async def _call_vllm_async(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        task_type: TaskType,
+        **kwargs
+    ) -> str:
+        """
+        Appel async vers vLLM pour parallélisation.
+        """
+        # Nettoyer le nom du modèle
+        actual_model = model.replace("vllm:", "") if model.startswith("vllm:") else model
+
+        # Filtrer les paramètres internes
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
+
+        # Retirer response_format si non supporté
+        if 'response_format' in api_kwargs:
+            if not any(x in actual_model.lower() for x in ['qwen', 'mistral']):
+                api_kwargs.pop('response_format', None)
+
+        try:
+            response = await self.async_vllm_client.chat.completions.create(
+                model=actual_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **api_kwargs
+            )
+
+            # Log et tracking
+            if response.usage:
+                prompt_tokens = response.usage.prompt_tokens
+                completion_tokens = response.usage.completion_tokens
+                total_tokens = response.usage.total_tokens
+                logger.info(f"[TOKENS:vLLM:ASYNC] {actual_model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
+
+                track_tokens(f"vllm/{actual_model}", task_type.value, prompt_tokens, completion_tokens)
+
+            return response.choices[0].message.content or ""
+
+        except Exception as e:
+            logger.error(f"[vLLM:ASYNC] Error calling {actual_model}: {e}")
+            raise
+
+    # =========================================================================
+    # Méthodes Burst Mode - Appels vers EC2 Spot vLLM
+    # =========================================================================
+
+    def _call_burst_vllm(
+        self,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        task_type: TaskType,
+        **kwargs
+    ) -> str:
+        """
+        Appel vers vLLM en mode Burst (EC2 Spot).
+
+        Utilise le client burst dédié et le modèle configuré pour le burst.
+        """
+        if not self._burst_vllm_client:
+            raise RuntimeError("Burst mode client not initialized")
+
+        # Filtrer les paramètres internes
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
+
+        # Retirer response_format si non supporté par le modèle
+        if 'response_format' in api_kwargs:
+            if not any(x in self._burst_model.lower() for x in ['qwen', 'mistral']):
+                api_kwargs.pop('response_format', None)
+                logger.debug(f"[BURST:vLLM] Removed response_format for model {self._burst_model}")
+
+        try:
+            response = self._burst_vllm_client.chat.completions.create(
+                model=self._burst_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **api_kwargs
+            )
+
+            # Log et tracking des métriques de tokens
+            if response.usage:
+                prompt_tokens = response.usage.prompt_tokens
+                completion_tokens = response.usage.completion_tokens
+                total_tokens = response.usage.total_tokens
+                logger.info(f"[TOKENS:BURST:vLLM] {self._burst_model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
+
+                # Tracking pour analyse des coûts (burst = coût EC2 Spot, pas API)
+                track_tokens(f"burst/{self._burst_model}", task_type.value, prompt_tokens, completion_tokens)
+
+            return response.choices[0].message.content or ""
+
+        except Exception as e:
+            logger.error(f"[BURST:vLLM] Error calling {self._burst_model} at {self._burst_endpoint}: {e}")
+            raise
+
+    async def _call_burst_vllm_async(
+        self,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        task_type: TaskType,
+        **kwargs
+    ) -> str:
+        """
+        Appel async vers vLLM en mode Burst (EC2 Spot).
+        """
+        if not self._burst_async_vllm_client:
+            raise RuntimeError("Burst mode async client not initialized")
+
+        # Filtrer les paramètres internes
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
+
+        # Retirer response_format si non supporté
+        if 'response_format' in api_kwargs:
+            if not any(x in self._burst_model.lower() for x in ['qwen', 'mistral']):
+                api_kwargs.pop('response_format', None)
+
+        try:
+            response = await self._burst_async_vllm_client.chat.completions.create(
+                model=self._burst_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **api_kwargs
+            )
+
+            # Log et tracking
+            if response.usage:
+                prompt_tokens = response.usage.prompt_tokens
+                completion_tokens = response.usage.completion_tokens
+                total_tokens = response.usage.total_tokens
+                logger.info(f"[TOKENS:BURST:vLLM:ASYNC] {self._burst_model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
+
+                track_tokens(f"burst/{self._burst_model}", task_type.value, prompt_tokens, completion_tokens)
+
+            return response.choices[0].message.content or ""
+
+        except Exception as e:
+            logger.error(f"[BURST:vLLM:ASYNC] Error calling {self._burst_model} at {self._burst_endpoint}: {e}")
+            raise
 
     def _estimate_tokens(self, text: str) -> int:
         """Estimation grossière des tokens (~ 4 chars = 1 token)."""

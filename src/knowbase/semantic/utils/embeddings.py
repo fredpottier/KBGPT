@@ -2,13 +2,17 @@
 🌊 OSMOSE Semantic Intelligence V2.1 - Embeddings Multilingues
 
 Gestionnaire embeddings cross-lingual avec multilingual-e5-large
+
+Supporte le mode Burst EC2 Spot via EmbeddingModelManager.
 """
 
-from sentence_transformers import SentenceTransformer
 from typing import List, Optional
 import numpy as np
 from functools import lru_cache
 import logging
+
+# Import EmbeddingModelManager pour support Burst EC2 Spot
+from knowbase.common.clients.embeddings import get_embedding_manager
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +27,7 @@ class MultilingualEmbedder:
     - Topic clustering
 
     Phase 1 V2.1 - Semaine 1
+    Supporte le mode Burst EC2 Spot via EmbeddingModelManager.
     """
 
     def __init__(self, config):
@@ -34,27 +39,30 @@ class MultilingualEmbedder:
         """
         self.config = config
 
-        # Auto-detect GPU (CUDA) si disponible, sinon fallback CPU
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        # Utiliser EmbeddingModelManager (singleton avec support Burst EC2 Spot)
+        self._embedding_manager = get_embedding_manager()
 
-        # Charger le modèle multilingual-e5-large
-        logger.info(f"[OSMOSE] Loading embeddings model: {config.embeddings.model}...")
-        self.model = SentenceTransformer(
-            config.embeddings.model,
-            device=device
-        )
+        # Déterminer le mode (Burst EC2 vs Local)
+        burst_mode = self._embedding_manager.is_burst_mode_active()
 
-        # Log avec device réel (pas celui de la config)
-        gpu_info = ""
-        if device == "cuda":
-            gpu_name = torch.cuda.get_device_name(0)
-            gpu_info = f" (GPU: {gpu_name})"
+        if burst_mode:
+            logger.info(
+                f"[OSMOSE] ✅ MultilingualEmbedder initialized in BURST mode "
+                f"(model={config.embeddings.model}, target=EC2 Spot)"
+            )
+        else:
+            # Mode local: vérifier GPU
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            gpu_info = ""
+            if device == "cuda":
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_info = f" (GPU: {gpu_name})"
 
-        logger.info(
-            f"[OSMOSE] ✅ Embeddings model loaded: {config.embeddings.model} "
-            f"({config.embeddings.dimension}D, device: {device}{gpu_info})"
-        )
+            logger.info(
+                f"[OSMOSE] ✅ MultilingualEmbedder initialized in LOCAL mode "
+                f"(model={config.embeddings.model}, device={device}{gpu_info})"
+            )
 
     @lru_cache(maxsize=1000)
     def encode_cached(self, text: str) -> np.ndarray:
@@ -69,11 +77,12 @@ class MultilingualEmbedder:
         Returns:
             np.ndarray: Vecteur embedding (1024D)
         """
-        embedding = self.model.encode(
-            text,
-            convert_to_numpy=True,
-            normalize_embeddings=self.config.embeddings.normalize
-        )
+        # Utiliser le manager (supporte Burst EC2 Spot)
+        embedding = self._embedding_manager.encode([text])
+        if len(embedding) > 0:
+            embedding = embedding[0]
+            if self.config.embeddings.normalize:
+                embedding = embedding / np.linalg.norm(embedding)
         return embedding
 
     def encode(self, texts: List[str], prefix_type: Optional[str] = None) -> np.ndarray:
@@ -97,20 +106,18 @@ class MultilingualEmbedder:
         elif prefix_type == "passage":
             texts = [f"passage: {text}" for text in texts]
 
-        # Batch size optimisé pour GPU (128) vs CPU (32)
-        import torch
-        batch_size = 128 if torch.cuda.is_available() else 32
+        # Utiliser le manager (supporte Burst EC2 Spot)
+        burst_mode = self._embedding_manager.is_burst_mode_active()
+        embeddings = self._embedding_manager.encode(texts)
 
-        embeddings = self.model.encode(
-            texts,
-            batch_size=batch_size,
-            convert_to_numpy=True,
-            normalize_embeddings=self.config.embeddings.normalize,
-            show_progress_bar=False
-        )
+        # Normaliser si demandé
+        if self.config.embeddings.normalize and len(embeddings) > 0:
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            embeddings = embeddings / np.where(norms > 0, norms, 1)
 
         logger.debug(
-            f"[OSMOSE] Encoded {len(texts)} texts (prefix={prefix_type}, batch_size={batch_size}) → {embeddings.shape}"
+            f"[OSMOSE] Encoded {len(texts)} texts (prefix={prefix_type}, "
+            f"burst={'EC2' if burst_mode else 'LOCAL'}) → {embeddings.shape}"
         )
 
         return embeddings
@@ -129,11 +136,12 @@ class MultilingualEmbedder:
         if use_cache:
             return self.encode_cached(text)
         else:
-            return self.model.encode(
-                text,
-                convert_to_numpy=True,
-                normalize_embeddings=self.config.embeddings.normalize
-            )
+            embedding = self._embedding_manager.encode([text])
+            if len(embedding) > 0:
+                embedding = embedding[0]
+                if self.config.embeddings.normalize:
+                    embedding = embedding / np.linalg.norm(embedding)
+            return embedding
 
     def similarity(
         self,
@@ -233,11 +241,7 @@ class MultilingualEmbedder:
 
         # Utiliser préfixes e5 si demandé (recommandation OpenAI)
         if use_e5_prefixes:
-            query_emb = self.model.encode(
-                f"query: {query_text}",
-                convert_to_numpy=True,
-                normalize_embeddings=self.config.embeddings.normalize
-            )
+            query_emb = self.encode_single(f"query: {query_text}", use_cache=False)
             candidate_embs = self.encode(candidate_texts, prefix_type="passage")
         else:
             query_emb = self.encode_cached(query_text)

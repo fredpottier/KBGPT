@@ -133,16 +133,18 @@ export interface SuggestedQuestion {
   related_concepts: string[]
 }
 
-// 🌊 Phase 3.5: Research Axes (basés sur signaux KG réels)
+// 🌊 Phase 3.5+: Research Axes v2 (basés sur KG typed edges)
 export interface ResearchAxis {
   axis_id: string
-  axis_type: 'bridge' | 'weak_signal' | 'cluster' | 'continuity' | 'unexplored' | 'transitive'
-  title: string
-  justification: string
-  contextual_question: string
-  concepts_involved: string[]
+  role: 'actionnable' | 'risk' | 'structure'
+  short_label: string
+  full_question: string
+  source_concept: string
+  target_concept: string
+  relation_type: string
   relevance_score: number
-  data_source: string
+  confidence: number
+  explainer_trace: string
   search_query: string
 }
 
@@ -155,6 +157,106 @@ export interface ExplorationIntelligence {
   processing_time_ms: number
 }
 
+// 🌊 Answer+Proof: Confidence Engine Types
+export type EpistemicState = 'established' | 'partial' | 'debate' | 'incomplete'
+export type ContractState = 'covered' | 'out_of_scope'
+
+export interface KGSignals {
+  typed_edges_count: number
+  avg_conf: number
+  validated_ratio: number
+  conflicts_count: number
+  orphan_concepts_count: number
+  independent_sources_count: number
+  expected_edges_missing_count: number
+}
+
+export interface DomainSignals {
+  in_scope_domains: string[]
+  matched_domains: string[]
+}
+
+export interface ConfidenceResult {
+  epistemic_state: EpistemicState
+  contract_state: ContractState
+  badge: string
+  micro_text: string
+  warnings: string[]
+  blockers: string[]
+  rules_fired: string[]
+  cta?: {
+    label: string
+    action: string
+  }
+  kg_signals?: KGSignals
+  domain_signals?: DomainSignals
+}
+
+// 🌊 Answer+Proof: Knowledge Proof Summary (Bloc B)
+export interface KnowledgeProofSummary {
+  concepts_count: number
+  relations_count: number
+  relation_types: string[]
+  sources_count: number
+  contradictions_count: number
+  coherence_status: 'coherent' | 'debate' | 'incomplete'
+  maturity_percent: number
+  avg_confidence: number
+  dominant_concept_types: string[]
+  solidity: 'Fragile' | 'Partielle' | 'Etablie'
+  epistemic_state: EpistemicState
+  contract_state: ContractState
+}
+
+// 🌊 Answer+Proof: Reasoning Trace (Bloc C)
+export interface ReasoningSupport {
+  relation_type: string
+  source_concept_id: string
+  source_concept_name: string
+  target_concept_id: string
+  target_concept_name: string
+  edge_confidence: number
+  canonical_relation_id?: string
+  source_refs: string[]
+}
+
+export interface ReasoningStep {
+  step: number
+  statement: string
+  has_kg_support: boolean
+  is_conflict: boolean
+  supports: ReasoningSupport[]
+  source_refs: string[]
+}
+
+export interface ReasoningTrace {
+  coherence_status: 'coherent' | 'partial_conflict' | 'conflict'
+  coherence_message: string
+  unsupported_steps_count: number
+  steps: ReasoningStep[]
+}
+
+// 🌊 Answer+Proof: Coverage Map (Bloc D)
+export interface DomainCoverage {
+  domain_id: string
+  domain: string
+  status: 'covered' | 'partial' | 'debate' | 'not_covered'
+  epistemic_state: EpistemicState
+  relations_count: number
+  concepts_found: string[]
+  confidence: number
+  note?: string
+}
+
+export interface CoverageMap {
+  domains: DomainCoverage[]
+  coverage_percent: number | null
+  covered_count: number
+  total_relevant: number
+  recommendations: string[]
+  message?: string
+}
+
 export interface SearchResponse {
   status: 'success' | 'no_results'
   results: SearchChunk[]
@@ -165,4 +267,9 @@ export interface SearchResponse {
   graph_data?: import('./graph').GraphData
   // 🌊 Phase 3.5+: Exploration Intelligence
   exploration_intelligence?: ExplorationIntelligence
+  // 🌊 Answer+Proof: New fields
+  confidence?: ConfidenceResult
+  knowledge_proof?: KnowledgeProofSummary
+  reasoning_trace?: ReasoningTrace
+  coverage_map?: CoverageMap
 }

@@ -1,9 +1,9 @@
 # 🌊 OSMOSE Phase 2 - Tracking Opérationnel
 
-**Version:** 1.2
+**Version:** 1.3
 **Date Création:** 2025-11-16
 **Dernière MAJ:** 2025-12-26
-**Status Global:** 🟢 IN PROGRESS - Semaine 16 (65%)
+**Status Global:** 🟢 IN PROGRESS - Semaine 16 (75%)
 
 ---
 
@@ -14,7 +14,7 @@ Phase 2 : Intelligence Relationnelle Avancée
 ════════════════════════════════════════════
 
 Durée : 11 semaines (Semaines 14-24)
-Progress Global : [█████████████░░░░░░░] 65%
+Progress Global : [███████████████░░░░░] 75%
 
 Architecture : 1 instance = 1 client (isolation totale)
 
@@ -23,6 +23,7 @@ Composants :
 ├─ 🔵 DomainContextPersonalizer     : ⏸️ OPTIONNEL (simplifié)
 ├─ 🟢 RelationExtractionEngine      : ✅ COMPLÉTÉ (95%) - Intégré pipeline
 ├─ 🟢 Phase 2.3 InferenceEngine     : ✅ COMPLÉTÉ (100%) - Graph-Guided RAG
+├─ 🟢 Phase 2.3b Answer+Proof       : ✅ COMPLÉTÉ (100%) - Knowledge Confidence UI
 ├─ 🟢 Phase 2.5 Memory Layer        : ✅ COMPLÉTÉ (100%) - Sessions, Context
 ├─ 🟢 Phase 2.7 Concept Matching    : ✅ COMPLÉTÉ (100%) - 3 paliers
 ├─ 🟢 Phase 2.8-2.11 Relations V3   : ✅ COMPLÉTÉ (100%) - Claims MVP
@@ -686,6 +687,94 @@ Consolidation relations multi-sources + **Validation finale Phase 2**.
 ---
 
 ## 📝 Journal des Accomplissements
+
+### 2025-12-26 : Answer+Proof - Implémentation Complète
+**Status :** ✅ COMPLÉTÉ
+
+#### Objectif
+Implémenter l'écran "Answer + Proof" qui affiche la confiance épistémique des réponses basée sur le Knowledge Graph. Différenciation critique vs RAG standard.
+
+#### Architecture Implémentée
+
+**Modèle de Confiance (2 axes orthogonaux) :**
+- **EpistemicState** : ESTABLISHED | PARTIAL | DEBATE | INCOMPLETE
+- **ContractState** : COVERED | OUT_OF_SCOPE
+
+**4 Blocs UI :**
+- **Bloc A** : Badge de confiance (toujours visible)
+- **Bloc B** : Knowledge Proof Summary (collapsible)
+- **Bloc C** : Reasoning Trace (collapsible)
+- **Bloc D** : Coverage Map (collapsible)
+
+#### Fichiers Créés (Backend Python)
+
+| Fichier | Lignes | Description |
+|---------|--------|-------------|
+| `confidence_engine.py` | ~300 | Coeur algorithmique - Table de vérité déterministe |
+| `knowledge_proof_service.py` | ~280 | Bloc B - Métriques KG (concepts, relations, coherence) |
+| `reasoning_trace_service.py` | ~350 | Bloc C - Chaîne de raisonnement narrative |
+| `coverage_map_service.py` | ~320 | Bloc D - Couverture par domaine DomainContext |
+| `test_confidence_engine.py` | ~280 | Tests unitaires exhaustifs (truth table) |
+| **Total Backend** | **~1,530** | |
+
+#### Fichiers Créés (Frontend TypeScript/React)
+
+| Fichier | Lignes | Description |
+|---------|--------|-------------|
+| `KnowledgeProofPanel.tsx` | ~200 | Bloc B UI - Progress bars, métriques |
+| `ReasoningTracePanel.tsx` | ~210 | Bloc C UI - Steps avec supports KG |
+| `CoverageMapPanel.tsx` | ~180 | Bloc D UI - Tableau domaines + recommandations |
+| **Total Frontend** | **~590** | |
+
+#### Fichiers Modifiés
+
+| Fichier | Modifications |
+|---------|---------------|
+| `search.py` | +~80 lignes - Intégration 4 blocs après exploration_intelligence |
+| `SearchResultDisplay.tsx` | +~100 lignes - Badge confiance + import 3 panels |
+| `api.ts` | +~120 lignes - Types TS (EpistemicState, KGSignals, etc.) |
+| `components/chat/index.ts` | +3 exports nouveaux panels |
+
+#### Truth Table Confidence Engine
+
+```
+| E | C | O | M | S | EpistemicState |
+|---|---|---|---|---|----------------|
+| 0 | * | * | * | * | INCOMPLETE     | (pas de relations typées)
+| 1 | 1 | * | * | * | DEBATE         | (conflit détecté)
+| 1 | 0 | 1 | * | * | INCOMPLETE     | (concepts orphelins)
+| 1 | 0 | 0 | 1 | * | INCOMPLETE     | (relations attendues manquantes)
+| 1 | 0 | 0 | 0 | 1 | ESTABLISHED    | (toutes conditions OK)
+| 1 | 0 | 0 | 0 | 0 | PARTIAL        | (conditions partielles)
+
+Légende: E=edges, C=conflict, O=orphans, M=missing, S=strong
+```
+
+#### Décisions Techniques
+
+1. **Déterminisme** : Table de vérité sans ML (reproductible, auditable)
+2. **Non-bloquant** : Erreurs services Answer+Proof n'arrêtent pas la recherche
+3. **Lazy loading** : Services instanciés uniquement si graph_context présent
+4. **DomainContext dynamique** : Pas de taxonomie hardcodée, utilise DomainContextStore
+5. **Fallback gracieux** : Si Neo4j indisponible, utilise graph_context du search
+
+#### Tests
+
+- **19 tests unitaires** pour Confidence Engine
+- Tests truth table (6 états)
+- Tests déterminisme (same input → same output)
+- Tests boundary values (seuils exacts)
+- Tests serialization
+
+#### Métriques
+
+- Code total : ~2,200 lignes (backend + frontend + tests)
+- 4 nouveaux services backend
+- 3 nouveaux composants React
+- 1 fichier tests complet
+- Intégration complète dans pipeline search
+
+---
 
 ### 2025-12-18 : RelationExtractionEngine - Complétion & Intégration
 **Status :** ✅ COMPLÉTÉ

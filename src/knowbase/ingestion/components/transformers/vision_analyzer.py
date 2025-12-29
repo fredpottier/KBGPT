@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import logging
 
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 from knowbase.config.prompts_loader import load_prompts, select_prompt, render_prompt
 from ..utils.text_utils import clean_gpt_response, recursive_chunk
 
@@ -85,9 +85,9 @@ def ask_gpt_slide_analysis(
         >>> concepts[0]["full_explanation"]
         "SAP S/4HANA Cloud provides..."
     """
-    # Initialiser dépendances
+    # Initialiser dépendances (singleton avec support Burst Mode)
     if llm_router is None:
-        llm_router = LLMRouter()
+        llm_router = get_llm_router()
     if prompt_registry is None:
         prompt_registry = load_prompts()
     if logger is None:
@@ -276,9 +276,9 @@ def ask_gpt_vision_summary(
         >>> "architecture" in summary.lower()
         True
     """
-    # Initialiser dépendances
+    # Initialiser dépendances (singleton avec support Burst Mode)
     if llm_router is None:
-        llm_router = LLMRouter()
+        llm_router = get_llm_router()
     if logger is None:
         logger = logging.getLogger(__name__)
 

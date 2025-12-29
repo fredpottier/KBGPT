@@ -743,9 +743,9 @@ class SupervisorAgent(BaseAgent):
             # Lazy load doc-level extractor
             if self.doc_level_extractor is None:
                 from knowbase.relations.doc_level_extractor import DocLevelRelationExtractor
-                from knowbase.common.llm_router import LLMRouter
+                from knowbase.common.llm_router import get_llm_router
 
-                llm_router = LLMRouter()
+                llm_router = get_llm_router()
                 self.doc_level_extractor = DocLevelRelationExtractor(
                     llm_router=llm_router,
                     model="gpt-4o-mini",

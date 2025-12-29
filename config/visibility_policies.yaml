@@ -1,0 +1,256 @@
+# KnowWhere/OSMOSE - Profils de Visibilité
+#
+# Architecture Agnostique - Couche 3 (Politique)
+# Voir: doc/ongoing/KG_AGNOSTIC_ARCHITECTURE.md
+#
+# 4 profils comportementaux simples (pas de configuration par domaine métier).
+# L'admin du tenant choisit le profil adapté à son usage.
+#
+# Version: 2.0
+# Date: 2025-12-26
+# Évolution: Granularité par tenant (v2), par rôle (future v3)
+
+# =============================================================================
+# PROFIL PAR DÉFAUT DU SYSTÈME
+# =============================================================================
+default_profile: balanced
+
+# =============================================================================
+# MAPPING TENANT → PROFIL
+# Chaque tenant peut avoir son propre profil
+# =============================================================================
+tenant_profiles:
+  default: balanced
+  # Exemples:
+  # tenant_hospital: verified
+  # tenant_startup: exploratory
+  # tenant_admin: full_access
+
+# =============================================================================
+# DÉFINITION DES 4 PROFILS
+# =============================================================================
+profiles:
+
+  # ---------------------------------------------------------------------------
+  # 🔒 VÉRIFIÉ (verified)
+  # ---------------------------------------------------------------------------
+  verified:
+    id: verified
+    icon: "🔒"
+    name: "Vérifié"
+
+    # Description courte pour l'interface
+    short_description: "Uniquement les faits confirmés par plusieurs sources"
+
+    # Explication détaillée pour l'admin (langage non-technique)
+    explanation: |
+      Ce profil affiche uniquement les informations qui ont été confirmées
+      par au moins deux documents différents dans votre base de connaissances.
+
+      Quand l'utiliser ?
+      • Vous prenez des décisions importantes basées sur ces informations
+      • Vous avez besoin d'une fiabilité maximale
+      • Vous préférez moins d'informations mais plus sûres
+
+      Ce que vous verrez :
+      ✓ Relations confirmées par plusieurs sources
+      ✓ Alertes si des informations contradictoires existent
+
+      Ce que vous ne verrez pas :
+      ✗ Relations mentionnées dans un seul document
+      ✗ Informations avec un niveau de confiance moyen
+
+    # Paramètres techniques
+    settings:
+      min_maturity: VALIDATED
+      min_confidence: 0.90
+      min_source_count: 2
+      allowed_maturities:
+        - VALIDATED
+      show_conflicts: true
+      show_context_dependent: false
+      show_ambiguous: false
+
+    # Indicateurs visuels dans l'UI
+    ui:
+      show_maturity_badge: false  # Pas besoin, tout est validé
+      show_confidence: false
+      show_source_count: true
+      mandatory_disclaimer: false
+      filtered_count_visible: true  # "X relations masquées"
+
+  # ---------------------------------------------------------------------------
+  # ⚖️ ÉQUILIBRÉ (balanced) - DÉFAUT
+  # ---------------------------------------------------------------------------
+  balanced:
+    id: balanced
+    icon: "⚖️"
+    name: "Équilibré"
+
+    short_description: "Faits vérifiés + informations fiables avec indication visuelle"
+
+    explanation: |
+      Ce profil affiche les informations confirmées ainsi que celles qui
+      semblent fiables même si elles proviennent d'une seule source.
+      Un indicateur visuel distingue les deux.
+
+      Quand l'utiliser ?
+      • Usage quotidien de la base de connaissances
+      • Vous voulez un bon équilibre entre quantité et qualité
+      • Vous êtes à l'aise pour interpréter les indicateurs de fiabilité
+
+      Ce que vous verrez :
+      ✓ Relations confirmées par plusieurs sources (sans badge)
+      ✓ Relations fiables d'une seule source (avec badge "à vérifier")
+      ✓ Niveau de confiance affiché
+
+      Ce que vous ne verrez pas :
+      ✗ Relations avec une confiance faible (< 70%)
+      ✗ Informations ambiguës ou contradictoires
+
+    settings:
+      min_maturity: CANDIDATE
+      min_confidence: 0.70
+      min_source_count: 1
+      allowed_maturities:
+        - VALIDATED
+        - CANDIDATE
+      show_conflicts: false
+      show_context_dependent: true
+      show_ambiguous: false
+
+    ui:
+      show_maturity_badge: true
+      show_confidence: true
+      show_source_count: true
+      mandatory_disclaimer: false
+      filtered_count_visible: false
+
+  # ---------------------------------------------------------------------------
+  # 🔍 EXPLORATOIRE (exploratory)
+  # ---------------------------------------------------------------------------
+  exploratory:
+    id: exploratory
+    icon: "🔍"
+    name: "Exploratoire"
+
+    short_description: "Maximum de connexions pour découvrir des liens"
+
+    explanation: |
+      Ce profil affiche un maximum d'informations pour vous permettre
+      de découvrir des connexions et des patterns dans vos données.
+      Les informations moins fiables sont clairement identifiées.
+
+      Quand l'utiliser ?
+      • Vous explorez un nouveau sujet
+      • Vous cherchez des connexions inattendues
+      • Vous faites du brainstorming ou de l'analyse
+      • Vous acceptez de voir des informations non vérifiées
+
+      Ce que vous verrez :
+      ✓ Toutes les relations avec une confiance minimale (> 40%)
+      ✓ Informations contradictoires signalées
+      ✓ Cas particuliers et exceptions
+      ✓ Toutes les métadonnées (confiance, sources, dates)
+
+      Attention :
+      ⚠️ Certaines informations affichées peuvent être incorrectes
+      ⚠️ Vérifiez avant de prendre des décisions importantes
+
+    settings:
+      min_maturity: CANDIDATE
+      min_confidence: 0.40
+      min_source_count: 1
+      allowed_maturities:
+        - VALIDATED
+        - CANDIDATE
+        - CONTEXT_DEPENDENT
+        - AMBIGUOUS_TYPE
+      show_conflicts: true
+      show_context_dependent: true
+      show_ambiguous: true
+
+    ui:
+      show_maturity_badge: true
+      show_confidence: true
+      show_source_count: true
+      mandatory_disclaimer: true
+      disclaimer_text: "Mode exploratoire : certaines informations peuvent nécessiter vérification"
+      filtered_count_visible: false
+
+  # ---------------------------------------------------------------------------
+  # 🔓 COMPLET (full_access)
+  # ---------------------------------------------------------------------------
+  full_access:
+    id: full_access
+    icon: "🔓"
+    name: "Complet"
+
+    short_description: "Accès à toutes les données sans filtre"
+
+    explanation: |
+      Ce profil donne accès à l'intégralité du graphe de connaissances
+      sans aucun filtre. Destiné aux administrateurs et aux opérations
+      de maintenance.
+
+      Quand l'utiliser ?
+      • Administration et maintenance du système
+      • Audit de la qualité des données
+      • Debug et investigation technique
+      • Vous êtes administrateur du système
+
+      Ce que vous verrez :
+      ✓ Absolument toutes les relations
+      ✓ Toutes les métadonnées techniques
+      ✓ Conflits, ambiguïtés, erreurs potentielles
+      ✓ Identifiants techniques internes
+
+      Attention :
+      ⚠️ Ce mode est réservé aux administrateurs
+      ⚠️ Les informations brutes peuvent être trompeuses sans contexte
+
+    settings:
+      min_maturity: CANDIDATE
+      min_confidence: 0.0
+      min_source_count: 0
+      allowed_maturities:
+        - VALIDATED
+        - CANDIDATE
+        - CONTEXT_DEPENDENT
+        - AMBIGUOUS_TYPE
+        - CONFLICTING
+      show_conflicts: true
+      show_context_dependent: true
+      show_ambiguous: true
+
+    ui:
+      show_maturity_badge: true
+      show_confidence: true
+      show_source_count: true
+      show_internal_ids: true
+      show_timestamps: true
+      mandatory_disclaimer: true
+      disclaimer_text: "Mode complet : accès administrateur sans filtre"
+      filtered_count_visible: false
+
+# =============================================================================
+# ÉVOLUTION FUTURE (documentée pour référence)
+# =============================================================================
+#
+# Version 3.0 prévue : Granularité par rôle
+#
+# role_profiles:
+#   user:
+#     allowed_profiles: [verified, balanced]
+#     default: balanced
+#   advanced:
+#     allowed_profiles: [verified, balanced, exploratory]
+#     default: balanced
+#   admin:
+#     allowed_profiles: [verified, balanced, exploratory, full_access]
+#     default: balanced
+#
+# Cela permettra de :
+# - Limiter les profils accessibles selon le rôle
+# - Définir un profil par défaut par rôle
+# - Empêcher un user standard d'accéder au mode full_access

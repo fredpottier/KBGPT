@@ -274,6 +274,21 @@ def search_documents(
         "synthesis": synthesis_result
     }
 
+    # 🌊 Phase 2.12: Ajouter le profil de visibilité actif
+    try:
+        from .visibility_service import get_visibility_service
+        visibility_service = get_visibility_service(tenant_id=tenant_id)
+        profile_id = visibility_service.get_profile_for_tenant(tenant_id)
+        profile = visibility_service.get_profile(profile_id)
+        response["visibility"] = {
+            "profile_id": profile_id,
+            "profile_name": profile.name,
+            "show_maturity_badge": profile.ui.show_maturity_badge,
+            "show_confidence": profile.ui.show_confidence,
+        }
+    except Exception as e:
+        logger.warning(f"[VISIBILITY] Could not add visibility info: {e}")
+
     # Ajouter le contexte KG si disponible
     if graph_context_data:
         response["graph_context"] = graph_context_data
@@ -311,18 +326,116 @@ def search_documents(
                 synthesis_answer=synthesis_result.get("synthesized_answer", ""),
                 graph_context=graph_context_data,
                 chunks=reranked_chunks,
+                tenant_id=tenant_id,
             )
             response["exploration_intelligence"] = exploration_intelligence.to_dict()
             logger.info(
                 f"[PHASE-3.5+] Exploration intelligence: "
                 f"{len(exploration_intelligence.concept_explanations)} explanations, "
                 f"{len(exploration_intelligence.exploration_suggestions)} suggestions, "
-                f"{len(exploration_intelligence.suggested_questions)} questions "
+                f"{len(exploration_intelligence.suggested_questions)} questions, "
+                f"{len(exploration_intelligence.research_axes)} research axes "
                 f"({exploration_intelligence.processing_time_ms:.1f}ms)"
             )
 
         except Exception as e:
             logger.warning(f"[PHASE-3.5+] Exploration intelligence failed (non-blocking): {e}")
+
+    # 🌊 Answer+Proof: Bloc B - Knowledge Proof Summary
+    # NOTE: Execute TOUJOURS, meme sans graph_context_data
+    try:
+        from .knowledge_proof_service import get_knowledge_proof_service
+        from .confidence_engine import DomainSignals
+
+        proof_service = get_knowledge_proof_service()
+
+        # Construire les domain signals depuis le DomainContext
+        domain_signals = DomainSignals(
+            in_scope_domains=[],  # Sera enrichi si DomainContext disponible
+            matched_domains=["default"],  # Assume COVERED par defaut
+        )
+
+        # Extraire concepts du graph_context si disponible
+        query_concepts = graph_context_data.get("query_concepts", []) if graph_context_data else []
+        related_concepts = graph_context_data.get("related_concepts", []) if graph_context_data else []
+
+        knowledge_proof = proof_service.build_proof_summary(
+            query_concepts=query_concepts,
+            related_concepts=related_concepts,
+            sources=synthesis_result.get("sources_used", []),
+            tenant_id=tenant_id,
+            domain_signals=domain_signals,
+        )
+        response["knowledge_proof"] = knowledge_proof.to_dict()
+
+        # Ajouter la confiance globale (Bloc A)
+        from .confidence_engine import get_confidence_engine
+        confidence_engine = get_confidence_engine()
+        if knowledge_proof.kg_signals:
+            confidence_result = confidence_engine.evaluate(
+                knowledge_proof.kg_signals,
+                domain_signals
+            )
+            response["confidence"] = confidence_result.to_dict()
+
+        logger.info(
+            f"[ANSWER-PROOF] Knowledge proof: {knowledge_proof.concepts_count} concepts, "
+            f"{knowledge_proof.relations_count} relations, "
+            f"state={knowledge_proof.epistemic_state.value}"
+        )
+
+    except Exception as e:
+        logger.warning(f"[ANSWER-PROOF] Knowledge proof failed (non-blocking): {e}")
+
+    # 🌊 Answer+Proof: Bloc C - Reasoning Trace
+    # NOTE: Execute TOUJOURS, meme sans graph_context_data
+    try:
+        from .reasoning_trace_service import build_reasoning_trace_sync
+
+        # Extraire concepts du graph_context si disponible
+        focus_concepts = graph_context_data.get("query_concepts", []) if graph_context_data else []
+        related_concepts = graph_context_data.get("related_concepts", []) if graph_context_data else []
+
+        reasoning_trace = build_reasoning_trace_sync(
+            query=query,
+            answer=synthesis_result.get("synthesized_answer", ""),
+            focus_concepts=focus_concepts,
+            related_concepts=related_concepts,
+            tenant_id=tenant_id,
+        )
+        response["reasoning_trace"] = reasoning_trace.to_dict()
+        logger.info(
+            f"[ANSWER-PROOF] Reasoning trace: {len(reasoning_trace.steps)} steps, "
+            f"coherence={reasoning_trace.coherence_status}"
+        )
+
+    except Exception as e:
+        logger.warning(f"[ANSWER-PROOF] Reasoning trace failed (non-blocking): {e}")
+
+    # 🌊 Answer+Proof: Bloc D - Coverage Map
+    # NOTE: Execute TOUJOURS, meme sans graph_context_data
+    # Le Coverage Map se base sur la QUESTION, pas sur le KG
+    try:
+        from .coverage_map_service import build_coverage_map_sync
+
+        # Extraire concepts du graph_context si disponible
+        query_concepts = graph_context_data.get("query_concepts", []) if graph_context_data else []
+        kg_relations = graph_context_data.get("related_concepts", []) if graph_context_data else []
+
+        coverage_map = build_coverage_map_sync(
+            query=query,
+            query_concepts=query_concepts,
+            kg_relations=kg_relations,
+            tenant_id=tenant_id,
+        )
+        response["coverage_map"] = coverage_map.to_dict()
+        logger.info(
+            f"[ANSWER-PROOF] Coverage map: {coverage_map.covered_count}/{coverage_map.total_relevant} domains, "
+            f"{coverage_map.coverage_percent}% covered"
+        )
+
+    except Exception as e:
+        logger.warning(f"[ANSWER-PROOF] Coverage map failed (non-blocking): {e}")
 
     return response
 

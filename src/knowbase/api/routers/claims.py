@@ -28,6 +28,7 @@ from knowbase.api.schemas.claims import (
     ConflictsListResponse,
     ConsolidationRequest,
     ConsolidationResponse,
+    ConsolidationStatsResponse,
 )
 from knowbase.api.services.claim_service import get_claim_service
 from knowbase.relations.claim_consolidator import get_claim_consolidator
@@ -178,48 +179,86 @@ async def trigger_consolidation(request: ConsolidationRequest):
     - claim_type: Only consolidate this claim type
     - doc_id: Only consolidate from this document
     - force: Reconsolidate even if already done
+
+    Separation:
+    - consolidate_claims: Only consolidate claims (default: true)
+    - consolidate_relations: Only consolidate relations (default: true)
     """
     try:
         start_time = time.time()
 
-        # Consolidate claims
-        claim_consolidator = get_claim_consolidator()
-        canonical_claims = claim_consolidator.consolidate_all(
-            subject_concept_id=request.subject_concept_id,
-            claim_type=request.claim_type,
-            doc_id=request.doc_id
-        )
+        claims_count = 0
+        relations_count = 0
+        conflicts_count = 0
+        claims_validated = 0
+        claims_candidate = 0
+        relations_validated = 0
+        relations_candidate = 0
 
-        # Write canonical claims
-        claim_writer = get_canonical_claim_writer()
-        claim_writer.write_batch(canonical_claims)
+        # Consolidate claims if requested
+        if request.consolidate_claims:
+            claim_consolidator = get_claim_consolidator()
+            canonical_claims = claim_consolidator.consolidate_all(
+                subject_concept_id=request.subject_concept_id,
+                claim_type=request.claim_type,
+                doc_id=request.doc_id
+            )
 
-        # Consolidate relations
-        relation_consolidator = get_relation_consolidator()
-        canonical_relations = relation_consolidator.consolidate_all(
-            subject_concept_id=request.subject_concept_id,
-            doc_id=request.doc_id
-        )
+            # Write canonical claims
+            claim_writer = get_canonical_claim_writer()
+            claim_writer.write_batch(canonical_claims)
 
-        # Write canonical relations
-        relation_writer = get_canonical_relation_writer()
-        relation_writer.write_batch(canonical_relations)
+            # Get stats
+            claim_stats = claim_consolidator.get_stats()
+            claims_count = len(canonical_claims)
+            conflicts_count = claim_stats.get("conflicts_detected", 0)
+            claims_validated = claim_stats.get("validated", 0)
+            claims_candidate = claims_count - claims_validated - conflicts_count
 
-        # Get stats
-        claim_stats = claim_consolidator.get_stats()
+            logger.info(
+                f"[ClaimsRouter] Claims consolidation: {claims_count} claims, "
+                f"{claims_validated} validated, {conflicts_count} conflicts"
+            )
+
+        # Consolidate relations if requested
+        if request.consolidate_relations:
+            relation_consolidator = get_relation_consolidator()
+            canonical_relations = relation_consolidator.consolidate_all(
+                subject_concept_id=request.subject_concept_id,
+                doc_id=request.doc_id
+            )
+
+            # Write canonical relations
+            relation_writer = get_canonical_relation_writer()
+            relation_writer.write_batch(canonical_relations)
+
+            # Get stats
+            relation_stats = relation_consolidator.get_stats()
+            relations_count = len(canonical_relations)
+            relations_validated = relation_stats.get("validated", 0)
+            relations_candidate = relations_count - relations_validated
+
+            logger.info(
+                f"[ClaimsRouter] Relations consolidation: {relations_count} relations, "
+                f"{relations_validated} validated"
+            )
+
         execution_time = (time.time() - start_time) * 1000
 
         logger.info(
-            f"[ClaimsRouter] Consolidation complete: "
-            f"{len(canonical_claims)} claims, {len(canonical_relations)} relations, "
-            f"{claim_stats['conflicts_detected']} conflicts"
+            f"[ClaimsRouter] Consolidation complete in {execution_time:.0f}ms: "
+            f"{claims_count} claims, {relations_count} relations"
         )
 
         return ConsolidationResponse(
-            claims_consolidated=len(canonical_claims),
-            relations_consolidated=len(canonical_relations),
-            conflicts_detected=claim_stats.get("conflicts_detected", 0),
-            execution_time_ms=execution_time
+            claims_consolidated=claims_count,
+            relations_consolidated=relations_count,
+            conflicts_detected=conflicts_count,
+            execution_time_ms=execution_time,
+            claims_validated=claims_validated,
+            claims_candidate=claims_candidate,
+            relations_validated=relations_validated,
+            relations_candidate=relations_candidate
         )
 
     except Exception as e:
@@ -247,4 +286,122 @@ async def get_claim_types():
         return [r["claim_type"] for r in results if r.get("claim_type")]
     except Exception as e:
         logger.error(f"[ClaimsRouter] Error getting claim types: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stats", response_model=ConsolidationStatsResponse)
+async def get_consolidation_stats():
+    """
+    Get comprehensive consolidation statistics.
+
+    Returns counts for:
+    - Raw claims and assertions (before consolidation)
+    - Canonical claims and relations (after consolidation)
+    - Breakdown by maturity level (VALIDATED, CANDIDATE, CONFLICTING, etc.)
+    - Relation types distribution
+    """
+    try:
+        service = get_claim_service()
+
+        # Query all counts in parallel-ish manner
+        queries = {
+            "raw_claims": """
+                MATCH (rc:RawClaim {tenant_id: $tenant_id})
+                RETURN count(rc) AS count
+            """,
+            "raw_assertions": """
+                MATCH (ra:RawAssertion {tenant_id: $tenant_id})
+                RETURN count(ra) AS count
+            """,
+            "canonical_claims": """
+                MATCH (cc:CanonicalClaim {tenant_id: $tenant_id})
+                RETURN count(cc) AS count
+            """,
+            "canonical_relations": """
+                MATCH (cr:CanonicalRelation {tenant_id: $tenant_id})
+                RETURN count(cr) AS count
+            """,
+            "claims_by_maturity": """
+                MATCH (cc:CanonicalClaim {tenant_id: $tenant_id})
+                RETURN cc.maturity AS maturity, count(cc) AS count
+            """,
+            "relations_by_maturity": """
+                MATCH (cr:CanonicalRelation {tenant_id: $tenant_id})
+                RETURN cr.maturity AS maturity, count(cr) AS count
+            """,
+            "relation_types": """
+                MATCH (cr:CanonicalRelation {tenant_id: $tenant_id})
+                RETURN cr.relation_type AS type, count(cr) AS count
+                ORDER BY count DESC
+            """,
+        }
+
+        results = {}
+        for key, query in queries.items():
+            try:
+                results[key] = service._execute_query(query, {"tenant_id": service.tenant_id})
+            except Exception:
+                results[key] = []
+
+        # Parse results
+        raw_claims = results["raw_claims"][0]["count"] if results["raw_claims"] else 0
+        raw_assertions = results["raw_assertions"][0]["count"] if results["raw_assertions"] else 0
+        canonical_claims = results["canonical_claims"][0]["count"] if results["canonical_claims"] else 0
+        canonical_relations = results["canonical_relations"][0]["count"] if results["canonical_relations"] else 0
+
+        # Claims by maturity
+        claims_validated = 0
+        claims_candidate = 0
+        claims_conflicting = 0
+        claims_context_dependent = 0
+        for row in results.get("claims_by_maturity", []):
+            maturity = row.get("maturity", "")
+            count = row.get("count", 0)
+            if maturity == "VALIDATED":
+                claims_validated = count
+            elif maturity == "CANDIDATE":
+                claims_candidate = count
+            elif maturity == "CONFLICTING":
+                claims_conflicting = count
+            elif maturity == "CONTEXT_DEPENDENT":
+                claims_context_dependent = count
+
+        # Relations by maturity
+        relations_validated = 0
+        relations_candidate = 0
+        relations_ambiguous = 0
+        for row in results.get("relations_by_maturity", []):
+            maturity = row.get("maturity", "")
+            count = row.get("count", 0)
+            if maturity == "VALIDATED":
+                relations_validated = count
+            elif maturity == "CANDIDATE":
+                relations_candidate = count
+            elif maturity == "AMBIGUOUS_TYPE":
+                relations_ambiguous = count
+
+        # Relation types distribution
+        relation_types = {}
+        for row in results.get("relation_types", []):
+            rel_type = row.get("type", "UNKNOWN")
+            count = row.get("count", 0)
+            relation_types[rel_type] = count
+
+        return ConsolidationStatsResponse(
+            raw_claims_count=raw_claims,
+            raw_assertions_count=raw_assertions,
+            canonical_claims_count=canonical_claims,
+            canonical_relations_count=canonical_relations,
+            claims_validated=claims_validated,
+            claims_candidate=claims_candidate,
+            claims_conflicting=claims_conflicting,
+            claims_context_dependent=claims_context_dependent,
+            relations_validated=relations_validated,
+            relations_candidate=relations_candidate,
+            relations_ambiguous=relations_ambiguous,
+            relation_types=relation_types
+        )
+
+    except Exception as e:
+        logger.error(f"[ClaimsRouter] Error getting consolidation stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))

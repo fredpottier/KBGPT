@@ -445,6 +445,175 @@ async def get_gpu_status():
     )
 
 
+# ============================================================================
+# Visibility Profiles (Phase 2.12 - Agnostic KG Architecture)
+# ============================================================================
+
+class VisibilityProfileSummary(BaseModel):
+    """Résumé d'un profil de visibilité."""
+    id: str
+    icon: str
+    name: str
+    short_description: str
+    explanation: str
+    is_current: bool = False
+
+
+class VisibilityProfilesResponse(BaseModel):
+    """Réponse liste des profils."""
+    current_profile: str
+    profiles: List[VisibilityProfileSummary]
+
+
+class SetProfileRequest(BaseModel):
+    """Requête pour changer de profil."""
+    profile_id: str = Field(..., description="ID du profil (verified, balanced, exploratory, full_access)")
+
+
+@router.get(
+    "/visibility-profiles",
+    response_model=VisibilityProfilesResponse,
+    summary="Liste des profils de visibilité",
+    description="""
+    Récupère la liste des profils de visibilité disponibles.
+
+    **Profils disponibles:**
+    - `verified`: Uniquement les faits confirmés (2+ sources)
+    - `balanced`: Équilibre qualité/quantité (défaut)
+    - `exploratory`: Maximum de connexions
+    - `full_access`: Accès admin complet
+
+    Voir: doc/ongoing/KG_AGNOSTIC_ARCHITECTURE.md
+    """
+)
+async def list_visibility_profiles(
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Liste tous les profils de visibilité avec le profil actuel du tenant."""
+    try:
+        from knowbase.api.services.visibility_service import get_visibility_service
+
+        service = get_visibility_service(tenant_id=tenant_id)
+        current_profile_id = service.get_profile_for_tenant(tenant_id)
+        profiles = service.list_profiles(current_profile_id)
+
+        return VisibilityProfilesResponse(
+            current_profile=current_profile_id,
+            profiles=[
+                VisibilityProfileSummary(
+                    id=p.id,
+                    icon=p.icon,
+                    name=p.name,
+                    short_description=p.short_description,
+                    explanation=p.explanation,
+                    is_current=p.is_current
+                )
+                for p in profiles
+            ]
+        )
+    except Exception as e:
+        logger.error(f"Erreur liste profils visibilité: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put(
+    "/visibility-profiles/current",
+    summary="Changer le profil de visibilité",
+    description="""
+    Change le profil de visibilité pour le tenant.
+
+    **Note**: Ce changement affecte tous les utilisateurs du tenant.
+    Le changement est immédiat pour les nouvelles requêtes.
+    """
+)
+async def set_visibility_profile(
+    request: SetProfileRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Change le profil de visibilité du tenant."""
+    try:
+        from knowbase.api.services.visibility_service import get_visibility_service
+
+        service = get_visibility_service(tenant_id=tenant_id)
+
+        # Vérifier que le profil existe
+        if request.profile_id not in ["verified", "balanced", "exploratory", "full_access"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Profil invalide: {request.profile_id}. "
+                       f"Valeurs acceptées: verified, balanced, exploratory, full_access"
+            )
+
+        # Changer le profil (in-memory pour l'instant)
+        success = service.set_tenant_profile(tenant_id, request.profile_id)
+
+        if not success:
+            raise HTTPException(status_code=400, detail="Échec du changement de profil")
+
+        logger.info(f"Profil visibilité changé: tenant={tenant_id}, profil={request.profile_id}")
+
+        return {
+            "success": True,
+            "tenant_id": tenant_id,
+            "new_profile": request.profile_id,
+            "message": f"Profil changé en '{request.profile_id}'"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur changement profil visibilité: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/visibility-profiles/{profile_id}",
+    summary="Détail d'un profil de visibilité",
+    description="Récupère les détails complets d'un profil spécifique."
+)
+async def get_visibility_profile_detail(
+    profile_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Récupère les détails d'un profil de visibilité."""
+    try:
+        from knowbase.api.services.visibility_service import get_visibility_service
+
+        service = get_visibility_service(tenant_id=tenant_id)
+        profile = service.get_profile(profile_id)
+
+        if not profile:
+            raise HTTPException(status_code=404, detail=f"Profil non trouvé: {profile_id}")
+
+        return {
+            "id": profile.id,
+            "icon": profile.icon,
+            "name": profile.name,
+            "short_description": profile.short_description,
+            "explanation": profile.explanation,
+            "settings": {
+                "min_maturity": profile.settings.min_maturity,
+                "min_confidence": profile.settings.min_confidence,
+                "min_source_count": profile.settings.min_source_count,
+                "allowed_maturities": profile.settings.allowed_maturities,
+                "show_conflicts": profile.settings.show_conflicts,
+                "show_context_dependent": profile.settings.show_context_dependent,
+                "show_ambiguous": profile.settings.show_ambiguous,
+            },
+            "ui": {
+                "show_maturity_badge": profile.ui.show_maturity_badge,
+                "show_confidence": profile.ui.show_confidence,
+                "mandatory_disclaimer": profile.ui.mandatory_disclaimer,
+                "disclaimer_text": profile.ui.disclaimer_text,
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur détail profil visibilité: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post(
     "/gpu/unload",
     summary="Décharger modèle embedding GPU",

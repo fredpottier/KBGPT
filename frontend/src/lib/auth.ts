@@ -271,10 +271,51 @@ class AuthService {
   }
 
   /**
-   * Vérifie si l'utilisateur est authentifié.
+   * Décode un JWT pour extraire le payload (sans vérifier la signature).
+   */
+  private decodeToken(token: string): { exp?: number; [key: string]: any } | null {
+    try {
+      const base64Url = token.split('.')[1]
+      if (!base64Url) return null
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      )
+      return JSON.parse(jsonPayload)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Vérifie si un token est expiré.
+   */
+  private isTokenExpired(token: string): boolean {
+    const payload = this.decodeToken(token)
+    if (!payload || !payload.exp) return true
+    // exp est en secondes, Date.now() en millisecondes
+    // Ajouter 30 secondes de marge pour éviter les problèmes de timing
+    return payload.exp * 1000 < Date.now() + 30000
+  }
+
+  /**
+   * Vérifie si l'utilisateur est authentifié (token existe ET non expiré).
    */
   isAuthenticated(): boolean {
-    return !!this.getAccessToken()
+    const token = this.getAccessToken()
+    if (!token) return false
+
+    // Vérifier si le token n'est pas expiré
+    if (this.isTokenExpired(token)) {
+      console.log('[AuthService] Token expired, clearing storage')
+      this.logout()
+      return false
+    }
+
+    return true
   }
 
   /**

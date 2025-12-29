@@ -24,7 +24,7 @@ from knowbase.common.clients import (
     get_qdrant_client,
     get_sentence_transformer,
 )
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import get_llm_router, TaskType
 
 from knowbase.common.logging import setup_logging
 from knowbase.config.prompts_loader import load_prompts, select_prompt, render_prompt
@@ -132,6 +132,10 @@ from knowbase.ingestion.components.transformers import (
     ask_gpt_slide_analysis_text_only,
     ask_gpt_slide_analysis,
     ask_gpt_vision_summary,
+    # Vision Gating - Optimisation coûts
+    VisionDecision,
+    should_use_vision,
+    estimate_vision_savings,
 )
 from knowbase.ingestion.components.utils import (
     run_cmd,
@@ -176,7 +180,7 @@ PUBLIC_URL = normalize_public_url(os.getenv("PUBLIC_URL", "knowbase.ngrok.app"))
 SOFFICE_PATH = resolve_soffice_path()
 
 # --- Initialisation des clients et modèles ---
-llm_router = LLMRouter()
+# Note: get_llm_router() retourne le singleton avec support Burst Mode
 qdrant_client = get_qdrant_client()
 model = get_sentence_transformer(EMB_MODEL_NAME)
 embedding_size = model.get_sentence_embedding_dimension()
@@ -258,8 +262,22 @@ def process_pptx(
     document_type_id: str | None = None,
     progress_callback=None,
     rq_job=None,
-    use_vision: bool = True,
+    use_vision: bool = True,  # DEPRECATED: Gardé pour compatibilité, gating automatique activé
 ):
+    """
+    Traite un fichier PPTX avec gating Vision automatique.
+
+    Le gating Vision décide automatiquement pour chaque slide si Vision (GPT-4o)
+    est nécessaire ou si le texte extrait suffit. Cela optimise les coûts en
+    réduisant les appels Vision de 40-60%.
+
+    Args:
+        pptx_path: Chemin vers le fichier PPTX
+        document_type_id: ID du type de document (optionnel)
+        progress_callback: Callback pour progression UI
+        rq_job: Job RQ pour heartbeat
+        use_vision: DEPRECATED - Le gating automatique est toujours actif
+    """
     # Reconfigurer logger pour le contexte RQ worker avec lazy file creation
     global logger
     logger = setup_logging(LOGS_DIR, "ingest_debug.log", enable_console=False)
@@ -270,7 +288,7 @@ def process_pptx(
     logger.info(f"🚀 Traitement: {pptx_path.name}")
     logger.info(f"📋 Document Type ID: {document_type_id or 'default'}")
     logger.info(
-        f"🔍 Mode extraction: {'VISION (GPT-4 avec images)' if use_vision else 'TEXT-ONLY (LLM rapide)'}"
+        f"🔍 Mode extraction: VISION GATING AUTOMATIQUE (décision par slide)"
     )
 
     # Charger le context_prompt personnalisé depuis la DB
@@ -613,44 +631,69 @@ def process_pptx(
         logger.info(
             f"📊 [OSMOSE PURE] Utilisation de {actual_workers} workers pour {total_slides} slides"
         )
-        logger.info(f"📊 [OSMOSE PURE] use_vision = {use_vision}")
         logger.info(f"📊 [OSMOSE PURE] image_paths count = {len(image_paths)}")
         logger.info(f"📊 [OSMOSE PURE] slides_data count = {len(slides_data)}")
-    
+
+        # ===== VISION GATING : Estimation des économies avant traitement =====
+        gating_stats = estimate_vision_savings(slides_data, include_optional=True)
+        logger.info(f"📊 [VISION GATING] Estimation pré-traitement:")
+        logger.info(f"   - Total slides: {gating_stats['total_slides']}")
+        logger.info(f"   - Vision requise: {gating_stats['required_vision']} slides")
+        logger.info(f"   - Vision optionnelle: {gating_stats['optional_vision']} slides")
+        logger.info(f"   - Skip Vision: {gating_stats['skip_vision']} slides")
+        logger.info(f"   - Économie estimée: ${gating_stats['estimated_savings_usd']:.2f} ({gating_stats['savings_percent']:.0f}%)")
+
         vision_tasks = []
+        gating_decisions = {"vision": 0, "skip": 0}
+
         logger.info(
-            f"🤖 [OSMOSE PURE] Soumission de {len(slides_data)} tâches Vision (résumés)..."
+            f"🤖 [OSMOSE PURE] Analyse avec gating Vision automatique..."
         )
-    
+
         with ThreadPoolExecutor(max_workers=actual_workers) as ex:
             for slide in slides_data:
                 idx = slide["slide_index"]
                 raw_text = slide.get("text", "")
                 notes = slide.get("notes", "")
                 megaparse_content = slide.get("megaparse_content", raw_text)
-    
-                if idx in image_paths:
-                    # Mode OSMOSE Pure: Vision génère résumé riche
-                    if use_vision:
-                        vision_tasks.append(
-                            (
+
+                # === VISION GATING : Décision automatique par slide ===
+                gating_result = should_use_vision(
+                    slide_text=raw_text,
+                    slide_notes=notes,
+                    slide_index=idx,
+                    has_shapes=slide.get("has_shapes", False),
+                    has_images=slide.get("has_images", False),
+                    has_charts=slide.get("has_charts", False),
+                )
+
+                if idx in image_paths and gating_result.decision != VisionDecision.SKIP:
+                    # Vision requise ou optionnelle → appel GPT-4o Vision
+                    gating_decisions["vision"] += 1
+                    vision_tasks.append(
+                        (
+                            idx,
+                            gating_result.decision.value,  # "required" ou "optional"
+                            ex.submit(
+                                ask_gpt_vision_summary,
+                                image_paths[idx],
                                 idx,
-                                ex.submit(
-                                    ask_gpt_vision_summary,  # Nouvelle fonction
-                                    image_paths[idx],
-                                    idx,
-                                    pptx_path.name,
-                                    raw_text,
-                                    notes,
-                                    megaparse_content,
-                                ),
-                            )
+                                pptx_path.name,
+                                raw_text,
+                                notes,
+                                megaparse_content,
+                            ),
                         )
-                    else:
-                        # Fallback texte brut
-                        vision_tasks.append((idx, None))  # Pas de Vision, texte direct
-    
-        total_slides_with_vision = len([t for t in vision_tasks if t[1] is not None])
+                    )
+                else:
+                    # Skip Vision → utiliser texte brut
+                    gating_decisions["skip"] += 1
+                    vision_tasks.append((idx, "skip", None))
+
+        total_slides_with_vision = gating_decisions["vision"]
+        logger.info(f"📊 [VISION GATING] Décisions finales:")
+        logger.info(f"   - Appels Vision: {gating_decisions['vision']} slides")
+        logger.info(f"   - Skip (texte seul): {gating_decisions['skip']} slides")
         logger.info(
             f"🚀 [OSMOSE PURE] Début génération de {total_slides_with_vision} résumés Vision"
         )
@@ -665,26 +708,29 @@ def process_pptx(
     
         # Collecter les résumés
         slide_summaries = []
-    
-        for i, (idx, future) in enumerate(vision_tasks):
+        actual_vision_count = 0
+        actual_skip_count = 0
+
+        for i, (idx, decision, future) in enumerate(vision_tasks):
             slide_progress = 20 + int((i / len(vision_tasks)) * 40)  # 20% → 60%
             if progress_callback:
                 progress_callback(
                     "Analyse Vision",
                     slide_progress,
                     100,
-                    f"Slide {i+1}/{len(vision_tasks)}",
+                    f"Slide {i+1}/{len(vision_tasks)} ({decision})",
                 )
-    
+
             if future is not None:
                 # Attendre résumé Vision
+                actual_vision_count += 1
                 try:
                     import concurrent.futures
                     import time
-    
+
                     timeout_seconds = 60
                     start_time = time.time()
-    
+
                     while not future.done():
                         try:
                             summary = future.result(timeout=timeout_seconds)
@@ -694,7 +740,7 @@ def process_pptx(
                             elapsed = time.time() - start_time
                             if elapsed > 300:  # 5 minutes max
                                 logger.warning(
-                                    f"Slide {idx} [VISION SUMMARY]: Timeout après 5min"
+                                    f"Slide {idx} [VISION {decision.upper()}]: Timeout après 5min"
                                 )
                                 summary = f"Slide {idx}: timeout"
                                 break
@@ -702,49 +748,64 @@ def process_pptx(
                                 from knowbase.ingestion.queue.jobs import (
                                     send_worker_heartbeat,
                                 )
-    
+
                                 send_worker_heartbeat()
                             except Exception:
                                 pass
-    
+
                     if not future.done():
                         logger.error(
-                            f"Slide {idx} [VISION SUMMARY]: Future n'est pas done après attente"
+                            f"Slide {idx} [VISION {decision.upper()}]: Future n'est pas done après attente"
                         )
                         summary = f"Slide {idx}: erreur"
                     else:
                         summary = future.result()
-    
+
                 except Exception as e:
                     logger.error(
-                        f"Slide {idx} [VISION SUMMARY]: Erreur récupération résultat: {e}"
+                        f"Slide {idx} [VISION {decision.upper()}]: Erreur récupération résultat: {e}"
                     )
                     # Fallback texte
                     slide_data = slides_data[i] if i < len(slides_data) else {}
                     summary = f"Slide {idx}: {slide_data.get('text', '')} {slide_data.get('notes', '')}"
-    
+
             else:
-                # Pas de Vision, utiliser texte brut
+                # Skip Vision → utiliser texte brut (économie $$)
+                actual_skip_count += 1
                 slide_data = slides_data[i] if i < len(slides_data) else {}
                 text = slide_data.get("text", "")
                 notes = slide_data.get("notes", "")
                 summary = f"{text}\n{notes}".strip() or f"Slide {idx}"
-    
-            # Ajouter à la collection
-            slide_summaries.append({"slide_index": idx, "summary": summary})
-    
-            logger.info(f"Slide {idx} [VISION SUMMARY]: {len(summary)} chars collectés")
-    
+                logger.debug(f"Slide {idx} [SKIP]: Utilisation texte brut ({len(summary)} chars)")
+
+            # Ajouter à la collection avec métadonnée de décision
+            slide_summaries.append({
+                "slide_index": idx,
+                "summary": summary,
+                "vision_decision": decision,  # "required", "optional", ou "skip"
+            })
+
+            if decision != "skip":
+                logger.info(f"Slide {idx} [VISION {decision.upper()}]: {len(summary)} chars collectés")
+
             # Heartbeat périodique
             if (i + 1) % 3 == 0:
                 try:
                     from knowbase.ingestion.queue.jobs import send_worker_heartbeat
-    
+
                     send_worker_heartbeat()
                 except Exception:
                     pass
-    
-        logger.info(f"✅ [OSMOSE PURE] {len(slide_summaries)} résumés Vision collectés")
+
+        # Statistiques finales de gating
+        logger.info(f"✅ [OSMOSE PURE] {len(slide_summaries)} résumés collectés")
+        logger.info(f"📊 [VISION GATING] Bilan final:")
+        logger.info(f"   - Appels Vision réels: {actual_vision_count}")
+        logger.info(f"   - Slides skip (texte seul): {actual_skip_count}")
+        if actual_skip_count > 0:
+            savings_pct = (actual_skip_count / len(slide_summaries)) * 100
+            savings_usd = actual_skip_count * 0.03  # ~$0.03 par appel Vision
+            logger.info(f"   - 💰 Économie Vision: {savings_pct:.0f}% (~${savings_usd:.2f})")
     
         # ===== Construire texte complet enrichi =====
         logger.info("[OSMOSE PURE] Construction du texte enrichi complet...")

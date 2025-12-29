@@ -10,7 +10,7 @@ import time
 from typing import List, Dict, Any, Optional
 import logging
 
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 from knowbase.common.entity_normalizer import get_entity_normalizer
 from knowbase.config.prompts_loader import load_prompts, select_prompt, render_prompt
 from ..utils.text_utils import clean_gpt_response, recursive_chunk
@@ -65,9 +65,9 @@ def analyze_deck_summary(
         >>> result["metadata"]["main_solution"]
         "SAP S/4HANA"
     """
-    # Initialiser dépendances si non fournies
+    # Initialiser dépendances si non fournies (singleton avec support Burst Mode)
     if llm_router is None:
-        llm_router = LLMRouter()
+        llm_router = get_llm_router()
     if prompt_registry is None:
         prompt_registry = load_prompts()
     if logger is None:
@@ -244,9 +244,9 @@ def ask_gpt_slide_analysis_text_only(
         >>> concepts[0]["full_explanation"]
         "SAP S/4HANA Cloud provides..."
     """
-    # Initialiser dépendances
+    # Initialiser dépendances (singleton avec support Burst Mode)
     if llm_router is None:
-        llm_router = LLMRouter()
+        llm_router = get_llm_router()
     if prompt_registry is None:
         prompt_registry = load_prompts()
     if logger is None:
