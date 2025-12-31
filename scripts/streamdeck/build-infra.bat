@@ -1,2 +1,2 @@
 @echo off
-powershell -ExecutionPolicy Bypass -File "%~dp0build-infra.ps1"
+start "KnowWhere - Build Infra" cmd /k "powershell -ExecutionPolicy Bypass -File "%~dp0build-infra.ps1""

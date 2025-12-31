@@ -7,14 +7,21 @@ from pydantic import BaseModel, Field
 
 
 class RelationType(str, Enum):
-    """Types de relations Phase 2.8 (14 types core + 3 spéciaux)"""
+    """
+    Types de relations Phase 2.8+ (18 types core + 3 spéciaux).
+
+    ADR 2024-12-30: 12 prédicats du set fermé pour Pass 2:
+    defines, requires, enables, prevents, causes, applies_to,
+    part_of, depends_on (alias REQUIRES), mitigates, conflicts_with,
+    example_of, governed_by
+    """
 
     # STRUCTURELLES (Hiérarchies & Taxonomies)
     PART_OF = "PART_OF"
     SUBTYPE_OF = "SUBTYPE_OF"
 
     # DÉPENDANCES (Fonctionnelles & Techniques)
-    REQUIRES = "REQUIRES"
+    REQUIRES = "REQUIRES"  # Inclut "depends_on" comme alias
     USES = "USES"
 
     # INTÉGRATIONS (Connexions Systèmes)
@@ -35,10 +42,18 @@ class RelationType(str, Enum):
 
     # GOUVERNANCE / SCOPE (Phase 2.8)
     APPLIES_TO = "APPLIES_TO"
+    GOVERNED_BY = "GOVERNED_BY"  # ADR 2024-12-30: régulation
 
     # CAUSALITÉ / CONTRAINTE (Phase 2.10)
     CAUSES = "CAUSES"
     PREVENTS = "PREVENTS"
+    MITIGATES = "MITIGATES"  # ADR 2024-12-30: atténuation risque
+
+    # DÉFINITIONNEL (ADR 2024-12-30)
+    DEFINES = "DEFINES"  # A defines B
+
+    # INSTANCE (ADR 2024-12-30)
+    EXAMPLE_OF = "EXAMPLE_OF"  # A is an example of B
 
     # TYPES SPÉCIAUX (Phase 2.8)
     UNKNOWN = "UNKNOWN"  # Non mappé - conserve predicate_raw

@@ -151,6 +151,10 @@ class Topic(BaseModel):
     windows: List[Window]               # Fenêtres de texte (3000 chars, 25% overlap)
     anchors: List[str]                  # Entités clés (NER) + keywords (TF-IDF)
 
+    # Position dans le document complet (2024-12-30: Fix mapping anchors → chunks)
+    # Offset du premier caractère de ce topic dans le document complet
+    char_offset: int = 0
+
     # Cohésion
     cohesion_score: float = Field(ge=0.0, le=1.0)  # Similarité intra-topic
 

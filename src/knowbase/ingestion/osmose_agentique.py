@@ -38,6 +38,13 @@ from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router  # Ph
 from knowbase.ontology.domain_context_injector import get_domain_context_injector  # Domain Context injection
 from knowbase.entity_resolution.deferred_reevaluator import get_deferred_reevaluator  # Phase 2.12: Entity Resolution
 
+# ===== Phase 2 - Hybrid Anchor Model =====
+from knowbase.config.feature_flags import is_feature_enabled, get_hybrid_anchor_config
+from knowbase.ingestion.enrichment_tracker import (
+    get_enrichment_tracker,
+    EnrichmentStatus
+)  # ADR 2024-12-30: Enrichment tracking
+
 # Logger pour ce module (pas de manipulation du root logger pour eviter les doublons)
 logger = logging.getLogger(__name__)
 
@@ -81,8 +88,19 @@ class OsmoseAgentiqueService:
         self.text_chunker = None  # Lazy init (Phase 1.6)
         self.llm_router = None  # Lazy init (Phase 1.8: Document Context)
 
+        # ===== Phase 2 - Hybrid Anchor Model =====
+        self.hybrid_chunker = None  # Lazy init
+        self.hybrid_extractor = None  # Lazy init
+        self.heuristic_classifier = None  # Lazy init
+        self.anchor_scorer = None  # Lazy init
+        self.pass2_orchestrator = None  # Lazy init
+
+        # Check if Hybrid Anchor Model is enabled
+        self.use_hybrid_anchor = is_feature_enabled("phase_2_hybrid_anchor")
+
         logger.info(
-            f"[OSMOSE AGENTIQUE] Service initialized - OSMOSE enabled: {self.config.enable_osmose}"
+            f"[OSMOSE AGENTIQUE] Service initialized - OSMOSE enabled: {self.config.enable_osmose}, "
+            f"Hybrid Anchor Model: {self.use_hybrid_anchor}"
         )
 
     def _get_supervisor(self) -> SupervisorAgent:
@@ -121,6 +139,71 @@ class OsmoseAgentiqueService:
             logger.info("[OSMOSE AGENTIQUE] LLMRouter initialized (Phase 1.8)")
 
         return self.llm_router
+
+    # =========================================================================
+    # Phase 2 - Hybrid Anchor Model Lazy Init Methods
+    # =========================================================================
+
+    def _get_hybrid_chunker(self):
+        """Lazy init du HybridAnchorChunker (Phase 2)."""
+        if self.hybrid_chunker is None:
+            from knowbase.ingestion.hybrid_anchor_chunker import get_hybrid_anchor_chunker
+            self.hybrid_chunker = get_hybrid_anchor_chunker(
+                tenant_id=self.config.default_tenant_id
+            )
+            logger.info("[OSMOSE:HybridAnchor] HybridAnchorChunker initialized")
+
+        return self.hybrid_chunker
+
+    def _get_hybrid_extractor(self):
+        """Lazy init du HybridAnchorExtractor (Phase 2)."""
+        if self.hybrid_extractor is None:
+            from knowbase.semantic.extraction.hybrid_anchor_extractor import (
+                get_hybrid_anchor_extractor
+            )
+            self.hybrid_extractor = get_hybrid_anchor_extractor(
+                tenant_id=self.config.default_tenant_id
+            )
+            logger.info("[OSMOSE:HybridAnchor] HybridAnchorExtractor initialized")
+
+        return self.hybrid_extractor
+
+    def _get_heuristic_classifier(self):
+        """Lazy init du HeuristicClassifier (Phase 2)."""
+        if self.heuristic_classifier is None:
+            from knowbase.semantic.classification.heuristic_classifier import (
+                get_heuristic_classifier
+            )
+            self.heuristic_classifier = get_heuristic_classifier(
+                tenant_id=self.config.default_tenant_id
+            )
+            logger.info("[OSMOSE:HybridAnchor] HeuristicClassifier initialized")
+
+        return self.heuristic_classifier
+
+    def _get_anchor_scorer(self):
+        """Lazy init du AnchorBasedScorer (Phase 2)."""
+        if self.anchor_scorer is None:
+            from knowbase.agents.gatekeeper.anchor_based_scorer import (
+                AnchorBasedScorer
+            )
+            self.anchor_scorer = AnchorBasedScorer(
+                tenant_id=self.config.default_tenant_id
+            )
+            logger.info("[OSMOSE:HybridAnchor] AnchorBasedScorer initialized")
+
+        return self.anchor_scorer
+
+    def _get_pass2_orchestrator(self):
+        """Lazy init du Pass2Orchestrator (Phase 2)."""
+        if self.pass2_orchestrator is None:
+            from knowbase.ingestion.pass2_orchestrator import get_pass2_orchestrator
+            self.pass2_orchestrator = get_pass2_orchestrator(
+                tenant_id=self.config.default_tenant_id
+            )
+            logger.info("[OSMOSE:HybridAnchor] Pass2Orchestrator initialized")
+
+        return self.pass2_orchestrator
 
     def _extract_document_metadata(self, full_text: str) -> Dict[str, Any]:
         """
@@ -602,7 +685,21 @@ Analyze this document and provide JSON response:"""
             result.total_duration_seconds = asyncio.get_event_loop().time() - start_time
             return result
 
-        # Traitement OSMOSE Agentique
+        # ===== Phase 2: Hybrid Anchor Model =====
+        # Si le feature flag est activé, utiliser le nouveau pipeline
+        if self.use_hybrid_anchor:
+            logger.info(
+                f"[OSMOSE:HybridAnchor] 🌊 Using Hybrid Anchor Model pipeline for {document_id}"
+            )
+            return await self.process_document_hybrid_anchor(
+                document_id=document_id,
+                document_title=document_title,
+                document_path=document_path,
+                text_content=text_content,
+                tenant_id=tenant_id
+            )
+
+        # ===== Legacy: OSMOSE Agentique (Phase 1.5) =====
         logger.info(
             f"[OSMOSE AGENTIQUE] Processing document {document_id} "
             f"({len(text_content)} chars) with SupervisorAgent FSM"
@@ -767,7 +864,7 @@ Analyze this document and provide JSON response:"""
                         document_name=document_title,
                         segment_id=initial_state.segments[0]["topic_id"] if initial_state.segments else "seg-0",
                         concepts=final_state.promoted,  # Concepts promus avec proto_concept_id Neo4j
-                        tenant_id=tenant
+                        tenant_id=tenant,
                     )
 
                     if chunks:
@@ -775,7 +872,7 @@ Analyze this document and provide JSON response:"""
                         chunk_ids = upsert_chunks(
                             chunks=chunks,
                             collection_name="knowbase",
-                            tenant_id=tenant
+                            tenant_id=tenant,
                         )
 
                         # Construire mapping concept_id → chunk_ids pour Gatekeeper
@@ -800,7 +897,7 @@ Analyze this document and provide JSON response:"""
                                 chunks=chunks,
                                 chunk_ids=chunk_ids,
                                 concept_to_chunk_ids=concept_to_chunk_ids,
-                                tenant_id=tenant
+                                tenant_id=tenant,
                             )
                         except Exception as e:
                             logger.error(
@@ -956,6 +1053,745 @@ Analyze this document and provide JSON response:"""
             result.total_duration_seconds = asyncio.get_event_loop().time() - start_time
 
             return result
+
+    # =========================================================================
+    # Phase 2 - Hybrid Anchor Model Pipeline
+    # =========================================================================
+
+    async def process_document_hybrid_anchor(
+        self,
+        document_id: str,
+        document_title: str,
+        document_path: Path,
+        text_content: str,
+        tenant_id: Optional[str] = None
+    ) -> OsmoseIntegrationResult:
+        """
+        Pipeline Hybrid Anchor Model - Phase 2.
+
+        Architecture à 2 Passes:
+        - Pass 1 (~10 min): EXTRACT → GATE_CHECK → RELATIONS → CHUNK
+        - Pass 2 (async): CLASSIFY_FINE → ENRICH_RELATIONS → CROSS_DOC
+
+        ADR: doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md
+
+        Args:
+            document_id: ID unique du document
+            document_title: Titre du document
+            document_path: Chemin du fichier
+            text_content: Contenu textuel extrait
+            tenant_id: ID tenant
+
+        Returns:
+            OsmoseIntegrationResult
+        """
+        start_time = asyncio.get_event_loop().time()
+        tenant = tenant_id or self.config.default_tenant_id
+
+        logger.info(
+            f"[OSMOSE:HybridAnchor] 🌊 Starting Pass 1 for document {document_id} "
+            f"({len(text_content)} chars)"
+        )
+
+        # Résultat
+        document_type = document_path.suffix.lower().replace(".", "")
+        result = OsmoseIntegrationResult(
+            document_id=document_id,
+            document_title=document_title,
+            document_path=str(document_path),
+            document_type=document_type,
+        )
+
+        # ADR 2024-12-30: Track enrichment state
+        enrichment_tracker = get_enrichment_tracker(tenant)
+        enrichment_tracker.update_pass1_status(
+            document_id=document_id,
+            status=EnrichmentStatus.IN_PROGRESS
+        )
+
+        try:
+            # ===== PASS 1: Socle de Vérité Exploitable =====
+
+            # Étape 1: Segmentation
+            segmenter = self._get_topic_segmenter()
+            topics = await segmenter.segment_document(
+                document_id=document_id,
+                text=text_content,
+                detect_language=True
+            )
+
+            segments = []
+            for topic in topics:
+                segment_text = " ".join([w.text for w in topic.windows])
+                segments.append({
+                    "segment_id": topic.topic_id,
+                    "text": segment_text,
+                    "section_id": topic.section_path,
+                    # 2024-12-30: Propager char_offset pour positions globales des anchors
+                    "char_offset": topic.char_offset,
+                })
+
+            logger.info(
+                f"[OSMOSE:HybridAnchor] Segmentation: {len(segments)} segments"
+            )
+
+            # Étape 2: Générer contexte document
+            document_context = ""
+            try:
+                document_context, _ = await self._generate_document_summary(
+                    document_id=document_id,
+                    full_text=text_content,
+                    max_length=500
+                )
+            except Exception as e:
+                logger.warning(f"[OSMOSE:HybridAnchor] Document context failed: {e}")
+
+            # Étape 3: EXTRACT_CONCEPTS + ANCHOR_RESOLUTION
+            extractor = self._get_hybrid_extractor()
+            extraction_result = await extractor.extract_batch(
+                segments=segments,
+                document_id=document_id,
+                document_context=document_context,
+                max_concurrent=5
+            )
+
+            proto_concepts = extraction_result.proto_concepts
+            logger.info(
+                f"[OSMOSE:HybridAnchor] Extraction: {len(proto_concepts)} ProtoConcepts "
+                f"({len(extraction_result.rejected_concepts)} rejected)"
+            )
+
+            # Étape 4: Classification heuristique (Pass 1)
+            classifier = self._get_heuristic_classifier()
+            for pc in proto_concepts:
+                quote = pc.anchors[0].quote if pc.anchors else ""
+                classification = classifier.classify(
+                    label=pc.label,
+                    context=pc.definition or "",
+                    quote=quote
+                )
+                pc.type_heuristic = classification.concept_type.value
+
+            # Étape 5: GATE_CHECK simplifié (scoring + promotion)
+            scorer = self._get_anchor_scorer()
+
+            # Construire corpus labels pour TF-IDF
+            corpus_labels = [pc.label for pc in proto_concepts]
+
+            # Scorer les proto-concepts
+            scored_protos = scorer.score_proto_concepts(
+                proto_concepts=proto_concepts,
+                corpus_labels=corpus_labels
+            )
+
+            # Déterminer promotions
+            promotion_decisions = scorer.determine_promotion(scored_protos)
+
+            # Créer CanonicalConcepts pour les concepts promus
+            from knowbase.agents.gatekeeper.anchor_based_scorer import (
+                create_canonical_from_protos
+            )
+            from knowbase.api.schemas.concepts import ConceptStability
+
+            canonical_concepts = []
+            promoted_protos = []
+
+            for decision in promotion_decisions:
+                if decision["promote"]:
+                    # Récupérer tous les protos pour ce label
+                    proto_ids = decision["all_proto_ids"]
+                    protos_for_label = [
+                        pc for pc in proto_concepts
+                        if pc.id in proto_ids
+                    ]
+
+                    if protos_for_label:
+                        stability = ConceptStability(decision["stability"])
+                        canonical = create_canonical_from_protos(
+                            proto_concepts=protos_for_label,
+                            stability=stability
+                        )
+                        canonical_concepts.append(canonical)
+                        promoted_protos.extend(protos_for_label)
+
+            logger.info(
+                f"[OSMOSE:HybridAnchor] Promotion: {len(canonical_concepts)} CanonicalConcepts "
+                f"(stable={len([d for d in promotion_decisions if d.get('stability') == 'stable'])}, "
+                f"singleton={len([d for d in promotion_decisions if d.get('stability') == 'singleton'])})"
+            )
+
+            # Étape 6: CHUNKING document-centric avec anchors
+            chunker = self._get_hybrid_chunker()
+
+            # Collecter tous les anchors des proto-concepts promus
+            # + mapping concept_id → label pour enrichir le payload Qdrant
+            all_anchors = []
+            concept_labels: Dict[str, str] = {}
+            for pc in promoted_protos:
+                all_anchors.extend(pc.anchors)
+                concept_labels[pc.id] = pc.label
+
+            chunks = chunker.chunk_document(
+                text=text_content,
+                document_id=document_id,
+                document_name=document_title,
+                anchors=all_anchors,
+                concept_labels=concept_labels,  # Mapping pour enrichir le payload
+                tenant_id=tenant,
+                segments=segments  # V2.1: Segment mapping
+            )
+
+            logger.info(
+                f"[OSMOSE:HybridAnchor] Chunking: {len(chunks)} chunks "
+                f"(0 concept-focused, {sum(len(c.get('anchored_concepts', [])) for c in chunks)} anchors)"
+            )
+
+            # Étape 7: Persister dans Qdrant
+            if chunks:
+                chunk_ids = upsert_chunks(
+                    chunks=chunks,
+                    collection_name="knowbase",
+                    tenant_id=tenant,
+                )
+                logger.info(
+                    f"[OSMOSE:HybridAnchor] Qdrant: {len(chunk_ids)} chunks inserted"
+                )
+
+            # Étape 8: Persister dans Neo4j (concepts + chunks + anchored_in)
+            await self._persist_hybrid_anchor_to_neo4j(
+                proto_concepts=promoted_protos,
+                canonical_concepts=canonical_concepts,
+                document_id=document_id,
+                tenant_id=tenant,
+                chunks=chunks  # Passer les chunks pour créer DocumentChunk + ANCHORED_IN
+            )
+
+            # ================================================================
+            # RELATIONS: Déplacées vers Pass 2 (ADR 2024-12-30)
+            # ================================================================
+            # Invariant: Pass 1 ne produit PAS de relations.
+            # - RAG utilisable immédiatement après Pass 1
+            # - Relations extraites en Pass 2 au niveau SEGMENT (non chunk)
+            # - Pass 2 utilise scoring pour sélectionner segments pertinents
+            # - Voir: doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md (Addendum 2024-12-30)
+            # ================================================================
+
+            # ===== PASS 2: Enrichissement (async) =====
+            pass2_config = get_hybrid_anchor_config("pass2_config", tenant)
+            pass2_mode = pass2_config.get("mode", "background") if pass2_config else "background"
+
+            if pass2_mode != "disabled" and canonical_concepts:
+                orchestrator = self._get_pass2_orchestrator()
+
+                # Convertir CanonicalConcepts en dicts pour Pass 2
+                concepts_for_pass2 = [
+                    {
+                        "id": cc.id,
+                        "label": cc.label,
+                        "definition": cc.definition_consolidated,
+                        "type_heuristic": cc.type_fine or "abstract",
+                        "section_id": None,  # TODO: récupérer depuis protos
+                    }
+                    for cc in canonical_concepts
+                ]
+
+                # Planifier Pass 2
+                from knowbase.ingestion.pass2_orchestrator import Pass2Mode
+                mode_enum = Pass2Mode(pass2_mode)
+
+                await orchestrator.schedule_pass2(
+                    document_id=document_id,
+                    concepts=concepts_for_pass2,
+                    mode=mode_enum
+                )
+
+                logger.info(
+                    f"[OSMOSE:HybridAnchor] Pass 2 scheduled ({pass2_mode}): "
+                    f"{len(concepts_for_pass2)} concepts"
+                )
+
+            # ===== Finaliser résultat =====
+            pass1_duration = asyncio.get_event_loop().time() - start_time
+
+            result.osmose_success = True
+            result.concepts_extracted = len(proto_concepts)
+            result.canonical_concepts = len(canonical_concepts)
+            result.osmose_duration_seconds = pass1_duration
+            result.total_duration_seconds = pass1_duration
+
+            # ADR 2024-12-30: Update enrichment tracking - Pass 1 complete
+            enrichment_tracker.update_pass1_status(
+                document_id=document_id,
+                status=EnrichmentStatus.COMPLETE,
+                concepts_extracted=len(proto_concepts),
+                concepts_promoted=len(canonical_concepts),
+                chunks_created=len(chunks)
+            )
+            # Mark Pass 2 as pending (ready for enrichment)
+            enrichment_tracker.update_pass2_status(
+                document_id=document_id,
+                status=EnrichmentStatus.PENDING
+            )
+
+            logger.info(
+                f"[OSMOSE:HybridAnchor] ✅ Pass 1 complete for {document_id}: "
+                f"{len(canonical_concepts)} concepts, {len(chunks)} chunks in {pass1_duration:.1f}s"
+            )
+
+            return result
+
+        except Exception as e:
+            error_msg = f"Hybrid Anchor Model error: {str(e)}"
+            logger.error(
+                f"[OSMOSE:HybridAnchor] ❌ {error_msg} for document {document_id}",
+                exc_info=True
+            )
+
+            result.osmose_success = False
+            result.osmose_error = error_msg
+            result.total_duration_seconds = asyncio.get_event_loop().time() - start_time
+
+            # ADR 2024-12-30: Update enrichment tracking - Pass 1 failed
+            enrichment_tracker.update_pass1_status(
+                document_id=document_id,
+                status=EnrichmentStatus.FAILED,
+                error=error_msg
+            )
+
+            return result
+
+    async def _persist_hybrid_anchor_to_neo4j(
+        self,
+        proto_concepts: List[Any],
+        canonical_concepts: List[Any],
+        document_id: str,
+        tenant_id: str,
+        chunks: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, int]:
+        """
+        Persiste les concepts Hybrid Anchor dans Neo4j.
+
+        Crée selon l'ADR:
+        - ProtoConcept nodes avec leurs attributs
+        - CanonicalConcept nodes avec stability et needs_confirmation
+        - Relations INSTANCE_OF entre Proto et Canonical
+        - DocumentChunk nodes (si chunks fournis)
+        - Relations ANCHORED_IN entre concepts et chunks
+
+        Args:
+            proto_concepts: Liste des ProtoConcepts (promus uniquement)
+            canonical_concepts: Liste des CanonicalConcepts
+            document_id: ID du document
+            tenant_id: ID tenant
+            chunks: Liste des chunks avec anchored_concepts (optionnel)
+
+        Returns:
+            Dict avec compteurs créés
+        """
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+        from knowbase.config.settings import get_settings
+
+        settings = get_settings()
+        stats = {
+            "proto_created": 0,
+            "canonical_created": 0,
+            "relations_created": 0,
+            "chunks_created": 0,
+            "anchored_in_created": 0
+        }
+
+        try:
+            neo4j_client = get_neo4j_client(
+                uri=settings.neo4j_uri,
+                user=settings.neo4j_user,
+                password=settings.neo4j_password,
+                database="neo4j"
+            )
+
+            if not neo4j_client.is_connected():
+                logger.warning("[OSMOSE:HybridAnchor:Neo4j] Not connected, skipping persistence")
+                return stats
+
+            # ================================================================
+            # Étape 1: Créer les ProtoConcepts
+            # ================================================================
+            # Build mapping proto_id -> canonical_id pour les relations
+            proto_to_canonical: Dict[str, str] = {}
+            for cc in canonical_concepts:
+                for proto_id in cc.proto_concept_ids:
+                    proto_to_canonical[proto_id] = cc.id
+
+            # Batch create ProtoConcepts
+            proto_query = """
+            UNWIND $protos AS proto
+            MERGE (p:ProtoConcept {concept_id: proto.id, tenant_id: $tenant_id})
+            ON CREATE SET
+                p.concept_name = proto.label,
+                p.definition = proto.definition,
+                p.type_heuristic = proto.type_heuristic,
+                p.document_id = proto.document_id,
+                p.section_id = proto.section_id,
+                p.created_at = datetime(),
+                p.extraction_method = 'hybrid_anchor'
+            ON MATCH SET
+                p.definition = COALESCE(proto.definition, p.definition),
+                p.updated_at = datetime()
+            RETURN count(p) AS created
+            """
+
+            proto_data = [
+                {
+                    "id": pc.id,
+                    "label": pc.label,
+                    "definition": pc.definition,
+                    "type_heuristic": pc.type_heuristic,
+                    "document_id": pc.document_id,
+                    "section_id": getattr(pc, 'section_id', None)
+                }
+                for pc in proto_concepts
+            ]
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    proto_query,
+                    protos=proto_data,
+                    tenant_id=tenant_id
+                )
+                record = result.single()
+                if record:
+                    stats["proto_created"] = record["created"]
+
+            # ================================================================
+            # Étape 2: Créer les CanonicalConcepts avec stability
+            # ================================================================
+            canonical_query = """
+            UNWIND $canonicals AS cc
+            MERGE (c:CanonicalConcept {canonical_id: cc.id, tenant_id: $tenant_id})
+            ON CREATE SET
+                c.canonical_name = cc.label,
+                c.canonical_key = toLower(replace(cc.label, ' ', '_')),
+                c.unified_definition = cc.definition_consolidated,
+                c.type_fine = cc.type_fine,
+                c.stability = cc.stability,
+                c.needs_confirmation = cc.needs_confirmation,
+                c.status = 'HYBRID_ANCHOR',
+                c.created_at = datetime()
+            ON MATCH SET
+                c.unified_definition = COALESCE(cc.definition_consolidated, c.unified_definition),
+                c.type_fine = COALESCE(cc.type_fine, c.type_fine),
+                c.stability = cc.stability,
+                c.needs_confirmation = cc.needs_confirmation,
+                c.updated_at = datetime()
+            RETURN count(c) AS created
+            """
+
+            canonical_data = [
+                {
+                    "id": cc.id,
+                    "label": cc.label,
+                    "definition_consolidated": cc.definition_consolidated,
+                    "type_fine": cc.type_fine,
+                    "stability": cc.stability.value if hasattr(cc.stability, 'value') else str(cc.stability),
+                    "needs_confirmation": cc.needs_confirmation
+                }
+                for cc in canonical_concepts
+            ]
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    canonical_query,
+                    canonicals=canonical_data,
+                    tenant_id=tenant_id
+                )
+                record = result.single()
+                if record:
+                    stats["canonical_created"] = record["created"]
+
+            # ================================================================
+            # Étape 3: Créer les relations INSTANCE_OF (Proto → Canonical)
+            # ================================================================
+            relation_query = """
+            UNWIND $relations AS rel
+            MATCH (p:ProtoConcept {concept_id: rel.proto_id, tenant_id: $tenant_id})
+            MATCH (c:CanonicalConcept {canonical_id: rel.canonical_id, tenant_id: $tenant_id})
+            MERGE (p)-[r:INSTANCE_OF]->(c)
+            ON CREATE SET r.created_at = datetime()
+            RETURN count(r) AS created
+            """
+
+            relation_data = [
+                {"proto_id": proto_id, "canonical_id": canonical_id}
+                for proto_id, canonical_id in proto_to_canonical.items()
+            ]
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    relation_query,
+                    relations=relation_data,
+                    tenant_id=tenant_id
+                )
+                record = result.single()
+                if record:
+                    stats["relations_created"] = record["created"]
+
+            # ================================================================
+            # Étape 4: Créer les DocumentChunk nodes
+            # ================================================================
+            if chunks:
+                chunk_query = """
+                UNWIND $chunks AS chunk
+                MERGE (dc:DocumentChunk {chunk_id: chunk.id, tenant_id: $tenant_id})
+                ON CREATE SET
+                    dc.document_id = chunk.document_id,
+                    dc.document_name = chunk.document_name,
+                    dc.chunk_index = chunk.chunk_index,
+                    dc.chunk_type = chunk.chunk_type,
+                    dc.char_start = chunk.char_start,
+                    dc.char_end = chunk.char_end,
+                    dc.token_count = chunk.token_count,
+                    dc.text_preview = left(chunk.text, 200),
+                    dc.created_at = datetime()
+                ON MATCH SET
+                    dc.updated_at = datetime()
+                RETURN count(dc) AS created
+                """
+
+                chunk_data = [
+                    {
+                        "id": c.get("id"),
+                        "document_id": c.get("document_id"),
+                        "document_name": c.get("document_name"),
+                        "chunk_index": c.get("chunk_index", 0),
+                        "chunk_type": c.get("chunk_type", "document_centric"),
+                        "char_start": c.get("char_start", 0),
+                        "char_end": c.get("char_end", 0),
+                        "token_count": c.get("token_count", 0),
+                        "text": c.get("text", "")[:200]
+                    }
+                    for c in chunks
+                ]
+
+                with neo4j_client.driver.session(database="neo4j") as session:
+                    result = session.run(
+                        chunk_query,
+                        chunks=chunk_data,
+                        tenant_id=tenant_id
+                    )
+                    record = result.single()
+                    if record:
+                        stats["chunks_created"] = record["created"]
+
+                # ================================================================
+                # Étape 5: Créer les relations ANCHORED_IN (Concept → Chunk)
+                # ================================================================
+                # Collecter toutes les relations concept → chunk depuis anchored_concepts
+                anchored_relations = []
+                for chunk in chunks:
+                    chunk_id = chunk.get("id")
+                    for ac in chunk.get("anchored_concepts", []):
+                        concept_id = ac.get("concept_id")
+                        if concept_id and chunk_id:
+                            anchored_relations.append({
+                                "concept_id": concept_id,
+                                "chunk_id": chunk_id,
+                                "role": ac.get("role", "mention"),
+                                "span_start": ac.get("span", [0, 0])[0] if ac.get("span") else 0,
+                                "span_end": ac.get("span", [0, 0])[1] if ac.get("span") else 0
+                            })
+
+                if anchored_relations:
+                    anchored_query = """
+                    UNWIND $relations AS rel
+                    MATCH (p:ProtoConcept {concept_id: rel.concept_id, tenant_id: $tenant_id})
+                    MATCH (dc:DocumentChunk {chunk_id: rel.chunk_id, tenant_id: $tenant_id})
+                    MERGE (p)-[r:ANCHORED_IN]->(dc)
+                    ON CREATE SET
+                        r.role = rel.role,
+                        r.span_start = rel.span_start,
+                        r.span_end = rel.span_end,
+                        r.created_at = datetime()
+                    RETURN count(r) AS created
+                    """
+
+                    with neo4j_client.driver.session(database="neo4j") as session:
+                        result = session.run(
+                            anchored_query,
+                            relations=anchored_relations,
+                            tenant_id=tenant_id
+                        )
+                        record = result.single()
+                        if record:
+                            stats["anchored_in_created"] = record["created"]
+
+            logger.info(
+                f"[OSMOSE:HybridAnchor:Neo4j] ✅ Persisted: "
+                f"{stats['proto_created']} ProtoConcepts, "
+                f"{stats['canonical_created']} CanonicalConcepts, "
+                f"{stats['relations_created']} INSTANCE_OF, "
+                f"{stats['chunks_created']} DocumentChunks, "
+                f"{stats['anchored_in_created']} ANCHORED_IN"
+            )
+
+            return stats
+
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE:HybridAnchor:Neo4j] ❌ Persistence error: {e}",
+                exc_info=True
+            )
+            return stats
+
+    async def _extract_intra_document_relations(
+        self,
+        canonical_concepts: List[Any],
+        text_content: str,
+        document_id: str,
+        tenant_id: str,
+        document_chunks: Optional[List[Dict[str, Any]]] = None
+    ) -> int:
+        """
+        Extrait et persiste les relations intra-document (Pass 1.5).
+
+        Option A' (ADR 2024-12-30): Si document_chunks fournis, utilise
+        extract_relations_chunk_aware() qui itère sur les DocumentChunks
+        avec fenêtre [i-1, i, i+1] et catalogue filtré par anchored_concepts.
+
+        Args:
+            canonical_concepts: Liste des CanonicalConcepts (promus en Pass 1)
+            text_content: Texte complet du document (fallback si pas de chunks)
+            document_id: ID du document source
+            tenant_id: ID tenant
+            document_chunks: Liste des DocumentChunks avec anchored_concepts (Option A')
+
+        Returns:
+            Nombre de RawAssertions créées
+        """
+        from knowbase.relations.llm_relation_extractor import LLMRelationExtractor
+        from knowbase.relations.raw_assertion_writer import get_raw_assertion_writer
+
+        logger.info(
+            f"[OSMOSE:HybridAnchor:Relations] Extracting intra-document relations "
+            f"for {len(canonical_concepts)} concepts"
+            f"{f', {len(document_chunks)} chunks (Option A)' if document_chunks else ' (legacy mode)'}"
+        )
+
+        # Convertir CanonicalConcepts en format attendu par LLMRelationExtractor
+        # 2024-12-30: Inclure proto_concept_ids pour mapping anchored_concepts → canonical
+        concepts_for_extraction = []
+        for cc in canonical_concepts:
+            concept_dict = {
+                "canonical_id": cc.id,
+                "canonical_name": cc.label,
+                "concept_type": cc.type_fine or "abstract",
+                "surface_forms": list(cc.surface_forms) if hasattr(cc, 'surface_forms') and cc.surface_forms else [],
+                # Proto IDs pour mapping anchors (qui utilisent proto_id) vers canonical
+                "proto_concept_ids": list(cc.proto_concept_ids) if hasattr(cc, 'proto_concept_ids') and cc.proto_concept_ids else []
+            }
+            concepts_for_extraction.append(concept_dict)
+
+        # Initialiser l'extracteur LLM
+        extractor = LLMRelationExtractor(
+            model="gpt-4o-mini",
+            max_context_chars=8000,
+            use_id_first=True  # Utiliser ID-First (V3/V4)
+        )
+
+        try:
+            # Option A' : Extraction alignée sur DocumentChunks (recommandée)
+            # 2024-12-30: Version ASYNC parallélisée pour performance
+            if document_chunks and len(document_chunks) > 0:
+                logger.info(
+                    f"[OSMOSE:HybridAnchor:Relations] Using PARALLEL chunk-aware extraction "
+                    f"(Option A', async with max_concurrent=10)"
+                )
+                extraction_result = await extractor.extract_relations_chunk_aware_async(
+                    document_chunks=document_chunks,
+                    all_concepts=concepts_for_extraction,
+                    document_id=document_id,
+                    tenant_id=tenant_id,
+                    window_size=1,  # Fenêtre [i-1, i, i+1]
+                    max_concepts=100,
+                    min_type_confidence=0.65,
+                    doc_top_k=15,
+                    lex_fallback_threshold=8,
+                    max_concurrent=10  # 10 appels LLM en parallèle
+                )
+            else:
+                # Fallback: Extraction legacy sur full_text (déprécié)
+                logger.warning(
+                    f"[OSMOSE:HybridAnchor:Relations] No chunks provided, "
+                    f"falling back to legacy extraction (DEPRECATED)"
+                )
+                extraction_result = extractor.extract_relations_type_first(
+                    concepts=concepts_for_extraction,
+                    full_text=text_content,
+                    document_id=document_id,
+                    chunk_id=f"{document_id}_full",
+                    min_type_confidence=0.65
+                )
+
+            if not extraction_result.relations:
+                logger.info(
+                    f"[OSMOSE:HybridAnchor:Relations] No relations extracted "
+                    f"({extraction_result.stats.get('relations_extracted', 0)} attempted)"
+                )
+                return 0
+
+            logger.info(
+                f"[OSMOSE:HybridAnchor:Relations] Extracted {len(extraction_result.relations)} relations "
+                f"(valid={extraction_result.stats.get('relations_valid', 0)}, "
+                f"invalid_type={extraction_result.stats.get('relations_invalid_type', 0)}, "
+                f"invalid_index={extraction_result.stats.get('relations_invalid_index', 0)})"
+            )
+
+            # Initialiser le writer
+            writer = get_raw_assertion_writer(
+                tenant_id=tenant_id,
+                extractor_version="2.10.0",
+                model_used="gpt-4o-mini"
+            )
+            writer.reset_stats()
+
+            # Écrire chaque relation comme RawAssertion
+            for rel in extraction_result.relations:
+                writer.write_assertion(
+                    subject_concept_id=rel.subject_concept_id,
+                    object_concept_id=rel.object_concept_id,
+                    predicate_raw=rel.predicate_raw,
+                    evidence_text=rel.evidence,
+                    source_doc_id=document_id,
+                    source_chunk_id=f"{document_id}_full",
+                    confidence=rel.confidence,
+                    source_language="MULTI",
+                    subject_surface_form=rel.subject_surface_form,
+                    object_surface_form=rel.object_surface_form,
+                    flags=rel.flags,
+                    evidence_span_start=rel.evidence_start_char,
+                    evidence_span_end=rel.evidence_end_char,
+                    # Phase 2.10 Type-First fields
+                    relation_type=rel.relation_type,
+                    type_confidence=rel.type_confidence,
+                    alt_type=rel.alt_type,
+                    alt_type_confidence=rel.alt_type_confidence,
+                    relation_subtype_raw=rel.relation_subtype_raw,
+                    context_hint=rel.context_hint
+                )
+
+            stats = writer.get_stats()
+            logger.info(
+                f"[OSMOSE:HybridAnchor:Relations] ✅ Persisted {stats['written']} RawAssertions "
+                f"(skipped: {stats['skipped_duplicate']} duplicates, "
+                f"{stats['skipped_no_concept']} missing concepts)"
+            )
+
+            return stats['written']
+
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE:HybridAnchor:Relations] ❌ Error extracting relations: {e}",
+                exc_info=True
+            )
+            return 0
 
     async def _trigger_entity_resolution_reevaluation(
         self,

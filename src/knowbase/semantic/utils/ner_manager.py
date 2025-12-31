@@ -95,12 +95,20 @@ class MultilingualNER:
         # Chemin de base pour les ontologies
         base_path = Path("config/ontologies")
 
-        # 1. Charger dictionnaires globaux
-        global_ontologies = [
-            "sap_products.json",
-            "salesforce_concepts.json",
-            "pharma_fda_terms.json"
-        ]
+        # 1. Ontologies statiques DÉSACTIVÉES (2024-12-30)
+        # Ces dictionnaires pré-définis (Salesforce, Pharma/FDA, SAP) sont incompatibles
+        # avec l'architecture OSMOSE domain-agnostic. Le système découvre les concepts
+        # dynamiquement via HybridAnchorExtractor (LLM-based).
+        #
+        # Les ontologies statiques causaient des faux positifs (ex: "GMP" classé FDA
+        # au lieu de concept EU dans des documents de régulation européenne).
+        #
+        # global_ontologies = [
+        #     "sap_products.json",
+        #     "salesforce_concepts.json",
+        #     "pharma_fda_terms.json"
+        # ]
+        global_ontologies = []  # OSMOSE: extraction dynamique uniquement
 
         for ontology_file in global_ontologies:
             ontology_path = base_path / ontology_file

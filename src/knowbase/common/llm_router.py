@@ -858,6 +858,12 @@ class LLMRouter:
         if not self._burst_vllm_client:
             raise RuntimeError("Burst mode client not initialized")
 
+        # Limite de contexte pour Qwen2.5-14B-AWQ (garder marge pour output)
+        MAX_INPUT_TOKENS = 6500  # 8192 - 1500 pour output - marge sécurité
+
+        # Tronquer les messages si trop longs
+        messages = self._truncate_messages_for_context(messages, MAX_INPUT_TOKENS)
+
         # Filtrer les paramètres internes
         api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
 
@@ -867,30 +873,25 @@ class LLMRouter:
                 api_kwargs.pop('response_format', None)
                 logger.debug(f"[BURST:vLLM] Removed response_format for model {self._burst_model}")
 
-        try:
-            response = self._burst_vllm_client.chat.completions.create(
-                model=self._burst_model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **api_kwargs
-            )
+        response = self._burst_vllm_client.chat.completions.create(
+            model=self._burst_model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **api_kwargs
+        )
 
-            # Log et tracking des métriques de tokens
-            if response.usage:
-                prompt_tokens = response.usage.prompt_tokens
-                completion_tokens = response.usage.completion_tokens
-                total_tokens = response.usage.total_tokens
-                logger.info(f"[TOKENS:BURST:vLLM] {self._burst_model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
+        # Log et tracking des métriques de tokens
+        if response.usage:
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
+            total_tokens = response.usage.total_tokens
+            logger.info(f"[TOKENS:BURST:vLLM] {self._burst_model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
 
-                # Tracking pour analyse des coûts (burst = coût EC2 Spot, pas API)
-                track_tokens(f"burst/{self._burst_model}", task_type.value, prompt_tokens, completion_tokens)
+            # Tracking pour analyse des coûts (burst = coût EC2 Spot, pas API)
+            track_tokens(f"burst/{self._burst_model}", task_type.value, prompt_tokens, completion_tokens)
 
-            return response.choices[0].message.content or ""
-
-        except Exception as e:
-            logger.error(f"[BURST:vLLM] Error calling {self._burst_model} at {self._burst_endpoint}: {e}")
-            raise
+        return response.choices[0].message.content or ""
 
     async def _call_burst_vllm_async(
         self,
@@ -906,6 +907,12 @@ class LLMRouter:
         if not self._burst_async_vllm_client:
             raise RuntimeError("Burst mode async client not initialized")
 
+        # Limite de contexte pour Qwen2.5-14B-AWQ (garder marge pour output)
+        MAX_INPUT_TOKENS = 6500  # 8192 - 1500 pour output - marge sécurité
+
+        # Tronquer les messages si trop longs
+        messages = self._truncate_messages_for_context(messages, MAX_INPUT_TOKENS)
+
         # Filtrer les paramètres internes
         api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
 
@@ -914,33 +921,137 @@ class LLMRouter:
             if not any(x in self._burst_model.lower() for x in ['qwen', 'mistral']):
                 api_kwargs.pop('response_format', None)
 
-        try:
-            response = await self._burst_async_vllm_client.chat.completions.create(
-                model=self._burst_model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **api_kwargs
-            )
+        response = await self._burst_async_vllm_client.chat.completions.create(
+            model=self._burst_model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **api_kwargs
+        )
 
-            # Log et tracking
-            if response.usage:
-                prompt_tokens = response.usage.prompt_tokens
-                completion_tokens = response.usage.completion_tokens
-                total_tokens = response.usage.total_tokens
-                logger.info(f"[TOKENS:BURST:vLLM:ASYNC] {self._burst_model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
+        # Log et tracking
+        if response.usage:
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
+            total_tokens = response.usage.total_tokens
+            logger.info(f"[TOKENS:BURST:vLLM:ASYNC] {self._burst_model} - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
 
-                track_tokens(f"burst/{self._burst_model}", task_type.value, prompt_tokens, completion_tokens)
+            track_tokens(f"burst/{self._burst_model}", task_type.value, prompt_tokens, completion_tokens)
 
-            return response.choices[0].message.content or ""
-
-        except Exception as e:
-            logger.error(f"[BURST:vLLM:ASYNC] Error calling {self._burst_model} at {self._burst_endpoint}: {e}")
-            raise
+        return response.choices[0].message.content or ""
 
     def _estimate_tokens(self, text: str) -> int:
         """Estimation grossière des tokens (~ 4 chars = 1 token)."""
         return max(1, len(text) // 4)
+
+    def _truncate_messages_for_context(
+        self,
+        messages: List[Dict[str, Any]],
+        max_tokens: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Tronque les messages pour respecter la limite de contexte.
+
+        Stratégie:
+        1. Préserver le system message (premier)
+        2. Préserver le dernier user message
+        3. Tronquer le contenu des messages intermédiaires si nécessaire
+
+        Args:
+            messages: Liste des messages
+            max_tokens: Limite de tokens d'entrée
+
+        Returns:
+            Messages tronqués si nécessaire
+        """
+        if not messages:
+            return messages
+
+        # Estimer le total actuel
+        total_tokens = sum(
+            self._estimate_tokens(m.get("content", ""))
+            for m in messages
+        )
+
+        if total_tokens <= max_tokens:
+            return messages
+
+        logger.warning(
+            f"[BURST:TRUNCATE] Input too long ({total_tokens} tokens), "
+            f"truncating to {max_tokens} tokens"
+        )
+
+        # Copie pour ne pas modifier l'original
+        truncated = []
+
+        # Garder le system message intact si présent
+        system_msg = None
+        other_msgs = []
+
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_msg = msg.copy()
+            else:
+                other_msgs.append(msg.copy())
+
+        # Budget tokens disponible
+        system_tokens = self._estimate_tokens(system_msg.get("content", "")) if system_msg else 0
+        remaining_budget = max_tokens - system_tokens
+
+        # Si le system message est déjà trop long, le tronquer
+        if system_msg and system_tokens > max_tokens * 0.3:
+            max_system_chars = int(max_tokens * 0.3 * 4)  # 30% max pour system
+            content = system_msg.get("content", "")
+            if len(content) > max_system_chars:
+                system_msg["content"] = content[:max_system_chars] + "\n[...truncated...]"
+                system_tokens = self._estimate_tokens(system_msg["content"])
+                remaining_budget = max_tokens - system_tokens
+
+        # Tronquer les autres messages (en gardant le dernier user message prioritaire)
+        if other_msgs:
+            # Dernier message = prioritaire
+            last_msg = other_msgs[-1]
+            last_tokens = self._estimate_tokens(last_msg.get("content", ""))
+
+            # Si le dernier message est trop long, le tronquer
+            if last_tokens > remaining_budget * 0.7:
+                max_chars = int(remaining_budget * 0.7 * 4)
+                content = last_msg.get("content", "")
+                last_msg["content"] = content[:max_chars] + "\n[...truncated...]"
+                last_tokens = self._estimate_tokens(last_msg["content"])
+
+            # Distribuer le reste du budget aux messages précédents
+            budget_for_others = remaining_budget - last_tokens
+
+            processed_others = []
+            for msg in other_msgs[:-1]:
+                msg_tokens = self._estimate_tokens(msg.get("content", ""))
+                if budget_for_others <= 0:
+                    # Plus de budget, skip ce message
+                    continue
+                if msg_tokens <= budget_for_others:
+                    processed_others.append(msg)
+                    budget_for_others -= msg_tokens
+                else:
+                    # Tronquer partiellement
+                    max_chars = int(budget_for_others * 4)
+                    if max_chars > 100:  # Seulement si ça vaut le coup
+                        content = msg.get("content", "")
+                        msg["content"] = content[:max_chars] + "\n[...truncated...]"
+                        processed_others.append(msg)
+                    budget_for_others = 0
+
+            other_msgs = processed_others + [last_msg]
+
+        # Reconstruire la liste
+        if system_msg:
+            truncated.append(system_msg)
+        truncated.extend(other_msgs)
+
+        new_total = sum(self._estimate_tokens(m.get("content", "")) for m in truncated)
+        logger.info(f"[BURST:TRUNCATE] Reduced from {total_tokens} to {new_total} tokens")
+
+        return truncated
 
 
 # Instance globale du routeur

@@ -264,17 +264,22 @@ def upsert_chunks(
         chunk_ids.append(chunk_id)
 
         # Construire payload (tout sauf embedding et id)
+        # Phase 2 - Hybrid Anchor Model: anchored_concepts contient les concepts
+        # liés à ce chunk avec payload minimal (concept_id, label, role, span)
         payload = {
             "text": chunk.get("text", ""),
             "document_id": chunk.get("document_id", ""),
             "document_name": chunk.get("document_name", ""),
             "segment_id": chunk.get("segment_id", ""),
             "chunk_index": chunk.get("chunk_index", 0),
+            "chunk_type": chunk.get("chunk_type", "generic"),  # document_centric vs legacy
             "proto_concept_ids": chunk.get("proto_concept_ids", []),
             "canonical_concept_ids": chunk.get("canonical_concept_ids", []),
+            "anchored_concepts": chunk.get("anchored_concepts", []),  # Hybrid Anchor Model (ADR)
             "tenant_id": tenant_id,
             "char_start": chunk.get("char_start", 0),
             "char_end": chunk.get("char_end", 0),
+            "token_count": chunk.get("token_count", 0),
             "created_at": chunk.get("created_at", "")
         }
 

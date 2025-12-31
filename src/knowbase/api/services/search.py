@@ -66,6 +66,7 @@ def search_documents(
     use_graph_context: bool = True,
     graph_enrichment_level: str = "standard",
     session_id: str | None = None,
+    use_hybrid_anchor_search: bool = False,
 ) -> dict[str, Any]:
     """
     Recherche sémantique avec enrichissement Knowledge Graph (OSMOSE) et contexte conversationnel.
@@ -80,6 +81,7 @@ def search_documents(
         use_graph_context: Activer l'enrichissement KG (Graph-Guided RAG)
         graph_enrichment_level: Niveau d'enrichissement (none, light, standard, deep)
         session_id: ID de session pour contexte conversationnel (Memory Layer Phase 2.5)
+        use_hybrid_anchor_search: Utiliser le HybridAnchorSearchService (Phase 7)
 
     Returns:
         Résultats de recherche avec synthèse enrichie
@@ -137,40 +139,111 @@ def search_documents(
         query_vector = query_vector.numpy().tolist()
     query_vector = [float(x) for x in query_vector]
 
-    # Construction du filtre de base
-    filter_conditions = [FieldCondition(key="type", match=MatchValue(value="rfp_qa"))]
+    # 🚀 OSMOSE Phase 7: Hybrid Anchor Search Mode
+    reranked_chunks = None
+    hybrid_search_succeeded = False
 
-    # Ajouter le filtre par solution si spécifié
-    must_conditions = []
-    if solution:
-        must_conditions.append(
-            FieldCondition(key="solution.main", match=MatchValue(value=solution))
+    if use_hybrid_anchor_search:
+        try:
+            from .hybrid_anchor_search import (
+                get_hybrid_anchor_search_service,
+                SearchMode
+            )
+
+            hybrid_service = get_hybrid_anchor_search_service(
+                qdrant_client=qdrant_client,
+                embedding_model=embedding_model,
+                tenant_id=tenant_id
+            )
+
+            # Construire les filtres
+            filter_params = {}
+            if solution:
+                filter_params["solution.main"] = solution
+
+            # Exécuter la recherche hybride
+            hybrid_response = hybrid_service.search_sync(
+                query=enriched_query,
+                collection_name=settings.qdrant_collection,
+                top_k=TOP_K,
+                mode=SearchMode.HYBRID,
+                filter_params=filter_params if filter_params else None
+            )
+
+            if hybrid_response.results:
+                # Convertir les résultats hybrides en format standard
+                hybrid_chunks = []
+                for hr in hybrid_response.results:
+                    chunk_data = {
+                        "text": hr.text,
+                        "source_file": hr.source_file_url or hr.document_name,
+                        "slide_index": hr.slide_index,
+                        "score": hr.score,
+                        "slide_image_url": hr.slide_image_url,
+                        # Métadonnées additionnelles Hybrid Anchor
+                        "chunk_score": hr.chunk_score,
+                        "concept_score": hr.concept_score,
+                        "citations": [
+                            {
+                                "concept_label": c.concept_label,
+                                "anchor_role": c.anchor_role,
+                                "quote": c.quote,
+                            }
+                            for c in hr.citations
+                        ]
+                    }
+                    hybrid_chunks.append(chunk_data)
+
+                reranked_chunks = hybrid_chunks
+                hybrid_search_succeeded = True
+
+                logger.info(
+                    f"[OSMOSE:HybridAnchor] Search returned {len(hybrid_chunks)} results "
+                    f"({hybrid_response.total_concepts_matched} concepts matched, "
+                    f"{hybrid_response.processing_time_ms:.1f}ms)"
+                )
+
+        except Exception as e:
+            logger.warning(
+                f"[OSMOSE:HybridAnchor] Search failed, falling back to standard: {e}"
+            )
+
+    # Recherche classique (seulement si hybrid search n'a pas fonctionné)
+    if not hybrid_search_succeeded:
+        # Construction du filtre de base (pour recherche classique)
+        filter_conditions = [FieldCondition(key="type", match=MatchValue(value="rfp_qa"))]
+
+        # Ajouter le filtre par solution si spécifié
+        must_conditions = []
+        if solution:
+            must_conditions.append(
+                FieldCondition(key="solution.main", match=MatchValue(value=solution))
+            )
+
+        query_filter = Filter(
+            must_not=filter_conditions,
+            must=must_conditions if must_conditions else None
         )
+        results = qdrant_client.search(
+            collection_name=settings.qdrant_collection,
+            query_vector=query_vector,
+            limit=TOP_K,
+            with_payload=True,
+            query_filter=query_filter,
+        )
+        filtered = [r for r in results if r.score >= SCORE_THRESHOLD]
+        if not filtered:
+            return {
+                "status": "no_results",
+                "results": [],
+                "message": "Aucune information pertinente n'a été trouvée dans la base de connaissance.",
+            }
 
-    query_filter = Filter(
-        must_not=filter_conditions,
-        must=must_conditions if must_conditions else None
-    )
-    results = qdrant_client.search(
-        collection_name=settings.qdrant_collection,
-        query_vector=query_vector,
-        limit=TOP_K,
-        with_payload=True,
-        query_filter=query_filter,
-    )
-    filtered = [r for r in results if r.score >= SCORE_THRESHOLD]
-    if not filtered:
-        return {
-            "status": "no_results",
-            "results": [],
-            "message": "Aucune information pertinente n'a été trouvée dans la base de connaissance.",
-        }
+        public_url = PUBLIC_URL
+        response_chunks = [build_response_payload(r, public_url) for r in filtered]
 
-    public_url = PUBLIC_URL
-    response_chunks = [build_response_payload(r, public_url) for r in filtered]
-
-    # Apply reranking to improve relevance ordering
-    reranked_chunks = rerank_chunks(query, response_chunks, top_k=TOP_K)
+        # Apply reranking to improve relevance ordering
+        reranked_chunks = rerank_chunks(query, response_chunks, top_k=TOP_K)
 
     # 🧠 Session Entity Resolution: Si session active, chercher chunks via KG
     # pour les entités mentionnées dans le contexte de conversation

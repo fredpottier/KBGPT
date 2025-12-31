@@ -97,6 +97,135 @@ phase_1_8:
 
 
 # ===============================================================================
+# Phase 2 - Hybrid Anchor Model Architecture
+# ===============================================================================
+# ADR: doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md
+# Objectif: Réduire temps traitement de 35+ min à ~10 min par document
+
+phase_2_hybrid_anchor:
+  # Global toggle
+  enabled: true
+
+  # -------------------------------------------------------------------------
+  # Pass 2 Mode Configuration
+  # -------------------------------------------------------------------------
+  # inline: Exécute Pass 2 immédiatement après Pass 1 (mode Burst GPU)
+  # background: Job asynchrone via RQ worker (mode normal)
+  # scheduled: Batch nocturne (corpus stable)
+  pass2_mode: "background"
+
+  # -------------------------------------------------------------------------
+  # Anchor Configuration
+  # -------------------------------------------------------------------------
+  anchor_config:
+    # Seuil fuzzy matching pour anchor valide
+    min_fuzzy_score: 85
+    # Marquer approximate si score < seuil mais > min_approximate
+    min_approximate_score: 70
+    # Rejeter anchor si score < min_approximate
+    reject_below_score: 70
+
+  # -------------------------------------------------------------------------
+  # Promotion Configuration (ProtoConcept → CanonicalConcept)
+  # -------------------------------------------------------------------------
+  promotion_config:
+    # Critères pour "stable" (promu avec confiance)
+    min_proto_concepts_for_stable: 2
+    min_anchor_sections_for_stable: 2
+
+    # Voie d'exception pour singletons critiques
+    allow_singleton_if_high_signal: true
+
+    # Rôles anchor considérés "high-signal"
+    high_signal_roles:
+      - "requirement"
+      - "prohibition"
+      - "definition"
+      - "constraint"
+      - "obligation"
+
+    # Modaux normatifs pour détection high-signal
+    high_signal_modals:
+      - "shall"
+      - "must"
+      - "required"
+      - "prohibited"
+      - "mandatory"
+
+    # Sections critiques pour high-signal
+    high_signal_sections:
+      - "requirements"
+      - "security"
+      - "compliance"
+      - "sla"
+      - "constraints"
+      - "obligations"
+
+    # Domaines high-value
+    high_signal_domains:
+      - "gdpr"
+      - "security"
+      - "disaster_recovery"
+      - "sla"
+      - "compliance"
+      - "legal"
+
+  # -------------------------------------------------------------------------
+  # Chunking Configuration (Document-Centric)
+  # -------------------------------------------------------------------------
+  chunking_config:
+    chunk_size_tokens: 256       # Réduit de 512 pour meilleure granularité
+    chunk_overlap_tokens: 64     # Overlap pour continuité contextuelle
+    min_chunk_tokens: 50         # Minimum pour éviter chunks trop petits
+
+  # -------------------------------------------------------------------------
+  # Payload Qdrant - Champs autorisés (Invariant d'Architecture)
+  # -------------------------------------------------------------------------
+  # IMPORTANT: Ne JAMAIS ajouter d'autres champs dans anchored_concepts
+  allowed_anchor_payload_fields:
+    - "concept_id"
+    - "label"
+    - "role"
+    - "span"
+    - "chunk_id"
+
+  # -------------------------------------------------------------------------
+  # Pass 2 Configuration (Enrichissement)
+  # -------------------------------------------------------------------------
+  pass2_config:
+    # Mode d'exécution: inline | background | scheduled | disabled
+    mode: "background"
+    # Phases activées
+    enabled_phases:
+      - "classify_fine"
+      - "enrich_relations"
+      - "cross_doc"
+    # Priorité jobs background
+    default_priority: 0
+
+  # -------------------------------------------------------------------------
+  # Classification Configuration
+  # -------------------------------------------------------------------------
+  classification_config:
+    # Patterns custom par tenant (optionnel)
+    custom_patterns: {}
+
+  # -------------------------------------------------------------------------
+  # Hybrid Search Configuration (Phase 7)
+  # -------------------------------------------------------------------------
+  search_config:
+    # Poids pour fusion chunks/concepts
+    chunk_weight: 0.6
+    concept_weight: 0.4
+    # Score minimum pour inclusion
+    min_score: 0.5
+    # Max chunks additionnels via anchor expansion
+    max_anchor_expansion: 5
+    # Mode par défaut: chunks_only | concepts_only | hybrid | anchor_first
+    default_mode: "hybrid"
+
+
+# ===============================================================================
 # Phases Antérieures (Référence)
 # ===============================================================================
 

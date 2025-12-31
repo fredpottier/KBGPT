@@ -7,6 +7,44 @@
 
 ---
 
+## Invariants d'Architecture (Non-Négociables)
+
+Ces règles sont **verrouillées** et ne doivent jamais être remises en question :
+
+### 1. Aucun concept sans anchor
+> Un concept qui n'est pas ancré dans le texte source n'existe pas dans le système.
+
+**Garanties** : Élimination du bruit, traçabilité native, KG sain, auditabilité B2B.
+
+### 2. Aucun texte indexé généré par LLM
+> Le LLM sélectionne, qualifie et consolide. Il ne matérialise JAMAIS de texte indexé.
+
+**Garanties** : Pas de reformulations hallucinées dans Qdrant, vérifiabilité des citations.
+
+### 3. Chunking indépendant des concepts
+> Les chunks sont découpés selon des règles fixes (taille, overlap). Jamais selon les concepts.
+
+**Garanties** : Volumétrie prévisible, pas d'explosion combinatoire.
+
+### 4. Neo4j = Vérité, Qdrant = Projection
+> En cas de divergence, Neo4j fait foi. Qdrant est une vue optimisée pour le retrieval.
+
+**Garanties** : Source unique de vérité, cohérence garantie.
+
+### 5. Pass 1 toujours exploitable
+> Même si Pass 2 ne tourne jamais, le système doit être 100% fonctionnel après Pass 1.
+
+**Garanties** : Pas de dépendance cachée, livraison incrémentale possible.
+
+### 6. Payload Qdrant minimal
+> Le payload Qdrant ne contient que : `concept_id`, `label`, `role`, `span`, `chunk_id`.
+
+**Interdits** : Pas de définitions, pas de textes synthétiques, pas de contextes étendus.
+
+**Garanties** : Évite la dérive de duplication, maintient la séparation des responsabilités.
+
+---
+
 ## Contexte et Problème
 
 ### Situation actuelle
@@ -123,21 +161,36 @@ Ils sont remplacés par :
 
 ### Phase EXTRACT (~5-6 min)
 
+> **Note architecturale** : Bien que traitée comme une phase unique, EXTRACT comprend deux sous-phases conceptuellement distinctes pour faciliter le debug, les logs et la reprise sur erreur.
+
 #### Entrée
 - Document segmenté (47 segments pour 40 pages)
 
-#### Traitement
+#### Sous-phase A : EXTRACT_CONCEPTS
+
+Responsabilité : Extraction sémantique pure
+
 1. **Extraction LLM** : Pour chaque segment, le LLM extrait :
    - Concepts (label, type heuristique, définition courte)
    - Quote textuelle exacte justifiant le concept
+   - Rôle de l'anchor (definition, procedure, requirement, example, etc.)
+
+**Logs attendus** : `[OSMOSE:EXTRACT_CONCEPTS] Segment 12/47 → 8 concepts extraits`
+
+#### Sous-phase B : ANCHOR_RESOLUTION
+
+Responsabilité : Localisation et validation des anchors
 
 2. **Fuzzy Matching** : Algorithme (rapidfuzz) localise la quote dans le segment source
    - Produit `char_start`, `char_end` exacts
    - Si similarité < 85% → anchor marqué `approximate`
+   - Si quote introuvable → concept rejeté (pas d'anchor = pas de concept)
 
-3. **Création ProtoConcept** : Chaque concept est créé avec :
+3. **Création ProtoConcept** : Chaque concept validé est créé avec :
    - Son embedding (label + quote principale)
    - Son anchor vers le segment source
+
+**Logs attendus** : `[OSMOSE:ANCHOR_RESOLUTION] 8 concepts → 7 anchors valides, 1 rejeté`
 
 #### Sortie
 - ProtoConcepts avec anchors validés
@@ -157,6 +210,65 @@ Ils sont remplacés par :
 | Déduplication | LLM + embeddings | LLM simplifié |
 | Embedding concept | Multiples par contexte | **1 seul par CanonicalConcept** |
 
+#### Règle de Promotion : 3 Statuts de Concepts
+
+> **Problématique** : Le garde-fou `min=2` protège contre le bruit, mais risque de perdre des concepts rares mais critiques (obligation légale citée une fois, exception spécifique, terme technique rare mais clé).
+
+**Solution** : 3 niveaux de statut au lieu d'un simple "promu / rejeté"
+
+| Statut | Critère | Usage | Stabilité |
+|--------|---------|-------|-----------|
+| **ProtoConcept** | Anchor valide | Toujours conservé, exploitable via chunks | doc-level |
+| **CanonicalConcept "stable"** | ≥2 ProtoConcepts OU ≥2 sections | Graphe navigable, recherche directe | corpus-level |
+| **CanonicalConcept "singleton"** | 1 seul, mais high-signal | Marqué `needs_confirmation=true` | corpus-level (prudent) |
+
+#### Règle de promotion
+
+```python
+PROMOTION_CONFIG = {
+    "min_proto_concepts_for_stable": 2,      # ProtoConcepts distincts
+    "min_anchor_sections_for_stable": 2,      # Anchors sur sections différentes
+    "allow_singleton_if_high_signal": True,   # Voie d'exception
+}
+
+def should_promote(proto_concepts: List[ProtoConcept]) -> Tuple[bool, str]:
+    """Détermine si un groupe de ProtoConcepts doit être promu en Canonical."""
+
+    count = len(proto_concepts)
+    sections = len(set(pc.section_id for pc in proto_concepts))
+
+    # Règle standard : robustesse par fréquence
+    if count >= 2 or sections >= 2:
+        return True, "stable"
+
+    # Voie d'exception : singleton high-signal
+    if count == 1 and is_high_signal(proto_concepts[0]):
+        return True, "singleton"  # Marqué needs_confirmation
+
+    return False, None  # Reste ProtoConcept uniquement
+
+def is_high_signal(pc: ProtoConcept) -> bool:
+    """Détecte si un concept singleton est critique malgré sa rareté."""
+
+    # Rôle anchor normatif
+    if pc.anchor_role in {"requirement", "prohibition", "definition", "constraint"}:
+        return True
+
+    # Modaux normatifs dans la quote
+    if any(modal in pc.quote.lower() for modal in ["shall", "must", "required", "prohibited"]):
+        return True
+
+    # Section type critique
+    if pc.section_type in {"requirements", "security", "compliance", "sla", "constraints"}:
+        return True
+
+    # Domaine high-value (GDPR, security, DR, etc.)
+    if pc.domain in {"gdpr", "security", "disaster_recovery", "sla", "compliance"}:
+        return True
+
+    return False
+```
+
 #### Traitement
 1. **Scoring simplifié** :
    - TF-IDF sur le label/définition
@@ -166,15 +278,21 @@ Ils sont remplacés par :
 2. **Déduplication** :
    - Regroupement des ProtoConcepts similaires
    - Création CanonicalConcept avec embedding consolidé
+   - Attribution du statut : "stable" ou "singleton"
 
 3. **Persistance Neo4j** :
-   - ProtoConcepts
-   - CanonicalConcepts
+   - ProtoConcepts (toujours conservés)
+   - CanonicalConcepts avec propriété `stability: "stable"|"singleton"`
+   - Singletons marqués `needs_confirmation: true`
    - Relations ANCHORED_IN
 
 #### Sortie
 - CanonicalConcepts avec 1 embedding chacun
+- Distinction stable/singleton pour la qualité du graphe
 - Graphe Neo4j propre
+
+#### Garantie importante
+> Même si un concept n'est pas promu en CanonicalConcept, il reste **exploitable** via les chunks (Qdrant) + anchors. La recherche reste complète.
 
 ### Phase RELATIONS (~1 min)
 
@@ -476,12 +594,40 @@ Classification fine avec sous-types, confiance, justification.
 
 **Décision** :
 - **ProtoConcept** (doc-level) : embedding = label + quote principale du doc
-- **CanonicalConcept** (corpus-level) : embedding = synthèse consolidée
+- **CanonicalConcept** (corpus-level) : embedding en 2 temps
+
+**Moment exact de l'embedding CanonicalConcept** :
+
+| Phase | Type d'embedding | Méthode | Commentaire |
+|-------|------------------|---------|-------------|
+| **Pass 1** | Provisoire | Centroïde des embeddings ProtoConcept | 100% fonctionnel, pas de dépendance LLM |
+| **Pass 2** | Canonique | Synthèse LLM du concept | Amélioration optionnelle |
+
+```python
+def compute_canonical_embedding(proto_concepts: List[ProtoConcept], pass_number: int):
+    """Calcule l'embedding d'un CanonicalConcept selon la pass."""
+
+    if pass_number == 1:
+        # Centroïde = moyenne des embeddings ProtoConcept
+        embeddings = [pc.embedding for pc in proto_concepts]
+        return np.mean(embeddings, axis=0)  # Déterministe, rapide
+
+    else:  # Pass 2
+        # Synthèse LLM = embedding de la définition consolidée
+        consolidated_def = llm_consolidate_definitions(proto_concepts)
+        return embed(consolidated_def)  # Plus riche sémantiquement
+```
+
+**Garantie Pass 1** :
+- L'embedding centroïde est **immédiatement disponible**
+- La recherche vectorielle fonctionne sans attendre Pass 2
+- Pas de dépendance cachée vers le LLM
 
 **Justification** :
 - Un CanonicalConcept représente le concept *dans le corpus*, pas dans un doc
 - Évite la dérive vers un document spécifique
 - Cohérence cross-document
+- Pass 2 améliore sans invalider
 
 ### 5. Stockage Anchors : Double écriture intentionnelle
 
@@ -496,6 +642,52 @@ Classification fine avec sous-types, confiance, justification.
 - Retrieval enrichi : chunk → ses concepts
 - Reranking intelligent
 - Réponse expliquée
+
+### 6. Payload Qdrant : Règle de Minimalité
+
+**Décision** : Le payload Qdrant pour `anchored_concepts` est strictement limité.
+
+**Champs autorisés** :
+
+```python
+ALLOWED_ANCHOR_PAYLOAD_FIELDS = {
+    "concept_id",   # Référence vers Neo4j
+    "label",        # Nom du concept (pour affichage rapide)
+    "role",         # Rôle de l'anchor (definition, requirement, etc.)
+    "span",         # [char_start, char_end] dans le chunk
+    "chunk_id",     # Référence vers le chunk parent
+}
+```
+
+**Champs INTERDITS** (ne jamais ajouter) :
+
+```python
+FORBIDDEN_ANCHOR_PAYLOAD_FIELDS = {
+    "definition",       # ❌ Duplication de Neo4j
+    "synthetic_text",   # ❌ Texte généré par LLM
+    "full_context",     # ❌ Contexte étendu
+    "embedding",        # ❌ Jamais dans payload
+    "relations",        # ❌ Appartient à Neo4j
+    "metadata",         # ❌ Trop générique, risque de dérive
+}
+```
+
+**Justification** :
+- Évite la dérive de duplication avec Neo4j
+- Maintient Qdrant comme **projection légère**
+- Force les enrichissements à passer par Neo4j
+- Dans 6 mois, quelqu'un sera tenté d'ajouter "par confort" → cette règle l'en empêche
+
+**Validation automatique** :
+
+```python
+def validate_anchor_payload(anchor_payload: dict) -> bool:
+    """Rejette tout payload non-conforme."""
+    for key in anchor_payload.keys():
+        if key not in ALLOWED_ANCHOR_PAYLOAD_FIELDS:
+            raise ValueError(f"Champ interdit dans anchor payload: {key}")
+    return True
+```
 
 ---
 
@@ -643,3 +835,135 @@ L'architecture à 2 passes permet de livrer un système exploitable rapidement (
 - Discussion architecture : 2024-12-29 (Claude + ChatGPT consensus)
 - Document test : `aepd_gdpr_ai_guide.pdf` (172K chars, ~40 pages)
 - Mesures initiales : 35+ min / 11,713 chunks / 527 concepts
+
+---
+
+## Addendum 2024-12-30 : Architecture Relations Pass 2
+
+### Contexte
+
+L'Option A' (extraction relations chunk-by-chunk) corrigeait le dépassement de contexte LLM mais introduisait un problème de coût : **166 appels LLM** au lieu de ~47, causant des temps de 20-25 min au lieu de ~1 min prévu.
+
+**Décision** : Les relations explicites sont déplacées en **Pass 2** (non-bloquant), avec extraction au niveau **segment** (pas chunk).
+
+### Invariants Pass 1 / Pass 2 (Non-Négociables)
+
+#### 1. Pass 1 MUST be usable without explicit relations
+RAG + concepts + anchors + corrélations (similarité embeddings).
+Aucune relation typée en Pass 1.
+
+#### 2. No relation is persisted without text evidence
+Quote trouvable + ancrage (chunk_id, span).
+Si quote introuvable → relation rejetée.
+
+#### 3. Relations extraction is segment-level only
+Chunk-level extraction interdit (sauf mode debug).
+Unité d'extraction = segment sémantique (~47 par document).
+
+#### 4. Hard budgets (non-dépassables)
+```python
+PASS2_RELATION_BUDGET = {
+    "max_relations_per_segment": 8,
+    "max_total_relations_per_doc": 150,
+    "max_quote_words": 30,
+    "max_output_tokens": 800,
+    "predicate_set": [
+        "defines", "requires", "enables", "prevents", "causes",
+        "applies_to", "part_of", "depends_on", "mitigates",
+        "conflicts_with", "example_of", "governed_by"
+    ]
+}
+```
+
+#### 5. Every relation must include an anchorable quote
+Format obligatoire : `subject_id`, `predicate`, `object_id`, `confidence`, `quote`.
+
+#### 6. Observability required
+- Par segment : relations proposées / validées / rejetées
+- Par document : taux fuzzy-match, tokens consommés, état enrichissement
+
+#### 7. UI/API must distinguish correlations from relations
+- **Corrélations Pass 1** : "Similar concepts" (embedding_similarity, same_section)
+- **Relations Pass 2** : "Relations" (predicates typés avec evidence)
+
+### Scoring Segments Pass 2
+
+Objectif : Ne lancer des appels LLM que sur les segments à fort potentiel relationnel.
+
+```python
+def compute_segment_score(segment) -> int:
+    """Score 0-100 pour décider si on extrait les relations."""
+
+    # 1. Densité d'anchors (signal principal)
+    anchor_score = min(segment.anchors_count * 15, 45)
+
+    # 2. Diversité conceptuelle
+    diversity_score = min(segment.unique_concepts_count * 10, 30)
+
+    # 3. Type de section
+    section_scores = {
+        "requirements": 25, "process": 25, "architecture": 25, "rules": 25,
+        "scope": 15, "obligations": 15, "controls": 15,
+        "definition": 5,
+        "introduction": -20, "summary": -20, "annex": -20, "foreword": -20
+    }
+    section_type_score = section_scores.get(segment.section_type, 0)
+
+    # 4. Pénalité narratif pur
+    narrative_penalty = -20 if (segment.anchors_count <= 1 and segment.unique_concepts_count <= 1) else 0
+
+    return anchor_score + diversity_score + section_type_score + narrative_penalty
+
+# Seuils de décision
+SEGMENT_SCORE_THRESHOLDS = {
+    "run_always": 50,      # Score >= 50 → extraction systématique
+    "run_if_budget": 35,   # Score 35-49 → si budget disponible
+    "skip": 0              # Score < 35 → skip
+}
+```
+
+**Résultat attendu** : ~15-25 appels LLM au lieu de 47, sans perte significative.
+
+### État d'enrichissement par document
+
+```python
+DOCUMENT_ENRICHMENT_STATUS = {
+    "pass1_done": "Socle exploitable (RAG + concepts)",
+    "pass2_pending": "En attente d'enrichissement relations",
+    "pass2_running": "Enrichissement en cours",
+    "pass2_done": "Graphe complet avec relations",
+    "pass2_failed": "Échec enrichissement (voir logs)",
+    "pass2_skipped": "Enrichissement ignoré (config)"
+}
+```
+
+### Gestion quotes introuvables
+
+```python
+FUZZY_MATCH_CONFIG = {
+    "min_score": 85,
+    "on_match_failure": "reject",  # Options: "reject" | "needs_review"
+    "log_failures": True,
+    "max_failures_before_alert": 10
+}
+```
+
+**Règle absolue** : Pass 2 n'écrit jamais une relation sans preuve ancrée.
+
+### Mode d'exécution Pass 2
+
+```python
+PASS2_EXECUTION_MODE = {
+    "burst_active": "inline",      # GPU disponible → immédiat
+    "burst_inactive": "scheduled", # Batch (nocturne ou job)
+    "force_skip": False            # Désactiver Pass 2
+}
+```
+
+### Validation
+
+- [x] Analyse validée par ChatGPT (2024-12-30)
+- [x] Architecture cohérente avec Pass 1 socle / Pass 2 enrichissement
+- [ ] Implémentation
+- [ ] Tests
+- [ ] Métriques observabilité

@@ -6,6 +6,10 @@ MegaParse permet de :
 - Préserver la structure du document (titres, hiérarchie)
 - Identifier les blocs de contenu cohérents
 - Extraire les tableaux de manière structurée
+
+Stratégie d'extraction intelligente (OSMOSE 2025-12):
+- PDFs avec texte natif → StrategyEnum.FAST (pas d'OCR, RAM légère)
+- PDFs scannés/images → StrategyEnum.AUTO avec DocTR (OCR nécessaire)
 """
 from __future__ import annotations
 
@@ -15,15 +19,71 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# Import conditionnel de MegaParse (comme dans pptx_pipeline.py)
+# Seuil minimal de caractères/page pour considérer un PDF comme "texte natif"
+NATIVE_TEXT_THRESHOLD_CHARS_PER_PAGE = 100
+
+# Seuil de pages à vérifier pour la détection
+NATIVE_TEXT_SAMPLE_PAGES = 5
+
+# Import conditionnel de MegaParse
 try:
     from megaparse import MegaParse
     MEGAPARSE_AVAILABLE = True
-    logger.info("✅ MegaParse disponible pour PDF")
+    logger.info("MegaParse disponible pour PDF")
 except ImportError as e:
     MEGAPARSE_AVAILABLE = False
     MegaParse = None
-    logger.warning(f"⚠️ MegaParse non disponible pour PDF, fallback pdftotext: {e}")
+    logger.warning(f"MegaParse non disponible pour PDF, fallback pdftotext: {e}")
+
+# Import StrategyEnum pour contrôler OCR vs extraction native
+try:
+    from megaparse_sdk.schema.parser_config import StrategyEnum
+    STRATEGY_ENUM_AVAILABLE = True
+except ImportError:
+    STRATEGY_ENUM_AVAILABLE = False
+    StrategyEnum = None
+
+# Import PyMuPDF pour analyse PDF (pages, texte natif)
+try:
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
+
+
+def _analyze_pdf(pdf_path: Path) -> Dict[str, Any]:
+    """Analyse un PDF pour déterminer s'il contient du texte natif."""
+    result = {
+        "page_count": 0,
+        "has_native_text": False,
+        "avg_chars_per_page": 0,
+    }
+
+    if not PYMUPDF_AVAILABLE:
+        return result
+
+    try:
+        doc = fitz.open(str(pdf_path))
+        result["page_count"] = doc.page_count
+
+        # Échantillonner les premières pages
+        pages_to_check = min(NATIVE_TEXT_SAMPLE_PAGES, doc.page_count)
+        total_chars = 0
+
+        for i in range(pages_to_check):
+            text = doc[i].get_text()
+            total_chars += len(text)
+
+        doc.close()
+
+        result["avg_chars_per_page"] = total_chars / pages_to_check if pages_to_check > 0 else 0
+        result["has_native_text"] = result["avg_chars_per_page"] >= NATIVE_TEXT_THRESHOLD_CHARS_PER_PAGE
+
+        return result
+
+    except Exception as e:
+        logger.warning(f"Erreur analyse PDF: {e}")
+        return result
 
 
 def parse_pdf_with_megaparse(
@@ -32,6 +92,10 @@ def parse_pdf_with_megaparse(
 ) -> List[Dict[str, Any]]:
     """
     Utilise MegaParse pour découper un PDF en blocs sémantiques cohérents.
+
+    Stratégie intelligente:
+    - PDF avec texte natif → StrategyEnum.FAST (pas d'OCR)
+    - PDF scanné/images → StrategyEnum.AUTO (OCR avec DocTR)
 
     Args:
         pdf_path: Chemin vers le fichier PDF
@@ -50,21 +114,34 @@ def parse_pdf_with_megaparse(
     """
     # Si MegaParse n'est pas disponible, utiliser directement le fallback
     if not MEGAPARSE_AVAILABLE:
-        logger.warning(f"⚠️ MegaParse non disponible, fallback pour {pdf_path.name}")
+        logger.warning(f"MegaParse non disponible, fallback pour {pdf_path.name}")
         return _fallback_simple_extraction(pdf_path)
 
-    logger.info(f"🔍 MegaParse: analyse {pdf_path.name}")
+    # Analyser le PDF pour déterminer la stratégie optimale
+    pdf_info = _analyze_pdf(pdf_path)
+    page_count = pdf_info["page_count"]
+    has_native_text = pdf_info["has_native_text"]
+    avg_chars = pdf_info["avg_chars_per_page"]
+
+    logger.info(f"[MEGAPARSE] Analyse {pdf_path.name}: {page_count} pages, "
+                f"texte natif={has_native_text} ({avg_chars:.0f} chars/page)")
 
     try:
-        # Initialiser le parser
-        # Note: Pour l'instant, use_vision est ignoré car MegaParseVision n'existe pas dans cette version
         if use_vision:
-            logger.warning("⚠️ Mode VISION demandé mais non disponible dans cette version de MegaParse")
-            logger.info("📄 MegaParse STANDARD utilisé à la place")
-        else:
-            logger.info("📄 MegaParse STANDARD: extraction texte structurée")
+            logger.warning("Mode VISION demandé mais non disponible dans cette version de MegaParse")
 
-        parser = MegaParse()
+        # Choisir la stratégie selon le type de PDF
+        if has_native_text and STRATEGY_ENUM_AVAILABLE:
+            # PDF avec texte natif → extraction directe, pas d'OCR
+            logger.info("[MEGAPARSE] Stratégie FAST: extraction texte natif (pas d'OCR)")
+            parser = MegaParse(unstructured_strategy=StrategyEnum.FAST)
+        else:
+            # PDF scanné → OCR nécessaire
+            if not has_native_text:
+                logger.info("[MEGAPARSE] Stratégie AUTO: OCR nécessaire (PDF scanné)")
+            else:
+                logger.info("[MEGAPARSE] Stratégie AUTO (StrategyEnum non disponible)")
+            parser = MegaParse()
 
         # Parser le document
         document = parser.load(str(pdf_path))

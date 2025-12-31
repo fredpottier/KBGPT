@@ -7,7 +7,11 @@ docker pull vllm/vllm-openai:latest &
 docker pull ghcr.io/huggingface/text-embeddings-inference:1.5 &
 wait
 docker run -d --gpus all -p 8000:8000 --name vllm vllm/vllm-openai:latest --model Qwen/Qwen2.5-14B-Instruct-AWQ --quantization awq --dtype half --gpu-memory-utilization 0.85 --max-model-len 8192 --max-num-seqs 32 --trust-remote-code
-docker run -d --gpus all -p 8001:80 --name emb ghcr.io/huggingface/text-embeddings-inference:1.5 --model-id intfloat/multilingual-e5-large
+# TEI avec limites augmentées (évite 413 Payload Too Large)
+# --max-client-batch-size: max inputs par requête (défaut: 32 → 64)
+# --max-batch-tokens: max tokens par batch (défaut: 16384 → 32768)
+# --payload-limit: taille max body HTTP en bytes (défaut: 2MB → 10MB)
+docker run -d --gpus all -p 8001:80 --name emb ghcr.io/huggingface/text-embeddings-inference:1.5 --model-id intfloat/multilingual-e5-large --max-client-batch-size 64 --max-batch-tokens 32768 --payload-limit 10000000
 python3 -c "
 from http.server import HTTPServer,BaseHTTPRequestHandler
 import urllib.request,json

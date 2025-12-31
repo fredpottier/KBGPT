@@ -108,9 +108,10 @@ asyncpg>=0.29.0
 psycopg2-binary>=2.9.9
 sqlalchemy[asyncio]>=2.0.0
 
-# === Fuzzy Matching (Phase 5B) ===
+# === Fuzzy Matching (Phase 5B + Hybrid Anchor Model) ===
 fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.21.0
+rapidfuzz>=3.5.0  # Hybrid Anchor Model - fuzzy matching haute performance pour anchors
 
 # === Folder Watcher (Phase 3 - Multi-Source) ===
 watchdog>=3.0.0

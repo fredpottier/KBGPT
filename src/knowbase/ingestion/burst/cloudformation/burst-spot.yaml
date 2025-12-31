@@ -51,8 +51,8 @@ Parameters:
 
   VllmGpuMemoryUtilization:
     Type: String
-    Default: "0.85"
-    Description: Fraction mémoire GPU pour vLLM (0.0-1.0)
+    Default: "0.70"
+    Description: Fraction mémoire GPU pour vLLM (0.0-1.0) - 0.70 laisse ~15GB pour TEI sur L40S 48GB
 
   VllmMaxModelLen:
     Type: Number
@@ -212,9 +212,9 @@ Resources:
 
         LaunchSpecifications:
           # ================================================================
-          # g6.2xlarge - NVIDIA L4 24GB (Préféré pour 14B AWQ)
+          # g6e.xlarge - NVIDIA L40S 48GB (Préféré - assez de VRAM pour vLLM + TEI)
           # ================================================================
-          - InstanceType: g6.2xlarge
+          - InstanceType: g6e.xlarge
             # AMI Golden OSMOSE v5 - Qwen 14B AWQ + TEI préchargés
             ImageId: !Ref AmiId
             # NetworkInterfaces avec SubnetId explicite (requis pour SpotFleet)
@@ -320,29 +320,26 @@ Resources:
 
                 echo "vLLM args: $VLLM_ARGS"
 
-                docker run -d \
-                  --gpus all \
-                  --name vllm \
-                  --restart unless-stopped \
-                  -p $VLLM_PORT:8000 \
-                  -v /home/ubuntu/.cache/huggingface:/root/.cache/huggingface \
-                  -e HF_HOME=/root/.cache/huggingface \
-                  vllm/vllm-openai:latest \
-                  $VLLM_ARGS
-
                 # ============================================
-                # Start Text Embeddings Inference (TEI)
+                # AMI Golden : containers déjà configurés
                 # ============================================
-                echo "Starting TEI server with model: $EMBEDDINGS_MODEL"
+                # L'AMI Golden v5 a vLLM et TEI préinstallés avec --restart unless-stopped
+                # Ils démarrent automatiquement au boot, pas besoin de docker run
+                echo "AMI Golden detected - containers vllm/embeddings should auto-start"
 
-                docker run -d \
-                  --gpus all \
-                  --name embeddings \
-                  --restart unless-stopped \
-                  -p $EMB_PORT:80 \
-                  -v /home/ubuntu/.cache/huggingface:/data \
-                  ghcr.io/huggingface/text-embeddings-inference:1.5 \
-                  --model-id $EMBEDDINGS_MODEL
+                # Attendre que les containers soient prêts (max 60s)
+                echo "Waiting for containers to be ready..."
+                for i in $(seq 1 12); do
+                  if docker ps | grep -q vllm && docker ps | grep -q embeddings; then
+                    echo "Containers are running"
+                    break
+                  fi
+                  echo "Waiting for containers... ($i/12)"
+                  sleep 5
+                done
+
+                # Afficher status des containers
+                docker ps
 
                 # ============================================
                 # Health Check Endpoint
@@ -453,9 +450,9 @@ Resources:
                 echo "Health: http://localhost:8080"
 
           # ================================================================
-          # g6e.xlarge - NVIDIA L4 24GB (Alternative efficace)
+          # g6e.2xlarge - NVIDIA L40S 48GB (Fallback si xlarge indispo)
           # ================================================================
-          - InstanceType: g6e.xlarge
+          - InstanceType: g6e.2xlarge
             ImageId: !Ref AmiId
             NetworkInterfaces:
               - DeviceIndex: 0
@@ -479,7 +476,7 @@ Resources:
                 #!/bin/bash
                 set -ex
                 exec > >(tee /var/log/user-data.log) 2>&1
-                echo "=== OSMOSE Burst Bootstrap (g6e.xlarge) ==="
+                echo "=== OSMOSE Burst Bootstrap (g6e.2xlarge) ==="
 
                 VLLM_MODEL="${VllmModel}"
                 EMBEDDINGS_MODEL="${EmbeddingsModel}"
@@ -517,110 +514,15 @@ Resources:
                 [ "$VLLM_QUANTIZATION" != "none" ] && VLLM_ARGS="$VLLM_ARGS --quantization $VLLM_QUANTIZATION"
                 VLLM_ARGS="$VLLM_ARGS --dtype $VLLM_DTYPE"
 
-                docker run -d --gpus all --name vllm --restart unless-stopped \
-                  -p $VLLM_PORT:8000 -v /home/ubuntu/.cache/huggingface:/root/.cache/huggingface \
-                  vllm/vllm-openai:latest $VLLM_ARGS
-
-                # TEI
-                docker run -d --gpus all --name embeddings --restart unless-stopped \
-                  -p $EMB_PORT:80 -v /home/ubuntu/.cache/huggingface:/data \
-                  ghcr.io/huggingface/text-embeddings-inference:1.5 --model-id $EMBEDDINGS_MODEL
+                # AMI Golden : containers déjà configurés, attendre qu'ils soient prêts
+                echo "AMI Golden - waiting for auto-started containers..."
+                for i in $(seq 1 12); do
+                  docker ps | grep -q vllm && docker ps | grep -q embeddings && break
+                  sleep 5
+                done
+                docker ps
 
                 # Health endpoint
-                cat > /opt/health.py << 'EOF'
-                #!/usr/bin/env python3
-                from http.server import HTTPServer, BaseHTTPRequestHandler
-                import json, urllib.request, os
-                VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
-                EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
-                class H(BaseHTTPRequestHandler):
-                    def do_GET(self):
-                        v = e = False
-                        try: v = urllib.request.urlopen(f"http://localhost:{VLLM_PORT}/health", timeout=10).status == 200
-                        except: pass
-                        try: e = urllib.request.urlopen(f"http://localhost:{EMB_PORT}/health", timeout=10).status == 200
-                        except: pass
-                        self.send_response(200 if v and e else 503)
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        self.wfile.write(json.dumps({"vllm": v, "embeddings": e, "healthy": v and e}).encode())
-                    def log_message(self, *a): pass
-                HTTPServer(("", 8080), H).serve_forever()
-                EOF
-                chmod +x /opt/health.py
-                VLLM_PORT=$VLLM_PORT EMB_PORT=$EMB_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
-
-                echo "Bootstrap complete"
-
-          # ================================================================
-          # g5.2xlarge - NVIDIA A10G 24GB (Fallback)
-          # ================================================================
-          - InstanceType: g5.2xlarge
-            ImageId: !Ref AmiId
-            NetworkInterfaces:
-              - DeviceIndex: 0
-                SubnetId: subnet-3320d458
-                Groups:
-                  - !GetAtt SecurityGroup.GroupId
-                AssociatePublicIpAddress: true
-                DeleteOnTermination: true
-            IamInstanceProfile:
-              Arn: !GetAtt InstanceProfile.Arn
-            TagSpecifications:
-              - ResourceType: instance
-                Tags:
-                  - Key: Name
-                    Value: !Sub "knowwhere-burst-${BatchId}"
-                  - Key: Project
-                    Value: KnowWhere
-            UserData:
-              Fn::Base64: !Sub |
-                #!/bin/bash
-                set -ex
-                exec > >(tee /var/log/user-data.log) 2>&1
-                echo "=== OSMOSE Burst Bootstrap (g5.2xlarge fallback) ==="
-
-                VLLM_MODEL="${VllmModel}"
-                EMBEDDINGS_MODEL="${EmbeddingsModel}"
-                VLLM_PORT="${VllmPort}"
-                EMB_PORT="${EmbeddingsPort}"
-                VLLM_QUANTIZATION="${VllmQuantization}"
-                VLLM_DTYPE="${VllmDtype}"
-                VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
-                VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
-                VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
-
-                if ! command -v docker &> /dev/null; then
-                    apt-get update && apt-get install -y docker.io
-                fi
-                systemctl start docker && systemctl enable docker
-
-                if ! command -v nvidia-container-toolkit &> /dev/null; then
-                    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-                    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
-                    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
-                        tee /etc/apt/sources.list.d/nvidia-docker.list
-                    apt-get update && apt-get install -y nvidia-container-toolkit
-                    nvidia-ctk runtime configure --runtime=docker
-                    systemctl restart docker
-                fi
-
-                nvidia-smi
-
-                VLLM_ARGS="--model $VLLM_MODEL --max-model-len $VLLM_MAX_MODEL_LEN"
-                VLLM_ARGS="$VLLM_ARGS --gpu-memory-utilization $VLLM_GPU_MEM"
-                VLLM_ARGS="$VLLM_ARGS --max-num-seqs $VLLM_MAX_NUM_SEQS --trust-remote-code"
-                [ "$VLLM_QUANTIZATION" != "none" ] && VLLM_ARGS="$VLLM_ARGS --quantization $VLLM_QUANTIZATION"
-                VLLM_ARGS="$VLLM_ARGS --dtype $VLLM_DTYPE"
-
-                docker run -d --gpus all --name vllm --restart unless-stopped \
-                  -p $VLLM_PORT:8000 -v /home/ubuntu/.cache/huggingface:/root/.cache/huggingface \
-                  vllm/vllm-openai:latest $VLLM_ARGS
-
-                docker run -d --gpus all --name embeddings --restart unless-stopped \
-                  -p $EMB_PORT:80 -v /home/ubuntu/.cache/huggingface:/data \
-                  ghcr.io/huggingface/text-embeddings-inference:1.5 --model-id $EMBEDDINGS_MODEL
-
                 cat > /opt/health.py << 'EOF'
                 #!/usr/bin/env python3
                 from http.server import HTTPServer, BaseHTTPRequestHandler

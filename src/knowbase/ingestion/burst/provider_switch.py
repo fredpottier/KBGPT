@@ -174,13 +174,16 @@ def deactivate_burst_providers() -> Dict[str, Any]:
 
 # Configuration des limites en mode Burst (sans rate limiting cloud)
 # ATTENTION: Valeurs calibrées pour éviter saturation TEI/vLLM sur g6.2xlarge
+# 2024-12-30: Réduit embedding_batch_chars de 6000→4000 pour éviter 413 Payload Too Large
+# 2024-12-31: batch_size=1 pour éviter 413 intermittent sur AMI Golden TEI
 BURST_CONCURRENCY_CONFIG = {
     "max_concurrent_llm": 15,        # Appels LLM simultanés (réduit de 20 pour stabilité)
     "max_parallel_segments": 8,      # Segments traités en parallèle (réduit de 10)
-    "max_concurrent_embeddings": 6,  # Workers embeddings (réduit de 12 - TEI sature facilement)
+    "max_concurrent_embeddings": 6,  # Workers embeddings parallèles
     "max_concurrent_batches": 10,    # Batches gatekeeper (réduit de 15)
-    "embedding_batch_size": 4,       # Taille batch pour remote (vs 8 local)
-    "embedding_batch_chars": 6000,   # Max chars par batch remote (vs 12000 local)
+    "embedding_batch_size": 1,       # 1 texte par requête (évite 413 intermittent)
+    "embedding_batch_chars": 600,    # Max chars par requête
+    "embedding_max_text_chars": 500,  # Max chars par texte (réduit pour AMI Golden TEI)
     "circuit_breaker_threshold": 5,  # Arrêt après N échecs consécutifs
     "rate_limits": {
         "SMALL": 10000,  # Pas de limite réelle

@@ -26,7 +26,7 @@ from knowbase.relations.types import (
     RelationStrength,
     RelationStatus
 )
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 from knowbase.config.feature_flags import is_feature_enabled, get_feature_config
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ class RelationEnricher:
             max_batches: Maximum batches to process (budget cap)
             tenant_id: Tenant ID for feature flags
         """
-        self.llm_router = llm_router or LLMRouter()
+        self.llm_router = llm_router or get_llm_router()
         self.model = model
         self.batch_size = batch_size
         self.max_batches = max_batches

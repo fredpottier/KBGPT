@@ -204,6 +204,10 @@ class EmbeddingModelManager:
                 max_batch_size = config.get("embedding_batch_size", 4)
             if max_batch_chars is None:
                 max_batch_chars = config.get("embedding_batch_chars", 6000)
+            # 2024-12-30: Lire aussi max_text_chars depuis config Burst
+            config_max_text_chars = config.get("embedding_max_text_chars")
+            if config_max_text_chars:
+                max_text_chars = config_max_text_chars
             circuit_breaker_threshold = config.get("circuit_breaker_threshold", 5)
         except ImportError:
             if max_concurrent is None:

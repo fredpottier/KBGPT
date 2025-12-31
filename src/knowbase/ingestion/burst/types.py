@@ -284,7 +284,7 @@ class BurstConfig:
     # vLLM Configuration pour AWQ
     vllm_quantization: str = "awq"  # Obligatoire pour charger les poids AWQ
     vllm_dtype: str = "half"  # FP16 pour inférence AWQ
-    vllm_gpu_memory_utilization: float = 0.85  # 14B AWQ ~10GB, TEI ~2GB, reste ~12GB buffer
+    vllm_gpu_memory_utilization: float = 0.70  # 14B AWQ ~10GB réel, réserve 33GB, laisse ~15GB pour TEI
     vllm_max_model_len: int = 8192  # Context window raisonnable
     vllm_max_num_seqs: int = 32  # Limite concurrence pour stabilité
 
@@ -294,7 +294,7 @@ class BurstConfig:
 
     # Timeouts - augmentés pour 14B (chargement plus long)
     instance_boot_timeout: int = 900  # 15 minutes (DLAMI + vLLM 14B load)
-    model_load_timeout: int = 600  # 10 minutes pour charger le modèle seul
+    model_load_timeout: int = 900  # 15 minutes (vLLM ~8-9min) pour charger le modèle seul
     healthcheck_interval: int = 15  # Intervalle entre checks
     healthcheck_timeout: int = 10  # Timeout par check
     max_retries: int = 3
@@ -364,7 +364,7 @@ class BurstConfig:
             vllm_quantization=os.getenv("BURST_VLLM_QUANTIZATION", "awq"),
             vllm_dtype=os.getenv("BURST_VLLM_DTYPE", "half"),
             vllm_gpu_memory_utilization=float(
-                os.getenv("BURST_VLLM_GPU_MEMORY_UTILIZATION", "0.85")
+                os.getenv("BURST_VLLM_GPU_MEMORY_UTILIZATION", "0.70")
             ),
             vllm_max_model_len=int(os.getenv("BURST_VLLM_MAX_MODEL_LEN", "8192")),
             vllm_max_num_seqs=int(os.getenv("BURST_VLLM_MAX_NUM_SEQS", "32")),
@@ -375,7 +375,7 @@ class BurstConfig:
 
             # Timeouts (augmentés pour 14B)
             instance_boot_timeout=int(os.getenv("BURST_INSTANCE_BOOT_TIMEOUT", "900")),
-            model_load_timeout=int(os.getenv("BURST_MODEL_LOAD_TIMEOUT", "600")),
+            model_load_timeout=int(os.getenv("BURST_MODEL_LOAD_TIMEOUT", "900")),
             healthcheck_interval=int(os.getenv("BURST_HEALTHCHECK_INTERVAL", "15")),
             healthcheck_timeout=int(os.getenv("BURST_HEALTHCHECK_TIMEOUT", "10")),
             max_retries=int(os.getenv("BURST_MAX_RETRIES", "3")),

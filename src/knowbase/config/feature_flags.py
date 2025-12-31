@@ -143,7 +143,7 @@ def is_feature_enabled(
     Vérifie si une feature est activée.
 
     Args:
-        feature_name: Nom de la feature (ex: "enable_hybrid_extraction")
+        feature_name: Nom de la feature (ex: "enable_hybrid_extraction", "phase_2_hybrid_anchor")
         tenant_id: ID tenant pour overrides
         default: Valeur par défaut si non trouvée
 
@@ -154,7 +154,19 @@ def is_feature_enabled(
     flags = _get_environment_overrides(flags)
     flags = _get_tenant_overrides(flags, tenant_id)
 
-    # Chercher dans phase_1_8 d'abord
+    # =========================================================================
+    # Phase 2+ : Vérifier d'abord les sections de premier niveau (phase_2_*)
+    # =========================================================================
+    if feature_name in flags:
+        value = flags[feature_name]
+        if isinstance(value, bool):
+            return value
+        elif isinstance(value, dict):
+            return value.get("enabled", default)
+
+    # =========================================================================
+    # Phase 1.8 : Chercher dans phase_1_8
+    # =========================================================================
     phase_1_8 = flags.get("phase_1_8", {})
 
     # Vérifier master switch
@@ -169,7 +181,9 @@ def is_feature_enabled(
         elif isinstance(value, dict):
             return value.get("enabled", default)
 
-    # Chercher dans phases antérieures
+    # =========================================================================
+    # Phases antérieures : phase_1_5, phase_1
+    # =========================================================================
     for phase_key in ["phase_1_5", "phase_1"]:
         phase = flags.get(phase_key, {})
         if feature_name in phase:
@@ -205,6 +219,33 @@ def get_feature_config(
             return value
 
     return {}
+
+
+def get_hybrid_anchor_config(
+    config_name: str,
+    tenant_id: str = "default"
+) -> Any:
+    """
+    Obtient une configuration du Hybrid Anchor Model (Phase 2).
+
+    Args:
+        config_name: Nom de la config (ex: "anchor_config", "pass2_mode")
+        tenant_id: ID tenant pour overrides
+
+    Returns:
+        Valeur de configuration (dict, str, etc.)
+    """
+    flags = _load_feature_flags()
+    flags = _get_environment_overrides(flags)
+    flags = _get_tenant_overrides(flags, tenant_id)
+
+    # Chercher dans phase_2_hybrid_anchor
+    phase_2 = flags.get("phase_2_hybrid_anchor", {})
+
+    if config_name in phase_2:
+        return phase_2[config_name]
+
+    return None
 
 
 def reload_feature_flags():
@@ -284,3 +325,44 @@ class FeatureFlags:
     def llm_judge_config(self) -> Dict[str, Any]:
         """Configuration LLM-as-a-Judge."""
         return self.get_config("llm_judge")
+
+    # =========================================================================
+    # Phase 2 - Hybrid Anchor Model
+    # =========================================================================
+
+    @property
+    def enable_hybrid_anchor_model(self) -> bool:
+        """Active le Hybrid Anchor Model (Phase 2)."""
+        return is_feature_enabled("phase_2_hybrid_anchor", self.tenant_id, default=True)
+
+    @property
+    def pass2_mode(self) -> str:
+        """Mode d'exécution Pass 2: inline, background, ou scheduled."""
+        return get_hybrid_anchor_config("pass2_mode", self.tenant_id) or "background"
+
+    @property
+    def anchor_config(self) -> Dict[str, Any]:
+        """Configuration des anchors (fuzzy matching)."""
+        return get_hybrid_anchor_config("anchor_config", self.tenant_id) or {
+            "min_fuzzy_score": 85,
+            "min_approximate_score": 70,
+            "reject_below_score": 70
+        }
+
+    @property
+    def promotion_config(self) -> Dict[str, Any]:
+        """Configuration de promotion ProtoConcept → CanonicalConcept."""
+        return get_hybrid_anchor_config("promotion_config", self.tenant_id) or {
+            "min_proto_concepts_for_stable": 2,
+            "min_anchor_sections_for_stable": 2,
+            "allow_singleton_if_high_signal": True
+        }
+
+    @property
+    def chunking_config(self) -> Dict[str, Any]:
+        """Configuration du chunking document-centric."""
+        return get_hybrid_anchor_config("chunking_config", self.tenant_id) or {
+            "chunk_size_tokens": 256,
+            "chunk_overlap_tokens": 64,
+            "min_chunk_tokens": 50
+        }

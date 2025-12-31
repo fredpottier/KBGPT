@@ -59,6 +59,7 @@ const navigationConfig = {
       { label: 'Dashboard', href: '/admin', icon: FiHome },
       { label: 'Domain Context', href: '/admin/domain-context', icon: FiGlobe },
       { label: 'Profil Visibilite', href: '/admin/visibility-profile', icon: FiSliders },
+      { label: 'Pass 2 Enrichment', href: '/admin/pass2', icon: FiActivity },
       { label: 'Consolidation KG', href: '/admin/consolidation', icon: FiShare2 },
       { label: 'Mode Burst (Spot)', href: '/admin/burst', icon: FiCloud },
       { label: 'Configuration', href: '/admin/settings', icon: FiSettings },

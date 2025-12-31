@@ -338,11 +338,15 @@ class BurstOrchestrator:
         """
         Démarre l'infrastructure EC2 Spot.
 
+        Optimisation 2024-12-30: Réutilise un fleet existant en veille (capacity=0)
+        pour un démarrage plus rapide (~1-2 min vs ~5-7 min).
+
         1. Vérifie si une stack existante peut être réutilisée
-        2. Sinon, déploie CloudFormation
-        3. Attend l'instance
-        4. Attend les services (healthcheck)
-        5. Bascule les providers
+        2. Si fleet en veille (capacity=0), scale up à 1
+        3. Sinon, déploie CloudFormation
+        4. Attend l'instance
+        5. Attend les services (healthcheck)
+        6. Bascule les providers
 
         Returns:
             True si infrastructure prête
@@ -358,19 +362,42 @@ class BurstOrchestrator:
             existing_stacks = self.find_active_burst_stacks()
             if existing_stacks:
                 stack = existing_stacks[0]
-                logger.info(
-                    f"[BURST:ORCHESTRATOR] Réutilisation de la stack existante: {stack['stack_name']}"
-                )
-                self._add_event(
-                    "reusing_existing_stack",
-                    f"Réutilisation de {stack['stack_name']}",
-                    details=stack
-                )
-
-                # Récupérer les infos de la stack existante
                 self.state.stack_name = stack['stack_name']
                 self.state.spot_fleet_id = stack['spot_fleet_id']
-                self.state.status = BurstStatus.INSTANCE_STARTING
+
+                # Vérifier si le fleet est en veille (capacity=0)
+                fleet_capacity = self._get_fleet_target_capacity(stack['spot_fleet_id'])
+
+                if fleet_capacity == 0:
+                    # Fleet en veille - scale up rapide!
+                    logger.info(
+                        f"[BURST:ORCHESTRATOR] ⚡ Fast start: scaling up existing fleet "
+                        f"{stack['spot_fleet_id']} (0→1)"
+                    )
+                    self._add_event(
+                        "fleet_scale_up",
+                        f"Redémarrage rapide du fleet {stack['spot_fleet_id']}",
+                        details={"previous_capacity": 0, "new_capacity": 1}
+                    )
+
+                    self.ec2_client.modify_spot_fleet_request(
+                        SpotFleetRequestId=stack['spot_fleet_id'],
+                        TargetCapacity=1
+                    )
+                    self.state.status = BurstStatus.INSTANCE_STARTING
+
+                else:
+                    # Fleet déjà actif - vérifier instance existante
+                    logger.info(
+                        f"[BURST:ORCHESTRATOR] Réutilisation de la stack existante: {stack['stack_name']} "
+                        f"(capacity={fleet_capacity})"
+                    )
+                    self._add_event(
+                        "reusing_existing_stack",
+                        f"Réutilisation de {stack['stack_name']}",
+                        details=stack
+                    )
+                    self.state.status = BurstStatus.INSTANCE_STARTING
             else:
                 # 1. Déployer CloudFormation (nouvelle stack)
                 self._deploy_spot_infrastructure()
@@ -400,6 +427,19 @@ class BurstOrchestrator:
             self._cleanup_on_failure()
             raise BurstOrchestrationError(f"Infrastructure start failed: {e}")
 
+    def _get_fleet_target_capacity(self, spot_fleet_id: str) -> int:
+        """Récupère la TargetCapacity actuelle d'un Spot Fleet."""
+        try:
+            response = self.ec2_client.describe_spot_fleet_requests(
+                SpotFleetRequestIds=[spot_fleet_id]
+            )
+            configs = response.get('SpotFleetRequestConfigs', [])
+            if configs:
+                return configs[0].get('SpotFleetRequestConfig', {}).get('TargetCapacity', 0)
+        except ClientError as e:
+            logger.warning(f"[BURST] Failed to get fleet capacity: {e}")
+        return 0
+
     def _deploy_spot_infrastructure(self):
         """Déploie le stack CloudFormation Spot Fleet."""
         self.state.status = BurstStatus.REQUESTING_SPOT
@@ -426,6 +466,12 @@ class BurstOrchestrator:
             {"ParameterKey": "SpotMaxPrice", "ParameterValue": str(self.config.spot_max_price)},
             {"ParameterKey": "VllmPort", "ParameterValue": str(self.config.vllm_port)},
             {"ParameterKey": "EmbeddingsPort", "ParameterValue": str(self.config.embeddings_port)},
+            # Paramètres vLLM additionnels
+            {"ParameterKey": "VllmGpuMemoryUtilization", "ParameterValue": str(self.config.vllm_gpu_memory_utilization)},
+            {"ParameterKey": "VllmQuantization", "ParameterValue": self.config.vllm_quantization},
+            {"ParameterKey": "VllmDtype", "ParameterValue": self.config.vllm_dtype},
+            {"ParameterKey": "VllmMaxModelLen", "ParameterValue": str(self.config.vllm_max_model_len)},
+            {"ParameterKey": "VllmMaxNumSeqs", "ParameterValue": str(self.config.vllm_max_num_seqs)},
         ]
 
         # Ajouter VPC/Subnet si configurés
@@ -811,23 +857,47 @@ class BurstOrchestrator:
     # Teardown
     # =========================================================================
 
-    def _teardown_infrastructure(self):
-        """Détruit l'infrastructure CloudFormation."""
+    def _teardown_infrastructure(self, keep_fleet: bool = True):
+        """
+        Arrête l'infrastructure EC2.
+
+        Args:
+            keep_fleet: Si True, réduit TargetCapacity à 0 au lieu de supprimer la stack.
+                       Cela permet un redémarrage plus rapide au prochain batch.
+                       (défaut: True - optimisation 2024-12-30)
+        """
         if not self.state.stack_name:
             return
 
         try:
-            self._add_event("teardown_started", "Suppression infrastructure")
+            if keep_fleet and self.state.spot_fleet_id:
+                # Optimisation: réduire capacity à 0 au lieu de supprimer
+                # Cela garde le fleet, security group, IAM roles pour réutilisation
+                self._add_event("teardown_scale_down", "Réduction capacity fleet à 0")
 
-            self.cf_client.delete_stack(StackName=self.state.stack_name)
+                self.ec2_client.modify_spot_fleet_request(
+                    SpotFleetRequestId=self.state.spot_fleet_id,
+                    TargetCapacity=0
+                )
 
-            logger.info(f"[BURST:ORCHESTRATOR] Stack deletion initiated: {self.state.stack_name}")
+                logger.info(
+                    f"[BURST:ORCHESTRATOR] Fleet capacity set to 0: {self.state.spot_fleet_id} "
+                    f"(stack kept for fast restart)"
+                )
 
-            # Attendre suppression (optionnel, non bloquant)
-            # waiter = self.cf_client.get_waiter('stack_delete_complete')
-            # waiter.wait(StackName=self.state.stack_name)
+                self._add_event(
+                    "teardown_complete",
+                    "Infrastructure mise en veille (fleet capacity=0)"
+                )
+            else:
+                # Suppression complète de la stack
+                self._add_event("teardown_started", "Suppression infrastructure")
 
-            self._add_event("teardown_initiated", "Suppression stack initiée")
+                self.cf_client.delete_stack(StackName=self.state.stack_name)
+
+                logger.info(f"[BURST:ORCHESTRATOR] Stack deletion initiated: {self.state.stack_name}")
+
+                self._add_event("teardown_initiated", "Suppression stack initiée")
 
         except ClientError as e:
             self._add_event(
@@ -1024,23 +1094,13 @@ Resources:
                 # Install nvidia-docker
                 yum install -y nvidia-driver-latest-dkms
 
-                # Pull and run vLLM
-                docker pull vllm/vllm-openai:latest || true
-                docker run -d --gpus all \\
-                  -p $VLLM_PORT:8000 \\
-                  --name vllm \\
-                  vllm/vllm-openai:latest \\
-                  --model $VLLM_MODEL \\
-                  --max-model-len 8192 \\
-                  --gpu-memory-utilization 0.7
-
-                # Pull and run embeddings (TEI)
-                docker pull ghcr.io/huggingface/text-embeddings-inference:1.2 || true
-                docker run -d --gpus all \\
-                  -p $EMB_PORT:80 \\
-                  --name embeddings \\
-                  ghcr.io/huggingface/text-embeddings-inference:1.2 \\
-                  --model-id $EMBEDDINGS_MODEL
+                # AMI Golden : containers déjà configurés, attendre qu'ils soient prêts
+                echo "AMI Golden - waiting for auto-started containers..."
+                for i in $(seq 1 12); do
+                  docker ps | grep -q vllm && docker ps | grep -q embeddings && break
+                  sleep 5
+                done
+                docker ps
 
                 echo "Bootstrap complete"
 

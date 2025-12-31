@@ -78,7 +78,7 @@ task_parameters:
   # Extraction de connaissance structurée (concepts, facts, entities, relations)
   knowledge_extraction:
     temperature: 0.2  # Équilibre entre créativité et cohérence
-    max_tokens: 8000  # gpt-4o-mini supporte jusqu'à 16K, 8K est largement suffisant
+    max_tokens: 4000  # Réduit pour compatibilité Qwen2.5-14B (8192 context) en mode Burst
 
 # Configuration des providers LLM
 providers:

@@ -4,7 +4,7 @@ Router FastAPI pour les fonctions d'administration.
 Phase 7 - Admin Management
 """
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from knowbase.api.services.purge_service import PurgeService
@@ -612,6 +612,276 @@ async def get_visibility_profile_detail(
     except Exception as e:
         logger.error(f"Erreur détail profil visibilité: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Pass 2 Enrichment (Hybrid Anchor Model)
+# ============================================================================
+
+class Pass2StatusResponse(BaseModel):
+    """Statut Pass 2."""
+    proto_concepts: int = 0
+    canonical_concepts: int = 0
+    raw_assertions: int = 0
+    raw_claims: int = 0
+    canonical_relations: int = 0
+    canonical_claims: int = 0
+    pending_jobs: int = 0
+    running_jobs: int = 0
+
+
+class Pass2PhaseRequest(BaseModel):
+    """Requête pour exécuter une phase Pass 2."""
+    document_id: Optional[str] = Field(None, description="Filtrer par document")
+    limit: int = Field(100, description="Nombre max d'items")
+
+
+class Pass2ResultResponse(BaseModel):
+    """Résultat d'une phase Pass 2."""
+    success: bool
+    phase: str
+    items_processed: int
+    items_created: int
+    items_updated: int
+    execution_time_ms: float
+    errors: List[str] = []
+    details: Dict[str, Any] = {}
+
+
+@router.get(
+    "/pass2/status",
+    response_model=Pass2StatusResponse,
+    summary="Statut Pass 2",
+    description="""
+    Récupère le statut du système Pass 2 (Hybrid Anchor Model).
+
+    Affiche:
+    - Nombre de ProtoConcepts / CanonicalConcepts
+    - Nombre de RawAssertions / RawClaims
+    - Nombre de CanonicalRelations / CanonicalClaims
+    - Jobs Pass 2 en attente et en cours
+    """
+)
+async def get_pass2_status(
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Récupère le statut du système Pass 2."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    status = service.get_status()
+
+    return Pass2StatusResponse(
+        proto_concepts=status.proto_concepts,
+        canonical_concepts=status.canonical_concepts,
+        raw_assertions=status.raw_assertions,
+        raw_claims=status.raw_claims,
+        canonical_relations=status.canonical_relations,
+        canonical_claims=status.canonical_claims,
+        pending_jobs=status.pending_jobs,
+        running_jobs=status.running_jobs
+    )
+
+
+@router.post(
+    "/pass2/classify-fine",
+    response_model=Pass2ResultResponse,
+    summary="Exécuter CLASSIFY_FINE",
+    description="""
+    Exécute la phase CLASSIFY_FINE de Pass 2.
+
+    Cette phase affine les types heuristiques des concepts avec
+    une classification LLM fine-grained.
+    """
+)
+async def run_classify_fine(
+    request: Pass2PhaseRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Exécute CLASSIFY_FINE."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    result = await service.run_classify_fine(
+        document_id=request.document_id,
+        limit=request.limit
+    )
+
+    return Pass2ResultResponse(
+        success=result.success,
+        phase=result.phase,
+        items_processed=result.items_processed,
+        items_created=result.items_created,
+        items_updated=result.items_updated,
+        execution_time_ms=result.execution_time_ms,
+        errors=result.errors,
+        details=result.details
+    )
+
+
+@router.post(
+    "/pass2/enrich-relations",
+    response_model=Pass2ResultResponse,
+    summary="Exécuter ENRICH_RELATIONS",
+    description="""
+    Exécute la phase ENRICH_RELATIONS de Pass 2.
+
+    Cette phase:
+    1. Détecte les relations cross-segment via LLM
+    2. Persiste les relations en RawAssertions dans Neo4j
+    3. Prépare pour la consolidation
+    """
+)
+async def run_enrich_relations(
+    request: Pass2PhaseRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Exécute ENRICH_RELATIONS avec persistence."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    result = await service.run_enrich_relations(
+        document_id=request.document_id,
+        max_pairs=request.limit
+    )
+
+    return Pass2ResultResponse(
+        success=result.success,
+        phase=result.phase,
+        items_processed=result.items_processed,
+        items_created=result.items_created,
+        items_updated=result.items_updated,
+        execution_time_ms=result.execution_time_ms,
+        errors=result.errors,
+        details=result.details
+    )
+
+
+@router.post(
+    "/pass2/consolidate-claims",
+    response_model=Pass2ResultResponse,
+    summary="Consolider les Claims",
+    description="""
+    Consolide les RawClaims en CanonicalClaims.
+
+    Utilise le code existant de consolidation:
+    - Groupement par (subject, claim_type, scope_key)
+    - Calcul de maturité (VALIDATED, CANDIDATE, CONFLICTING, etc.)
+    - Détection des conflits et supersessions
+    """
+)
+async def run_consolidate_claims(
+    request: Pass2PhaseRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Consolide Claims."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    result = service.run_consolidate_claims()
+
+    return Pass2ResultResponse(
+        success=result.success,
+        phase=result.phase,
+        items_processed=result.items_processed,
+        items_created=result.items_created,
+        items_updated=result.items_updated,
+        execution_time_ms=result.execution_time_ms,
+        errors=result.errors,
+        details=result.details
+    )
+
+
+@router.post(
+    "/pass2/consolidate-relations",
+    response_model=Pass2ResultResponse,
+    summary="Consolider les Relations",
+    description="""
+    Consolide les RawAssertions en CanonicalRelations.
+
+    Utilise le code existant de consolidation:
+    - Groupement par (subject, object, predicate_norm)
+    - Calcul de maturité (VALIDATED, CANDIDATE, AMBIGUOUS_TYPE)
+    - Création des typed edges dans Neo4j
+    """
+)
+async def run_consolidate_relations(
+    request: Pass2PhaseRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Consolide Relations."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    result = service.run_consolidate_relations()
+
+    return Pass2ResultResponse(
+        success=result.success,
+        phase=result.phase,
+        items_processed=result.items_processed,
+        items_created=result.items_created,
+        items_updated=result.items_updated,
+        execution_time_ms=result.execution_time_ms,
+        errors=result.errors,
+        details=result.details
+    )
+
+
+class Pass2FullRequest(BaseModel):
+    """Requête pour exécuter Pass 2 complet."""
+    document_id: Optional[str] = Field(None, description="Filtrer par document")
+    skip_classify: bool = Field(False, description="Ignorer CLASSIFY_FINE")
+    skip_enrich: bool = Field(False, description="Ignorer ENRICH_RELATIONS")
+    skip_consolidate: bool = Field(False, description="Ignorer consolidation")
+
+
+@router.post(
+    "/pass2/run-full",
+    summary="Exécuter Pass 2 complet",
+    description="""
+    Exécute toutes les phases de Pass 2 dans l'ordre:
+
+    1. **CLASSIFY_FINE**: Classification LLM fine-grained
+    2. **ENRICH_RELATIONS**: Détection relations cross-segment + persistence
+    3. **CONSOLIDATE_CLAIMS**: RawClaims → CanonicalClaims
+    4. **CONSOLIDATE_RELATIONS**: RawAssertions → CanonicalRelations
+
+    Chaque phase peut être désactivée individuellement.
+    """
+)
+async def run_full_pass2(
+    request: Pass2FullRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Exécute Pass 2 complet."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    results = await service.run_full_pass2(
+        document_id=request.document_id,
+        skip_classify=request.skip_classify,
+        skip_enrich=request.skip_enrich,
+        skip_consolidate=request.skip_consolidate
+    )
+
+    return {
+        "success": all(r.success for r in results.values()),
+        "phases": {
+            phase: {
+                "success": r.success,
+                "items_processed": r.items_processed,
+                "items_created": r.items_created,
+                "execution_time_ms": r.execution_time_ms,
+                "errors": r.errors
+            }
+            for phase, r in results.items()
+        }
+    }
 
 
 @router.post(

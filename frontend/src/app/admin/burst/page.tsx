@@ -39,8 +39,6 @@ import {
   TabPanels,
   Tab,
   TabPanel,
-  Checkbox,
-  Tooltip,
 } from '@chakra-ui/react'
 import { motion } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -99,7 +97,6 @@ interface BurstStatus {
   created_at: string | null
   started_at: string | null
   instance_details?: InstanceDetails
-  dual_logging?: boolean
 }
 
 interface BurstEvent {
@@ -308,7 +305,7 @@ const formatUptime = (seconds: number | null): string => {
 }
 
 // Instance Info Panel Component
-const InstanceInfoPanel = ({ details, vllmUrl, dualLogging }: { details: InstanceDetails | null; vllmUrl: string | null; dualLogging?: boolean }) => {
+const InstanceInfoPanel = ({ details, vllmUrl }: { details: InstanceDetails | null; vllmUrl: string | null }) => {
   if (!details || !details.public_ip) return null
 
   const getStatusColor = (status: string) => {
@@ -378,22 +375,12 @@ const InstanceInfoPanel = ({ details, vllmUrl, dualLogging }: { details: Instanc
               </Text>
             </VStack>
           </HStack>
-          <HStack spacing={2}>
-            {dualLogging && (
-              <Badge colorScheme="purple" fontSize="sm" px={3} py={1}>
-                <HStack spacing={1}>
-                  <Icon as={FiActivity} boxSize={3} />
-                  <Text>Dual-Logging</Text>
-                </HStack>
-              </Badge>
-            )}
-            <Badge colorScheme="green" fontSize="sm" px={3} py={1}>
-              <HStack spacing={1}>
-                <Icon as={FiClock} boxSize={3} />
-                <Text>{formatUptime(details.uptime_seconds)}</Text>
-              </HStack>
-            </Badge>
-          </HStack>
+          <Badge colorScheme="green" fontSize="sm" px={3} py={1}>
+            <HStack spacing={1}>
+              <Icon as={FiClock} boxSize={3} />
+              <Text>{formatUptime(details.uptime_seconds)}</Text>
+            </HStack>
+          </Badge>
         </HStack>
 
         {/* Content Grid */}
@@ -538,7 +525,6 @@ export default function BurstAdminPage() {
   const toast = useToast()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState(0)
-  const [dualLogging, setDualLogging] = useState(true) // Dual-logging activé par défaut
 
   // Queries
   const {
@@ -608,11 +594,11 @@ export default function BurstAdminPage() {
   })
 
   const startMutation = useMutation({
-    mutationFn: async (options: { dualLogging: boolean }) => {
+    mutationFn: async () => {
       const res = await fetch(`${API_BASE_URL}/api/burst/start`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ dual_logging: options.dualLogging }),
+        body: JSON.stringify({}),
       })
       if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
       return res.json()
@@ -808,33 +794,10 @@ export default function BurstAdminPage() {
             1. Préparer Batch
           </Button>
 
-          <Tooltip
-            label="Compare OpenAI et vLLM en parallèle. Les réponses sont loguées pour analyse qualité."
-            placement="top"
-          >
-            <HStack
-              px={3}
-              py={2}
-              bg="purple.900"
-              rounded="lg"
-              border="1px solid"
-              borderColor="purple.600"
-            >
-              <Checkbox
-                colorScheme="purple"
-                isChecked={dualLogging}
-                onChange={(e) => setDualLogging(e.target.checked)}
-                isDisabled={!canStart || isInfraStarting}
-              >
-                <Text fontSize="sm" color="purple.200">Dual-Logging</Text>
-              </Checkbox>
-            </HStack>
-          </Tooltip>
-
           <Button
             colorScheme="orange"
             leftIcon={isInfraStarting ? undefined : <FiCloud />}
-            onClick={() => startMutation.mutate({ dualLogging })}
+            onClick={() => startMutation.mutate()}
             isLoading={startMutation.isPending || isInfraStarting}
             loadingText={isInfraStarting ? "Démarrage en cours..." : undefined}
             isDisabled={!canStart && !isInfraStarting}
@@ -937,7 +900,6 @@ export default function BurstAdminPage() {
         <InstanceInfoPanel
           details={instanceDetails || null}
           vllmUrl={status.vllm_url}
-          dualLogging={status.dual_logging}
         />
       )}
 

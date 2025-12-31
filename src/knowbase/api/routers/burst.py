@@ -69,8 +69,6 @@ class BurstStatusResponse(BaseModel):
     started_at: Optional[str] = None
     # Phase 4.1: Détails enrichis de l'instance
     instance_details: Optional[InstanceDetails] = None
-    # Mode dual-logging (OpenAI + vLLM en parallèle)
-    dual_logging: bool = False
 
 
 class BurstConfigResponse(BaseModel):
@@ -113,10 +111,6 @@ class StartInfraRequest(BaseModel):
     force: bool = Field(
         False,
         description="Force le redémarrage même si une instance existe"
-    )
-    dual_logging: bool = Field(
-        False,
-        description="Active le dual-logging: OpenAI + vLLM en parallèle pour comparaison qualité"
     )
 
 
@@ -287,7 +281,6 @@ async def get_burst_status(
             embeddings_url=state.embeddings_url,
             created_at=state.created_at,
             started_at=state.started_at,
-            dual_logging=getattr(state, 'dual_logging', False),
         )
 
     except ImportError:
@@ -554,11 +547,6 @@ async def start_infrastructure(
                     detail=f"Batch en statut {orchestrator.state.status.value}. Utilisez force=true pour forcer."
                 )
 
-        # Configurer dual-logging si demandé
-        if request.dual_logging:
-            orchestrator.state.dual_logging = True
-            logger.info("[BURST] Mode dual-logging activé pour ce batch")
-
         # Démarrer l'infrastructure (sync call wrapped)
         import asyncio
         success = await asyncio.to_thread(orchestrator.start_infrastructure)
@@ -571,12 +559,6 @@ async def start_infrastructure(
                 message="Échec du démarrage de l'infrastructure."
             )
 
-        msg = "Infrastructure prête. "
-        if request.dual_logging:
-            msg += "Mode dual-logging activé (OpenAI + vLLM en parallèle)."
-        else:
-            msg += "Providers basculés vers EC2 Spot."
-
         return StartInfraResponse(
             success=True,
             batch_id=orchestrator.state.batch_id,
@@ -584,7 +566,7 @@ async def start_infrastructure(
             instance_ip=orchestrator.state.instance_ip,
             vllm_url=orchestrator.state.vllm_url,
             embeddings_url=orchestrator.state.embeddings_url,
-            message=msg
+            message="Infrastructure prête. Providers basculés vers EC2 Spot (vLLM)."
         )
 
     except HTTPException:
@@ -1000,12 +982,16 @@ async def get_instance_details(
             ec2 = boto3.client('ec2', region_name=os.getenv('AWS_DEFAULT_REGION', 'eu-central-1'))
 
             # Récupérer le prix Spot actuel pour ce type d'instance
-            price_response = ec2.describe_spot_price_history(
-                InstanceTypes=[instance_type],
-                ProductDescriptions=['Linux/UNIX'],
-                MaxResults=1,
-                AvailabilityZone=availability_zone if availability_zone else None
-            )
+            # Ne pas inclure AvailabilityZone si None (l'API n'accepte pas None)
+            spot_params = {
+                'InstanceTypes': [instance_type],
+                'ProductDescriptions': ['Linux/UNIX'],
+                'MaxResults': 1,
+            }
+            if availability_zone:
+                spot_params['AvailabilityZone'] = availability_zone
+
+            price_response = ec2.describe_spot_price_history(**spot_params)
 
             if price_response.get('SpotPriceHistory'):
                 spot_price = float(price_response['SpotPriceHistory'][0]['SpotPrice'])

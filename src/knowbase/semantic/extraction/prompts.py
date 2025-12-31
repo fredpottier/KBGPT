@@ -358,3 +358,111 @@ def get_relation_enrichment_prompt(
             relations_batch=relations_str
         )
     }
+
+
+# =============================================================================
+# HYBRID ANCHOR MODEL - Pass 1 EXTRACT_CONCEPTS (Phase 2)
+# =============================================================================
+# ADR: doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md
+#
+# IMPORTANT: Ce prompt demande des QUOTES TEXTUELLES EXACTES.
+# Les quotes sont utilisées par le fuzzy matching pour créer des anchors.
+# Sans quote valide = concept rejeté (Invariant d'Architecture).
+
+HYBRID_ANCHOR_EXTRACT_SYSTEM_PROMPT = """You are a precise concept extraction specialist for enterprise knowledge graphs.
+
+Your task is to extract concepts WITH EXACT QUOTES from the source text.
+
+## CRITICAL REQUIREMENTS
+
+1. **EXACT QUOTES ONLY**
+   - Every concept MUST have an exact textual quote from the source
+   - The quote MUST be copy-pasted verbatim from the input text
+   - Do NOT paraphrase, summarize, or rewrite quotes
+   - If you cannot find an exact quote, do NOT include the concept
+
+2. **Anchor Roles**
+   Each quote must be classified with a semantic role:
+   - `definition`: The text defines what the concept is
+   - `procedure`: The text describes a process/method involving the concept
+   - `requirement`: The text states an obligation/requirement
+   - `prohibition`: The text states something is forbidden/not allowed
+   - `constraint`: The text describes a technical/business constraint
+   - `example`: The text provides an example of the concept
+   - `reference`: The text references/cites the concept
+   - `context`: General mention without specific role
+
+3. **Concept Types (Heuristic)**
+   Assign a preliminary type based on text patterns:
+   - `structural`: Articles, sections, clauses (e.g., "Article 35", "Section 4.2")
+   - `regulatory`: Legal/compliance terms with normative language (shall, must)
+   - `procedural`: Processes, methods, procedures
+   - `abstract`: General concepts without clear structural/regulatory pattern
+
+## Output Format
+```json
+{
+  "concepts": [
+    {
+      "label": "Data Protection Impact Assessment",
+      "definition": "A process to identify and minimize data protection risks",
+      "type_heuristic": "procedural",
+      "quote": "A DPIA shall be carried out prior to the processing",
+      "role": "requirement"
+    }
+  ]
+}
+```
+
+## Quality Rules
+- Extract 3-15 concepts per segment (quality over quantity)
+- Quotes should be 10-150 characters (capture the essence)
+- Prefer official terminology over informal mentions
+- Cross-lingual: extract concepts regardless of language
+"""
+
+HYBRID_ANCHOR_EXTRACT_USER_PROMPT = """Extract concepts with EXACT QUOTES from this text segment.
+
+## Document Context
+{document_context}
+
+## Text Segment
+{text}
+
+## Instructions
+1. Identify key concepts in the text
+2. For EACH concept, find the EXACT quote that supports it
+3. Classify the quote's semantic role
+4. Assign a heuristic type based on text patterns
+
+CRITICAL: Quotes must be VERBATIM from the text above. Do not paraphrase.
+
+Return only valid JSON."""
+
+
+def get_hybrid_anchor_extract_prompt(
+    text: str,
+    document_context: str = ""
+) -> dict:
+    """
+    Construit les prompts pour extraction Pass 1 du Hybrid Anchor Model.
+
+    Ce prompt demande des quotes exactes pour permettre le fuzzy matching
+    et la création d'anchors avec positions précises.
+
+    Args:
+        text: Segment de texte à analyser
+        document_context: Contexte global du document
+
+    Returns:
+        Dict avec system_prompt et user_prompt
+    """
+    context = document_context or "No document context available."
+
+    return {
+        "system_prompt": HYBRID_ANCHOR_EXTRACT_SYSTEM_PROMPT,
+        "user_prompt": HYBRID_ANCHOR_EXTRACT_USER_PROMPT.format(
+            document_context=context,
+            text=text
+        )
+    }

@@ -23,7 +23,7 @@ from knowbase.relations.types import (
     # Phase 2.10
     RelationMaturity,
 )
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 
 logger = logging.getLogger(__name__)
 
@@ -477,7 +477,7 @@ class LLMRelationExtractor:
             use_v2_prompt: Phase 2.8 - Utiliser prompt V2 (predicate_raw + flags)
             use_id_first: Phase 2.8+ - Utiliser ID-First avec index (c1, c2...) - RECOMMANDÉ
         """
-        self.llm_router = llm_router or LLMRouter()
+        self.llm_router = llm_router or get_llm_router()
         self.model = model
         self.max_context_chars = max_context_chars
         self.co_occurrence_window = co_occurrence_window
@@ -1211,17 +1211,28 @@ class LLMRelationExtractor:
 
     def _build_concept_catalogue(
         self,
-        concepts: List[Dict[str, Any]]
+        concepts: List[Dict[str, Any]],
+        chunk_text: Optional[str] = None,
+        max_concepts: int = 80
     ) -> Tuple[str, Dict[str, Dict[str, Any]]]:
         """
         Construit le catalogue JSON avec index (c1, c2...) et le mapping.
 
+        Si chunk_text est fourni, filtre pour ne garder que les concepts
+        pertinents au chunk (mentionnés ou potentiellement liés).
+
         Args:
             concepts: Liste concepts avec canonical_id, canonical_name, surface_forms
+            chunk_text: Texte du chunk pour filtrer les concepts pertinents
+            max_concepts: Nombre max de concepts dans le catalogue (défaut: 80)
 
         Returns:
             (catalogue_json_str, index_to_concept_map)
         """
+        # Filtrer les concepts pertinents au chunk si texte fourni
+        if chunk_text:
+            concepts = self._filter_concepts_for_chunk(concepts, chunk_text, max_concepts)
+
         catalogue = []
         index_to_concept = {}
 
@@ -1234,16 +1245,13 @@ class LLMRelationExtractor:
             concept_type = concept.get("concept_type", "UNKNOWN")
 
             if not canonical_id or not canonical_name:
-                logger.warning(
-                    f"[OSMOSE:LLMRelationExtractor] Skipping concept without ID/name: {concept}"
-                )
                 continue
 
             # Entry pour le catalogue LLM
             catalogue_entry = {
                 "idx": index,
                 "name": canonical_name,
-                "aliases": surface_forms[:5],  # Limiter à 5 alias pour économiser tokens
+                "aliases": surface_forms[:3],  # Limiter à 3 alias pour économiser tokens
                 "type": concept_type.lower()
             }
             catalogue.append(catalogue_entry)
@@ -1258,6 +1266,74 @@ class LLMRelationExtractor:
         catalogue_json = json.dumps(catalogue, ensure_ascii=False, indent=2)
 
         return catalogue_json, index_to_concept
+
+    def _filter_concepts_for_chunk(
+        self,
+        concepts: List[Dict[str, Any]],
+        chunk_text: str,
+        max_concepts: int = 80
+    ) -> List[Dict[str, Any]]:
+        """
+        Filtre les concepts pertinents pour un chunk de texte.
+
+        Stratégie:
+        1. Concepts dont le nom ou une surface form apparaît dans le chunk (score élevé)
+        2. Si pas assez, ajouter des concepts par type le plus fréquent
+
+        Args:
+            concepts: Tous les concepts disponibles
+            chunk_text: Texte du chunk
+            max_concepts: Nombre max à retourner
+
+        Returns:
+            Liste filtrée de concepts
+        """
+        chunk_lower = chunk_text.lower()
+        scored_concepts = []
+
+        for concept in concepts:
+            canonical_name = concept.get("canonical_name", "").lower()
+            surface_forms = [sf.lower() for sf in concept.get("surface_forms", [])]
+
+            # Calculer score de pertinence
+            score = 0
+
+            # Nom canonique présent = haute priorité
+            if canonical_name and canonical_name in chunk_lower:
+                score += 10
+
+            # Surface forms présentes = priorité moyenne
+            for sf in surface_forms[:5]:  # Limiter la recherche
+                if sf and len(sf) > 2 and sf in chunk_lower:
+                    score += 5
+                    break  # Une seule surface form suffit
+
+            if score > 0:
+                scored_concepts.append((score, concept))
+
+        # Trier par score décroissant
+        scored_concepts.sort(key=lambda x: x[0], reverse=True)
+
+        # Prendre les top concepts mentionnés
+        result = [c for _, c in scored_concepts[:max_concepts]]
+
+        # Si on n'a pas assez de concepts, ajouter des concepts non-scorés
+        if len(result) < max_concepts:
+            existing_ids = {c.get("canonical_id") or c.get("concept_id") for c in result}
+            for concept in concepts:
+                if len(result) >= max_concepts:
+                    break
+                cid = concept.get("canonical_id") or concept.get("concept_id")
+                if cid not in existing_ids:
+                    result.append(concept)
+                    existing_ids.add(cid)
+
+        logger.debug(
+            f"[OSMOSE:LLMRelationExtractor] Filtered {len(result)} concepts "
+            f"from {len(concepts)} for chunk ({len(scored_concepts)} matched)"
+        )
+
+        return result
 
     def _validate_relation_closed_world(
         self,
@@ -1293,7 +1369,21 @@ class LLMRelationExtractor:
     def _chunk_text_for_v3(self, full_text: str) -> List[str]:
         """
         Découpe le texte en chunks pour le prompt V3.
+
+        DEPRECATED (ADR 2024-12-30): Cette méthode crée un chunking parallèle
+        désaligné des DocumentChunks. Utiliser extract_relations_chunk_aware()
+        qui itère sur les DocumentChunks existants avec fenêtre [i-1, i, i+1].
+
+        Conservée uniquement pour compatibilité avec extract_relations_type_first()
+        en mode fallback.
         """
+        import warnings
+        warnings.warn(
+            "_chunk_text_for_v3 is deprecated. Use extract_relations_chunk_aware() "
+            "with DocumentChunks instead (ADR Option A').",
+            DeprecationWarning,
+            stacklevel=2
+        )
         if len(full_text) <= self.max_context_chars:
             return [full_text]
 
@@ -1684,3 +1774,741 @@ class LLMRelationExtractor:
             deduplicated.append(best)
 
         return deduplicated
+
+    # =========================================================================
+    # Option A' - Extraction alignée sur DocumentChunks (ADR 2024-12-30)
+    # =========================================================================
+
+    def extract_relations_chunk_aware(
+        self,
+        document_chunks: List[Dict[str, Any]],
+        all_concepts: List[Dict[str, Any]],
+        document_id: str,
+        tenant_id: str = "default",
+        window_size: int = 1,
+        max_concepts: int = 100,
+        min_type_confidence: float = 0.65,
+        doc_top_k: int = 15,
+        lex_fallback_threshold: int = 8
+    ) -> TypeFirstExtractionResult:
+        """
+        Extraction de relations alignée sur DocumentChunks (Option A').
+
+        Itère sur chaque DocumentChunk avec fenêtre [i-window, i, i+window],
+        construit un catalogue filtré via anchored_concepts, et extrait
+        les relations locales.
+
+        ADR: doc/ongoing/ADR_OPTION_A_PRIME_CHUNK_ALIGNED_RELATIONS.md
+
+        Args:
+            document_chunks: Liste des DocumentChunks avec anchored_concepts
+            all_concepts: Catalogue global des concepts (canonical_id, label, etc.)
+            document_id: ID du document source
+            tenant_id: ID tenant
+            window_size: Taille de la fenêtre (1 = [i-1, i, i+1])
+            max_concepts: Nombre max de concepts dans le catalogue par fenêtre
+            min_type_confidence: Seuil de confiance pour le type
+            doc_top_k: Nombre de concepts doc-level à inclure
+            lex_fallback_threshold: Seuil pour activer le fallback lexical
+
+        Returns:
+            TypeFirstExtractionResult avec relations et stats d'observabilité
+        """
+        logger.info(
+            f"[OSMOSE:ChunkAware] Starting chunk-aware extraction: "
+            f"{len(document_chunks)} chunks, {len(all_concepts)} concepts, "
+            f"window_size={window_size}"
+        )
+
+        result = TypeFirstExtractionResult(
+            stats={
+                "chunks_processed": 0,
+                "concepts_in_catalogue": len(all_concepts),
+                "relations_extracted": 0,
+                "relations_valid": 0,
+                "relations_invalid_index": 0,
+                "relations_invalid_type": 0,
+                "relations_low_confidence": 0,
+                "unresolved_mentions": 0,
+                "types_distribution": {},
+                # Observabilité Option A'
+                "avg_catalog_size": 0,
+                "catalog_size_by_source": {"anchors": 0, "doc_top": 0, "lex": 0},
+                "chunks_with_low_anchors": 0,
+            }
+        )
+
+        if not document_chunks or not all_concepts:
+            logger.warning("[OSMOSE:ChunkAware] No chunks or concepts provided")
+            return result
+
+        # Pré-calcul: mapping concept_id → concept pour accès rapide
+        # 2024-12-30: Indexer par canonical_id ET par proto_concept_ids
+        # Car anchored_concepts utilise proto_id, mais catalogue utilise canonical_id
+        concept_by_id = {}
+        for c in all_concepts:
+            cid = c.get("canonical_id") or c.get("concept_id")
+            if cid:
+                concept_by_id[cid] = c
+                # Ajouter aussi les proto_concept_ids comme clés alternatives
+                for proto_id in c.get("proto_concept_ids", []):
+                    if proto_id and proto_id not in concept_by_id:
+                        concept_by_id[proto_id] = c
+
+        # Pré-calcul: top-K concepts doc-level (par fréquence anchors)
+        doc_top_concepts = self._compute_doc_top_concepts(
+            document_chunks, concept_by_id, top_k=doc_top_k
+        )
+
+        # Construire mapping global doc_id (d001, d002...) → concept
+        # Tri déterministe par canonical_id
+        sorted_concepts = sorted(
+            all_concepts,
+            key=lambda c: c.get("canonical_id") or c.get("concept_id") or ""
+        )
+        global_doc_id_map = {}
+        global_id_to_doc_id = {}
+        for i, concept in enumerate(sorted_concepts):
+            doc_id = f"d{i+1:03d}"  # d001, d002, ...
+            cid = concept.get("canonical_id") or concept.get("concept_id")
+            if cid:
+                global_doc_id_map[doc_id] = concept
+                global_id_to_doc_id[cid] = doc_id
+
+        # Traitement par fenêtre de chunks
+        total_catalog_sizes = []
+        all_relations_raw: List[ExtractedRelationV4] = []
+
+        for chunk_idx in range(len(document_chunks)):
+            # Construire fenêtre [i-window, i+window]
+            window_start = max(0, chunk_idx - window_size)
+            window_end = min(len(document_chunks), chunk_idx + window_size + 1)
+            window_chunks = document_chunks[window_start:window_end]
+
+            # Construire le catalogue pour cette fenêtre (3 niveaux)
+            catalog_concepts, catalog_stats = self._build_window_catalog(
+                window_chunks=window_chunks,
+                concept_by_id=concept_by_id,
+                doc_top_concepts=doc_top_concepts,
+                global_id_to_doc_id=global_id_to_doc_id,
+                max_concepts=max_concepts,
+                lex_fallback_threshold=lex_fallback_threshold
+            )
+
+            if not catalog_concepts:
+                logger.debug(
+                    f"[OSMOSE:ChunkAware] Chunk {chunk_idx}: empty catalog, skipping"
+                )
+                continue
+
+            total_catalog_sizes.append(len(catalog_concepts))
+            result.stats["catalog_size_by_source"]["anchors"] += catalog_stats["anchors"]
+            result.stats["catalog_size_by_source"]["doc_top"] += catalog_stats["doc_top"]
+            result.stats["catalog_size_by_source"]["lex"] += catalog_stats["lex"]
+
+            if catalog_stats["anchors"] < lex_fallback_threshold:
+                result.stats["chunks_with_low_anchors"] += 1
+
+            # Concaténer le texte de la fenêtre
+            window_text = "\n\n".join([
+                c.get("text", "") for c in window_chunks
+            ])
+
+            # Construire catalogue JSON pour le LLM
+            catalogue_json, index_to_concept = self._build_catalog_for_window(
+                catalog_concepts, global_id_to_doc_id
+            )
+            valid_indices = set(index_to_concept.keys())
+
+            # Extraction LLM (Type-First V4)
+            try:
+                chunk_relations, chunk_unresolved = self._extract_from_chunk_v4(
+                    chunk_text=window_text,
+                    catalogue_json=catalogue_json
+                )
+
+                result.stats["relations_extracted"] += len(chunk_relations)
+                result.stats["unresolved_mentions"] += len(chunk_unresolved)
+
+                # Valider et résoudre les relations
+                for rel_data in chunk_relations:
+                    validated_rel = self._validate_and_resolve_relation_v4(
+                        rel_data=rel_data,
+                        valid_indices=valid_indices,
+                        index_to_concept=index_to_concept,
+                        min_type_confidence=min_type_confidence
+                    )
+
+                    if validated_rel:
+                        all_relations_raw.append(validated_rel)
+                        result.stats["relations_valid"] += 1
+
+                        # Track type distribution
+                        type_key = validated_rel.relation_type.value
+                        result.stats["types_distribution"][type_key] = \
+                            result.stats["types_distribution"].get(type_key, 0) + 1
+                    else:
+                        # Stats de rejet (déjà loggées dans _validate_and_resolve)
+                        pass
+
+                # Collecter unresolved mentions
+                for mention_data in chunk_unresolved:
+                    mention = UnresolvedMention(
+                        mention=mention_data.get("mention", ""),
+                        context=mention_data.get("context", "")[:300],
+                        suggested_type=mention_data.get("suggested_type")
+                    )
+                    result.unresolved_mentions.append(mention)
+
+            except Exception as e:
+                logger.error(
+                    f"[OSMOSE:ChunkAware] Chunk {chunk_idx} extraction failed: {e}",
+                    exc_info=True
+                )
+
+            result.stats["chunks_processed"] += 1
+
+            # Log progression tous les 10 chunks
+            if (chunk_idx + 1) % 10 == 0:
+                logger.info(
+                    f"[OSMOSE:ChunkAware] Progress: {chunk_idx + 1}/{len(document_chunks)} chunks, "
+                    f"{result.stats['relations_valid']} relations"
+                )
+
+        # Calcul stats finales
+        if total_catalog_sizes:
+            result.stats["avg_catalog_size"] = sum(total_catalog_sizes) / len(total_catalog_sizes)
+
+        # Déduplication finale
+        result.relations = self._deduplicate_relations_v4(all_relations_raw)
+
+        logger.info(
+            f"[OSMOSE:ChunkAware] ✅ Extraction complete: "
+            f"{result.stats['chunks_processed']} chunks, "
+            f"{len(result.relations)} relations (deduplicated from {len(all_relations_raw)}), "
+            f"avg_catalog={result.stats['avg_catalog_size']:.1f}, "
+            f"low_anchors_chunks={result.stats['chunks_with_low_anchors']}"
+        )
+
+        return result
+
+    def _compute_doc_top_concepts(
+        self,
+        document_chunks: List[Dict[str, Any]],
+        concept_by_id: Dict[str, Dict[str, Any]],
+        top_k: int = 15
+    ) -> List[Dict[str, Any]]:
+        """
+        Calcule les top-K concepts doc-level par fréquence d'anchors.
+
+        Returns:
+            Liste des top-K concepts triés par fréquence décroissante
+        """
+        from collections import Counter
+
+        concept_freq = Counter()
+
+        for chunk in document_chunks:
+            for ac in chunk.get("anchored_concepts", []):
+                concept_id = ac.get("concept_id")
+                if concept_id:
+                    concept_freq[concept_id] += 1
+
+        # Top-K par fréquence
+        top_ids = [cid for cid, _ in concept_freq.most_common(top_k)]
+
+        return [
+            concept_by_id[cid]
+            for cid in top_ids
+            if cid in concept_by_id
+        ]
+
+    def _build_window_catalog(
+        self,
+        window_chunks: List[Dict[str, Any]],
+        concept_by_id: Dict[str, Dict[str, Any]],
+        doc_top_concepts: List[Dict[str, Any]],
+        global_id_to_doc_id: Dict[str, str],
+        max_concepts: int = 100,
+        lex_fallback_threshold: int = 8
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+        """
+        Construit le catalogue de concepts pour une fenêtre de chunks.
+
+        Shortlist en 3 niveaux:
+        1. S_anchor: concepts ancrés dans la fenêtre (signal fort)
+        2. S_doc_top: top-K doc-level (signal faible)
+        3. S_lex: fallback lexical (dernier recours, si anchors < threshold)
+
+        Returns:
+            (catalog_concepts, stats)
+        """
+        stats = {"anchors": 0, "doc_top": 0, "lex": 0}
+        seen_ids = set()
+        catalog = []
+
+        # Niveau 1: S_anchor - concepts ancrés dans la fenêtre
+        for chunk in window_chunks:
+            for ac in chunk.get("anchored_concepts", []):
+                concept_id = ac.get("concept_id")
+                if concept_id and concept_id not in seen_ids and concept_id in concept_by_id:
+                    catalog.append(concept_by_id[concept_id])
+                    seen_ids.add(concept_id)
+                    stats["anchors"] += 1
+
+        # Niveau 2: S_doc_top - top concepts doc-level
+        for concept in doc_top_concepts:
+            cid = concept.get("canonical_id") or concept.get("concept_id")
+            if cid and cid not in seen_ids:
+                catalog.append(concept)
+                seen_ids.add(cid)
+                stats["doc_top"] += 1
+
+            if len(catalog) >= max_concepts:
+                break
+
+        # Niveau 3: S_lex - fallback lexical (seulement si anchors faibles)
+        if stats["anchors"] < lex_fallback_threshold:
+            logger.debug(
+                f"[OSMOSE:ChunkAware] Low anchors ({stats['anchors']}), "
+                f"activating lexical fallback"
+            )
+            window_text = " ".join([c.get("text", "") for c in window_chunks]).lower()
+
+            for cid, concept in concept_by_id.items():
+                if cid in seen_ids:
+                    continue
+                if len(catalog) >= max_concepts:
+                    break
+
+                # Match lexical sur canonical_name et surface_forms
+                name = concept.get("canonical_name", "").lower()
+                if name and len(name) > 2 and name in window_text:
+                    catalog.append(concept)
+                    seen_ids.add(cid)
+                    stats["lex"] += 1
+                    continue
+
+                # Surface forms
+                for sf in concept.get("surface_forms", [])[:3]:
+                    if sf and len(sf) > 2 and sf.lower() in window_text:
+                        catalog.append(concept)
+                        seen_ids.add(cid)
+                        stats["lex"] += 1
+                        break
+
+        return catalog[:max_concepts], stats
+
+    def _build_catalog_for_window(
+        self,
+        catalog_concepts: List[Dict[str, Any]],
+        global_id_to_doc_id: Dict[str, str]
+    ) -> Tuple[str, Dict[str, Dict[str, Any]]]:
+        """
+        Construit le catalogue JSON pour le LLM avec doc_ids stables.
+
+        Returns:
+            (catalogue_json, index_to_concept_map)
+        """
+        catalogue = []
+        index_to_concept = {}
+
+        for concept in catalog_concepts:
+            cid = concept.get("canonical_id") or concept.get("concept_id")
+            if not cid:
+                continue
+
+            # Utiliser doc_id global (d001, d002...) si disponible
+            doc_id = global_id_to_doc_id.get(cid, f"c{len(catalogue)+1}")
+
+            canonical_name = concept.get("canonical_name", "")
+            surface_forms = concept.get("surface_forms", [])
+            concept_type = concept.get("concept_type", "UNKNOWN")
+
+            catalogue_entry = {
+                "idx": doc_id,
+                "name": canonical_name,
+                "aliases": surface_forms[:3],
+                "type": concept_type.lower() if isinstance(concept_type, str) else "unknown"
+            }
+            catalogue.append(catalogue_entry)
+
+            index_to_concept[doc_id] = {
+                "canonical_id": cid,
+                "canonical_name": canonical_name,
+                "concept_type": concept_type
+            }
+
+        catalogue_json = json.dumps(catalogue, ensure_ascii=False, indent=2)
+        return catalogue_json, index_to_concept
+
+    def _validate_and_resolve_relation_v4(
+        self,
+        rel_data: Dict[str, Any],
+        valid_indices: Set[str],
+        index_to_concept: Dict[str, Dict[str, Any]],
+        min_type_confidence: float
+    ) -> Optional[ExtractedRelationV4]:
+        """
+        Valide et résout une relation extraite.
+
+        Returns:
+            ExtractedRelationV4 si valide, None sinon
+        """
+        # Validation index (closed-world)
+        subject_id = rel_data.get("subject_id", "")
+        object_id = rel_data.get("object_id", "")
+
+        if not subject_id or subject_id not in valid_indices:
+            logger.debug(f"[OSMOSE:ChunkAware] Invalid subject_id: {subject_id}")
+            return None
+
+        if not object_id or object_id not in valid_indices:
+            logger.debug(f"[OSMOSE:ChunkAware] Invalid object_id: {object_id}")
+            return None
+
+        if subject_id == object_id:
+            logger.debug(f"[OSMOSE:ChunkAware] Self-relation rejected: {subject_id}")
+            return None
+
+        # Validation type (closed-world)
+        relation_type_str = rel_data.get("relation_type", "")
+        if relation_type_str not in CORE_RELATION_TYPES_V4:
+            logger.debug(f"[OSMOSE:ChunkAware] Invalid type: {relation_type_str}")
+            return None
+
+        # Validation confidence
+        type_confidence = float(rel_data.get("type_confidence", 0.0))
+        if type_confidence < min_type_confidence:
+            logger.debug(
+                f"[OSMOSE:ChunkAware] Low confidence: {type_confidence} < {min_type_confidence}"
+            )
+            return None
+
+        # Résolution
+        subject_concept = index_to_concept[subject_id]
+        object_concept = index_to_concept[object_id]
+
+        try:
+            relation_type = RelationType(relation_type_str)
+        except ValueError:
+            relation_type = RelationType.ASSOCIATED_WITH
+
+        # Alt type
+        alt_type = None
+        alt_type_confidence = None
+        alt_type_str = rel_data.get("alt_type")
+        if alt_type_str and alt_type_str in CORE_RELATION_TYPES_V4:
+            try:
+                alt_type = RelationType(alt_type_str)
+                alt_type_confidence = float(rel_data.get("alt_type_confidence", 0.0))
+            except (ValueError, TypeError):
+                pass
+
+        # Flags
+        flags_data = rel_data.get("flags", {})
+        flags = RawAssertionFlags(
+            is_negated=flags_data.get("is_negated", False),
+            is_hedged=flags_data.get("is_hedged", False),
+            is_conditional=flags_data.get("is_conditional", False),
+            cross_sentence=flags_data.get("cross_sentence", False)
+        )
+
+        return ExtractedRelationV4(
+            subject_concept_id=subject_concept["canonical_id"],
+            object_concept_id=object_concept["canonical_id"],
+            relation_type=relation_type,
+            type_confidence=type_confidence,
+            alt_type=alt_type,
+            alt_type_confidence=alt_type_confidence,
+            predicate_raw=rel_data.get("predicate_raw", "")[:100],
+            relation_subtype_raw=rel_data.get("relation_subtype_raw"),
+            evidence=rel_data.get("evidence", "")[:500],
+            evidence_start_char=rel_data.get("evidence_start_char"),
+            evidence_end_char=rel_data.get("evidence_end_char"),
+            context_hint=rel_data.get("context_hint"),
+            confidence=type_confidence,
+            flags=flags,
+            subject_surface_form=subject_concept["canonical_name"],
+            object_surface_form=object_concept["canonical_name"]
+        )
+
+    # =========================================================================
+    # Option A' - Version ASYNC parallélisée (2024-12-30)
+    # =========================================================================
+
+    async def _extract_from_chunk_v4_async(
+        self,
+        chunk_text: str,
+        catalogue_json: str
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Version async de l'extraction V4 pour parallélisation.
+
+        Utilise llm_router.acomplete() au lieu de complete().
+
+        Returns:
+            (relations_list, unresolved_mentions_list)
+        """
+        messages = [
+            {"role": "system", "content": RELATION_EXTRACTION_V4_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": RELATION_EXTRACTION_V4_USER_PROMPT.format(
+                    text_segment=chunk_text,
+                    concept_catalog_json=catalogue_json
+                )
+            }
+        ]
+
+        try:
+            response_text = await self.llm_router.acomplete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                messages=messages,
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                model_preference=self.model
+            )
+
+            response_data = json.loads(response_text)
+            relations = response_data.get("relations", [])
+            unresolved = response_data.get("unresolved_mentions", [])
+
+            return relations, unresolved
+
+        except json.JSONDecodeError as e:
+            logger.error(f"[OSMOSE:ChunkAware:Async] JSON parse error: {e}")
+            return [], []
+        except Exception as e:
+            logger.error(f"[OSMOSE:ChunkAware:Async] Extraction error: {e}")
+            return [], []
+
+    async def extract_relations_chunk_aware_async(
+        self,
+        document_chunks: List[Dict[str, Any]],
+        all_concepts: List[Dict[str, Any]],
+        document_id: str,
+        tenant_id: str = "default",
+        window_size: int = 1,
+        max_concepts: int = 100,
+        min_type_confidence: float = 0.65,
+        doc_top_k: int = 15,
+        lex_fallback_threshold: int = 8,
+        max_concurrent: int = 10
+    ) -> TypeFirstExtractionResult:
+        """
+        Version ASYNC parallélisée de extract_relations_chunk_aware.
+
+        Optimisation majeure: traite tous les chunks en parallèle via asyncio.gather()
+        avec contrôle de concurrence via semaphore.
+
+        Performance attendue:
+        - Séquentiel: 349 chunks × 1.3s = ~7.5 minutes
+        - Parallèle (10 workers): ~45 secondes
+
+        Args:
+            document_chunks: Liste des DocumentChunks
+            all_concepts: Catalogue global des concepts
+            document_id: ID du document source
+            tenant_id: ID tenant
+            window_size: Taille fenêtre (1 = [i-1, i, i+1])
+            max_concepts: Nombre max concepts par fenêtre
+            min_type_confidence: Seuil confiance type
+            doc_top_k: Top-K concepts doc-level
+            lex_fallback_threshold: Seuil fallback lexical
+            max_concurrent: Nombre max d'appels LLM en parallèle
+
+        Returns:
+            TypeFirstExtractionResult avec relations et stats
+        """
+        import asyncio
+
+        logger.info(
+            f"[OSMOSE:ChunkAware:Async] Starting PARALLEL extraction: "
+            f"{len(document_chunks)} chunks, {len(all_concepts)} concepts, "
+            f"max_concurrent={max_concurrent}"
+        )
+
+        result = TypeFirstExtractionResult(
+            stats={
+                "chunks_processed": 0,
+                "chunks_skipped": 0,
+                "concepts_in_catalogue": len(all_concepts),
+                "relations_extracted": 0,
+                "relations_valid": 0,
+                "relations_invalid_index": 0,
+                "relations_invalid_type": 0,
+                "relations_low_confidence": 0,
+                "unresolved_mentions": 0,
+                "types_distribution": {},
+                "avg_catalog_size": 0,
+                "catalog_size_by_source": {"anchors": 0, "doc_top": 0, "lex": 0},
+                "chunks_with_low_anchors": 0,
+            }
+        )
+
+        if not document_chunks or not all_concepts:
+            logger.warning("[OSMOSE:ChunkAware:Async] No chunks or concepts")
+            return result
+
+        # Pré-calcul: mapping concept_id → concept
+        # 2024-12-30: Indexer par canonical_id ET par proto_concept_ids
+        # Car anchored_concepts utilise proto_id, mais catalogue utilise canonical_id
+        concept_by_id = {}
+        for c in all_concepts:
+            cid = c.get("canonical_id") or c.get("concept_id")
+            if cid:
+                concept_by_id[cid] = c
+                # Ajouter aussi les proto_concept_ids comme clés alternatives
+                for proto_id in c.get("proto_concept_ids", []):
+                    if proto_id and proto_id not in concept_by_id:
+                        concept_by_id[proto_id] = c
+
+        # Pré-calcul: top-K concepts doc-level
+        doc_top_concepts = self._compute_doc_top_concepts(
+            document_chunks, concept_by_id, top_k=doc_top_k
+        )
+
+        # Construire mapping global doc_id → concept
+        sorted_concepts = sorted(
+            all_concepts,
+            key=lambda c: c.get("canonical_id") or c.get("concept_id") or ""
+        )
+        global_doc_id_map = {}
+        global_id_to_doc_id = {}
+        for i, concept in enumerate(sorted_concepts):
+            doc_id = f"d{i+1:03d}"
+            cid = concept.get("canonical_id") or concept.get("concept_id")
+            if cid:
+                global_doc_id_map[doc_id] = concept
+                global_id_to_doc_id[cid] = doc_id
+
+        # Pré-construire les données pour chaque chunk (sync, rapide)
+        chunk_tasks_data = []
+        total_catalog_sizes = []
+
+        for chunk_idx in range(len(document_chunks)):
+            window_start = max(0, chunk_idx - window_size)
+            window_end = min(len(document_chunks), chunk_idx + window_size + 1)
+            window_chunks = document_chunks[window_start:window_end]
+
+            catalog_concepts, catalog_stats = self._build_window_catalog(
+                window_chunks=window_chunks,
+                concept_by_id=concept_by_id,
+                doc_top_concepts=doc_top_concepts,
+                global_id_to_doc_id=global_id_to_doc_id,
+                max_concepts=max_concepts,
+                lex_fallback_threshold=lex_fallback_threshold
+            )
+
+            if not catalog_concepts:
+                result.stats["chunks_skipped"] += 1
+                continue
+
+            total_catalog_sizes.append(len(catalog_concepts))
+            result.stats["catalog_size_by_source"]["anchors"] += catalog_stats["anchors"]
+            result.stats["catalog_size_by_source"]["doc_top"] += catalog_stats["doc_top"]
+            result.stats["catalog_size_by_source"]["lex"] += catalog_stats["lex"]
+
+            if catalog_stats["anchors"] < lex_fallback_threshold:
+                result.stats["chunks_with_low_anchors"] += 1
+
+            window_text = "\n\n".join([c.get("text", "") for c in window_chunks])
+            catalogue_json, index_to_concept = self._build_catalog_for_window(
+                catalog_concepts, global_id_to_doc_id
+            )
+            valid_indices = set(index_to_concept.keys())
+
+            chunk_tasks_data.append({
+                "chunk_idx": chunk_idx,
+                "window_text": window_text,
+                "catalogue_json": catalogue_json,
+                "index_to_concept": index_to_concept,
+                "valid_indices": valid_indices,
+            })
+
+        logger.info(
+            f"[OSMOSE:ChunkAware:Async] Prepared {len(chunk_tasks_data)} tasks "
+            f"({result.stats['chunks_skipped']} skipped empty catalogs)"
+        )
+
+        # Semaphore pour limiter la concurrence
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def process_chunk(task_data: Dict[str, Any]) -> Dict[str, Any]:
+            """Traite un chunk avec semaphore."""
+            async with semaphore:
+                chunk_relations, chunk_unresolved = await self._extract_from_chunk_v4_async(
+                    chunk_text=task_data["window_text"],
+                    catalogue_json=task_data["catalogue_json"]
+                )
+                return {
+                    "chunk_idx": task_data["chunk_idx"],
+                    "relations": chunk_relations,
+                    "unresolved": chunk_unresolved,
+                    "index_to_concept": task_data["index_to_concept"],
+                    "valid_indices": task_data["valid_indices"],
+                }
+
+        # Lancer tous les chunks en parallèle
+        tasks = [process_chunk(td) for td in chunk_tasks_data]
+
+        logger.info(
+            f"[OSMOSE:ChunkAware:Async] Launching {len(tasks)} parallel LLM calls..."
+        )
+
+        # Exécuter avec gather (return_exceptions pour ne pas bloquer sur erreurs)
+        chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Traiter les résultats
+        all_relations_raw: List[ExtractedRelationV4] = []
+
+        for chunk_result in chunk_results:
+            if isinstance(chunk_result, Exception):
+                logger.error(f"[OSMOSE:ChunkAware:Async] Task failed: {chunk_result}")
+                continue
+
+            result.stats["chunks_processed"] += 1
+            result.stats["relations_extracted"] += len(chunk_result["relations"])
+            result.stats["unresolved_mentions"] += len(chunk_result["unresolved"])
+
+            # Valider et résoudre les relations
+            for rel_data in chunk_result["relations"]:
+                validated_rel = self._validate_and_resolve_relation_v4(
+                    rel_data=rel_data,
+                    valid_indices=chunk_result["valid_indices"],
+                    index_to_concept=chunk_result["index_to_concept"],
+                    min_type_confidence=min_type_confidence
+                )
+
+                if validated_rel:
+                    all_relations_raw.append(validated_rel)
+                    result.stats["relations_valid"] += 1
+                    type_key = validated_rel.relation_type.value
+                    result.stats["types_distribution"][type_key] = \
+                        result.stats["types_distribution"].get(type_key, 0) + 1
+
+            # Unresolved mentions
+            for mention_data in chunk_result["unresolved"]:
+                mention = UnresolvedMention(
+                    mention=mention_data.get("mention", ""),
+                    context=mention_data.get("context", "")[:300],
+                    suggested_type=mention_data.get("suggested_type")
+                )
+                result.unresolved_mentions.append(mention)
+
+        # Stats finales
+        if total_catalog_sizes:
+            result.stats["avg_catalog_size"] = sum(total_catalog_sizes) / len(total_catalog_sizes)
+
+        # Déduplication
+        result.relations = self._deduplicate_relations_v4(all_relations_raw)
+
+        logger.info(
+            f"[OSMOSE:ChunkAware:Async] ✅ PARALLEL extraction complete: "
+            f"{result.stats['chunks_processed']} chunks in parallel, "
+            f"{len(result.relations)} relations (from {len(all_relations_raw)}), "
+            f"avg_catalog={result.stats['avg_catalog_size']:.1f}"
+        )
+
+        return result

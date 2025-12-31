@@ -236,13 +236,15 @@ class TopicSegmenter:
             clusters = self._cluster_with_fallbacks(windows, embeddings)
 
             # Créer topics pour cette macro-section
+            # Passer section["start"] pour calculer char_offset global des topics
             section_topics = self._create_topics_from_clusters(
                 document_id=document_id,
                 clusters=clusters,
                 windows=windows,
                 embeddings=embeddings,
                 doc_language=doc_language,
-                section_prefix=f"sec{section['id']}"
+                section_prefix=f"sec{section['id']}",
+                section_char_offset=section.get("start", 0)
             )
 
             # Enrichir section_path avec info macro-section
@@ -362,7 +364,8 @@ class TopicSegmenter:
         windows: List[Window],
         embeddings: np.ndarray,
         doc_language: Optional[str],
-        section_prefix: str
+        section_prefix: str,
+        section_char_offset: int = 0
     ) -> List[Topic]:
         """
         Crée des topics à partir des clusters.
@@ -374,6 +377,8 @@ class TopicSegmenter:
             embeddings: Embeddings des windows
             doc_language: Langue détectée
             section_prefix: Préfixe pour topic_id
+            section_char_offset: Offset de la section dans le document complet
+                                 (2024-12-30: Fix mapping anchors → chunks)
 
         Returns:
             List[Topic]: Topics créés
@@ -403,14 +408,23 @@ class TopicSegmenter:
                 )
                 continue
 
-            # Créer Topic
+            # Calculer char_offset du topic = section_offset + premier window.start
+            # Les windows ont des positions relatives à la section
+            topic_char_offset = section_char_offset
+            if cluster_windows:
+                # Trouver la première window du cluster (position minimale)
+                min_window_start = min(w.start for w in cluster_windows)
+                topic_char_offset = section_char_offset + min_window_start
+
+            # Créer Topic avec char_offset global
             topic = Topic(
                 topic_id=f"{document_id}_{section_prefix}_c{cluster_id}",
                 document_id=document_id,
                 section_path=f"cluster_{cluster_id}",
                 windows=cluster_windows,
                 anchors=anchors,
-                cohesion_score=cohesion
+                cohesion_score=cohesion,
+                char_offset=topic_char_offset
             )
 
             topics.append(topic)

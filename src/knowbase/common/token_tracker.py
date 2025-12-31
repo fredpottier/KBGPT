@@ -70,6 +70,7 @@ class TokenTracker:
         self.usage_history: List[TokenUsage] = []
         self.log_file = log_file
         self._session_start_index = 0  # Pour tracking par document
+        self._warned_models: set = set()  # Éviter warnings répétitifs
 
     def start_session(self) -> None:
         """Marque le début d'une session de tracking (nouveau document)."""
@@ -172,7 +173,13 @@ class TokenTracker:
         """Calcule le coût d'une utilisation."""
         pricing = self.MODEL_PRICING.get(usage.model)
         if not pricing:
-            logger.warning(f"Pricing non trouvé pour {usage.model}")
+            # Log warning seulement une fois par modèle pour éviter pollution des logs
+            if usage.model not in self._warned_models:
+                logger.warning(
+                    f"[TOKEN_TRACKER] Pricing non trouvé pour '{usage.model}' "
+                    f"(ce warning ne sera pas répété)"
+                )
+                self._warned_models.add(usage.model)
             return 0.0
 
         input_cost = (usage.input_tokens / 1000) * pricing.input_price_per_1k
