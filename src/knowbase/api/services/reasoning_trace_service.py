@@ -85,34 +85,20 @@ class ReasoningTrace:
         }
 
 
-# Templates pour generer les statements sans LLM
-STATEMENT_TEMPLATES = {
-    "REQUIRES": "{source} necessite {target}",
-    "CAUSES": "{source} provoque/entraine {target}",
-    "ENABLES": "{source} permet {target}",
-    "PART_OF": "{target} fait partie de {source}",
-    "SUBTYPE_OF": "{source} est un type de {target}",
-    "CONFLICTS_WITH": "{source} est en contradiction avec {target}",
-    "APPLIES_TO": "{source} s'applique a {target}",
-    "USES": "{source} utilise {target}",
-    "INTEGRATES_WITH": "{source} s'integre avec {target}",
-    "EXTENDS": "{source} etend {target}",
-    "PREVENTS": "{source} empeche {target}",
-    "ASSOCIATED_WITH": "{source} est associe a {target}",
-    "DEFAULT": "{source} est lie a {target} ({relation})",
-}
+# Note: Les phrases sont générées par LLM dans la langue de la question.
+# Pas de templates hardcodés pour supporter le multilingue.
 
 
 class ReasoningTraceService:
     """Service pour construire la Trace de Raisonnement (Bloc C)."""
 
-    def __init__(self, neo4j_driver=None, use_llm: bool = False):
+    def __init__(self, neo4j_driver=None, use_llm: bool = True):
         """
         Initialise le service.
 
         Args:
             neo4j_driver: Driver Neo4j optionnel
-            use_llm: Si True, utilise le LLM pour narrativiser (plus couteux)
+            use_llm: Si True, utilise le LLM pour narrativiser (active par defaut)
         """
         self._neo4j_driver = neo4j_driver
         self._use_llm = use_llm
@@ -323,8 +309,8 @@ class ReasoningTraceService:
                     source_refs=[],
                 ))
 
-            # Generer le statement
-            statement = self._generate_statement(source_name, source_paths)
+            # Generer le statement placeholder (sera enrichi par LLM)
+            statement = self._generate_statement_placeholder(source_name, source_paths)
 
             steps.append(ReasoningStep(
                 step_number=step_num,
@@ -339,40 +325,30 @@ class ReasoningTraceService:
 
         return steps
 
-    def _generate_statement(
+    def _generate_statement_placeholder(
         self,
         source_name: str,
         paths: List[Dict[str, Any]],
     ) -> str:
         """
-        Genere un statement narratif depuis les relations.
+        Genere un statement placeholder depuis les relations.
 
-        Utilise des templates simples (pas de LLM).
+        Ce placeholder sera remplace par le LLM pour une phrase naturelle.
+        Utilise uniquement en fallback si LLM echoue.
         """
         if not paths:
-            return f"{source_name} est mentionne dans la base de connaissance."
+            return f"{source_name}"
 
-        # Prendre la premiere relation pour le statement principal
+        # Format simple: source -> relation -> target
         first = paths[0]
         relation_type = first["relation_type"]
         target_name = first["target_name"]
 
-        template = STATEMENT_TEMPLATES.get(
-            relation_type,
-            STATEMENT_TEMPLATES["DEFAULT"]
-        )
+        # Placeholder minimal (sera remplace par LLM)
+        statement = f"{source_name} [{relation_type}] {target_name}"
 
-        statement = template.format(
-            source=source_name,
-            target=target_name,
-            relation=relation_type,
-        )
-
-        # Ajouter un suffixe si plusieurs relations
         if len(paths) > 1:
-            other_types = set(p["relation_type"] for p in paths[1:])
-            if other_types:
-                statement += f" (+ {len(paths)-1} autres relations)"
+            statement += f" (+{len(paths)-1})"
 
         return statement
 
@@ -383,12 +359,93 @@ class ReasoningTraceService:
         steps: List[ReasoningStep],
     ) -> List[ReasoningStep]:
         """
-        Enrichit les statements avec un LLM pour plus de naturel.
+        Enrichit les statements avec un LLM pour des phrases naturelles.
 
-        Optionnel et couteux - desactive par defaut.
+        Detecte la langue de la question et genere dans la meme langue.
         """
-        # TODO: Implementer si besoin
-        # Pour l'instant, on garde les templates simples
+        if not steps:
+            return steps
+
+        try:
+            from knowbase.common.llm_router import get_llm_router, TaskType
+            # Note: Use KNOWLEDGE_EXTRACTION for structured JSON extraction
+
+            # Construire la liste des triplets pour le prompt
+            triplets_text = []
+            for i, step in enumerate(steps):
+                step_triplets = []
+                for support in step.supports:
+                    triplet = f"  - {support.source_concept_name} --[{support.relation_type}]--> {support.target_concept_name}"
+                    if support.edge_confidence > 0:
+                        triplet += f" (confidence: {support.edge_confidence:.0%})"
+                    step_triplets.append(triplet)
+
+                if step_triplets:
+                    triplets_text.append(f"Step {i + 1}:\n" + "\n".join(step_triplets))
+
+            if not triplets_text:
+                return steps
+
+            prompt = f"""You are helping explain WHY an answer is supported by a knowledge graph.
+
+User question: "{query}"
+
+Here are the knowledge graph relationships that support the answer:
+{chr(10).join(triplets_text)}
+
+Generate a natural language explanation for each step.
+IMPORTANT: Detect the language of the user question and generate ALL explanations in that SAME language.
+
+For each step, write a clear, concise sentence that explains the relationship in natural language.
+Focus on explaining the logical connection, not just stating the relationship.
+
+Return JSON format:
+{{
+  "statements": [
+    {{"step": 1, "statement": "Natural explanation for step 1"}},
+    {{"step": 2, "statement": "Natural explanation for step 2"}}
+  ]
+}}
+
+Only return valid JSON, no markdown."""
+
+            router = get_llm_router()
+            response = router.complete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=800,
+            )
+
+            # Parser la reponse JSON
+            import json
+            import re
+
+            # router.complete() retourne une string directement
+            content = response if isinstance(response, str) else str(response)
+
+            # Nettoyer les balises markdown si presentes
+            content = re.sub(r"```json\s*", "", content)
+            content = re.sub(r"```\s*", "", content)
+            content = content.strip()
+
+            data = json.loads(content)
+            statements_list = data.get("statements", [])
+
+            # Creer un mapping step -> statement
+            statements_map = {s["step"]: s["statement"] for s in statements_list}
+
+            # Mettre a jour les steps
+            for step in steps:
+                if step.step_number in statements_map:
+                    step.statement = statements_map[step.step_number]
+
+            logger.info(f"Enriched {len(statements_map)} reasoning steps with LLM")
+
+        except Exception as e:
+            logger.warning(f"LLM enrichment failed, keeping placeholders: {e}")
+            # En cas d'erreur, on garde les placeholders
+
         return steps
 
     def _compute_coherence(
@@ -399,25 +456,25 @@ class ReasoningTraceService:
         Calcule le statut de coherence global.
 
         Returns:
-            (status, message)
+            (status, message) - message is empty, frontend renders based on status
         """
         if not steps:
-            return "incomplete", "Aucun chemin de raisonnement identifie."
+            return "incomplete", ""
 
         # Verifier les conflits
         conflict_count = sum(1 for s in steps if s.is_conflict)
 
         if conflict_count > 1:
-            return "conflict", f"Attention : {conflict_count} contradictions detectees entre sources."
+            return "conflict", ""
         elif conflict_count == 1:
-            return "partial_conflict", "Une source contredit les autres sur un point."
+            return "partial_conflict", ""
 
         # Verifier les etapes non supportees
         unsupported = sum(1 for s in steps if not s.has_kg_support)
         if unsupported > 0:
-            return "partial_conflict", f"{unsupported} etape(s) non supportee(s) par le graphe."
+            return "partial_conflict", ""
 
-        return "coherent", "Ces regles sont coherentes entre elles."
+        return "coherent", ""
 
 
 # === Fonction synchrone wrapper ===

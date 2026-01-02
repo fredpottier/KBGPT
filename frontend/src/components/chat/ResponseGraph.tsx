@@ -39,14 +39,16 @@ import {
   QuestionIcon,
 } from '@chakra-ui/icons';
 import * as d3 from 'd3';
-import type { GraphData, GraphNode, GraphEdge } from '@/types/graph';
+import type { GraphData, GraphNode, GraphEdge, ProofGraph } from '@/types/graph';
 import type { ExplorationIntelligence, ConceptExplanation, ExplorationSuggestion, SuggestedQuestion, ResearchAxis } from '@/types/api';
-import { GRAPH_COLORS, getNodeColor } from '@/types/graph';
+import { GRAPH_COLORS, getNodeColor, getEdgeStyle } from '@/types/graph';
 import { getNodeRadius, getNodeBorderColor } from '@/lib/graph';
 import ResearchAxesSection from './ResearchAxesSection';
+import ProofGraphViewer from '../graph/ProofGraphViewer';
 
 interface ResponseGraphProps {
   graphData: GraphData;
+  proofGraph?: ProofGraph;  // 🌊 Phase 3.5+: Proof Graph prioritaire
   explorationIntelligence?: ExplorationIntelligence;
   onSearch?: (query: string) => void;
   defaultExpanded?: boolean;
@@ -141,16 +143,17 @@ function MiniGraph({
       })
       .filter((e): e is D3Edge => e !== null);
 
-    // Arêtes
+    // Arêtes - style dynamique selon layer (semantic=plein, navigation=pointillé)
     const links = g
       .append('g')
       .attr('class', 'links')
       .selectAll('line')
       .data(d3Edges)
       .join('line')
-      .attr('stroke', '#94A3B8')
-      .attr('stroke-width', 1.5)
-      .attr('opacity', 0.5);
+      .attr('stroke', (d) => getEdgeStyle(d).stroke)
+      .attr('stroke-width', (d) => getEdgeStyle(d).strokeWidth)
+      .attr('stroke-dasharray', (d) => getEdgeStyle(d).strokeDasharray)
+      .attr('opacity', 0.6);
 
     // Noeuds
     const nodeGroups = g
@@ -692,6 +695,7 @@ function ExplorationSection({
  */
 function ResponseGraphComponent({
   graphData,
+  proofGraph,
   explorationIntelligence,
   onSearch,
   defaultExpanded = false,
@@ -704,6 +708,9 @@ function ResponseGraphComponent({
   const edgeCount = graphData.edges.length;
   const queryCount = graphData.queryConceptIds.length;
   const usedCount = graphData.usedConceptIds.length;
+
+  // 🌊 Phase 3.5+: Utiliser ProofGraph si disponible (prioritaire)
+  const useProofGraph = proofGraph && proofGraph.nodes.length > 0;
 
   const handleNodeClick = useCallback((node: GraphNode) => {
     setSelectedNode(node);
@@ -732,100 +739,111 @@ function ResponseGraphComponent({
 
   return (
     <Box mt={1} borderTop="1px solid" borderColor="gray.100" pt={1}>
-      {/* Header compact - seulement si graphe disponible */}
-      {nodeCount > 0 && (
-        <HStack
-          spacing={1}
-          cursor="pointer"
-          onClick={() => setIsExpanded(!isExpanded)}
-          _hover={{ bg: 'gray.50' }}
-          px={1.5}
-          py={0.5}
-          borderRadius="sm"
-          transition="background 0.2s"
-        >
-          <Icon
-            as={isExpanded ? ChevronUpIcon : ChevronDownIcon}
-            boxSize={3}
-            color="gray.400"
-          />
-          <HStack spacing={0.5}>
-            <Box w={1.5} h={1.5} borderRadius="full" bg="teal.400" />
-            <Text fontSize="2xs" color="gray.500" fontWeight="medium">
-              Graph
-            </Text>
-          </HStack>
-          <Badge colorScheme="gray" fontSize="2xs" variant="subtle" px={1}>
-            {nodeCount}
-          </Badge>
-          <Box flex="1" />
-          {isExpanded && (
-            <Tooltip label="Agrandir" fontSize="xs">
-              <IconButton
-                aria-label="Agrandir le graphe"
-                icon={<ExternalLinkIcon boxSize={2.5} />}
-                size="xs"
-                variant="ghost"
-                minW={4}
-                h={4}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openModal();
-                }}
+      {/* 🌊 Phase 3.5+: ProofGraphViewer prioritaire si disponible */}
+      {useProofGraph ? (
+        <ProofGraphViewer
+          proofGraph={proofGraph}
+          onSearch={onSearch}
+          defaultExpanded={defaultExpanded}
+        />
+      ) : (
+        <>
+          {/* Legacy: Header compact - seulement si graphe disponible */}
+          {nodeCount > 0 && (
+            <HStack
+              spacing={1}
+              cursor="pointer"
+              onClick={() => setIsExpanded(!isExpanded)}
+              _hover={{ bg: 'gray.50' }}
+              px={1.5}
+              py={0.5}
+              borderRadius="sm"
+              transition="background 0.2s"
+            >
+              <Icon
+                as={isExpanded ? ChevronUpIcon : ChevronDownIcon}
+                boxSize={3}
+                color="gray.400"
               />
-            </Tooltip>
-          )}
-        </HStack>
-      )}
-
-      {/* Contenu dépliable du graphe - seulement si nodes */}
-      {nodeCount > 0 && (
-        <Collapse in={isExpanded}>
-          <Box mt={1} p={1.5} bg="gray.50" borderRadius="sm">
-            <Flex gap={3}>
-              {/* Graphe - taille minimale pour interface pro */}
-              <Box flex="1">
-                <MiniGraph
-                  graphData={graphData}
-                  width={480}
-                  height={200}
-                  onNodeClick={handleNodeClick}
-                />
-              </Box>
-              {/* Panneau d'info concept sélectionné */}
-              {selectedNode && (
-                <ConceptInfoPanel
-                  node={selectedNode}
-                  edges={graphData.edges}
-                  nodes={graphData.nodes}
-                  conceptExplanation={getConceptExplanation(selectedNode.name)}
-                  onClose={handleCloseInfo}
-                  onSearch={onSearch}
-                />
+              <HStack spacing={0.5}>
+                <Box w={1.5} h={1.5} borderRadius="full" bg="teal.400" />
+                <Text fontSize="2xs" color="gray.500" fontWeight="medium">
+                  Graph
+                </Text>
+              </HStack>
+              <Badge colorScheme="gray" fontSize="2xs" variant="subtle" px={1}>
+                {nodeCount}
+              </Badge>
+              <Box flex="1" />
+              {isExpanded && (
+                <Tooltip label="Agrandir" fontSize="xs">
+                  <IconButton
+                    aria-label="Agrandir le graphe"
+                    icon={<ExternalLinkIcon boxSize={2.5} />}
+                    size="xs"
+                    variant="ghost"
+                    minW={4}
+                    h={4}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openModal();
+                    }}
+                  />
+                </Tooltip>
               )}
-            </Flex>
-
-            {/* Légende ultra-compacte */}
-            <HStack mt={1} spacing={2} fontSize="2xs" color="gray.400" justify="center">
-              <HStack spacing={0.5}>
-                <Box w={1.5} h={1.5} borderRadius="full" bg={GRAPH_COLORS.query} />
-                <Text>Query</Text>
-              </HStack>
-              <HStack spacing={0.5}>
-                <Box w={1.5} h={1.5} borderRadius="full" bg={GRAPH_COLORS.used} />
-                <Text>Utilisé</Text>
-              </HStack>
-              <HStack spacing={0.5}>
-                <Box w={1.5} h={1.5} borderRadius="full" bg={GRAPH_COLORS.suggested} />
-                <Text>Suggéré</Text>
-              </HStack>
-              <HStack spacing={0.5}>
-                <Box w={1.5} h={1.5} borderRadius="full" bg={GRAPH_COLORS.context} />
-                <Text>Ctx</Text>
-              </HStack>
             </HStack>
-          </Box>
-        </Collapse>
+          )}
+
+          {/* Legacy: Contenu dépliable du graphe - seulement si nodes */}
+          {nodeCount > 0 && (
+            <Collapse in={isExpanded}>
+              <Box mt={1} p={1.5} bg="gray.50" borderRadius="sm">
+                <Flex gap={3}>
+                  {/* Graphe - taille minimale pour interface pro */}
+                  <Box flex="1">
+                    <MiniGraph
+                      graphData={graphData}
+                      width={480}
+                      height={200}
+                      onNodeClick={handleNodeClick}
+                    />
+                  </Box>
+                  {/* Panneau d'info concept sélectionné */}
+                  {selectedNode && (
+                    <ConceptInfoPanel
+                      node={selectedNode}
+                      edges={graphData.edges}
+                      nodes={graphData.nodes}
+                      conceptExplanation={getConceptExplanation(selectedNode.name)}
+                      onClose={handleCloseInfo}
+                      onSearch={onSearch}
+                    />
+                  )}
+                </Flex>
+
+                {/* Légende ultra-compacte */}
+                <HStack mt={1} spacing={2} fontSize="2xs" color="gray.400" justify="center">
+                  <HStack spacing={0.5}>
+                    <Box w={1.5} h={1.5} borderRadius="full" bg={GRAPH_COLORS.query} />
+                    <Text>Query</Text>
+                  </HStack>
+                  <HStack spacing={0.5}>
+                    <Box w={1.5} h={1.5} borderRadius="full" bg={GRAPH_COLORS.used} />
+                    <Text>Utilisé</Text>
+                  </HStack>
+                  <HStack spacing={0.5}>
+                    <Box w={1.5} h={1.5} borderRadius="full" bg={GRAPH_COLORS.suggested} />
+                    <Text>Suggéré</Text>
+                  </HStack>
+                  <HStack spacing={0.5}>
+                    <Box w={1.5} h={1.5} borderRadius="full" bg={GRAPH_COLORS.context} />
+                    <Text>Ctx</Text>
+                  </HStack>
+                </HStack>
+              </Box>
+            </Collapse>
+          )}
+        </>
       )}
 
       {/* Section Axes de recherche - priorité sur l'ancienne ExplorationSection */}

@@ -9,10 +9,10 @@
  * 3. CONSOLIDATE_CLAIMS - RawClaims → CanonicalClaims
  * 4. CONSOLIDATE_RELATIONS - RawAssertions → CanonicalRelations
  *
- * Réutilise les composants existants de la page consolidation.
+ * Architecture Job-based avec polling pour progression temps réel.
  */
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Box,
   Button,
@@ -61,6 +61,9 @@ import {
   FiGrid,
   FiBox,
   FiActivity,
+  FiStopCircle,
+  FiClock,
+  FiXCircle,
 } from 'react-icons/fi'
 import { apiClient } from '@/lib/api'
 
@@ -74,6 +77,11 @@ interface Pass2Status {
   raw_claims: number
   canonical_relations: number
   canonical_claims: number
+  // Entity Resolution stats
+  er_standalone_concepts: number
+  er_merged_concepts: number
+  er_pending_proposals: number
+  // Jobs
   pending_jobs: number
   running_jobs: number
 }
@@ -96,6 +104,28 @@ interface PhaseConfig {
   icon: any
   color: string
   endpoint: string
+}
+
+// Job System Types
+interface Pass2JobProgress {
+  phase: string
+  items_processed: number
+  items_total: number
+  percentage: number
+  current_batch: number
+  total_batches: number
+  errors: string[]
+}
+
+interface Pass2Job {
+  job_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  progress: Pass2JobProgress | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  error: string | null
+  result: Record<string, any> | null
 }
 
 const phases: PhaseConfig[] = [
@@ -130,6 +160,14 @@ const phases: PhaseConfig[] = [
     icon: FiGitMerge,
     color: 'orange',
     endpoint: '/admin/pass2/consolidate-relations',
+  },
+  {
+    id: 'corpus-er',
+    name: 'Entity Resolution',
+    description: 'Fusionne les concepts dupliqués à travers le corpus',
+    icon: FiLayers,
+    color: 'cyan',
+    endpoint: '/admin/pass2/corpus-er',
   },
 ]
 
@@ -293,6 +331,207 @@ const PhaseCard = ({
   )
 }
 
+// Format elapsed time
+const formatDuration = (startTime: string | null, endTime?: string | null): string => {
+  if (!startTime) return '--'
+  const start = new Date(startTime).getTime()
+  const end = endTime ? new Date(endTime).getTime() : Date.now()
+  const seconds = Math.floor((end - start) / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  return `${minutes}m ${remainingSeconds}s`
+}
+
+// Job Progress Card Component
+const JobProgressCard = ({
+  job,
+  onCancel,
+  isCancelling,
+}: {
+  job: Pass2Job
+  onCancel: () => void
+  isCancelling: boolean
+}) => {
+  const progress = job.progress
+  const isActive = job.status === 'pending' || job.status === 'running'
+
+  const statusColor = {
+    pending: 'yellow',
+    running: 'blue',
+    completed: 'green',
+    failed: 'red',
+    cancelled: 'gray',
+  }[job.status]
+
+  const statusIcon = {
+    pending: FiClock,
+    running: FiActivity,
+    completed: FiCheckCircle,
+    failed: FiXCircle,
+    cancelled: FiStopCircle,
+  }[job.status]
+
+  const statusText = {
+    pending: 'En attente',
+    running: 'En cours',
+    completed: 'Terminé',
+    failed: 'Échoué',
+    cancelled: 'Annulé',
+  }[job.status]
+
+  return (
+    <Box
+      bg="bg.secondary"
+      border="2px solid"
+      borderColor={`${statusColor}.500`}
+      rounded="xl"
+      p={5}
+      mb={6}
+    >
+      <HStack justify="space-between" mb={4}>
+        <HStack spacing={3}>
+          <Box
+            w={10}
+            h={10}
+            rounded="lg"
+            bg={`${statusColor}.900`}
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+          >
+            {isActive ? (
+              <Spinner size="sm" color={`${statusColor}.400`} />
+            ) : (
+              <Icon as={statusIcon} boxSize={5} color={`${statusColor}.400`} />
+            )}
+          </Box>
+          <VStack align="start" spacing={0}>
+            <HStack>
+              <Text fontWeight="semibold" color="text.primary">
+                Pass 2 Job
+              </Text>
+              <Badge colorScheme={statusColor} fontSize="xs">
+                {statusText}
+              </Badge>
+            </HStack>
+            <Text fontSize="xs" color="text.muted">
+              ID: {job.job_id.slice(0, 8)}...
+            </Text>
+          </VStack>
+        </HStack>
+
+        {isActive && (
+          <Button
+            leftIcon={<FiStopCircle />}
+            colorScheme="red"
+            variant="outline"
+            size="sm"
+            onClick={onCancel}
+            isLoading={isCancelling}
+            loadingText="Annulation..."
+          >
+            Annuler
+          </Button>
+        )}
+      </HStack>
+
+      {/* Progress bar */}
+      {progress && (
+        <Box mb={4}>
+          <HStack justify="space-between" mb={2}>
+            <Text fontSize="sm" color="text.secondary">
+              Phase: <Text as="span" fontWeight="semibold" color={`${statusColor}.300`}>{progress.phase || 'Initialisation...'}</Text>
+            </Text>
+            <Text fontSize="sm" color="text.muted">
+              {progress.items_processed ?? 0} / {progress.items_total ?? '?'}
+            </Text>
+          </HStack>
+          <Progress
+            value={progress.percentage ?? 0}
+            size="lg"
+            colorScheme={statusColor}
+            rounded="lg"
+            hasStripe={isActive}
+            isAnimated={isActive}
+          />
+          <HStack justify="space-between" mt={2}>
+            <Text fontSize="xs" color="text.muted">
+              Batch {progress.current_batch ?? 0} / {progress.total_batches ?? '?'}
+            </Text>
+            <Text fontSize="sm" fontWeight="bold" color={`${statusColor}.300`}>
+              {(progress.percentage ?? 0).toFixed(1)}%
+            </Text>
+          </HStack>
+        </Box>
+      )}
+
+      {/* Stats */}
+      <SimpleGrid columns={3} spacing={4}>
+        <VStack spacing={0}>
+          <Text fontSize="xs" color="text.muted">Démarré</Text>
+          <Text fontSize="sm" fontWeight="medium" color="text.primary">
+            {job.started_at ? new Date(job.started_at).toLocaleTimeString() : '--'}
+          </Text>
+        </VStack>
+        <VStack spacing={0}>
+          <Text fontSize="xs" color="text.muted">Durée</Text>
+          <Text fontSize="sm" fontWeight="medium" color="text.primary">
+            {formatDuration(job.started_at, job.completed_at)}
+          </Text>
+        </VStack>
+        <VStack spacing={0}>
+          <Text fontSize="xs" color="text.muted">Terminé</Text>
+          <Text fontSize="sm" fontWeight="medium" color="text.primary">
+            {job.completed_at ? new Date(job.completed_at).toLocaleTimeString() : '--'}
+          </Text>
+        </VStack>
+      </SimpleGrid>
+
+      {/* Error display */}
+      {job.error && (
+        <Alert status="error" variant="subtle" rounded="lg" mt={4} bg="red.900" border="1px solid" borderColor="red.600">
+          <AlertIcon color="red.400" />
+          <Text fontSize="sm" color="red.200">{job.error}</Text>
+        </Alert>
+      )}
+
+      {/* Progress errors */}
+      {progress && progress.errors.length > 0 && (
+        <Alert status="warning" variant="subtle" rounded="lg" mt={4} bg="yellow.900" border="1px solid" borderColor="yellow.600">
+          <AlertIcon color="yellow.400" />
+          <Box>
+            <Text fontSize="sm" fontWeight="medium" color="yellow.200">
+              {progress.errors.length} erreur(s) rencontrée(s)
+            </Text>
+            <Text fontSize="xs" color="yellow.300" noOfLines={2}>
+              {progress.errors.slice(0, 3).join(', ')}
+              {progress.errors.length > 3 && ` (+${progress.errors.length - 3} autres)`}
+            </Text>
+          </Box>
+        </Alert>
+      )}
+
+      {/* Result summary */}
+      {job.status === 'completed' && job.result && (
+        <Box mt={4} p={3} bg="green.900" rounded="lg" border="1px solid" borderColor="green.600">
+          <Text fontSize="sm" fontWeight="medium" color="green.200" mb={2}>
+            Résumé de l'exécution
+          </Text>
+          <SimpleGrid columns={2} spacing={2}>
+            {Object.entries(job.result.phases || {}).map(([phase, data]: [string, any]) => (
+              <HStack key={phase} justify="space-between" px={2}>
+                <Text fontSize="xs" color="green.300">{phase}:</Text>
+                <Text fontSize="xs" color="green.100">{data.items_processed || 0} traités</Text>
+              </HStack>
+            ))}
+          </SimpleGrid>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
 // Flow Diagram
 const Pass2FlowDiagram = () => (
   <Box
@@ -324,6 +563,10 @@ const Pass2FlowDiagram = () => (
         <Text fontSize="sm" fontWeight="medium" color="green.200">Consolidation</Text>
       </Box>
       <Icon as={FiArrowRight} boxSize={4} color="text.muted" />
+      <Box px={3} py={2} bg="cyan.900" border="1px solid" borderColor="cyan.500" rounded="lg">
+        <Text fontSize="sm" fontWeight="medium" color="cyan.200">Entity Resolution</Text>
+      </Box>
+      <Icon as={FiArrowRight} boxSize={4} color="text.muted" />
       <Box px={3} py={2} bg="brand.900" border="1px solid" borderColor="brand.500" rounded="lg">
         <Text fontSize="sm" fontWeight="medium" color="brand.200">KG Enrichi</Text>
       </Box>
@@ -336,6 +579,143 @@ export default function Pass2DashboardPage() {
   const queryClient = useQueryClient()
   const [phaseResults, setPhaseResults] = useState<Record<string, Pass2Result>>({})
   const [runningPhase, setRunningPhase] = useState<string | null>(null)
+
+  // Job management state
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [activeJob, setActiveJob] = useState<Pass2Job | null>(null)
+  const [isCancelling, setIsCancelling] = useState(false)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null) // Ref to avoid stale closure issues
+  const toastShownForJobRef = useRef<string | null>(null) // Prevent duplicate toasts (ref to avoid closure issues)
+
+  // Poll job status
+  const pollJobStatus = useCallback(async (jobId: string) => {
+    try {
+      const res = await apiClient.get<Pass2Job>(`/admin/pass2/jobs/${jobId}`)
+      if (res.success && res.data) {
+        setActiveJob(res.data)
+
+        // Stop polling if job is done
+        if (['completed', 'failed', 'cancelled'].includes(res.data.status)) {
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current)
+            pollingIntervalRef.current = null
+          }
+          // Refresh status
+          queryClient.invalidateQueries({ queryKey: ['pass2'] })
+
+          // Show toast only once per job (use ref to avoid closure issues with setInterval)
+          if (toastShownForJobRef.current !== jobId) {
+            toastShownForJobRef.current = jobId
+            if (res.data.status === 'completed') {
+              toast({
+                title: 'Pass 2 terminé',
+                description: 'Toutes les phases ont été exécutées avec succès',
+                status: 'success',
+                duration: 5000,
+              })
+            } else if (res.data.status === 'failed') {
+              toast({
+                title: 'Pass 2 échoué',
+                description: res.data.error || 'Erreur inconnue',
+                status: 'error',
+                duration: 5000,
+              })
+            } else if (res.data.status === 'cancelled') {
+              toast({
+                title: 'Pass 2 annulé',
+                description: 'Le job a été annulé par l\'utilisateur',
+                status: 'warning',
+                duration: 3000,
+              })
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error polling job status:', error)
+    }
+  }, [queryClient, toast])
+
+  // Start polling when job starts
+  useEffect(() => {
+    if (activeJobId && !pollingIntervalRef.current) {
+      // Initial poll
+      pollJobStatus(activeJobId)
+
+      // Start interval
+      const interval = setInterval(() => {
+        pollJobStatus(activeJobId)
+      }, 2000) // Poll every 2 seconds
+
+      pollingIntervalRef.current = interval
+    }
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+    }
+  }, [activeJobId, pollJobStatus])
+
+  // Cancel job handler
+  const handleCancelJob = async () => {
+    if (!activeJobId) return
+
+    setIsCancelling(true)
+    try {
+      await apiClient.delete(`/admin/pass2/jobs/${activeJobId}`)
+      // Polling will pick up the cancelled status
+    } catch (error) {
+      toast({
+        title: 'Erreur annulation',
+        description: 'Impossible d\'annuler le job',
+        status: 'error',
+        duration: 3000,
+      })
+    } finally {
+      setIsCancelling(false)
+    }
+  }
+
+  // Clear job display
+  const handleClearJob = () => {
+    setActiveJobId(null)
+    setActiveJob(null)
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+    // Reset toast tracking for next job
+    toastShownForJobRef.current = null
+  }
+
+  // Load active job on component mount (restore after page reload/session expiry)
+  useEffect(() => {
+    const loadActiveJob = async () => {
+      try {
+        // Fetch recent jobs to find any running one
+        const res = await apiClient.get<{ jobs: Pass2Job[], total: number }>('/admin/pass2/jobs?limit=5')
+        if (res.success && res.data?.jobs) {
+          // Find a running or pending job
+          const activeJob = res.data.jobs.find(
+            (job) => job.status === 'running' || job.status === 'pending'
+          )
+          if (activeJob) {
+            setActiveJobId(activeJob.job_id)
+            setActiveJob(activeJob)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load active job:', error)
+      }
+    }
+
+    // Only load if no active job already
+    if (!activeJobId) {
+      loadActiveJob()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch Pass 2 status
   const {
@@ -387,33 +767,35 @@ export default function Pass2DashboardPage() {
     },
   })
 
-  // Run full Pass 2
+  // Run full Pass 2 (using job-based API)
   const runFullMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiClient.post('/admin/pass2/run-full', {
+      // Create a background job instead of waiting for completion
+      const res = await apiClient.post<Pass2Job>('/admin/pass2/jobs', {
         skip_classify: false,
         skip_enrich: false,
         skip_consolidate: false,
+        batch_size: 500,
+        process_all: true,
       })
-      if (!res.success) throw new Error(res.error || 'Full Pass 2 failed')
+      if (!res.success || !res.data) throw new Error(res.error || 'Failed to create Pass 2 job')
       return res.data
     },
-    onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ['pass2'] })
-      const totalProcessed = Object.values(data.phases || {}).reduce(
-        (sum: number, p: any) => sum + (p.items_processed || 0),
-        0
-      )
+    onSuccess: (job: Pass2Job) => {
+      // Start tracking the job
+      setActiveJobId(job.job_id)
+      setActiveJob(job)
+
       toast({
-        title: 'Pass 2 complet terminé',
-        description: `${totalProcessed} items traités au total`,
-        status: data.success ? 'success' : 'warning',
-        duration: 5000,
+        title: 'Pass 2 démarré',
+        description: `Job ${job.job_id.slice(0, 8)}... créé. Suivi en temps réel activé.`,
+        status: 'info',
+        duration: 3000,
       })
     },
     onError: (error: any) => {
       toast({
-        title: 'Erreur Pass 2',
+        title: 'Erreur création job',
         description: error.message,
         status: 'error',
         duration: 5000,
@@ -475,14 +857,18 @@ export default function Pass2DashboardPage() {
                 Rafraîchir
               </Button>
             </Tooltip>
-            <Tooltip label="Exécute toutes les phases dans l'ordre">
+            <Tooltip label={activeJob && ['pending', 'running'].includes(activeJob.status)
+              ? "Un job est déjà en cours"
+              : "Exécute toutes les phases dans l'ordre (batch_size=500, process_all=true)"
+            }>
               <Button
                 leftIcon={<FiZap />}
                 colorScheme="brand"
                 size="lg"
                 onClick={() => runFullMutation.mutate()}
                 isLoading={runFullMutation.isPending}
-                loadingText="Exécution..."
+                isDisabled={activeJob && ['pending', 'running'].includes(activeJob.status)}
+                loadingText="Création job..."
                 _hover={{
                   transform: 'translateY(-2px)',
                   boxShadow: '0 0 20px rgba(99, 102, 241, 0.4)',
@@ -498,8 +884,34 @@ export default function Pass2DashboardPage() {
       {/* Flow Diagram */}
       <Pass2FlowDiagram />
 
+      {/* Active Job Progress Card */}
+      {activeJob && (
+        <Box position="relative">
+          <JobProgressCard
+            job={activeJob}
+            onCancel={handleCancelJob}
+            isCancelling={isCancelling}
+          />
+          {/* Clear button for completed jobs */}
+          {['completed', 'failed', 'cancelled'].includes(activeJob.status) && (
+            <Button
+              size="xs"
+              variant="ghost"
+              position="absolute"
+              top={2}
+              right={2}
+              onClick={handleClearJob}
+              color="text.muted"
+              _hover={{ color: 'text.primary' }}
+            >
+              Fermer
+            </Button>
+          )}
+        </Box>
+      )}
+
       {/* Status Cards */}
-      <SimpleGrid columns={{ base: 2, md: 4, lg: 8 }} spacing={4} mb={8}>
+      <SimpleGrid columns={{ base: 2, md: 4, lg: 6 }} spacing={4} mb={4}>
         <StatCard
           title="ProtoConcepts"
           value={status?.proto_concepts || 0}
@@ -536,10 +948,35 @@ export default function Pass2DashboardPage() {
           icon={FiTarget}
           color="teal"
         />
+      </SimpleGrid>
+
+      {/* Entity Resolution Stats */}
+      <SimpleGrid columns={{ base: 2, md: 5 }} spacing={4} mb={8}>
+        <StatCard
+          title="ER Standalone"
+          value={status?.er_standalone_concepts || 0}
+          subtitle="Non fusionnés"
+          icon={FiGrid}
+          color="cyan"
+        />
+        <StatCard
+          title="ER Merged"
+          value={status?.er_merged_concepts || 0}
+          subtitle="Fusionnés"
+          icon={FiGitMerge}
+          color="cyan"
+        />
+        <StatCard
+          title="ER Proposals"
+          value={status?.er_pending_proposals || 0}
+          subtitle="En attente review"
+          icon={FiLayers}
+          color="cyan"
+        />
         <StatCard
           title="Jobs en attente"
           value={status?.pending_jobs || 0}
-          icon={FiLayers}
+          icon={FiClock}
           color="gray"
         />
         <StatCard
@@ -568,7 +1005,7 @@ export default function Pass2DashboardPage() {
       <Text fontSize="lg" fontWeight="semibold" color="text.primary" mb={4}>
         Phases Pass 2
       </Text>
-      <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4} mb={8}>
+      <SimpleGrid columns={{ base: 1, md: 2, lg: 5 }} spacing={4} mb={8}>
         {phases.map((phase) => (
           <PhaseCard
             key={phase.id}
@@ -609,7 +1046,7 @@ export default function Pass2DashboardPage() {
                   <Text fontSize="sm" color="text.muted">1. CLASSIFY_FINE - Classification LLM fine-grained</Text>
                   <Text fontSize="sm" color="text.muted">2. ENRICH_RELATIONS - Relations cross-segment</Text>
                   <Text fontSize="sm" color="text.muted">3. CONSOLIDATE - Claims + Relations → Canonical</Text>
-                  <Text fontSize="sm" color="text.muted">4. CROSS_DOC - Consolidation corpus (TODO)</Text>
+                  <Text fontSize="sm" color="text.muted">4. CORPUS_ER - Entity Resolution (fusion doublons)</Text>
                 </VStack>
               </Box>
             </SimpleGrid>

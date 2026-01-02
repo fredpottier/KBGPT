@@ -98,7 +98,8 @@ def synthesize_response(
     question: str,
     chunks: List[Dict[str, Any]],
     graph_context_text: str = "",
-    session_context_text: str = ""
+    session_context_text: str = "",
+    kg_signals: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Génère une réponse synthétisée à partir des chunks et de la question.
@@ -108,6 +109,8 @@ def synthesize_response(
         chunks: Liste des chunks reranqués
         graph_context_text: Contexte Knowledge Graph formaté (OSMOSE)
         session_context_text: Contexte conversationnel formaté (Memory Layer Phase 2.5)
+        kg_signals: Signaux KG optionnels pour le calcul de confiance
+                   {"concepts_count", "relations_count", "sources_count", "avg_confidence"}
 
     Returns:
         Dictionnaire contenant la réponse synthétisée et les métadonnées
@@ -199,13 +202,50 @@ def synthesize_response(
         num_chunks = len(chunks)
         diversity_bonus = min(0.1, num_chunks * 0.02)  # +2% par chunk, max +10%
 
-        # Score final
-        confidence = min(base_confidence + diversity_bonus, 1.0)
+        # Score final base (sans KG)
+        base_confidence_final = min(base_confidence + diversity_bonus, 1.0)
+
+        # Bonus KG si signaux disponibles (le KG doit AMÉLIORER la confiance)
+        kg_bonus = 0.0
+        if kg_signals:
+            concepts_count = kg_signals.get("concepts_count", 0)
+            relations_count = kg_signals.get("relations_count", 0)
+            kg_sources = kg_signals.get("sources_count", 0)
+            kg_avg_conf = kg_signals.get("avg_confidence", 0.0)
+
+            # Bonus si le KG apporte des concepts pertinents
+            if concepts_count > 0:
+                kg_bonus += min(0.05, concepts_count * 0.01)  # +1% par concept, max +5%
+
+            # Bonus si le KG apporte des relations typées
+            if relations_count > 0:
+                kg_bonus += min(0.08, relations_count * 0.02)  # +2% par relation, max +8%
+
+            # Bonus si multi-sources dans le KG
+            if kg_sources >= 2:
+                kg_bonus += 0.05  # +5% pour multi-sources
+
+            # Modulation par la confiance moyenne des relations KG
+            if kg_avg_conf > 0:
+                kg_bonus *= kg_avg_conf  # Pondère par la qualité
+
+            logger.debug(
+                f"[SYNTHESIS] KG bonus: {kg_bonus:.2%} "
+                f"(concepts={concepts_count}, relations={relations_count}, sources={kg_sources})"
+            )
+
+        # Score final = base + KG bonus (le KG ne peut qu'améliorer)
+        confidence = min(base_confidence_final + kg_bonus, 1.0)
 
         return {
             "synthesized_answer": synthesized_answer.strip(),
             "sources_used": sources_used,
-            "confidence": min(confidence, 1.0)  # Cap à 1.0
+            "confidence": confidence,
+            "confidence_breakdown": {
+                "base_score": round(base_confidence_final, 3),
+                "kg_bonus": round(kg_bonus, 3),
+                "final_score": round(confidence, 3)
+            }
         }
 
     except Exception as e:

@@ -265,6 +265,8 @@ export interface SearchResponse {
   // 🌊 Phase 3.5: Knowledge Graph
   graph_context?: any
   graph_data?: import('./graph').GraphData
+  // 🌊 Phase 3.5+: Proof Graph (budgeté et hiérarchisé)
+  proof_graph?: import('./graph').ProofGraph
   // 🌊 Phase 3.5+: Exploration Intelligence
   exploration_intelligence?: ExplorationIntelligence
   // 🌊 Answer+Proof: New fields

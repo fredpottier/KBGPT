@@ -1017,12 +1017,12 @@ def process_pdf(pdf_path: Path, document_type_id: str | None = None, use_vision:
 
         elif not loaded_from_cache:
             # ===== MODE TEXT-ONLY : MegaParse extraction uniquement =====
-            from knowbase.ingestion.parsers.megaparse_pdf import parse_pdf_with_megaparse
+            from knowbase.ingestion.parsers.megaparse_safe import parse_pdf_safe
 
-            logger.info("📚 [OSMOSE PURE] Mode TEXT-ONLY: MegaParse extraction (pas d'analyse LLM)")
+            logger.info("📚 [OSMOSE PURE] Mode TEXT-ONLY: MegaParse extraction (circuit breaker activé)")
 
             try:
-                semantic_blocks = parse_pdf_with_megaparse(pdf_path, use_vision=False)
+                semantic_blocks = parse_pdf_safe(pdf_path, timeout=300, max_memory_mb=8192, use_vision=False)
                 logger.info(f"✅ MegaParse: {len(semantic_blocks)} blocs sémantiques extraits")
 
                 # Extraire le texte complet depuis les blocs (SANS analyse LLM)

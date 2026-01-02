@@ -30,6 +30,14 @@ from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 from knowbase.semantic.inference import InferenceEngine, InsightType
 
+# Navigation Layer - Whitelist relations sémantiques (ADR: ADR_NAVIGATION_LAYER.md)
+# Le RAG ne doit JAMAIS utiliser les relations de navigation (MENTIONED_IN, etc.)
+SEMANTIC_RELATION_TYPES = frozenset({
+    "REQUIRES", "ENABLES", "PREVENTS", "CAUSES",
+    "APPLIES_TO", "DEPENDS_ON", "PART_OF", "MITIGATES",
+    "CONFLICTS_WITH", "DEFINES", "EXAMPLE_OF", "GOVERNED_BY",
+})
+
 # Palier 2 - Semantic Search (importe depuis concept_embedding_service)
 from knowbase.semantic.concept_embedding_service import (
     QDRANT_CONCEPTS_COLLECTION,
@@ -727,11 +735,14 @@ class GraphGuidedSearchService:
             allowed_maturities = ["VALIDATED", "CANDIDATE"]
 
         # Requête avec filtres de visibilité
+        # ADR: ADR_NAVIGATION_LAYER.md - Whitelist stricte des relations sémantiques
+        # Le RAG ne doit JAMAIS utiliser les relations de navigation (MENTIONED_IN, etc.)
         cypher = """
         UNWIND $concepts AS concept_name
         MATCH (c:CanonicalConcept {canonical_name: concept_name, tenant_id: $tenant_id})
         MATCH (c)-[r]-(related:CanonicalConcept)
         WHERE related.tenant_id = $tenant_id
+          AND type(r) IN $semantic_relation_types
           AND coalesce(r.confidence, 0.5) >= $min_confidence
           AND coalesce(r.source_count, 1) >= $min_source_count
           AND coalesce(r.maturity, 'CANDIDATE') IN $allowed_maturities
@@ -750,6 +761,7 @@ class GraphGuidedSearchService:
             results = self.neo4j_client.execute_query(cypher, {
                 "concepts": concept_names,
                 "tenant_id": tenant_id,
+                "semantic_relation_types": list(SEMANTIC_RELATION_TYPES),
                 "min_confidence": min_confidence,
                 "min_source_count": min_source_count,
                 "allowed_maturities": allowed_maturities,

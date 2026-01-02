@@ -45,11 +45,12 @@ const RELATION_COLORS: Record<string, string> = {
   DEFAULT: 'gray',
 }
 
-// Configuration coherence (definie hors du composant)
-const COHERENCE_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
-  coherent: { icon: FiCheckCircle, color: 'green.400', label: 'Coherent' },
-  partial_conflict: { icon: FiAlertTriangle, color: 'yellow.400', label: 'Partiel' },
-  conflict: { icon: FiAlertTriangle, color: 'orange.400', label: 'Conflit' },
+// Configuration coherence - icon-based (language-agnostic)
+const COHERENCE_CONFIG: Record<string, { icon: any; color: string; colorScheme: string }> = {
+  coherent: { icon: FiCheckCircle, color: 'green.400', colorScheme: 'green' },
+  partial_conflict: { icon: FiAlertTriangle, color: 'yellow.400', colorScheme: 'yellow' },
+  conflict: { icon: FiAlertTriangle, color: 'orange.400', colorScheme: 'orange' },
+  incomplete: { icon: FiAlertTriangle, color: 'gray.400', colorScheme: 'gray' },
 }
 
 export default function ReasoningTracePanel({ trace, onSourceClick }: ReasoningTracePanelProps) {
@@ -81,7 +82,7 @@ export default function ReasoningTracePanel({ trace, onSourceClick }: ReasoningT
         <HStack spacing={2}>
           <Icon as={FiSearch} boxSize={4} color="brand.400" />
           <Text fontSize="xs" fontWeight="medium" color="text.primary">
-            Pourquoi cette reponse tient
+            Reasoning Trace
           </Text>
           <Badge
             colorScheme={
@@ -90,7 +91,7 @@ export default function ReasoningTracePanel({ trace, onSourceClick }: ReasoningT
             }
             fontSize="2xs"
           >
-            {trace.steps.length} etape(s)
+            {trace.steps.length}
           </Badge>
         </HStack>
         <Icon
@@ -105,9 +106,12 @@ export default function ReasoningTracePanel({ trace, onSourceClick }: ReasoningT
         <VStack spacing={3} p={4} align="stretch">
           {/* Etapes de raisonnement */}
           {trace.steps.length === 0 ? (
-            <Text fontSize="xs" color="text.muted" textAlign="center" py={4}>
-              Aucun chemin de raisonnement identifie
-            </Text>
+            <HStack justify="center" py={4} spacing={2}>
+              <Icon as={FiSearch} color="text.muted" boxSize={4} />
+              <Text fontSize="xs" color="text.muted">
+                —
+              </Text>
+            </HStack>
           ) : (
             trace.steps.map((step) => (
               <ReasoningStepCard
@@ -118,7 +122,7 @@ export default function ReasoningTracePanel({ trace, onSourceClick }: ReasoningT
             ))
           )}
 
-          {/* Footer coherence */}
+          {/* Footer coherence - icon + badge based (language-agnostic) */}
           <Box
             mt={2}
             pt={3}
@@ -127,15 +131,29 @@ export default function ReasoningTracePanel({ trace, onSourceClick }: ReasoningT
           >
             <HStack spacing={2}>
               <Icon as={coherenceConfig.icon} color={coherenceConfig.color} boxSize={4} />
-              <Text fontSize="xs" color="text.secondary">
-                {trace.coherence_message || 'Ces regles sont coherentes entre elles.'}
-              </Text>
+              <Badge
+                colorScheme={coherenceConfig.colorScheme}
+                fontSize="2xs"
+                variant="subtle"
+              >
+                {trace.coherence_status}
+              </Badge>
+              {trace.coherence_message && (
+                <Text fontSize="xs" color="text.secondary">
+                  {trace.coherence_message}
+                </Text>
+              )}
             </HStack>
 
             {trace.unsupported_steps_count > 0 && (
-              <Text fontSize="2xs" color="text.muted" mt={1}>
-                {trace.unsupported_steps_count} etape(s) non supportee(s) par le graphe
-              </Text>
+              <HStack spacing={1} mt={1}>
+                <Badge colorScheme="gray" fontSize="2xs" variant="outline">
+                  {trace.unsupported_steps_count}
+                </Badge>
+                <Text fontSize="2xs" color="text.muted">
+                  unsupported
+                </Text>
+              </HStack>
             )}
           </Box>
         </VStack>
@@ -172,18 +190,14 @@ function ReasoningStepCard({ step, onSourceClick }: ReasoningStepCardProps) {
           {step.statement}
         </Text>
         {!step.has_kg_support && (
-          <Tooltip label="Non supporte par le KG" placement="top" fontSize="xs">
-            <Badge colorScheme="gray" fontSize="2xs" variant="outline">
-              Hypothese
-            </Badge>
-          </Tooltip>
+          <Badge colorScheme="gray" fontSize="2xs" variant="outline">
+            ?
+          </Badge>
         )}
         {step.is_conflict && (
-          <Tooltip label="Contradiction detectee" placement="top" fontSize="xs">
-            <Badge colorScheme="orange" fontSize="2xs">
-              Conflit
-            </Badge>
-          </Tooltip>
+          <Badge colorScheme="orange" fontSize="2xs">
+            ⚠
+          </Badge>
         )}
       </HStack>
 
@@ -228,7 +242,7 @@ function SupportRelation({ support, onSourceClick }: SupportRelationProps) {
         {support.target_concept_name}
       </Text>
       <Tooltip
-        label={`Confiance: ${(support.edge_confidence * 100).toFixed(0)}%`}
+        label={`${(support.edge_confidence * 100).toFixed(0)}%`}
         placement="top"
         fontSize="xs"
       >

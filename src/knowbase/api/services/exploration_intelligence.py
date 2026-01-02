@@ -372,7 +372,7 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après."""
 
         try:
             response = self.llm_router.complete(
-                task_type=TaskType.JSON_EXTRACTION,
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
                 messages=messages,
                 temperature=0.3,
                 max_tokens=1500
@@ -383,7 +383,8 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après."""
             import re
 
             # Nettoyer la réponse (enlever markdown si présent)
-            cleaned = response.strip()
+            content = response.get("content", "") if isinstance(response, dict) else str(response)
+            cleaned = content.strip()
             if cleaned.startswith("```"):
                 cleaned = re.sub(r'^```(?:json)?\n?', '', cleaned)
                 cleaned = re.sub(r'\n?```$', '', cleaned)

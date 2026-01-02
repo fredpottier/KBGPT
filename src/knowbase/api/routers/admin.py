@@ -626,6 +626,11 @@ class Pass2StatusResponse(BaseModel):
     raw_claims: int = 0
     canonical_relations: int = 0
     canonical_claims: int = 0
+    # Entity Resolution stats
+    er_standalone_concepts: int = 0
+    er_merged_concepts: int = 0
+    er_pending_proposals: int = 0
+    # Jobs
     pending_jobs: int = 0
     running_jobs: int = 0
 
@@ -678,6 +683,9 @@ async def get_pass2_status(
         raw_claims=status.raw_claims,
         canonical_relations=status.canonical_relations,
         canonical_claims=status.canonical_claims,
+        er_standalone_concepts=status.er_standalone_concepts,
+        er_merged_concepts=status.er_merged_concepts,
+        er_pending_proposals=status.er_pending_proposals,
         pending_jobs=status.pending_jobs,
         running_jobs=status.running_jobs
     )
@@ -831,12 +839,62 @@ async def run_consolidate_relations(
     )
 
 
+class Pass2CorpusERRequest(BaseModel):
+    """Requête pour exécuter CORPUS_ER."""
+    dry_run: bool = Field(False, description="Si True, preview sans exécuter les merges")
+    limit: Optional[int] = Field(None, description="Limite de concepts à analyser (pour tests)")
+
+
+@router.post(
+    "/pass2/corpus-er",
+    response_model=Pass2ResultResponse,
+    summary="Exécuter CORPUS_ER (Entity Resolution)",
+    description="""
+    Exécute la phase CORPUS_ER de Pass 2.
+
+    Cette phase fusionne les CanonicalConcepts dupliqués à travers le corpus.
+
+    **Spec**: PATCH-ER-04/05/06 (ChatGPT calibration)
+    - TopK + Mutual Best pruning
+    - Decision v2 (AUTO/PROPOSE/REJECT)
+    - Hard budget proposals cap (1000 max)
+
+    **Distribution cible**: ~80% AUTO / ~15% PROPOSE / ~5% REJECT
+    """
+)
+async def run_corpus_er(
+    request: Pass2CorpusERRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Exécute Entity Resolution corpus-level."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    result = service.run_corpus_er(
+        dry_run=request.dry_run,
+        limit=request.limit
+    )
+
+    return Pass2ResultResponse(
+        success=result.success,
+        phase=result.phase,
+        items_processed=result.items_processed,
+        items_created=result.items_created,
+        items_updated=result.items_updated,
+        execution_time_ms=result.execution_time_ms,
+        errors=result.errors,
+        details=result.details
+    )
+
+
 class Pass2FullRequest(BaseModel):
     """Requête pour exécuter Pass 2 complet."""
     document_id: Optional[str] = Field(None, description="Filtrer par document")
     skip_classify: bool = Field(False, description="Ignorer CLASSIFY_FINE")
     skip_enrich: bool = Field(False, description="Ignorer ENRICH_RELATIONS")
     skip_consolidate: bool = Field(False, description="Ignorer consolidation")
+    skip_corpus_er: bool = Field(False, description="Ignorer CORPUS_ER (Entity Resolution)")
 
 
 @router.post(
@@ -849,6 +907,7 @@ class Pass2FullRequest(BaseModel):
     2. **ENRICH_RELATIONS**: Détection relations cross-segment + persistence
     3. **CONSOLIDATE_CLAIMS**: RawClaims → CanonicalClaims
     4. **CONSOLIDATE_RELATIONS**: RawAssertions → CanonicalRelations
+    5. **CORPUS_ER**: Entity Resolution corpus-level
 
     Chaque phase peut être désactivée individuellement.
     """
@@ -866,7 +925,8 @@ async def run_full_pass2(
         document_id=request.document_id,
         skip_classify=request.skip_classify,
         skip_enrich=request.skip_enrich,
-        skip_consolidate=request.skip_consolidate
+        skip_consolidate=request.skip_consolidate,
+        skip_corpus_er=request.skip_corpus_er
     )
 
     return {
@@ -929,6 +989,131 @@ async def unload_gpu_model():
         "message": f"Modèle {status_before['model_name']} déchargé",
         "model_was_loaded": True,
         "gpu_memory_allocated_gb_after": gpu_memory_after
+    }
+
+
+# =============================================================================
+# Pass 2 Background Jobs (Production-Ready)
+# =============================================================================
+
+class Pass2JobRequest(BaseModel):
+    """Requête pour créer un job Pass2."""
+    document_id: Optional[str] = None
+    skip_classify: bool = False
+    skip_enrich: bool = False
+    skip_consolidate: bool = False
+    skip_corpus_er: bool = False
+    batch_size: int = Field(default=500, ge=10, le=1000, description="Taille des batches de classification")
+    process_all: bool = Field(default=True, description="Si True, traite tous les concepts sans limite")
+
+
+@router.post(
+    "/pass2/jobs",
+    summary="Créer un job Pass2 en background",
+    description="""
+    Crée et lance un job Pass2 en background.
+    Retourne immédiatement avec un job_id pour suivre la progression.
+
+    Le job s'exécute dans le worker et met à jour sa progression dans Redis.
+    Utilisez GET /pass2/jobs/{job_id} pour suivre la progression.
+    """
+)
+async def create_pass2_job(
+    request: Pass2JobRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Crée un job Pass2 en background."""
+    from knowbase.ingestion.queue.pass2_jobs import enqueue_pass2_full_job
+
+    state = enqueue_pass2_full_job(
+        tenant_id=tenant_id,
+        document_id=request.document_id,
+        skip_classify=request.skip_classify,
+        skip_enrich=request.skip_enrich,
+        skip_consolidate=request.skip_consolidate,
+        skip_corpus_er=request.skip_corpus_er,
+        batch_size=request.batch_size,
+        process_all=request.process_all,
+        created_by=admin.get("email", "admin")
+    )
+
+    # Retourne l'état complet du job pour le frontend
+    return state.to_dict()
+
+
+@router.get(
+    "/pass2/jobs/{job_id}",
+    summary="Obtenir le statut d'un job Pass2",
+    description="Retourne l'état complet du job incluant la progression en temps réel."
+)
+async def get_pass2_job(
+    job_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Récupère le statut d'un job Pass2."""
+    from knowbase.ingestion.queue.pass2_jobs import get_pass2_job_manager
+
+    manager = get_pass2_job_manager()
+    state = manager.get_job(job_id)
+
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    return state.to_dict()
+
+
+@router.get(
+    "/pass2/jobs",
+    summary="Lister les jobs Pass2",
+    description="Retourne la liste des jobs Pass2 récents."
+)
+async def list_pass2_jobs(
+    limit: int = 20,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Liste les jobs Pass2."""
+    from knowbase.ingestion.queue.pass2_jobs import get_pass2_job_manager
+
+    manager = get_pass2_job_manager()
+    jobs = manager.list_jobs(tenant_id=tenant_id, limit=limit)
+
+    return {
+        "jobs": [job.to_dict() for job in jobs],
+        "total": len(jobs)
+    }
+
+
+@router.delete(
+    "/pass2/jobs/{job_id}",
+    summary="Annuler un job Pass2",
+    description="Annule un job en cours d'exécution."
+)
+async def cancel_pass2_job(
+    job_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Annule un job Pass2."""
+    from knowbase.ingestion.queue.pass2_jobs import get_pass2_job_manager
+
+    manager = get_pass2_job_manager()
+    success = manager.cancel_job(job_id)
+
+    if not success:
+        state = manager.get_job(job_id)
+        if not state:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot cancel job in status {state.status.value}"
+            )
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "message": "Job cancelled"
     }
 
 

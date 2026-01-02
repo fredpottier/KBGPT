@@ -13,6 +13,7 @@ from .vision_gating import (
     GatingResult,
     should_use_vision,
     estimate_vision_savings,
+    estimate_vision_savings_pptx,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "GatingResult",
     "should_use_vision",
     "estimate_vision_savings",
+    "estimate_vision_savings_pptx",
 ]

@@ -37,7 +37,7 @@ import SourcesSection from './SourcesSection'
 import KnowledgeProofPanel from '../chat/KnowledgeProofPanel'
 import ReasoningTracePanel from '../chat/ReasoningTracePanel'
 import CoverageMapPanel from '../chat/CoverageMapPanel'
-import type { GraphData } from '@/types/graph'
+import type { GraphData, ProofGraph } from '@/types/graph'
 import {
   FiAlertTriangle,
   FiFileText,
@@ -50,6 +50,7 @@ import {
 interface SearchResultDisplayProps {
   searchResult: SearchResponse
   graphData?: GraphData
+  proofGraph?: ProofGraph  // 🌊 Phase 3.5+: Proof Graph prioritaire
   explorationIntelligence?: ExplorationIntelligence
   onSearch?: (query: string) => void
 }
@@ -70,6 +71,7 @@ const CONFIDENCE_BADGE_CONFIG: Record<string, {
 export default function SearchResultDisplay({
   searchResult,
   graphData,
+  proofGraph,
   explorationIntelligence,
   onSearch,
 }: SearchResultDisplayProps) {
@@ -124,13 +126,14 @@ export default function SearchResultDisplay({
         <ConfidenceBadge confidence={searchResult.confidence} />
       )}
 
-      {/* Synthesized Answer (with integrated Knowledge Graph) */}
+      {/* Synthesized Answer (with integrated Knowledge Graph / Proof Graph) */}
       {searchResult.synthesis && (
         <SynthesizedAnswer
           synthesis={searchResult.synthesis}
           chunks={searchResult.results}
           onSlideClick={handleSlideClick}
           graphData={graphData}
+          proofGraph={proofGraph || searchResult.proof_graph}
           explorationIntelligence={explorationIntelligence}
           onSearch={onSearch}
         />
@@ -148,10 +151,16 @@ export default function SearchResultDisplay({
           <ReasoningTracePanel trace={searchResult.reasoning_trace} />
         )}
 
-        {/* Bloc D: Coverage Map */}
-        {searchResult.coverage_map && (
+        {/* Bloc D: Coverage Map - DÉSACTIVÉ
+         * Raison: Les sub_domains du DomainContext sont définis au setup,
+         * mais les documents peuvent ne pas correspondre aux catégories prédéfinies.
+         * Cela donne une fausse impression de mauvaise couverture.
+         * À réactiver si on implémente une détection automatique des catégories
+         * basée sur le contenu réel du Knowledge Graph.
+         */}
+        {/* {searchResult.coverage_map && (
           <CoverageMapPanel coverage={searchResult.coverage_map} />
-        )}
+        )} */}
       </VStack>
 
       {/* Sources Section */}

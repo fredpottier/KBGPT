@@ -39,6 +39,35 @@ class ConceptType(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class GraphLayer(str, Enum):
+    """Couche du graphe (ADR: ADR_NAVIGATION_LAYER.md)."""
+    SEMANTIC = "semantic"      # Relations pour le raisonnement (REQUIRES, ENABLES, etc.)
+    NAVIGATION = "navigation"  # Relations corpus-level (MENTIONED_IN, CO_OCCURS, etc.)
+
+
+# Types de relations par couche
+SEMANTIC_RELATION_TYPES = frozenset({
+    "REQUIRES", "ENABLES", "PREVENTS", "CAUSES",
+    "APPLIES_TO", "DEPENDS_ON", "PART_OF", "MITIGATES",
+    "CONFLICTS_WITH", "DEFINES", "EXAMPLE_OF", "GOVERNED_BY",
+    "RELATED_TO", "SUBTYPE_OF", "USES", "INTEGRATES_WITH",
+    "EXTENDS", "VERSION_OF", "PRECEDES", "REPLACES",
+    "DEPRECATES", "ALTERNATIVE_TO", "TRANSITIVE",
+})
+
+NAVIGATION_RELATION_TYPES = frozenset({
+    "MENTIONED_IN", "HAS_SECTION", "CONTAINED_IN", "CO_OCCURS",
+    "APPEARS_WITH", "CO_OCCURS_IN_DOCUMENT", "CO_OCCURS_IN_CORPUS",
+})
+
+
+def get_relation_layer(relation_type: str) -> GraphLayer:
+    """Détermine la couche d'une relation basé sur son type."""
+    if relation_type in NAVIGATION_RELATION_TYPES:
+        return GraphLayer.NAVIGATION
+    return GraphLayer.SEMANTIC
+
+
 @dataclass
 class GraphNode:
     """Noeud du graphe D3.js."""
@@ -72,6 +101,7 @@ class GraphEdge:
     confidence: float
     is_used: bool = False    # Relation traversée dans le raisonnement
     is_inferred: bool = False  # Relation inférée vs explicite
+    layer: str = "semantic"  # Couche: semantic ou navigation
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -82,6 +112,7 @@ class GraphEdge:
             "confidence": self.confidence,
             "isUsed": self.is_used,
             "isInferred": self.is_inferred,
+            "layer": self.layer,
         }
 
 
@@ -213,7 +244,13 @@ class GraphDataTransformer:
 
         query_concepts = graph_context.get("query_concepts", [])
         for c in query_concepts:
-            all_concepts.add(c)
+            # c peut être un dict ou une string
+            if isinstance(c, dict):
+                name = c.get("canonical_name") or c.get("name", "")
+                if name:
+                    all_concepts.add(name)
+            elif isinstance(c, str):
+                all_concepts.add(c)
 
         related_concepts = graph_context.get("related_concepts", [])
         for rel in related_concepts:
@@ -234,7 +271,13 @@ class GraphDataTransformer:
 
         bridge_concepts = graph_context.get("bridge_concepts", [])
         for c in bridge_concepts:
-            all_concepts.add(c)
+            # c peut être un dict ou une string
+            if isinstance(c, dict):
+                name = c.get("canonical_name") or c.get("name", "")
+                if name:
+                    all_concepts.add(name)
+            elif isinstance(c, str):
+                all_concepts.add(c)
 
         # Récupérer les métadonnées de tous les concepts
         metadata = self.get_concept_metadata(list(all_concepts), tenant_id)
@@ -307,6 +350,7 @@ class GraphDataTransformer:
                     confidence=rel.get("confidence", 0.5),
                     is_used=is_used,
                     is_inferred=False,
+                    layer=get_relation_layer(relation).value,
                 ))
 
         # Arêtes des transitive_relations (marquées comme inferred)
@@ -333,6 +377,7 @@ class GraphDataTransformer:
                         confidence=trans.get("confidence", 0.3),
                         is_used=False,
                         is_inferred=True,
+                        layer=GraphLayer.SEMANTIC.value,  # Transitive = toujours sémantique
                     ))
 
         graph_data = GraphData(
@@ -352,6 +397,106 @@ class GraphDataTransformer:
 
         return graph_data
 
+    def add_navigation_edges(
+        self,
+        graph_data: GraphData,
+        tenant_id: str = "default",
+        max_edges: int = 20
+    ) -> GraphData:
+        """
+        Ajoute les relations de navigation (MENTIONED_IN) au graphe.
+
+        Récupère les concepts qui co-apparaissent dans les mêmes documents
+        et ajoute des edges "CO_OCCURS" pour la visualisation.
+
+        ADR: ADR_NAVIGATION_LAYER.md
+
+        Args:
+            graph_data: GraphData existant
+            tenant_id: Tenant ID
+            max_edges: Nombre max d'edges navigation à ajouter
+
+        Returns:
+            GraphData enrichi avec les relations navigation
+        """
+        if not graph_data.nodes:
+            return graph_data
+
+        # Récupérer les canonical_ids des noeuds existants
+        node_names = [n.name for n in graph_data.nodes]
+
+        # Requête pour trouver les co-occurrences via MENTIONED_IN
+        cypher = """
+        // Trouver les concepts qui co-apparaissent dans le même document
+        UNWIND $names AS name1
+        MATCH (c1:CanonicalConcept {canonical_name: name1, tenant_id: $tenant_id})
+              -[:MENTIONED_IN]->(ctx:ContextNode {tenant_id: $tenant_id, kind: 'document'})
+              <-[:MENTIONED_IN]-(c2:CanonicalConcept {tenant_id: $tenant_id})
+        WHERE c1.canonical_name IN $names
+          AND c2.canonical_name IN $names
+          AND c1.canonical_name < c2.canonical_name  // Éviter doublons
+
+        WITH c1.canonical_name AS source, c2.canonical_name AS target,
+             count(DISTINCT ctx) AS doc_count
+
+        WHERE doc_count >= 1
+
+        RETURN source, target, doc_count
+        ORDER BY doc_count DESC
+        LIMIT $limit
+        """
+
+        try:
+            results = self.neo4j_client.execute_query(cypher, {
+                "names": node_names,
+                "tenant_id": tenant_id,
+                "limit": max_edges
+            })
+
+            # Créer un mapping name -> node_id
+            name_to_id = {n.name: n.id for n in graph_data.nodes}
+
+            # Collecter les IDs d'edges existants
+            existing_edge_ids = {e.id for e in graph_data.edges}
+
+            # Ajouter les edges navigation
+            nav_edges_added = 0
+            for record in results:
+                source_name = record.get("source")
+                target_name = record.get("target")
+                doc_count = record.get("doc_count", 1)
+
+                if source_name not in name_to_id or target_name not in name_to_id:
+                    continue
+
+                source_id = name_to_id[source_name]
+                target_id = name_to_id[target_name]
+                edge_id = self._generate_edge_id(source_id, target_id, "CO_OCCURS")
+
+                if edge_id not in existing_edge_ids:
+                    existing_edge_ids.add(edge_id)
+                    graph_data.edges.append(GraphEdge(
+                        id=edge_id,
+                        source=source_id,
+                        target=target_id,
+                        relation_type="CO_OCCURS",
+                        confidence=min(1.0, doc_count / 5.0),  # Normaliser
+                        is_used=False,
+                        is_inferred=False,
+                        layer=GraphLayer.NAVIGATION.value,
+                    ))
+                    nav_edges_added += 1
+
+            if nav_edges_added > 0:
+                logger.info(
+                    f"[GRAPH-DATA] Added {nav_edges_added} navigation edges (CO_OCCURS)"
+                )
+
+        except Exception as e:
+            logger.warning(f"[GRAPH-DATA] Failed to add navigation edges: {e}")
+
+        return graph_data
+
 
 # Singleton instance
 _transformer: Optional[GraphDataTransformer] = None
@@ -368,7 +513,9 @@ def get_graph_data_transformer() -> GraphDataTransformer:
 def transform_graph_context(
     graph_context: Dict[str, Any],
     used_in_synthesis: List[str] = None,
-    tenant_id: str = "default"
+    tenant_id: str = "default",
+    include_navigation: bool = True,
+    max_navigation_edges: int = 20
 ) -> Dict[str, Any]:
     """
     Fonction utilitaire pour transformer un GraphContext en format D3.js.
@@ -377,6 +524,8 @@ def transform_graph_context(
         graph_context: GraphContext.to_dict()
         used_in_synthesis: Concepts utilisés dans la synthèse
         tenant_id: Tenant ID
+        include_navigation: Inclure les relations de navigation (CO_OCCURS)
+        max_navigation_edges: Nombre max d'edges navigation
 
     Returns:
         GraphData.to_dict() prêt pour le frontend
@@ -387,6 +536,15 @@ def transform_graph_context(
         used_in_synthesis,
         tenant_id
     )
+
+    # Ajouter les relations de navigation si demandé
+    if include_navigation:
+        graph_data = transformer.add_navigation_edges(
+            graph_data,
+            tenant_id=tenant_id,
+            max_edges=max_navigation_edges
+        )
+
     return graph_data.to_dict()
 
 

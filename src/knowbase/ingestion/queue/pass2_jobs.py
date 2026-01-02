@@ -1,22 +1,749 @@
 """
 Pass 2 Background Jobs for RQ Queue.
 
-Jobs pour le traitement asynchrone de Pass 2:
+Architecture production-ready avec:
+- Persistance de l'état dans Redis
+- Progression en temps réel
+- Reprise sur erreur
+- Annulation possible
+
+Jobs:
+- execute_pass2_full_job: Exécute Pass 2 complet avec progression
 - process_pass2_queue: Traite les jobs Pass 2 en attente
 - run_pass2_for_document: Exécute Pass 2 pour un document spécifique
 - scheduled_pass2_consolidation: Batch nocturne pour consolidation
 
 Author: OSMOSE Phase 2
-Date: 2024-12
+Date: 2024-12 (Updated 2024-12-31 for production-ready job management)
 """
 
 import asyncio
+import json
 import logging
+import time
+import uuid
+from datetime import datetime
 from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field, asdict
+from enum import Enum
 
-from rq import get_current_job
+import redis
+from rq import get_current_job, Queue
+
+from knowbase.config.settings import get_settings
+from knowbase.config.feature_flags import get_hybrid_anchor_config
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Job State Management (Redis-backed)
+# =============================================================================
+
+class Pass2JobStatus(str, Enum):
+    """États possibles d'un job Pass2."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class Pass2JobProgress:
+    """Progression d'un job Pass2."""
+    current_phase: str = ""
+    phase_index: int = 0
+    total_phases: int = 4
+    iteration: int = 0
+    total_iterations: int = 0
+    items_processed: int = 0
+    items_total: int = 0
+    items_updated: int = 0
+    type_changes: int = 0
+    started_at: Optional[str] = None
+    phase_started_at: Optional[str] = None
+    elapsed_seconds: float = 0
+    estimated_remaining_seconds: float = 0
+    last_message: str = ""
+    errors: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        # Add frontend-expected fields
+        data["phase"] = self.current_phase  # Frontend expects 'phase'
+        data["current_batch"] = self.iteration
+        data["total_batches"] = self.total_iterations if self.total_iterations > 0 else max(1, self.items_total // 500)
+        # Calculate percentage
+        if self.items_total > 0:
+            data["percentage"] = (self.items_processed / self.items_total) * 100
+        else:
+            data["percentage"] = 0
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Pass2JobProgress":
+        errors = data.get("errors") or []
+        return cls(
+            current_phase=data.get("current_phase", ""),
+            phase_index=data.get("phase_index", 0),
+            total_phases=data.get("total_phases", 4),
+            iteration=data.get("iteration", 0),
+            total_iterations=data.get("total_iterations", 0),
+            items_processed=data.get("items_processed", 0),
+            items_total=data.get("items_total", 0),
+            items_updated=data.get("items_updated", 0),
+            type_changes=data.get("type_changes", 0),
+            started_at=data.get("started_at"),
+            phase_started_at=data.get("phase_started_at"),
+            elapsed_seconds=data.get("elapsed_seconds", 0),
+            estimated_remaining_seconds=data.get("estimated_remaining_seconds", 0),
+            last_message=data.get("last_message", ""),
+            errors=errors
+        )
+
+
+@dataclass
+class Pass2JobState:
+    """État complet d'un job Pass2."""
+    job_id: str
+    tenant_id: str
+    status: Pass2JobStatus
+    document_id: Optional[str] = None
+    skip_classify: bool = False
+    skip_enrich: bool = False
+    skip_consolidate: bool = False
+    skip_corpus_er: bool = False
+    batch_size: int = 500
+    process_all: bool = True
+    progress: Pass2JobProgress = field(default_factory=Pass2JobProgress)
+    phase_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    created_at: str = ""
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    created_by: str = "admin"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "tenant_id": self.tenant_id,
+            "status": self.status.value,
+            "document_id": self.document_id,
+            "skip_classify": self.skip_classify,
+            "skip_enrich": self.skip_enrich,
+            "skip_consolidate": self.skip_consolidate,
+            "skip_corpus_er": self.skip_corpus_er,
+            "batch_size": self.batch_size,
+            "process_all": self.process_all,
+            "progress": self.progress.to_dict(),
+            "phase_results": self.phase_results,
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+            "created_by": self.created_by
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Pass2JobState":
+        return cls(
+            job_id=data["job_id"],
+            tenant_id=data.get("tenant_id", "default"),
+            status=Pass2JobStatus(data.get("status", "pending")),
+            document_id=data.get("document_id"),
+            skip_classify=data.get("skip_classify", False),
+            skip_enrich=data.get("skip_enrich", False),
+            skip_consolidate=data.get("skip_consolidate", False),
+            skip_corpus_er=data.get("skip_corpus_er", False),
+            batch_size=data.get("batch_size", 500),
+            process_all=data.get("process_all", True),
+            progress=Pass2JobProgress.from_dict(data.get("progress", {})),
+            phase_results=data.get("phase_results", {}),
+            created_at=data.get("created_at", ""),
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
+            created_by=data.get("created_by", "admin")
+        )
+
+
+class Pass2JobManager:
+    """Gestionnaire des jobs Pass2 avec persistance Redis."""
+
+    REDIS_PREFIX = "pass2:job:"
+    JOB_TTL_SECONDS = 86400 * 7  # 7 jours
+
+    def __init__(self, redis_client: Optional[redis.Redis] = None):
+        if redis_client:
+            self._redis = redis_client
+        else:
+            settings = get_settings()
+            redis_url = f"redis://{settings.redis_host}:{settings.redis_port}/0"
+            self._redis = redis.from_url(redis_url, decode_responses=True)
+
+    def _job_key(self, job_id: str) -> str:
+        return f"{self.REDIS_PREFIX}{job_id}"
+
+    def _list_key(self, tenant_id: str) -> str:
+        return f"{self.REDIS_PREFIX}list:{tenant_id}"
+
+    def create_job(
+        self,
+        tenant_id: str = "default",
+        document_id: Optional[str] = None,
+        skip_classify: bool = False,
+        skip_enrich: bool = False,
+        skip_consolidate: bool = False,
+        skip_corpus_er: bool = False,
+        batch_size: int = 500,
+        process_all: bool = True,
+        created_by: str = "admin"
+    ) -> Pass2JobState:
+        """Crée un nouveau job Pass2."""
+        job_id = f"p2_{uuid.uuid4().hex[:12]}"
+        now = datetime.utcnow().isoformat() + "Z"
+
+        state = Pass2JobState(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            status=Pass2JobStatus.PENDING,
+            document_id=document_id,
+            skip_classify=skip_classify,
+            skip_enrich=skip_enrich,
+            skip_consolidate=skip_consolidate,
+            skip_corpus_er=skip_corpus_er,
+            batch_size=batch_size,
+            process_all=process_all,
+            created_at=now,
+            created_by=created_by
+        )
+
+        self._save_state(state)
+        self._redis.lpush(self._list_key(tenant_id), job_id)
+        self._redis.ltrim(self._list_key(tenant_id), 0, 99)
+
+        logger.info(f"[Pass2JobManager] Created job {job_id} (batch_size={batch_size}, process_all={process_all})")
+        return state
+
+    def get_job(self, job_id: str) -> Optional[Pass2JobState]:
+        """Récupère l'état d'un job."""
+        data = self._redis.get(self._job_key(job_id))
+        if not data:
+            return None
+        try:
+            return Pass2JobState.from_dict(json.loads(data))
+        except Exception as e:
+            logger.error(f"[Pass2JobManager] Error parsing job {job_id}: {e}")
+            return None
+
+    def list_jobs(self, tenant_id: str = "default", limit: int = 20) -> List[Pass2JobState]:
+        """Liste les jobs d'un tenant."""
+        job_ids = self._redis.lrange(self._list_key(tenant_id), 0, limit - 1)
+        jobs = []
+        for job_id in job_ids:
+            state = self.get_job(job_id)
+            if state:
+                jobs.append(state)
+        return jobs
+
+    def update_progress(
+        self,
+        job_id: str,
+        current_phase: Optional[str] = None,
+        phase_index: Optional[int] = None,
+        iteration: Optional[int] = None,
+        total_iterations: Optional[int] = None,
+        items_processed: Optional[int] = None,
+        items_total: Optional[int] = None,
+        items_updated: Optional[int] = None,
+        type_changes: Optional[int] = None,
+        message: Optional[str] = None,
+        error: Optional[str] = None
+    ):
+        """Met à jour la progression d'un job."""
+        state = self.get_job(job_id)
+        if not state:
+            return
+
+        if current_phase is not None:
+            state.progress.current_phase = current_phase
+            state.progress.phase_started_at = datetime.utcnow().isoformat() + "Z"
+        if phase_index is not None:
+            state.progress.phase_index = phase_index
+        if iteration is not None:
+            state.progress.iteration = iteration
+        if total_iterations is not None:
+            state.progress.total_iterations = total_iterations
+        if items_processed is not None:
+            state.progress.items_processed = items_processed
+        if items_total is not None:
+            state.progress.items_total = items_total
+        if items_updated is not None:
+            state.progress.items_updated = items_updated
+        if type_changes is not None:
+            state.progress.type_changes = type_changes
+        if message:
+            state.progress.last_message = message
+        if error:
+            state.progress.errors.append(error)
+
+        # Calculer temps écoulé et estimation
+        if state.started_at:
+            try:
+                started = datetime.fromisoformat(state.started_at.replace("Z", "+00:00"))
+                now = datetime.utcnow().replace(tzinfo=started.tzinfo)
+                state.progress.elapsed_seconds = (now - started).total_seconds()
+
+                if state.progress.items_total > 0 and state.progress.items_processed > 0:
+                    rate = state.progress.items_processed / max(state.progress.elapsed_seconds, 1)
+                    remaining = state.progress.items_total - state.progress.items_processed
+                    state.progress.estimated_remaining_seconds = remaining / rate if rate > 0 else 0
+            except Exception:
+                pass
+
+        self._save_state(state)
+
+    def start_job(self, job_id: str):
+        """Marque un job comme démarré."""
+        state = self.get_job(job_id)
+        if state:
+            state.status = Pass2JobStatus.RUNNING
+            state.started_at = datetime.utcnow().isoformat() + "Z"
+            state.progress.started_at = state.started_at
+            self._save_state(state)
+            logger.info(f"[Pass2JobManager] Job {job_id} started")
+
+    def complete_job(self, job_id: str, phase_results: Optional[Dict] = None):
+        """Marque un job comme terminé."""
+        state = self.get_job(job_id)
+        if state:
+            state.status = Pass2JobStatus.COMPLETED
+            state.completed_at = datetime.utcnow().isoformat() + "Z"
+            if phase_results:
+                state.phase_results = phase_results
+            state.progress.last_message = "Pass 2 completed successfully"
+            self._save_state(state)
+            logger.info(f"[Pass2JobManager] Job {job_id} completed")
+
+    def fail_job(self, job_id: str, error: str):
+        """Marque un job comme échoué."""
+        state = self.get_job(job_id)
+        if state:
+            state.status = Pass2JobStatus.FAILED
+            state.completed_at = datetime.utcnow().isoformat() + "Z"
+            state.progress.errors.append(error)
+            state.progress.last_message = f"Failed: {error}"
+            self._save_state(state)
+            logger.error(f"[Pass2JobManager] Job {job_id} failed: {error}")
+
+    def cancel_job(self, job_id: str) -> bool:
+        """Annule un job."""
+        state = self.get_job(job_id)
+        if not state or state.status not in [Pass2JobStatus.PENDING, Pass2JobStatus.RUNNING]:
+            return False
+
+        state.status = Pass2JobStatus.CANCELLED
+        state.completed_at = datetime.utcnow().isoformat() + "Z"
+        state.progress.last_message = "Cancelled by user"
+        self._save_state(state)
+        logger.info(f"[Pass2JobManager] Job {job_id} cancelled")
+        return True
+
+    def is_cancelled(self, job_id: str) -> bool:
+        """Vérifie si un job a été annulé."""
+        state = self.get_job(job_id)
+        return state.status == Pass2JobStatus.CANCELLED if state else False
+
+    def set_phase_result(self, job_id: str, phase: str, result: Dict[str, Any]):
+        """Enregistre le résultat d'une phase."""
+        state = self.get_job(job_id)
+        if state:
+            state.phase_results[phase] = result
+            self._save_state(state)
+
+    def _save_state(self, state: Pass2JobState):
+        """Sauvegarde l'état dans Redis."""
+        self._redis.setex(
+            self._job_key(state.job_id),
+            self.JOB_TTL_SECONDS,
+            json.dumps(state.to_dict())
+        )
+
+
+# Singleton
+_job_manager: Optional[Pass2JobManager] = None
+
+
+def get_pass2_job_manager() -> Pass2JobManager:
+    """Récupère l'instance singleton du gestionnaire."""
+    global _job_manager
+    if _job_manager is None:
+        _job_manager = Pass2JobManager()
+    return _job_manager
+
+
+# =============================================================================
+# Main Worker Function - Execute Full Pass2 with Progress
+# =============================================================================
+
+def execute_pass2_full_job(job_id: str):
+    """
+    Fonction worker RQ: Exécute Pass 2 complet avec mise à jour progression.
+
+    Args:
+        job_id: ID du job à exécuter
+    """
+    from knowbase.api.services.pass2_service import Pass2Service, Pass2Result
+    from knowbase.ingestion.pass2_orchestrator import Pass2Job, Pass2Stats, Pass2Mode
+    from knowbase.ingestion.pass2_orchestrator import Pass2Phase as OrchestratorPhase
+
+    manager = get_pass2_job_manager()
+    state = manager.get_job(job_id)
+
+    if not state:
+        logger.error(f"[Pass2Worker] Job {job_id} not found")
+        return
+
+    if state.status == Pass2JobStatus.CANCELLED:
+        logger.info(f"[Pass2Worker] Job {job_id} was cancelled, skipping")
+        return
+
+    manager.start_job(job_id)
+
+    try:
+        service = Pass2Service(tenant_id=state.tenant_id)
+
+        # Compter concepts à traiter
+        total_concepts = 0
+        if not state.skip_classify:
+            count_query = """
+            MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+            WHERE c.type_fine IS NULL OR c.type_fine = ''
+                  OR c.type_fine_justification = 'Fallback to heuristic type'
+            RETURN count(c) AS count
+            """
+            result = service._execute_query(count_query, {"tenant_id": state.tenant_id})
+            total_concepts = result[0]["count"] if result else 0
+            manager.update_progress(job_id, items_total=total_concepts,
+                                   message=f"Found {total_concepts} concepts to classify")
+
+        phase_results = {}
+        phase_index = 0
+
+        # Phase 1: CLASSIFY_FINE - Skip si aucun concept à classifier
+        if not state.skip_classify and total_concepts > 0 and not manager.is_cancelled(job_id):
+            manager.update_progress(job_id, current_phase="CLASSIFY_FINE",
+                                   phase_index=phase_index, message="Starting classification...")
+
+            result = asyncio.run(_run_classify_with_progress(
+                service, job_id, manager, state
+            ))
+
+            phase_results["classify_fine"] = {
+                "success": result.success,
+                "items_processed": result.items_processed,
+                "items_updated": result.items_updated,
+                "execution_time_ms": result.execution_time_ms,
+                "details": result.details
+            }
+            manager.set_phase_result(job_id, "classify_fine", phase_results["classify_fine"])
+            phase_index += 1
+        elif not state.skip_classify and total_concepts == 0:
+            # Tous les concepts déjà classifiés - skip intelligent
+            phase_results["classify_fine"] = {
+                "success": True,
+                "items_processed": 0,
+                "items_updated": 0,
+                "execution_time_ms": 0,
+                "details": {"skipped": True, "reason": "All concepts already classified"}
+            }
+            manager.update_progress(job_id, message="Classification skipped: all concepts already have type_fine")
+            logger.info(f"[Pass2Worker] CLASSIFY_FINE skipped for job {job_id}: all concepts already classified")
+            phase_index += 1
+
+        # Phase 2: ENRICH_RELATIONS
+        # Check feature flag enabled_phases
+        pass2_config = get_hybrid_anchor_config("pass2_config", state.tenant_id) or {}
+        enabled_phases = pass2_config.get("enabled_phases", [])
+        enrich_enabled = "enrich_relations" in enabled_phases
+
+        if not state.skip_enrich and enrich_enabled and not manager.is_cancelled(job_id):
+            manager.update_progress(job_id, current_phase="ENRICH_RELATIONS",
+                                   phase_index=phase_index, message="Detecting relations...")
+
+            result = asyncio.run(service.run_enrich_relations(state.document_id))
+            phase_results["enrich_relations"] = {
+                "success": result.success,
+                "items_processed": result.items_processed,
+                "items_created": result.items_created,
+                "execution_time_ms": result.execution_time_ms
+            }
+            manager.set_phase_result(job_id, "enrich_relations", phase_results["enrich_relations"])
+            phase_index += 1
+        elif not enrich_enabled:
+            # Phase disabled via feature flag
+            phase_results["enrich_relations"] = {
+                "success": True,
+                "items_processed": 0,
+                "items_created": 0,
+                "execution_time_ms": 0,
+                "details": {"skipped": True, "reason": "Disabled in feature_flags.yaml (ADR violation)"}
+            }
+            manager.update_progress(job_id, message="ENRICH_RELATIONS skipped: disabled in config")
+            logger.info(f"[Pass2Worker] ENRICH_RELATIONS skipped for job {job_id}: disabled in feature_flags.yaml")
+            phase_index += 1
+
+        # Phase 3 & 4: CONSOLIDATION
+        if not state.skip_consolidate and not manager.is_cancelled(job_id):
+            manager.update_progress(job_id, current_phase="CONSOLIDATE_CLAIMS",
+                                   phase_index=phase_index, message="Consolidating claims...")
+            result = service.run_consolidate_claims()
+            phase_results["consolidate_claims"] = {
+                "success": result.success,
+                "items_processed": result.items_processed,
+                "items_created": result.items_created
+            }
+            manager.set_phase_result(job_id, "consolidate_claims", phase_results["consolidate_claims"])
+            phase_index += 1
+
+            manager.update_progress(job_id, current_phase="CONSOLIDATE_RELATIONS",
+                                   phase_index=phase_index, message="Consolidating relations...")
+            result = service.run_consolidate_relations()
+            phase_results["consolidate_relations"] = {
+                "success": result.success,
+                "items_processed": result.items_processed,
+                "items_created": result.items_created
+            }
+            manager.set_phase_result(job_id, "consolidate_relations", phase_results["consolidate_relations"])
+            phase_index += 1
+
+        # Phase 5: CORPUS_ER - Entity Resolution corpus-level
+        if not state.skip_corpus_er and not manager.is_cancelled(job_id):
+            manager.update_progress(job_id, current_phase="CORPUS_ER",
+                                   phase_index=phase_index, message="Running Entity Resolution...")
+            result = service.run_corpus_er(dry_run=False)
+            phase_results["corpus_er"] = {
+                "success": result.success,
+                "items_processed": result.items_processed,
+                "items_created": result.items_created,
+                "items_updated": result.items_updated,
+                "execution_time_ms": result.execution_time_ms,
+                "details": result.details
+            }
+            manager.set_phase_result(job_id, "corpus_er", phase_results["corpus_er"])
+
+            if result.details:
+                manager.update_progress(
+                    job_id,
+                    message=f"ER: {result.details.get('auto_merges', 0)} auto-merges, "
+                           f"{result.details.get('proposals_created', 0)} proposals"
+                )
+
+        if manager.is_cancelled(job_id):
+            return
+
+        manager.complete_job(job_id, phase_results)
+
+    except Exception as e:
+        logger.exception(f"[Pass2Worker] Job {job_id} failed")
+        manager.fail_job(job_id, str(e))
+
+
+async def _run_classify_with_progress(
+    service,
+    job_id: str,
+    manager: Pass2JobManager,
+    state: Pass2JobState
+):
+    """
+    Exécute CLASSIFY_FINE avec mise à jour progression Redis.
+
+    Args:
+        service: Pass2Service instance
+        job_id: ID du job pour suivi progression
+        manager: Pass2JobManager pour mises à jour
+        state: Pass2JobState avec configuration (batch_size, process_all, document_id)
+    """
+    from knowbase.ingestion.pass2_orchestrator import Pass2Job, Pass2Stats, Pass2Mode
+    from knowbase.ingestion.pass2_orchestrator import Pass2Phase as OrchestratorPhase
+    from knowbase.api.services.pass2_service import Pass2Result
+
+    start_time = time.time()
+    result = Pass2Result(phase="CLASSIFY_FINE")
+
+    total_processed = 0
+    total_updated = 0
+    total_type_changes = 0
+    iteration = 0
+
+    # Utilise les paramètres du job
+    batch_size = state.batch_size
+    process_all = state.process_all
+    document_id = state.document_id
+
+    # Limite de sécurité: si process_all=False, une seule itération
+    max_iterations = 1000 if process_all else 1
+
+    try:
+        while iteration < max_iterations:
+            if manager.is_cancelled(job_id):
+                result.details["cancelled"] = True
+                break
+
+            iteration += 1
+
+            where_clause = "WHERE c.tenant_id = $tenant_id"
+            if document_id:
+                where_clause += " AND c.source_doc_id = $doc_id"
+
+            query = f"""
+            MATCH (c:CanonicalConcept)
+            {where_clause}
+            AND (c.type_fine IS NULL OR c.type_fine = ''
+                 OR c.type_fine_justification = 'Fallback to heuristic type')
+            RETURN c.canonical_id AS id, c.canonical_name AS label,
+                   c.type_fine AS type_heuristic, c.unified_definition AS definition
+            LIMIT $limit
+            """
+
+            params = {"tenant_id": service.tenant_id, "limit": batch_size}
+            if document_id:
+                params["doc_id"] = document_id
+
+            concepts = service._execute_query(query, params)
+            if not concepts:
+                break
+
+            manager.update_progress(
+                job_id, iteration=iteration, items_processed=total_processed,
+                message=f"Processing batch {iteration} ({len(concepts)} concepts)..."
+            )
+
+            concept_dicts = [{
+                "id": c["id"],
+                "label": c.get("label") or "",
+                "type_heuristic": c.get("type_heuristic") or "abstract",
+                "definition": c.get("definition") or ""
+            } for c in concepts]
+
+            job = Pass2Job(
+                job_id=f"p2_classify_{uuid.uuid4().hex[:8]}",
+                document_id=document_id or "all",
+                tenant_id=service.tenant_id,
+                mode=Pass2Mode.INLINE,
+                phases=[OrchestratorPhase.CLASSIFY_FINE],
+                concepts=concept_dicts
+            )
+
+            stats = Pass2Stats(document_id=job.document_id)
+            await service._orchestrator._phase_classify_fine(job, stats)
+
+            batch_updates = 0
+            for concept in job.concepts:
+                if concept.get("type_fine"):
+                    service._execute_query("""
+                        MATCH (c:CanonicalConcept {canonical_id: $id, tenant_id: $tenant_id})
+                        SET c.type_fine = $type_fine,
+                            c.type_fine_confidence = $confidence,
+                            c.type_fine_justification = $justification
+                    """, {
+                        "id": concept["id"],
+                        "tenant_id": service.tenant_id,
+                        "type_fine": concept.get("type_fine"),
+                        "confidence": concept.get("type_fine_confidence", 0),
+                        "justification": concept.get("type_fine_justification", "")
+                    })
+                    batch_updates += 1
+
+            total_processed += len(concepts)
+            total_updated += batch_updates
+            total_type_changes += stats.classify_fine_changes
+
+            manager.update_progress(
+                job_id, items_processed=total_processed, items_updated=total_updated,
+                type_changes=total_type_changes,
+                message=f"Batch {iteration}: {batch_updates} updated, {stats.classify_fine_changes} changes"
+            )
+
+        result.items_processed = total_processed
+        result.items_updated = total_updated
+        result.success = True
+        result.details = {
+            "iterations": iteration,
+            "type_changes": total_type_changes,
+            "batch_size": batch_size,
+            "process_all": process_all
+        }
+
+    except Exception as e:
+        result.success = False
+        result.errors.append(str(e))
+        manager.update_progress(job_id, error=str(e))
+
+    result.execution_time_ms = (time.time() - start_time) * 1000
+    return result
+
+
+def enqueue_pass2_full_job(
+    tenant_id: str = "default",
+    document_id: Optional[str] = None,
+    skip_classify: bool = False,
+    skip_enrich: bool = False,
+    skip_consolidate: bool = False,
+    skip_corpus_er: bool = False,
+    batch_size: int = 500,
+    process_all: bool = True,
+    created_by: str = "admin"
+) -> Pass2JobState:
+    """
+    Crée et enqueue un job Pass2 complet.
+
+    Args:
+        tenant_id: ID du tenant
+        document_id: Optionnel - filtrer par document
+        skip_classify: Ignorer la classification
+        skip_enrich: Ignorer l'enrichissement relations
+        skip_consolidate: Ignorer la consolidation
+        skip_corpus_er: Ignorer Entity Resolution corpus-level
+        batch_size: Taille des batches de classification (défaut: 500)
+        process_all: Si True, traite tous les concepts en boucle (défaut: True)
+        created_by: Email du créateur
+
+    Returns:
+        Pass2JobState avec job_id pour suivi
+    """
+    manager = get_pass2_job_manager()
+
+    state = manager.create_job(
+        tenant_id=tenant_id,
+        document_id=document_id,
+        skip_classify=skip_classify,
+        skip_enrich=skip_enrich,
+        skip_consolidate=skip_consolidate,
+        skip_corpus_er=skip_corpus_er,
+        batch_size=batch_size,
+        process_all=process_all,
+        created_by=created_by
+    )
+
+    settings = get_settings()
+    redis_url = f"redis://{settings.redis_host}:{settings.redis_port}/0"
+    redis_conn = redis.from_url(redis_url)
+    queue = Queue("ingestion", connection=redis_conn)  # Use ingestion queue (worker listens on this)
+
+    queue.enqueue(
+        execute_pass2_full_job,
+        state.job_id,
+        job_timeout="4h",
+        result_ttl=86400,
+        job_id=f"rq_{state.job_id}"
+    )
+
+    logger.info(f"[Pass2Jobs] Enqueued full job {state.job_id}")
+    return state
+
+
+# =============================================================================
+# Legacy Functions (kept for compatibility)
+# =============================================================================
 
 
 def process_pass2_queue(

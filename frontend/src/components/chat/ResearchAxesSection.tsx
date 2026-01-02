@@ -141,7 +141,8 @@ interface ResearchAxisCardProps {
 }
 
 /**
- * Card for a research axis with role badge and explainer
+ * Card for a research axis - displays as a clickable question
+ * No RDF triplets, just clean readable questions
  */
 function ResearchAxisCard({ axis, onClick }: ResearchAxisCardProps) {
   const config = ROLE_CONFIG[axis.role] || ROLE_CONFIG.default
@@ -155,11 +156,14 @@ function ResearchAxisCard({ axis, onClick }: ResearchAxisCardProps) {
       _hover={{
         transform: 'translateY(-1px)',
         boxShadow: `0 4px 12px ${config.bg}`,
+        bg: axis.role === 'actionnable' ? 'rgba(34, 197, 94, 0.25)' :
+            axis.role === 'risk' ? 'rgba(251, 146, 60, 0.25)' :
+            'rgba(96, 165, 250, 0.25)',
       }}
       onClick={onClick}
       transition="all 0.2s"
     >
-      <HStack spacing={3} align="start">
+      <HStack spacing={3} align="center">
         {/* Role icon */}
         <Box
           p={1.5}
@@ -170,60 +174,45 @@ function ResearchAxisCard({ axis, onClick }: ResearchAxisCardProps) {
           <Icon as={config.icon} boxSize={3.5} color={config.color} />
         </Box>
 
-        {/* Content */}
-        <VStack align="start" spacing={0.5} flex={1} minW={0}>
-          {/* Short label with role badge */}
-          <HStack spacing={2}>
-            <Text
-              fontSize="sm"
-              fontWeight="medium"
-              color="text.primary"
-              noOfLines={1}
-            >
-              {axis.short_label}
-            </Text>
-            <Badge
-              fontSize="2xs"
-              colorScheme={
-                axis.role === 'actionnable' ? 'green' :
-                axis.role === 'risk' ? 'orange' : 'blue'
-              }
-              variant="subtle"
-            >
-              {config.label}
-            </Badge>
-          </HStack>
-
-          {/* Explainer trace */}
-          {axis.explainer_trace && (
-            <Text
-              fontSize="2xs"
-              color="text.muted"
-              fontFamily="mono"
-              noOfLines={1}
-            >
-              {axis.explainer_trace}
-            </Text>
-          )}
-        </VStack>
-
-        {/* Confidence indicator */}
-        <Tooltip
-          label={`Confiance: ${Math.round(axis.confidence * 100)}%`}
-          placement="top"
-          fontSize="xs"
+        {/* Question - clean and readable */}
+        <Text
+          fontSize="sm"
+          fontWeight="medium"
+          color="text.primary"
+          flex={1}
+          noOfLines={2}
         >
-          <Box
-            w={2}
-            h={2}
-            rounded="full"
-            bg={
-              axis.confidence >= 0.7 ? 'green.400' :
-              axis.confidence >= 0.4 ? 'yellow.400' : 'gray.400'
+          {axis.short_label}
+        </Text>
+
+        {/* Role badge + confidence */}
+        <HStack spacing={2} flexShrink={0}>
+          <Badge
+            fontSize="2xs"
+            colorScheme={
+              axis.role === 'actionnable' ? 'green' :
+              axis.role === 'risk' ? 'orange' : 'blue'
             }
-            flexShrink={0}
-          />
-        </Tooltip>
+            variant="subtle"
+          >
+            {config.label}
+          </Badge>
+          <Tooltip
+            label={`Confiance: ${Math.round(axis.confidence * 100)}% - Cliquez pour explorer`}
+            placement="top"
+            fontSize="xs"
+          >
+            <Box
+              w={2}
+              h={2}
+              rounded="full"
+              bg={
+                axis.confidence >= 0.7 ? 'green.400' :
+                axis.confidence >= 0.4 ? 'yellow.400' : 'gray.400'
+              }
+            />
+          </Tooltip>
+        </HStack>
       </HStack>
     </Box>
   )

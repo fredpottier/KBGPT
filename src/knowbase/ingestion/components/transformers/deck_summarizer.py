@@ -53,9 +53,10 @@ def summarize_large_pptx(
         for i, chunk in enumerate(chunks, 1):
             try:
                 prompt = f"Résume le contenu suivant (partie {i}/{len(chunks)}):\n\n{chunk}"
-                summary = llm_router.call(
-                    prompt=prompt,
+                messages = [{"role": "user", "content": prompt}]
+                summary = llm_router.complete(
                     task_type=TaskType.SUMMARIZATION,
+                    messages=messages,
                     max_tokens=500
                 )
                 partial_summaries.append(summary)
@@ -69,9 +70,10 @@ def summarize_large_pptx(
         # Résumé final
         try:
             final_prompt = f"Synthétise ces résumés en un résumé global cohérent:\n\n{combined}"
-            final_summary = llm_router.call(
-                prompt=final_prompt,
+            messages = [{"role": "user", "content": final_prompt}]
+            final_summary = llm_router.complete(
                 task_type=TaskType.SUMMARIZATION,
+                messages=messages,
                 max_tokens=1000
             )
             return final_summary
@@ -84,9 +86,10 @@ def summarize_large_pptx(
         # Deck de taille raisonnable, résumé direct
         try:
             prompt = f"Résume le contenu suivant:\n\n{all_text}"
-            summary = llm_router.call(
-                prompt=prompt,
+            messages = [{"role": "user", "content": prompt}]
+            summary = llm_router.complete(
                 task_type=TaskType.SUMMARIZATION,
+                messages=messages,
                 max_tokens=1000
             )
             return summary

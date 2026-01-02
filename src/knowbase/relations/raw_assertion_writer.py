@@ -470,9 +470,15 @@ class RawAssertionWriter:
         RETURN ra.raw_assertion_id AS id
         """
 
-        # Extract relation_type values (enum to string)
-        relation_type_str = assertion.relation_type.value if assertion.relation_type else None
-        alt_type_str = assertion.alt_type.value if assertion.alt_type else None
+        # Extract relation_type values (enum to string, handle both Enum and string)
+        if assertion.relation_type:
+            relation_type_str = assertion.relation_type.value if hasattr(assertion.relation_type, 'value') else str(assertion.relation_type)
+        else:
+            relation_type_str = None
+        if assertion.alt_type:
+            alt_type_str = assertion.alt_type.value if hasattr(assertion.alt_type, 'value') else str(assertion.alt_type)
+        else:
+            alt_type_str = None
 
         params = {
             "raw_assertion_id": assertion.raw_assertion_id,

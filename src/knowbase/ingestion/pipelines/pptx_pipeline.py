@@ -135,7 +135,7 @@ from knowbase.ingestion.components.transformers import (
     # Vision Gating - Optimisation coûts
     VisionDecision,
     should_use_vision,
-    estimate_vision_savings,
+    estimate_vision_savings_pptx,
 )
 from knowbase.ingestion.components.utils import (
     run_cmd,
@@ -635,7 +635,7 @@ def process_pptx(
         logger.info(f"📊 [OSMOSE PURE] slides_data count = {len(slides_data)}")
 
         # ===== VISION GATING : Estimation des économies avant traitement =====
-        gating_stats = estimate_vision_savings(slides_data, include_optional=True)
+        gating_stats = estimate_vision_savings_pptx(slides_data, include_optional=True)
         logger.info(f"📊 [VISION GATING] Estimation pré-traitement:")
         logger.info(f"   - Total slides: {gating_stats['total_slides']}")
         logger.info(f"   - Vision requise: {gating_stats['required_vision']} slides")

@@ -184,7 +184,7 @@ class FineClassifier:
         self,
         llm_router=None,
         tenant_id: str = "default",
-        batch_size: int = 20
+        batch_size: int = 50  # Increased from 20 to 50 for faster processing
     ):
         """
         Initialise le classificateur.
@@ -264,13 +264,16 @@ class FineClassifier:
         """Appelle LLM pour classification fine."""
 
         # Préparer JSON input
+        # FIXED 2024-12-31: Gérer les valeurs None provenant de Neo4j
+        # c.get("key", "") retourne None si la clé existe avec valeur None
+        # Utiliser (c.get("key") or "") pour garantir une chaîne
         concepts_data = [
             {
-                "id": c.get("id", f"c_{i}"),
-                "label": c.get("label", ""),
-                "definition": c.get("definition", "")[:200],
-                "quote": c.get("quote", "")[:200],
-                "type_heuristic": c.get("type_heuristic", "abstract")
+                "id": c.get("id") or f"c_{i}",
+                "label": (c.get("label") or "")[:200],
+                "definition": (c.get("definition") or "")[:200],
+                "quote": (c.get("quote") or "")[:200],
+                "type_heuristic": c.get("type_heuristic") or "abstract"
             }
             for i, c in enumerate(batch)
         ]
@@ -303,6 +306,11 @@ class FineClassifier:
         """Parse la réponse LLM."""
 
         try:
+            # FIXED 2024-12-31: Gérer le cas où response_text est None
+            if response_text is None:
+                logger.warning("[OSMOSE:FineClassifier] Received None response from LLM")
+                return [self._fallback_result(c) for c in batch]
+
             # Nettoyer markdown si présent
             text = response_text.strip()
             if text.startswith("```"):

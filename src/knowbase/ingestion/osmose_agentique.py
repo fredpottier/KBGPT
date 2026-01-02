@@ -13,7 +13,7 @@ Author: OSMOSE Phase 1.5
 Date: 2025-10-15
 """
 
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import asyncio
@@ -44,6 +44,7 @@ from knowbase.ingestion.enrichment_tracker import (
     get_enrichment_tracker,
     EnrichmentStatus
 )  # ADR 2024-12-30: Enrichment tracking
+from knowbase.navigation import get_navigation_layer_builder  # ADR: Navigation Layer
 
 # Logger pour ce module (pas de manipulation du root logger pour eviter les doublons)
 logger = logging.getLogger(__name__)
@@ -1265,6 +1266,69 @@ Analyze this document and provide JSON response:"""
                 tenant_id=tenant,
                 chunks=chunks  # Passer les chunks pour créer DocumentChunk + ANCHORED_IN
             )
+
+            # ================================================================
+            # Étape 8b: Navigation Layer (ADR: ADR_NAVIGATION_LAYER.md)
+            # ================================================================
+            # Crée les ContextNodes (DocumentContext, SectionContext) et
+            # les liens MENTIONED_IN pour la navigation corpus-level.
+            # IMPORTANT: Couche NON-SÉMANTIQUE, jamais utilisée par le RAG.
+            # ================================================================
+            try:
+                # Construire mapping section → concepts via anchors
+                section_to_concepts: Dict[str, set] = defaultdict(set)
+                proto_to_canonical: Dict[str, str] = {}
+
+                # Mapper proto_id → canonical_id
+                for cc in canonical_concepts:
+                    for proto_id in cc.proto_concept_ids:
+                        proto_to_canonical[proto_id] = cc.id
+
+                # Collecter concepts par section
+                for proto in promoted_protos:
+                    canonical_id = proto_to_canonical.get(proto.id)
+                    if not canonical_id:
+                        continue
+
+                    # Via proto.section_id
+                    if proto.section_id:
+                        section_to_concepts[proto.section_id].add(canonical_id)
+
+                    # Via anchors (peut avoir plusieurs sections)
+                    for anchor in proto.anchors:
+                        if anchor.section_id:
+                            section_to_concepts[anchor.section_id].add(canonical_id)
+
+                # Préparer sections au format attendu
+                sections_for_nav = [
+                    {"path": section_path, "level": 0, "concept_ids": list(concept_ids)}
+                    for section_path, concept_ids in section_to_concepts.items()
+                ]
+
+                # Tous les canonical_ids pour le document
+                all_canonical_ids = [cc.id for cc in canonical_concepts]
+
+                # Construire la Navigation Layer
+                nav_builder = get_navigation_layer_builder(tenant_id=tenant)
+                nav_stats = nav_builder.build_for_document(
+                    document_id=document_id,
+                    document_name=document_title,
+                    document_type=document_type,
+                    sections=sections_for_nav,
+                    concept_mentions={f"doc:{document_id}": all_canonical_ids}
+                )
+
+                logger.info(
+                    f"[OSMOSE:HybridAnchor] Navigation Layer: "
+                    f"{len(sections_for_nav)} sections, {len(all_canonical_ids)} concepts, "
+                    f"stats={nav_stats}"
+                )
+
+            except Exception as nav_error:
+                # Navigation Layer non-critique, log warning mais continue
+                logger.warning(
+                    f"[OSMOSE:HybridAnchor] Navigation Layer failed: {nav_error}"
+                )
 
             # ================================================================
             # RELATIONS: Déplacées vers Pass 2 (ADR 2024-12-30)

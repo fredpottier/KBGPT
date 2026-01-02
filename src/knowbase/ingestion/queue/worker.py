@@ -2,9 +2,19 @@
 
 import logging
 import os
+import sys
 
 import debugpy
 from rq import SimpleWorker
+
+# Configure logging at module load - CRITICAL for seeing OSMOSE logs
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout,
+    force=True  # Override any existing config
+)
 
 from knowbase.common.clients import (
     get_openai_client,

@@ -80,7 +80,9 @@ phase_1_8:
 
   # Enrichissement Relations: LLM sur zone grise (0.4-0.6 confidence)
   # Impact: Precision relations 60% → 80%, Rappel 50% → 70%
-  enable_llm_relation_enrichment: true
+  # DÉSACTIVÉ 2026-01-01: Unifié sur Pass 2 ENRICH_RELATIONS (ADR-compliant)
+  # Voir doc/ongoing/CONSISTENCY_AUDIT_2026-01.md
+  enable_llm_relation_enrichment: false
   relation_enrichment:
     min_confidence: 0.4      # Zone grise min
     max_confidence: 0.6      # Zone grise max
@@ -196,9 +198,12 @@ phase_2_hybrid_anchor:
     # Mode d'exécution: inline | background | scheduled | disabled
     mode: "background"
     # Phases activées
+    # NOTE 2025-01-01: enrich_relations réactivé avec implémentation ADR-compliant
+    # Segment-first extraction avec quote + chunk_id + span obligatoires
+    # Voir: src/knowbase/relations/segment_window_relation_extractor.py
     enabled_phases:
       - "classify_fine"
-      - "enrich_relations"
+      - "enrich_relations"  # ADR-compliant implementation
       - "cross_doc"
     # Priorité jobs background
     default_priority: 0
@@ -223,6 +228,24 @@ phase_2_hybrid_anchor:
     max_anchor_expansion: 5
     # Mode par défaut: chunks_only | concepts_only | hybrid | anchor_first
     default_mode: "hybrid"
+
+  # -------------------------------------------------------------------------
+  # Navigation Layer Configuration
+  # -------------------------------------------------------------------------
+  # ADR: doc/ongoing/ADR_NAVIGATION_LAYER.md
+  # Couche de navigation non-sémantique pour exploration corpus-level
+  navigation_layer:
+    # Feature toggles
+    enable_document_context: true    # DocumentContext - 1 par document
+    enable_section_context: true     # SectionContext - ~5-20 par document
+    enable_window_context: false     # WindowContext - DÉSACTIVÉ par défaut (ADR)
+
+    # Budgets (pour éviter explosion)
+    max_windows_per_document: 50     # Cap WindowContext par document
+    max_mentions_per_concept: 100    # Top-N mentions par concept
+
+    # Seuils
+    min_mention_count: 1             # Min mentions pour créer lien MENTIONED_IN
 
 
 # ===============================================================================

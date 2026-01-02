@@ -90,80 +90,8 @@ ANCHOR_BONUS = {
     FocusOrigin.CHUNKS: 0.0,
 }
 
-# Templates FR pour les axes
-TEMPLATES_FR: Dict[str, Dict[str, str]] = {
-    # Actionnable
-    "REQUIRES": {
-        "short": "Prérequis: {target}",
-        "full": "Quels sont les prérequis liés à {target} pour mettre en œuvre {source} ?",
-    },
-    "ENABLES": {
-        "short": "Rendu possible: {target}",
-        "full": "Comment {source} permet-il d'activer ou d'améliorer {target} ?",
-    },
-    "DEPENDS_ON": {
-        "short": "Dépendance: {target}",
-        "full": "Quelles sont les dépendances de {source} envers {target} ?",
-    },
-    "IMPLEMENTS": {
-        "short": "Implémentation: {target}",
-        "full": "Comment {source} implémente-t-il concrètement {target} ?",
-    },
-
-    # Risk
-    "CAUSES": {
-        "short": "Impact: {target}",
-        "full": "Quels impacts ou conséquences {source} peut-il avoir sur {target} ?",
-    },
-    "CONFLICTS_WITH": {
-        "short": "Conflit: {target}",
-        "full": "Quels conflits potentiels existent entre {source} et {target} ?",
-    },
-    "CONTRADICTS": {
-        "short": "Contradiction: {target}",
-        "full": "En quoi {source} contredit-il ou s'oppose-t-il à {target} ?",
-    },
-    "THREATENS": {
-        "short": "Risque: {target}",
-        "full": "Quels risques {source} fait-il peser sur {target} ?",
-    },
-    "AFFECTS": {
-        "short": "Effet sur: {target}",
-        "full": "Comment {source} affecte-t-il {target} et quelles précautions prendre ?",
-    },
-
-    # Structure
-    "PART_OF": {
-        "short": "Composant de: {target}",
-        "full": "Quelle est la place de {source} au sein de {target} ?",
-    },
-    "SUBTYPE_OF": {
-        "short": "Type de: {target}",
-        "full": "En tant que sous-type de {target}, quelles sont les spécificités de {source} ?",
-    },
-    "BELONGS_TO": {
-        "short": "Appartient à: {target}",
-        "full": "Comment {source} s'intègre-t-il dans {target} ?",
-    },
-    "COMPONENT_OF": {
-        "short": "Élément de: {target}",
-        "full": "Quel rôle joue {source} en tant que composant de {target} ?",
-    },
-    "INSTANCE_OF": {
-        "short": "Instance de: {target}",
-        "full": "Quelles caractéristiques de {target} retrouve-t-on dans {source} ?",
-    },
-    "CATEGORIZED_AS": {
-        "short": "Catégorie: {target}",
-        "full": "Quels autres éléments de la catégorie {target} sont liés à {source} ?",
-    },
-
-    # Fallback pour RELATED_TO
-    "RELATED_TO": {
-        "short": "Lié à: {target}",
-        "full": "Quel est le lien entre {source} et {target} ?",
-    },
-}
+# Note: Les questions sont générées dynamiquement par LLM dans la langue
+# de la question originale. Pas de templates hardcodés.
 
 
 # =============================================================================
@@ -706,37 +634,37 @@ class ResearchAxesEngine:
         return selected
 
     # -------------------------------------------------------------------------
-    # Génération des axes finaux avec templates FR
+    # Génération des axes finaux avec LLM (multilingue)
     # -------------------------------------------------------------------------
 
-    def generate_axes(
+    async def generate_axes(
         self,
         selected_candidates: List[ResearchAxisCandidate],
+        original_query: str = "",
     ) -> List[ResearchAxis]:
         """
-        Génère les axes finaux avec les templates FR.
+        Génère les axes finaux avec des questions générées par LLM.
+
+        Le LLM détecte la langue de la query originale et génère
+        les questions dans cette langue.
         """
+        if not selected_candidates:
+            return []
+
+        # Générer les questions via LLM
+        questions = await self._generate_questions_with_llm(
+            candidates=selected_candidates,
+            original_query=original_query,
+        )
+
         axes = []
+        for i, candidate in enumerate(selected_candidates):
+            # Récupérer les questions générées ou fallback
+            q = questions.get(i, {})
+            short_label = q.get("short", f"{candidate.source_name} → {candidate.target_name}")
+            full_question = q.get("full", short_label)
 
-        for candidate in selected_candidates:
-            # Récupérer le template
-            templates = TEMPLATES_FR.get(
-                candidate.relation_type,
-                TEMPLATES_FR["RELATED_TO"]
-            )
-
-            # Construire les labels
-            short_label = templates["short"].format(
-                source=candidate.source_name,
-                target=candidate.target_name,
-            )
-
-            full_question = templates["full"].format(
-                source=candidate.source_name,
-                target=candidate.target_name,
-            )
-
-            # Search query
+            # Search query (concepts bruts, pas de langue)
             search_query = f"{candidate.source_name} {candidate.target_name}"
 
             axis = ResearchAxis(
@@ -747,7 +675,7 @@ class ResearchAxesEngine:
                 source_concept=candidate.source_name,
                 target_concept=candidate.target_name,
                 relation_type=candidate.relation_type,
-                relevance_score=min(candidate.score / 3.0, 1.0),  # Normaliser 0-1
+                relevance_score=min(candidate.score / 3.0, 1.0),
                 confidence=candidate.confidence,
                 explainer_trace=candidate.trace,
                 search_query=search_query,
@@ -756,6 +684,112 @@ class ResearchAxesEngine:
             axes.append(axis)
 
         return axes
+
+    async def _generate_questions_with_llm(
+        self,
+        candidates: List[ResearchAxisCandidate],
+        original_query: str,
+    ) -> Dict[int, Dict[str, str]]:
+        """
+        Génère les questions via LLM dans la langue de la query.
+
+        Fait UN appel batch pour tous les candidats.
+
+        Returns:
+            Dict[index, {"short": "...", "full": "..."}]
+        """
+        if not candidates:
+            return {}
+
+        try:
+            from knowbase.common.llm_router import get_llm_router, TaskType
+
+            # Construire le prompt batch
+            relations_desc = []
+            for i, c in enumerate(candidates):
+                role_desc = {
+                    AxisRole.ACTIONNABLE: "action/prerequisite",
+                    AxisRole.RISK: "risk/impact",
+                    AxisRole.STRUCTURE: "context/structure",
+                }.get(c.role, "general")
+
+                relations_desc.append(
+                    f"{i}. [{role_desc}] {c.source_name} --[{c.relation_type}]--> {c.target_name}"
+                )
+
+            prompt = f"""Based on this user question: "{original_query}"
+
+Generate follow-up questions for these knowledge graph relations.
+IMPORTANT: Detect the language of the user question and generate ALL questions in that SAME language.
+
+Relations to convert into questions:
+{chr(10).join(relations_desc)}
+
+For each relation, generate:
+- "short": A concise question (max 50 chars) that a user might ask
+- "full": A complete, natural question for deeper exploration
+
+Output format (JSON array, same order as input):
+[
+  {{"short": "...", "full": "..."}},
+  ...
+]
+
+Rules:
+- Questions must be in the SAME language as the user question
+- Questions should be natural and contextual, not robotic
+- Focus on what would help the user explore further
+- For action relations: ask about requirements, steps, how-to
+- For risk relations: ask about impacts, mitigation, concerns
+- For structure relations: ask about context, components, categories
+
+Output ONLY the JSON array, no explanation."""
+
+            router = get_llm_router()
+            response = router.complete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=1000,
+            )
+
+            # Parser la réponse JSON
+            import json
+            # Nettoyer la réponse (enlever markdown si présent)
+            content = response.get("content", "") if isinstance(response, dict) else str(response)
+            clean_response = content.strip()
+            if clean_response.startswith("```"):
+                clean_response = clean_response.split("```")[1]
+                if clean_response.startswith("json"):
+                    clean_response = clean_response[4:]
+
+            questions_list = json.loads(clean_response)
+
+            # Convertir en dict indexé
+            result = {}
+            for i, q in enumerate(questions_list):
+                if isinstance(q, dict):
+                    result[i] = {
+                        "short": q.get("short", ""),
+                        "full": q.get("full", ""),
+                    }
+
+            logger.info(f"[OSMOSE] LLM generated {len(result)} questions for research axes")
+            # Debug: afficher les questions générées
+            for idx, q in result.items():
+                logger.debug(f"[OSMOSE] Axis {idx}: short='{q.get('short', '')[:50]}...'")
+            return result
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE] LLM question generation failed: {e}, using fallback")
+            # Fallback: questions basiques (relation brute)
+            return {
+                i: {
+                    "short": f"{c.source_name} → {c.target_name}?",
+                    "full": f"{c.source_name} {c.relation_type} {c.target_name}",
+                }
+                for i, c in enumerate(candidates)
+            }
 
     # -------------------------------------------------------------------------
     # Point d'entrée principal
@@ -830,8 +864,8 @@ class ResearchAxesEngine:
             # 4. Sélection 2-pass diversifiée
             selected = self.select_diverse_axes(candidates)
 
-            # 5. Générer les axes finaux
-            result.axes = self.generate_axes(selected)
+            # 5. Générer les axes finaux (avec LLM pour questions multilingues)
+            result.axes = await self.generate_axes(selected, original_query=query)
 
             # Métriques
             result.roles_distribution = {

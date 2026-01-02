@@ -25,7 +25,7 @@ import type { Components } from 'react-markdown'
 import { SynthesisResult, SearchChunk, ExplorationIntelligence } from '@/types/api'
 import CopyButton from './CopyButton'
 import { ResponseGraph } from '@/components/chat'
-import type { GraphData } from '@/types/graph'
+import type { GraphData, ProofGraph } from '@/types/graph'
 import { FiCheckCircle, FiAlertCircle, FiAlertTriangle } from 'react-icons/fi'
 
 interface SynthesizedAnswerProps {
@@ -33,6 +33,7 @@ interface SynthesizedAnswerProps {
   chunks?: SearchChunk[]
   onSlideClick?: (chunk: SearchChunk) => void
   graphData?: GraphData
+  proofGraph?: ProofGraph  // 🌊 Phase 3.5+: Proof Graph prioritaire
   explorationIntelligence?: ExplorationIntelligence
   onSearch?: (query: string) => void
 }
@@ -252,6 +253,7 @@ export default function SynthesizedAnswer({
   chunks,
   onSlideClick,
   graphData,
+  proofGraph,
   explorationIntelligence,
   onSearch,
 }: SynthesizedAnswerProps) {
@@ -323,14 +325,15 @@ export default function SynthesizedAnswer({
           </Flex>
         </Box>
 
-        {/* Knowledge Graph */}
-        {graphData && graphData.nodes.length > 0 && (
+        {/* Knowledge Graph (ProofGraph prioritaire si disponible) */}
+        {(graphData && graphData.nodes.length > 0) || (proofGraph && proofGraph.nodes.length > 0) ? (
           <ResponseGraph
-            graphData={graphData}
+            graphData={graphData || { nodes: [], edges: [], queryConceptIds: [], usedConceptIds: [], suggestedConceptIds: [] }}
+            proofGraph={proofGraph}
             explorationIntelligence={explorationIntelligence}
             onSearch={onSearch}
           />
-        )}
+        ) : null}
       </VStack>
     </Box>
   )

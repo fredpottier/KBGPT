@@ -30,6 +30,7 @@ from knowbase.relations.claim_consolidator import get_claim_consolidator
 from knowbase.relations.relation_consolidator import get_relation_consolidator
 from knowbase.relations.canonical_claim_writer import get_canonical_claim_writer
 from knowbase.relations.canonical_relation_writer import get_canonical_relation_writer
+from knowbase.consolidation import get_corpus_er_pipeline, CorpusERConfig
 from knowbase.common.clients.neo4j_client import Neo4jClient
 from knowbase.config.settings import get_settings
 from knowbase.common.llm_router import get_llm_router, TaskType
@@ -49,6 +50,11 @@ class Pass2Status:
     raw_claims: int = 0
     canonical_relations: int = 0
     canonical_claims: int = 0
+
+    # Entity Resolution stats
+    er_standalone_concepts: int = 0
+    er_merged_concepts: int = 0
+    er_pending_proposals: int = 0
 
     # Jobs en attente
     pending_jobs: int = 0
@@ -151,6 +157,26 @@ class Pass2Service:
             except Exception as e:
                 logger.error(f"[Pass2Service] Error counting {key}: {e}")
 
+        # Entity Resolution stats
+        er_query = """
+        MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+        WITH count(c) AS total,
+             sum(CASE WHEN c.er_status = 'STANDALONE' OR c.er_status IS NULL THEN 1 ELSE 0 END) AS standalone,
+             sum(CASE WHEN c.er_status = 'MERGED' THEN 1 ELSE 0 END) AS merged
+        OPTIONAL MATCH (p:MergeProposal {tenant_id: $tenant_id})
+        WHERE p.applied = false OR p.applied IS NULL
+        WITH total, standalone, merged, count(p) AS pending
+        RETURN standalone, merged, pending
+        """
+        try:
+            result = self._execute_query(er_query, {"tenant_id": self.tenant_id})
+            if result:
+                status.er_standalone_concepts = result[0].get("standalone", 0)
+                status.er_merged_concepts = result[0].get("merged", 0)
+                status.er_pending_proposals = result[0].get("pending", 0)
+        except Exception as e:
+            logger.error(f"[Pass2Service] Error counting ER stats: {e}")
+
         # Jobs en attente
         status.pending_jobs = self._orchestrator.queue_size
         status.running_jobs = len(self._orchestrator.running_jobs)
@@ -160,7 +186,8 @@ class Pass2Service:
     async def run_classify_fine(
         self,
         document_id: Optional[str] = None,
-        limit: int = 100
+        limit: int = 500,
+        process_all: bool = False
     ) -> Pass2Result:
         """
         Exécute CLASSIFY_FINE sur les concepts.
@@ -169,90 +196,121 @@ class Pass2Service:
 
         Args:
             document_id: Filtrer par document (optionnel)
-            limit: Nombre max de concepts à traiter
+            limit: Nombre de concepts par batch (défaut: 500)
+            process_all: Si True, boucle jusqu'à traiter TOUS les concepts
 
         Returns:
-            Pass2Result avec statistiques
+            Pass2Result avec statistiques cumulées
         """
         start_time = time.time()
         result = Pass2Result(phase="CLASSIFY_FINE")
 
+        total_processed = 0
+        total_updated = 0
+        total_type_changes = 0
+        iteration = 0
+        max_iterations = 1000  # Sécurité anti-boucle infinie
+
         try:
-            # Récupérer concepts à classifier
-            where_clause = "WHERE c.tenant_id = $tenant_id"
-            if document_id:
-                where_clause += " AND c.source_doc_id = $doc_id"
-
-            query = f"""
-            MATCH (c:CanonicalConcept)
-            {where_clause}
-            AND (c.type_fine IS NULL OR c.type_fine = '')
-            RETURN c.canonical_id AS id, c.label AS label,
-                   c.type_heuristic AS type_heuristic, c.definition AS definition
-            LIMIT $limit
-            """
-
-            params = {"tenant_id": self.tenant_id, "limit": limit}
-            if document_id:
-                params["doc_id"] = document_id
-
-            concepts = self._execute_query(query, params)
-            result.items_processed = len(concepts)
-
-            if not concepts:
-                result.details["message"] = "No concepts to classify"
-                return result
-
-            # Convertir en format attendu par l'orchestrateur
-            concept_dicts = [
-                {
-                    "id": c["id"],
-                    "label": c["label"],
-                    "type_heuristic": c.get("type_heuristic"),
-                    "definition": c.get("definition", "")
-                }
-                for c in concepts
-            ]
-
-            # Créer un job fictif pour réutiliser le code existant
             from knowbase.ingestion.pass2_orchestrator import Pass2Job, Pass2Stats
             import uuid
 
-            job = Pass2Job(
-                job_id=f"p2_manual_{uuid.uuid4().hex[:8]}",
-                document_id=document_id or "all",
-                tenant_id=self.tenant_id,
-                mode=Pass2Mode.INLINE,
-                phases=[Pass2Phase.CLASSIFY_FINE],
-                concepts=concept_dicts
-            )
+            while iteration < max_iterations:
+                iteration += 1
 
-            stats = Pass2Stats(document_id=job.document_id)
-            await self._orchestrator._phase_classify_fine(job, stats)
+                # Récupérer concepts à classifier
+                where_clause = "WHERE c.tenant_id = $tenant_id"
+                if document_id:
+                    where_clause += " AND c.source_doc_id = $doc_id"
 
-            # Persister les changements dans Neo4j
-            updates = 0
-            for concept in job.concepts:
-                if concept.get("type_fine"):
-                    update_query = """
-                    MATCH (c:CanonicalConcept {canonical_id: $id, tenant_id: $tenant_id})
-                    SET c.type_fine = $type_fine,
-                        c.type_fine_confidence = $confidence,
-                        c.type_fine_justification = $justification
-                    """
-                    self._execute_query(update_query, {
-                        "id": concept["id"],
-                        "tenant_id": self.tenant_id,
-                        "type_fine": concept.get("type_fine"),
-                        "confidence": concept.get("type_fine_confidence", 0),
-                        "justification": concept.get("type_fine_justification", "")
-                    })
-                    updates += 1
+                # FIXED 2024-12-31: Utiliser les bons noms de propriétés Neo4j
+                query = f"""
+                MATCH (c:CanonicalConcept)
+                {where_clause}
+                AND (c.type_fine IS NULL OR c.type_fine = '' OR c.type_fine_justification = 'Fallback to heuristic type')
+                RETURN c.canonical_id AS id,
+                       c.canonical_name AS label,
+                       c.type_fine AS type_heuristic,
+                       c.unified_definition AS definition
+                LIMIT $limit
+                """
 
-            result.items_updated = updates
+                params = {"tenant_id": self.tenant_id, "limit": limit}
+                if document_id:
+                    params["doc_id"] = document_id
+
+                concepts = self._execute_query(query, params)
+
+                if not concepts:
+                    if iteration == 1:
+                        result.details["message"] = "No concepts to classify"
+                    break
+
+                logger.info(f"[Pass2Service] CLASSIFY_FINE iteration {iteration}: {len(concepts)} concepts")
+
+                # Convertir en format attendu par l'orchestrateur
+                concept_dicts = [
+                    {
+                        "id": c["id"],
+                        "label": c.get("label") or "",
+                        "type_heuristic": c.get("type_heuristic") or "abstract",
+                        "definition": c.get("definition") or ""
+                    }
+                    for c in concepts
+                ]
+
+                # Créer un job pour ce batch
+                job = Pass2Job(
+                    job_id=f"p2_classify_{uuid.uuid4().hex[:8]}",
+                    document_id=document_id or "all",
+                    tenant_id=self.tenant_id,
+                    mode=Pass2Mode.INLINE,
+                    phases=[Pass2Phase.CLASSIFY_FINE],
+                    concepts=concept_dicts
+                )
+
+                stats = Pass2Stats(document_id=job.document_id)
+                await self._orchestrator._phase_classify_fine(job, stats)
+
+                # Persister les changements dans Neo4j
+                batch_updates = 0
+                for concept in job.concepts:
+                    if concept.get("type_fine"):
+                        update_query = """
+                        MATCH (c:CanonicalConcept {canonical_id: $id, tenant_id: $tenant_id})
+                        SET c.type_fine = $type_fine,
+                            c.type_fine_confidence = $confidence,
+                            c.type_fine_justification = $justification
+                        """
+                        self._execute_query(update_query, {
+                            "id": concept["id"],
+                            "tenant_id": self.tenant_id,
+                            "type_fine": concept.get("type_fine"),
+                            "confidence": concept.get("type_fine_confidence", 0),
+                            "justification": concept.get("type_fine_justification", "")
+                        })
+                        batch_updates += 1
+
+                total_processed += len(concepts)
+                total_updated += batch_updates
+                total_type_changes += stats.classify_fine_changes
+
+                logger.info(
+                    f"[Pass2Service] CLASSIFY_FINE iteration {iteration} done: "
+                    f"{batch_updates} updated, {stats.classify_fine_changes} type changes"
+                )
+
+                # Si process_all=False, ne faire qu'une seule itération
+                if not process_all:
+                    break
+
+            result.items_processed = total_processed
+            result.items_updated = total_updated
             result.details = {
-                "concepts_processed": stats.classify_fine_count,
-                "type_changes": stats.classify_fine_changes
+                "iterations": iteration,
+                "concepts_processed": total_processed,
+                "type_changes": total_type_changes,
+                "process_all": process_all
             }
 
         except Exception as e:
@@ -261,105 +319,97 @@ class Pass2Service:
             result.errors.append(str(e))
 
         result.execution_time_ms = (time.time() - start_time) * 1000
+        logger.info(
+            f"[Pass2Service] CLASSIFY_FINE complete: {total_processed} concepts, "
+            f"{total_updated} updated, {result.execution_time_ms/1000:.1f}s"
+        )
         return result
 
     async def run_enrich_relations(
         self,
         document_id: Optional[str] = None,
-        max_pairs: int = 50
+        max_relations_per_doc: int = 150
     ) -> Pass2Result:
         """
-        Exécute ENRICH_RELATIONS avec persistence.
+        ADR-Compliant ENRICH_RELATIONS using segment-first extraction.
 
-        Détecte relations cross-segment et les persiste en RawAssertions.
+        Extrait relations au niveau SEGMENT avec:
+        - Scoring segments (anchor density, concept diversity, section type)
+        - Budgets stricts: 8 relations/segment, 150/document
+        - Evidence obligatoire: quote + chunk_id + span
+        - 12 prédicats fermés uniquement
+        - Fuzzy matching >= 70%
+
+        ADR: doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md
 
         Args:
-            document_id: Filtrer par document (optionnel)
-            max_pairs: Nombre max de paires à analyser
+            document_id: Document à traiter (requis pour extraction segment)
+            max_relations_per_doc: Budget max par document (défaut: 150)
 
         Returns:
-            Pass2Result avec statistiques
+            Pass2Result avec statistiques et observabilité
         """
+        from knowbase.relations.segment_window_relation_extractor import (
+            extract_document_relations,
+            persist_relations
+        )
+
         start_time = time.time()
         result = Pass2Result(phase="ENRICH_RELATIONS")
 
         try:
-            # Récupérer concepts par section
-            where_clause = "WHERE c.tenant_id = $tenant_id"
-            if document_id:
-                where_clause += " AND c.source_doc_id = $doc_id"
+            if not document_id:
+                # Si pas de document_id, récupérer les documents à traiter
+                doc_ids = self._get_documents_needing_enrichment()
+                if not doc_ids:
+                    result.details["message"] = "No documents to enrich"
+                    result.success = True
+                    return result
+            else:
+                doc_ids = [document_id]
 
-            query = f"""
-            MATCH (c:CanonicalConcept)
-            {where_clause}
-            RETURN c.canonical_id AS id, c.label AS label,
-                   c.type_fine AS type_fine, c.type_heuristic AS type_heuristic,
-                   c.section_id AS section_id, c.source_doc_id AS doc_id
-            """
+            total_relations = 0
+            total_segments = 0
+            all_observability = []
 
-            params = {"tenant_id": self.tenant_id}
-            if document_id:
-                params["doc_id"] = document_id
-
-            concepts = self._execute_query(query, params)
-
-            if not concepts:
-                result.details["message"] = "No concepts found"
-                return result
-
-            # Générer paires cross-section
-            pairs = self._generate_cross_section_pairs(concepts, max_pairs)
-            result.items_processed = len(pairs)
-
-            if not pairs:
-                result.details["message"] = "No cross-section pairs"
-                return result
-
-            # Détecter relations via LLM
-            llm_router = get_llm_router()
-            relations = await self._detect_relations_llm(pairs, llm_router)
-
-            # Persister en RawAssertions
-            writer = get_raw_assertion_writer(self.tenant_id)
-            written_count = 0
-
-            for rel in relations:
-                if rel.get("confidence", 0) < 0.6:
-                    continue
-
-                # Mapper predicate vers RelationType
-                relation_type = self._map_predicate_to_type(rel.get("predicate", ""))
-
-                # Récupérer les concepts sources pour les surface forms
-                source_concept = next((c for c in concepts if c["id"] == rel["source_id"]), None)
-                target_concept = next((c for c in concepts if c["id"] == rel["target_id"]), None)
-
-                if not source_concept or not target_concept:
-                    continue
-
-                assertion_id = writer.write_assertion(
-                    subject_concept_id=rel["source_id"],
-                    object_concept_id=rel["target_id"],
-                    predicate_raw=rel.get("predicate", "ASSOCIATED_WITH"),
-                    evidence_text=f"Cross-section relation detected: {source_concept['label']} → {target_concept['label']}",
-                    source_doc_id=source_concept.get("doc_id", "unknown"),
-                    source_chunk_id=f"pass2_enrich_{start_time}",
-                    confidence=rel.get("confidence", 0.7),
-                    subject_surface_form=source_concept.get("label"),
-                    object_surface_form=target_concept.get("label"),
-                    relation_type=relation_type,
-                    type_confidence=rel.get("confidence", 0.7),
+            for doc_id in doc_ids:
+                # Extraire avec scoring segments + budgets ADR
+                relations, observability = await extract_document_relations(
+                    document_id=doc_id,
+                    tenant_id=self.tenant_id,
+                    max_per_document=max_relations_per_doc
                 )
 
-                if assertion_id:
-                    written_count += 1
+                # Persister avec guardrails ADR + Verify-to-Persist pour conflicts_with
+                written = await persist_relations(relations, doc_id, self.tenant_id)
 
-            result.items_created = written_count
+                total_relations += written
+                total_segments += len(observability)
+                all_observability.extend(observability)
+
+                # Log observabilité par segment
+                for obs in observability:
+                    logger.info(
+                        f"[OSMOSE:Pass2] Segment {obs.segment_id}: "
+                        f"proposed={obs.relations_proposed}, "
+                        f"validated={obs.relations_validated}, "
+                        f"rejected={obs.relations_rejected}, "
+                        f"fuzzy_rate={obs.fuzzy_match_rate:.1%}"
+                    )
+
+            result.items_processed = total_segments
+            result.items_created = total_relations
+            result.success = True
             result.details = {
-                "pairs_analyzed": len(pairs),
-                "relations_detected": len(relations),
-                "raw_assertions_created": written_count,
-                "writer_stats": writer.get_stats()
+                "documents_processed": len(doc_ids),
+                "segments_analyzed": total_segments,
+                "relations_created": total_relations,
+                "budget_per_doc": max_relations_per_doc,
+                "observability_summary": {
+                    "total_proposed": sum(o.relations_proposed for o in all_observability),
+                    "total_validated": sum(o.relations_validated for o in all_observability),
+                    "total_rejected": sum(o.relations_rejected for o in all_observability),
+                }
             }
 
         except Exception as e:
@@ -368,14 +418,53 @@ class Pass2Service:
             result.errors.append(str(e))
 
         result.execution_time_ms = (time.time() - start_time) * 1000
+        logger.info(
+            f"[Pass2Service] ENRICH_RELATIONS complete: "
+            f"{result.items_created} relations from {result.items_processed} segments, "
+            f"{result.execution_time_ms/1000:.1f}s"
+        )
         return result
+
+    def _get_documents_needing_enrichment(self) -> List[str]:
+        """
+        Récupère les documents qui n'ont pas encore été enrichis par Pass 2.
+
+        Exclut les documents qui ont déjà des RawAssertions pour éviter
+        les doublons (RawAssertionWriter utilise CREATE, pas MERGE).
+        """
+        query = """
+        MATCH (d:Document {tenant_id: $tenant_id})
+        WHERE d.document_id IS NOT NULL
+
+        // Compter les RawAssertions existantes pour ce document
+        OPTIONAL MATCH (ra:RawAssertion {tenant_id: $tenant_id, source_doc_id: d.document_id})
+        WITH d, count(ra) AS existing_relations
+
+        // Ne retourner que les documents sans RawAssertions
+        WHERE existing_relations = 0
+
+        RETURN d.document_id AS doc_id
+        ORDER BY d.document_id
+        LIMIT 100
+        """
+        results = self._execute_query(query, {"tenant_id": self.tenant_id})
+        doc_ids = [r["doc_id"] for r in results if r.get("doc_id")]
+
+        logger.info(f"[Pass2Service] Found {len(doc_ids)} documents needing enrichment (excluding already processed)")
+        return doc_ids
 
     def _generate_cross_section_pairs(
         self,
         concepts: List[Dict[str, Any]],
         max_pairs: int
     ) -> List[Dict[str, Any]]:
-        """Génère paires de concepts de sections différentes."""
+        """
+        Génère paires de concepts de sections différentes.
+
+        Stratégie: échantillonnage diversifié pour couvrir le corpus.
+        """
+        import random
+
         by_section: Dict[str, List[Dict]] = {}
 
         for c in concepts:
@@ -387,10 +476,20 @@ class Pass2Service:
         pairs = []
         sections = list(by_section.keys())
 
+        # Limite par section basée sur le nombre total de sections
+        # Pour avoir une bonne couverture avec max_pairs paires
+        concepts_per_section = max(3, min(10, int((max_pairs / len(sections)) ** 0.5))) if sections else 5
+
+        logger.debug(f"[Pass2Service] Generating pairs: {len(sections)} sections, {concepts_per_section} concepts/section max")
+
         for i, s1 in enumerate(sections):
             for s2 in sections[i + 1:]:
-                for c1 in by_section[s1][:5]:
-                    for c2 in by_section[s2][:5]:
+                # Échantillonner aléatoirement pour diversité
+                sample1 = by_section[s1][:concepts_per_section] if len(by_section[s1]) <= concepts_per_section else random.sample(by_section[s1], concepts_per_section)
+                sample2 = by_section[s2][:concepts_per_section] if len(by_section[s2]) <= concepts_per_section else random.sample(by_section[s2], concepts_per_section)
+
+                for c1 in sample1:
+                    for c2 in sample2:
                         pairs.append({
                             "concept_a": {
                                 "id": c1.get("id"),
@@ -411,18 +510,34 @@ class Pass2Service:
     async def _detect_relations_llm(
         self,
         pairs: List[Dict[str, Any]],
-        llm_router
+        llm_router,
+        batch_size: int = 40  # Pairs per LLM call
     ) -> List[Dict[str, Any]]:
-        """Détecte relations via LLM."""
+        """
+        Détecte relations via LLM avec batching.
+
+        Traite toutes les paires en lots de batch_size.
+        """
         import json
         import re
+        import asyncio
 
         if not pairs:
             return []
 
-        pairs_json = json.dumps(pairs[:30], ensure_ascii=False, indent=2)
+        all_relations = []
+        total_batches = (len(pairs) + batch_size - 1) // batch_size
 
-        prompt = f"""Analyze these concept pairs and identify semantic relations.
+        logger.info(f"[Pass2Service] Processing {len(pairs)} pairs in {total_batches} batches")
+
+        for batch_idx in range(total_batches):
+            start = batch_idx * batch_size
+            end = min(start + batch_size, len(pairs))
+            batch_pairs = pairs[start:end]
+
+            pairs_json = json.dumps(batch_pairs, ensure_ascii=False, indent=2)
+
+            prompt = f"""Analyze these concept pairs and identify semantic relations.
 
 ## Concept Pairs
 {pairs_json}
@@ -439,29 +554,41 @@ class Pass2Service:
 1. For each pair with a clear semantic relation, output it
 2. Only include relations with confidence >= 0.6
 3. Use one of the valid relation types as predicate
+4. Skip pairs with no meaningful relation
 
 Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicate": "REQUIRES", "confidence": 0.85}}]}}"""
 
-        try:
-            response = await llm_router.acomplete(
-                task_type=TaskType.KNOWLEDGE_EXTRACTION,
-                messages=[
-                    {"role": "system", "content": "You are OSMOSE Pass 2 Relation Detector. Output only valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"}
-            )
+            try:
+                logger.info(f"[Pass2Service] Batch {batch_idx + 1}/{total_batches}: sending {len(batch_pairs)} pairs to LLM")
+                response = await llm_router.acomplete(
+                    task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                    messages=[
+                        {"role": "system", "content": "You are OSMOSE Pass 2 Relation Detector. Output only valid JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"}
+                )
 
-            text = response.strip()
-            json_match = re.search(r'\{.*\}', text, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group(0))
-                return data.get("relations", [])
-        except Exception as e:
-            logger.error(f"[Pass2Service] LLM relation detection failed: {e}")
+                text = response.strip() if response else ""
+                json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group(0))
+                    batch_relations = data.get("relations", [])
+                    all_relations.extend(batch_relations)
+                    logger.info(f"[Pass2Service] Batch {batch_idx + 1}: detected {len(batch_relations)} relations")
+                else:
+                    logger.warning(f"[Pass2Service] Batch {batch_idx + 1}: no JSON found in LLM response")
 
-        return []
+            except Exception as e:
+                logger.error(f"[Pass2Service] Batch {batch_idx + 1} failed: {e}")
+
+            # Small delay between batches to avoid rate limiting
+            if batch_idx < total_batches - 1:
+                await asyncio.sleep(0.5)
+
+        logger.info(f"[Pass2Service] Total relations detected: {len(all_relations)}")
+        return all_relations
 
     def _map_predicate_to_type(self, predicate: str) -> RelationType:
         """Mappe un predicate vers un RelationType."""
@@ -587,35 +714,122 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
         result.execution_time_ms = (time.time() - start_time) * 1000
         return result
 
+    def run_corpus_er(
+        self,
+        dry_run: bool = False,
+        limit: Optional[int] = None
+    ) -> Pass2Result:
+        """
+        Exécute Corpus Entity Resolution.
+
+        Fusionne les CanonicalConcepts dupliqués à travers le corpus.
+
+        Spec: PATCH-ER-04/05/06 (ChatGPT calibration)
+        - TopK + Mutual Best pruning
+        - Decision v2 (AUTO/PROPOSE/REJECT)
+        - Hard budget proposals cap
+
+        Args:
+            dry_run: Si True, preview sans exécuter les merges
+            limit: Limite de concepts à analyser (pour tests)
+
+        Returns:
+            Pass2Result avec statistiques
+        """
+        start_time = time.time()
+        result = Pass2Result(phase="CORPUS_ER")
+
+        try:
+            # Obtenir le pipeline ER avec config par défaut
+            pipeline = get_corpus_er_pipeline(
+                tenant_id=self.tenant_id,
+                config=CorpusERConfig()
+            )
+
+            try:
+                # Exécuter le pipeline
+                stats = pipeline.run(dry_run=dry_run, limit=limit)
+
+                result.items_processed = stats.concepts_analyzed
+                result.items_created = stats.auto_merges
+                result.items_updated = stats.proposals_created
+
+                result.details = {
+                    "dry_run": dry_run,
+                    "concepts_analyzed": stats.concepts_analyzed,
+                    "candidates_generated": stats.candidates_generated,
+                    "candidates_after_topk": stats.candidates_after_topk,
+                    "candidates_after_mutual": stats.candidates_after_mutual,
+                    "auto_merges": stats.auto_merges,
+                    "proposals_created": stats.proposals_created,
+                    "proposals_dropped_by_cap": stats.proposals_dropped_by_cap,
+                    "rejections": stats.rejections,
+                    "reject_breakdown": {
+                        "compat_low": stats.reject_compat_low,
+                        "lex_sem_low": stats.reject_lex_sem_low,
+                        "not_proposal": stats.reject_not_proposal,
+                    },
+                    "edges_rewired": stats.edges_rewired,
+                    "instance_of_rewired": stats.instance_of_rewired,
+                    "distribution": stats.log_summary(),
+                }
+
+                if stats.errors:
+                    result.errors = stats.errors[:10]
+
+                logger.info(
+                    f"[Pass2Service] CORPUS_ER complete: {stats.log_summary()}"
+                )
+
+            finally:
+                pipeline.close()
+
+        except Exception as e:
+            logger.error(f"[Pass2Service] CORPUS_ER failed: {e}")
+            result.success = False
+            result.errors.append(str(e))
+
+        result.execution_time_ms = (time.time() - start_time) * 1000
+        return result
+
     async def run_full_pass2(
         self,
         document_id: Optional[str] = None,
         skip_classify: bool = False,
         skip_enrich: bool = False,
-        skip_consolidate: bool = False
+        skip_consolidate: bool = False,
+        skip_corpus_er: bool = False
     ) -> Dict[str, Pass2Result]:
         """
-        Exécute Pass 2 complet.
+        Exécute Pass 2 complet sur TOUS les concepts.
 
         Phases dans l'ordre:
-        1. CLASSIFY_FINE (optionnel)
-        2. ENRICH_RELATIONS (optionnel)
-        3. CONSOLIDATE_CLAIMS
-        4. CONSOLIDATE_RELATIONS
+        1. CLASSIFY_FINE - Traite TOUS les concepts en boucle
+        2. ENRICH_RELATIONS - Détecte relations cross-segment
+        3. CONSOLIDATE_CLAIMS - Consolide les claims
+        4. CONSOLIDATE_RELATIONS - Consolide les relations
+        5. CORPUS_ER - Entity Resolution corpus-level
 
         Args:
             document_id: Filtrer par document
             skip_classify: Ignorer CLASSIFY_FINE
             skip_enrich: Ignorer ENRICH_RELATIONS
             skip_consolidate: Ignorer consolidation
+            skip_corpus_er: Ignorer CORPUS_ER
 
         Returns:
             Dict avec résultats par phase
         """
+        logger.info("[Pass2Service] Starting FULL Pass 2 (process_all=True)")
         results = {}
 
         if not skip_classify:
-            results["classify_fine"] = await self.run_classify_fine(document_id)
+            # FIXED 2024-12-31: process_all=True pour traiter TOUS les concepts
+            results["classify_fine"] = await self.run_classify_fine(
+                document_id=document_id,
+                limit=500,  # 500 concepts par batch
+                process_all=True  # Boucle jusqu'à traiter tous les concepts
+            )
 
         if not skip_enrich:
             results["enrich_relations"] = await self.run_enrich_relations(document_id)
@@ -624,6 +838,10 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
             results["consolidate_claims"] = self.run_consolidate_claims()
             results["consolidate_relations"] = self.run_consolidate_relations()
 
+        if not skip_corpus_er:
+            results["corpus_er"] = self.run_corpus_er(dry_run=False)
+
+        logger.info(f"[Pass2Service] FULL Pass 2 complete: {len(results)} phases executed")
         return results
 
 

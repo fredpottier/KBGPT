@@ -60,7 +60,9 @@ class OsmoseIntegrationConfig:
     default_tenant_id: str = "default"
 
     # Phase 2 - Typed Relations (RelationExtractionEngine)
-    enable_phase2_relations: bool = True  # Extraction relations typées Phase 2
+    # DÉSACTIVÉ 2026-01-01: Unifié sur Pass 2 ENRICH_RELATIONS (ADR-compliant)
+    # Voir doc/ongoing/CONSISTENCY_AUDIT_2026-01.md
+    enable_phase2_relations: bool = False  # Legacy - utiliser Pass 2 ENRICH_RELATIONS
     phase2_relation_strategy: str = "llm_first"  # "llm_first", "hybrid", "pattern_only"
     phase2_relation_min_confidence: float = 0.60  # Seuil minimum confidence
 

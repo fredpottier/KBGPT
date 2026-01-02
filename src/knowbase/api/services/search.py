@@ -333,12 +333,32 @@ def search_documents(
             logger.warning(f"[OSMOSE] Graph enrichment failed (non-blocking): {e}")
             # Continue sans enrichissement KG
 
+    # Extraire les signaux KG pour le calcul de confiance
+    kg_signals = None
+    if graph_context_data:
+        kg_signals = {
+            "concepts_count": len(graph_context_data.get("query_concepts", [])) +
+                              len(graph_context_data.get("related_concepts", [])),
+            "relations_count": len(graph_context_data.get("typed_edges", [])),
+            "sources_count": len(set(
+                edge.get("source_doc_id", "")
+                for edge in graph_context_data.get("typed_edges", [])
+                if edge.get("source_doc_id")
+            )),
+            "avg_confidence": sum(
+                edge.get("confidence", 0.5)
+                for edge in graph_context_data.get("typed_edges", [])
+            ) / max(len(graph_context_data.get("typed_edges", [])), 1)
+        }
+        logger.debug(f"[OSMOSE] KG signals for synthesis: {kg_signals}")
+
     # Generate synthesized response using LLM (with optional KG and session context)
     synthesis_result = synthesize_response(
         query,
         reranked_chunks,
         graph_context_text,
-        session_context_text
+        session_context_text,
+        kg_signals
     )
 
     response = {
@@ -371,8 +391,28 @@ def search_documents(
             from .graph_data_transformer import transform_graph_context
 
             # Extraire les concepts utilisés dans la synthèse
-            # (approximation basée sur les concepts de la réponse)
-            used_concepts = graph_context_data.get("query_concepts", [])
+            # Les "used concepts" sont les concepts LIÉS (targets des relations)
+            # qui supportent la réponse, PAS les query concepts
+            related_concepts = graph_context_data.get("related_concepts", [])
+            used_concepts = []
+            for rel in related_concepts:
+                target = rel.get("concept", "")
+                if target and target not in used_concepts:
+                    used_concepts.append(target)
+
+            # Ajouter aussi les bridge concepts comme "used"
+            bridge_concepts = graph_context_data.get("bridge_concepts", [])
+            for bc in bridge_concepts:
+                if isinstance(bc, dict):
+                    name = bc.get("canonical_name") or bc.get("name", "")
+                elif isinstance(bc, str):
+                    name = bc
+                else:
+                    continue
+                if name and name not in used_concepts:
+                    used_concepts.append(name)
+
+            logger.debug(f"[PHASE-3.5] Used concepts for proof: {used_concepts[:5]}...")
 
             # Transformer en format D3.js (synchrone)
             graph_data = transform_graph_context(
@@ -385,6 +425,50 @@ def search_documents(
                 f"[PHASE-3.5] Graph data: {len(graph_data.get('nodes', []))} nodes, "
                 f"{len(graph_data.get('edges', []))} edges"
             )
+
+            # 🌊 Phase 3.5+: Proof Subgraph pour visualisation ciblée
+            try:
+                from .proof_subgraph_builder import build_proof_graph
+
+                # Extraire les IDs des concepts depuis graph_data (qui a les bons IDs hash)
+                # graph_data contient queryConceptIds et usedConceptIds avec les IDs corrects
+                query_concept_ids = graph_data.get("queryConceptIds", [])
+                used_concept_ids = graph_data.get("usedConceptIds", [])
+
+                # Fallback: si pas d'IDs dans graph_data, utiliser les noms comme IDs
+                if not query_concept_ids:
+                    for c in graph_context_data.get("query_concepts", []):
+                        if isinstance(c, dict):
+                            cid = c.get("canonical_id") or c.get("id", "")
+                            if cid:
+                                query_concept_ids.append(cid)
+                        elif isinstance(c, str) and c:
+                            # Chercher l'ID correspondant dans les nodes
+                            for node in graph_data.get("nodes", []):
+                                if node.get("name", "").lower() == c.lower():
+                                    query_concept_ids.append(node.get("id"))
+                                    break
+
+                if query_concept_ids or used_concept_ids:
+                    proof_graph = build_proof_graph(
+                        graph_data=graph_data,
+                        query_concept_ids=query_concept_ids,
+                        used_concept_ids=used_concept_ids,
+                        tenant_id=tenant_id,
+                    )
+                    response["proof_graph"] = proof_graph
+                    logger.info(
+                        f"[PHASE-3.5+] Proof graph: {proof_graph.get('stats', {}).get('total_nodes', 0)} nodes, "
+                        f"{proof_graph.get('stats', {}).get('total_edges', 0)} edges, "
+                        f"{proof_graph.get('stats', {}).get('total_paths', 0)} paths"
+                    )
+                else:
+                    logger.debug("[PHASE-3.5+] No concepts for proof graph, skipping")
+
+            except Exception as e:
+                import traceback
+                logger.warning(f"[PHASE-3.5+] Proof subgraph building failed (non-blocking): {e}")
+                logger.debug(f"[PHASE-3.5+] Traceback: {traceback.format_exc()}")
 
         except Exception as e:
             logger.warning(f"[PHASE-3.5] Graph data transformation failed (non-blocking): {e}")
@@ -485,30 +569,27 @@ def search_documents(
     except Exception as e:
         logger.warning(f"[ANSWER-PROOF] Reasoning trace failed (non-blocking): {e}")
 
-    # 🌊 Answer+Proof: Bloc D - Coverage Map
-    # NOTE: Execute TOUJOURS, meme sans graph_context_data
-    # Le Coverage Map se base sur la QUESTION, pas sur le KG
-    try:
-        from .coverage_map_service import build_coverage_map_sync
-
-        # Extraire concepts du graph_context si disponible
-        query_concepts = graph_context_data.get("query_concepts", []) if graph_context_data else []
-        kg_relations = graph_context_data.get("related_concepts", []) if graph_context_data else []
-
-        coverage_map = build_coverage_map_sync(
-            query=query,
-            query_concepts=query_concepts,
-            kg_relations=kg_relations,
-            tenant_id=tenant_id,
-        )
-        response["coverage_map"] = coverage_map.to_dict()
-        logger.info(
-            f"[ANSWER-PROOF] Coverage map: {coverage_map.covered_count}/{coverage_map.total_relevant} domains, "
-            f"{coverage_map.coverage_percent}% covered"
-        )
-
-    except Exception as e:
-        logger.warning(f"[ANSWER-PROOF] Coverage map failed (non-blocking): {e}")
+    # 🌊 Answer+Proof: Bloc D - Coverage Map - DÉSACTIVÉ
+    # Raison: Les sub_domains du DomainContext sont définis au setup par l'admin,
+    # mais ne correspondent pas forcément aux documents ingérés ensuite.
+    # Cela donne une fausse impression de couverture incomplète.
+    # À réactiver si on implémente une détection automatique des catégories
+    # basée sur le contenu réel du Knowledge Graph.
+    #
+    # try:
+    #     from .coverage_map_service import build_coverage_map_sync
+    #     query_concepts = graph_context_data.get("query_concepts", []) if graph_context_data else []
+    #     kg_relations = graph_context_data.get("related_concepts", []) if graph_context_data else []
+    #     coverage_map = build_coverage_map_sync(
+    #         query=query,
+    #         query_concepts=query_concepts,
+    #         kg_relations=kg_relations,
+    #         tenant_id=tenant_id,
+    #     )
+    #     response["coverage_map"] = coverage_map.to_dict()
+    #     logger.info(f"[ANSWER-PROOF] Coverage map: {coverage_map.covered_count}/{coverage_map.total_relevant} domains")
+    # except Exception as e:
+    #     logger.warning(f"[ANSWER-PROOF] Coverage map failed (non-blocking): {e}")
 
     return response
 
