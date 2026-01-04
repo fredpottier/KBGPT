@@ -22,9 +22,10 @@ import {
   ChatIcon,
   ViewIcon,
   SettingsIcon,
-  ExternalLinkIcon
+  ExternalLinkIcon,
+  InfoIcon
 } from '@chakra-ui/icons'
-import { FiGlobe } from 'react-icons/fi'
+import { FiBarChart2, FiGlobe } from 'react-icons/fi'
 
 interface SidebarProps {
   isOpen: boolean
@@ -153,6 +154,14 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           onClick={isMobile ? onClose : undefined}
         >
           Domain Context
+        </NavItem>
+        <NavItem
+          icon={FiBarChart2}
+          href="/analytics"
+          isActive={pathname?.startsWith('/analytics')}
+          onClick={isMobile ? onClose : undefined}
+        >
+          Import Analytics
         </NavItem>
         {/* Living Ontology désactivé - fonctionnalité mise en pause (génère du bruit en mode domain-agnostic) */}
         <NavItem

@@ -480,6 +480,10 @@ class BurstOrchestrator:
         if self.config.subnet_id:
             parameters.append({"ParameterKey": "SubnetId", "ParameterValue": self.config.subnet_id})
 
+        # Ajouter CallbackUrl pour notifications d'interruption Spot
+        if self.config.callback_url:
+            parameters.append({"ParameterKey": "CallbackUrl", "ParameterValue": self.config.callback_url})
+
         try:
             self.cf_client.create_stack(
                 StackName=stack_name,
@@ -712,11 +716,52 @@ class BurstOrchestrator:
 
         return self.state.get_progress()
 
+    def _check_for_spot_interruption(self) -> bool:
+        """
+        Vérifie si une interruption Spot est imminente via le health endpoint.
+
+        Returns:
+            True si interruption détectée, False sinon
+        """
+        if not self.state or not self.state.instance_ip:
+            return False
+
+        try:
+            from .provider_switch import check_instance_health_with_spot
+
+            health = check_instance_health_with_spot(self.state.instance_ip)
+
+            if health.get("spot_interruption"):
+                logger.warning(
+                    f"[BURST:ORCHESTRATOR] ⚠️ Spot interruption detected: {health['spot_interruption']}"
+                )
+                return True
+
+        except Exception as e:
+            logger.debug(f"[BURST] Spot check error (non-fatal): {e}")
+
+        return False
+
     def _process_pending_documents(self):
         """Traite les documents en attente."""
         pending = self.state.get_pending_documents()
+        last_spot_check = time.time()
+        SPOT_CHECK_INTERVAL = 30  # Vérifier toutes les 30 secondes
 
         for doc in pending:
+            # Vérifier périodiquement si une interruption Spot est imminente
+            if time.time() - last_spot_check > SPOT_CHECK_INTERVAL:
+                if self._check_for_spot_interruption():
+                    # Interruption détectée - sauvegarder et arrêter
+                    self._add_event(
+                        "spot_warning_detected",
+                        "⚠️ Interruption Spot détectée via health check - sauvegarde en cours",
+                        EventSeverity.WARNING
+                    )
+                    self.initiate_graceful_shutdown()
+                    raise BurstProviderUnavailable("Spot interruption imminent")
+                last_spot_check = time.time()
+
             try:
                 doc.status = "processing"
                 doc.started_at = datetime.now(timezone.utc).isoformat()
@@ -924,6 +969,154 @@ class BurstOrchestrator:
         self._teardown_infrastructure()
 
         logger.info("[BURST:ORCHESTRATOR] Batch cancelled")
+
+    def initiate_graceful_shutdown(self):
+        """
+        Déclenche un arrêt gracieux suite à une notification d'interruption Spot.
+
+        Actions:
+        1. Marque le batch comme interrompu
+        2. Sauvegarde l'état actuel dans un fichier
+        3. Termine proprement les jobs en cours (si possible)
+        4. Prépare la reprise pour le prochain démarrage
+        """
+        if self.state is None:
+            logger.warning("[BURST] graceful_shutdown called but no state")
+            return
+
+        logger.warning("[BURST:ORCHESTRATOR] Initiating graceful shutdown...")
+
+        # Marquer le statut
+        self.state.status = BurstStatus.INTERRUPTED
+        self._add_event(
+            "graceful_shutdown_started",
+            "Arrêt gracieux initié - sauvegarde état en cours",
+            EventSeverity.WARNING
+        )
+
+        # Sauvegarder l'état pour reprise
+        try:
+            self._save_state_for_resume()
+            self._add_event(
+                "state_saved",
+                f"État sauvegardé pour reprise ({self._get_state_file_path()})"
+            )
+        except Exception as e:
+            logger.error(f"[BURST] Failed to save state: {e}")
+            self._add_event(
+                "state_save_failed",
+                f"Échec sauvegarde état: {e}",
+                EventSeverity.ERROR
+            )
+
+        # Désactiver les providers pour éviter de nouveaux appels
+        deactivate_burst_providers()
+
+        logger.warning("[BURST:ORCHESTRATOR] Graceful shutdown complete - ready for resume")
+
+    def _get_state_file_path(self) -> Path:
+        """Retourne le chemin du fichier de sauvegarde d'état."""
+        state_dir = Path("/app/data/burst_state") if Path("/app").exists() else Path("data/burst_state")
+        state_dir.mkdir(parents=True, exist_ok=True)
+        return state_dir / f"burst_state_{self.state.batch_id}.json"
+
+    def _save_state_for_resume(self):
+        """Sauvegarde l'état du batch pour une reprise ultérieure."""
+        if not self.state:
+            return
+
+        state_file = self._get_state_file_path()
+
+        # Préparer les données à sauvegarder
+        state_data = {
+            "batch_id": self.state.batch_id,
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "status": self.state.status.value,
+            "documents": [
+                {
+                    "name": doc.name,
+                    "path": doc.path,
+                    "status": doc.status,
+                    "hash": doc.hash,
+                    "chunks_count": doc.chunks_count,
+                    "error": doc.error,
+                    "started_at": doc.started_at,
+                    "completed_at": doc.completed_at,
+                }
+                for doc in self.state.documents
+            ],
+            "progress": self.state.get_progress(),
+            "interruption_count": self.state.interruption_count,
+            "stack_name": self.state.stack_name,
+            "spot_fleet_id": self.state.spot_fleet_id,
+        }
+
+        import json
+        with open(state_file, "w") as f:
+            json.dump(state_data, f, indent=2)
+
+        logger.info(f"[BURST] State saved to {state_file}")
+
+    def load_saved_state(self) -> Optional[Dict]:
+        """
+        Charge un état sauvegardé pour reprise.
+
+        Returns:
+            Dict avec l'état sauvegardé ou None si aucun état trouvé
+        """
+        state_dir = Path("/app/data/burst_state") if Path("/app").exists() else Path("data/burst_state")
+
+        if not state_dir.exists():
+            return None
+
+        # Trouver le fichier d'état le plus récent
+        state_files = list(state_dir.glob("burst_state_*.json"))
+        if not state_files:
+            return None
+
+        latest_file = max(state_files, key=lambda f: f.stat().st_mtime)
+
+        import json
+        with open(latest_file) as f:
+            state_data = json.load(f)
+
+        logger.info(f"[BURST] Loaded saved state from {latest_file}")
+        return state_data
+
+    def get_resumable_documents(self) -> List[str]:
+        """
+        Retourne la liste des documents à reprendre (non complétés).
+
+        Returns:
+            Liste des chemins de fichiers à retraiter
+        """
+        saved_state = self.load_saved_state()
+        if not saved_state:
+            return []
+
+        # Documents qui n'ont pas été complétés avec succès
+        resumable = [
+            doc["path"]
+            for doc in saved_state.get("documents", [])
+            if doc["status"] not in ("completed", "done")
+        ]
+
+        return resumable
+
+    def clear_saved_state(self, batch_id: Optional[str] = None):
+        """Supprime l'état sauvegardé après reprise réussie."""
+        state_dir = Path("/app/data/burst_state") if Path("/app").exists() else Path("data/burst_state")
+
+        if batch_id:
+            state_file = state_dir / f"burst_state_{batch_id}.json"
+            if state_file.exists():
+                state_file.unlink()
+                logger.info(f"[BURST] Cleared saved state: {state_file}")
+        else:
+            # Supprimer tous les états
+            for f in state_dir.glob("burst_state_*.json"):
+                f.unlink()
+            logger.info("[BURST] Cleared all saved states")
 
     # =========================================================================
     # État et événements

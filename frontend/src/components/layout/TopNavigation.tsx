@@ -32,6 +32,7 @@ import {
   FiShare2,
   FiSliders,
   FiCloud,
+  FiBarChart2,
 } from 'react-icons/fi'
 
 // Configuration des menus
@@ -62,6 +63,7 @@ const navigationConfig = {
       { label: 'Pass 2 Enrichment', href: '/admin/pass2', icon: FiActivity },
       { label: 'Consolidation KG', href: '/admin/consolidation', icon: FiShare2 },
       { label: 'Mode Burst (Spot)', href: '/admin/burst', icon: FiCloud },
+      { label: 'Import Analytics', href: '/analytics', icon: FiBarChart2 },
       { label: 'Configuration', href: '/admin/settings', icon: FiSettings },
     ],
   },

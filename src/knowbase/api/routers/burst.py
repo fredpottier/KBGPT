@@ -97,6 +97,14 @@ class PrepareBatchRequest(BaseModel):
     )
 
 
+class ResumableBatchInfo(BaseModel):
+    """Info sur un batch pouvant être repris."""
+    batch_id: str
+    saved_at: str
+    pending_documents: int
+    completed_documents: int
+
+
 class PrepareBatchResponse(BaseModel):
     """Réponse préparation batch."""
     success: bool
@@ -104,6 +112,7 @@ class PrepareBatchResponse(BaseModel):
     documents_count: int
     documents: List[Dict]
     message: str
+    resumable_batch: Optional[ResumableBatchInfo] = None
 
 
 class StartInfraRequest(BaseModel):
@@ -442,9 +451,27 @@ async def prepare_batch(
     """Prépare un batch de documents."""
     try:
         from knowbase.ingestion.burst import get_burst_orchestrator, BurstConfig
+        import json
 
         config = BurstConfig.from_env()
         orchestrator = get_burst_orchestrator()
+
+        # Vérifier s'il y a un batch interrompu à reprendre
+        resumable_info = None
+        saved_state = orchestrator.load_saved_state()
+        if saved_state:
+            docs = saved_state.get("documents", [])
+            completed = sum(1 for d in docs if d.get("status") in ("completed", "done"))
+            pending = len(docs) - completed
+
+            if pending > 0:
+                resumable_info = ResumableBatchInfo(
+                    batch_id=saved_state.get("batch_id", "unknown"),
+                    saved_at=saved_state.get("saved_at", ""),
+                    pending_documents=pending,
+                    completed_documents=completed
+                )
+                logger.info(f"[BURST] Found resumable batch: {resumable_info.batch_id} with {pending} pending docs")
 
         # Déterminer les documents
         if request.document_paths:
@@ -493,12 +520,18 @@ async def prepare_batch(
 
         logger.info(f"[BURST] Batch {batch_id} préparé avec {len(documents)} documents")
 
+        # Message avec info sur batch resumable
+        message = f"Batch préparé avec {len(documents)} documents. Utilisez /start pour lancer l'infrastructure."
+        if resumable_info:
+            message += f" ⚠️ Un batch interrompu ({resumable_info.batch_id}) peut être repris ({resumable_info.pending_documents} docs en attente)."
+
         return PrepareBatchResponse(
             success=True,
             batch_id=batch_id,
             documents_count=len(documents),
             documents=documents,
-            message=f"Batch préparé avec {len(documents)} documents. Utilisez /start pour lancer l'infrastructure."
+            message=message,
+            resumable_batch=resumable_info
         )
 
     except Exception as e:
@@ -621,8 +654,7 @@ async def process_batch(
         async def run_batch():
             """Traite les documents du batch de manière async."""
             import traceback
-            from knowbase.ingestion.pipelines.pptx_pipeline import process_pptx
-            from knowbase.ingestion.pipelines.pdf_pipeline import process_pdf
+            from knowbase.ingestion.queue.jobs_v2 import ingest_document_v2_job
 
             try:
                 orchestrator.state.status = BurstStatus.PROCESSING
@@ -642,19 +674,21 @@ async def process_batch(
                         suffix = doc_path.suffix.lower()
                         logger.info(f"[BURST] Processing: {doc_path.name}")
 
-                        # Les pipelines sont synchrones - utiliser to_thread pour ne pas bloquer
-                        if suffix == ".pptx":
-                            result = await asyncio.to_thread(process_pptx, doc_path)
-                        elif suffix == ".pdf":
-                            result = await asyncio.to_thread(process_pdf, doc_path)
+                        # Pipeline V2 unifié (Docling + Vision Gating V4 + OSMOSE)
+                        # Supporte: .pdf, .pptx, .docx, .xlsx
+                        if suffix in [".pdf", ".pptx", ".docx", ".xlsx"]:
+                            result = await asyncio.to_thread(
+                                lambda: ingest_document_v2_job(file_path=str(doc_path))
+                            )
                         else:
                             raise ValueError(f"Format non supporté: {suffix}")
 
                         doc_status.status = "completed"
                         doc_status.completed_at = datetime.now(timezone.utc).isoformat()
-                        # Récupérer le nombre de concepts (OSMOSE) ou chunks selon le pipeline
+                        # Récupérer le nombre de concepts depuis le résultat V2
                         if isinstance(result, dict):
-                            doc_status.chunks_count = result.get("canonical_concepts", result.get("chunks_count", 0))
+                            osmose = result.get("osmose", {})
+                            doc_status.chunks_count = osmose.get("canonical_concepts", 0)
                         else:
                             doc_status.chunks_count = 0
                         orchestrator.state.documents_done += 1
@@ -1049,6 +1083,289 @@ async def get_instance_details(
     except Exception as e:
         logger.error(f"Erreur get_instance_details: {e}")
         return InstanceDetails()
+
+
+# ============================================================================
+# Spot Interruption Warning Endpoint
+# ============================================================================
+
+class SpotWarningRequest(BaseModel):
+    """Notification d'interruption Spot depuis EC2."""
+    instance_id: str
+    action: Optional[dict] = None
+    instance_type: Optional[str] = None
+    timestamp: Optional[str] = None
+
+
+class SpotWarningResponse(BaseModel):
+    """Réponse à la notification d'interruption."""
+    received: bool
+    message: str
+    graceful_shutdown_initiated: bool = False
+
+
+class SavedStateInfo(BaseModel):
+    """Informations sur un état sauvegardé."""
+    batch_id: str
+    saved_at: str
+    status: str
+    total_documents: int
+    completed: int
+    pending: int
+    failed: int
+    file_path: str
+
+
+class SavedStatesResponse(BaseModel):
+    """Liste des états sauvegardés."""
+    states: List[SavedStateInfo]
+    has_resumable: bool
+
+
+@router.post(
+    "/spot-warning",
+    response_model=SpotWarningResponse,
+    summary="Notification d'interruption Spot",
+    description="Reçoit la notification 2 minutes avant interruption Spot AWS. Déclenche une sauvegarde gracieuse.",
+    tags=["burst"]
+)
+async def receive_spot_warning(
+    warning: SpotWarningRequest,
+) -> SpotWarningResponse:
+    """
+    Endpoint appelé par le spot-monitor.sh sur l'instance EC2.
+    Déclenche une sauvegarde gracieuse de l'état du traitement.
+
+    Note: Pas d'authentification requise car appelé depuis EC2.
+    """
+    try:
+        from knowbase.ingestion.burst import get_burst_orchestrator, EventSeverity
+
+        logger.warning(
+            f"[BURST] ⚠️ SPOT INTERRUPTION WARNING received! "
+            f"Instance: {warning.instance_id}, Time: {warning.timestamp}"
+        )
+
+        orchestrator = get_burst_orchestrator()
+
+        if not orchestrator.state:
+            logger.warning("[BURST] Spot warning received but no active batch")
+            return SpotWarningResponse(
+                received=True,
+                message="No active batch to save",
+                graceful_shutdown_initiated=False
+            )
+
+        # Ajouter événement
+        orchestrator._add_event(
+            "spot_warning_received",
+            f"⚠️ Interruption Spot dans ~2 min! Instance {warning.instance_id}",
+            EventSeverity.WARNING,
+            details={
+                "instance_id": warning.instance_id,
+                "instance_type": warning.instance_type,
+                "action": warning.action,
+                "timestamp": warning.timestamp
+            }
+        )
+
+        # Déclencher sauvegarde gracieuse
+        try:
+            orchestrator.initiate_graceful_shutdown()
+            graceful = True
+            message = "Graceful shutdown initiated - saving state"
+        except Exception as e:
+            logger.error(f"[BURST] Failed to initiate graceful shutdown: {e}")
+            graceful = False
+            message = f"Warning received but graceful shutdown failed: {e}"
+
+        return SpotWarningResponse(
+            received=True,
+            message=message,
+            graceful_shutdown_initiated=graceful
+        )
+
+    except Exception as e:
+        logger.error(f"[BURST] Error handling spot warning: {e}")
+        return SpotWarningResponse(
+            received=True,
+            message=f"Error: {e}",
+            graceful_shutdown_initiated=False
+        )
+
+
+@router.get(
+    "/saved-states",
+    response_model=SavedStatesResponse,
+    summary="États sauvegardés",
+    description="Liste les états de batches interrompus pouvant être repris.",
+    tags=["burst"]
+)
+async def list_saved_states(
+    admin: dict = Depends(require_admin),
+) -> SavedStatesResponse:
+    """Liste les états sauvegardés pour reprise."""
+    try:
+        from pathlib import Path
+        import json
+
+        state_dir = Path("/app/data/burst_state") if Path("/app").exists() else Path("data/burst_state")
+
+        states = []
+        if state_dir.exists():
+            for state_file in state_dir.glob("burst_state_*.json"):
+                try:
+                    with open(state_file) as f:
+                        data = json.load(f)
+
+                    docs = data.get("documents", [])
+                    completed = sum(1 for d in docs if d.get("status") in ("completed", "done"))
+                    failed = sum(1 for d in docs if d.get("status") == "failed")
+                    pending = len(docs) - completed - failed
+
+                    states.append(SavedStateInfo(
+                        batch_id=data.get("batch_id", "unknown"),
+                        saved_at=data.get("saved_at", ""),
+                        status=data.get("status", "unknown"),
+                        total_documents=len(docs),
+                        completed=completed,
+                        pending=pending,
+                        failed=failed,
+                        file_path=str(state_file)
+                    ))
+                except Exception as e:
+                    logger.warning(f"Error reading state file {state_file}: {e}")
+
+        # Trier par date de sauvegarde (plus récent en premier)
+        states.sort(key=lambda s: s.saved_at, reverse=True)
+
+        return SavedStatesResponse(
+            states=states,
+            has_resumable=any(s.pending > 0 for s in states)
+        )
+
+    except Exception as e:
+        logger.error(f"Error listing saved states: {e}")
+        return SavedStatesResponse(states=[], has_resumable=False)
+
+
+@router.delete(
+    "/saved-states/{batch_id}",
+    summary="Supprimer un état sauvegardé",
+    description="Supprime l'état sauvegardé d'un batch (après reprise réussie ou abandon).",
+    tags=["burst"]
+)
+async def delete_saved_state(
+    batch_id: str,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    """Supprime un état sauvegardé."""
+    try:
+        from knowbase.ingestion.burst import get_burst_orchestrator
+
+        orchestrator = get_burst_orchestrator()
+        orchestrator.clear_saved_state(batch_id)
+
+        return {"success": True, "message": f"État {batch_id} supprimé"}
+
+    except Exception as e:
+        logger.error(f"Error deleting saved state: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/resume",
+    response_model=PrepareBatchResponse,
+    summary="Reprendre un batch interrompu",
+    description="Reprend un batch interrompu en chargeant les documents non traités depuis l'état sauvegardé.",
+    tags=["burst"]
+)
+async def resume_batch(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> PrepareBatchResponse:
+    """Reprend un batch interrompu."""
+    try:
+        from knowbase.ingestion.burst import get_burst_orchestrator
+
+        orchestrator = get_burst_orchestrator()
+
+        # Charger l'état sauvegardé
+        saved_state = orchestrator.load_saved_state()
+        if not saved_state:
+            return PrepareBatchResponse(
+                success=False,
+                batch_id="",
+                documents_count=0,
+                documents=[],
+                message="Aucun batch interrompu à reprendre."
+            )
+
+        # Extraire les documents non complétés
+        docs = saved_state.get("documents", [])
+        pending_docs = [
+            d for d in docs
+            if d.get("status") not in ("completed", "done")
+        ]
+
+        if not pending_docs:
+            # Tous les docs étaient terminés, nettoyer l'état
+            orchestrator.clear_saved_state(saved_state.get("batch_id"))
+            return PrepareBatchResponse(
+                success=False,
+                batch_id=saved_state.get("batch_id", ""),
+                documents_count=0,
+                documents=[],
+                message="Tous les documents du batch interrompu ont été traités. État nettoyé."
+            )
+
+        # Préparer le batch avec uniquement les documents en attente
+        document_paths = [Path(d["path"]) for d in pending_docs if Path(d["path"]).exists()]
+
+        if not document_paths:
+            return PrepareBatchResponse(
+                success=False,
+                batch_id=saved_state.get("batch_id", ""),
+                documents_count=0,
+                documents=[],
+                message="Les fichiers du batch interrompu ne sont plus disponibles."
+            )
+
+        # Utiliser le même batch_id pour la continuité
+        original_batch_id = saved_state.get("batch_id", "")
+        batch_id = orchestrator.prepare_batch(
+            document_paths=document_paths,
+            batch_id=f"{original_batch_id}-resume"
+        )
+
+        # Récupérer les documents préparés
+        state = orchestrator.state
+        documents = [
+            {
+                "path": d.path,
+                "name": d.name,
+                "status": d.status
+            }
+            for d in state.documents
+        ]
+
+        # Supprimer l'ancien état sauvegardé
+        orchestrator.clear_saved_state(original_batch_id)
+
+        logger.info(f"[BURST] Resumed batch {batch_id} with {len(documents)} pending documents")
+
+        return PrepareBatchResponse(
+            success=True,
+            batch_id=batch_id,
+            documents_count=len(documents),
+            documents=documents,
+            message=f"Batch repris avec {len(documents)} documents en attente (sur {len(docs)} originaux). "
+                    f"Utilisez /start pour relancer l'infrastructure."
+        )
+
+    except Exception as e:
+        logger.error(f"Error resuming batch: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 __all__ = ["router"]

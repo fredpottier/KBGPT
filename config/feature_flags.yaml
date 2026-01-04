@@ -249,6 +249,47 @@ phase_2_hybrid_anchor:
 
 
 # ===============================================================================
+# Extraction V2 - Pipeline Unifié Docling + Vision Gating
+# ===============================================================================
+# ADR: doc/OSMOSIS_EXTRACTION_V2_DECISIONS.md
+# Objectif: Pipeline d'extraction unifié avec Vision Gating V4
+
+extraction_v2:
+  # Global toggle - active le nouveau pipeline d'extraction
+  enabled: true  # DÉSACTIVÉ par défaut, activer pour tester
+
+  # Configuration Vision
+  vision_config:
+    # Modèle Vision à utiliser
+    model: "gpt-4o"
+    # Température pour génération
+    temperature: 0.0
+    # Budget max pages Vision par document (null = illimité)
+    budget: null
+    # Inclure pages RECOMMENDED (pas seulement REQUIRED)
+    include_recommended: true
+
+  # Seuils de gating
+  gating_thresholds:
+    # Score VNS >= ce seuil → VISION_REQUIRED
+    vision_required: 0.60
+    # Score VNS >= ce seuil → VISION_RECOMMENDED
+    vision_recommended: 0.40
+
+  # Formats supportés
+  supported_formats:
+    - "pdf"
+    - "pptx"
+    - "docx"
+    - "xlsx"
+
+  # Cache
+  cache:
+    enabled: true
+    version: "v2"
+
+
+# ===============================================================================
 # Phases Antérieures (Référence)
 # ===============================================================================
 

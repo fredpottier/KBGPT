@@ -17,6 +17,7 @@ from .dispatcher import (
     enqueue_pdf_ingestion,
     enqueue_excel_ingestion,
     enqueue_fill_excel,
+    enqueue_document_v2,
     fetch_job,
 )
 from .jobs import (
@@ -32,6 +33,7 @@ __all__ = [
     "enqueue_pdf_ingestion",
     "enqueue_excel_ingestion",
     "enqueue_fill_excel",
+    "enqueue_document_v2",
     "fetch_job",
     "send_worker_heartbeat",
     "update_job_progress",

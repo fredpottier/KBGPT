@@ -248,6 +248,22 @@ def get_hybrid_anchor_config(
     return None
 
 
+def get_feature_flags(tenant_id: str = "default") -> Dict[str, Any]:
+    """
+    Retourne tous les feature flags avec overrides appliques.
+
+    Args:
+        tenant_id: ID tenant pour overrides
+
+    Returns:
+        Dict complet des feature flags
+    """
+    flags = _load_feature_flags()
+    flags = _get_environment_overrides(flags)
+    flags = _get_tenant_overrides(flags, tenant_id)
+    return flags
+
+
 def reload_feature_flags():
     """
     Force le rechargement du fichier de configuration.

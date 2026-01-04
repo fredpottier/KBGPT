@@ -335,3 +335,59 @@ def check_burst_providers_health(
     result["all_healthy"] = result["vllm_healthy"] and result["embeddings_healthy"]
 
     return result
+
+
+def check_instance_health_with_spot(
+    instance_ip: str,
+    health_port: int = 8080,
+    timeout: int = 5
+) -> Dict[str, Any]:
+    """
+    Vérifie la santé de l'instance via le health endpoint unifié.
+    Inclut la détection d'interruption Spot.
+
+    Args:
+        instance_ip: IP de l'instance EC2
+        health_port: Port du health endpoint (défaut 8080)
+        timeout: Timeout HTTP en secondes
+
+    Returns:
+        Dict avec:
+        - healthy: bool (vllm ET embeddings OK)
+        - vllm_healthy: bool
+        - embeddings_healthy: bool
+        - spot_interruption: None ou {"action": "terminate", "time": "..."}
+    """
+    import requests
+
+    result = {
+        "healthy": False,
+        "vllm_healthy": False,
+        "embeddings_healthy": False,
+        "spot_interruption": None,
+        "error": None
+    }
+
+    try:
+        health_url = f"http://{instance_ip}:{health_port}/"
+        resp = requests.get(health_url, timeout=timeout)
+
+        if resp.ok:
+            data = resp.json()
+            result["healthy"] = data.get("healthy", False)
+            result["vllm_healthy"] = data.get("vllm", {}).get("healthy", False)
+            result["embeddings_healthy"] = data.get("embeddings", {}).get("healthy", False)
+            result["spot_interruption"] = data.get("spot_interruption")
+
+            if result["spot_interruption"]:
+                logger.warning(
+                    f"[BURST:HEALTH] ⚠️ SPOT INTERRUPTION DETECTED: {result['spot_interruption']}"
+                )
+        else:
+            result["error"] = f"Health endpoint returned {resp.status_code}"
+
+    except requests.exceptions.RequestException as e:
+        result["error"] = str(e)
+        logger.debug(f"[BURST:HEALTH] Health check failed: {e}")
+
+    return result

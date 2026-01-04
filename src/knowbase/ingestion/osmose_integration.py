@@ -45,7 +45,7 @@ class OsmoseIntegrationConfig:
 
     # Filtres
     min_text_length: int = 500  # Skip si texte < 500 caractères
-    max_text_length: int = 1_000_000  # Skip si texte trop long
+    max_text_length: int = 5_000_000  # Skip si texte trop long (5M pour gros docs)
 
     # Performance
     timeout_seconds: int = 300  # 5 minutes max par document
@@ -78,7 +78,7 @@ class OsmoseIntegrationConfig:
             osmose_for_pptx=getattr(settings, "osmose_for_pptx", True),
             osmose_for_pdf=getattr(settings, "osmose_for_pdf", True),
             min_text_length=getattr(settings, "osmose_min_text_length", 500),
-            max_text_length=getattr(settings, "osmose_max_text_length", 1_000_000),
+            max_text_length=getattr(settings, "osmose_max_text_length", 5_000_000),
             timeout_seconds=getattr(settings, "osmose_timeout_seconds", 300),
             enable_hierarchy=getattr(settings, "osmose_enable_hierarchy", True),
             enable_relations=getattr(settings, "osmose_enable_relations", True),

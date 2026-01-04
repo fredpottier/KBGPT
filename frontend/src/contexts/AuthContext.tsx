@@ -1,8 +1,11 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react'
 import { authService, User, LoginCredentials, RegisterData } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
+
+// Intervalle de vérification du token (toutes les 2 minutes)
+const TOKEN_CHECK_INTERVAL = 2 * 60 * 1000
 
 interface AuthContextType {
   user: User | null
@@ -26,7 +29,62 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isMounted, setIsMounted] = useState(false)
+  const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const router = useRouter()
+
+  // Fonction pour vérifier et rafraîchir le token si nécessaire
+  const checkAndRefreshToken = useCallback(async () => {
+    // Utiliser ensureValidToken qui gère le refresh proactif
+    const token = await authService.ensureValidToken()
+
+    if (!token && user) {
+      // Token invalide et pas de refresh possible -> déconnexion silencieuse
+      console.log('[AuthContext] Token invalid and refresh failed, logging out')
+      authService.logout()
+      setUser(null)
+      window.location.href = '/login'
+    }
+  }, [user])
+
+  // Timer pour vérifier périodiquement le token
+  useEffect(() => {
+    if (!user) {
+      // Pas d'utilisateur connecté, arrêter le timer
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current)
+        refreshIntervalRef.current = null
+      }
+      return
+    }
+
+    // Démarrer le timer de vérification
+    console.log('[AuthContext] Starting token refresh timer (every 2 min)')
+    refreshIntervalRef.current = setInterval(checkAndRefreshToken, TOKEN_CHECK_INTERVAL)
+
+    // Cleanup
+    return () => {
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current)
+        refreshIntervalRef.current = null
+      }
+    }
+  }, [user, checkAndRefreshToken])
+
+  // Rafraîchir le token quand l'onglet devient visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && user) {
+        console.log('[AuthContext] Tab became visible, checking token...')
+        checkAndRefreshToken()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [user, checkAndRefreshToken])
 
   // Au chargement, vérifier si user authentifié
   useEffect(() => {
@@ -34,7 +92,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const initAuth = async () => {
       try {
-        if (authService.isAuthenticated()) {
+        // Utiliser isAuthenticatedAsync pour tenter un refresh si le token est expiré
+        const isValid = await authService.isAuthenticatedAsync()
+
+        if (isValid) {
           const storedUser = authService.getUser()
 
           if (storedUser) {

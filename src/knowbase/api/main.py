@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation
+from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics
 # living_ontology désactivé - génère trop de bruit en mode domain-agnostic (voir OSMOSE_STATUS_ACTUEL.md)
 
 
@@ -245,6 +245,7 @@ def create_app() -> FastAPI:
     app.include_router(entity_resolution.router)  # 🌊 OSMOSE Entity Resolution - Déduplication cross-doc (Phase 2.12)
     app.include_router(burst.router)  # 🚀 OSMOSE Burst Mode - EC2 Spot compute provider (Phase 2)
     app.include_router(navigation.router, prefix="/api")  # 🧭 Navigation Layer - Exploration corpus-level (ADR)
+    app.include_router(analytics.router, prefix="/api")  # 📊 Import Analytics - Dashboard analyse imports V2
 
     return app
 

@@ -204,7 +204,7 @@ Resources:
       SpotFleetRequestConfigData:
         IamFleetRole: !GetAtt SpotFleetRole.Arn
         TargetCapacity: 1
-        AllocationStrategy: capacityOptimized
+        AllocationStrategy: priceCapacityOptimized  # Priorise prix avec capacité acceptable
         Type: maintain
         TerminateInstancesWithExpiration: true
         SpotPrice: !Ref SpotMaxPrice
@@ -212,9 +212,11 @@ Resources:
 
         LaunchSpecifications:
           # ================================================================
-          # g6e.xlarge - NVIDIA L40S 48GB (Préféré - assez de VRAM pour vLLM + TEI)
+          # g6.2xlarge - NVIDIA L4 24GB (Préféré - moins cher, plus stable)
+          # Prix: ~$0.47-0.48/h vs g6e à ~$1.17-1.70/h
+          # GPU L4 24GB suffit pour Qwen 14B AWQ (~8GB) + TEI (~2GB)
           # ================================================================
-          - InstanceType: g6e.xlarge
+          - InstanceType: g6.2xlarge
             # AMI Golden OSMOSE v5 - Qwen 14B AWQ + TEI préchargés
             ImageId: !Ref AmiId
             # NetworkInterfaces avec SubnetId explicite (requis pour SpotFleet)
@@ -351,6 +353,7 @@ Resources:
                 """
                 Health endpoint pour OSMOSE Burst.
                 Vérifie que vLLM ET TEI sont prêts avant de retourner healthy.
+                Inclut aussi le statut d'interruption Spot (polling metadata AWS).
                 """
                 from http.server import HTTPServer, BaseHTTPRequestHandler
                 import json
@@ -360,6 +363,7 @@ Resources:
 
                 VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
                 EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
+                METADATA_URL = "http://169.254.169.254/latest/meta-data/spot/instance-action"
 
                 class HealthHandler(BaseHTTPRequestHandler):
                     def do_GET(self):
@@ -367,6 +371,7 @@ Resources:
                         vllm_msg = "not checked"
                         emb_ok = False
                         emb_msg = "not checked"
+                        spot_interruption = None
 
                         # Check vLLM - /health retourne 200 quand modèle chargé
                         try:
@@ -394,10 +399,24 @@ Resources:
                         except Exception as e:
                             emb_msg = f"error: {str(e)}"
 
+                        # Check Spot Interruption (AWS metadata)
+                        # Retourne 404 si pas d'interruption prévue, 200 avec JSON si interruption
+                        try:
+                            resp = urllib.request.urlopen(METADATA_URL, timeout=2)
+                            if resp.status == 200:
+                                spot_interruption = json.loads(resp.read().decode())
+                                print(f"⚠️ SPOT INTERRUPTION DETECTED: {spot_interruption}")
+                        except urllib.error.HTTPError as e:
+                            if e.code != 404:  # 404 = pas d'interruption (normal)
+                                print(f"Spot metadata error: {e.code}")
+                        except Exception:
+                            pass  # Pas d'interruption ou erreur réseau
+
                         status = {
                             "vllm": {"healthy": vllm_ok, "message": vllm_msg},
                             "embeddings": {"healthy": emb_ok, "message": emb_msg},
-                            "healthy": vllm_ok and emb_ok
+                            "healthy": vllm_ok and emb_ok,
+                            "spot_interruption": spot_interruption  # None ou {"action": "terminate", "time": "..."}
                         }
 
                         if status["healthy"]:
@@ -417,6 +436,7 @@ Resources:
                     print(f"Health endpoint starting on port 8080...")
                     print(f"  vLLM port: {VLLM_PORT}")
                     print(f"  Embeddings port: {EMB_PORT}")
+                    print(f"  Spot metadata: {METADATA_URL}")
                     server = HTTPServer(("", 8080), HealthHandler)
                     server.serve_forever()
                 HEALTHEOF
@@ -447,12 +467,13 @@ Resources:
                 echo "=== Bootstrap complete at $(date) ==="
                 echo "vLLM: http://localhost:$VLLM_PORT"
                 echo "Embeddings: http://localhost:$EMB_PORT"
-                echo "Health: http://localhost:8080"
+                echo "Health: http://localhost:8080 (includes Spot interruption status)"
 
           # ================================================================
-          # g6e.2xlarge - NVIDIA L40S 48GB (Fallback si xlarge indispo)
+          # g6.xlarge - NVIDIA L4 24GB (Fallback si 2xlarge indispo)
+          # Moins de vCPU mais même GPU - suffisant pour notre usage
           # ================================================================
-          - InstanceType: g6e.2xlarge
+          - InstanceType: g6.xlarge
             ImageId: !Ref AmiId
             NetworkInterfaces:
               - DeviceIndex: 0
@@ -476,7 +497,7 @@ Resources:
                 #!/bin/bash
                 set -ex
                 exec > >(tee /var/log/user-data.log) 2>&1
-                echo "=== OSMOSE Burst Bootstrap (g6e.2xlarge) ==="
+                echo "=== OSMOSE Burst Bootstrap (g6.xlarge) ==="
 
                 VLLM_MODEL="${VllmModel}"
                 EMBEDDINGS_MODEL="${EmbeddingsModel}"
@@ -522,31 +543,38 @@ Resources:
                 done
                 docker ps
 
-                # Health endpoint
+                # Health endpoint (with Spot interruption detection)
                 cat > /opt/health.py << 'EOF'
                 #!/usr/bin/env python3
                 from http.server import HTTPServer, BaseHTTPRequestHandler
-                import json, urllib.request, os
+                import json, urllib.request, urllib.error, os
                 VLLM_PORT = int(os.environ.get("VLLM_PORT", 8000))
                 EMB_PORT = int(os.environ.get("EMB_PORT", 8001))
+                SPOT_URL = "http://169.254.169.254/latest/meta-data/spot/instance-action"
                 class H(BaseHTTPRequestHandler):
                     def do_GET(self):
                         v = e = False
+                        spot = None
                         try: v = urllib.request.urlopen(f"http://localhost:{VLLM_PORT}/health", timeout=10).status == 200
                         except: pass
                         try: e = urllib.request.urlopen(f"http://localhost:{EMB_PORT}/health", timeout=10).status == 200
                         except: pass
+                        try:
+                            r = urllib.request.urlopen(SPOT_URL, timeout=2)
+                            if r.status == 200: spot = json.loads(r.read().decode())
+                        except urllib.error.HTTPError: pass
+                        except: pass
                         self.send_response(200 if v and e else 503)
                         self.send_header("Content-Type", "application/json")
                         self.end_headers()
-                        self.wfile.write(json.dumps({"vllm": v, "embeddings": e, "healthy": v and e}).encode())
+                        self.wfile.write(json.dumps({"vllm": {"healthy": v}, "embeddings": {"healthy": e}, "healthy": v and e, "spot_interruption": spot}).encode())
                     def log_message(self, *a): pass
                 HTTPServer(("", 8080), H).serve_forever()
                 EOF
                 chmod +x /opt/health.py
                 VLLM_PORT=$VLLM_PORT EMB_PORT=$EMB_PORT nohup python3 /opt/health.py > /var/log/health.log 2>&1 &
 
-                echo "Bootstrap complete"
+                echo "Bootstrap complete (Health endpoint includes Spot interruption status)"
 
 Outputs:
   SpotFleetId:

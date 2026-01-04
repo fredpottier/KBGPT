@@ -307,6 +307,10 @@ class BurstConfig:
     # Paths
     burst_pending_dir: str = "/data/burst/pending"
 
+    # Callback URL pour notifications d'interruption Spot
+    # L'instance EC2 appellera cette URL pour prévenir 2 min avant l'interruption
+    callback_url: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convertit en dictionnaire."""
         return {
@@ -332,7 +336,8 @@ class BurstConfig:
             "max_interruption_retries": self.max_interruption_retries,
             "use_deep_learning_ami": self.use_deep_learning_ami,
             "deep_learning_ami_os": self.deep_learning_ami_os,
-            "burst_pending_dir": self.burst_pending_dir
+            "burst_pending_dir": self.burst_pending_dir,
+            "callback_url": self.callback_url
         }
 
     @classmethod
@@ -386,5 +391,8 @@ class BurstConfig:
             deep_learning_ami_os=os.getenv("BURST_DEEP_LEARNING_AMI_OS", "ubuntu-22.04"),
 
             # Paths
-            burst_pending_dir=os.getenv("BURST_PENDING_DIR", "/data/burst/pending")
+            burst_pending_dir=os.getenv("BURST_PENDING_DIR", "/data/burst/pending"),
+
+            # Callback URL pour notification d'interruption Spot
+            callback_url=os.getenv("BURST_CALLBACK_URL")
         )

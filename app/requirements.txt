@@ -50,13 +50,20 @@ python-pptx
 pillow
 PyMuPDF>=1.23.0
 pdfplumber>=0.11.0
+pdf2image>=1.16.0
 pypdf
 pycryptodome>=3.21.0
 pdfminer.six==20231228
 pyyaml
 jinja2
 
+# === Extraction V2 - Docling (Pipeline unifié) ===
+# Docling: extraction structurée PDF/DOCX/PPTX/XLSX/HTML/Markdown/Images
+# Documentation: https://github.com/DS4SD/docling
+docling>=2.14.0
+
 # LangChain minimal (pas toute la suite)
+langchain>=0.3.0  # Base package needed for memory classes
 langchain-core>=0.3,<0.4
 langchain-anthropic>=0.1.23
 langchain_openai>=0.1.21

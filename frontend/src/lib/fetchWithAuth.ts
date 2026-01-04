@@ -18,6 +18,7 @@ import { authService } from './auth'
 
 /**
  * Wrapper fetch() avec authentification JWT automatique et gestion des 401.
+ * Effectue un refresh proactif si le token expire bientôt.
  *
  * @param input - URL ou Request object
  * @param init - Options fetch (headers, method, body, etc.)
@@ -27,12 +28,22 @@ export async function fetchWithAuth(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> {
-  // Récupérer le token JWT
-  const token = authService.getAccessToken()
+  // S'assurer qu'on a un token valide (refresh proactif si nécessaire)
+  const token = await authService.ensureValidToken()
+
+  // Si pas de token après tentative de refresh, rediriger vers login
+  if (!token) {
+    console.log('[fetchWithAuth] No valid token available, redirecting to login')
+    if (typeof window !== 'undefined') {
+      const redirectUrl = encodeURIComponent(window.location.pathname)
+      window.location.href = `/login?redirect=${redirectUrl}`
+    }
+    throw new Error('Authentication required. Please log in.')
+  }
 
   // Préparer les headers avec le token
   const headers = new Headers(init?.headers || {})
-  if (token && !headers.has('Authorization')) {
+  if (!headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`)
   }
 
@@ -42,12 +53,12 @@ export async function fetchWithAuth(
     headers,
   })
 
-  // Si erreur 401 (token expiré), tenter un refresh
+  // Si erreur 401 (token invalide malgré le refresh proactif), dernière tentative
   if (response.status === 401) {
     try {
-      console.log('[fetchWithAuth] Token expired (401), attempting refresh...')
+      console.log('[fetchWithAuth] Got 401 despite proactive refresh, attempting one more refresh...')
 
-      // Tenter de rafraîchir le token
+      // Tenter une dernière fois de rafraîchir le token
       const newToken = await authService.refreshAccessToken()
 
       console.log('[fetchWithAuth] Token refreshed successfully, retrying request')

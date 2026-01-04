@@ -141,12 +141,32 @@ CONFLICTS_WITH_MIN_FUZZY = 90
 
 # Seuils de scoring segment
 SEGMENT_SCORE_EXTRACT_ALWAYS = 50
-SEGMENT_SCORE_EXTRACT_IF_BUDGET = 35
-SEGMENT_SCORE_SKIP = 35
+SEGMENT_SCORE_EXTRACT_IF_BUDGET = 30  # Abaissé de 35 à 30 après calibration
+SEGMENT_SCORE_SKIP = 30
 
-# PATCH-03: Top-K fallback pour couverture minimale
-MIN_ELIGIBLE_SEGMENTS = 10  # Minimum de segments à traiter par document
+# Sélection adaptative des segments (ratio + cap)
+MIN_SEGMENTS = 10           # Minimum absolu de segments par document
+SEGMENT_RATIO = 0.25        # 25% des segments du document
+MAX_SEGMENTS = 50           # Cap maximum pour contrôle des coûts
 SEGMENT_SCORE_FALLBACK_FLOOR = 25  # Plancher absolu pour fallback
+
+
+def get_target_segments(total_segments: int) -> int:
+    """
+    Calcule le nombre de segments à traiter de manière adaptative.
+
+    Formule: max(MIN_SEGMENTS, ceil(total * RATIO)), plafonné à MAX_SEGMENTS
+
+    Exemples:
+        20 segments  -> 10 (min)
+        40 segments  -> 10 (min)
+        94 segments  -> 24 (25%)
+        184 segments -> 46 (25%)
+        250 segments -> 50 (cap)
+    """
+    from math import ceil
+    target = max(MIN_SEGMENTS, ceil(total_segments * SEGMENT_RATIO))
+    return min(target, MAX_SEGMENTS)
 
 # Poids section pour scoring
 SECTION_WEIGHTS = {
@@ -484,17 +504,21 @@ async def get_document_segments(
                 f"[OSMOSE:Pass2] Segment {seg_id} excluded (score={score.score} < floor)"
             )
 
-    # PATCH-03: Compléter avec fallback si pas assez de segments éligibles
+    # Sélection adaptative: ratio 25% avec min/max
+    total_segments = len(segments_map)
+    target_segments = get_target_segments(total_segments)
+
+    # Prendre d'abord les éligibles, puis compléter avec fallback si nécessaire
     selected_segments = eligible_segments.copy()
 
-    if len(selected_segments) < MIN_ELIGIBLE_SEGMENTS and fallback_candidates:
-        needed = MIN_ELIGIBLE_SEGMENTS - len(selected_segments)
+    if len(selected_segments) < target_segments and fallback_candidates:
+        needed = target_segments - len(selected_segments)
         fallback_to_add = fallback_candidates[:needed]  # Déjà triés par score desc
         selected_segments.extend(fallback_to_add)
 
         if fallback_to_add:
             logger.info(
-                f"[OSMOSE:Pass2] PATCH-03 Top-K fallback: added {len(fallback_to_add)} segments "
+                f"[OSMOSE:Pass2] Fallback selection: added {len(fallback_to_add)} segments "
                 f"(scores: {[s[2].score for s in fallback_to_add]})"
             )
 
@@ -526,12 +550,19 @@ async def get_document_segments(
             score=score
         ))
 
-    # Log stats
+    # Log stats enrichis pour observabilité
     fallback_count = len(selected_segments) - len(eligible_segments)
+    avg_score = (
+        sum(s[2].score for s in selected_segments) / len(selected_segments)
+        if selected_segments else 0
+    )
+    coverage_pct = (len(segments) / total_segments * 100) if total_segments > 0 else 0
+
     logger.info(
         f"[OSMOSE:Pass2] Document {document_id}: "
-        f"{len(segments)} segments selected ({len(eligible_segments)} eligible + {fallback_count} fallback) "
-        f"of {len(segments_map)} total"
+        f"total={total_segments}, target={target_segments}, "
+        f"selected={len(segments)} (eligible={len(eligible_segments)}, fallback={fallback_count}), "
+        f"avg_score={avg_score:.1f}, coverage={coverage_pct:.1f}%"
     )
 
     return segments

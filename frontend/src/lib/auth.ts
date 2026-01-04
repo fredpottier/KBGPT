@@ -273,7 +273,7 @@ class AuthService {
   /**
    * Décode un JWT pour extraire le payload (sans vérifier la signature).
    */
-  private decodeToken(token: string): { exp?: number; [key: string]: any } | null {
+  decodeToken(token: string): { exp?: number; iat?: number; [key: string]: any } | null {
     try {
       const base64Url = token.split('.')[1]
       if (!base64Url) return null
@@ -293,7 +293,7 @@ class AuthService {
   /**
    * Vérifie si un token est expiré.
    */
-  private isTokenExpired(token: string): boolean {
+  isTokenExpired(token: string): boolean {
     const payload = this.decodeToken(token)
     if (!payload || !payload.exp) return true
     // exp est en secondes, Date.now() en millisecondes
@@ -302,7 +302,78 @@ class AuthService {
   }
 
   /**
+   * Retourne le temps restant avant expiration du token en millisecondes.
+   * Retourne 0 si le token est expiré ou invalide.
+   */
+  getTokenTimeRemaining(): number {
+    const token = this.getAccessToken()
+    if (!token) return 0
+
+    const payload = this.decodeToken(token)
+    if (!payload || !payload.exp) return 0
+
+    const remaining = payload.exp * 1000 - Date.now()
+    return remaining > 0 ? remaining : 0
+  }
+
+  /**
+   * Vérifie si le token expire bientôt (dans les 5 prochaines minutes).
+   */
+  isTokenExpiringSoon(): boolean {
+    const remaining = this.getTokenTimeRemaining()
+    const FIVE_MINUTES = 5 * 60 * 1000
+    return remaining > 0 && remaining < FIVE_MINUTES
+  }
+
+  /**
+   * S'assure qu'un token valide est disponible.
+   * Si le token expire bientôt, tente un refresh proactif.
+   * Retourne le token valide ou null si impossible.
+   */
+  async ensureValidToken(): Promise<string | null> {
+    const token = this.getAccessToken()
+
+    // Pas de token du tout
+    if (!token) {
+      console.log('[AuthService] ensureValidToken: No token available')
+      return null
+    }
+
+    // Token déjà expiré - tenter refresh
+    if (this.isTokenExpired(token)) {
+      console.log('[AuthService] ensureValidToken: Token expired, attempting refresh...')
+      try {
+        const newToken = await this.refreshAccessToken()
+        console.log('[AuthService] ensureValidToken: Token refreshed successfully')
+        return newToken
+      } catch (error) {
+        console.error('[AuthService] ensureValidToken: Refresh failed', error)
+        return null
+      }
+    }
+
+    // Token expire bientôt - refresh proactif
+    if (this.isTokenExpiringSoon()) {
+      console.log('[AuthService] ensureValidToken: Token expiring soon, proactive refresh...')
+      try {
+        const newToken = await this.refreshAccessToken()
+        console.log('[AuthService] ensureValidToken: Proactive refresh successful')
+        return newToken
+      } catch (error) {
+        // Refresh échoué mais token encore valide, on continue
+        console.warn('[AuthService] ensureValidToken: Proactive refresh failed, using existing token')
+        return token
+      }
+    }
+
+    // Token valide et pas proche d'expirer
+    return token
+  }
+
+  /**
    * Vérifie si l'utilisateur est authentifié (token existe ET non expiré).
+   * Note: Cette méthode est synchrone. Pour un check avec refresh automatique,
+   * utiliser ensureValidToken() qui est async.
    */
   isAuthenticated(): boolean {
     const token = this.getAccessToken()
@@ -310,12 +381,21 @@ class AuthService {
 
     // Vérifier si le token n'est pas expiré
     if (this.isTokenExpired(token)) {
-      console.log('[AuthService] Token expired, clearing storage')
-      this.logout()
+      // Ne pas logout ici, laisser ensureValidToken() gérer le refresh
+      console.log('[AuthService] Token expired - refresh needed')
       return false
     }
 
     return true
+  }
+
+  /**
+   * Version async de isAuthenticated qui tente un refresh si nécessaire.
+   * Retourne true si l'utilisateur est authentifié après tentative de refresh.
+   */
+  async isAuthenticatedAsync(): Promise<boolean> {
+    const token = await this.ensureValidToken()
+    return token !== null
   }
 
   /**

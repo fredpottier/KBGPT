@@ -42,6 +42,7 @@ from .provider_switch import (
     deactivate_burst_providers,
     get_burst_providers_status,
     check_burst_providers_health,
+    check_instance_health_with_spot,
 )
 
 # Resilient Client
@@ -84,6 +85,7 @@ __all__ = [
     "deactivate_burst_providers",
     "get_burst_providers_status",
     "check_burst_providers_health",
+    "check_instance_health_with_spot",
     # Resilient Client
     "ResilientBurstClient",
     "BurstProviderUnavailable",
