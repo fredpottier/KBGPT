@@ -117,8 +117,8 @@ class KnowledgeProofService:
         """Recupere le driver Neo4j (lazy loading)."""
         if self._neo4j_driver is None:
             try:
-                from knowbase.semantic.clients.neo4j_client import get_neo4j_driver
-                self._neo4j_driver = get_neo4j_driver()
+                from knowbase.common.clients.neo4j_client import get_neo4j_client
+                self._neo4j_driver = get_neo4j_client().driver
             except Exception as e:
                 logger.warning(f"Could not get Neo4j driver: {e}")
                 return None

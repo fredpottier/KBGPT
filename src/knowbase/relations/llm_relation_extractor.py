@@ -9,7 +9,6 @@ from typing import List, Dict, Any, Optional, Tuple, Set
 from datetime import datetime
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
 
 from knowbase.relations.types import (
     RelationType,
@@ -25,422 +24,30 @@ from knowbase.relations.types import (
 )
 from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 
+# Phase 2 Refactoring - Import depuis modules extraits
+from knowbase.relations.relation_extraction_models import (
+    UnresolvedMention,
+    ExtractedRelationV3,
+    IDFirstExtractionResult,
+    CORE_RELATION_TYPES_V4,
+    ExtractedRelationV4,
+    TypeFirstExtractionResult,
+)
+from knowbase.relations.relation_extraction_prompts import (
+    RELATION_EXTRACTION_PROMPT_V3,
+    RELATION_EXTRACTION_V4_SYSTEM_PROMPT,
+    RELATION_EXTRACTION_V4_USER_PROMPT,
+)
+
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# Phase 2.8+ - Dataclasses pour résultats ID-First
-# =============================================================================
-
-@dataclass
-class UnresolvedMention:
-    """Mention d'entité non trouvée dans le catalogue."""
-    mention: str
-    context: str
-    suggested_type: Optional[str] = None
-
-
-@dataclass
-class ExtractedRelationV3:
-    """Relation extraite avec IDs résolus (post index→concept_id mapping)."""
-    subject_concept_id: str
-    object_concept_id: str
-    predicate_raw: str
-    evidence: str
-    confidence: float
-    flags: RawAssertionFlags
-    subject_surface_form: str
-    object_surface_form: str
-
-
-@dataclass
-class IDFirstExtractionResult:
-    """Résultat complet de l'extraction ID-First (Phase 2.8+)."""
-    relations: List[ExtractedRelationV3] = field(default_factory=list)
-    unresolved_mentions: List[UnresolvedMention] = field(default_factory=list)
-    stats: Dict[str, int] = field(default_factory=dict)
-
-
-# =============================================================================
-# Phase 2.10 - Type-First Extraction (Closed Set + Multi-Sourcing)
-# =============================================================================
-
-# Les 12 types Core domain-agnostic pour V4
-CORE_RELATION_TYPES_V4 = {
-    "PART_OF", "SUBTYPE_OF",  # Structurel
-    "REQUIRES", "ENABLES", "USES", "INTEGRATES_WITH", "APPLIES_TO",  # Dépendance
-    "CAUSES", "PREVENTS",  # Causalité
-    "VERSION_OF", "REPLACES",  # Temporel
-    "ASSOCIATED_WITH",  # Fallback
-}
-
-
-@dataclass
-class ExtractedRelationV4:
-    """
-    Relation extraite Phase 2.10 - Type-First avec set fermé.
-
-    Nouveaux champs vs V3:
-    - relation_type: Type forcé parmi les 12 Core
-    - type_confidence: Confiance LLM sur le type
-    - alt_type: Type alternatif si ambiguïté
-    - alt_type_confidence: Confiance sur l'alternatif
-    - relation_subtype_raw: Nuance sémantique fine (audit only)
-    - context_hint: Scope/contexte local
-    """
-    # Identité relation
-    subject_concept_id: str
-    object_concept_id: str
-
-    # Type forcé (Phase 2.10)
-    relation_type: RelationType
-    type_confidence: float
-    alt_type: Optional[RelationType] = None
-    alt_type_confidence: Optional[float] = None
-
-    # Prédicat brut (pour audit)
-    predicate_raw: str = ""
-    relation_subtype_raw: Optional[str] = None
-
-    # Evidence
-    evidence: str = ""
-    evidence_start_char: Optional[int] = None
-    evidence_end_char: Optional[int] = None
-    context_hint: Optional[str] = None
-
-    # Scores
-    confidence: float = 0.7  # Confidence extraction globale
-
-    # Flags sémantiques
-    flags: RawAssertionFlags = field(default_factory=RawAssertionFlags)
-
-    # Surface forms
-    subject_surface_form: str = ""
-    object_surface_form: str = ""
-
-
-@dataclass
-class TypeFirstExtractionResult:
-    """Résultat complet de l'extraction Type-First (Phase 2.10)."""
-    relations: List[ExtractedRelationV4] = field(default_factory=list)
-    unresolved_mentions: List[UnresolvedMention] = field(default_factory=list)
-    stats: Dict[str, Any] = field(default_factory=dict)
-
-
-# =============================================================================
-# Phase 2.8 - Nouveau prompt avec predicate_raw + flags
-# =============================================================================
-
-RELATION_EXTRACTION_PROMPT_V2 = """Tu es un expert en extraction de relations sémantiques entre concepts.
-
-CONTEXTE DU DOCUMENT:
-{full_text_excerpt}
-
-CONCEPTS IDENTIFIÉS:
-{concepts_list}
-
-INSTRUCTIONS:
-Analyse le contexte pour identifier TOUTES les relations entre les concepts.
-Pour chaque relation, extrais:
-
-1. **predicate_raw**: Le verbe/prédicat EXACT tel qu'il apparaît dans le texte
-   - Exemples: "requires", "uses", "integrates with", "is part of", "enables", "governs"
-   - NE PAS normaliser ou interpréter, garder la forme exacte
-
-2. **subject_concept**: Le concept SOURCE de la relation (celui qui agit/possède)
-3. **object_concept**: Le concept CIBLE de la relation (celui qui reçoit/est affecté)
-
-4. **evidence**: Citation EXACTE du texte justifiant la relation (phrase complète)
-
-5. **confidence**: Score 0.0-1.0 (ta confiance dans cette relation)
-   - 0.95+: Relation explicite, évidente
-   - 0.80-0.94: Relation claire mais contexte nécessaire
-   - 0.65-0.79: Relation implicite mais probable
-   - <0.65: Relation incertaine
-
-6. **flags** (tous booléens):
-   - is_negated: true si la relation est NIÉE ("ne nécessite PAS", "n'utilise pas")
-   - is_hedged: true si incertitude exprimée ("peut nécessiter", "pourrait utiliser", "might")
-   - is_conditional: true si condition ("si X alors", "when", "in case of")
-   - cross_sentence: true si la relation traverse plusieurs phrases
-
-EXEMPLES DE SORTIE:
-
-Texte: "NIS2 requires essential entities to implement risk management."
-→ predicate_raw: "requires"
-→ subject: "NIS2"
-→ object: "risk management"
-→ flags: {{is_negated: false, is_hedged: false, is_conditional: false, cross_sentence: false}}
-
-Texte: "GDPR may apply to certain organizations processing personal data."
-→ predicate_raw: "may apply to"
-→ is_hedged: true
-
-Texte: "S/4HANA does not require on-premise deployment."
-→ predicate_raw: "does not require"
-→ is_negated: true
-
-Réponds UNIQUEMENT en JSON valide:
-```json
-{{
-  "relations": [
-    {{
-      "subject_concept": "NIS2",
-      "object_concept": "risk management",
-      "predicate_raw": "requires",
-      "evidence": "NIS2 requires essential entities to implement risk management.",
-      "confidence": 0.95,
-      "flags": {{
-        "is_negated": false,
-        "is_hedged": false,
-        "is_conditional": false,
-        "cross_sentence": false
-      }}
-    }}
-  ]
-}}
-```
-
-Si aucune relation détectée, réponds: {{"relations": []}}
-"""
-
-# =============================================================================
-# Phase 2.8+ - Prompt V3 ID-First avec index (c1, c2...) - VERSION DÉFINITIVE
-# =============================================================================
-
-RELATION_EXTRACTION_PROMPT_V3 = """Tu es un expert en extraction de relations sémantiques entre concepts.
-
-CONTEXTE DU DOCUMENT (extrait) :
-{full_text_excerpt}
-
-CATALOGUE DE CONCEPTS AUTORISÉS (ensemble fermé) :
-{concept_catalog_json}
-
-RÈGLES STRICTES - À RESPECTER IMPÉRATIVEMENT :
-
-1) subject_id et object_id = UNIQUEMENT des index du catalogue (c1, c2, c3, etc.)
-2) Si une entité mentionnée dans le texte N'EST PAS dans le catalogue :
-   → NE CRÉE PAS de relation avec elle
-   → AJOUTE-LA dans "unresolved_mentions"
-3) predicate_raw = verbe/prédicat EXACT tel qu'il apparaît dans le texte
-4) evidence = citation EXACTE du texte (copier-coller, pas de paraphrase)
-5) Retourne UNIQUEMENT un JSON valide. Pas de texte avant ou après.
-
-DÉTECTION DES FLAGS :
-- is_negated: true si relation niée ("ne nécessite PAS", "n'utilise pas", "does not require")
-- is_hedged: true si incertitude ("peut nécessiter", "pourrait", "might", "may")
-- is_conditional: true si condition ("si X alors", "when", "in case of")
-- cross_sentence: true si la relation traverse plusieurs phrases
-
-FORMAT DE SORTIE JSON :
-{{
-  "relations": [
-    {{
-      "subject_id": "c1",
-      "object_id": "c2",
-      "predicate_raw": "requires compliance with",
-      "evidence": "EDPB requires compliance with GDPR for all EU organizations.",
-      "confidence": 0.95,
-      "flags": {{
-        "is_negated": false,
-        "is_hedged": false,
-        "is_conditional": false,
-        "cross_sentence": false
-      }}
-    }}
-  ],
-  "unresolved_mentions": [
-    {{
-      "mention": "ISO 27001",
-      "context": "GDPR compliance may also require ISO 27001 certification.",
-      "suggested_type": "standard"
-    }}
-  ]
-}}
-
-Si aucune relation détectée : {{"relations": [], "unresolved_mentions": []}}
-"""
-
-# =============================================================================
-# Phase 2.10 - Prompt V4 Type-First (Closed Set Domain-Agnostic)
-# =============================================================================
-
-RELATION_EXTRACTION_V4_SYSTEM_PROMPT = """You are OSMOSE Relation Extractor (V4).
-
-Goal:
-Extract factual relations between concepts from a text segment, using a CLOSED, domain-agnostic set of relation types.
-You must be strict and conservative. Do not invent facts. Do not infer unstated relations.
-
-You will be given:
-1) A text segment (evidence source)
-2) A catalog of concepts with IDs (c1, c2, ...), labels, and optional metadata.
-
-Hard constraints:
-- You may ONLY use the provided concept IDs as subject/object (no new concepts).
-- Output must be ONLY valid JSON (no markdown, no commentary).
-- Every relation MUST have an evidence snippet from the text (verbatim or near-verbatim).
-- If the text does not explicitly support a relation, do NOT output it.
-
-Relation types (choose exactly ONE primary type):
-STRUCTURAL
-- PART_OF         (A is part of B / contained in B / belongs to B)
-- SUBTYPE_OF      (A is a type/kind/subclass of B)
-
-DEPENDENCY / FUNCTIONAL
-- REQUIRES        (A requires/needs B to function/comply/occur)
-- ENABLES         (A enables/allows/supports B)
-- USES            (A uses/utilizes/leverages B)
-- INTEGRATES_WITH (A integrates/interoperates/connects with B)
-- APPLIES_TO      (A applies to/governs/regulates/targets B)
-
-CAUSALITY / CONSTRAINT
-- CAUSES          (A causes/leads to/results in B)
-- PREVENTS        (A prevents/prohibits/blocks B)
-
-TEMPORAL / EVOLUTION
-- VERSION_OF      (A is a version/variant of B)
-- REPLACES        (A replaces/supersedes B)
-
-FALLBACK
-- ASSOCIATED_WITH (weak association; only if nothing stronger fits AND the text clearly links them)
-
-Typing requirements:
-- Also return predicate_raw: the exact wording used in the text that expressed the relation (as close as possible).
-- Return type_confidence for the chosen relation_type between 0 and 1.
-- Optionally provide alt_type (one alternative relation_type) ONLY if ambiguity is real and supported; also include alt_type_confidence.
-- Optionally provide relation_subtype_raw for semantic nuance (e.g., "requires compliance with").
-- Optionally provide context_hint if the relation has a specific scope (e.g., "for medical devices").
-
-Anti-junk rules (very important):
-- Do NOT output relations where subject or object is:
-  (a) a purely structural reference (e.g., "Article 12", "Annex III", "Chapter IV", "Section 3", "Recital 28"),
-  (b) a generic vague term used without a concrete role (e.g., "Health", "Justice", "Market", "Guidance"), unless the text clearly makes it a specific entity or defined concept.
-- Do NOT output "includes/contains" as relations unless it truly expresses PART_OF and the components are meaningful concepts.
-- Do NOT output relations that are only list co-occurrence (A and B mentioned in the same list) without a connective claim.
-
-Negation / modality / conditions:
-For each relation, set flags:
-- is_negated: true if the text asserts the negation (e.g., "does not require", "shall not")
-- is_hedged: true if uncertain (e.g., "may", "might", "can", "could", "typically")
-- is_conditional: true if conditional (e.g., "if/when/in case/subject to")
-- cross_sentence: true ONLY if the relation needs more than one sentence to be explicit (otherwise false)
-
-Evidence:
-- evidence must be a short snippet that directly supports the relation (15-40 words recommended).
-- Provide evidence_start_char and evidence_end_char as offsets into the provided text segment IF possible; otherwise set them to null.
-
-Deduplication:
-- Do not repeat exact duplicates (same subject_id, relation_type, object_id, and same negation flag).
-
-Directionality:
-- Preserve direction: "A requires B" => subject=A, object=B.
-- If the sentence is passive, normalize direction logically (e.g., "B is required by A" => A REQUIRES B).
-
-If no valid relations exist, return {"relations": []}.
-"""
-
-RELATION_EXTRACTION_V4_USER_PROMPT = """Extract relations between the concepts from the text.
-
-TEXT:
-{text_segment}
-
-CONCEPT CATALOG (use ONLY these IDs):
-{concept_catalog_json}
-
-Output ONLY valid JSON following this schema:
-{{
-  "relations": [
-    {{
-      "subject_id": "c1",
-      "object_id": "c2",
-      "relation_type": "REQUIRES",
-      "type_confidence": 0.92,
-      "alt_type": "ENABLES",
-      "alt_type_confidence": 0.58,
-      "predicate_raw": "requires",
-      "relation_subtype_raw": "requires compliance with",
-      "flags": {{
-        "is_negated": false,
-        "is_hedged": false,
-        "is_conditional": true,
-        "cross_sentence": false
-      }},
-      "context_hint": "for medical devices",
-      "evidence": "If the provider places the system on the market, it requires appropriate risk management measures.",
-      "evidence_start_char": 1280,
-      "evidence_end_char": 1386
-    }}
-  ],
-  "unresolved_mentions": [
-    {{
-      "mention": "ISO 27001",
-      "context": "GDPR compliance may also require ISO 27001 certification.",
-      "suggested_type": "standard"
-    }}
-  ]
-}}
-"""
-
-# =============================================================================
-# Legacy prompt (Phase 2.7 compatibility)
-# =============================================================================
-
-RELATION_EXTRACTION_PROMPT = """Tu es un expert en extraction de relations sémantiques entre concepts.
-
-CONTEXTE DU DOCUMENT:
-{full_text_excerpt}
-
-CONCEPTS IDENTIFIÉS:
-{concepts_list}
-
-TYPES DE RELATIONS POSSIBLES:
-1. PART_OF: A est un composant/partie de B (ex: "Fiori fait partie de S/4HANA")
-2. SUBTYPE_OF: A est un sous-type de B (ex: "S/4HANA Cloud est un type d'ERP")
-3. REQUIRES: A nécessite B (obligatoire) (ex: "S/4HANA requiert HANA")
-4. USES: A utilise B (optionnel) (ex: "HANA est chiffré en AES256")
-5. INTEGRATES_WITH: A s'intègre avec B (ex: "SAP intègre Salesforce")
-6. VERSION_OF: A est une version de B (ex: "CCR 2023 version de CCR")
-7. PRECEDES: A précède B chronologiquement (ex: "CCR 2022 avant CCR 2023")
-8. REPLACES: A remplace B (ex: "S/4HANA remplace ECC")
-9. DEPRECATES: A rend B obsolète (ex: "HANA Cloud déprécie HANA on-premise")
-
-INSTRUCTIONS:
-- Analyse le contexte pour identifier TOUTES les relations entre les concepts
-- Pour chaque relation, fournis:
-  * source_concept: ID du concept source
-  * target_concept: ID du concept cible
-  * relation_type: Type parmi les 9 ci-dessus
-  * confidence: Score 0.0-1.0 (ta confiance dans cette relation)
-  * evidence: Citation exacte du texte qui justifie la relation
-  * metadata: Informations contextuelles (optionnel si applicable, force, contexte technique, etc.)
-
-IMPORTANT:
-- Ne crée une relation QUE si elle est explicite ou fortement implicite dans le texte
-- Si "ne nécessite PAS", "incompatible", etc. → ne crée PAS de relation
-- "peut utiliser" → USES avec strength=WEAK
-- "nécessite" → REQUIRES (obligatoire)
-- Attention aux négations et conditions
-
-Réponds UNIQUEMENT en JSON valide (array de relations):
-```json
-[
-  {{
-    "source_concept": "concept-id-1",
-    "target_concept": "concept-id-2",
-    "relation_type": "USES",
-    "confidence": 0.92,
-    "evidence": "la base HANA est chiffrée au repos en AES256",
-    "metadata": {{
-      "context": "encryption",
-      "scope": "at_rest",
-      "strength": "STRONG"
-    }}
-  }}
-]
-```
-
-Si aucune relation détectée, réponds: []
-"""
+# Prompts actifs (depuis relation_extraction_prompts.py):
+# - RELATION_EXTRACTION_PROMPT_V3 (Phase 2.8+ ID-First) - SupervisorAgent FSM
+# - RELATION_EXTRACTION_V4_SYSTEM_PROMPT (Phase 2.10 Type-First) - Pipeline principal
+# - RELATION_EXTRACTION_V4_USER_PROMPT
+#
+# Prompts supprimés (code mort):
+# - RELATION_EXTRACTION_PROMPT_V2, RELATION_EXTRACTION_PROMPT (legacy)
 
 
 class LLMRelationExtractor:
@@ -747,82 +354,28 @@ class LLMRelationExtractor:
         chunk_ids: Optional[List[str]] = None
     ) -> List[TypedRelation]:
         """
-        Extraire relations d'un chunk via LLM.
+        DEPRECATED: Extraire relations d'un chunk via LLM (legacy V2/V1).
+
+        Cette méthode utilisait les prompts V2 et Legacy qui ont été supprimés.
+        Utiliser extract_relations_type_first() ou extract_relations_chunk_aware_async() à la place.
+
+        Raises:
+            DeprecationWarning: Cette méthode n'est plus supportée.
         """
-        chunk_text = chunk_data["text"]
-        chunk_concepts = chunk_data["concepts"]
-
-        # Formater concepts pour prompt (utiliser canonical_name comme identifiant principal)
-        concepts_list = "\n".join([
-            f"- {c.get('canonical_name', 'UNKNOWN')} ({c.get('concept_type', 'UNKNOWN')})"
-            for c in chunk_concepts
-            if c.get('canonical_name')  # Skip concepts sans nom
-        ])
-
-        # Construire prompt (V2 ou legacy selon config)
-        prompt_template = RELATION_EXTRACTION_PROMPT_V2 if self.use_v2_prompt else RELATION_EXTRACTION_PROMPT
-        prompt = prompt_template.format(
-            full_text_excerpt=chunk_text,
-            concepts_list=concepts_list
+        import warnings
+        warnings.warn(
+            "_extract_from_chunk is deprecated. Use extract_relations_type_first() "
+            "or extract_relations_chunk_aware_async() instead.",
+            DeprecationWarning,
+            stacklevel=2
         )
+        logger.warning(
+            "[OSMOSE:LLMRelationExtractor] _extract_from_chunk called but is DEPRECATED. "
+            "The V2/Legacy prompts have been removed. Returning empty list."
+        )
+        return []
 
-        # Appel LLM via LLMRouter
-        try:
-            response_text = self.llm_router.complete(
-                task_type=TaskType.KNOWLEDGE_EXTRACTION,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,  # Bas pour cohérence
-                response_format={"type": "json_object"},  # Force JSON
-                model_preference=self.model  # Préférence pour gpt-4o-mini
-            )
-
-            # Parser JSON response
-            relations_data = json.loads(response_text)
-
-            # Si LLM retourne objet avec clé "relations"
-            if isinstance(relations_data, dict) and "relations" in relations_data:
-                relations_data = relations_data["relations"]
-
-            # Créer TypedRelation pour chaque relation
-            relations = []
-            for rel_data in relations_data:
-                if self.use_v2_prompt:
-                    relation = self._create_relation_from_llm_v2(
-                        rel_data=rel_data,
-                        concepts=chunk_concepts,
-                        document_id=document_id,
-                        document_name=document_name,
-                        chunk_ids=chunk_ids
-                    )
-                else:
-                    relation = self._create_relation_from_llm(
-                        rel_data=rel_data,
-                        concepts=chunk_concepts,
-                        document_id=document_id,
-                        document_name=document_name,
-                        chunk_ids=chunk_ids
-                    )
-                if relation:
-                    relations.append(relation)
-
-            logger.info(
-                f"[OSMOSE:LLMRelationExtractor] LLM extracted {len(relations)} relations "
-                f"from chunk (v2={self.use_v2_prompt})"
-            )
-
-            return relations
-
-        except json.JSONDecodeError as e:
-            logger.error(
-                f"[OSMOSE:LLMRelationExtractor] Failed to parse LLM JSON response: {e}"
-            )
-            return []
-        except Exception as e:
-            logger.error(
-                f"[OSMOSE:LLMRelationExtractor] LLM extraction error: {e}",
-                exc_info=True
-            )
-            return []
+    # _extract_from_chunk_legacy_disabled supprimée - code mort (prompts V2/Legacy supprimés)
 
     def _create_relation_from_llm(
         self,

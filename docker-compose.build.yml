@@ -12,12 +12,6 @@ services:
       dockerfile: ./app/Dockerfile
     image: sap-kb-worker:latest
 
-  ui:
-    build:
-      context: .
-      dockerfile: ./ui/Dockerfile
-    image: sap-kb-ui:latest
-
   frontend:
     build:
       context: ./frontend

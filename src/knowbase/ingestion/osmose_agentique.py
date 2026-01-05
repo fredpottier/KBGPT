@@ -38,6 +38,24 @@ from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router  # Ph
 from knowbase.ontology.domain_context_injector import get_domain_context_injector  # Domain Context injection
 from knowbase.entity_resolution.deferred_reevaluator import get_deferred_reevaluator  # Phase 2.12: Entity Resolution
 
+# ===== OSMOSE Refactored Modules =====
+from knowbase.ingestion.osmose_utils import (
+    OsmoseComponentFactory,
+    should_process_with_osmose,
+    calculate_adaptive_timeout,
+)
+from knowbase.ingestion.osmose_enrichment import (
+    enrich_anchors_with_context,
+    extract_document_metadata,
+    generate_document_summary,
+    cross_reference_chunks_and_concepts,
+)
+from knowbase.ingestion.osmose_persistence import (
+    persist_hybrid_anchor_to_neo4j,
+    extract_intra_document_relations,
+    trigger_entity_resolution_reevaluation,
+)
+
 # ===== Phase 2 - Hybrid Anchor Model =====
 from knowbase.config.feature_flags import is_feature_enabled, get_hybrid_anchor_config
 from knowbase.ingestion.enrichment_tracker import (
@@ -374,146 +392,15 @@ class OsmoseAgentiqueService:
         """
         Génère un résumé contextuel du document ET évalue sa densité technique.
 
-        Phase 1.8 Task T1.8.1.0: Document Context Global.
-        Phase 1.8.2: Ajout technical_density_hint pour stratégie extraction domain-agnostic.
-
-        Ce résumé est utilisé pour:
-        - Désambiguïser les acronymes/abréviations
-        - Préférer les noms complets officiels
-        - Contexte domaine pour meilleure extraction
-
-        Le technical_density_hint (0.0-1.0) indique si le document contient
-        du vocabulaire technique spécialisé nécessitant une extraction LLM.
-
-        Args:
-            document_id: ID unique pour cache
-            full_text: Texte complet du document
-            max_length: Longueur max du résumé (caractères)
-
-        Returns:
-            Tuple (résumé contextuel, technical_density_hint 0.0-1.0)
+        Délègue à osmose_enrichment.generate_document_summary().
         """
-        # Vérifier cache global (inclut maintenant le hint)
-        cache_key = hashlib.md5(document_id.encode()).hexdigest()
-
-        if cache_key in _document_context_cache:
-            cached = _document_context_cache[cache_key]
-            # Support ancien format (string) et nouveau format (tuple)
-            if isinstance(cached, tuple):
-                logger.info(f"[PHASE1.8:Context] Cache hit for document {document_id[:20]}...")
-                return cached
-            else:
-                # Ancien format: retourner avec hint par défaut
-                return (cached, 0.5)
-
-        logger.info(f"[PHASE1.8:Context] Generating document context for {document_id[:20]}...")
-
-        # Extraction métadonnées sans LLM
-        metadata = self._extract_document_metadata(full_text)
-
-        # Construire prompt pour LLM
-        # Limiter texte envoyé au LLM (premiers 4000 chars + derniers 1000)
-        text_sample = full_text[:4000]
-        if len(full_text) > 5000:
-            text_sample += "\n[...]\n" + full_text[-1000:]
-
-        # Prompt générique (domain-agnostic) avec évaluation densité technique
-        system_prompt = """You are a document analyst. Your task is to:
-1. Generate a concise document summary (1-2 paragraphs, max 500 characters)
-2. Evaluate the technical density of the document
-
-For the summary, focus on:
-- Main theme/topic of the document
-- Full official names of products, solutions, or key terms mentioned
-- Industry or domain context
-- Target audience
-
-For technical density evaluation (0.0-1.0):
-- 0.0-0.3: Simple text (marketing, general communication, basic explanations)
-- 0.3-0.5: Moderate technical content (business documents, standard procedures)
-- 0.5-0.7: Technical content (specialized domain vocabulary, acronyms, jargon)
-- 0.7-1.0: Highly technical (scientific papers, technical specifications, dense terminology)
-
-Answer in JSON format:
-{"summary": "your summary here", "technical_density": 0.X}
-
-Write the summary in the same language as the document."""
-
-        # Injection du Domain Context si disponible
-        try:
-            injector = get_domain_context_injector()
-            system_prompt = injector.inject_context(system_prompt, tenant_id="default")
-            logger.info("[PHASE1.8:Context] Domain Context injected into summary prompt")
-        except Exception as e:
-            logger.debug(f"[PHASE1.8:Context] No Domain Context available: {e}")
-
-        user_prompt = f"""Document metadata:
-- Title: {metadata.get('title', 'Unknown')}
-- Headers: {', '.join(metadata.get('headers', [])[:5])}
-- Keywords detected: {', '.join(metadata.get('keywords', [])[:10])}
-
-Document text sample:
-{text_sample}
-
-Analyze this document and provide JSON response:"""
-
-        try:
-            llm_router = self._get_llm_router()
-
-            # Utiliser LONG_TEXT_SUMMARY pour ce type de tâche
-            response = await llm_router.acomplete(
-                task_type=TaskType.LONG_TEXT_SUMMARY,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3,
-                max_tokens=400
-            )
-
-            # Parser la réponse JSON
-            import json
-            technical_density = 0.5  # Défaut
-            summary = response
-
-            try:
-                # Chercher JSON dans la réponse
-                json_match = re.search(r'\{[^}]+\}', response, re.DOTALL)
-                if json_match:
-                    data = json.loads(json_match.group(0))
-                    summary = data.get("summary", response)
-                    technical_density = float(data.get("technical_density", 0.5))
-                    # Clamp entre 0 et 1
-                    technical_density = max(0.0, min(1.0, technical_density))
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"[PHASE1.8:Context] Failed to parse JSON response: {e}")
-                # Garder le response brut comme summary
-
-            # Tronquer si trop long
-            if len(summary) > max_length:
-                summary = summary[:max_length-3] + "..."
-
-            # Stocker en cache (nouveau format tuple)
-            _document_context_cache[cache_key] = (summary, technical_density)
-
-            logger.info(
-                f"[PHASE1.8:Context] Generated context ({len(summary)} chars, "
-                f"technical_density={technical_density:.2f}) for document {document_id[:20]}..."
-            )
-
-            return (summary, technical_density)
-
-        except Exception as e:
-            logger.warning(f"[PHASE1.8:Context] Failed to generate summary: {e}")
-
-            # Fallback: construire contexte minimal depuis métadonnées
-            fallback = f"Document: {metadata.get('title', 'Unknown')}. "
-            if metadata.get('keywords'):
-                fallback += f"Topics: {', '.join(metadata['keywords'][:5])}."
-
-            # Fallback hint: 0.5 (neutre)
-            _document_context_cache[cache_key] = (fallback, 0.5)
-            return (fallback, 0.5)
+        llm_router = self._get_llm_router()
+        return await generate_document_summary(
+            document_id=document_id,
+            full_text=full_text,
+            llm_router=llm_router,
+            max_length=max_length,
+        )
 
     def _cross_reference_chunks_and_concepts(
         self,
@@ -525,107 +412,14 @@ Analyze this document and provide JSON response:"""
         """
         Établit le cross-référencement bidirectionnel Neo4j ↔ Qdrant.
 
-        Après création des chunks, cette méthode :
-        1. Récupère le mapping Proto → Canonical depuis Neo4j
-        2. Met à jour les chunks Qdrant avec canonical_concept_ids
-        3. Met à jour les CanonicalConcepts Neo4j avec chunk_ids
-
-        Args:
-            chunks: Liste des chunks créés
-            chunk_ids: IDs des chunks dans Qdrant
-            concept_to_chunk_ids: Mapping proto_id → chunk_ids
-            tenant_id: ID tenant
+        Délègue à osmose_enrichment.cross_reference_chunks_and_concepts().
         """
-        from knowbase.common.clients.neo4j_client import get_neo4j_client
-        from knowbase.common.clients.qdrant_client import get_qdrant_client
-        from knowbase.config.settings import get_settings
-
-        settings = get_settings()
-        neo4j_client = get_neo4j_client(
-            uri=settings.neo4j_uri,
-            user=settings.neo4j_user,
-            password=settings.neo4j_password,
-            database="neo4j"
+        cross_reference_chunks_and_concepts(
+            chunks=chunks,
+            chunk_ids=chunk_ids,
+            concept_to_chunk_ids=concept_to_chunk_ids,
+            tenant_id=tenant_id,
         )
-        qdrant_client = get_qdrant_client()
-
-        try:
-            # Étape 1: Récupérer mapping Proto → Canonical depuis Neo4j
-            proto_to_canonical = {}
-            with neo4j_client.driver.session(database="neo4j") as session:
-                result = session.run("""
-                    MATCH (p:ProtoConcept)-[:PROMOTED_TO]->(c:CanonicalConcept)
-                    WHERE p.tenant_id = $tenant_id
-                    RETURN p.concept_id as proto_id, c.canonical_id as canonical_id
-                """, tenant_id=tenant_id)
-
-                for record in result:
-                    proto_to_canonical[record["proto_id"]] = record["canonical_id"]
-
-            logger.info(
-                f"[OSMOSE AGENTIQUE:CrossRef] Retrieved {len(proto_to_canonical)} Proto→Canonical mappings"
-            )
-
-            # Étape 2: Construire mapping chunk_id → canonical_concept_ids
-            chunk_to_canonicals = {}
-            canonical_to_chunks = {}  # Pour update Neo4j
-
-            for chunk, chunk_id in zip(chunks, chunk_ids):
-                proto_ids = chunk.get("proto_concept_ids", [])
-                canonical_ids = []
-
-                for proto_id in proto_ids:
-                    canonical_id = proto_to_canonical.get(proto_id)
-                    if canonical_id:
-                        canonical_ids.append(canonical_id)
-                        # Mapper Canonical → Chunks pour Neo4j update
-                        if canonical_id not in canonical_to_chunks:
-                            canonical_to_chunks[canonical_id] = []
-                        canonical_to_chunks[canonical_id].append(chunk_id)
-
-                if canonical_ids:
-                    chunk_to_canonicals[chunk_id] = canonical_ids
-
-            logger.info(
-                f"[OSMOSE AGENTIQUE:CrossRef] Mapped {len(chunk_to_canonicals)} chunks to canonical concepts"
-            )
-
-            # Étape 3: Update chunks Qdrant avec canonical_concept_ids (batch)
-            if chunk_to_canonicals:
-                # Utiliser set_payload pour update uniquement le champ (plus efficace)
-                for chunk_id, canonical_ids in chunk_to_canonicals.items():
-                    qdrant_client.set_payload(
-                        collection_name="knowbase",
-                        payload={"canonical_concept_ids": canonical_ids},
-                        points=[chunk_id]
-                    )
-
-                logger.info(
-                    f"[OSMOSE AGENTIQUE:CrossRef] ✅ Updated {len(chunk_to_canonicals)} chunks in Qdrant with canonical_concept_ids"
-                )
-
-            # Étape 4: Update CanonicalConcepts Neo4j avec chunk_ids (batch)
-            if canonical_to_chunks:
-                with neo4j_client.driver.session(database="neo4j") as session:
-                    for canonical_id, chunk_list in canonical_to_chunks.items():
-                        session.run("""
-                            MATCH (c:CanonicalConcept {canonical_id: $canonical_id, tenant_id: $tenant_id})
-                            SET c.chunk_ids = $chunk_ids
-                        """, canonical_id=canonical_id, tenant_id=tenant_id, chunk_ids=chunk_list)
-
-                logger.info(
-                    f"[OSMOSE AGENTIQUE:CrossRef] ✅ Updated {len(canonical_to_chunks)} CanonicalConcepts in Neo4j with chunk_ids"
-                )
-
-            # Log résumé
-            logger.info(
-                f"[OSMOSE AGENTIQUE:CrossRef] ✅ Cross-reference complete: "
-                f"{len(chunk_to_canonicals)} chunks ↔ {len(canonical_to_chunks)} concepts"
-            )
-
-        except Exception as e:
-            logger.error(f"[OSMOSE AGENTIQUE:CrossRef] Error during cross-reference: {e}", exc_info=True)
-            raise
 
     def _should_process_with_osmose(
         self,
@@ -635,90 +429,25 @@ Analyze this document and provide JSON response:"""
         """
         Détermine si le document doit être traité avec OSMOSE.
 
-        Args:
-            document_type: Type document ("pptx" ou "pdf")
-            text_content: Contenu textuel du document
-
-        Returns:
-            (should_process, skip_reason)
+        Délègue à osmose_utils.should_process_with_osmose().
         """
-        # Feature flag global désactivé
-        if not self.config.enable_osmose:
-            return False, "OSMOSE globally disabled"
-
-        # Feature flag par type de document
-        if document_type == "pptx" and not self.config.osmose_for_pptx:
-            return False, "OSMOSE disabled for PPTX"
-
-        if document_type == "pdf" and not self.config.osmose_for_pdf:
-            return False, "OSMOSE disabled for PDF"
-
-        # Filtre par longueur texte
-        text_length = len(text_content)
-
-        if text_length < self.config.min_text_length:
-            return False, f"Text too short: {text_length} < {self.config.min_text_length}"
-
-        if text_length > self.config.max_text_length:
-            return False, f"Text too long: {text_length} > {self.config.max_text_length}"
-
-        return True, None
+        return should_process_with_osmose(
+            document_type=document_type,
+            text_content=text_content,
+            enable_osmose=self.config.enable_osmose,
+            osmose_for_pptx=self.config.osmose_for_pptx,
+            osmose_for_pdf=self.config.osmose_for_pdf,
+            min_text_length=self.config.min_text_length,
+            max_text_length=self.config.max_text_length,
+        )
 
     def _calculate_adaptive_timeout(self, num_segments: int) -> int:
         """
         Calcule un timeout adaptatif basé sur la complexité du document.
 
-        Formule Phase 2 OSMOSE (avec extraction relations LLM):
-        - Temps de base : 120s (2 min)
-        - Temps par segment : 90s (60s extraction NER + 30s relation extraction LLM)
-        - Temps FSM overhead : 120s (mining, gatekeeper, promotion, relation writing, indexing)
-        - Min : 600s (10 min), Max : settings.osmose_timeout_seconds (défaut 1h, configurable)
-
-        Rationale Phase 2:
-        - Extraction relations LLM ajoute ~30-50% overhead par segment
-        - Documents larges (500+ concepts) peuvent prendre 60-90 min avec Phase 2
-        - Cas réel observé: 553 concepts, 2246 relations → 48 min (timeout à 30 min!)
-
-        Architecture centralisée timeouts (Phase 2 refactor):
-        - Utilise settings.osmose_timeout_seconds (property calculée depuis MAX_DOCUMENT_PROCESSING_TIME)
-        - Timeout unifié: 1 seule variable à configurer (MAX_DOCUMENT_PROCESSING_TIME)
-
-        Exemples (avec max par défaut 3600s / 1h):
-        - 1 segment : 120 + 90*1 + 120 = 330s → clamped à min=600s (10 min)
-        - 10 segments : 120 + 90*10 + 120 = 1140s (19 min)
-        - 20 segments : 120 + 90*20 + 120 = 2040s (34 min)
-        - 30 segments : 120 + 90*30 + 120 = 2940s (49 min) ✅ OK pour doc 230 slides
-        - 50 segments : 120 + 90*50 + 120 = 4740s (79 min) → capped à max=3600s (1h)
-        - 60 segments : 120 + 90*60 + 120 = 5640s → capped à max=3600s (1h)
-
-        Args:
-            num_segments: Nombre de segments détectés
-
-        Returns:
-            Timeout en secondes
+        Délègue à osmose_utils.calculate_adaptive_timeout().
         """
-        from knowbase.config.settings import get_settings
-
-        settings = get_settings()
-
-        base_time = 120  # 2 min base
-        time_per_segment = 90  # 90s (1.5 min) par segment (extraction + relations Phase 2)
-        fsm_overhead = 120  # 2 min pour mining, gatekeeper, promotion, relation writing, indexing
-
-        calculated_timeout = base_time + (time_per_segment * num_segments) + fsm_overhead
-
-        # Bornes: utilise architecture centralisée via settings
-        min_timeout = 600  # Minimum absolu: 10 minutes (réduit car max augmenté à 1h)
-        max_timeout = settings.osmose_timeout_seconds  # Depuis MAX_DOCUMENT_PROCESSING_TIME
-
-        adaptive_timeout = max(min_timeout, min(calculated_timeout, max_timeout))
-
-        logger.info(
-            f"⏱️ Adaptive timeout: {adaptive_timeout}s "
-            f"(calculated={calculated_timeout}s, max={max_timeout}s, min={min_timeout}s, segments={num_segments})"
-        )
-
-        return adaptive_timeout
+        return calculate_adaptive_timeout(num_segments)
 
     async def process_document_agentique(
         self,
@@ -1569,426 +1298,48 @@ Analyze this document and provide JSON response:"""
         """
         Persiste les concepts Hybrid Anchor dans Neo4j.
 
-        Crée selon l'ADR:
-        - Document node avec DocContextFrame (PR4)
-        - ProtoConcept nodes avec leurs attributs
-        - CanonicalConcept nodes avec stability et needs_confirmation
-        - Relations INSTANCE_OF entre Proto et Canonical
-        - Relations EXTRACTED_FROM avec propriétés assertion (PR4)
-        - DocumentChunk nodes (si chunks fournis)
-        - Relations ANCHORED_IN entre concepts et chunks
-
-        Args:
-            proto_concepts: Liste des ProtoConcepts (promus uniquement)
-            canonical_concepts: Liste des CanonicalConcepts
-            document_id: ID du document
-            tenant_id: ID tenant
-            chunks: Liste des chunks avec anchored_concepts (optionnel)
-            document_name: Nom du document (PR4)
-            doc_context_frame: DocContextFrame pour propriétés Document (PR4)
-
-        Returns:
-            Dict avec compteurs créés
+        Délègue à osmose_persistence.persist_hybrid_anchor_to_neo4j().
         """
-        from knowbase.common.clients.neo4j_client import get_neo4j_client
-        from knowbase.config.settings import get_settings
+        return await persist_hybrid_anchor_to_neo4j(
+            proto_concepts=proto_concepts,
+            canonical_concepts=canonical_concepts,
+            document_id=document_id,
+            tenant_id=tenant_id,
+            chunks=chunks,
+            document_name=document_name,
+            doc_context_frame=doc_context_frame,
+        )
 
-        settings = get_settings()
-        stats = {
-            "document_created": 0,
-            "proto_created": 0,
-            "canonical_created": 0,
-            "relations_created": 0,
-            "extracted_from_created": 0,  # PR4: EXTRACTED_FROM avec propriétés assertion
-            "chunks_created": 0,
-            "anchored_in_created": 0
-        }
+    # NOTE: Le reste de l'ancienne implémentation a été supprimé.
+    # L'implémentation complète est maintenant dans osmose_persistence.py.
 
-        try:
-            neo4j_client = get_neo4j_client(
-                uri=settings.neo4j_uri,
-                user=settings.neo4j_user,
-                password=settings.neo4j_password,
-                database="neo4j"
-            )
+    async def _persist_hybrid_anchor_to_neo4j_PLACEHOLDER(self) -> None:
+        """Placeholder pour maintenir la structure du fichier après édition."""
+        pass
 
-            if not neo4j_client.is_connected():
-                logger.warning("[OSMOSE:HybridAnchor:Neo4j] Not connected, skipping persistence")
-                return stats
+    async def _DELETED_persist_hybrid_anchor_to_neo4j(
+        self,
+    ) -> None:
+        """
+        DELETED - Cette section contenait ~380 lignes de code Neo4j.
+        L'implémentation a été déplacée vers osmose_persistence.py.
+        """
+        # Ce placeholder sera supprimé par l'édition suivante
+        pass
 
-            # ================================================================
-            # Étape 0: Créer/mettre à jour le nœud Document (PR4)
-            # ================================================================
-            doc_query = """
-            MERGE (d:Document {id: $doc_id, tenant_id: $tenant_id})
-            ON CREATE SET
-                d.name = $doc_name,
-                d.detected_variant = $detected_variant,
-                d.variant_confidence = $variant_confidence,
-                d.doc_scope = $doc_scope,
-                d.edition = $edition,
-                d.global_markers = $global_markers,
-                d.created_at = datetime()
-            ON MATCH SET
-                d.name = COALESCE($doc_name, d.name),
-                d.detected_variant = COALESCE($detected_variant, d.detected_variant),
-                d.variant_confidence = $variant_confidence,
-                d.doc_scope = $doc_scope,
-                d.edition = COALESCE($edition, d.edition),
-                d.global_markers = $global_markers,
-                d.updated_at = datetime()
-            RETURN count(d) AS created
-            """
+    # === FIN SECTION SUPPRIMÉE ===
 
-            # Extraire les données du DocContextFrame
-            detected_variant = None
-            variant_confidence = 0.0
-            doc_scope = "unknown"
-            edition = None
-            global_markers: List[str] = []
+    # OSMOSE Persistence methods delegation done - see osmose_persistence.py
 
-            if doc_context_frame:
-                # Utiliser get_dominant_marker() pour detected_variant
-                detected_variant = doc_context_frame.get_dominant_marker()
-                variant_confidence = doc_context_frame.scope_confidence
-                doc_scope = doc_context_frame.doc_scope.value if hasattr(doc_context_frame.doc_scope, 'value') else str(doc_context_frame.doc_scope)
-                # Edition n'existe plus - déduire de doc_scope si VARIANT_SPECIFIC
-                edition = detected_variant if doc_context_frame.doc_scope.value == "VARIANT_SPECIFIC" else None
-                # Combiner strong_markers et weak_markers pour global_markers
-                global_markers = list(doc_context_frame.strong_markers) + list(doc_context_frame.weak_markers)
-
-            with neo4j_client.driver.session(database="neo4j") as session:
-                result = session.run(
-                    doc_query,
-                    doc_id=document_id,
-                    tenant_id=tenant_id,
-                    doc_name=document_name,
-                    detected_variant=detected_variant,
-                    variant_confidence=variant_confidence,
-                    doc_scope=doc_scope,
-                    edition=edition,
-                    global_markers=global_markers,
-                )
-                record = result.single()
-                if record:
-                    stats["document_created"] = record["created"]
-
-            # ================================================================
-            # Étape 1: Créer les ProtoConcepts
-            # ================================================================
-            # Build mapping proto_id -> canonical_id pour les relations
-            proto_to_canonical: Dict[str, str] = {}
-            for cc in canonical_concepts:
-                for proto_id in cc.proto_concept_ids:
-                    proto_to_canonical[proto_id] = cc.id
-
-            # Batch create ProtoConcepts
-            proto_query = """
-            UNWIND $protos AS proto
-            MERGE (p:ProtoConcept {concept_id: proto.id, tenant_id: $tenant_id})
-            ON CREATE SET
-                p.concept_name = proto.label,
-                p.definition = proto.definition,
-                p.type_heuristic = proto.type_heuristic,
-                p.document_id = proto.document_id,
-                p.section_id = proto.section_id,
-                p.created_at = datetime(),
-                p.extraction_method = 'hybrid_anchor'
-            ON MATCH SET
-                p.definition = COALESCE(proto.definition, p.definition),
-                p.updated_at = datetime()
-            RETURN count(p) AS created
-            """
-
-            proto_data = [
-                {
-                    "id": pc.id,
-                    "label": pc.label,
-                    "definition": pc.definition,
-                    "type_heuristic": pc.type_heuristic,
-                    "document_id": pc.document_id,
-                    "section_id": getattr(pc, 'section_id', None)
-                }
-                for pc in proto_concepts
-            ]
-
-            with neo4j_client.driver.session(database="neo4j") as session:
-                result = session.run(
-                    proto_query,
-                    protos=proto_data,
-                    tenant_id=tenant_id
-                )
-                record = result.single()
-                if record:
-                    stats["proto_created"] = record["created"]
-
-            # ================================================================
-            # Étape 2: Créer les CanonicalConcepts avec stability
-            # ================================================================
-            canonical_query = """
-            UNWIND $canonicals AS cc
-            MERGE (c:CanonicalConcept {canonical_id: cc.id, tenant_id: $tenant_id})
-            ON CREATE SET
-                c.canonical_name = cc.label,
-                c.canonical_key = toLower(replace(cc.label, ' ', '_')),
-                c.unified_definition = cc.definition_consolidated,
-                c.type_fine = cc.type_fine,
-                c.stability = cc.stability,
-                c.needs_confirmation = cc.needs_confirmation,
-                c.status = 'HYBRID_ANCHOR',
-                c.created_at = datetime()
-            ON MATCH SET
-                c.unified_definition = COALESCE(cc.definition_consolidated, c.unified_definition),
-                c.type_fine = COALESCE(cc.type_fine, c.type_fine),
-                c.stability = cc.stability,
-                c.needs_confirmation = cc.needs_confirmation,
-                c.updated_at = datetime()
-            RETURN count(c) AS created
-            """
-
-            canonical_data = [
-                {
-                    "id": cc.id,
-                    "label": cc.label,
-                    "definition_consolidated": cc.definition_consolidated,
-                    "type_fine": cc.type_fine,
-                    "stability": cc.stability.value if hasattr(cc.stability, 'value') else str(cc.stability),
-                    "needs_confirmation": cc.needs_confirmation
-                }
-                for cc in canonical_concepts
-            ]
-
-            with neo4j_client.driver.session(database="neo4j") as session:
-                result = session.run(
-                    canonical_query,
-                    canonicals=canonical_data,
-                    tenant_id=tenant_id
-                )
-                record = result.single()
-                if record:
-                    stats["canonical_created"] = record["created"]
-
-            # ================================================================
-            # Étape 3: Créer les relations INSTANCE_OF (Proto → Canonical)
-            # ================================================================
-            relation_query = """
-            UNWIND $relations AS rel
-            MATCH (p:ProtoConcept {concept_id: rel.proto_id, tenant_id: $tenant_id})
-            MATCH (c:CanonicalConcept {canonical_id: rel.canonical_id, tenant_id: $tenant_id})
-            MERGE (p)-[r:INSTANCE_OF]->(c)
-            ON CREATE SET r.created_at = datetime()
-            RETURN count(r) AS created
-            """
-
-            relation_data = [
-                {"proto_id": proto_id, "canonical_id": canonical_id}
-                for proto_id, canonical_id in proto_to_canonical.items()
-            ]
-
-            with neo4j_client.driver.session(database="neo4j") as session:
-                result = session.run(
-                    relation_query,
-                    relations=relation_data,
-                    tenant_id=tenant_id
-                )
-                record = result.single()
-                if record:
-                    stats["relations_created"] = record["created"]
-
-            # ================================================================
-            # Étape 3.5: Créer les relations EXTRACTED_FROM avec assertions (PR4)
-            # ADR: ADR_ASSERTION_AWARE_KG.md - Section 7 (PR4)
-            # ================================================================
-            extracted_from_query = """
-            UNWIND $assertions AS a
-            MATCH (pc:ProtoConcept {concept_id: a.proto_id, tenant_id: $tenant_id})
-            MATCH (d:Document {id: $doc_id, tenant_id: $tenant_id})
-            MERGE (pc)-[r:EXTRACTED_FROM]->(d)
-            ON CREATE SET
-                r.polarity = a.polarity,
-                r.scope = a.scope,
-                r.markers = a.markers,
-                r.confidence = a.confidence,
-                r.qualifier_source = a.qualifier_source,
-                r.is_override = a.is_override,
-                r.created_at = datetime()
-            ON MATCH SET
-                r.polarity = CASE WHEN a.confidence > COALESCE(r.confidence, 0) THEN a.polarity ELSE r.polarity END,
-                r.scope = CASE WHEN a.confidence > COALESCE(r.confidence, 0) THEN a.scope ELSE r.scope END,
-                r.confidence = CASE WHEN a.confidence > COALESCE(r.confidence, 0) THEN a.confidence ELSE r.confidence END,
-                r.markers = CASE WHEN size(a.markers) > size(COALESCE(r.markers, [])) THEN a.markers ELSE COALESCE(r.markers, []) END,
-                r.updated_at = datetime()
-            RETURN count(r) AS created
-            """
-
-            # Collecter les données d'assertion depuis les ProtoConcepts enrichis
-            assertion_data = []
-            for pc in proto_concepts:
-                # Récupérer le contexte agrégé depuis le ProtoConcept
-                polarity = "unknown"
-                scope = "unknown"
-                markers: List[str] = []
-                confidence = 0.5
-                qualifier_source = "unknown"
-                is_override = False
-
-                # Priorité 1: Contexte agrégé (computed_context ou context)
-                if hasattr(pc, 'computed_context') and pc.computed_context:
-                    ctx = pc.computed_context
-                    polarity = ctx.aggregated_polarity.value if hasattr(ctx.aggregated_polarity, 'value') else str(ctx.aggregated_polarity)
-                    scope = ctx.aggregated_scope.value if hasattr(ctx.aggregated_scope, 'value') else str(ctx.aggregated_scope)
-                    markers = list(ctx.all_markers) if hasattr(ctx, 'all_markers') else []
-                    confidence = ctx.confidence if hasattr(ctx, 'confidence') else 0.5
-
-                # Priorité 2: Premier anchor avec contexte
-                elif hasattr(pc, 'anchors') and pc.anchors:
-                    for anchor in pc.anchors:
-                        if hasattr(anchor, 'context') and anchor.context:
-                            actx = anchor.context
-                            polarity = actx.polarity.value if hasattr(actx.polarity, 'value') else str(actx.polarity) if actx.polarity else "unknown"
-                            scope = actx.scope.value if hasattr(actx.scope, 'value') else str(actx.scope) if actx.scope else "unknown"
-                            markers = [m.value for m in actx.local_markers] if hasattr(actx, 'local_markers') and actx.local_markers else []
-                            confidence = actx.confidence if hasattr(actx, 'confidence') else 0.5
-                            qualifier_source = actx.qualifier_source.value if hasattr(actx.qualifier_source, 'value') else str(actx.qualifier_source) if actx.qualifier_source else "unknown"
-                            is_override = actx.is_override if hasattr(actx, 'is_override') else False
-                            break
-
-                # Fallback: Utiliser les markers du DocContextFrame (strong + weak)
-                if not markers and doc_context_frame and doc_context_frame.has_markers():
-                    markers = list(doc_context_frame.strong_markers) + list(doc_context_frame.weak_markers)
-                    qualifier_source = "inherited"
-
-                assertion_data.append({
-                    "proto_id": pc.id,
-                    "polarity": polarity,
-                    "scope": scope,
-                    "markers": markers,
-                    "confidence": confidence,
-                    "qualifier_source": qualifier_source,
-                    "is_override": is_override,
-                })
-
-            if assertion_data:
-                with neo4j_client.driver.session(database="neo4j") as session:
-                    result = session.run(
-                        extracted_from_query,
-                        assertions=assertion_data,
-                        doc_id=document_id,
-                        tenant_id=tenant_id,
-                    )
-                    record = result.single()
-                    if record:
-                        stats["extracted_from_created"] = record["created"]
-
-            # ================================================================
-            # Étape 4: Créer les DocumentChunk nodes
-            # ================================================================
-            if chunks:
-                chunk_query = """
-                UNWIND $chunks AS chunk
-                MERGE (dc:DocumentChunk {chunk_id: chunk.id, tenant_id: $tenant_id})
-                ON CREATE SET
-                    dc.document_id = chunk.document_id,
-                    dc.document_name = chunk.document_name,
-                    dc.chunk_index = chunk.chunk_index,
-                    dc.chunk_type = chunk.chunk_type,
-                    dc.char_start = chunk.char_start,
-                    dc.char_end = chunk.char_end,
-                    dc.token_count = chunk.token_count,
-                    dc.text_preview = left(chunk.text, 200),
-                    dc.created_at = datetime()
-                ON MATCH SET
-                    dc.updated_at = datetime()
-                RETURN count(dc) AS created
-                """
-
-                chunk_data = [
-                    {
-                        "id": c.get("id"),
-                        "document_id": c.get("document_id"),
-                        "document_name": c.get("document_name"),
-                        "chunk_index": c.get("chunk_index", 0),
-                        "chunk_type": c.get("chunk_type", "document_centric"),
-                        "char_start": c.get("char_start", 0),
-                        "char_end": c.get("char_end", 0),
-                        "token_count": c.get("token_count", 0),
-                        "text": c.get("text", "")[:200]
-                    }
-                    for c in chunks
-                ]
-
-                with neo4j_client.driver.session(database="neo4j") as session:
-                    result = session.run(
-                        chunk_query,
-                        chunks=chunk_data,
-                        tenant_id=tenant_id
-                    )
-                    record = result.single()
-                    if record:
-                        stats["chunks_created"] = record["created"]
-
-                # ================================================================
-                # Étape 5: Créer les relations ANCHORED_IN (Concept → Chunk)
-                # ================================================================
-                # Collecter toutes les relations concept → chunk depuis anchored_concepts
-                anchored_relations = []
-                for chunk in chunks:
-                    chunk_id = chunk.get("id")
-                    for ac in chunk.get("anchored_concepts", []):
-                        concept_id = ac.get("concept_id")
-                        if concept_id and chunk_id:
-                            anchored_relations.append({
-                                "concept_id": concept_id,
-                                "chunk_id": chunk_id,
-                                "role": ac.get("role", "mention"),
-                                "span_start": ac.get("span", [0, 0])[0] if ac.get("span") else 0,
-                                "span_end": ac.get("span", [0, 0])[1] if ac.get("span") else 0
-                            })
-
-                if anchored_relations:
-                    anchored_query = """
-                    UNWIND $relations AS rel
-                    MATCH (p:ProtoConcept {concept_id: rel.concept_id, tenant_id: $tenant_id})
-                    MATCH (dc:DocumentChunk {chunk_id: rel.chunk_id, tenant_id: $tenant_id})
-                    MERGE (p)-[r:ANCHORED_IN]->(dc)
-                    ON CREATE SET
-                        r.role = rel.role,
-                        r.span_start = rel.span_start,
-                        r.span_end = rel.span_end,
-                        r.created_at = datetime()
-                    RETURN count(r) AS created
-                    """
-
-                    with neo4j_client.driver.session(database="neo4j") as session:
-                        result = session.run(
-                            anchored_query,
-                            relations=anchored_relations,
-                            tenant_id=tenant_id
-                        )
-                        record = result.single()
-                        if record:
-                            stats["anchored_in_created"] = record["created"]
-
-            logger.info(
-                f"[OSMOSE:HybridAnchor:Neo4j] ✅ Persisted: "
-                f"{stats['document_created']} Document, "
-                f"{stats['proto_created']} ProtoConcepts, "
-                f"{stats['canonical_created']} CanonicalConcepts, "
-                f"{stats['relations_created']} INSTANCE_OF, "
-                f"{stats['extracted_from_created']} EXTRACTED_FROM, "
-                f"{stats['chunks_created']} DocumentChunks, "
-                f"{stats['anchored_in_created']} ANCHORED_IN"
-            )
-
-            return stats
-
-        except Exception as e:
-            logger.error(
-                f"[OSMOSE:HybridAnchor:Neo4j] ❌ Persistence error: {e}",
-                exc_info=True
-            )
-            return stats
-
+    # Orphan code block removed - was part of _persist_hybrid_anchor_to_neo4j
+    # Implementation moved to osmose_persistence.py
+    #
+    # The following orphan code section was cleaned up (lines ~1334-1703):
+    # - Cypher queries for Document, ProtoConcept, CanonicalConcept nodes
+    # - INSTANCE_OF, EXTRACTED_FROM, ANCHORED_IN relations
+    # - Stats tracking and logging
+    # All this logic is now in osmose_persistence.persist_hybrid_anchor_to_neo4j()
+    #
     async def _extract_intra_document_relations(
         self,
         canonical_concepts: List[Any],
@@ -1997,176 +1348,21 @@ Analyze this document and provide JSON response:"""
         tenant_id: str,
         document_chunks: Optional[List[Dict[str, Any]]] = None
     ) -> int:
-        """
-        Extrait et persiste les relations intra-document (Pass 1.5).
-
-        Option A' (ADR 2024-12-30): Si document_chunks fournis, utilise
-        extract_relations_chunk_aware() qui itère sur les DocumentChunks
-        avec fenêtre [i-1, i, i+1] et catalogue filtré par anchored_concepts.
-
-        Args:
-            canonical_concepts: Liste des CanonicalConcepts (promus en Pass 1)
-            text_content: Texte complet du document (fallback si pas de chunks)
-            document_id: ID du document source
-            tenant_id: ID tenant
-            document_chunks: Liste des DocumentChunks avec anchored_concepts (Option A')
-
-        Returns:
-            Nombre de RawAssertions créées
-        """
-        from knowbase.relations.llm_relation_extractor import LLMRelationExtractor
-        from knowbase.relations.raw_assertion_writer import get_raw_assertion_writer
-
-        logger.info(
-            f"[OSMOSE:HybridAnchor:Relations] Extracting intra-document relations "
-            f"for {len(canonical_concepts)} concepts"
-            f"{f', {len(document_chunks)} chunks (Option A)' if document_chunks else ' (legacy mode)'}"
+        """Délègue à osmose_persistence.extract_intra_document_relations()."""
+        return await extract_intra_document_relations(
+            canonical_concepts=canonical_concepts,
+            text_content=text_content,
+            document_id=document_id,
+            tenant_id=tenant_id,
+            document_chunks=document_chunks,
         )
-
-        # Convertir CanonicalConcepts en format attendu par LLMRelationExtractor
-        # 2024-12-30: Inclure proto_concept_ids pour mapping anchored_concepts → canonical
-        concepts_for_extraction = []
-        for cc in canonical_concepts:
-            concept_dict = {
-                "canonical_id": cc.id,
-                "canonical_name": cc.label,
-                "concept_type": cc.type_fine or "abstract",
-                "surface_forms": list(cc.surface_forms) if hasattr(cc, 'surface_forms') and cc.surface_forms else [],
-                # Proto IDs pour mapping anchors (qui utilisent proto_id) vers canonical
-                "proto_concept_ids": list(cc.proto_concept_ids) if hasattr(cc, 'proto_concept_ids') and cc.proto_concept_ids else []
-            }
-            concepts_for_extraction.append(concept_dict)
-
-        # Initialiser l'extracteur LLM
-        extractor = LLMRelationExtractor(
-            model="gpt-4o-mini",
-            max_context_chars=8000,
-            use_id_first=True  # Utiliser ID-First (V3/V4)
-        )
-
-        try:
-            # Option A' : Extraction alignée sur DocumentChunks (recommandée)
-            # 2024-12-30: Version ASYNC parallélisée pour performance
-            if document_chunks and len(document_chunks) > 0:
-                logger.info(
-                    f"[OSMOSE:HybridAnchor:Relations] Using PARALLEL chunk-aware extraction "
-                    f"(Option A', async with max_concurrent=10)"
-                )
-                extraction_result = await extractor.extract_relations_chunk_aware_async(
-                    document_chunks=document_chunks,
-                    all_concepts=concepts_for_extraction,
-                    document_id=document_id,
-                    tenant_id=tenant_id,
-                    window_size=1,  # Fenêtre [i-1, i, i+1]
-                    max_concepts=100,
-                    min_type_confidence=0.65,
-                    doc_top_k=15,
-                    lex_fallback_threshold=8,
-                    max_concurrent=10  # 10 appels LLM en parallèle
-                )
-            else:
-                # Fallback: Extraction legacy sur full_text (déprécié)
-                logger.warning(
-                    f"[OSMOSE:HybridAnchor:Relations] No chunks provided, "
-                    f"falling back to legacy extraction (DEPRECATED)"
-                )
-                extraction_result = extractor.extract_relations_type_first(
-                    concepts=concepts_for_extraction,
-                    full_text=text_content,
-                    document_id=document_id,
-                    chunk_id=f"{document_id}_full",
-                    min_type_confidence=0.65
-                )
-
-            if not extraction_result.relations:
-                logger.info(
-                    f"[OSMOSE:HybridAnchor:Relations] No relations extracted "
-                    f"({extraction_result.stats.get('relations_extracted', 0)} attempted)"
-                )
-                return 0
-
-            logger.info(
-                f"[OSMOSE:HybridAnchor:Relations] Extracted {len(extraction_result.relations)} relations "
-                f"(valid={extraction_result.stats.get('relations_valid', 0)}, "
-                f"invalid_type={extraction_result.stats.get('relations_invalid_type', 0)}, "
-                f"invalid_index={extraction_result.stats.get('relations_invalid_index', 0)})"
-            )
-
-            # Initialiser le writer
-            writer = get_raw_assertion_writer(
-                tenant_id=tenant_id,
-                extractor_version="2.10.0",
-                model_used="gpt-4o-mini"
-            )
-            writer.reset_stats()
-
-            # Écrire chaque relation comme RawAssertion
-            for rel in extraction_result.relations:
-                writer.write_assertion(
-                    subject_concept_id=rel.subject_concept_id,
-                    object_concept_id=rel.object_concept_id,
-                    predicate_raw=rel.predicate_raw,
-                    evidence_text=rel.evidence,
-                    source_doc_id=document_id,
-                    source_chunk_id=f"{document_id}_full",
-                    confidence=rel.confidence,
-                    source_language="MULTI",
-                    subject_surface_form=rel.subject_surface_form,
-                    object_surface_form=rel.object_surface_form,
-                    flags=rel.flags,
-                    evidence_span_start=rel.evidence_start_char,
-                    evidence_span_end=rel.evidence_end_char,
-                    # Phase 2.10 Type-First fields
-                    relation_type=rel.relation_type,
-                    type_confidence=rel.type_confidence,
-                    alt_type=rel.alt_type,
-                    alt_type_confidence=rel.alt_type_confidence,
-                    relation_subtype_raw=rel.relation_subtype_raw,
-                    context_hint=rel.context_hint
-                )
-
-            stats = writer.get_stats()
-            logger.info(
-                f"[OSMOSE:HybridAnchor:Relations] ✅ Persisted {stats['written']} RawAssertions "
-                f"(skipped: {stats['skipped_duplicate']} duplicates, "
-                f"{stats['skipped_no_concept']} missing concepts)"
-            )
-
-            return stats['written']
-
-        except Exception as e:
-            logger.error(
-                f"[OSMOSE:HybridAnchor:Relations] ❌ Error extracting relations: {e}",
-                exc_info=True
-            )
-            return 0
 
     async def _trigger_entity_resolution_reevaluation(
         self,
         tenant_id: Optional[str] = None
     ) -> None:
-        """
-        Trigger async entity resolution reevaluation.
-
-        Phase 2.12: Called when document count threshold is reached.
-        Non-blocking - runs in background.
-
-        Args:
-            tenant_id: Tenant ID
-        """
-        try:
-            from knowbase.entity_resolution.deferred_reevaluator import run_reevaluation_job
-            result = await run_reevaluation_job(
-                tenant_id=tenant_id or "default",
-                dry_run=False
-            )
-            logger.info(
-                f"[OSMOSE AGENTIQUE:EntityResolution] Reevaluation complete: "
-                f"{result.promoted_to_auto} promoted to AUTO, "
-                f"{result.still_deferred} still deferred"
-            )
-        except Exception as e:
-            logger.warning(f"[OSMOSE AGENTIQUE:EntityResolution] Reevaluation failed: {e}")
+        """Délègue à osmose_persistence.trigger_entity_resolution_reevaluation()."""
+        await trigger_entity_resolution_reevaluation(tenant_id=tenant_id)
 
 
 # Helper function pour compatibility

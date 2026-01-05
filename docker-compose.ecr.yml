@@ -205,36 +205,6 @@ services:
           memory: 8G
 
   # ===================================
-  # LEGACY UI - Streamlit (depuis ECR)
-  # ===================================
-  ui:
-    <<: *common-config
-    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/sap-kb-ui:latest
-    container_name: knowbase-ui
-    depends_on:
-      app:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      BACKEND_URL: http://app:8000
-      PYTHONPATH: /app/src
-      KNOWBASE_DATA_DIR: /data
-    ports:
-      - "${APP_UI_PORT:-8501}:8501"
-    volumes:
-      - ui_data:/data
-      - ./config:/app/config:ro
-    networks:
-      - knowbase_net
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8501/_stcore/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-  # ===================================
   # FRONTEND - Next.js (depuis ECR)
   # ===================================
   frontend:
@@ -390,7 +360,5 @@ volumes:
     name: knowbase_app_models
   app_logs:
     name: knowbase_app_logs
-  ui_data:
-    name: knowbase_ui_data
   # ngrok_logs:
   #   name: knowbase_ngrok_logs
