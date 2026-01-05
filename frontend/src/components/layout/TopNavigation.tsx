@@ -33,6 +33,7 @@ import {
   FiSliders,
   FiCloud,
   FiBarChart2,
+  FiGitBranch,
 } from 'react-icons/fi'
 
 // Configuration des menus
@@ -41,6 +42,12 @@ const navigationConfig = {
     label: 'Chat',
     href: '/chat',
     icon: FiMessageSquare,
+    isDropdown: false,
+  },
+  compare: {
+    label: 'Compare',
+    href: '/compare',
+    icon: FiGitBranch,
     isDropdown: false,
   },
   documents: {
@@ -184,6 +191,7 @@ export default function TopNavigation() {
 
   const isActiveSection = (section: string) => {
     if (section === 'chat') return pathname?.startsWith('/chat')
+    if (section === 'compare') return pathname?.startsWith('/compare')
     if (section === 'documents') return pathname?.startsWith('/documents')
     if (section === 'admin') return pathname?.startsWith('/admin')
     return false
@@ -226,6 +234,15 @@ export default function TopNavigation() {
           >
             <Icon as={navigationConfig.chat.icon} />
             <Text>{navigationConfig.chat.label}</Text>
+          </NavLink>
+
+          {/* Compare - lien direct */}
+          <NavLink
+            href={navigationConfig.compare.href!}
+            isActive={isActiveSection('compare')}
+          >
+            <Icon as={navigationConfig.compare.icon} />
+            <Text>{navigationConfig.compare.label}</Text>
           </NavLink>
 
           {/* Documents - dropdown */}

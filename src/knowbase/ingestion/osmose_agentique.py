@@ -46,6 +46,14 @@ from knowbase.ingestion.enrichment_tracker import (
 )  # ADR 2024-12-30: Enrichment tracking
 from knowbase.navigation import get_navigation_layer_builder  # ADR: Navigation Layer
 
+# ===== PR2 - Assertion Context (ADR_ASSERTION_AWARE_KG) =====
+from knowbase.extraction_v2.context import (
+    AnchorContextAnalyzer,
+    get_anchor_context_analyzer,
+    DocContextFrame,
+    DocScope,
+)
+
 # Logger pour ce module (pas de manipulation du root logger pour eviter les doublons)
 logger = logging.getLogger(__name__)
 
@@ -205,6 +213,88 @@ class OsmoseAgentiqueService:
             logger.info("[OSMOSE:HybridAnchor] Pass2Orchestrator initialized")
 
         return self.pass2_orchestrator
+
+    # =========================================================================
+    # PR2 - Assertion Context Enrichment (ADR_ASSERTION_AWARE_KG)
+    # =========================================================================
+
+    async def _enrich_anchors_with_context(
+        self,
+        proto_concepts: List[Any],
+        doc_context_frame: Optional[DocContextFrame] = None,
+    ) -> None:
+        """
+        Enrichit les anchors des ProtoConcepts avec contexte d'assertion.
+
+        Applique l'analyse de contexte (polarity, scope, markers) sur chaque
+        anchor et calcule le contexte agrege du ProtoConcept.
+
+        ADR: doc/ongoing/ADR_ASSERTION_AWARE_KG.md - PR2
+
+        Args:
+            proto_concepts: Liste des ProtoConcepts a enrichir (modifies in-place)
+            doc_context_frame: Contexte documentaire (si disponible)
+        """
+        if not proto_concepts:
+            return
+
+        analyzer = get_anchor_context_analyzer()
+
+        # Compteurs pour stats
+        anchors_enriched = 0
+        protos_with_context = 0
+
+        for proto in proto_concepts:
+            if not hasattr(proto, 'anchors') or not proto.anchors:
+                continue
+
+            # Analyser chaque anchor
+            for anchor in proto.anchors:
+                try:
+                    # Extraire le passage (quote) de l'anchor
+                    passage = getattr(anchor, 'quote', '')
+                    if not passage:
+                        continue
+
+                    # Analyse sync (heuristiques uniquement pour Pass 1)
+                    anchor_context = analyzer.analyze_sync(
+                        passage=passage,
+                        doc_context=doc_context_frame,
+                    )
+
+                    # Enrichir l'anchor avec les resultats
+                    # (conversion vers les champs du schema Pydantic)
+                    anchor.polarity = anchor_context.polarity
+                    anchor.scope = anchor_context.scope
+                    anchor.local_markers = [
+                        {"value": m.value, "evidence": m.evidence, "confidence": m.confidence}
+                        for m in anchor_context.local_markers
+                    ]
+                    anchor.is_override = anchor_context.is_override
+                    anchor.qualifier_source = anchor_context.qualifier_source
+                    anchor.context_confidence = anchor_context.confidence
+
+                    anchors_enriched += 1
+
+                except Exception as e:
+                    logger.debug(
+                        f"[OSMOSE:PR2:Context] Failed to enrich anchor: {e}"
+                    )
+
+            # Calculer le contexte agrege du ProtoConcept
+            if hasattr(proto, 'compute_context'):
+                try:
+                    proto.context = proto.compute_context()
+                    protos_with_context += 1
+                except Exception as e:
+                    logger.debug(
+                        f"[OSMOSE:PR2:Context] Failed to compute proto context: {e}"
+                    )
+
+        logger.info(
+            f"[OSMOSE:PR2:Context] Enriched {anchors_enriched} anchors, "
+            f"{protos_with_context} ProtoConcepts with aggregated context"
+        )
 
     def _extract_document_metadata(self, full_text: str) -> Dict[str, Any]:
         """
@@ -636,7 +726,8 @@ Analyze this document and provide JSON response:"""
         document_title: str,
         document_path: Path,
         text_content: str,
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        doc_context_frame: Optional["DocContextFrame"] = None,  # PR4: DocContextFrame
     ) -> OsmoseIntegrationResult:
         """
         Pipeline OSMOSE Agentique - Architecture Phase 1.5.
@@ -653,12 +744,21 @@ Analyze this document and provide JSON response:"""
             document_path: Chemin du fichier
             text_content: Contenu textuel extrait
             tenant_id: ID tenant (multi-tenancy)
+            doc_context_frame: DocContextFrame pour assertions (PR4)
 
         Returns:
             Résultat OSMOSE avec métriques agentiques
         """
         start_time = asyncio.get_event_loop().time()
         print(f"[DEBUG OSMOSE] >>> ENTRY process_document_agentique: doc={document_id}")
+        # PR4 DEBUG: Log DocContext reception
+        if doc_context_frame:
+            logger.info(
+                f"[OSMOSE:PR4] DocContext received: doc_scope={doc_context_frame.doc_scope.value}, "
+                f"markers={doc_context_frame.strong_markers + doc_context_frame.weak_markers}"
+            )
+        else:
+            logger.warning(f"[OSMOSE:PR4] DocContext is None for {document_id}")
 
         # Déterminer type de document
         document_type = document_path.suffix.lower().replace(".", "")
@@ -697,7 +797,8 @@ Analyze this document and provide JSON response:"""
                 document_title=document_title,
                 document_path=document_path,
                 text_content=text_content,
-                tenant_id=tenant_id
+                tenant_id=tenant_id,
+                doc_context_frame=doc_context_frame,  # PR4: Propager DocContextFrame
             )
 
         # ===== Legacy: OSMOSE Agentique (Phase 1.5) =====
@@ -1065,7 +1166,8 @@ Analyze this document and provide JSON response:"""
         document_title: str,
         document_path: Path,
         text_content: str,
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        doc_context_frame: Optional["DocContextFrame"] = None,  # PR4: DocContextFrame
     ) -> OsmoseIntegrationResult:
         """
         Pipeline Hybrid Anchor Model - Phase 2.
@@ -1082,6 +1184,7 @@ Analyze this document and provide JSON response:"""
             document_path: Chemin du fichier
             text_content: Contenu textuel extrait
             tenant_id: ID tenant
+            doc_context_frame: DocContextFrame pour assertions (PR4)
 
         Returns:
             OsmoseIntegrationResult
@@ -1161,6 +1264,32 @@ Analyze this document and provide JSON response:"""
                 f"[OSMOSE:HybridAnchor] Extraction: {len(proto_concepts)} ProtoConcepts "
                 f"({len(extraction_result.rejected_concepts)} rejected)"
             )
+
+            # Étape 3.5: PR2 - Enrich anchors with assertion context
+            # ADR: ADR_ASSERTION_AWARE_KG.md - PR2
+            try:
+                # Utiliser le DocContextFrame passé en paramètre (PR4),
+                # sinon essayer de le reconstruire depuis extraction_result
+                if doc_context_frame is None:
+                    if hasattr(extraction_result, 'doc_context') and extraction_result.doc_context:
+                        doc_context_frame = extraction_result.doc_context
+                    else:
+                        # Fallback: creer un DocContextFrame minimal GENERAL
+                        doc_context_frame = DocContextFrame(
+                            document_id=document_id,
+                            doc_scope=DocScope.GENERAL,
+                            scope_confidence=0.5,
+                        )
+
+                await self._enrich_anchors_with_context(
+                    proto_concepts=proto_concepts,
+                    doc_context_frame=doc_context_frame,
+                )
+            except Exception as ctx_err:
+                logger.warning(
+                    f"[OSMOSE:PR2:Context] Anchor context enrichment failed: {ctx_err}"
+                )
+                # Non-bloquant: continuer sans enrichissement contexte
 
             # Étape 4: Classification heuristique (Pass 1)
             classifier = self._get_heuristic_classifier()
@@ -1259,12 +1388,15 @@ Analyze this document and provide JSON response:"""
                 )
 
             # Étape 8: Persister dans Neo4j (concepts + chunks + anchored_in)
+            # PR4: Inclut Document node + EXTRACTED_FROM avec propriétés assertion
             await self._persist_hybrid_anchor_to_neo4j(
                 proto_concepts=promoted_protos,
                 canonical_concepts=canonical_concepts,
                 document_id=document_id,
+                document_name=document_title,
                 tenant_id=tenant,
-                chunks=chunks  # Passer les chunks pour créer DocumentChunk + ANCHORED_IN
+                chunks=chunks,  # Passer les chunks pour créer DocumentChunk + ANCHORED_IN
+                doc_context_frame=doc_context_frame,  # PR4: DocContextFrame pour Document node
             )
 
             # ================================================================
@@ -1430,15 +1562,19 @@ Analyze this document and provide JSON response:"""
         canonical_concepts: List[Any],
         document_id: str,
         tenant_id: str,
-        chunks: Optional[List[Dict[str, Any]]] = None
+        chunks: Optional[List[Dict[str, Any]]] = None,
+        document_name: Optional[str] = None,
+        doc_context_frame: Optional[DocContextFrame] = None,
     ) -> Dict[str, int]:
         """
         Persiste les concepts Hybrid Anchor dans Neo4j.
 
         Crée selon l'ADR:
+        - Document node avec DocContextFrame (PR4)
         - ProtoConcept nodes avec leurs attributs
         - CanonicalConcept nodes avec stability et needs_confirmation
         - Relations INSTANCE_OF entre Proto et Canonical
+        - Relations EXTRACTED_FROM avec propriétés assertion (PR4)
         - DocumentChunk nodes (si chunks fournis)
         - Relations ANCHORED_IN entre concepts et chunks
 
@@ -1448,6 +1584,8 @@ Analyze this document and provide JSON response:"""
             document_id: ID du document
             tenant_id: ID tenant
             chunks: Liste des chunks avec anchored_concepts (optionnel)
+            document_name: Nom du document (PR4)
+            doc_context_frame: DocContextFrame pour propriétés Document (PR4)
 
         Returns:
             Dict avec compteurs créés
@@ -1457,9 +1595,11 @@ Analyze this document and provide JSON response:"""
 
         settings = get_settings()
         stats = {
+            "document_created": 0,
             "proto_created": 0,
             "canonical_created": 0,
             "relations_created": 0,
+            "extracted_from_created": 0,  # PR4: EXTRACTED_FROM avec propriétés assertion
             "chunks_created": 0,
             "anchored_in_created": 0
         }
@@ -1475,6 +1615,63 @@ Analyze this document and provide JSON response:"""
             if not neo4j_client.is_connected():
                 logger.warning("[OSMOSE:HybridAnchor:Neo4j] Not connected, skipping persistence")
                 return stats
+
+            # ================================================================
+            # Étape 0: Créer/mettre à jour le nœud Document (PR4)
+            # ================================================================
+            doc_query = """
+            MERGE (d:Document {id: $doc_id, tenant_id: $tenant_id})
+            ON CREATE SET
+                d.name = $doc_name,
+                d.detected_variant = $detected_variant,
+                d.variant_confidence = $variant_confidence,
+                d.doc_scope = $doc_scope,
+                d.edition = $edition,
+                d.global_markers = $global_markers,
+                d.created_at = datetime()
+            ON MATCH SET
+                d.name = COALESCE($doc_name, d.name),
+                d.detected_variant = COALESCE($detected_variant, d.detected_variant),
+                d.variant_confidence = $variant_confidence,
+                d.doc_scope = $doc_scope,
+                d.edition = COALESCE($edition, d.edition),
+                d.global_markers = $global_markers,
+                d.updated_at = datetime()
+            RETURN count(d) AS created
+            """
+
+            # Extraire les données du DocContextFrame
+            detected_variant = None
+            variant_confidence = 0.0
+            doc_scope = "unknown"
+            edition = None
+            global_markers: List[str] = []
+
+            if doc_context_frame:
+                # Utiliser get_dominant_marker() pour detected_variant
+                detected_variant = doc_context_frame.get_dominant_marker()
+                variant_confidence = doc_context_frame.scope_confidence
+                doc_scope = doc_context_frame.doc_scope.value if hasattr(doc_context_frame.doc_scope, 'value') else str(doc_context_frame.doc_scope)
+                # Edition n'existe plus - déduire de doc_scope si VARIANT_SPECIFIC
+                edition = detected_variant if doc_context_frame.doc_scope.value == "VARIANT_SPECIFIC" else None
+                # Combiner strong_markers et weak_markers pour global_markers
+                global_markers = list(doc_context_frame.strong_markers) + list(doc_context_frame.weak_markers)
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    doc_query,
+                    doc_id=document_id,
+                    tenant_id=tenant_id,
+                    doc_name=document_name,
+                    detected_variant=detected_variant,
+                    variant_confidence=variant_confidence,
+                    doc_scope=doc_scope,
+                    edition=edition,
+                    global_markers=global_markers,
+                )
+                record = result.single()
+                if record:
+                    stats["document_created"] = record["created"]
 
             # ================================================================
             # Étape 1: Créer les ProtoConcepts
@@ -1599,6 +1796,91 @@ Analyze this document and provide JSON response:"""
                     stats["relations_created"] = record["created"]
 
             # ================================================================
+            # Étape 3.5: Créer les relations EXTRACTED_FROM avec assertions (PR4)
+            # ADR: ADR_ASSERTION_AWARE_KG.md - Section 7 (PR4)
+            # ================================================================
+            extracted_from_query = """
+            UNWIND $assertions AS a
+            MATCH (pc:ProtoConcept {concept_id: a.proto_id, tenant_id: $tenant_id})
+            MATCH (d:Document {id: $doc_id, tenant_id: $tenant_id})
+            MERGE (pc)-[r:EXTRACTED_FROM]->(d)
+            ON CREATE SET
+                r.polarity = a.polarity,
+                r.scope = a.scope,
+                r.markers = a.markers,
+                r.confidence = a.confidence,
+                r.qualifier_source = a.qualifier_source,
+                r.is_override = a.is_override,
+                r.created_at = datetime()
+            ON MATCH SET
+                r.polarity = CASE WHEN a.confidence > COALESCE(r.confidence, 0) THEN a.polarity ELSE r.polarity END,
+                r.scope = CASE WHEN a.confidence > COALESCE(r.confidence, 0) THEN a.scope ELSE r.scope END,
+                r.confidence = CASE WHEN a.confidence > COALESCE(r.confidence, 0) THEN a.confidence ELSE r.confidence END,
+                r.markers = CASE WHEN size(a.markers) > size(COALESCE(r.markers, [])) THEN a.markers ELSE COALESCE(r.markers, []) END,
+                r.updated_at = datetime()
+            RETURN count(r) AS created
+            """
+
+            # Collecter les données d'assertion depuis les ProtoConcepts enrichis
+            assertion_data = []
+            for pc in proto_concepts:
+                # Récupérer le contexte agrégé depuis le ProtoConcept
+                polarity = "unknown"
+                scope = "unknown"
+                markers: List[str] = []
+                confidence = 0.5
+                qualifier_source = "unknown"
+                is_override = False
+
+                # Priorité 1: Contexte agrégé (computed_context ou context)
+                if hasattr(pc, 'computed_context') and pc.computed_context:
+                    ctx = pc.computed_context
+                    polarity = ctx.aggregated_polarity.value if hasattr(ctx.aggregated_polarity, 'value') else str(ctx.aggregated_polarity)
+                    scope = ctx.aggregated_scope.value if hasattr(ctx.aggregated_scope, 'value') else str(ctx.aggregated_scope)
+                    markers = list(ctx.all_markers) if hasattr(ctx, 'all_markers') else []
+                    confidence = ctx.confidence if hasattr(ctx, 'confidence') else 0.5
+
+                # Priorité 2: Premier anchor avec contexte
+                elif hasattr(pc, 'anchors') and pc.anchors:
+                    for anchor in pc.anchors:
+                        if hasattr(anchor, 'context') and anchor.context:
+                            actx = anchor.context
+                            polarity = actx.polarity.value if hasattr(actx.polarity, 'value') else str(actx.polarity) if actx.polarity else "unknown"
+                            scope = actx.scope.value if hasattr(actx.scope, 'value') else str(actx.scope) if actx.scope else "unknown"
+                            markers = [m.value for m in actx.local_markers] if hasattr(actx, 'local_markers') and actx.local_markers else []
+                            confidence = actx.confidence if hasattr(actx, 'confidence') else 0.5
+                            qualifier_source = actx.qualifier_source.value if hasattr(actx.qualifier_source, 'value') else str(actx.qualifier_source) if actx.qualifier_source else "unknown"
+                            is_override = actx.is_override if hasattr(actx, 'is_override') else False
+                            break
+
+                # Fallback: Utiliser les markers du DocContextFrame (strong + weak)
+                if not markers and doc_context_frame and doc_context_frame.has_markers():
+                    markers = list(doc_context_frame.strong_markers) + list(doc_context_frame.weak_markers)
+                    qualifier_source = "inherited"
+
+                assertion_data.append({
+                    "proto_id": pc.id,
+                    "polarity": polarity,
+                    "scope": scope,
+                    "markers": markers,
+                    "confidence": confidence,
+                    "qualifier_source": qualifier_source,
+                    "is_override": is_override,
+                })
+
+            if assertion_data:
+                with neo4j_client.driver.session(database="neo4j") as session:
+                    result = session.run(
+                        extracted_from_query,
+                        assertions=assertion_data,
+                        doc_id=document_id,
+                        tenant_id=tenant_id,
+                    )
+                    record = result.single()
+                    if record:
+                        stats["extracted_from_created"] = record["created"]
+
+            # ================================================================
             # Étape 4: Créer les DocumentChunk nodes
             # ================================================================
             if chunks:
@@ -1689,9 +1971,11 @@ Analyze this document and provide JSON response:"""
 
             logger.info(
                 f"[OSMOSE:HybridAnchor:Neo4j] ✅ Persisted: "
+                f"{stats['document_created']} Document, "
                 f"{stats['proto_created']} ProtoConcepts, "
                 f"{stats['canonical_created']} CanonicalConcepts, "
                 f"{stats['relations_created']} INSTANCE_OF, "
+                f"{stats['extracted_from_created']} EXTRACTED_FROM, "
                 f"{stats['chunks_created']} DocumentChunks, "
                 f"{stats['anchored_in_created']} ANCHORED_IN"
             )

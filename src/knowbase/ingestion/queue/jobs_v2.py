@@ -187,6 +187,7 @@ async def _run_extraction_v2(
         "page_index": result.page_index,
         "file_type": result.file_type,
         "metrics": metrics,
+        "doc_context": result.doc_context,  # PR4: DocContextFrame pour assertions
     }
 
 
@@ -196,6 +197,7 @@ async def _run_osmose_processing(
     document_path: Path,
     full_text: str,
     tenant_id: str = "default",
+    doc_context: Optional[Any] = None,  # PR4: DocContextFrame
 ) -> Dict[str, Any]:
     """
     Execute le traitement OSMOSE apres extraction.
@@ -206,6 +208,7 @@ async def _run_osmose_processing(
         document_path: Chemin du document
         full_text: Texte extrait (avec marqueurs V2)
         tenant_id: Tenant ID
+        doc_context: DocContextFrame pour assertions (PR4)
 
     Returns:
         Resultat OSMOSE
@@ -220,6 +223,7 @@ async def _run_osmose_processing(
         document_path=document_path,
         text_content=full_text,
         tenant_id=tenant_id,
+        doc_context_frame=doc_context,  # PR4: Passer DocContextFrame
     )
 
     return {
@@ -277,11 +281,13 @@ def ingest_document_v2_job(
         document_id = extraction_result["document_id"]
         full_text = extraction_result["full_text"]
         metrics = extraction_result["metrics"]
+        doc_context = extraction_result.get("doc_context")  # PR4: DocContextFrame
 
         logger.info(
             f"[V2] Extraction complete: {document_id}, "
             f"{len(full_text)} chars, "
-            f"{metrics.get('total_pages', 0)} pages"
+            f"{metrics.get('total_pages', 0)} pages, "
+            f"doc_context={doc_context is not None}"
         )
 
         # Etape 2: Traitement OSMOSE
@@ -294,6 +300,7 @@ def ingest_document_v2_job(
                 document_path=path,
                 full_text=full_text,
                 tenant_id=tenant_id,
+                doc_context=doc_context,  # PR4: Passer DocContextFrame
             )
         )
 
@@ -382,6 +389,180 @@ def ingest_document_v2_job(
         raise
 
 
+def ingest_excel_job(
+    *,
+    xlsx_path: str,
+    meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Job d'ingestion Excel (RFP Q/A import).
+
+    Migre depuis jobs.py - Excel pas encore dans ExtractionPipelineV2.
+
+    Args:
+        xlsx_path: Chemin du fichier Excel
+        meta: Metadata optionnelle
+
+    Returns:
+        Resultat de l'ingestion
+    """
+    from knowbase.ingestion.pipelines import excel_pipeline
+
+    try:
+        mark_job_as_processing()
+        update_job_progress("Initialisation", 0, 4, "Verification du fichier Excel")
+
+        path = _ensure_exists(Path(xlsx_path))
+        meta_dict = meta or {}
+
+        update_job_progress("Traitement", 1, 4, "Traitement du fichier Excel")
+        result = excel_pipeline.process_excel_rfp(path, meta_dict)
+
+        update_job_progress("Finalisation", 3, 4, "Deplacement du fichier")
+        destination = DOCS_DONE / path.name
+
+        update_job_progress("Termine", 4, 4, "Import Excel termine avec succes")
+
+        # Notifier historique Redis
+        from knowbase.api.services.import_history_redis import get_redis_import_history_service
+
+        job = get_current_job()
+        if job:
+            history_service = get_redis_import_history_service()
+            chunks_inserted = result.get("chunks_inserted", 0) if isinstance(result, dict) else 0
+            history_service.update_import_status(
+                uid=job.id,
+                status="completed",
+                chunks_inserted=chunks_inserted
+            )
+
+        # Deduplication
+        auto_deduplicate_entities(tenant_id="default")
+
+        return {
+            "status": "completed",
+            "output_path": str(destination),
+            "chunks_inserted": result.get("chunks_inserted", 0) if isinstance(result, dict) else 0
+        }
+
+    except Exception as e:
+        update_job_progress("Erreur", 0, 4, f"Erreur traitement Excel: {str(e)}")
+
+        from knowbase.api.services.import_deletion import delete_import_completely
+        from knowbase.api.services.import_history_redis import get_redis_import_history_service
+
+        job = get_current_job()
+        if job:
+            try:
+                update_job_progress("Rollback", 0, 4, "Suppression chunks partiels...")
+                delete_import_completely(job.id)
+            except Exception as rollback_error:
+                logger.error(f"[Excel] Rollback failed: {rollback_error}")
+
+            history_service = get_redis_import_history_service()
+            history_service.update_import_status(
+                uid=job.id,
+                status="failed",
+                error_message=str(e)
+            )
+
+        raise
+
+
+def fill_excel_job(*, xlsx_path: str, meta_path: str) -> Dict[str, Any]:
+    """
+    Job de remplissage RFP Excel.
+
+    Migre depuis jobs.py.
+
+    Args:
+        xlsx_path: Chemin du fichier Excel a remplir
+        meta_path: Chemin du fichier meta
+
+    Returns:
+        Resultat du remplissage
+    """
+    try:
+        mark_job_as_processing()
+        update_job_progress("Initialisation", 0, 5, "Verification des fichiers")
+
+        path = _ensure_exists(Path(xlsx_path))
+        meta_file = Path(meta_path)
+
+        def pipeline_progress_callback(step: str, progress: int, total: int, message: str):
+            global_progress = 1 + int((progress / 100) * 2)
+            update_job_progress(step, global_progress, 5, message)
+
+        from knowbase.ingestion.pipelines import smart_fill_excel_pipeline
+        result = smart_fill_excel_pipeline.main(path, meta_file, progress_callback=pipeline_progress_callback)
+
+        update_job_progress("Finalisation", 3, 5, "Creation du fichier de sortie")
+        output_dir = SETTINGS.presentations_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        job = get_current_job()
+        if job:
+            uid_parts = job.id.split('_')
+            if len(uid_parts) >= 3 and uid_parts[-3:-1] == ['rfp']:
+                date_part = uid_parts[-2]
+                time_part = uid_parts[-1]
+                short_uid = f"{date_part}{time_part}"
+            else:
+                short_uid = job.id
+
+            original_stem = path.stem.split('_')[0]
+        else:
+            short_uid = "unknown"
+            original_stem = path.stem
+
+        destination = output_dir / f"{original_stem}_{short_uid}_filled.xlsx"
+        path.replace(destination)
+
+        update_job_progress("Nettoyage", 4, 5, "Suppression fichiers temporaires")
+        if meta_file.exists():
+            meta_file.unlink()
+
+        update_job_progress("Termine", 5, 5, "Remplissage RFP termine avec succes")
+
+        from knowbase.api.services.import_history_redis import get_redis_import_history_service
+
+        job = get_current_job()
+        if job:
+            history_service = get_redis_import_history_service()
+            chunks_filled = result.get("chunks_filled", 0) if isinstance(result, dict) else 0
+            history_service.update_import_status(
+                uid=job.id,
+                status="completed",
+                chunks_inserted=chunks_filled
+            )
+
+        return {
+            "status": "completed",
+            "output_path": str(destination),
+            "chunks_filled": result.get("chunks_filled", 0) if isinstance(result, dict) else 0
+        }
+
+    except Exception as e:
+        update_job_progress("Erreur", 0, 5, f"Erreur remplissage RFP: {str(e)}")
+
+        from knowbase.api.services.import_history_redis import get_redis_import_history_service
+
+        job = get_current_job()
+        if job:
+            history_service = get_redis_import_history_service()
+            history_service.update_import_status(
+                uid=job.id,
+                status="failed",
+                error_message=str(e)
+            )
+
+        raise
+
+
 __all__ = [
     "ingest_document_v2_job",
+    "ingest_excel_job",
+    "fill_excel_job",
+    "send_worker_heartbeat",
+    "update_job_progress",
 ]
