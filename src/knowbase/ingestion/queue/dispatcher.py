@@ -1,11 +1,10 @@
 ﻿"""
-Dispatcher - Route les documents vers V1 ou V2 selon feature flag.
+Dispatcher - Route les documents vers le pipeline V2 unifie.
 
-Si extraction_v2.enabled = true:
-    -> ingest_document_v2_job (pipeline unifie Docling + Vision Gating)
+Tous les formats (PDF, PPTX, DOCX, XLSX) passent par ExtractionPipelineV2
+avec Docling + Vision Gating V4.
 
-Sinon:
-    -> ingest_pptx_job / ingest_pdf_job (pipelines legacy)
+Legacy V1 supprime - Cleanup 2025-01-05.
 """
 
 from __future__ import annotations
@@ -18,32 +17,10 @@ from rq.job import Job
 from rq.exceptions import NoSuchJobError
 
 from knowbase.config.settings import get_settings
-from knowbase.config.feature_flags import get_feature_flags
 from .connection import DEFAULT_JOB_TIMEOUT, get_queue
 
 SETTINGS = get_settings()
 logger = logging.getLogger(__name__)
-
-
-def _is_extraction_v2_enabled() -> bool:
-    """Verifie si Extraction V2 est active."""
-    try:
-        flags = get_feature_flags()
-        v2_config = flags.get("extraction_v2", {})
-        return v2_config.get("enabled", False)
-    except Exception:
-        return False
-
-
-def _is_format_supported_v2(file_type: str) -> bool:
-    """Verifie si le format est supporte par V2."""
-    try:
-        flags = get_feature_flags()
-        v2_config = flags.get("extraction_v2", {})
-        supported = v2_config.get("supported_formats", ["pdf", "pptx", "docx", "xlsx"])
-        return file_type.lower().lstrip(".") in supported
-    except Exception:
-        return False
 
 
 def enqueue_document_v2(
@@ -106,54 +83,32 @@ def enqueue_pptx_ingestion(
     use_vision: bool = True,
     queue_name: Optional[str] = None,
 ) -> Job:
-    # Route vers V2 si active et format supporte
-    if _is_extraction_v2_enabled() and _is_format_supported_v2("pptx"):
-        logger.info(f"[Dispatcher] Routing PPTX to V2 pipeline: {Path(file_path).name}")
-        return enqueue_document_v2(
-            job_id=job_id,
-            file_path=file_path,
-            document_type_id=document_type_id,
-            queue_name=queue_name,
-        )
-
-    # Pipeline V1 legacy
-    job = get_queue(queue_name).enqueue_call(
-        func="knowbase.ingestion.queue.jobs.ingest_pptx_job",
-        kwargs={
-            "pptx_path": file_path,
-            "document_type_id": document_type_id,
-            "meta_path": meta_path,
-            "use_vision": use_vision,
-        },
+    """Route PPTX vers pipeline V2 unifie."""
+    logger.info(f"[Dispatcher] Routing PPTX to V2 pipeline: {Path(file_path).name}")
+    return enqueue_document_v2(
         job_id=job_id,
-        result_ttl=DEFAULT_JOB_TIMEOUT,
-        failure_ttl=DEFAULT_JOB_TIMEOUT,
-        description=f"PPTX ingestion for {Path(file_path).name}",
+        file_path=file_path,
+        document_type_id=document_type_id,
+        queue_name=queue_name,
     )
-    return _register_meta(job, job_type="ingest", document_type=document_type_id or "default", source=file_path)
 
 
-def enqueue_pdf_ingestion(*, job_id: str, file_path: str, document_type_id: Optional[str] = None, use_vision: bool = True, queue_name: Optional[str] = None) -> Job:
-    # Route vers V2 si active et format supporte
-    if _is_extraction_v2_enabled() and _is_format_supported_v2("pdf"):
-        logger.info(f"[Dispatcher] Routing PDF to V2 pipeline: {Path(file_path).name}")
-        return enqueue_document_v2(
-            job_id=job_id,
-            file_path=file_path,
-            document_type_id=document_type_id,
-            queue_name=queue_name,
-        )
-
-    # Pipeline V1 legacy
-    job = get_queue(queue_name).enqueue_call(
-        func="knowbase.ingestion.queue.jobs.ingest_pdf_job",
-        kwargs={"pdf_path": file_path, "document_type_id": document_type_id, "use_vision": use_vision},
+def enqueue_pdf_ingestion(
+    *,
+    job_id: str,
+    file_path: str,
+    document_type_id: Optional[str] = None,
+    use_vision: bool = True,
+    queue_name: Optional[str] = None,
+) -> Job:
+    """Route PDF vers pipeline V2 unifie."""
+    logger.info(f"[Dispatcher] Routing PDF to V2 pipeline: {Path(file_path).name}")
+    return enqueue_document_v2(
         job_id=job_id,
-        result_ttl=DEFAULT_JOB_TIMEOUT,
-        failure_ttl=DEFAULT_JOB_TIMEOUT,
-        description=f"PDF ingestion for {Path(file_path).name}",
+        file_path=file_path,
+        document_type_id=document_type_id,
+        queue_name=queue_name,
     )
-    return _register_meta(job, job_type="ingest", document_type=document_type_id or "pdf", source=file_path)
 
 
 def enqueue_excel_ingestion(
@@ -164,7 +119,7 @@ def enqueue_excel_ingestion(
     queue_name: Optional[str] = None,
 ) -> Job:
     job = get_queue(queue_name).enqueue_call(
-        func="knowbase.ingestion.queue.jobs.ingest_excel_job",
+        func="knowbase.ingestion.queue.jobs_v2.ingest_excel_job",
         kwargs={"xlsx_path": file_path, "meta": meta or {}},
         job_id=job_id,
         result_ttl=DEFAULT_JOB_TIMEOUT,
@@ -182,7 +137,7 @@ def enqueue_fill_excel(
     queue_name: Optional[str] = None,
 ) -> Job:
     job = get_queue(queue_name).enqueue_call(
-        func="knowbase.ingestion.queue.jobs.fill_excel_job",
+        func="knowbase.ingestion.queue.jobs_v2.fill_excel_job",
         kwargs={"xlsx_path": file_path, "meta_path": meta_path},
         job_id=job_id,
         result_ttl=DEFAULT_JOB_TIMEOUT,

@@ -34,6 +34,10 @@ from knowbase.extraction_v2.models import (
     VisionExtraction,
     get_vision_domain_context,
 )
+from knowbase.extraction_v2.context.doc_context_extractor import (
+    DocContextExtractor,
+    get_doc_context_extractor,
+)
 from knowbase.extraction_v2.extractors.docling_extractor import DoclingExtractor
 from knowbase.extraction_v2.gating.engine import GatingEngine
 from knowbase.extraction_v2.gating.weights import DEFAULT_GATING_WEIGHTS, GATING_THRESHOLDS
@@ -52,6 +56,7 @@ class PipelineConfig:
     # Activation des composants
     enable_vision: bool = True
     enable_gating: bool = True
+    enable_doc_context: bool = True  # Extraction contexte documentaire (ADR_ASSERTION_AWARE_KG)
 
     # Seuils de gating
     vision_required_threshold: float = 0.60
@@ -78,11 +83,15 @@ class PipelineConfig:
     # Default: MAX_WORKERS env var ou 30
     max_concurrent_vision: int = None  # None = auto-detect from env
 
+    # Options DocContext (ADR_ASSERTION_AWARE_KG)
+    doc_context_use_llm: bool = True  # Utiliser LLM pour validation
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialise en dictionnaire."""
         return {
             "enable_vision": self.enable_vision,
             "enable_gating": self.enable_gating,
+            "enable_doc_context": self.enable_doc_context,
             "vision_required_threshold": self.vision_required_threshold,
             "vision_recommended_threshold": self.vision_recommended_threshold,
             "vision_budget": self.vision_budget,
@@ -92,6 +101,7 @@ class PipelineConfig:
             "vision_model": self.vision_model,
             "include_recommended_in_vision": self.include_recommended_in_vision,
             "max_concurrent_vision": self.max_concurrent_vision,
+            "doc_context_use_llm": self.doc_context_use_llm,
         }
 
 
@@ -105,6 +115,7 @@ class PipelineMetrics:
     extraction_time_ms: float = 0
     gating_time_ms: float = 0
     vision_time_ms: float = 0
+    doc_context_time_ms: float = 0  # Temps extraction contexte
     total_time_ms: float = 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -116,6 +127,7 @@ class PipelineMetrics:
             "extraction_time_ms": round(self.extraction_time_ms, 2),
             "gating_time_ms": round(self.gating_time_ms, 2),
             "vision_time_ms": round(self.vision_time_ms, 2),
+            "doc_context_time_ms": round(self.doc_context_time_ms, 2),
             "total_time_ms": round(self.total_time_ms, 2),
         }
 
@@ -153,6 +165,7 @@ class ExtractionPipelineV2:
         self._vision_analyzer: Optional[VisionAnalyzer] = None
         self._merger: Optional[StructuredMerger] = None
         self._linearizer: Optional[Linearizer] = None
+        self._doc_context_extractor: Optional[DocContextExtractor] = None
 
         # Cache V2 (évite de refaire les appels Vision)
         self._cache: Optional[VersionedCache] = None
@@ -214,6 +227,12 @@ class ExtractionPipelineV2:
             include_tables=True,
         )
 
+        # 5. Initialiser DocContextExtractor (ADR_ASSERTION_AWARE_KG)
+        if self.config.enable_doc_context:
+            self._doc_context_extractor = DocContextExtractor(
+                use_llm=self.config.doc_context_use_llm,
+            )
+
         self._initialized = True
         elapsed = (time.time() - start) * 1000
 
@@ -256,10 +275,55 @@ class ExtractionPipelineV2:
         if self._cache:
             cached_result = self._cache.get(document_id, file_path)
             if cached_result:
-                logger.info(
-                    f"[ExtractionPipelineV2] Cache HIT: {document_id}, "
-                    f"skipping extraction (saved Vision calls!)"
-                )
+                # Vérifier si le cache a un doc_context (ADR_ASSERTION_AWARE_KG)
+                if cached_result.doc_context is None and self.config.enable_doc_context and self._doc_context_extractor:
+                    # Cache ancien sans DocContext - extraire à la volée
+                    logger.info(
+                        f"[ExtractionPipelineV2] Cache HIT but missing DocContext: {document_id}, "
+                        f"extracting context..."
+                    )
+                    try:
+                        # Reconstruire pages_text depuis la structure cachee
+                        # Chaque page a son text_markdown preserve
+                        pages_text = [
+                            page.text_markdown
+                            for page in cached_result.structure.pages
+                        ]
+
+                        # Fallback si structure vide (anciens caches)
+                        if not pages_text:
+                            logger.warning(
+                                f"[ExtractionPipelineV2] No page structure in cache, "
+                                f"using full_text as single page"
+                            )
+                            pages_text = [cached_result.full_text]
+
+                        doc_context = await self._doc_context_extractor.extract(
+                            document_id=document_id,
+                            filename=Path(file_path).name,
+                            pages_text=pages_text,
+                        )
+
+                        # Mettre à jour le résultat avec le doc_context
+                        cached_result.doc_context = doc_context
+
+                        # Mettre à jour le cache
+                        self._cache.set(document_id, file_path, cached_result)
+
+                        logger.info(
+                            f"[ExtractionPipelineV2] DocContext extracted for cached doc: "
+                            f"{doc_context.doc_scope.value}, "
+                            f"markers={doc_context.strong_markers + doc_context.weak_markers}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[ExtractionPipelineV2] DocContext extraction failed for cached doc: {e}"
+                        )
+                else:
+                    logger.info(
+                        f"[ExtractionPipelineV2] Cache HIT: {document_id}, "
+                        f"skipping extraction (saved Vision calls!)"
+                    )
                 return cached_result
 
         # Obtenir le Domain Context
@@ -400,6 +464,33 @@ class ExtractionPipelineV2:
         # === ETAPE 5: Linearisation ===
         full_text, page_index = self._linearizer.linearize(merged_pages)
 
+        # === ETAPE 6: DocContext Extraction (ADR_ASSERTION_AWARE_KG) ===
+        doc_context = None
+        if self.config.enable_doc_context and self._doc_context_extractor:
+            doc_context_start = time.time()
+            try:
+                # Extraire le texte des pages pour le miner
+                pages_text = [mp.text_content for mp in merged_pages]
+
+                doc_context = await self._doc_context_extractor.extract(
+                    document_id=document_id,
+                    filename=Path(file_path).name,
+                    pages_text=pages_text,
+                )
+
+                metrics.doc_context_time_ms = (time.time() - doc_context_start) * 1000
+
+                logger.info(
+                    f"[ExtractionPipelineV2] DocContext: {doc_context.doc_scope.value}, "
+                    f"markers={doc_context.strong_markers + doc_context.weak_markers}, "
+                    f"time={metrics.doc_context_time_ms:.0f}ms"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[ExtractionPipelineV2] DocContext extraction failed: {e}, "
+                    f"continuing without context"
+                )
+
         # === Construction du resultat ===
         structure = self._build_structure(merged_pages, gating_decisions)
 
@@ -424,6 +515,7 @@ class ExtractionPipelineV2:
             domain_context_name=effective_tenant,
             gating_decisions=gating_decisions,
             vision_results=vision_results,
+            doc_context=doc_context,  # ADR_ASSERTION_AWARE_KG
             stats={
                 "tenant_id": effective_tenant,
                 "config": self.config.to_dict(),

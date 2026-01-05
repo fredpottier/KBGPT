@@ -255,8 +255,8 @@ phase_2_hybrid_anchor:
 # Objectif: Pipeline d'extraction unifié avec Vision Gating V4
 
 extraction_v2:
-  # Global toggle - active le nouveau pipeline d'extraction
-  enabled: true  # DÉSACTIVÉ par défaut, activer pour tester
+  # Pipeline V2 actif par defaut (V1 supprime - Cleanup 2025-01-05)
+  enabled: true
 
   # Configuration Vision
   vision_config:
