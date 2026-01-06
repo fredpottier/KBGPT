@@ -154,6 +154,7 @@ class NormalizationEngine:
                 pattern=rule_data.get("pattern", ""),
                 is_regex=True,  # Les rules sont toujours regex
                 requires_entity=rule_data.get("requires_entity", False),
+                requires_strong_entity=rule_data.get("requires_strong_entity", False),
                 requires_base_version=rule_data.get("requires_base_version", False),
                 output_template=rule_data.get("output_template", ""),
                 priority=rule_data.get("priority", 0),
@@ -259,7 +260,7 @@ class NormalizationEngine:
     def _select_best_entity_anchor(
         self,
         anchors: List[Dict[str, Any]],
-    ) -> Optional[str]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Sélectionne le meilleur Entity Anchor parmi les candidats.
 
@@ -267,7 +268,7 @@ class NormalizationEngine:
             anchors: Liste de candidats
 
         Returns:
-            Nom de l'entity anchor ou None
+            Dict avec 'name' et 'is_strong' ou None
         """
         if not anchors:
             return None
@@ -285,8 +286,22 @@ class NormalizationEngine:
                 )
                 return None
 
-        # Retourner le canonical_name du premier
-        return anchors[0].get("canonical_name") or anchors[0].get("name")
+        best = anchors[0]
+        name = best.get("canonical_name") or best.get("name")
+        mentions = best.get("mentions", 0)
+        role = best.get("role", "")
+
+        # Un entity anchor est "fort" si:
+        # - Il a >= 3 mentions dans le document
+        # - OU il a un rôle primaire (subject, primary)
+        is_strong = mentions >= 3 or role in ("primary", "subject")
+
+        return {
+            "name": name,
+            "is_strong": is_strong,
+            "mentions": mentions,
+            "role": role,
+        }
 
     # =========================================================================
     # Normalization Logic
@@ -296,6 +311,7 @@ class NormalizationEngine:
         self,
         mention: MarkerMention,
         entity_anchor: Optional[str] = None,
+        entity_is_strong: bool = False,
         base_version: Optional[str] = None,
     ) -> NormalizationResult:
         """
@@ -310,6 +326,7 @@ class NormalizationEngine:
         Args:
             mention: MarkerMention à normaliser
             entity_anchor: Entity Anchor connu (optionnel)
+            entity_is_strong: True si l'entity a haute confiance (>= 3 mentions)
             base_version: Version de base si connue (pour patches)
 
         Returns:
@@ -351,7 +368,7 @@ class NormalizationEngine:
                 continue
 
             result = self._try_rule(
-                mention, rule, entity_anchor, base_version
+                mention, rule, entity_anchor, entity_is_strong, base_version
             )
             if result is not None:
                 return result
@@ -368,6 +385,7 @@ class NormalizationEngine:
         mention: MarkerMention,
         rule: NormalizationRule,
         entity_anchor: Optional[str],
+        entity_is_strong: bool,
         base_version: Optional[str],
     ) -> Optional[NormalizationResult]:
         """
@@ -377,6 +395,7 @@ class NormalizationEngine:
             mention: MarkerMention
             rule: NormalizationRule à tester
             entity_anchor: Entity Anchor disponible
+            entity_is_strong: True si l'entity a haute confiance
             base_version: Version de base si connue
 
         Returns:
@@ -386,6 +405,10 @@ class NormalizationEngine:
 
         # Vérifier les requirements
         if rule.requires_entity and not entity_anchor:
+            return None
+
+        # requires_strong_entity: l'entity doit être "forte" (haute confiance)
+        if rule.requires_strong_entity and not entity_is_strong:
             return None
 
         if rule.requires_base_version and not base_version:
@@ -505,11 +528,18 @@ class NormalizationEngine:
 
         # 2. Trouver les Entity Anchors
         anchors = await self.find_entity_anchors(doc_id)
-        entity_anchor = self._select_best_entity_anchor(anchors)
+        anchor_info = self._select_best_entity_anchor(anchors)
 
-        if entity_anchor:
+        entity_anchor: Optional[str] = None
+        entity_is_strong: bool = False
+
+        if anchor_info:
+            entity_anchor = anchor_info["name"]
+            entity_is_strong = anchor_info["is_strong"]
             logger.info(
-                f"[NormalizationEngine] Using entity anchor '{entity_anchor}' for doc {doc_id}"
+                f"[NormalizationEngine] Using entity anchor '{entity_anchor}' "
+                f"(strong={entity_is_strong}, mentions={anchor_info.get('mentions', 0)}) "
+                f"for doc {doc_id}"
             )
 
         # 3. Normaliser chaque mention
@@ -518,6 +548,7 @@ class NormalizationEngine:
             result = await self.normalize_mention(
                 mention,
                 entity_anchor=entity_anchor,
+                entity_is_strong=entity_is_strong,
             )
             results.append(result)
 

@@ -2,9 +2,9 @@
 #
 # ADR: doc/ongoing/ADR_MARKER_NORMALIZATION_LAYER.md
 #
-# IMPORTANT: Ce fichier est 100% tenant-specific.
-# Les exemples ci-dessous sont ILLUSTRATIFS - chaque organisation
-# définit ses propres règles selon son domaine métier.
+# DOMAIN-AGNOSTIC: Ces règles sont universelles et fonctionnent
+# pour tout vertical métier (software, automobile, hardware, etc.)
+# Les tenants peuvent ajouter leurs propres règles spécifiques.
 
 version: "1.0"
 tenant_id: "default"
@@ -14,49 +14,77 @@ tenant_id: "default"
 # Mapping direct raw_marker → canonical_form
 # Utiliser quand l'Entity Anchor est DÉJÀ dans le marker
 # =============================================================
-aliases:
-  # Exemples SAP (illustratifs)
-  # "Edition 2508": "S/4HANA Cloud 2508"
-  # "PCE 2023": "S/4HANA Cloud Private Edition 2023"
+aliases: {}
 
 # =============================================================
-# RÈGLES REGEX (priorité moyenne)
+# RÈGLES REGEX UNIVERSELLES
 # Patterns avec capture groups + Entity Anchor obligatoire
 # =============================================================
 rules:
-  - id: "edition_year"
-    description: "Pattern 'Edition YYYY' avec entity anchor"
-    pattern: "^Edition\\s+(20\\d{2}|25\\d{2})$"
+  # ---------------------------------------------------------
+  # 1) Semantic Versioning (software, protocols, standards)
+  # ---------------------------------------------------------
+  - id: "semver"
+    description: "vX.Y[.Z] or X.Y[.Z] (requires entity)"
+    pattern: "^(v)?(\\d+)\\.(\\d+)(\\.(\\d+))?$"
     requires_entity: true
-    output_template: "{entity} {$1}"
-    priority: 10
+    output_template: "{entity} v{$2}.{$3}{$4}"
+    priority: 20
+    confidence: 0.90
+
+  # ---------------------------------------------------------
+  # 2) Revision / Rev (industry, standards, docs)
+  # ---------------------------------------------------------
+  - id: "revision_letter"
+    description: "Rev A/B/C... (requires entity)"
+    pattern: "^(Rev\\.?\\s*|Revision\\s+)([A-Z])$"
+    requires_entity: true
+    output_template: "{entity} Rev {$2}"
+    priority: 18
+    confidence: 0.88
+
+  - id: "revision_year"
+    description: "Revision YYYY (requires entity)"
+    pattern: "^(Rev\\.?\\s*|Revision\\s+)(20\\d{2})$"
+    requires_entity: true
+    output_template: "{entity} Rev {$2}"
+    priority: 17
+    confidence: 0.86
+
+  # ---------------------------------------------------------
+  # 3) Generation / Mk / Mark / Gen (auto, hardware, products)
+  # ---------------------------------------------------------
+  - id: "generation_numeric"
+    description: "Gen 2 / Generation 3 / Mk 4 / Mark II (requires entity)"
+    pattern: "^(Gen(eration)?\\s+|Mk\\s+|Mark\\s+)(\\d+|[IVXLCM]+)$"
+    requires_entity: true
+    output_template: "{entity} Gen {$3}"
+    priority: 16
     confidence: 0.85
 
-  - id: "version_standalone"
-    description: "Année seule (YYYY) avec entity anchor"
-    pattern: "^(20\\d{2}|25\\d{2})$"
+  # ---------------------------------------------------------
+  # 4) Model Year shorthand (auto common, but not domain-locked)
+  # ---------------------------------------------------------
+  - id: "model_year"
+    description: "MY2021 / MY 2020 (requires entity)"
+    pattern: "^(MY\\s?)(20\\d{2})$"
     requires_entity: true
+    output_template: "{entity} MY{$2}"
+    priority: 14
+    confidence: 0.84
+
+  # ---------------------------------------------------------
+  # 5) Standalone numeral (high ambiguity - strong entity required)
+  # NOTE: Only normalize if marker is just a numeral and entity is strong.
+  # ---------------------------------------------------------
+  - id: "standalone_numeral"
+    description: "Standalone numeral (e.g., '3') requires entity + strong anchor"
+    pattern: "^(\\d{1,3})$"
+    requires_entity: true
+    requires_strong_entity: true
     output_template: "{entity} {$1}"
     priority: 5
-    confidence: 0.70
-
-  - id: "fps_patch"
-    description: "FPS patch level"
-    pattern: "^FPS(\\d{2})$"
-    requires_entity: true
-    requires_base_version: true
-    output_template: "{entity} {base_version} FPS{$1}"
-    priority: 8
-    confidence: 0.75
-
-  - id: "sp_patch"
-    description: "SP patch level"
-    pattern: "^SP(\\d{2,3})$"
-    requires_entity: true
-    requires_base_version: true
-    output_template: "{entity} {base_version} SP{$1}"
-    priority: 8
-    confidence: 0.75
+    confidence: 0.60
 
 # =============================================================
 # CONTRAINTES DE SÉCURITÉ
@@ -65,33 +93,22 @@ constraints:
   # Si pas d'entity anchor → marker reste "unresolved"
   require_entity_for_ambiguous: true
 
+  # Si plusieurs entities possibles → unresolved (pas de guess)
+  single_entity_required: true
+
   # Seuil de confiance pour application automatique
   # En dessous = suggestion seulement (humain décide)
   auto_apply_threshold: 0.95
 
   # Limite du nombre d'aliases (évite explosion)
-  max_aliases: 100
-
-  # Si plusieurs entities possibles → unresolved (pas de guess)
-  single_entity_required: true
+  max_aliases: 200
 
 # =============================================================
 # BLACKLIST (rejeter ces markers, jamais normaliser)
-# Faux positifs connus du tenant
+# Faux positifs universels - garder minimal
 # =============================================================
 blacklist:
-  # Artefacts d'extraction communs
-  - "Content 2"
-  - "PUBLIC 3"
-  - "Level 2"
-  - "Phase 1"
-  - "Phase 2"
-  - "Phase 3"
-  - "Step 1"
-  - "Step 2"
-  - "Option 1"
-  - "Option 2"
-  # Marqueurs de document (pas de version)
+  - "Page"
   - "Page 1"
-  - "Part 1"
-  - "Section 1"
+  - "Section"
+  - "Table of contents"

@@ -219,6 +219,7 @@ class NormalizationRule:
 
     # Requirements (garde-fous)
     requires_entity: bool = False       # Doit avoir un Entity Anchor
+    requires_strong_entity: bool = False  # Entity doit être "forte" (haute confiance)
     requires_base_version: bool = False # Doit avoir une version parente
 
     # Output
@@ -236,6 +237,7 @@ class NormalizationRule:
             "pattern": self.pattern,
             "is_regex": self.is_regex,
             "requires_entity": self.requires_entity,
+            "requires_strong_entity": self.requires_strong_entity,
             "requires_base_version": self.requires_base_version,
             "output_template": self.output_template,
             "priority": self.priority,
