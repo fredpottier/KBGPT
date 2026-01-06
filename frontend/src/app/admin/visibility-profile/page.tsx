@@ -2,15 +2,7 @@
 
 /**
  * Visibility Profile Selection - Admin Page
- *
- * Allows admin to select the visibility profile for the tenant.
- * Part of the Agnostic KG Architecture (Couche 3).
- *
- * 4 Profiles:
- * - verified: Only validated facts (2+ sources)
- * - balanced: Validated + reliable candidates (default)
- * - exploratory: Maximum connections for discovery
- * - full_access: Admin access, no filters
+ * Left: vertical list, Right: detail on hover
  */
 
 import {
@@ -19,14 +11,12 @@ import {
   HStack,
   Text,
   Icon,
-  Button,
   useToast,
   Spinner,
   Center,
-  Collapse,
   Badge,
+  Flex,
 } from '@chakra-ui/react'
-import { motion } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
@@ -35,14 +25,11 @@ import {
   FiSearch,
   FiUnlock,
   FiCheck,
-  FiChevronDown,
-  FiChevronUp,
   FiInfo,
   FiAlertTriangle,
+  FiChevronRight,
 } from 'react-icons/fi'
 import { apiClient } from '@/lib/api'
-
-const MotionBox = motion(Box)
 
 interface VisibilityProfile {
   id: string
@@ -58,171 +45,19 @@ interface ProfilesResponse {
   profiles: VisibilityProfile[]
 }
 
-// Map profile IDs to icons
-const profileIcons: Record<string, any> = {
-  verified: FiShield,
-  balanced: FiSliders,
-  exploratory: FiSearch,
-  full_access: FiUnlock,
-}
-
-// Map profile IDs to colors
-const profileColors: Record<string, string> = {
-  verified: 'green',
-  balanced: 'brand',
-  exploratory: 'orange',
-  full_access: 'red',
-}
-
-// Profile Card Component
-const ProfileCard = ({
-  profile,
-  isSelected,
-  onSelect,
-  isLoading,
-  delay = 0,
-}: {
-  profile: VisibilityProfile
-  isSelected: boolean
-  onSelect: () => void
-  isLoading: boolean
-  delay?: number
-}) => {
-  const [isExpanded, setIsExpanded] = useState(false)
-  const color = profileColors[profile.id] || 'brand'
-  const IconComponent = profileIcons[profile.id] || FiSliders
-
-  return (
-    <MotionBox
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay }}
-    >
-      <Box
-        bg="bg.secondary"
-        border="2px solid"
-        borderColor={isSelected ? `${color}.500` : 'border.default'}
-        rounded="xl"
-        overflow="hidden"
-        cursor="pointer"
-        onClick={onSelect}
-        _hover={{
-          borderColor: `${color}.400`,
-          transform: 'translateY(-2px)',
-          boxShadow: `0 4px 20px rgba(99, 102, 241, 0.15)`,
-        }}
-        transition="all 0.2s"
-        position="relative"
-      >
-        {/* Selection indicator */}
-        {isSelected && (
-          <Box
-            position="absolute"
-            top={3}
-            right={3}
-            w={6}
-            h={6}
-            rounded="full"
-            bg={`${color}.500`}
-            display="flex"
-            alignItems="center"
-            justifyContent="center"
-          >
-            <Icon as={FiCheck} color="white" boxSize={4} />
-          </Box>
-        )}
-
-        {/* Main content */}
-        <Box p={5}>
-          <HStack spacing={4} align="start">
-            {/* Icon */}
-            <Box
-              w={12}
-              h={12}
-              rounded="xl"
-              bg={`rgba(99, 102, 241, 0.15)`}
-              display="flex"
-              alignItems="center"
-              justifyContent="center"
-              flexShrink={0}
-            >
-              <Icon as={IconComponent} boxSize={6} color={`${color}.400`} />
-            </Box>
-
-            {/* Text */}
-            <VStack align="start" spacing={1} flex={1}>
-              <HStack>
-                <Text fontSize="lg" fontWeight="bold" color="text.primary">
-                  {profile.icon} {profile.name}
-                </Text>
-                {profile.id === 'balanced' && (
-                  <Badge colorScheme="brand" fontSize="xs">
-                    Recommande
-                  </Badge>
-                )}
-              </HStack>
-              <Text fontSize="sm" color="text.secondary">
-                {profile.short_description}
-              </Text>
-            </VStack>
-          </HStack>
-
-          {/* Expand button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            mt={3}
-            onClick={(e) => {
-              e.stopPropagation()
-              setIsExpanded(!isExpanded)
-            }}
-            rightIcon={<Icon as={isExpanded ? FiChevronUp : FiChevronDown} />}
-            color="text.muted"
-            _hover={{ color: 'text.primary' }}
-          >
-            {isExpanded ? 'Masquer les details' : 'Voir les details'}
-          </Button>
-
-          {/* Expanded content */}
-          <Collapse in={isExpanded}>
-            <Box
-              mt={4}
-              p={4}
-              bg="bg.tertiary"
-              rounded="lg"
-              fontSize="sm"
-              color="text.secondary"
-              whiteSpace="pre-wrap"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {profile.explanation}
-            </Box>
-          </Collapse>
-        </Box>
-
-        {/* Loading overlay */}
-        {isLoading && (
-          <Box
-            position="absolute"
-            inset={0}
-            bg="blackAlpha.600"
-            display="flex"
-            alignItems="center"
-            justifyContent="center"
-            rounded="xl"
-          >
-            <Spinner size="lg" color="white" />
-          </Box>
-        )}
-      </Box>
-    </MotionBox>
-  )
+// Map profile IDs to icons and colors
+const profileConfig: Record<string, { icon: any; color: string; gradient: string }> = {
+  verified: { icon: FiShield, color: 'green', gradient: 'linear(to-br, green.500, green.600)' },
+  balanced: { icon: FiSliders, color: 'blue', gradient: 'linear(to-br, #4338CA, #6366F1)' },
+  exploratory: { icon: FiSearch, color: 'orange', gradient: 'linear(to-br, orange.500, orange.600)' },
+  full_access: { icon: FiUnlock, color: 'red', gradient: 'linear(to-br, red.500, red.600)' },
 }
 
 export default function VisibilityProfilePage() {
   const toast = useToast()
   const queryClient = useQueryClient()
   const [pendingProfile, setPendingProfile] = useState<string | null>(null)
+  const [hoveredProfile, setHoveredProfile] = useState<string | null>(null)
 
   // Fetch profiles
   const {
@@ -250,7 +85,7 @@ export default function VisibilityProfilePage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'visibility-profiles'] })
       toast({
-        title: 'Profil mis a jour',
+        title: 'Profil mis à jour',
         description: data.message,
         status: 'success',
         duration: 3000,
@@ -275,131 +110,291 @@ export default function VisibilityProfilePage() {
   }
 
   if (isLoading) {
+    return <Center h="200px"><Spinner size="md" color="brand.500" /></Center>
+  }
+
+  if (error || !profilesData) {
     return (
-      <Center h="400px">
-        <VStack spacing={4}>
-          <Spinner size="xl" color="brand.500" thickness="3px" />
-          <Text color="text.muted">Chargement des profils...</Text>
+      <Center h="200px">
+        <VStack spacing={2}>
+          <Icon as={FiAlertTriangle} boxSize={8} color="red.400" />
+          <Text fontSize="sm" color="text.muted">Erreur de chargement des profils</Text>
         </VStack>
       </Center>
     )
   }
 
-  if (error || !profilesData) {
-    return (
-      <Center h="400px">
-        <Box
-          bg="rgba(239, 68, 68, 0.1)"
-          border="1px solid"
-          borderColor="red.500"
-          rounded="xl"
-          p={8}
-          textAlign="center"
-        >
-          <Icon as={FiAlertTriangle} boxSize={12} color="red.400" mb={4} />
-          <Text fontSize="lg" fontWeight="medium" color="red.400" mb={2}>
-            Erreur de chargement
-          </Text>
-          <Text fontSize="sm" color="text.muted">
-            Impossible de charger les profils de visibilite
-          </Text>
-        </Box>
-      </Center>
-    )
-  }
+  // Profile to display in detail panel (hovered or current)
+  const displayedProfileId = hoveredProfile || profilesData.current_profile
+  const displayedProfile = profilesData.profiles.find(p => p.id === displayedProfileId)
+  const displayConfig = displayedProfile ? profileConfig[displayedProfile.id] : null
 
   return (
-    <Box maxW="900px" mx="auto">
-      {/* Header */}
-      <MotionBox
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        mb={8}
-      >
-        <HStack spacing={3} mb={4}>
+    <Box maxW="1000px" mx="auto" p={3}>
+      {/* Compact Header */}
+      <Flex justify="space-between" align="center" mb={4}>
+        <HStack spacing={3}>
           <Box
-            w={10}
-            h={10}
+            w={8}
+            h={8}
             rounded="lg"
-            bgGradient="linear(to-br, brand.500, accent.400)"
+            bgGradient="linear(to-br, #4338CA, #6366F1)"
             display="flex"
             alignItems="center"
             justifyContent="center"
-            boxShadow="0 0 20px rgba(99, 102, 241, 0.3)"
           >
-            <Icon as={FiSliders} boxSize={5} color="white" />
+            <Icon as={FiSliders} boxSize={4} color="white" />
           </Box>
-          <VStack align="start" spacing={0}>
-            <Text fontSize="2xl" fontWeight="bold" color="text.primary">
-              Profil de Visibilite
+          <Box>
+            <Text fontSize="lg" fontWeight="bold" color="text.primary" lineHeight={1}>
+              Profil de Visibilité
             </Text>
-            <Text color="text.secondary">
-              Controlez les informations affichees aux utilisateurs
+            <Text fontSize="xs" color="text.muted">
+              Contrôle des informations affichées aux utilisateurs
             </Text>
-          </VStack>
+          </Box>
         </HStack>
+      </Flex>
 
-        {/* Info box */}
+      {/* Main content: List + Detail Panel - align stretch so left matches right height */}
+      <Flex gap={4} direction={{ base: 'column', md: 'row' }} align="stretch">
+        {/* Left: Vertical scale + list of profiles */}
+        <Flex gap={0} flexShrink={0}>
+          {/* Vertical scale indicator */}
+          <Flex direction="column" align="center" py={1} pr={2}>
+            <Text
+              fontSize="9px"
+              fontWeight="bold"
+              color="green.400"
+              style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+              letterSpacing="1px"
+              flexShrink={0}
+            >
+              RESTRICTIF
+            </Text>
+            <Box
+              w="3px"
+              flex={1}
+              my={1}
+              rounded="full"
+              bgGradient="linear(to-b, green.500, yellow.500, orange.500, red.500)"
+              minH="50px"
+            />
+            <Text
+              fontSize="9px"
+              fontWeight="bold"
+              color="red.400"
+              style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+              letterSpacing="1px"
+              flexShrink={0}
+            >
+              PERMISSIF
+            </Text>
+          </Flex>
+
+          {/* Profile list - cards expand to fill height */}
+          <Flex direction="column" gap={2} w={{ base: '100%', md: '320px' }} flex={1}>
+            {profilesData.profiles.map((profile) => {
+            const config = profileConfig[profile.id] || { icon: FiSliders, color: 'gray', gradient: 'linear(to-br, gray.500, gray.600)' }
+            const isSelected = profile.id === profilesData.current_profile
+            const isHovered = profile.id === hoveredProfile
+            const isLoading = pendingProfile === profile.id
+
+            return (
+              <Flex
+                key={profile.id}
+                flex={1}
+                bg={isSelected ? 'whiteAlpha.100' : 'whiteAlpha.50'}
+                border="2px solid"
+                borderColor={isSelected ? `${config.color}.500` : isHovered ? 'whiteAlpha.300' : 'whiteAlpha.100'}
+                rounded="lg"
+                p={3}
+                cursor={isLoading ? 'wait' : 'pointer'}
+                onClick={() => handleSelectProfile(profile.id)}
+                onMouseEnter={() => setHoveredProfile(profile.id)}
+                onMouseLeave={() => setHoveredProfile(null)}
+                position="relative"
+                transition="all 0.15s ease"
+                align="center"
+                _hover={{
+                  bg: 'whiteAlpha.100',
+                }}
+              >
+                {/* Loading overlay */}
+                {isLoading && (
+                  <Box
+                    position="absolute"
+                    inset={0}
+                    bg="blackAlpha.600"
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="center"
+                    rounded="lg"
+                    zIndex={1}
+                  >
+                    <Spinner size="sm" color="white" />
+                  </Box>
+                )}
+
+                <HStack spacing={3}>
+                  {/* Icon */}
+                  <Box
+                    w={9}
+                    h={9}
+                    rounded="lg"
+                    bgGradient={config.gradient}
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="center"
+                    flexShrink={0}
+                  >
+                    <Icon as={config.icon} boxSize={4} color="white" />
+                  </Box>
+
+                  {/* Text */}
+                  <Box flex={1} minW={0}>
+                    <HStack spacing={1.5}>
+                      <Text fontSize="sm" fontWeight="bold" color="text.primary" noOfLines={1}>
+                        {profile.name}
+                      </Text>
+                      {profile.id === 'balanced' && (
+                        <Badge colorScheme="blue" fontSize="9px" px={1}>Défaut</Badge>
+                      )}
+                    </HStack>
+                    <Text fontSize="xs" color="text.muted" noOfLines={1}>
+                      {profile.short_description}
+                    </Text>
+                  </Box>
+
+                  {/* Selection indicator or arrow */}
+                  {isSelected ? (
+                    <Box
+                      w={5}
+                      h={5}
+                      rounded="full"
+                      bg={`${config.color}.500`}
+                      display="flex"
+                      alignItems="center"
+                      justifyContent="center"
+                      flexShrink={0}
+                    >
+                      <Icon as={FiCheck} color="white" boxSize={3} />
+                    </Box>
+                  ) : (
+                    <Icon as={FiChevronRight} boxSize={4} color="text.muted" opacity={isHovered ? 1 : 0.3} />
+                  )}
+                </HStack>
+              </Flex>
+            )
+          })}
+
+            {/* Hint */}
+            <HStack spacing={1.5} px={2} flexShrink={0}>
+              <Icon as={FiInfo} boxSize={3} color="text.muted" />
+              <Text fontSize="10px" color="text.muted">Survolez pour détails, cliquez pour activer</Text>
+            </HStack>
+          </Flex>
+        </Flex>
+
+        {/* Right: Detail Panel - Longest profile (full_access) sets height */}
         <Box
-          bg="bg.secondary"
+          flex={1}
+          bg="whiteAlpha.50"
           border="1px solid"
-          borderColor="border.default"
+          borderColor={displayConfig ? `${displayConfig.color}.500` : 'whiteAlpha.200'}
+          borderLeftWidth="3px"
           rounded="lg"
           p={4}
+          position="relative"
         >
-          <HStack spacing={3} align="start">
-            <Icon as={FiInfo} boxSize={5} color="brand.400" mt={0.5} />
-            <VStack align="start" spacing={1}>
-              <Text fontSize="sm" color="text.primary" fontWeight="medium">
-                Comment ca fonctionne ?
-              </Text>
-              <Text fontSize="sm" color="text.secondary">
-                Le profil determine quelles relations du graphe de connaissances sont
-                visibles pour vos utilisateurs. Un profil plus restrictif affiche moins
-                d&apos;informations mais avec plus de fiabilite. Ce parametre s&apos;applique
-                a tous les utilisateurs de votre organisation.
-              </Text>
-            </VStack>
-          </HStack>
-        </Box>
-      </MotionBox>
+          {/* Render full_access (longest) invisibly to establish container height */}
+          {(() => {
+            const longestProfile = profilesData.profiles.find(p => p.id === 'full_access') || profilesData.profiles[profilesData.profiles.length - 1]
+            return (
+              <VStack align="stretch" spacing={3} visibility="hidden" aria-hidden="true">
+                <HStack spacing={3}>
+                  <Box w={9} h={9} flexShrink={0} />
+                  <Box flex={1}>
+                    <HStack spacing={2}>
+                      <Text fontSize="sm" fontWeight="bold">{longestProfile.name}</Text>
+                    </HStack>
+                    <Text fontSize="xs">{longestProfile.short_description}</Text>
+                  </Box>
+                </HStack>
+                <Text fontSize="sm" whiteSpace="pre-wrap" lineHeight="tall">
+                  {longestProfile.explanation}
+                </Text>
+                <Text fontSize="xs">→ Cliquez pour activer ce profil</Text>
+              </VStack>
+            )
+          })()}
 
-      {/* Profile Cards */}
-      <VStack spacing={4} align="stretch">
-        {profilesData.profiles.map((profile, index) => (
-          <ProfileCard
-            key={profile.id}
-            profile={profile}
-            isSelected={profile.id === profilesData.current_profile}
-            onSelect={() => handleSelectProfile(profile.id)}
-            isLoading={pendingProfile === profile.id}
-            delay={index * 0.1}
-          />
-        ))}
-      </VStack>
+          {/* Actual visible content - positioned absolute */}
+          {displayedProfile && displayConfig && (
+            <VStack
+              position="absolute"
+              top={4}
+              left={4}
+              right={4}
+              align="stretch"
+              spacing={3}
+            >
+              <HStack spacing={3}>
+                <Box
+                  w={9}
+                  h={9}
+                  rounded="lg"
+                  bgGradient={displayConfig.gradient}
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                  flexShrink={0}
+                >
+                  <Icon as={displayConfig.icon} boxSize={4} color="white" />
+                </Box>
+                <Box flex={1}>
+                  <HStack spacing={2}>
+                    <Text fontSize="sm" fontWeight="bold" color="text.primary">
+                      {displayedProfile.name}
+                    </Text>
+                    {displayedProfile.id === profilesData.current_profile && (
+                      <Badge colorScheme={displayConfig.color} fontSize="xs">Actif</Badge>
+                    )}
+                    {hoveredProfile && hoveredProfile !== profilesData.current_profile && (
+                      <Badge colorScheme="gray" fontSize="xs" variant="outline">Aperçu</Badge>
+                    )}
+                  </HStack>
+                  <Text fontSize="xs" color="text.muted">
+                    {displayedProfile.short_description}
+                  </Text>
+                </Box>
+              </HStack>
+
+              <Text
+                fontSize="sm"
+                color="text.secondary"
+                whiteSpace="pre-wrap"
+                lineHeight="tall"
+              >
+                {displayedProfile.explanation}
+              </Text>
+
+              {hoveredProfile && hoveredProfile !== profilesData.current_profile && (
+                <Text fontSize="xs" color={`${displayConfig.color}.400`} fontStyle="italic">
+                  → Cliquez pour activer ce profil
+                </Text>
+              )}
+            </VStack>
+          )}
+        </Box>
+      </Flex>
 
       {/* Footer note */}
-      <MotionBox
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.3, delay: 0.5 }}
-        mt={8}
-      >
-        <Box
-          bg="bg.tertiary"
-          rounded="lg"
-          p={4}
-          borderLeft="3px solid"
-          borderColor="brand.500"
-        >
-          <Text fontSize="sm" color="text.muted">
-            <strong>Note :</strong> Le changement de profil prend effet immediatement
-            pour toutes les nouvelles requetes. Les donnees existantes ne sont pas
-            modifiees, seul l&apos;affichage change.
-          </Text>
-        </Box>
-      </MotionBox>
+      <Box mt={4} px={3} py={2} borderLeft="2px solid" borderColor="#4338CA">
+        <Text fontSize="xs" color="text.muted">
+          <Text as="span" fontWeight="bold" color="text.secondary">Note :</Text> Le changement prend effet immédiatement pour toutes les requêtes. Les données existantes ne sont pas modifiées.
+        </Text>
+      </Box>
     </Box>
   )
 }

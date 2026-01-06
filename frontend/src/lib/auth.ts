@@ -61,10 +61,19 @@ export interface AuthResponse {
   user: User
 }
 
+// Durée max d'inactivité avant logout automatique (en heures)
+// Au-delà de cette durée sans interaction, l'utilisateur devra se reconnecter
+// Configurable via NEXT_PUBLIC_MAX_INACTIVITY_HOURS (default: 4 heures)
+const MAX_INACTIVITY_HOURS = parseInt(
+  process.env.NEXT_PUBLIC_MAX_INACTIVITY_HOURS || '4',
+  10
+)
+
 class AuthService {
   private readonly ACCESS_TOKEN_KEY = 'auth_token'
   private readonly REFRESH_TOKEN_KEY = 'refresh_token'
   private readonly USER_KEY = 'user'
+  private readonly LAST_ACTIVITY_KEY = 'last_activity'
 
   /**
    * Login utilisateur et stocke les tokens.
@@ -105,6 +114,7 @@ class AuthService {
       this.setAccessToken(data.access_token)
       this.setRefreshToken(data.refresh_token)
       this.setUser(data.user)
+      this.updateLastActivity() // Initialiser le tracking d'activité
 
       console.log('[AuthService] Tokens and user stored in localStorage')
 
@@ -130,6 +140,7 @@ class AuthService {
     localStorage.removeItem(this.ACCESS_TOKEN_KEY)
     localStorage.removeItem(this.REFRESH_TOKEN_KEY)
     localStorage.removeItem(this.USER_KEY)
+    this.clearLastActivity() // Nettoyer aussi le tracking d'activité
     console.log('[AuthService] Logout - LocalStorage cleared:', {
       hasToken: !!localStorage.getItem(this.ACCESS_TOKEN_KEY),
       hasRefreshToken: !!localStorage.getItem(this.REFRESH_TOKEN_KEY),
@@ -327,10 +338,18 @@ class AuthService {
 
   /**
    * S'assure qu'un token valide est disponible.
-   * Si le token expire bientôt, tente un refresh proactif.
+   * Vérifie d'abord l'inactivité, puis si le token expire bientôt, tente un refresh proactif.
    * Retourne le token valide ou null si impossible.
    */
   async ensureValidToken(): Promise<string | null> {
+    // NOUVEAU: Vérifier l'inactivité AVANT tout refresh
+    // Si l'utilisateur est inactif depuis trop longtemps, on force le logout
+    if (this.isInactiveForTooLong()) {
+      console.log('[AuthService] ensureValidToken: User inactive for too long, forcing logout')
+      this.logout()
+      return null
+    }
+
     const token = this.getAccessToken()
 
     // Pas de token du tout
@@ -345,6 +364,7 @@ class AuthService {
       try {
         const newToken = await this.refreshAccessToken()
         console.log('[AuthService] ensureValidToken: Token refreshed successfully')
+        this.updateLastActivity() // Mettre à jour l'activité après refresh réussi
         return newToken
       } catch (error) {
         console.error('[AuthService] ensureValidToken: Refresh failed', error)
@@ -358,6 +378,7 @@ class AuthService {
       try {
         const newToken = await this.refreshAccessToken()
         console.log('[AuthService] ensureValidToken: Proactive refresh successful')
+        this.updateLastActivity() // Mettre à jour l'activité après refresh réussi
         return newToken
       } catch (error) {
         // Refresh échoué mais token encore valide, on continue
@@ -367,6 +388,7 @@ class AuthService {
     }
 
     // Token valide et pas proche d'expirer
+    this.updateLastActivity() // Mettre à jour l'activité
     return token
   }
 
@@ -418,6 +440,67 @@ class AuthService {
    */
   isAdmin(): boolean {
     return this.hasRole('admin')
+  }
+
+  // === Activity tracking ===
+
+  /**
+   * Récupère le timestamp de dernière activité.
+   */
+  getLastActivity(): number | null {
+    if (typeof window === 'undefined') return null
+    const ts = localStorage.getItem(this.LAST_ACTIVITY_KEY)
+    return ts ? parseInt(ts, 10) : null
+  }
+
+  /**
+   * Met à jour le timestamp de dernière activité.
+   */
+  updateLastActivity(): void {
+    if (typeof window === 'undefined') return
+    localStorage.setItem(this.LAST_ACTIVITY_KEY, Date.now().toString())
+  }
+
+  /**
+   * Efface le timestamp de dernière activité.
+   */
+  clearLastActivity(): void {
+    if (typeof window === 'undefined') return
+    localStorage.removeItem(this.LAST_ACTIVITY_KEY)
+  }
+
+  /**
+   * Vérifie si l'utilisateur est inactif depuis trop longtemps.
+   * Retourne true si l'inactivité dépasse MAX_INACTIVITY_HOURS.
+   */
+  isInactiveForTooLong(): boolean {
+    const lastActivity = this.getLastActivity()
+    if (!lastActivity) return false // Pas de tracking encore, on laisse passer
+
+    const inactivityMs = Date.now() - lastActivity
+    const maxInactivityMs = MAX_INACTIVITY_HOURS * 60 * 60 * 1000
+    const isInactive = inactivityMs > maxInactivityMs
+
+    if (isInactive) {
+      const hoursInactive = (inactivityMs / (1000 * 60 * 60)).toFixed(1)
+      console.log(`[AuthService] User inactive for ${hoursInactive}h (max: ${MAX_INACTIVITY_HOURS}h) - forcing logout`)
+    }
+
+    return isInactive
+  }
+
+  /**
+   * Retourne le temps restant avant logout pour inactivité (en ms).
+   */
+  getInactivityTimeRemaining(): number {
+    const lastActivity = this.getLastActivity()
+    if (!lastActivity) return MAX_INACTIVITY_HOURS * 60 * 60 * 1000
+
+    const inactivityMs = Date.now() - lastActivity
+    const maxInactivityMs = MAX_INACTIVITY_HOURS * 60 * 60 * 1000
+    const remaining = maxInactivityMs - inactivityMs
+
+    return remaining > 0 ? remaining : 0
   }
 }
 

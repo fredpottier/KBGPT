@@ -144,10 +144,19 @@ class ProcessBatchResponse(BaseModel):
     message: str
 
 
+class CancelRequest(BaseModel):
+    """Requête d'annulation avec options."""
+    terminate_infrastructure: bool = Field(
+        True,
+        description="Si True, détruit l'infrastructure EC2. Si False, garde l'instance pour relancer un traitement."
+    )
+
+
 class CancelResponse(BaseModel):
     """Réponse annulation."""
     success: bool
     batch_id: Optional[str] = None
+    infrastructure_terminated: bool = False
     message: str
 
 
@@ -742,15 +751,20 @@ async def process_batch(
     response_model=CancelResponse,
     summary="Annuler le batch en cours",
     description="""
-    Annule le batch en cours et libère les ressources.
+    Annule le batch en cours avec options.
 
-    **Actions:**
-    - Désactive les providers Burst
-    - Supprime le stack CloudFormation
-    - Marque le batch comme annulé
+    **Options:**
+    - `terminate_infrastructure: true` (défaut) - Arrête tout et détruit l'instance EC2
+    - `terminate_infrastructure: false` - Arrête le traitement mais garde l'instance EC2 prête
+
+    **Cas d'usage "garder l'infrastructure":**
+    - Arrêter un import problématique
+    - Relancer avec d'autres documents
+    - Économiser le temps de boot (~5-10 min)
     """
 )
 async def cancel_batch(
+    request: CancelRequest = CancelRequest(),
     admin: dict = Depends(require_admin),
     tenant_id: str = Depends(get_tenant_id),
 ) -> CancelResponse:
@@ -764,19 +778,32 @@ async def cancel_batch(
             return CancelResponse(
                 success=True,
                 batch_id=None,
+                infrastructure_terminated=False,
                 message="Aucun batch actif à annuler."
             )
 
         batch_id = orchestrator.state.batch_id
-        orchestrator.cancel()
 
-        logger.info(f"[BURST] Batch {batch_id} annulé")
-
-        return CancelResponse(
-            success=True,
-            batch_id=batch_id,
-            message=f"Batch {batch_id} annulé. Ressources libérées."
-        )
+        if request.terminate_infrastructure:
+            # Annulation complète (comportement actuel)
+            orchestrator.cancel()
+            logger.info(f"[BURST] Batch {batch_id} annulé avec destruction infrastructure")
+            return CancelResponse(
+                success=True,
+                batch_id=batch_id,
+                infrastructure_terminated=True,
+                message=f"Batch {batch_id} annulé. Infrastructure EC2 détruite."
+            )
+        else:
+            # Annulation du traitement uniquement, garde l'infrastructure
+            orchestrator.cancel_processing_only()
+            logger.info(f"[BURST] Batch {batch_id} annulé (infrastructure conservée)")
+            return CancelResponse(
+                success=True,
+                batch_id=batch_id,
+                infrastructure_terminated=False,
+                message=f"Traitement annulé. Infrastructure EC2 conservée - prête pour nouveau batch."
+            )
 
     except Exception as e:
         logger.error(f"Erreur cancel_batch: {e}")

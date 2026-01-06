@@ -7,6 +7,10 @@ import { useRouter } from 'next/navigation'
 // Intervalle de vérification du token (toutes les 2 minutes)
 const TOKEN_CHECK_INTERVAL = 2 * 60 * 1000
 
+// Intervalle de mise à jour de l'activité utilisateur (toutes les 30 secondes)
+// On ne met pas à jour à chaque interaction pour éviter trop d'écritures localStorage
+const ACTIVITY_UPDATE_INTERVAL = 30 * 1000
+
 interface AuthContextType {
   user: User | null
   isAuthenticated: boolean
@@ -30,7 +34,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [isMounted, setIsMounted] = useState(false)
   const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const lastActivityUpdateRef = useRef<number>(0)
   const router = useRouter()
+
+  // Fonction pour mettre à jour l'activité (throttled)
+  const updateActivity = useCallback(() => {
+    const now = Date.now()
+    if (now - lastActivityUpdateRef.current > ACTIVITY_UPDATE_INTERVAL) {
+      authService.updateLastActivity()
+      lastActivityUpdateRef.current = now
+    }
+  }, [])
 
   // Fonction pour vérifier et rafraîchir le token si nécessaire
   const checkAndRefreshToken = useCallback(async () => {
@@ -85,6 +99,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [user, checkAndRefreshToken])
+
+  // Tracker l'activité utilisateur (mouse, keyboard, touch)
+  useEffect(() => {
+    if (!user) return // Pas de tracking si pas connecté
+
+    const activityEvents = ['mousedown', 'keydown', 'touchstart', 'scroll']
+
+    const handleActivity = () => {
+      updateActivity()
+    }
+
+    // Ajouter les listeners
+    activityEvents.forEach(event => {
+      document.addEventListener(event, handleActivity, { passive: true })
+    })
+
+    console.log('[AuthContext] Activity tracking started')
+
+    return () => {
+      activityEvents.forEach(event => {
+        document.removeEventListener(event, handleActivity)
+      })
+    }
+  }, [user, updateActivity])
 
   // Au chargement, vérifier si user authentifié
   useEffect(() => {

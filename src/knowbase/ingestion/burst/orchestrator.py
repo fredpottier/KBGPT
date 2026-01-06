@@ -958,17 +958,56 @@ class BurstOrchestrator:
         self._teardown_infrastructure()
 
     def cancel(self):
-        """Annule le batch en cours."""
+        """Annule le batch en cours et détruit l'infrastructure."""
         if self.state is None:
             return
 
         self.state.status = BurstStatus.CANCELLED
-        self._add_event("batch_cancelled", "Batch annulé par l'utilisateur")
+        self._add_event("batch_cancelled", "Batch annulé par l'utilisateur (infrastructure détruite)")
 
         deactivate_burst_providers()
         self._teardown_infrastructure()
 
-        logger.info("[BURST:ORCHESTRATOR] Batch cancelled")
+        logger.info("[BURST:ORCHESTRATOR] Batch cancelled with infrastructure teardown")
+
+    def cancel_processing_only(self):
+        """
+        Annule le traitement en cours SANS détruire l'infrastructure.
+
+        L'instance EC2 reste active et les providers restent configurés.
+        Permet de relancer un nouveau batch immédiatement sans attendre le boot.
+        """
+        if self.state is None:
+            return
+
+        # Sauvegarder les infos d'infrastructure
+        instance_ip = self.state.instance_ip
+        instance_type = self.state.instance_type
+        vllm_url = self.state.vllm_url
+        embeddings_url = self.state.embeddings_url
+        stack_name = self.state.stack_name
+
+        self._add_event(
+            "processing_cancelled",
+            "Traitement annulé (infrastructure conservée)",
+            EventSeverity.WARNING
+        )
+
+        # Remettre le statut à READY pour permettre un nouveau traitement
+        self.state.status = BurstStatus.READY
+        self.state.documents = []
+        self.state.total_documents = 0
+        self.state.documents_done = 0
+        self.state.documents_failed = 0
+
+        # Conserver les infos d'infrastructure
+        self.state.instance_ip = instance_ip
+        self.state.instance_type = instance_type
+        self.state.vllm_url = vllm_url
+        self.state.embeddings_url = embeddings_url
+        self.state.stack_name = stack_name
+
+        logger.info("[BURST:ORCHESTRATOR] Processing cancelled - infrastructure kept active")
 
     def initiate_graceful_shutdown(self):
         """

@@ -23,7 +23,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # TODO: Charger depuis variables d'environnement
 JWT_ALGORITHM = "RS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 heure
-REFRESH_TOKEN_EXPIRE_DAYS = 7  # 7 jours
+REFRESH_TOKEN_EXPIRE_DAYS = 1  # 24 heures (réduit de 7j pour sécurité)
 
 
 class AuthService:
