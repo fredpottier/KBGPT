@@ -30,12 +30,18 @@ from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 from knowbase.semantic.inference import InferenceEngine, InsightType
 
-# Navigation Layer - Whitelist relations sémantiques (ADR: ADR_NAVIGATION_LAYER.md)
-# Le RAG ne doit JAMAIS utiliser les relations de navigation (MENTIONED_IN, etc.)
+# ADR_GRAPH_FIRST_ARCHITECTURE: Relations sémantiques pour pathfinding
+# Ces relations forment le graphe de raisonnement (Reasoned mode)
 SEMANTIC_RELATION_TYPES = frozenset({
     "REQUIRES", "ENABLES", "PREVENTS", "CAUSES",
     "APPLIES_TO", "DEPENDS_ON", "PART_OF", "MITIGATES",
     "CONFLICTS_WITH", "DEFINES", "EXAMPLE_OF", "GOVERNED_BY",
+})
+
+# ADR_GRAPH_FIRST_ARCHITECTURE: Relations navigation pour evidence retrieval
+# MENTIONED_IN est utilisé pour récupérer les context_id des sections (Phase A)
+NAVIGATION_RELATION_TYPES = frozenset({
+    "MENTIONED_IN",  # Concept → SectionContext (avec salience, positions)
 })
 
 # Palier 2 - Semantic Search (importe depuis concept_embedding_service)
@@ -735,8 +741,8 @@ class GraphGuidedSearchService:
             allowed_maturities = ["VALIDATED", "CANDIDATE"]
 
         # Requête avec filtres de visibilité
-        # ADR: ADR_NAVIGATION_LAYER.md - Whitelist stricte des relations sémantiques
-        # Le RAG ne doit JAMAIS utiliser les relations de navigation (MENTIONED_IN, etc.)
+        # ADR_GRAPH_FIRST_ARCHITECTURE: Relations sémantiques uniquement pour pathfinding
+        # MENTIONED_IN est utilisé séparément pour evidence retrieval (voir get_evidence_context_ids)
         cypher = """
         UNWIND $concepts AS concept_name
         MATCH (c:CanonicalConcept {canonical_name: concept_name, tenant_id: $tenant_id})
@@ -788,6 +794,106 @@ class GraphGuidedSearchService:
         except Exception as e:
             logger.warning(f"[OSMOSE] Failed to get related concepts: {e}")
             return []
+
+    async def get_evidence_context_ids(
+        self,
+        concept_ids: List[str],
+        tenant_id: str = "default",
+        min_salience: float = 0.0,
+        max_per_concept: int = 10
+    ) -> Dict[str, List[str]]:
+        """
+        ADR_GRAPH_FIRST_ARCHITECTURE Phase A: Evidence Retrieval via MENTIONED_IN.
+
+        Récupère les context_id des sections où les concepts sont mentionnés.
+        Ces context_id peuvent être utilisés pour filtrer Qdrant.
+
+        Args:
+            concept_ids: Liste des canonical_id des concepts
+            tenant_id: Tenant ID
+            min_salience: Salience minimum (0.0-1.0)
+            max_per_concept: Max sections par concept
+
+        Returns:
+            Dict mapping concept_id → [context_id, ...]
+
+        Example:
+            >>> context_map = await engine.get_evidence_context_ids(
+            ...     ["cc_abc123", "cc_def456"],
+            ...     min_salience=0.3
+            ... )
+            >>> # {"cc_abc123": ["sec:doc1:hash1", "sec:doc1:hash2"], ...}
+        """
+        if not concept_ids:
+            return {}
+
+        cypher = """
+        UNWIND $concept_ids AS cid
+        MATCH (c:CanonicalConcept {canonical_id: cid, tenant_id: $tenant_id})
+        MATCH (c)-[m:MENTIONED_IN]->(ctx:SectionContext)
+        WHERE ctx.tenant_id = $tenant_id
+          AND coalesce(m.weight, 0.0) >= $min_salience
+        WITH cid, ctx.context_id AS context_id, m.weight AS salience
+        ORDER BY salience DESC
+        WITH cid, collect(context_id)[0..$max_per_concept] AS context_ids
+        RETURN cid AS concept_id, context_ids
+        """
+
+        try:
+            result = await self.neo4j_client.execute_read(
+                cypher,
+                {
+                    "concept_ids": concept_ids,
+                    "tenant_id": tenant_id,
+                    "min_salience": min_salience,
+                    "max_per_concept": max_per_concept,
+                }
+            )
+
+            context_map = {}
+            for record in result:
+                concept_id = record.get("concept_id")
+                context_ids = record.get("context_ids", [])
+                if concept_id and context_ids:
+                    context_map[concept_id] = context_ids
+
+            total_contexts = sum(len(v) for v in context_map.values())
+            logger.debug(
+                f"[OSMOSE:Evidence] Retrieved {total_contexts} context_ids "
+                f"for {len(context_map)} concepts"
+            )
+
+            return context_map
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Evidence] Failed to get context_ids: {e}")
+            return {}
+
+    async def get_all_evidence_context_ids(
+        self,
+        concept_ids: List[str],
+        tenant_id: str = "default",
+        min_salience: float = 0.0
+    ) -> List[str]:
+        """
+        Convenience method: récupère tous les context_id uniques pour une liste de concepts.
+
+        Args:
+            concept_ids: Liste des canonical_id
+            tenant_id: Tenant ID
+            min_salience: Salience minimum
+
+        Returns:
+            Liste unique de context_id (pour filtrage Qdrant)
+        """
+        context_map = await self.get_evidence_context_ids(
+            concept_ids, tenant_id, min_salience
+        )
+        # Flatten et déduplique
+        all_contexts = set()
+        for contexts in context_map.values():
+            all_contexts.update(contexts)
+        return list(all_contexts)
 
     async def get_transitive_for_concepts(
         self,
@@ -1064,9 +1170,298 @@ def get_graph_guided_service() -> GraphGuidedSearchService:
     return _graph_guided_service
 
 
+# ============================================================================
+# ADR_GRAPH_FIRST_ARCHITECTURE Phase A.4: GDS Pathfinding
+# ============================================================================
+
+class GDSSemanticGraph:
+    """
+    ADR_GRAPH_FIRST_ARCHITECTURE Phase A: Projection GDS pour pathfinding sémantique.
+
+    Crée et gère une projection Graph Data Science du graphe sémantique
+    pour découvrir les chemins entre concepts.
+
+    Note: Nécessite le plugin GDS Community installé dans Neo4j.
+    Voir docker-compose.infra.yml pour la configuration.
+    """
+
+    PROJECTION_NAME = "SemanticGraph"
+
+    def __init__(self, neo4j_client=None):
+        self._neo4j_client = neo4j_client
+        self._projection_exists = False
+
+    @property
+    def neo4j_client(self):
+        """Lazy loading du client Neo4j."""
+        if self._neo4j_client is None:
+            from knowbase.neo4j_custom.client import get_neo4j_client
+            self._neo4j_client = get_neo4j_client()
+        return self._neo4j_client
+
+    async def check_gds_available(self) -> bool:
+        """Vérifie si GDS est disponible."""
+        try:
+            result = self.neo4j_client.execute_query(
+                "CALL gds.list() YIELD name RETURN count(name) AS count"
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"[OSMOSE:GDS] GDS not available: {e}")
+            return False
+
+    async def create_projection(
+        self,
+        tenant_id: str = "default",
+        force_recreate: bool = False
+    ) -> bool:
+        """
+        Crée ou recrée la projection GDS SemanticGraph.
+
+        Args:
+            tenant_id: Tenant ID pour filtrer les concepts
+            force_recreate: Si True, supprime et recrée la projection
+
+        Returns:
+            True si la projection a été créée/existe
+        """
+        projection_name = f"{self.PROJECTION_NAME}_{tenant_id}"
+
+        # Vérifier si la projection existe déjà
+        if not force_recreate:
+            try:
+                check_query = """
+                CALL gds.graph.exists($name) YIELD exists
+                RETURN exists
+                """
+                result = self.neo4j_client.execute_query(
+                    check_query, {"name": projection_name}
+                )
+                if result and result[0].get("exists"):
+                    logger.info(f"[OSMOSE:GDS] Projection {projection_name} already exists")
+                    self._projection_exists = True
+                    return True
+            except Exception as e:
+                logger.debug(f"[OSMOSE:GDS] Check failed: {e}")
+
+        # Supprimer si existante et force_recreate
+        if force_recreate:
+            try:
+                self.neo4j_client.execute_query(
+                    "CALL gds.graph.drop($name, false)",
+                    {"name": projection_name}
+                )
+                logger.info(f"[OSMOSE:GDS] Dropped existing projection {projection_name}")
+            except Exception:
+                pass  # Projection n'existait pas
+
+        # Créer la projection avec les relations sémantiques
+        # Configuration: nœuds CanonicalConcept, relations sémantiques (undirected pour pathfinding)
+        relation_types_str = "|".join(SEMANTIC_RELATION_TYPES)
+
+        create_query = f"""
+        CALL gds.graph.project(
+            $name,
+            {{
+                CanonicalConcept: {{
+                    properties: ['quality_score']
+                }}
+            }},
+            {{
+                {', '.join(f'{rt}: {{orientation: "UNDIRECTED"}}' for rt in SEMANTIC_RELATION_TYPES)}
+            }}
+        )
+        YIELD graphName, nodeCount, relationshipCount
+        RETURN graphName, nodeCount, relationshipCount
+        """
+
+        try:
+            result = self.neo4j_client.execute_query(
+                create_query, {"name": projection_name}
+            )
+
+            if result:
+                stats = result[0]
+                logger.info(
+                    f"[OSMOSE:GDS] Created projection {projection_name}: "
+                    f"{stats.get('nodeCount', 0)} nodes, "
+                    f"{stats.get('relationshipCount', 0)} relationships"
+                )
+                self._projection_exists = True
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"[OSMOSE:GDS] Failed to create projection: {e}")
+            return False
+
+    async def find_shortest_path(
+        self,
+        source_concept_id: str,
+        target_concept_id: str,
+        tenant_id: str = "default",
+        max_depth: int = 5
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Trouve le plus court chemin entre deux concepts via GDS.
+
+        Args:
+            source_concept_id: canonical_id du concept source
+            target_concept_id: canonical_id du concept cible
+            tenant_id: Tenant ID
+            max_depth: Profondeur max du chemin
+
+        Returns:
+            Dict avec path, cost, nodes si trouvé, None sinon
+        """
+        projection_name = f"{self.PROJECTION_NAME}_{tenant_id}"
+
+        # S'assurer que la projection existe
+        if not self._projection_exists:
+            await self.create_projection(tenant_id)
+
+        # Utiliser Dijkstra pour le shortest path
+        query = """
+        MATCH (source:CanonicalConcept {canonical_id: $source_id, tenant_id: $tenant_id})
+        MATCH (target:CanonicalConcept {canonical_id: $target_id, tenant_id: $tenant_id})
+        CALL gds.shortestPath.dijkstra.stream($projection_name, {
+            sourceNode: source,
+            targetNode: target
+        })
+        YIELD index, sourceNode, targetNode, totalCost, nodeIds, costs, path
+        WITH nodeIds, totalCost, [nodeId IN nodeIds |
+            gds.util.asNode(nodeId).canonical_name
+        ] AS nodeNames
+        RETURN nodeNames AS path, totalCost AS cost, size(nodeNames) AS length
+        """
+
+        try:
+            result = self.neo4j_client.execute_query(query, {
+                "source_id": source_concept_id,
+                "target_id": target_concept_id,
+                "tenant_id": tenant_id,
+                "projection_name": projection_name
+            })
+
+            if result:
+                path_data = result[0]
+                return {
+                    "path": path_data.get("path", []),
+                    "cost": path_data.get("cost", 0.0),
+                    "length": path_data.get("length", 0),
+                    "source": source_concept_id,
+                    "target": target_concept_id
+                }
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:GDS] Shortest path failed: {e}")
+            return None
+
+    async def find_all_paths(
+        self,
+        source_concept_id: str,
+        target_concept_id: str,
+        tenant_id: str = "default",
+        max_depth: int = 4,
+        max_paths: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Trouve tous les chemins entre deux concepts (jusqu'à max_paths).
+
+        Args:
+            source_concept_id: canonical_id du concept source
+            target_concept_id: canonical_id du concept cible
+            tenant_id: Tenant ID
+            max_depth: Profondeur max des chemins
+            max_paths: Nombre max de chemins à retourner
+
+        Returns:
+            Liste de chemins avec path, relations, length
+        """
+        # Utiliser Cypher natif pour allShortestPaths (plus flexible que GDS pour multi-paths)
+        relation_types = "|".join(SEMANTIC_RELATION_TYPES)
+
+        query = f"""
+        MATCH (source:CanonicalConcept {{canonical_id: $source_id, tenant_id: $tenant_id}})
+        MATCH (target:CanonicalConcept {{canonical_id: $target_id, tenant_id: $tenant_id}})
+        MATCH path = allShortestPaths((source)-[:{relation_types}*1..{max_depth}]-(target))
+        WITH path,
+             [node IN nodes(path) | node.canonical_name] AS node_names,
+             [rel IN relationships(path) | type(rel)] AS rel_types,
+             length(path) AS path_length
+        ORDER BY path_length
+        LIMIT $max_paths
+        RETURN node_names AS path, rel_types AS relations, path_length AS length
+        """
+
+        try:
+            result = self.neo4j_client.execute_query(query, {
+                "source_id": source_concept_id,
+                "target_id": target_concept_id,
+                "tenant_id": tenant_id,
+                "max_paths": max_paths
+            })
+
+            paths = []
+            for record in result:
+                paths.append({
+                    "path": record.get("path", []),
+                    "relations": record.get("relations", []),
+                    "length": record.get("length", 0)
+                })
+
+            logger.debug(
+                f"[OSMOSE:GDS] Found {len(paths)} paths between "
+                f"{source_concept_id[:8]}... and {target_concept_id[:8]}..."
+            )
+
+            return paths
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:GDS] All paths failed: {e}")
+            return []
+
+    async def drop_projection(self, tenant_id: str = "default") -> bool:
+        """Supprime la projection GDS."""
+        projection_name = f"{self.PROJECTION_NAME}_{tenant_id}"
+
+        try:
+            self.neo4j_client.execute_query(
+                "CALL gds.graph.drop($name)",
+                {"name": projection_name}
+            )
+            self._projection_exists = False
+            logger.info(f"[OSMOSE:GDS] Dropped projection {projection_name}")
+            return True
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:GDS] Failed to drop projection: {e}")
+            return False
+
+
+# Singleton GDS instance
+_gds_semantic_graph: Optional[GDSSemanticGraph] = None
+
+
+def get_gds_semantic_graph() -> GDSSemanticGraph:
+    """Retourne l'instance singleton du GDS SemanticGraph."""
+    global _gds_semantic_graph
+    if _gds_semantic_graph is None:
+        _gds_semantic_graph = GDSSemanticGraph()
+    return _gds_semantic_graph
+
+
 __all__ = [
     "GraphGuidedSearchService",
     "GraphContext",
     "EnrichmentLevel",
     "get_graph_guided_service",
+    # ADR_GRAPH_FIRST_ARCHITECTURE Phase A
+    "GDSSemanticGraph",
+    "get_gds_semantic_graph",
+    "SEMANTIC_RELATION_TYPES",
+    "NAVIGATION_RELATION_TYPES",
 ]

@@ -478,6 +478,8 @@ class Neo4jRelationshipWriter:
             "extraction_method": relation.metadata.extraction_method.value,
             "source_doc_id": relation.metadata.source_doc_id,
             "source_chunk_ids": relation.metadata.source_chunk_ids,
+            # ADR_GRAPH_FIRST_ARCHITECTURE Phase A: Lien vers Navigation Layer
+            "evidence_context_ids": relation.metadata.evidence_context_ids,
             "language": relation.metadata.language,
             "created_at": relation.metadata.created_at.isoformat(),
             "strength": relation.metadata.strength.value,

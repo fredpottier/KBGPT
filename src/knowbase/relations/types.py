@@ -90,6 +90,11 @@ class RelationMetadata(BaseModel):
     extraction_method: ExtractionMethod
     source_doc_id: str
     source_chunk_ids: List[str] = Field(default_factory=list)
+    # ADR_GRAPH_FIRST_ARCHITECTURE Phase A: Lien vers Navigation Layer
+    evidence_context_ids: List[str] = Field(
+        default_factory=list,
+        description="context_id des SectionContext où l'evidence a été trouvée (ex: sec:doc1:hash1)"
+    )
     language: str = Field(default="EN", description="Langue détection (EN, FR, DE, ES)")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     valid_from: Optional[date] = Field(default=None, description="Validité temporelle début")
