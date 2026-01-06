@@ -8,11 +8,13 @@ Marqueurs:
 - [TITLE level=n] : Titre
 - [PARAGRAPH] : Paragraphe
 - [TABLE_START id=x]...[TABLE_END] : Table en Markdown
+- [TABLE_SUMMARY id=x]...[TABLE_RAW]...[TABLE_END] : Table avec résumé LLM (QW-1)
 - [VISUAL_ENRICHMENT id=x confidence=y]...[END_VISUAL_ENRICHMENT] : Vision
 
 Specification BNF:
     marker       ::= '[' marker_type attributes? ']'
     marker_type  ::= 'PAGE' | 'TITLE' | 'PARAGRAPH' | 'TABLE_START' | 'TABLE_END'
+                   | 'TABLE_SUMMARY' | 'TABLE_RAW'
                    | 'VISUAL_ENRICHMENT' | 'END_VISUAL_ENRICHMENT'
     attributes   ::= (key '=' value)+
     key          ::= [a-z_]+
@@ -34,7 +36,7 @@ logger = logging.getLogger(__name__)
 # === Regex pour parsing des marqueurs ===
 
 MARKER_PATTERN = re.compile(
-    r"^\[(PAGE|TITLE|PARAGRAPH|TABLE_START|TABLE_END|VISUAL_ENRICHMENT|END_VISUAL_ENRICHMENT)[^\]]*\]"
+    r"^\[(PAGE|TITLE|PARAGRAPH|TABLE_START|TABLE_END|TABLE_SUMMARY|TABLE_RAW|VISUAL_ENRICHMENT|END_VISUAL_ENRICHMENT)[^\]]*\]"
 )
 
 
@@ -228,7 +230,19 @@ class Linearizer:
 
     def _format_table(self, table: TableData) -> str:
         """
-        Formate une table en Markdown avec marqueurs.
+        Formate une table avec marqueurs.
+
+        Si un résumé LLM (QW-1) est disponible, utilise le format enrichi:
+        [TABLE_SUMMARY id=x]
+        {summary en langage naturel}
+        [TABLE_RAW]
+        {markdown brut}
+        [TABLE_END]
+
+        Sinon, utilise le format standard:
+        [TABLE_START id=x]
+        {markdown}
+        [TABLE_END]
 
         Args:
             table: Donnees de la table
@@ -257,6 +271,16 @@ class Linearizer:
             return ""
 
         markdown_content = "\n".join(markdown_lines)
+
+        # QW-1: Si un résumé est disponible, utiliser le format enrichi
+        if table.summary:
+            return self.format_table_with_summary(
+                table.table_id,
+                table.summary,
+                markdown_content
+            )
+
+        # Sinon, format standard
         return self.format_table_markers(table.table_id, markdown_content)
 
     @staticmethod
@@ -281,8 +305,32 @@ class Linearizer:
 
     @staticmethod
     def format_table_markers(table_id: str, markdown_content: str) -> str:
-        """Formate les marqueurs de table."""
+        """Formate les marqueurs de table (format standard sans résumé)."""
         return f"[TABLE_START id={table_id}]\n{markdown_content}\n[TABLE_END]"
+
+    @staticmethod
+    def format_table_with_summary(table_id: str, summary: str, markdown_content: str) -> str:
+        """
+        Formate une table avec résumé LLM (QW-1).
+
+        Le résumé est placé en premier pour optimiser l'embedding sémantique.
+        Le Markdown brut est conservé dans [TABLE_RAW] pour traçabilité.
+
+        Args:
+            table_id: Identifiant de la table
+            summary: Résumé en langage naturel généré par LLM
+            markdown_content: Markdown brut de la table
+
+        Returns:
+            Format enrichi avec résumé
+        """
+        return (
+            f"[TABLE_SUMMARY id={table_id}]\n"
+            f"{summary}\n"
+            f"[TABLE_RAW]\n"
+            f"{markdown_content}\n"
+            f"[TABLE_END]"
+        )
 
     @staticmethod
     def is_marker_line(line: str) -> bool:

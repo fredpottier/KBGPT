@@ -45,6 +45,7 @@ from knowbase.extraction_v2.vision.analyzer import VisionAnalyzer
 from knowbase.extraction_v2.merge.merger import StructuredMerger, MergedPageOutput
 from knowbase.extraction_v2.merge.linearizer import Linearizer
 from knowbase.extraction_v2.cache.versioned_cache import VersionedCache
+from knowbase.extraction_v2.tables.table_summarizer import TableSummarizer
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class PipelineConfig:
     enable_vision: bool = True
     enable_gating: bool = True
     enable_doc_context: bool = True  # Extraction contexte documentaire (ADR_ASSERTION_AWARE_KG)
+    enable_table_summaries: bool = True  # QW-1: Résumé LLM des tables pour améliorer RAG
 
     # Seuils de gating
     vision_required_threshold: float = 0.60
@@ -92,6 +94,7 @@ class PipelineConfig:
             "enable_vision": self.enable_vision,
             "enable_gating": self.enable_gating,
             "enable_doc_context": self.enable_doc_context,
+            "enable_table_summaries": self.enable_table_summaries,
             "vision_required_threshold": self.vision_required_threshold,
             "vision_recommended_threshold": self.vision_recommended_threshold,
             "vision_budget": self.vision_budget,
@@ -116,6 +119,8 @@ class PipelineMetrics:
     gating_time_ms: float = 0
     vision_time_ms: float = 0
     doc_context_time_ms: float = 0  # Temps extraction contexte
+    table_summary_time_ms: float = 0  # QW-1: Temps résumé tables
+    tables_summarized: int = 0  # QW-1: Nombre tables résumées
     total_time_ms: float = 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -128,6 +133,8 @@ class PipelineMetrics:
             "gating_time_ms": round(self.gating_time_ms, 2),
             "vision_time_ms": round(self.vision_time_ms, 2),
             "doc_context_time_ms": round(self.doc_context_time_ms, 2),
+            "table_summary_time_ms": round(self.table_summary_time_ms, 2),
+            "tables_summarized": self.tables_summarized,
             "total_time_ms": round(self.total_time_ms, 2),
         }
 
@@ -166,6 +173,7 @@ class ExtractionPipelineV2:
         self._merger: Optional[StructuredMerger] = None
         self._linearizer: Optional[Linearizer] = None
         self._doc_context_extractor: Optional[DocContextExtractor] = None
+        self._table_summarizer: Optional[TableSummarizer] = None
 
         # Cache V2 (évite de refaire les appels Vision)
         self._cache: Optional[VersionedCache] = None
@@ -231,6 +239,13 @@ class ExtractionPipelineV2:
         if self.config.enable_doc_context:
             self._doc_context_extractor = DocContextExtractor(
                 use_llm=self.config.doc_context_use_llm,
+            )
+
+        # 6. Initialiser TableSummarizer (QW-1)
+        if self.config.enable_table_summaries:
+            self._table_summarizer = TableSummarizer(
+                min_cells=4,   # Tables avec au moins 4 cellules
+                max_cells=500, # Tronquer les très grandes tables
             )
 
         self._initialized = True
@@ -460,6 +475,44 @@ class ExtractionPipelineV2:
             vision_extractions=vision_extractions,
             gating_decisions=gating_decisions,
         )
+
+        # === ETAPE 4.5: Table Summaries (QW-1) ===
+        if self.config.enable_table_summaries and self._table_summarizer:
+            table_start = time.time()
+            try:
+                # Collecter toutes les tables des pages
+                all_tables = []
+                for page in merged_pages:
+                    all_tables.extend(page.base_tables)
+
+                if all_tables:
+                    # Résumer en batch
+                    summary_results = await self._table_summarizer.summarize_batch(
+                        tables=all_tables,
+                        max_concurrent=5,
+                    )
+
+                    # Appliquer les résumés aux TableData originales
+                    for result in summary_results:
+                        if result.success:
+                            # Trouver la table et mettre à jour son summary
+                            for page in merged_pages:
+                                for table in page.base_tables:
+                                    if table.table_id == result.table_id:
+                                        table.summary = result.summary
+                                        metrics.tables_summarized += 1
+                                        break
+
+                    metrics.table_summary_time_ms = (time.time() - table_start) * 1000
+
+                    logger.info(
+                        f"[ExtractionPipelineV2] Table summaries: {metrics.tables_summarized}/{len(all_tables)} "
+                        f"tables summarized in {metrics.table_summary_time_ms:.0f}ms"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"[ExtractionPipelineV2] Table summary failed: {e}, continuing without summaries"
+                )
 
         # === ETAPE 5: Linearisation ===
         full_text, page_index = self._linearizer.linearize(merged_pages)

@@ -32,6 +32,8 @@ logs/
 DOCS_DONE/
 DOCS_IN/
 models/
+# Exception: extraction_v2/models is code, not data
+!src/knowbase/extraction_v2/models/
 public_files/
 status/
 data/**

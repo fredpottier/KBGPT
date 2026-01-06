@@ -1,6 +1,6 @@
 # ADR-2024-12-30: Reducto-like Parsing Primitives in OSMOSE
 
-**Status:** ⚠️ PARTIELLEMENT IMPLÉMENTÉ (Janvier 2026)
+**Status:** ⚠️ EN COURS (~70%) - Janvier 2026
 **Date:** 2024-12-30
 **Authors:** OSMOSE Team
 **Reviewers:** -
@@ -16,12 +16,13 @@
 | Signals (RIS, VDS, TFS, SDS, VTS) | `extraction_v2/gating/signals.py` | ✅ |
 | Weights & Thresholds | `extraction_v2/gating/weights.py` | ✅ |
 | VisionUnit, GatingDecision | `extraction_v2/models/gating.py` | ✅ |
-| **QW-1: Table Summaries** | | ⚠️ **PARTIEL** |
-| Detection tableaux | `extraction_v2/extractors/docling_extractor.py` | ✅ Fait (via Docling) |
-| Extraction structurée | `extraction_v2/models/elements.py` (TableData) | ✅ Fait |
-| Conversion Markdown | `TableData.to_markdown()` + Linearizer | ✅ Fait |
-| LLM summarization en langage naturel | - | ❌ Non fait |
-| Storage summary + raw | - | ❌ Non fait |
+| **QW-1: Table Summaries** | | ✅ **COMPLET** |
+| Detection tableaux | `extraction_v2/extractors/docling_extractor.py` | ✅ Docling |
+| Extraction structurée | `extraction_v2/models/elements.py` (TableData) | ✅ |
+| Conversion Markdown | `TableData.to_markdown()` + Linearizer | ✅ |
+| **LLM summarization** | `extraction_v2/tables/table_summarizer.py` | ✅ TableSummarizer |
+| **Storage summary + raw** | `TableData.summary` + Linearizer format enrichi | ✅ |
+| **Pipeline integration** | `extraction_v2/pipeline.py` (ETAPE 4.5) | ✅ |
 | **QW-2: Confidence Scores** | | ⚠️ **PARTIEL** |
 | parse_confidence (heuristique) | - | ❌ Non fait |
 | extract_confidence (LLM) | - | ❌ Non fait |
@@ -38,10 +39,14 @@
 - ✅ Décision VISION_REQUIRED / VISION_RECOMMENDED / NONE
 - ✅ Règle de sécurité (RIS=1.0 ou VDS=1.0 → force Vision)
 - ✅ Domain context pour ajustement des poids
-- ✅ **QW-1 Partiel:** Docling extrait les tables structurées, Linearizer les convertit en Markdown avec marqueurs
+- ✅ **QW-1 COMPLET:** Table Summaries avec LLM
+  - `TableSummarizer` génère des résumés en langage naturel
+  - Format Linearizer enrichi: `[TABLE_SUMMARY]...[TABLE_RAW]...[TABLE_END]`
+  - Intégré dans pipeline comme ETAPE 4.5 (après Merge, avant Linearisation)
+  - Batch processing avec concurrence limitée (5 appels parallèles)
+  - Métriques: `tables_summarized`, `table_summary_time_ms`
 
 **Ce qui reste à faire (Quick Wins):**
-- QW-1 (suite): LLM summarization des tables en langage naturel → Impact RAG +50% estimé
 - QW-2: Confidence Scores → Debuggabilité
 - QW-3: Diagram Interpreter → Extraction structurée diagrammes
 
@@ -50,7 +55,6 @@ L'ADR original mentionnait MegaParse. Le projet a migré vers **Docling** qui g�
 - Extraction tables structurées (`doc.tables`)
 - Bounding boxes
 - Headers et cellules
-Le besoin de "résumé LLM" reste pertinent car le format Markdown brut n'est pas optimal pour l'embedding sémantique.
 
 ---
 
@@ -312,26 +316,25 @@ OSMOSE reste un systeme de **connaissance consolidee**, pas d'extraction locale.
     └── get_weights_for_domain()
 ```
 
-### Phase 1: Quick Wins ❌ NON FAIT
+### Phase 1: Quick Wins ⚠️ EN COURS
 
 ```
-Semaine 1-2:
-├── QW-1: Table Summaries ❌
-│   ├── Detection heuristique tableaux (patterns |, tabs)
-│   ├── Prompt LLM: "Resume ce tableau en langage naturel"
-│   ├── Stockage: summary + raw dans payload Qdrant
-│   └── Insertion: osmose_agentique.py entre segmentation et chunking
-│
-├── QW-2: Confidence Scores ❌
-│   ├── parse_confidence: heuristique (longueur, structure, coherence)
-│   ├── extract_confidence: retourne par LLM dans prompt
-│   ├── Stockage: payload Qdrant + Neo4j
-│   └── Insertion: osmose_agentique.py + hybrid_anchor_chunker.py
-│
-Semaine 3-4:
-└── QW-3: Diagram Interpreter ❌
-    ├── Pass 0 - Pre-analyse locale
-    ├── Pass 1 - VLM Adaptatif
+QW-1: Table Summaries ✅ DONE (Janvier 2026)
+├── extraction_v2/tables/table_summarizer.py (TableSummarizer)
+├── extraction_v2/models/elements.py (TableData.summary)
+├── extraction_v2/merge/linearizer.py (format_table_with_summary)
+├── extraction_v2/pipeline.py (ETAPE 4.5, PipelineConfig.enable_table_summaries)
+└── Marqueurs: [TABLE_SUMMARY]...[TABLE_RAW]...[TABLE_END]
+
+QW-2: Confidence Scores ❌
+├── parse_confidence: heuristique (longueur, structure, coherence)
+├── extract_confidence: retourne par LLM dans prompt
+├── Stockage: payload Qdrant + Neo4j
+└── Insertion: osmose_agentique.py + hybrid_anchor_chunker.py
+
+QW-3: Diagram Interpreter ❌
+├── Pass 0 - Pre-analyse locale
+├── Pass 1 - VLM Adaptatif
     ├── Schema DiagramAnalysis
     ├── Quality Gate
     └── Integration
