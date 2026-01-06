@@ -114,43 +114,83 @@ Option B - Topic comme CanonicalConcept type TOPIC :
 
 ---
 
-## 4. Pipeline d'Ingestion Cible (3 Passes)
+## 4. Pipeline d'Ingestion Cible (4 Passes)
+
+> **Clarification 2026-01-06** : La distinction scope vs preuve est FONDAMENTALE.
+> Topic/COVERS = périmètre documentaire (scope), JAMAIS lien conceptuel.
+> Seul Pass 3 crée des relations sémantiques prouvées.
 
 ### Pass 1 - Extraction Concepts (Existant, modifié)
 
 - Extraction des ProtoConcepts par segment
 - Consolidation en CanonicalConcepts
+- Création `MENTIONED_IN` avec salience par section
 - **CHANGEMENT** : Pas de relations sémantiques à ce stade
 
-### Pass 2 - Attachement Structurel (Nouveau)
+### Pass 2a - Structural Topics / COVERS (NOUVEAU)
 
-- Identification des Topics du document (multi-sujets possible)
-- Création relations `HAS_TOPIC`, `COVERS`
-- Enrichissement `MENTIONED_IN` avec salience par section
+> **Principe clé** : Topic/COVERS répond à "De quoi parle ce document/section ?"
+> Ce n'est JAMAIS un lien causal, une relation conceptuelle, ou un chemin de raisonnement.
+> C'est un **filtre de périmètre**, pas une preuve.
 
-### Pass 3 - Consolidation Sémantique (Nouveau)
+**Identification des Topics** (ordre de priorité) :
+1. **Structure documentaire** (H1/H2, TOC, headers) - source primaire
+2. **LLM léger** sur structure (titres + intro) → 5-15 Topics max
+3. **Match/Create CanonicalConcept** avec `concept_type: "TOPIC"`
 
-Création des relations sémantiques avec preuves :
+**Création des relations** :
+- `(Document)-[:HAS_TOPIC {salience}]->(Topic)`
+- `(Topic)-[:COVERS {confidence}]->(Concept)`
 
+**Règles COVERS** (déterministes, PAS de LLM) :
+- Concept `MENTIONED_IN` une section rattachée au Topic
+- ET salience suffisante (TF-IDF doc-level, spread)
+- ET pas un concept générique (stop-concept)
+
+> ⚠️ **PIÈGE À ÉVITER** : "Si A et B sont couverts par le même Topic, ils sont liés" = FAUX
+> Ils sont dans le même **périmètre documentaire**, aucun lien sémantique n'est affirmé.
+
+### Pass 2b - Classification Fine (Existant)
+
+- `CLASSIFY_FINE` : Affinage types concepts via LLM
+- Enrichissements non causaux
+- **Rien ici n'est utilisé comme preuve ou pour justifier une réponse**
+
+### Pass 3 - Consolidation Sémantique (NOUVEAU)
+
+> **Principe clé** : C'est le SEUL endroit où la vérité sémantique est construite.
+> Le LLM peut proposer/reformuler, mais la relation DOIT être ancrée dans une preuve.
+
+**Candidate Generation** :
+- Paires de concepts dans même Topic/Section
+- Co-présence récurrente (≥2 sections différentes)
+
+**Verification LLM (extractive-only)** :
 ```python
-# Candidate generation
-# - Paires de concepts dans même Topic/Section
-# - Co-présence récurrente (≥2 sections différentes)
-
-# Verification LLM (extractive-only)
 {
     "relation_type": "REQUIRES",
     "direction": "A→B",
-    "evidence_span": "quote exacte courte",
+    "evidence_span": "quote exacte courte",  # OBLIGATOIRE
     "evidence_locator": "ctx:sec:doc123:hash456",
     "confidence": 0.85
 }
-# OU: ABSTAIN si pas de preuve
-
-# Multi-evidence policy
-# - 1 preuve suffit si source forte (glossaire, norme, "shall")
-# - Sinon ≥2 preuves indépendantes
+# OU: ABSTAIN si pas de preuve textuelle
 ```
+
+**Multi-evidence policy** :
+- 1 preuve suffit si source forte (glossaire, norme, "shall")
+- Sinon ≥2 preuves indépendantes
+
+> ⚠️ **INVARIANT** : Pass 3 ne dépend JAMAIS du LLM seul.
+> Sans ancrage preuve, la relation reste décoration, pas connaissance.
+
+### 4.0 Nuances Importantes (Garde-fous Cognitifs)
+
+| Nuance | Description |
+|--------|-------------|
+| **Topic = précondition** | Un concept hors topic est non défendable. MAIS être dans le bon topic n'autorise rien. |
+| **Anchored ≠ Reasoned** | Mode Anchored = réduction espace de recherche, pas moteur logique. Il empêche les sauts hors sujet. |
+| **LLM = assistant** | Le LLM nomme/normalise les Topics, il n'invente pas. Pour COVERS, le LLM n'a rien à faire. |
 
 ### 4.1 Ce Qu'on Garde de l'Existant
 
@@ -311,11 +351,28 @@ ORDER BY m.salience DESC
 
 **Livrable** : Infrastructure prête pour graph-first
 
-### Phase B - Pass 2 & 3
+### Phase B - Pass 2a/2b/3 (Clarification 2026-01-06)
 
-1. Implémenter Pass 2 (Topics/COVERS) - attachement structurel
-2. Implémenter Pass 3 (consolidation sémantique avec preuves extractives)
-3. Règle : toute relation sémantique doit avoir `evidence_ids[]` non vide
+> **Rappel** : Topic/COVERS = scope (filtre), PAS lien conceptuel.
+> Pass 3 = seule source de relations sémantiques prouvées.
+
+**B.1 - Pass 2a : Structural Topics / COVERS**
+1. Extraire Topics depuis structure doc (H1/H2, TOC)
+2. Créer `CanonicalConcept` avec `concept_type: "TOPIC"`
+3. Créer `HAS_TOPIC` (Document → Topic)
+4. Créer `COVERS` (Topic → Concept) via règles déterministes :
+   - `MENTIONED_IN` + salience threshold
+   - Exclusion stop-concepts
+
+**B.2 - Pass 2b : Classification Fine** (existant, réorganisé)
+- `CLASSIFY_FINE` reste tel quel
+- Aucune création de relation sémantique
+
+**B.3 - Pass 3 : Consolidation Sémantique**
+1. Candidate generation : co-présence Topic/Section, récurrence ≥2 sections
+2. Verification LLM extractive : quote obligatoire ou ABSTAIN
+3. Règle : `evidence_context_ids[]` non vide pour TOUTE relation
+4. Multi-evidence policy pour sources faibles
 
 **Livrable** : Relations prouvées avec traçabilité
 
