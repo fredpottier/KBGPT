@@ -1,9 +1,45 @@
 # ADR: Marker Normalization Layer
 
-**Status**: Proposed
+**Status**: ⚠️ PARTIELLEMENT IMPLÉMENTÉ
 **Date**: 2025-01-05
 **Authors**: Claude + ChatGPT (collaborative design)
 **Reviewers**: Fred
+
+---
+
+## Implementation Status (Janvier 2026)
+
+| Composant | Fichier | Status |
+|-----------|---------|--------|
+| **Phase 1: Cleanup** | | ✅ **COMPLET** |
+| CandidateGate (filtrage faux positifs) | `extraction_v2/context/candidate_mining.py` | ✅ |
+| **Phase 2: Schema Neo4j** | | ⚠️ **PARTIEL** |
+| MarkerStore basique | `consolidation/marker_store.py` | ✅ |
+| MarkerKind enum | `consolidation/marker_store.py` | ✅ |
+| DiffResult | `consolidation/marker_store.py` | ✅ |
+| MarkerMention nodes | - | ❌ Non fait |
+| CanonicalMarker nodes | - | ❌ Non fait |
+| **Phase 3: Normalization Engine** | | ❌ **NON FAIT** |
+| Parser config YAML | - | ❌ Non fait |
+| Moteur de règles (aliases + regex) | - | ❌ Non fait |
+| Entity Anchor detection | - | ❌ Non fait |
+| **Phase 4: UI/UX** | | ❌ **NON FAIT** |
+| Endpoint `/markers/suggestions` | - | ❌ Non fait |
+| Interface chat normalization | - | ❌ Non fait |
+| Dashboard admin aliases | - | ❌ Non fait |
+| **Phase 5: Feedback Loop** | | ❌ **NON FAIT** |
+| Clustering automatique | - | ❌ Non fait |
+| Métriques | - | ❌ Non fait |
+
+**Ce qui existe:**
+- `consolidation/marker_store.py` : MarkerStore basique avec MarkerKind, DiffResult
+- `api/routers/markers.py` : API `/markers` pour lister/consulter markers
+- CandidateGate filtre déjà les faux positifs évidents (© dates, trimestres, etc.)
+
+**Ce qui manque pour compléter l'ADR:**
+- Architecture MarkerMention → CanonicalMarker (séparation brut/normalisé)
+- Moteur de normalisation avec config YAML tenant
+- UI/UX pour administration des aliases
 
 ---
 
@@ -356,26 +392,28 @@ Il est stocke/versionne par tenant et editable via l'UI admin ou le chat.
 
 ## 6. Implementation Plan
 
-### Phase 1: Cleanup (pre-requis)
-- [ ] Script de migration pour supprimer/marquer les faux positifs historiques
-- [ ] Validation que le nouveau CandidateGate fonctionne (burst import)
+### Phase 1: Cleanup (pre-requis) ✅ DONE
+- [x] CandidateGate avec filtres universels (dates, copyright, trimestres, etc.)
+- [x] Validation que le CandidateGate fonctionne dans le pipeline
 
-### Phase 2: Schema Neo4j
-- [ ] Creer les noeuds MarkerMention et CanonicalMarker
+### Phase 2: Schema Neo4j ⚠️ PARTIEL
+- [x] MarkerStore basique avec MarkerKind, DiffResult
+- [x] API `/markers` pour consultation
+- [ ] Creer les noeuds MarkerMention et CanonicalMarker (architecture à 2 niveaux)
 - [ ] Migrer les `global_markers` existants vers MarkerMention
 - [ ] Creer les indexes
 
-### Phase 3: Normalization Engine
-- [ ] Parser de config YAML
+### Phase 3: Normalization Engine ❌ NON FAIT
+- [ ] Parser de config YAML (config/marker_normalization.yaml)
 - [ ] Moteur de regles (aliases + regex)
 - [ ] Detection d'Entity Anchor via concepts du document
 
-### Phase 4: UI/UX
+### Phase 4: UI/UX ❌ NON FAIT
 - [ ] Endpoint API `/markers/suggestions`
 - [ ] Interface chat: "Normalise marker X en Y"
 - [ ] Dashboard admin pour gerer les aliases
 
-### Phase 5: Feedback Loop
+### Phase 5: Feedback Loop ❌ NON FAIT
 - [ ] Clustering automatique pour suggestions
 - [ ] Metriques: % markers resolus, % unresolved, % rejetes
 

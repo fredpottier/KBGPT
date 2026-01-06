@@ -1,10 +1,38 @@
 # ADR: Assertion-aware Knowledge Graph with Context Markers
 
-**Status:** Proposed (ready for implementation)
+**Status:** ✅ IMPLEMENTED (Janvier 2026)
 **Date:** 2026-01-04
 **Owner:** KnowWhere / OSMOSE Team
 **Reviewers:** Claude Code, ChatGPT
 **Path:** doc/ongoing/ADR_ASSERTION_AWARE_KG.md
+
+---
+
+## Implementation Status (Janvier 2026)
+
+| Composant | Fichier | Status |
+|-----------|---------|--------|
+| **PR1: DocContextExtractor** | | ✅ **COMPLET** |
+| DocContextExtractor | `extraction_v2/context/doc_context_extractor.py` | ✅ |
+| Models (DocContextFrame, etc.) | `extraction_v2/context/models.py` | ✅ |
+| CandidateMiner + CandidateGate | `extraction_v2/context/candidate_mining.py` | ✅ |
+| Prompts LLM | `extraction_v2/context/prompts.py` | ✅ |
+| Pipeline integration | `extraction_v2/pipeline.py` | ✅ |
+| **PR2: AnchorContext + Inheritance** | | ✅ **COMPLET** |
+| AnchorContext models | `extraction_v2/context/anchor_models.py` | ✅ |
+| AnchorContextAnalyzer | `extraction_v2/context/anchor_context_analyzer.py` | ✅ |
+| Heuristics (polarity, override) | `extraction_v2/context/heuristics.py` | ✅ |
+| InheritanceEngine | `extraction_v2/context/inheritance.py` | ✅ |
+| OSMOSE integration | `ingestion/osmose_agentique.py` | ✅ |
+| **PR3: Diff Queries + UI** | | ⚠️ **PARTIEL** |
+| MarkerStore | `consolidation/marker_store.py` | ✅ |
+| API /markers | `api/routers/markers.py` | ✅ |
+| ConceptDiffService | `api/services/concept_diff_service.py` | ✅ |
+| Frontend Compare UI | `frontend/src/app/compare/` | ❌ Non fait |
+| **PR4: Pipeline End-to-End** | | ✅ **COMPLET** |
+| DocContextFrame flow | `jobs_v2.py` → `osmose_agentique.py` → Neo4j | ✅ |
+
+**Note:** Les composants structurels (ZoneSegmenter, TemplateDetector, LinguisticCueDetector) sont dans `extraction_v2/context/structural/` - voir ADR_DOCUMENT_STRUCTURAL_AWARENESS.md.
 
 ---
 
@@ -303,49 +331,48 @@ CREATE INDEX marker_value IF NOT EXISTS FOR (m:Marker) ON (m.value);
 
 ## 7. Implementation Plan
 
-### PR 1: DocContextExtractor
+### PR 1: DocContextExtractor ✅ DONE
 **Files:**
-- `src/knowbase/extraction_v2/context/doc_context_extractor.py` (NEW)
-- `src/knowbase/extraction_v2/context/models.py` (NEW)
-- `src/knowbase/extraction_v2/context/candidate_mining.py` (NEW)
-- `src/knowbase/extraction_v2/context/prompts.py` (NEW)
-- `src/knowbase/extraction_v2/pipeline.py` (integration)
-- `src/knowbase/extraction_v2/models/extraction_result.py` (add doc_context)
+- `src/knowbase/extraction_v2/context/doc_context_extractor.py` ✅
+- `src/knowbase/extraction_v2/context/models.py` ✅
+- `src/knowbase/extraction_v2/context/candidate_mining.py` ✅ (1000+ lignes, CandidateGate complet)
+- `src/knowbase/extraction_v2/context/prompts.py` ✅
+- `src/knowbase/extraction_v2/pipeline.py` ✅
+- `src/knowbase/extraction_v2/models/extraction_result.py` ✅
 
-**Scope:**
-- Candidate mining (deterministic patterns)
-- LLM validation (Qwen 14B burst mode)
-- DocContextFrame storage on ExtractionResult
-- Integration after Docling extraction, before OSMOSE
+**Implémenté:**
+- ✅ Candidate mining avec patterns structurels agnostiques
+- ✅ CandidateGate avec 10+ filtres universels (dates, copyright, trimestres, etc.)
+- ✅ LLM validation
+- ✅ DocContextFrame storage on ExtractionResult
+- ✅ Integration pipeline complète
 
-### PR 2: AnchorContext + Inheritance
+### PR 2: AnchorContext + Inheritance ✅ DONE
 **Files:**
-- `src/knowbase/api/schemas/concepts.py` (enrich Anchor, ProtoConcept)
-- `src/knowbase/extraction_v2/context/anchor_context_analyzer.py` (NEW)
-- `src/knowbase/extraction_v2/context/heuristics.py` (NEW)
-- `src/knowbase/semantic/extraction/hybrid_anchor_extractor.py` (integration)
-- `src/knowbase/ingestion/osmose_agentique.py` (inheritance logic)
-- `src/knowbase/consolidation/merge_store.py` (aggregation)
+- `src/knowbase/extraction_v2/context/anchor_models.py` ✅
+- `src/knowbase/extraction_v2/context/anchor_context_analyzer.py` ✅
+- `src/knowbase/extraction_v2/context/heuristics.py` ✅
+- `src/knowbase/extraction_v2/context/inheritance.py` ✅
+- `src/knowbase/ingestion/osmose_agentique.py` ✅
 
-**Scope:**
-- Heuristic-first AnchorContext analysis
-- LLM on-demand for ambiguous cases
-- Inheritance matrix implementation
-- Conflict-aware aggregation to ProtoConcept
+**Implémenté:**
+- ✅ Heuristic-first AnchorContext analysis
+- ✅ LLM on-demand pour cas ambigus
+- ✅ Inheritance matrix implementation
+- ✅ Aggregation to ProtoConcept
 
-### PR 3: Diff Queries + UI
+### PR 3: Diff Queries + UI ⚠️ PARTIEL
 **Files:**
-- `src/knowbase/api/routers/concepts.py` (new endpoints)
-- `src/knowbase/api/services/concept_diff_service.py` (NEW)
-- `src/knowbase/consolidation/marker_store.py` (NEW - optional Marker nodes)
-- `frontend/src/app/compare/page.tsx` (NEW)
-- `frontend/src/components/diff/` (NEW)
+- `src/knowbase/api/routers/markers.py` ✅
+- `src/knowbase/api/services/concept_diff_service.py` ✅
+- `src/knowbase/consolidation/marker_store.py` ✅
+- `frontend/src/app/compare/page.tsx` ❌ NON FAIT
+- `frontend/src/components/diff/` ❌ NON FAIT
 
-**Scope:**
-- Optional Marker node materialization
-- Optimized Cypher diff queries
-- API endpoints: `/api/concepts/diff`, `/api/concepts/{id}/assertions`
-- Comparison UI
+**Implémenté:**
+- ✅ MarkerStore avec DiffResult
+- ✅ API endpoints `/markers`
+- ❌ Frontend Compare UI (reste à faire)
 
 ---
 

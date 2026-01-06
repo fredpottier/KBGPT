@@ -3,11 +3,46 @@
 **Date:** 2026-01-01
 **Révision:** 2026-01-01 (ajout garde-fous ChatGPT review)
 **Auteurs:** ChatGPT (spec + review), Claude Code (documentation)
-**Status:** Proposed → Accepted (à valider après implémentation + 1 run complet)
+**Status:** ❌ NON IMPLÉMENTÉ (Janvier 2026)
 
 **Changelog:**
 - v1.0 : Spec initiale (ChatGPT)
 - v1.1 : Ajout WindowContext constraints, Normative Semantics of Weights, Misuse Scenarios, Non-Promotion Clause (review ChatGPT)
+
+---
+
+## Implementation Status (Janvier 2026)
+
+| Composant | Fichier | Status |
+|-----------|---------|--------|
+| **Phase 1: Infrastructure** | | ❌ **NON FAIT** |
+| ContextNode model | - | ❌ Non fait |
+| navigation_layer_builder.py | - | ❌ Non fait |
+| **Phase 2: DocumentContext** | | ❌ **NON FAIT** |
+| DocumentContext nodes | - | ❌ Non fait |
+| MENTIONED_IN relations | - | ❌ Non fait |
+| IN_DOCUMENT relations | - | ❌ Non fait |
+| **Phase 3: SectionContext** | | ❌ **NON FAIT** |
+| SectionContext nodes | - | ❌ Non fait |
+| Section path extraction | - | ❌ Non fait |
+| **Phase 4: WindowContext** | | ❌ **NON FAIT** |
+| WindowContext nodes | - | ❌ Non fait |
+| CENTERED_ON relations | - | ❌ Non fait |
+| **Phase 5: Validation** | | ❌ **NON FAIT** |
+| Graph lint commands | - | ❌ Non fait |
+| RAG whitelist enforcement | - | ❌ Non fait |
+| **Phase 6: UI** | | ❌ **NON FAIT** |
+| 2-layer display (semantic vs navigation) | - | ❌ Non fait |
+
+**Priorité:** Cet ADR est une **amélioration future** pour l'exploration du corpus.
+Le système fonctionne sans cette couche - les concepts sont déjà reliés via:
+- `(ProtoConcept)-[:EXTRACTED_FROM]->(Document)`
+- `(Anchor)-[:ANCHORED_IN]->(DocumentChunk)`
+- Relations sémantiques REQUIRES, ENABLES, etc.
+
+**Quand implémenter:**
+- Quand le besoin d'exploration corpus-level devient prioritaire
+- Après stabilisation du pipeline d'extraction core
 
 ---
 
@@ -390,16 +425,18 @@ Deux endpoints distincts :
 
 # Plan d'Implémentation
 
-| Phase | Tâche | Priorité |
-|-------|-------|----------|
-| 1 | Créer `ContextNode` model + writer `navigation_layer_builder.py` | P0 |
-| 2 | Implémenter `DocumentContext` | P0 |
-| 3 | Implémenter `SectionContext` | P1 |
-| 4 | Implémenter `WindowContext` (optionnel) | P2 |
-| 5 | Mettre budgets top-N par concept au build time | P1 |
-| 6 | Ajouter le "graph lint" (3 requêtes) dans CI / commande dev | P0 |
-| 7 | Ajuster UI : affichage en 2 layers (plein vs pointillé) | P1 |
-| 8 | Vérifier RAG : whitelist stricte relations sémantiques | P0 |
+| Phase | Tâche | Priorité | Status |
+|-------|-------|----------|--------|
+| 1 | Créer `ContextNode` model + writer `navigation_layer_builder.py` | P0 | ❌ |
+| 2 | Implémenter `DocumentContext` | P0 | ❌ |
+| 3 | Implémenter `SectionContext` | P1 | ❌ |
+| 4 | Implémenter `WindowContext` (optionnel) | P2 | ❌ |
+| 5 | Mettre budgets top-N par concept au build time | P1 | ❌ |
+| 6 | Ajouter le "graph lint" (3 requêtes) dans CI / commande dev | P0 | ❌ |
+| 7 | Ajuster UI : affichage en 2 layers (plein vs pointillé) | P1 | ❌ |
+| 8 | Vérifier RAG : whitelist stricte relations sémantiques | P0 | ❌ |
+
+**Note (Janvier 2026):** Cet ADR reste en attente. Le pipeline core fonctionne avec les relations existantes (EXTRACTED_FROM, ANCHORED_IN, relations sémantiques). La Navigation Layer est une amélioration pour l'exploration.
 
 ---
 

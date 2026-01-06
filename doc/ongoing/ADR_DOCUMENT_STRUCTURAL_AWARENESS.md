@@ -2,8 +2,36 @@
 
 *Architecture Decision Record - OSMOSE Cognitive Infrastructure*
 *Date: Janvier 2026*
-*Status: VALIDATED - Review ChatGPT intégré*
+*Status: ✅ IMPLEMENTED - Janvier 2026*
 *Reviewers: Claude (Anthropic), ChatGPT (OpenAI)*
+
+---
+
+## Implementation Status (Janvier 2026)
+
+| Composant | Fichier | Status |
+|-----------|---------|--------|
+| **Phase 1: Infrastructure structurelle** | | ✅ **COMPLET** |
+| ZoneSegmenter | `extraction_v2/context/structural/zone_segmenter.py` | ✅ |
+| TemplateDetector | `extraction_v2/context/structural/template_detector.py` | ✅ |
+| Models (PageZones, TemplateFragment) | `extraction_v2/context/structural/models.py` | ✅ |
+| **Phase 2: Enrichissement candidats** | | ✅ **COMPLET** |
+| MarkerCandidate enrichi | `extraction_v2/context/candidate_mining.py` | ✅ |
+| LinguisticCueDetector | `extraction_v2/context/structural/linguistic_cue_detector.py` | ✅ |
+| EvidenceSample avec zone/page | `extraction_v2/context/candidate_mining.py` | ✅ |
+| **Phase 3: LLM Validation** | | ✅ **COMPLET** |
+| Prompt production-grade | `extraction_v2/context/prompts.py` | ✅ |
+| CandidateGate (filtrage universel) | `extraction_v2/context/candidate_mining.py` | ✅ |
+
+**Fichiers implémentés:**
+```
+src/knowbase/extraction_v2/context/structural/
+├── __init__.py
+├── zone_segmenter.py      # ~150 lignes - Segmentation TOP/MAIN/BOTTOM
+├── template_detector.py   # ~300 lignes - Détection boilerplate
+├── linguistic_cue_detector.py  # ~300 lignes - Scoring patterns linguistiques
+└── models.py              # ~400 lignes - PageZones, TemplateFragment, ContextualCues
+```
 
 ---
 
@@ -547,22 +575,22 @@ Le cache `*.v2cache.json` doit inclure les nouvelles données :
 
 ## 7. Plan d'implémentation
 
-### Phase 1 : Infrastructure structurelle (PR5)
-- [ ] `ZoneSegmenter` avec tests
-- [ ] `TemplateDetector` avec tests
-- [ ] Modèles `PageZones`, `TemplateFragment`
-- [ ] Intégration dans pipeline extraction
+### Phase 1 : Infrastructure structurelle (PR5) ✅ DONE
+- [x] `ZoneSegmenter` avec tests
+- [x] `TemplateDetector` avec tests
+- [x] Modèles `PageZones`, `TemplateFragment`
+- [x] Intégration dans pipeline extraction
 
-### Phase 2 : Enrichissement candidats (PR6)
-- [ ] `MarkerCandidate` enrichi
-- [ ] `LinguisticCueDetector`
-- [ ] `EvidenceSample` avec zone/page
-- [ ] Mise à jour `CandidateMiner`
+### Phase 2 : Enrichissement candidats (PR6) ✅ DONE
+- [x] `MarkerCandidate` enrichi (zone_distribution, template_likelihood, etc.)
+- [x] `LinguisticCueDetector` (scope_language, legal_language, contrast_language)
+- [x] `EvidenceSample` avec zone/page
+- [x] Mise à jour `CandidateMiner` avec `enrich_candidates_with_structural_analysis()`
 
-### Phase 3 : LLM Validation (PR7)
-- [ ] Nouveau prompt production-grade
-- [ ] Tests de non-régression
-- [ ] Validation sur corpus varié (SAP, générique)
+### Phase 3 : LLM Validation (PR7) ✅ DONE
+- [x] Nouveau prompt production-grade dans `prompts.py`
+- [x] CandidateGate avec 10+ filtres universels
+- [x] Validation sur corpus varié
 
 ---
 

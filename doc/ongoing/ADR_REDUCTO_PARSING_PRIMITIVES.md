@@ -1,9 +1,46 @@
 # ADR-2024-12-30: Reducto-like Parsing Primitives in OSMOSE
 
-**Status:** Accepted
+**Status:** ⚠️ PARTIELLEMENT IMPLÉMENTÉ (Janvier 2026)
 **Date:** 2024-12-30
 **Authors:** OSMOSE Team
 **Reviewers:** -
+
+---
+
+## Implementation Status (Janvier 2026)
+
+| Composant | Fichier | Status |
+|-----------|---------|--------|
+| **Vision Gating V4** | | ✅ **COMPLET** |
+| GatingEngine | `extraction_v2/gating/engine.py` | ✅ |
+| Signals (RIS, VDS, TFS, SDS, VTS) | `extraction_v2/gating/signals.py` | ✅ |
+| Weights & Thresholds | `extraction_v2/gating/weights.py` | ✅ |
+| VisionUnit, GatingDecision | `extraction_v2/models/gating.py` | ✅ |
+| **QW-1: Table Summaries** | | ❌ **NON FAIT** |
+| Detection tableaux | - | ❌ Non fait |
+| LLM summarization | - | ❌ Non fait |
+| Storage summary + raw | - | ❌ Non fait |
+| **QW-2: Confidence Scores** | | ⚠️ **PARTIEL** |
+| parse_confidence (heuristique) | - | ❌ Non fait |
+| extract_confidence (LLM) | - | ❌ Non fait |
+| **QW-3: Diagram Interpreter** | | ❌ **NON FAIT** |
+| Pass 0 pre-analyse | - | ❌ Non fait |
+| Pass 1 VLM adaptatif | - | ❌ Non fait |
+| DiagramAnalysis schema | - | ❌ Non fait |
+| **MT-1: Layout-Aware Chunking** | | ❌ **NON FAIT** |
+| layout_detector.py | - | ❌ Non fait |
+| Chunking par region | - | ❌ Non fait |
+
+**Ce qui est implémenté:**
+- ✅ Vision Gating V4 complet avec 5 signaux (RIS, VDS, TFS, SDS, VTS)
+- ✅ Décision VISION_REQUIRED / VISION_RECOMMENDED / NONE
+- ✅ Règle de sécurité (RIS=1.0 ou VDS=1.0 → force Vision)
+- ✅ Domain context pour ajustement des poids
+
+**Ce qui reste à faire (Quick Wins):**
+- QW-1: Table Summaries → Impact RAG +50% estimé
+- QW-2: Confidence Scores → Debuggabilité
+- QW-3: Diagram Interpreter → Extraction structurée diagrammes
 
 ---
 
@@ -242,61 +279,60 @@ OSMOSE reste un systeme de **connaissance consolidee**, pas d'extraction locale.
 
 ## Implementation Plan
 
-### Phase 1: Quick Wins (3-4 semaines)
+### Phase 0: Vision Gating V4 ✅ DONE (Janvier 2026)
+
+```
+✅ IMPLÉMENTÉ:
+├── GatingEngine complet (extraction_v2/gating/engine.py)
+│   ├── 5 signaux: RIS, VDS, TFS, SDS, VTS
+│   ├── VNS (Vision Need Score) calculation
+│   ├── Seuils: VISION_REQUIRED (≥0.60), VISION_RECOMMENDED (≥0.40), NONE (<0.40)
+│   └── Règle sécurité: RIS=1.0 ou VDS=1.0 → force Vision
+│
+├── Signals (extraction_v2/gating/signals.py)
+│   ├── compute_raster_image_score()
+│   ├── compute_vector_drawing_score()
+│   ├── compute_text_fragmentation_score()
+│   ├── compute_spatial_dispersion_score()
+│   └── compute_visual_table_score()
+│
+└── Weights & Domain Context (extraction_v2/gating/weights.py)
+    ├── DEFAULT_GATING_WEIGHTS
+    ├── GATING_THRESHOLDS
+    └── get_weights_for_domain()
+```
+
+### Phase 1: Quick Wins ❌ NON FAIT
 
 ```
 Semaine 1-2:
-├── QW-1: Table Summaries
+├── QW-1: Table Summaries ❌
 │   ├── Detection heuristique tableaux (patterns |, tabs)
 │   ├── Prompt LLM: "Resume ce tableau en langage naturel"
 │   ├── Stockage: summary + raw dans payload Qdrant
 │   └── Insertion: osmose_agentique.py entre segmentation et chunking
 │
-├── QW-2: Confidence Scores
+├── QW-2: Confidence Scores ❌
 │   ├── parse_confidence: heuristique (longueur, structure, coherence)
 │   ├── extract_confidence: retourne par LLM dans prompt
 │   ├── Stockage: payload Qdrant + Neo4j
 │   └── Insertion: osmose_agentique.py + hybrid_anchor_chunker.py
 │
 Semaine 3-4:
-└── QW-3: Diagram Interpreter (evolution majeure)
-    ├── Pass 0 - Pre-analyse locale (GRATUIT)
-    │   ├── Enrichir vision_gating.py avec 4 niveaux
-    │   │   └── SKIP | TEXT_ONLY | VISION_LITE | VISION_FULL
-    │   ├── Heuristiques complexite image (edges, histogramme)
-    │   └── Analyse densite texte OCR
-    │
-    ├── Pass 1 - VLM Adaptatif (1 seul appel)
-    │   ├── VISION_LITE: prompt court (type + labels)
-    │   ├── VISION_FULL: prompt structure complet
-    │   │   └── Output: DiagramAnalysis JSON
-    │   └── Nouveau fichier: diagram_extractor.py
-    │
+└── QW-3: Diagram Interpreter ❌
+    ├── Pass 0 - Pre-analyse locale
+    ├── Pass 1 - VLM Adaptatif
     ├── Schema DiagramAnalysis
-    │   ├── Nouveau fichier: src/knowbase/semantic/models.py (extension)
-    │   ├── DiagramElement, DiagramRelation, TableExtraction
-    │   └── Champs: elements[], relations[], tables[], confidence
-    │
     ├── Quality Gate
-    │   ├── if confidence < 0.7 → fallback prose (actuel)
-    │   └── else → injection structuree dans KG
-    │
     └── Integration
-        ├── Modification: vision_analyzer.py (nouveau mode)
-        ├── Modification: osmose_agentique.py (routing)
-        └── Stockage: Neo4j (elements/relations) + Qdrant (embeddings)
 ```
 
-### Phase 2: Moyen Terme (1-2 mois)
+### Phase 2: Moyen Terme ❌ NON FAIT
 
 ```
-MT-1: Layout-Aware Chunking
+MT-1: Layout-Aware Chunking ❌
 ├── Nouveau composant: layout_detector.py
-│   ├── Detection regions: tableau, liste, paragraphe, figure
-│   └── Heuristiques simples (pas ML lourd)
 ├── Modification: hybrid_anchor_chunker.py
-│   ├── Chunk par region, pas par tokens
-│   └── Regle: 1 tableau = 1 chunk (jamais coupe)
 └── Validation: 0 tableaux coupes sur set de test
 ```
 
