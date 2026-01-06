@@ -16,9 +16,11 @@
 | Signals (RIS, VDS, TFS, SDS, VTS) | `extraction_v2/gating/signals.py` | ✅ |
 | Weights & Thresholds | `extraction_v2/gating/weights.py` | ✅ |
 | VisionUnit, GatingDecision | `extraction_v2/models/gating.py` | ✅ |
-| **QW-1: Table Summaries** | | ❌ **NON FAIT** |
-| Detection tableaux | - | ❌ Non fait |
-| LLM summarization | - | ❌ Non fait |
+| **QW-1: Table Summaries** | | ⚠️ **PARTIEL** |
+| Detection tableaux | `extraction_v2/extractors/docling_extractor.py` | ✅ Fait (via Docling) |
+| Extraction structurée | `extraction_v2/models/elements.py` (TableData) | ✅ Fait |
+| Conversion Markdown | `TableData.to_markdown()` + Linearizer | ✅ Fait |
+| LLM summarization en langage naturel | - | ❌ Non fait |
 | Storage summary + raw | - | ❌ Non fait |
 | **QW-2: Confidence Scores** | | ⚠️ **PARTIEL** |
 | parse_confidence (heuristique) | - | ❌ Non fait |
@@ -36,11 +38,19 @@
 - ✅ Décision VISION_REQUIRED / VISION_RECOMMENDED / NONE
 - ✅ Règle de sécurité (RIS=1.0 ou VDS=1.0 → force Vision)
 - ✅ Domain context pour ajustement des poids
+- ✅ **QW-1 Partiel:** Docling extrait les tables structurées, Linearizer les convertit en Markdown avec marqueurs
 
 **Ce qui reste à faire (Quick Wins):**
-- QW-1: Table Summaries → Impact RAG +50% estimé
+- QW-1 (suite): LLM summarization des tables en langage naturel → Impact RAG +50% estimé
 - QW-2: Confidence Scores → Debuggabilité
 - QW-3: Diagram Interpreter → Extraction structurée diagrammes
+
+**Note Migration MegaParse → Docling (Janvier 2026):**
+L'ADR original mentionnait MegaParse. Le projet a migré vers **Docling** qui gère nativement:
+- Extraction tables structurées (`doc.tables`)
+- Bounding boxes
+- Headers et cellules
+Le besoin de "résumé LLM" reste pertinent car le format Markdown brut n'est pas optimal pour l'embedding sémantique.
 
 ---
 

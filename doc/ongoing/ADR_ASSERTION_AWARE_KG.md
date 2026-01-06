@@ -24,11 +24,11 @@
 | Heuristics (polarity, override) | `extraction_v2/context/heuristics.py` | ✅ |
 | InheritanceEngine | `extraction_v2/context/inheritance.py` | ✅ |
 | OSMOSE integration | `ingestion/osmose_agentique.py` | ✅ |
-| **PR3: Diff Queries + UI** | | ⚠️ **PARTIEL** |
+| **PR3: Diff Queries + UI** | | ✅ **COMPLET** |
 | MarkerStore | `consolidation/marker_store.py` | ✅ |
 | API /markers | `api/routers/markers.py` | ✅ |
 | ConceptDiffService | `api/services/concept_diff_service.py` | ✅ |
-| Frontend Compare UI | `frontend/src/app/compare/` | ❌ Non fait |
+| Frontend Compare UI | `frontend/src/app/compare/page.tsx` (~700 lignes) | ✅ |
 | **PR4: Pipeline End-to-End** | | ✅ **COMPLET** |
 | DocContextFrame flow | `jobs_v2.py` → `osmose_agentique.py` → Neo4j | ✅ |
 
@@ -361,18 +361,23 @@ CREATE INDEX marker_value IF NOT EXISTS FOR (m:Marker) ON (m.value);
 - ✅ Inheritance matrix implementation
 - ✅ Aggregation to ProtoConcept
 
-### PR 3: Diff Queries + UI ⚠️ PARTIEL
+### PR 3: Diff Queries + UI ✅ DONE
 **Files:**
 - `src/knowbase/api/routers/markers.py` ✅
 - `src/knowbase/api/services/concept_diff_service.py` ✅
 - `src/knowbase/consolidation/marker_store.py` ✅
-- `frontend/src/app/compare/page.tsx` ❌ NON FAIT
-- `frontend/src/components/diff/` ❌ NON FAIT
+- `frontend/src/app/compare/page.tsx` ✅ (~700 lignes)
 
 **Implémenté:**
 - ✅ MarkerStore avec DiffResult
-- ✅ API endpoints `/markers`
-- ❌ Frontend Compare UI (reste à faire)
+- ✅ API endpoints `/markers` et `/api/concepts/diff`
+- ✅ Frontend Compare UI complet:
+  - Sélection de markers (dropdown + saisie manuelle)
+  - Exécution du diff
+  - Statistiques (only_in_a, only_in_b, in_both, changed)
+  - Tabs de navigation par catégorie
+  - Filtrage par recherche
+  - Rendu des cartes de concepts avec polarity, scope, confidence
 
 ---
 
