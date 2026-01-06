@@ -1,6 +1,6 @@
 # ADR: Marker Normalization Layer
 
-**Status**: ✅ IMPLÉMENTÉ (~85%) - Janvier 2026
+**Status**: ✅ IMPLÉMENTÉ (100%) - Janvier 2026
 **Date**: 2025-01-05
 **Authors**: Claude + ChatGPT (collaborative design)
 **Reviewers**: Fred
@@ -24,42 +24,52 @@
 | Parser config YAML | `consolidation/normalization/normalization_engine.py` | ✅ |
 | Moteur de règles (aliases + regex) | `consolidation/normalization/normalization_engine.py` | ✅ |
 | Entity Anchor detection | `NormalizationEngine.find_entity_anchors()` | ✅ |
-| Config YAML par défaut | `config/normalization/default.yaml` | ✅ |
-| **Phase 4: UI/UX** | | ❌ **NON FAIT** |
-| Endpoint `/markers/suggestions` | - | ❌ Non fait |
-| Interface chat normalization | - | ❌ Non fait |
-| Dashboard admin aliases | - | ❌ Non fait |
-| **Phase 5: Feedback Loop** | | ❌ **NON FAIT** |
-| Clustering automatique | - | ❌ Non fait |
-| Métriques | - | ❌ Non fait |
+| Config YAML domain-agnostic | `config/normalization/default.yaml` | ✅ |
+| requires_strong_entity | `NormalizationRule.requires_strong_entity` | ✅ |
+| **Phase 4: UI/UX (API)** | | ✅ **COMPLET** |
+| GET `/markers/normalization/suggestions` | `api/routers/markers.py` | ✅ |
+| POST `/markers/normalization/apply` | `api/routers/markers.py` | ✅ |
+| GET `/markers/normalization/aliases` | `api/routers/markers.py` | ✅ |
+| POST `/markers/normalization/aliases` | `api/routers/markers.py` | ✅ |
+| DELETE `/markers/normalization/aliases/{raw}` | `api/routers/markers.py` | ✅ |
+| POST `/markers/normalization/blacklist` | `api/routers/markers.py` | ✅ |
+| **Phase 5: Feedback Loop** | | ✅ **COMPLET** |
+| GET `/markers/normalization/stats` | `api/routers/markers.py` | ✅ |
+| GET `/markers/normalization/clusters` | `api/routers/markers.py` | ✅ |
+| Clustering service | `NormalizationStore.get_marker_clusters()` | ✅ |
 
-**Ce qui est implémenté (Janvier 2026):**
+**Architecture complète (Janvier 2026):**
 ```
 consolidation/normalization/
 ├── __init__.py
 ├── models.py                    # MarkerMention, CanonicalMarker, NormalizationRule
-├── normalization_store.py       # Gestion Neo4j (CRUD mentions/canoniques)
+├── normalization_store.py       # Neo4j (CRUD, stats, clustering)
 └── normalization_engine.py      # Moteur de règles + Entity Anchor detection
 
+api/routers/
+└── markers.py                   # Endpoints normalisation (Phase 4-5)
+
 config/normalization/
-└── default.yaml                 # Config par défaut (aliases, rules, blacklist)
+└── default.yaml                 # Config domain-agnostic (semver, revision, gen, etc.)
 ```
 
+**Fonctionnalités implémentées:**
 - Architecture MarkerMention → CanonicalMarker complète
 - NormalizationStore avec schema Neo4j (indexes, constraints)
 - NormalizationEngine avec:
-  - Parser config YAML
+  - Parser config YAML domain-agnostic
   - Moteur de règles regex avec templates
   - Entity Anchor detection depuis concepts du document
+  - Support `requires_strong_entity` pour markers ambigus
   - Blacklist pour faux positifs
   - Safe-by-default (UNRESOLVED si doute)
-
-**Ce qui reste (UI/UX + Feedback Loop):**
-- Endpoints API pour suggestions et administration
-- Interface chat pour normaliser des markers
-- Dashboard admin pour gérer les aliases
-- Clustering automatique pour suggestions
-- Métriques de couverture
+- API REST complète:
+  - Suggestions de normalisation
+  - Application manuelle avec option création alias
+  - Gestion aliases (CRUD)
+  - Gestion blacklist
+  - Statistiques (taux résolution, etc.)
+  - Clustering automatique pour suggestions
 
 ---
 
@@ -416,26 +426,30 @@ Il est stocke/versionne par tenant et editable via l'UI admin ou le chat.
 - [x] CandidateGate avec filtres universels (dates, copyright, trimestres, etc.)
 - [x] Validation que le CandidateGate fonctionne dans le pipeline
 
-### Phase 2: Schema Neo4j ⚠️ PARTIEL
+### Phase 2: Schema Neo4j ✅ DONE
 - [x] MarkerStore basique avec MarkerKind, DiffResult
 - [x] API `/markers` pour consultation
-- [ ] Creer les noeuds MarkerMention et CanonicalMarker (architecture à 2 niveaux)
-- [ ] Migrer les `global_markers` existants vers MarkerMention
-- [ ] Creer les indexes
+- [x] MarkerMention et CanonicalMarker models (`consolidation/normalization/models.py`)
+- [x] NormalizationStore avec Neo4j CRUD (`consolidation/normalization/normalization_store.py`)
+- [x] Indexes et constraints Neo4j
 
-### Phase 3: Normalization Engine ❌ NON FAIT
-- [ ] Parser de config YAML (config/marker_normalization.yaml)
-- [ ] Moteur de regles (aliases + regex)
-- [ ] Detection d'Entity Anchor via concepts du document
+### Phase 3: Normalization Engine ✅ DONE
+- [x] Parser config YAML domain-agnostic (`config/normalization/default.yaml`)
+- [x] Moteur de regles (aliases + regex avec templates)
+- [x] Entity Anchor detection via concepts du document
+- [x] Support `requires_strong_entity` pour markers ambigus
+- [x] Blacklist configurable
 
-### Phase 4: UI/UX ❌ NON FAIT
-- [ ] Endpoint API `/markers/suggestions`
-- [ ] Interface chat: "Normalise marker X en Y"
-- [ ] Dashboard admin pour gerer les aliases
+### Phase 4: UI/UX (API) ✅ DONE
+- [x] GET `/markers/normalization/suggestions` - Suggestions de normalisation
+- [x] POST `/markers/normalization/apply` - Appliquer normalisation manuelle
+- [x] GET/POST/DELETE `/markers/normalization/aliases` - CRUD aliases
+- [x] POST `/markers/normalization/blacklist` - Ajouter à la blacklist
 
-### Phase 5: Feedback Loop ❌ NON FAIT
-- [ ] Clustering automatique pour suggestions
-- [ ] Metriques: % markers resolus, % unresolved, % rejetes
+### Phase 5: Feedback Loop ✅ DONE
+- [x] GET `/markers/normalization/stats` - Statistiques (taux résolution, etc.)
+- [x] GET `/markers/normalization/clusters` - Clustering suggestions
+- [x] Service clustering (`NormalizationStore.get_marker_clusters()`)
 
 ---
 

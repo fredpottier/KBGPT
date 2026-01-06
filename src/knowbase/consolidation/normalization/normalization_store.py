@@ -274,6 +274,37 @@ class NormalizationStore:
             logger.error(f"[NormalizationStore] Failed to get unresolved mentions: {e}")
             return []
 
+    async def get_mention_by_id(
+        self,
+        mention_id: str,
+    ) -> Optional[MarkerMention]:
+        """
+        Récupère une mention par son ID.
+
+        Args:
+            mention_id: ID de la mention
+
+        Returns:
+            MarkerMention ou None
+        """
+        client = self._get_neo4j_client()
+
+        query = """
+        MATCH (mm:MarkerMention {id: $mention_id, tenant_id: $tenant_id})
+        RETURN mm
+        """
+
+        try:
+            with client.driver.session(database="neo4j") as session:
+                result = session.run(query, mention_id=mention_id, tenant_id=self.tenant_id)
+                record = result.single()
+                if record:
+                    return MarkerMention.from_dict(dict(record["mm"]))
+                return None
+        except Exception as e:
+            logger.error(f"[NormalizationStore] Failed to get mention {mention_id}: {e}")
+            return None
+
     # =========================================================================
     # CanonicalMarker Operations
     # =========================================================================
@@ -539,6 +570,73 @@ class NormalizationStore:
             return False
 
     # =========================================================================
+    # Clustering & Suggestions (Phase 5)
+    # =========================================================================
+
+    async def get_marker_clusters(
+        self,
+        min_documents: int = 2,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """
+        Récupère les clusters de markers non résolus.
+
+        Identifie les markers qui co-occurrent fréquemment dans les mêmes
+        documents et pourraient partager une forme canonique.
+
+        Args:
+            min_documents: Nombre minimum de documents pour un cluster
+            limit: Nombre max de clusters
+
+        Returns:
+            Liste de clusters avec raw_markers, document_count, common_entity
+        """
+        client = self._get_neo4j_client()
+
+        query = """
+        // Trouver les mentions non résolues groupées par raw_text
+        MATCH (mm:MarkerMention {
+            normalization_status: 'unresolved',
+            tenant_id: $tenant_id
+        })
+        WITH mm.raw_text AS raw_marker, collect(DISTINCT mm.doc_id) AS doc_ids
+        WHERE size(doc_ids) >= $min_documents
+
+        // Chercher un entity anchor commun dans ces documents
+        OPTIONAL MATCH (pc:ProtoConcept)-[:EXTRACTED_FROM]->(d:Document)
+        WHERE d.doc_id IN doc_ids
+          AND pc.tenant_id = $tenant_id
+          AND pc.role IN ['primary', 'subject']
+        WITH raw_marker, doc_ids,
+             collect(DISTINCT pc.concept_name)[0] AS common_entity
+
+        RETURN {
+            raw_markers: collect(raw_marker),
+            document_count: size(doc_ids),
+            common_entity: common_entity
+        } AS cluster
+        ORDER BY size(doc_ids) DESC
+        LIMIT $limit
+        """
+
+        try:
+            with client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    query,
+                    tenant_id=self.tenant_id,
+                    min_documents=min_documents,
+                    limit=limit
+                )
+                clusters = []
+                for record in result:
+                    cluster_data = dict(record["cluster"])
+                    clusters.append(cluster_data)
+                return clusters
+        except Exception as e:
+            logger.error(f"[NormalizationStore] Failed to get clusters: {e}")
+            return []
+
+    # =========================================================================
     # Statistics & Queries
     # =========================================================================
 
@@ -547,12 +645,13 @@ class NormalizationStore:
         Récupère les statistiques de normalisation.
 
         Returns:
-            Dict avec statistiques
+            Dict avec statistiques (total, resolved, unresolved, etc.)
         """
         client = self._get_neo4j_client()
 
         query = """
-        MATCH (mm:MarkerMention {tenant_id: $tenant_id})
+        // Compter les mentions par statut
+        OPTIONAL MATCH (mm:MarkerMention {tenant_id: $tenant_id})
         WITH
             count(mm) AS total_mentions,
             count(CASE WHEN mm.normalization_status = 'resolved' THEN 1 END) AS resolved,
@@ -560,20 +659,18 @@ class NormalizationStore:
             count(CASE WHEN mm.normalization_status = 'blacklisted' THEN 1 END) AS blacklisted,
             count(CASE WHEN mm.normalization_status = 'pending' THEN 1 END) AS pending
 
+        // Compter les canonical markers
         OPTIONAL MATCH (cm:CanonicalMarker {tenant_id: $tenant_id})
         WITH total_mentions, resolved, unresolved, blacklisted, pending,
-             count(DISTINCT cm) AS total_canonicals
+             count(DISTINCT cm) AS unique_canonicals
 
         RETURN {
-            total_mentions: total_mentions,
+            total: total_mentions,
             resolved: resolved,
             unresolved: unresolved,
             blacklisted: blacklisted,
             pending: pending,
-            resolution_rate: CASE WHEN total_mentions > 0
-                THEN toFloat(resolved) / total_mentions
-                ELSE 0.0 END,
-            total_canonicals: total_canonicals
+            unique_canonicals: unique_canonicals
         } AS stats
         """
 
@@ -583,10 +680,24 @@ class NormalizationStore:
                 record = result.single()
                 if record:
                     return dict(record["stats"])
-                return {}
+                return {
+                    "total": 0,
+                    "resolved": 0,
+                    "unresolved": 0,
+                    "blacklisted": 0,
+                    "pending": 0,
+                    "unique_canonicals": 0,
+                }
         except Exception as e:
             logger.error(f"[NormalizationStore] Failed to get stats: {e}")
-            return {}
+            return {
+                "total": 0,
+                "resolved": 0,
+                "unresolved": 0,
+                "blacklisted": 0,
+                "pending": 0,
+                "unique_canonicals": 0,
+            }
 
 
 # =============================================================================
