@@ -281,6 +281,9 @@ def upsert_chunks(
             "char_end": chunk.get("char_end", 0),
             "token_count": chunk.get("token_count", 0),
             "created_at": chunk.get("created_at", ""),
+            # Phase 0: Pont SectionContext → Qdrant (ADR_GRAPH_FIRST_ARCHITECTURE)
+            "context_id": chunk.get("context_id"),
+            "section_path": chunk.get("section_path"),
             # QW-2: Confidence scores (ADR_REDUCTO_PARSING_PRIMITIVES)
             "parse_confidence": chunk.get("parse_confidence", 0.5),
             "confidence_signals": chunk.get("confidence_signals", {}),

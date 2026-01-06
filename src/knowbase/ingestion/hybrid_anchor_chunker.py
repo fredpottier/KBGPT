@@ -656,7 +656,7 @@ class HybridAnchorChunker:
             segments: Liste des segments avec char_offset et text
             overlap_min_chars: Overlap minimum pour etre considere mappe
         """
-        for chunk in raw_chunks:
+        for chunk_idx, chunk in enumerate(raw_chunks):
             c_start = chunk["char_start"]
             c_end = chunk["char_end"]
             c_center = (c_start + c_end) / 2.0
@@ -689,7 +689,8 @@ class HybridAnchorChunker:
 
                 if is_better:
                     best_seg_id = seg.get("segment_id")
-                    best_section_path = seg.get("section_id")  # Phase 0: section_path
+                    # Phase 0: section_path (supporte les 2 noms pour robustesse)
+                    best_section_path = seg.get("section_id") or seg.get("section_path")
                     best_overlap = overlap
                     best_center_dist = center_dist
                     best_seg_idx = seg_idx
