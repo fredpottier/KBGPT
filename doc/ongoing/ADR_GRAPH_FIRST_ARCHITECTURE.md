@@ -356,13 +356,22 @@ ORDER BY m.salience DESC
 > **Rappel** : Topic/COVERS = scope (filtre), PAS lien conceptuel.
 > Pass 3 = seule source de relations sémantiques prouvées.
 
-**B.1 - Pass 2a : Structural Topics / COVERS**
-1. Extraire Topics depuis structure doc (H1/H2, TOC)
-2. Créer `CanonicalConcept` avec `concept_type: "TOPIC"`
-3. Créer `HAS_TOPIC` (Document → Topic)
-4. Créer `COVERS` (Topic → Concept) via règles déterministes :
-   - `MENTIONED_IN` + salience threshold
-   - Exclusion stop-concepts
+**B.1 - Pass 2a : Structural Topics / COVERS** ✅ IMPLÉMENTÉ (2026-01-06)
+
+> **Module** : `src/knowbase/relations/structural_topic_extractor.py`
+> **Intégration** : `pass2_orchestrator.py` → phase `STRUCTURAL_TOPICS`
+
+1. ✅ Extraire Topics depuis structure doc (H1/H2, numérotation)
+   - `StructuralTopicExtractor._extract_headers()` parse Markdown H1/H2 et numérotation
+   - Normalisation titres pour matching cross-document
+2. ✅ Créer `CanonicalConcept` avec `concept_type: "TOPIC"`
+   - `TopicNeo4jWriter._upsert_topic_concept()` via MERGE
+3. ✅ Créer `HAS_TOPIC` (Document → Topic)
+   - `TopicNeo4jWriter._create_has_topic_relation()`
+4. ✅ Créer `COVERS` (Topic → Concept) via règles déterministes :
+   - `CoversBuilder.build_covers_for_document()`
+   - Critères : `MENTIONED_IN` + salience ≥ 0.3
+   - Exclusion stop-concepts (document, section, introduction, etc.)
 
 **B.2 - Pass 2b : Classification Fine** (existant, réorganisé)
 - `CLASSIFY_FINE` reste tel quel

@@ -53,8 +53,14 @@ class Pass2Mode(str, Enum):
 class Pass2Phase(str, Enum):
     """Phases de Pass 2."""
 
+    # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 2a: Structural Topics / COVERS
+    STRUCTURAL_TOPICS = "structural_topics"  # NEW: Extract Topics from H1/H2, create COVERS
+
+    # Pass 2b: Classification et Relations
     CLASSIFY_FINE = "classify_fine"
     ENRICH_RELATIONS = "enrich_relations"
+
+    # Cross-document consolidation
     CROSS_DOC = "cross_doc"
 
 
@@ -68,9 +74,16 @@ class Pass2Stats:
     mode: Pass2Mode = Pass2Mode.BACKGROUND
 
     # Par phase
+    # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 2a
+    structural_topics_count: int = 0
+    covers_relations_count: int = 0
+
+    # Pass 2b
     classify_fine_count: int = 0
     classify_fine_changes: int = 0
     enrich_relations_count: int = 0
+
+    # Cross-doc
     cross_doc_concepts: int = 0
 
     # Erreurs
@@ -123,7 +136,12 @@ class Pass2Orchestrator:
         self.default_mode = Pass2Mode(config.get("mode", "background"))
         self.enabled_phases = [
             Pass2Phase(p) for p in config.get("enabled_phases", [
-                "classify_fine", "enrich_relations", "cross_doc"
+                # ADR_GRAPH_FIRST_ARCHITECTURE: Pass 2a en premier (Topics/COVERS)
+                "structural_topics",
+                # Puis Pass 2b (Classification + Relations)
+                "classify_fine", "enrich_relations",
+                # Enfin Cross-doc
+                "cross_doc"
             ])
         ]
 
@@ -229,7 +247,13 @@ class Pass2Orchestrator:
         phases_completed = []
 
         try:
-            # Phase 1: CLASSIFY_FINE
+            # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 2a: STRUCTURAL_TOPICS
+            # Doit s'exécuter AVANT les autres phases pour créer Topics/COVERS
+            if Pass2Phase.STRUCTURAL_TOPICS in job.phases:
+                await self._phase_structural_topics(job, stats)
+                phases_completed.append(Pass2Phase.STRUCTURAL_TOPICS.value)
+
+            # Phase 2b-1: CLASSIFY_FINE
             if Pass2Phase.CLASSIFY_FINE in job.phases:
                 await self._phase_classify_fine(job, stats)
                 phases_completed.append(Pass2Phase.CLASSIFY_FINE.value)
@@ -272,10 +296,164 @@ class Pass2Orchestrator:
 
         logger.info(
             f"[OSMOSE:Pass2] Job {job.job_id} completed in {stats.duration_seconds:.1f}s "
-            f"(classify={stats.classify_fine_count}, relations={stats.enrich_relations_count})"
+            f"(topics={stats.structural_topics_count}, covers={stats.covers_relations_count}, "
+            f"classify={stats.classify_fine_count}, relations={stats.enrich_relations_count})"
         )
 
         return stats
+
+    async def _phase_structural_topics(self, job: Pass2Job, stats: Pass2Stats):
+        """
+        Phase STRUCTURAL_TOPICS: Extraction Topics depuis structure documentaire.
+
+        ADR_GRAPH_FIRST_ARCHITECTURE - Pass 2a
+
+        Pipeline:
+        1. Extraire Topics depuis headers H1/H2
+        2. Créer CanonicalConcept type=TOPIC + HAS_TOPIC
+        3. Créer COVERS via règles déterministes (MENTIONED_IN + salience)
+
+        IMPORTANT - Topic/COVERS = SCOPE documentaire, JAMAIS lien conceptuel.
+        """
+        from knowbase.relations.structural_topic_extractor import (
+            StructuralTopicExtractor,
+            TopicNeo4jWriter,
+            CoversBuilder
+        )
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+        from knowbase.config.settings import get_settings
+
+        logger.info(
+            f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] Starting for doc {job.document_id}"
+        )
+
+        try:
+            # Récupérer le texte du document
+            document_text = await self._get_document_text(job.document_id)
+
+            if not document_text:
+                logger.info(
+                    f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] No document text for {job.document_id}, skipping"
+                )
+                return
+
+            # 1. Extraire les topics structurels
+            extractor = StructuralTopicExtractor()
+            extraction_result = extractor.extract_topics(
+                document_id=job.document_id,
+                text=document_text,
+                metadata={"tenant_id": job.tenant_id}
+            )
+
+            stats.structural_topics_count = len(extraction_result.topics)
+
+            if not extraction_result.topics:
+                logger.info(
+                    f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] No topics extracted for {job.document_id}"
+                )
+                return
+
+            # 2. Écrire dans Neo4j (Topics + HAS_TOPIC)
+            settings = get_settings()
+            neo4j_client = get_neo4j_client(
+                uri=settings.neo4j_uri,
+                user=settings.neo4j_user,
+                password=settings.neo4j_password,
+                database="neo4j"
+            )
+
+            if not neo4j_client.is_connected():
+                logger.warning(
+                    f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] Neo4j not connected, skipping persistence"
+                )
+                return
+
+            writer = TopicNeo4jWriter(neo4j_client, tenant_id=job.tenant_id)
+            write_stats = writer.write_topics(job.document_id, extraction_result.topics)
+
+            # 3. Construire COVERS (déterministe, basé sur MENTIONED_IN + salience)
+            covers_builder = CoversBuilder(neo4j_client, tenant_id=job.tenant_id)
+            covers_stats = covers_builder.build_covers_for_document(
+                document_id=job.document_id,
+                topics=extraction_result.topics
+            )
+
+            stats.covers_relations_count = covers_stats.get("covers_created", 0)
+
+            logger.info(
+                f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] Complete: "
+                f"{stats.structural_topics_count} topics, "
+                f"{stats.covers_relations_count} COVERS relations"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] Failed: {e}",
+                exc_info=True
+            )
+            stats.errors.append(f"STRUCTURAL_TOPICS: {e}")
+
+    async def _get_document_text(self, document_id: str) -> Optional[str]:
+        """
+        Récupère le texte complet d'un document.
+
+        Returns:
+            Texte du document ou None si non trouvé
+        """
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+        from knowbase.config.settings import get_settings
+
+        settings = get_settings()
+        neo4j_client = get_neo4j_client(
+            uri=settings.neo4j_uri,
+            user=settings.neo4j_user,
+            password=settings.neo4j_password,
+            database="neo4j"
+        )
+
+        if not neo4j_client.is_connected():
+            return None
+
+        try:
+            # Essayer de récupérer le texte depuis le Document node
+            query = """
+            MATCH (d:Document {document_id: $document_id, tenant_id: $tenant_id})
+            RETURN d.text_content AS text
+            """
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    query,
+                    document_id=document_id,
+                    tenant_id=self.tenant_id
+                )
+                record = result.single()
+
+                if record and record.get("text"):
+                    return record["text"]
+
+            # Fallback: concaténer les chunks
+            query_chunks = """
+            MATCH (dc:DocumentChunk {document_id: $document_id, tenant_id: $tenant_id})
+            RETURN dc.text_preview AS text
+            ORDER BY dc.chunk_index
+            """
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    query_chunks,
+                    document_id=document_id,
+                    tenant_id=self.tenant_id
+                )
+
+                chunks = [r["text"] for r in result if r.get("text")]
+                if chunks:
+                    return "\n\n".join(chunks)
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Pass2a] Failed to get document text: {e}")
+
+        return None
 
     async def _phase_classify_fine(self, job: Pass2Job, stats: Pass2Stats):
         """
