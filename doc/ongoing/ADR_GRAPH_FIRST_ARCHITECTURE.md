@@ -377,13 +377,26 @@ ORDER BY m.salience DESC
 - `CLASSIFY_FINE` reste tel quel
 - Aucune création de relation sémantique
 
-**B.3 - Pass 3 : Consolidation Sémantique**
-1. Candidate generation : co-présence Topic/Section, récurrence ≥2 sections
-2. Verification LLM extractive : quote obligatoire ou ABSTAIN
-3. Règle : `evidence_context_ids[]` non vide pour TOUTE relation
-4. Multi-evidence policy pour sources faibles
+**B.3 - Pass 3 : Consolidation Sémantique** ✅ IMPLÉMENTÉ (2026-01-06)
 
-**Livrable** : Relations prouvées avec traçabilité
+> **Module** : `src/knowbase/relations/semantic_consolidation_pass3.py`
+> **Intégration** : `pass2_orchestrator.py` → phase `SEMANTIC_CONSOLIDATION`
+
+SEULE source de relations sémantiques prouvées.
+
+1. ✅ Candidate generation : co-présence Topic/Section, récurrence ≥2 sections
+   - `CandidateGenerator.generate_candidates()` via requête MENTIONED_IN
+   - Critères : MIN_CO_OCCURRENCES=2, MIN_CANDIDATE_SCORE=0.3
+2. ✅ Verification LLM extractive : quote obligatoire ou ABSTAIN
+   - `ExtractiveVerifier.verify_candidate()` avec prompt strict
+   - La quote doit être vérifiable dans le texte source (matching normalisé)
+   - ABSTAIN si aucune preuve explicite trouvée
+3. ✅ Règle : `evidence_context_ids[]` non vide pour TOUTE relation
+   - `Pass3SemanticWriter.write_verified_relation()` refuse écriture sans evidence
+   - Chaque relation a `evidence_quote` + `evidence_context_ids`
+4. ✅ Multi-evidence policy : relations marquées `multi_evidence=true` si mise à jour
+
+**Livrable** : Relations prouvées avec traçabilité complète
 
 ### Phase C - Runtime Graph-First
 

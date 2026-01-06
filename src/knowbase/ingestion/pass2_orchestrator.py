@@ -54,11 +54,14 @@ class Pass2Phase(str, Enum):
     """Phases de Pass 2."""
 
     # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 2a: Structural Topics / COVERS
-    STRUCTURAL_TOPICS = "structural_topics"  # NEW: Extract Topics from H1/H2, create COVERS
+    STRUCTURAL_TOPICS = "structural_topics"  # Extract Topics from H1/H2, create COVERS
 
     # Pass 2b: Classification et Relations
     CLASSIFY_FINE = "classify_fine"
     ENRICH_RELATIONS = "enrich_relations"
+
+    # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 3: Semantic Consolidation
+    SEMANTIC_CONSOLIDATION = "semantic_consolidation"  # Extractive verification + proven relations
 
     # Cross-document consolidation
     CROSS_DOC = "cross_doc"
@@ -82,6 +85,11 @@ class Pass2Stats:
     classify_fine_count: int = 0
     classify_fine_changes: int = 0
     enrich_relations_count: int = 0
+
+    # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 3
+    pass3_candidates: int = 0
+    pass3_verified: int = 0
+    pass3_abstained: int = 0
 
     # Cross-doc
     cross_doc_concepts: int = 0
@@ -138,8 +146,10 @@ class Pass2Orchestrator:
             Pass2Phase(p) for p in config.get("enabled_phases", [
                 # ADR_GRAPH_FIRST_ARCHITECTURE: Pass 2a en premier (Topics/COVERS)
                 "structural_topics",
-                # Puis Pass 2b (Classification + Relations)
+                # Puis Pass 2b (Classification + Relations existantes)
                 "classify_fine", "enrich_relations",
+                # ADR_GRAPH_FIRST_ARCHITECTURE: Pass 3 (Semantic Consolidation - proven relations)
+                "semantic_consolidation",
                 # Enfin Cross-doc
                 "cross_doc"
             ])
@@ -258,12 +268,18 @@ class Pass2Orchestrator:
                 await self._phase_classify_fine(job, stats)
                 phases_completed.append(Pass2Phase.CLASSIFY_FINE.value)
 
-            # Phase 2: ENRICH_RELATIONS
+            # Phase 2b-2: ENRICH_RELATIONS
             if Pass2Phase.ENRICH_RELATIONS in job.phases:
                 await self._phase_enrich_relations(job, stats)
                 phases_completed.append(Pass2Phase.ENRICH_RELATIONS.value)
 
-            # Phase 3: CROSS_DOC
+            # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 3: SEMANTIC_CONSOLIDATION
+            # Extractive verification + proven relations (SEULE source de relations sémantiques)
+            if Pass2Phase.SEMANTIC_CONSOLIDATION in job.phases:
+                await self._phase_semantic_consolidation(job, stats)
+                phases_completed.append(Pass2Phase.SEMANTIC_CONSOLIDATION.value)
+
+            # Phase finale: CROSS_DOC
             if Pass2Phase.CROSS_DOC in job.phases:
                 await self._phase_cross_doc(job, stats)
                 phases_completed.append(Pass2Phase.CROSS_DOC.value)
@@ -297,7 +313,8 @@ class Pass2Orchestrator:
         logger.info(
             f"[OSMOSE:Pass2] Job {job.job_id} completed in {stats.duration_seconds:.1f}s "
             f"(topics={stats.structural_topics_count}, covers={stats.covers_relations_count}, "
-            f"classify={stats.classify_fine_count}, relations={stats.enrich_relations_count})"
+            f"classify={stats.classify_fine_count}, relations={stats.enrich_relations_count}, "
+            f"pass3_verified={stats.pass3_verified}/{stats.pass3_candidates})"
         )
 
         return stats
@@ -848,6 +865,78 @@ class Pass2Orchestrator:
 3. Provide predicate (verb/phrase) and confidence
 
 Return JSON with "relations" array."""
+
+    async def _phase_semantic_consolidation(self, job: Pass2Job, stats: Pass2Stats):
+        """
+        Phase SEMANTIC_CONSOLIDATION: Pass 3 - Extractive Verification.
+
+        ADR_GRAPH_FIRST_ARCHITECTURE - Pass 3
+
+        SEULE source de relations sémantiques prouvées.
+        Chaque relation DOIT avoir:
+        - evidence_context_ids[] non vide
+        - Quote extractive du texte source
+
+        Pipeline:
+        1. Candidate generation: co-présence Topic/Section
+        2. Extractive verification: LLM cite le passage exact ou ABSTAIN
+        3. Relation writing: persiste uniquement si preuve valide
+
+        IMPORTANT: ABSTAIN préféré à relation douteuse.
+        """
+        from knowbase.relations.semantic_consolidation_pass3 import run_pass3_consolidation
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+        from knowbase.common.llm_router import get_llm_router
+        from knowbase.config.settings import get_settings
+
+        logger.info(
+            f"[OSMOSE:Pass3:SEMANTIC_CONSOLIDATION] Starting for doc {job.document_id}"
+        )
+
+        try:
+            # Initialiser clients
+            settings = get_settings()
+            neo4j_client = get_neo4j_client(
+                uri=settings.neo4j_uri,
+                user=settings.neo4j_user,
+                password=settings.neo4j_password,
+                database="neo4j"
+            )
+
+            if not neo4j_client.is_connected():
+                logger.warning(
+                    f"[OSMOSE:Pass3] Neo4j not connected, skipping semantic consolidation"
+                )
+                return
+
+            llm_router = get_llm_router()
+
+            # Exécuter Pass 3
+            pass3_stats = await run_pass3_consolidation(
+                document_id=job.document_id,
+                neo4j_client=neo4j_client,
+                llm_router=llm_router,
+                tenant_id=job.tenant_id,
+                max_candidates=50
+            )
+
+            # Mettre à jour stats
+            stats.pass3_candidates = pass3_stats.candidates_generated
+            stats.pass3_verified = pass3_stats.relations_created
+            stats.pass3_abstained = pass3_stats.abstained
+
+            logger.info(
+                f"[OSMOSE:Pass3:SEMANTIC_CONSOLIDATION] Complete: "
+                f"{stats.pass3_verified}/{stats.pass3_candidates} verified, "
+                f"{stats.pass3_abstained} abstained"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE:Pass3:SEMANTIC_CONSOLIDATION] Failed: {e}",
+                exc_info=True
+            )
+            stats.errors.append(f"SEMANTIC_CONSOLIDATION: {e}")
 
     async def _phase_cross_doc(self, job: Pass2Job, stats: Pass2Stats):
         """
