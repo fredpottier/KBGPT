@@ -23,9 +23,8 @@ Date: 2026-01-06
 """
 
 import logging
-import hashlib
 import re
-from typing import List, Dict, Optional, Any, Tuple, Set
+from typing import List, Dict, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -725,35 +724,118 @@ async def _get_section_texts(
     """
     Récupère les textes des sections d'un document.
 
+    Utilise Qdrant pour récupérer le texte complet des chunks,
+    groupés par context_id (pont Neo4j ↔ Qdrant établi en Phase 0).
+
     Returns:
         {context_id: text}
     """
-    query = """
-    MATCH (ctx:SectionContext {document_id: $document_id, tenant_id: $tenant_id})
-    OPTIONAL MATCH (dc:DocumentChunk {document_id: $document_id, tenant_id: $tenant_id})
-    WHERE ctx.context_id CONTAINS dc.section_id OR ctx.section_path = dc.section_path
-
-    RETURN ctx.context_id AS context_id,
-           coalesce(ctx.text_preview, collect(dc.text_preview)[0]) AS text
-    """
+    from knowbase.common.clients.qdrant_client import get_qdrant_client
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
 
     texts = {}
 
     try:
+        # 1. D'abord récupérer les context_ids des sections du document
+        query = """
+        MATCH (ctx:SectionContext {tenant_id: $tenant_id})
+        WHERE ctx.doc_id = $document_id
+        RETURN ctx.context_id AS context_id, ctx.section_path AS section_path
+        """
+
+        context_ids = []
         with neo4j_client.driver.session(database=neo4j_client.database) as session:
             result = session.run(
                 query,
                 document_id=document_id,
                 tenant_id=tenant_id
             )
+            context_ids = [r["context_id"] for r in result if r.get("context_id")]
 
-            for record in result:
-                ctx_id = record["context_id"]
-                text = record["text"]
-                if ctx_id and text:
-                    texts[ctx_id] = text
+        if not context_ids:
+            logger.debug(f"[OSMOSE:Pass3] No SectionContext found for {document_id}")
+            return texts
+
+        # 2. Récupérer les chunks depuis Qdrant filtrés par context_id
+        qdrant = get_qdrant_client()
+        collection_name = "knowbase"
+
+        for ctx_id in context_ids:
+            try:
+                # Scroll pour récupérer tous les chunks de cette section
+                scroll_result = qdrant.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="context_id",
+                                match=MatchValue(value=ctx_id)
+                            ),
+                            FieldCondition(
+                                key="tenant_id",
+                                match=MatchValue(value=tenant_id)
+                            )
+                        ]
+                    ),
+                    limit=50,  # Max chunks par section
+                    with_payload=True,
+                    with_vectors=False
+                )
+
+                # Concaténer les textes des chunks
+                chunk_texts = []
+                if scroll_result and scroll_result[0]:
+                    for point in scroll_result[0]:
+                        if point.payload and point.payload.get("text"):
+                            chunk_texts.append(point.payload["text"])
+
+                if chunk_texts:
+                    texts[ctx_id] = "\n\n".join(chunk_texts)
+
+            except Exception as e:
+                logger.debug(f"[OSMOSE:Pass3] Failed to get chunks for {ctx_id}: {e}")
+                continue
+
+        # 3. Fallback: si Qdrant n'a pas les context_id, utiliser document_id
+        if not texts:
+            logger.debug(f"[OSMOSE:Pass3] Fallback to document_id filter for {document_id}")
+            try:
+                scroll_result = qdrant.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="document_id",
+                                match=MatchValue(value=document_id)
+                            ),
+                            FieldCondition(
+                                key="tenant_id",
+                                match=MatchValue(value=tenant_id)
+                            )
+                        ]
+                    ),
+                    limit=100,
+                    with_payload=True,
+                    with_vectors=False
+                )
+
+                if scroll_result and scroll_result[0]:
+                    # Grouper par context_id si disponible, sinon utiliser un ID générique
+                    for point in scroll_result[0]:
+                        if point.payload:
+                            ctx_id = point.payload.get("context_id", f"doc:{document_id}")
+                            text = point.payload.get("text", "")
+                            if text:
+                                if ctx_id in texts:
+                                    texts[ctx_id] += "\n\n" + text
+                                else:
+                                    texts[ctx_id] = text
+
+            except Exception as e:
+                logger.error(f"[OSMOSE:Pass3] Fallback also failed: {e}")
 
     except Exception as e:
         logger.error(f"[OSMOSE:Pass3] Failed to get section texts: {e}")
 
+    logger.debug(f"[OSMOSE:Pass3] Retrieved texts for {len(texts)} sections")
     return texts

@@ -414,6 +414,12 @@ class Pass2Orchestrator:
         """
         Récupère le texte complet d'un document.
 
+        Le texte est reconstitué depuis les DocumentChunk.text_preview
+        qui contiennent les 200 premiers caractères de chaque chunk.
+
+        Note: Pour Pass 2a (extraction Topics), text_preview suffit car
+        on analyse la structure (H1/H2 headers) pas le contenu complet.
+
         Returns:
             Texte du document ou None si non trouvé
         """
@@ -432,27 +438,13 @@ class Pass2Orchestrator:
             return None
 
         try:
-            # Essayer de récupérer le texte depuis le Document node
-            query = """
-            MATCH (d:Document {document_id: $document_id, tenant_id: $tenant_id})
-            RETURN d.text_content AS text
-            """
-
-            with neo4j_client.driver.session(database="neo4j") as session:
-                result = session.run(
-                    query,
-                    document_id=document_id,
-                    tenant_id=self.tenant_id
-                )
-                record = result.single()
-
-                if record and record.get("text"):
-                    return record["text"]
-
-            # Fallback: concaténer les chunks
+            # Récupérer le texte depuis les DocumentChunk
+            # Note: text_preview = 200 premiers chars de chaque chunk
+            # Pour l'extraction de Topics (H1/H2), c'est suffisant car les headers
+            # sont généralement au début des chunks
             query_chunks = """
             MATCH (dc:DocumentChunk {document_id: $document_id, tenant_id: $tenant_id})
-            RETURN dc.text_preview AS text
+            RETURN dc.text_preview AS text, dc.chunk_index AS idx
             ORDER BY dc.chunk_index
             """
 
