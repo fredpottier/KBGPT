@@ -1,6 +1,6 @@
 # ADR-2024-12-30: Reducto-like Parsing Primitives in OSMOSE
 
-**Status:** ⚠️ EN COURS (~85%) - Janvier 2026
+**Status:** ⚠️ EN COURS (~95%) - Janvier 2026
 **Date:** 2024-12-30
 **Authors:** OSMOSE Team
 **Reviewers:** -
@@ -29,10 +29,12 @@
 | Storage Qdrant | `common/clients/qdrant_client.py` | ✅ parse_confidence, confidence_signals |
 | Storage Neo4j | `ingestion/osmose_persistence.py` | ✅ extract_confidence sur ProtoConcept |
 | ProtoConcept schema | `api/schemas/concepts.py` | ✅ extract_confidence field |
-| **QW-3: Diagram Interpreter** | | ❌ **NON FAIT** |
-| Pass 0 pre-analyse | - | ❌ Non fait |
-| Pass 1 VLM adaptatif | - | ❌ Non fait |
-| DiagramAnalysis schema | - | ❌ Non fait |
+| **QW-3: Diagram Interpreter** | | ✅ **COMPLET** |
+| Pass 0 pre-analyse (routing) | `extraction_v2/gating/engine.py` (GatingEngine) | ✅ Vision Gating V4 |
+| Pass 1 VLM adaptatif | `extraction_v2/vision/diagram_interpreter.py` | ✅ DiagramInterpreter |
+| VISION_LITE prompts | `extraction_v2/vision/prompts.py` | ✅ VISION_LITE_* |
+| Quality Gate + fallback | `DiagramInterpreter._apply_quality_gate()` | ✅ confidence < 0.7 → prose |
+| InterpretationResult schema | `extraction_v2/vision/diagram_interpreter.py` | ✅ Dataclass complet |
 | **MT-1: Layout-Aware Chunking** | | ❌ **NON FAIT** |
 | layout_detector.py | - | ❌ Non fait |
 | Chunking par region | - | ❌ Non fait |
@@ -55,9 +57,17 @@
   - Stockage Qdrant: `parse_confidence`, `confidence_signals` dans payload chunks
   - Stockage Neo4j: `extract_confidence` sur nodes ProtoConcept
   - Schema ProtoConcept étendu avec `extract_confidence: float`
+- ✅ **QW-3 COMPLET:** Diagram Interpreter
+  - `DiagramInterpreter`: Routing adaptatif LITE/FULL/SKIP/TEXT_ONLY
+  - Pass 0: GatingEngine existant (Vision Gating V4)
+  - Pass 1: VLM adaptatif selon VNS (VISION_LITE si VNS < 0.60, VISION_FULL sinon)
+  - VISION_LITE prompts: Extraction rapide (diagram_type + labels), detail=low
+  - VISION_FULL prompts: Extraction structurée complète (elements, relations), detail=high
+  - Quality Gate: confidence < 0.70 → fallback prose summary
+  - `InterpretationResult`: Dataclass unifié (method, raw_output, confidence, etc.)
 
-**Ce qui reste à faire (Quick Wins):**
-- QW-3: Diagram Interpreter → Extraction structurée diagrammes
+**Ce qui reste à faire (Moyen Terme):**
+- MT-1: Layout-Aware Chunking → Chunking par régions structurelles
 
 **Note Migration MegaParse → Docling (Janvier 2026):**
 L'ADR original mentionnait MegaParse. Le projet a migré vers **Docling** qui gère nativement:
@@ -325,7 +335,7 @@ OSMOSE reste un systeme de **connaissance consolidee**, pas d'extraction locale.
     └── get_weights_for_domain()
 ```
 
-### Phase 1: Quick Wins ⚠️ EN COURS
+### Phase 1: Quick Wins ✅ COMPLET
 
 ```
 QW-1: Table Summaries ✅ DONE (Janvier 2026)
@@ -343,12 +353,13 @@ QW-2: Confidence Scores ✅ DONE (Janvier 2026)
 ├── common/clients/qdrant_client.py (payload enrichi)
 └── ingestion/osmose_persistence.py (Neo4j extract_confidence)
 
-QW-3: Diagram Interpreter ❌
-├── Pass 0 - Pre-analyse locale
-├── Pass 1 - VLM Adaptatif
-    ├── Schema DiagramAnalysis
-    ├── Quality Gate
-    └── Integration
+QW-3: Diagram Interpreter ✅ DONE (Janvier 2026)
+├── extraction_v2/vision/diagram_interpreter.py (DiagramInterpreter, InterpretationResult)
+├── extraction_v2/vision/prompts.py (VISION_LITE_* prompts)
+├── Pass 0: GatingEngine existant → route()
+├── Pass 1: VLM adaptatif (VISION_LITE < 0.60, VISION_FULL >= 0.60)
+├── Quality Gate: confidence < 0.70 → fallback prose
+└── ExtractionMethod enum: SKIP, TEXT_ONLY, VISION_LITE, VISION_FULL, FALLBACK_PROSE
 ```
 
 ### Phase 2: Moyen Terme ❌ NON FAIT
@@ -474,6 +485,11 @@ Document → [Reducto API] → JSON propre → [OSMOSE Semantic]
 |            | - Schema DiagramAnalysis (elements, relations, tables) | |
 |            | - Metriques extraction diagrammes | |
 |            | - Risques specifiques VLM structuree | |
+| 2026-01-06 | **QW-3 Implementation COMPLETE** | Claude Code |
+|            | - DiagramInterpreter avec routing adaptatif | |
+|            | - VISION_LITE prompts (fast extraction) | |
+|            | - Quality Gate + fallback prose | |
+|            | - Phase 1 Quick Wins 100% complete | |
 
 ---
 

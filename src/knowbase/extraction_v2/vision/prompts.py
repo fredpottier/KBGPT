@@ -270,10 +270,138 @@ def get_vision_messages(
     return messages
 
 
+# =============================================================================
+# QW-3: VISION_LITE prompts (Diagram Interpreter - ADR_REDUCTO_PARSING_PRIMITIVES)
+# =============================================================================
+# VISION_LITE is a simpler, faster prompt for less complex visual content.
+# Used when VNS is moderate (VISION_RECOMMENDED but not VISION_REQUIRED).
+
+VISION_LITE_SYSTEM_PROMPT = """You are a fast visual extraction engine for document processing.
+
+Your task is to quickly identify:
+1. The diagram type (architecture, flowchart, table, etc.)
+2. All visible text labels and their types (box, arrow label, heading, etc.)
+
+Output ONLY valid JSON. Be fast and accurate."""
+
+
+VISION_LITE_JSON_SCHEMA = """{
+  "diagram_type": "architecture | flowchart | table | org_chart | process | timeline | comparison | hierarchy | other",
+  "labels": [
+    {
+      "id": "string (e.g., 'L1')",
+      "text": "string (exact text visible)",
+      "type": "box | arrow_label | title | caption | other"
+    }
+  ],
+  "overall_confidence": 0.0
+}"""
+
+
+VISION_LITE_USER_PROMPT_TEMPLATE = """Quickly extract diagram type and all visible text from this image.
+
+## LOCAL TEXT CONTEXT (if available)
+{local_snippets}
+
+## OUTPUT JSON SCHEMA (STRICT)
+```json
+{json_schema}
+```
+
+## RULES
+- Extract ONLY text that is clearly visible
+- Do not invent or assume any content
+- Be fast and concise
+- Return valid JSON only"""
+
+
+def build_vision_lite_prompt(local_snippets: str = "") -> str:
+    """
+    Construit le prompt Vision LITE (extraction rapide).
+
+    Args:
+        local_snippets: Texte local de la page (optionnel)
+
+    Returns:
+        Prompt LITE pour extraction rapide
+    """
+    snippets_section = local_snippets if local_snippets else "(No local text provided)"
+
+    return VISION_LITE_USER_PROMPT_TEMPLATE.format(
+        local_snippets=snippets_section,
+        json_schema=VISION_LITE_JSON_SCHEMA,
+    )
+
+
+def get_vision_lite_messages(
+    local_snippets: str = "",
+    image_base64: Optional[str] = None,
+    image_url: Optional[str] = None,
+) -> list:
+    """
+    Construit les messages pour l'API Vision en mode LITE.
+
+    Args:
+        local_snippets: Texte local
+        image_base64: Image encodée en base64
+        image_url: URL de l'image (alternatif)
+
+    Returns:
+        Liste de messages pour l'API Chat Completions
+    """
+    if not image_base64 and not image_url:
+        raise ValueError("Either image_base64 or image_url must be provided")
+
+    messages = [
+        {
+            "role": "system",
+            "content": VISION_LITE_SYSTEM_PROMPT,
+        }
+    ]
+
+    user_content = []
+
+    # Add image
+    if image_base64:
+        user_content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/png;base64,{image_base64}",
+                "detail": "low",  # LITE uses low detail for speed
+            },
+        })
+    elif image_url:
+        user_content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": image_url,
+                "detail": "low",
+            },
+        })
+
+    user_content.append({
+        "type": "text",
+        "text": build_vision_lite_prompt(local_snippets),
+    })
+
+    messages.append({
+        "role": "user",
+        "content": user_content,
+    })
+
+    return messages
+
+
 __all__ = [
     "VISION_SYSTEM_PROMPT",
     "VISION_JSON_SCHEMA",
     "VISION_USER_PROMPT_TEMPLATE",
     "build_vision_prompt",
     "get_vision_messages",
+    # QW-3: VISION_LITE
+    "VISION_LITE_SYSTEM_PROMPT",
+    "VISION_LITE_JSON_SCHEMA",
+    "VISION_LITE_USER_PROMPT_TEMPLATE",
+    "build_vision_lite_prompt",
+    "get_vision_lite_messages",
 ]
