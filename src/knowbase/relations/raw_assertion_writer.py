@@ -217,7 +217,9 @@ class RawAssertionWriter:
         alt_type: Optional[RelationType] = None,
         alt_type_confidence: Optional[float] = None,
         relation_subtype_raw: Optional[str] = None,
-        context_hint: Optional[str] = None
+        context_hint: Optional[str] = None,
+        # ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
+        evidence_context_ids: Optional[List[str]] = None,
     ) -> Optional[str]:
         """
         Write a single RawAssertion to Neo4j.
@@ -327,6 +329,8 @@ class RawAssertionWriter:
             source_chunk_id=source_chunk_id,
             source_segment_id=source_segment_id,
             source_language=source_language,
+            # ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
+            evidence_context_ids=evidence_context_ids or [],
             # Traçabilité
             extractor_name="llm_relation_extractor",
             extractor_version=self.extractor_version,
@@ -448,6 +452,8 @@ class RawAssertionWriter:
             source_chunk_id: $source_chunk_id,
             source_segment_id: $source_segment_id,
             source_language: $source_language,
+            // ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
+            evidence_context_ids: $evidence_context_ids,
             // Traçabilité
             extractor_name: $extractor_name,
             extractor_version: $extractor_version,
@@ -516,6 +522,8 @@ class RawAssertionWriter:
             "source_chunk_id": assertion.source_chunk_id,
             "source_segment_id": assertion.source_segment_id,
             "source_language": assertion.source_language,
+            # ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
+            "evidence_context_ids": assertion.evidence_context_ids,
             # Traçabilité
             "extractor_name": assertion.extractor_name,
             "extractor_version": assertion.extractor_version,

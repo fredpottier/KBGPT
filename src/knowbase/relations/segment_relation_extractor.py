@@ -31,6 +31,7 @@ from enum import Enum
 from knowbase.common.llm_router import get_llm_router, TaskType
 from knowbase.relations.types import RelationType, RawAssertionFlags
 from knowbase.semantic.anchor_resolver import fuzzy_match_in_text
+from knowbase.common.context_id import make_context_id  # ADR_GRAPH_FIRST_ARCHITECTURE
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,10 @@ class ExtractedRelation:
     chunk_id: Optional[str] = None
     evidence_span: Optional[Tuple[int, int]] = None
 
+    # ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
+    # context_ids des SectionContext où l'evidence a été trouvée
+    evidence_context_ids: List[str] = field(default_factory=list)
+
 
 @dataclass
 class SegmentExtractionResult:
@@ -211,6 +216,9 @@ class SegmentRelationExtractor:
         self.config = scoring_config or SegmentScoringConfig()
         self.max_concurrent = max_concurrent
         self.llm_router = get_llm_router()
+
+        # ADR_GRAPH_FIRST_ARCHITECTURE: Document ID courant pour context_id
+        self._current_document_id: Optional[str] = None
 
         logger.info(
             f"[OSMOSE:Pass2:SegmentExtractor] Initialized "
@@ -343,6 +351,9 @@ class SegmentRelationExtractor:
             total_segments=len(segments)
         )
 
+        # ADR_GRAPH_FIRST_ARCHITECTURE: Stocker document_id pour context_id
+        self._current_document_id = document_id
+
         # 1. Score les segments
         scored_segments = self.score_segments(segments, concept_anchors)
 
@@ -462,7 +473,10 @@ class SegmentRelationExtractor:
                 relation = self._resolve_relation(
                     rel_data=rel_data,
                     label_to_id=label_to_id,
-                    segment_text=scored_seg.text
+                    segment_text=scored_seg.text,
+                    # ADR_GRAPH_FIRST_ARCHITECTURE: Passer info pour context_id
+                    document_id=self._current_document_id,
+                    section_id=scored_seg.section_id,
                 )
                 if relation:
                     result.relations.append(relation)
@@ -552,9 +566,16 @@ Return JSON with "relations" array."""
         self,
         rel_data: Dict[str, Any],
         label_to_id: Dict[str, str],
-        segment_text: str
+        segment_text: str,
+        document_id: Optional[str] = None,
+        section_id: Optional[str] = None,
     ) -> Optional[ExtractedRelation]:
-        """Résout une relation vers des concept_ids."""
+        """
+        Résout une relation vers des concept_ids.
+
+        ADR_GRAPH_FIRST_ARCHITECTURE: Génère aussi evidence_context_ids
+        pour le lien vers la Navigation Layer.
+        """
 
         subject = rel_data.get("subject", "")
         obj = rel_data.get("object", "")
@@ -597,6 +618,12 @@ Return JSON with "relations" array."""
             if match_result:
                 evidence_span = (match_result["start"], match_result["end"])
 
+        # ADR_GRAPH_FIRST_ARCHITECTURE: Générer context_id pour le lien Navigation Layer
+        evidence_context_ids = []
+        if document_id and section_id:
+            context_id = make_context_id(document_id, section_id)
+            evidence_context_ids.append(context_id)
+
         return ExtractedRelation(
             subject_label=subject,
             object_label=obj,
@@ -605,7 +632,8 @@ Return JSON with "relations" array."""
             confidence=rel_data.get("confidence", 0.7),
             subject_concept_id=subject_id,
             object_concept_id=object_id,
-            evidence_span=evidence_span
+            evidence_span=evidence_span,
+            evidence_context_ids=evidence_context_ids,
         )
 
 

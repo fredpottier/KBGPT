@@ -403,7 +403,9 @@ class Pass2Orchestrator:
                         relation_type=relation_type,
                         type_confidence=rel.confidence,
                         evidence_span_start=rel.evidence_span[0] if rel.evidence_span else None,
-                        evidence_span_end=rel.evidence_span[1] if rel.evidence_span else None
+                        evidence_span_end=rel.evidence_span[1] if rel.evidence_span else None,
+                        # ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
+                        evidence_context_ids=rel.evidence_context_ids,
                     )
                     if result:
                         written_count += 1

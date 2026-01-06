@@ -232,6 +232,12 @@ class RawAssertion(BaseModel):
     source_segment_id: Optional[str] = Field(default=None, description="Ex: slide_7")
     source_language: str = Field(default="en")
 
+    # ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
+    evidence_context_ids: List[str] = Field(
+        default_factory=list,
+        description="context_id des SectionContext où l'evidence a été trouvée (ex: sec:doc1:hash1)"
+    )
+
     # Traçabilité
     extractor_name: str = Field(default="llm_relation_extractor")
     extractor_version: str = Field(default="v1.0.0")
