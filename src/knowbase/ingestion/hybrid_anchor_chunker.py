@@ -32,6 +32,7 @@ from knowbase.common.clients.embeddings import get_embedding_manager
 from knowbase.api.schemas.concepts import Anchor, AnchorPayload
 from knowbase.config.feature_flags import get_hybrid_anchor_config
 from knowbase.extraction_v2.confidence import get_confidence_scorer  # QW-2
+from knowbase.extraction_v2.layout import get_layout_detector, LayoutRegion  # MT-1
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +88,14 @@ class HybridAnchorChunker:
         # QW-2: Confidence scorer pour parse_confidence
         self._confidence_scorer = get_confidence_scorer()
 
+        # MT-1: Layout detector pour chunking structure-aware
+        self._layout_detector = get_layout_detector()
+        self.layout_aware = chunking_config.get("layout_aware", True)  # Defaut: active
+
         logger.info(
             f"[HybridAnchorChunker] Initialized "
-            f"(chunk_size={self.chunk_size}, overlap={self.overlap})"
+            f"(chunk_size={self.chunk_size}, overlap={self.overlap}, "
+            f"layout_aware={self.layout_aware})"
         )
 
     def chunk_document(
@@ -136,11 +142,15 @@ class HybridAnchorChunker:
 
         try:
             # 1. Decouper en chunks (document-centric, pas concept-focused)
-            raw_chunks = self._split_into_chunks(text)
+            # MT-1: Utiliser le chunking layout-aware si active
+            if self.layout_aware:
+                raw_chunks = self._split_into_chunks_layout_aware(text)
+            else:
+                raw_chunks = self._split_into_chunks(text)
 
             logger.info(
                 f"[HybridAnchorChunker] Created {len(raw_chunks)} chunks "
-                f"from {len(text)} chars (doc={document_id})"
+                f"from {len(text)} chars (doc={document_id}, layout_aware={self.layout_aware})"
             )
 
             # 2. Mapper chunks vers segments (V2.1)
@@ -196,22 +206,36 @@ class HybridAnchorChunker:
                     "canonical_concept_ids": [],
                     # QW-2: Confidence scores (ADR_REDUCTO_PARSING_PRIMITIVES)
                     "parse_confidence": parse_confidence,
-                    "confidence_signals": confidence_result.signals
+                    "confidence_signals": confidence_result.signals,
+                    # MT-1: Layout-aware chunking (ADR_REDUCTO_PARSING_PRIMITIVES)
+                    "is_atomic": chunk_data.get("is_atomic", False),
+                    "region_type": chunk_data.get("region_type", "unknown"),
                 })
 
             # 6. Valider couverture segment (V2.1)
             if segments:
                 self._validate_segment_coverage(final_chunks, fail_fast_orphans)
 
-            # 7. Metriques de qualite
+            # 7. MT-1: Valider qu'aucune table n'a ete coupee
+            if self.layout_aware:
+                is_valid, violations = self._layout_detector.validate_no_cut_tables(
+                    final_chunks, text
+                )
+                if not is_valid:
+                    logger.error(
+                        f"[HybridAnchorChunker] MT-1 VIOLATION: {len(violations)} tables coupees!"
+                    )
+
+            # 8. Metriques de qualite
             orphan_count = sum(1 for c in final_chunks if not c.get("segment_id"))
             segment_coverage = 1.0 - (orphan_count / len(final_chunks)) if final_chunks else 0.0
             total_anchors = sum(len(c['anchored_concepts']) for c in final_chunks)
+            atomic_count = sum(1 for c in final_chunks if c.get("is_atomic", False))
 
             logger.info(
                 f"[HybridAnchorChunker] Done: {len(final_chunks)} chunks "
                 f"(segment_coverage={segment_coverage:.1%}, orphans={orphan_count}, "
-                f"anchors={total_anchors})"
+                f"anchors={total_anchors}, atomic={atomic_count})"
             )
 
             return final_chunks
@@ -289,6 +313,170 @@ class HybridAnchorChunker:
                 start_idx += (chunk_chars - overlap_chars)
 
         return chunks
+
+    def _split_into_chunks_layout_aware(self, text: str) -> List[Dict[str, Any]]:
+        """
+        MT-1: Decoupe texte en chunks en respectant les unites structurelles.
+
+        Regle non-negociable: "Ne jamais couper un tableau"
+
+        Algorithme:
+        1. Detecter les regions atomiques (tables, vision)
+        2. Pour chaque region non-atomique, chunker normalement
+        3. Les regions atomiques deviennent des chunks entiers (meme si > chunk_size)
+
+        Args:
+            text: Texte a decouper
+
+        Returns:
+            Liste de dicts avec text, char_start, char_end, token_count, is_atomic
+        """
+        if not text:
+            return []
+
+        # 1. Detecter les regions structurelles
+        regions = self._layout_detector.detect_regions(text)
+
+        if not regions:
+            # Fallback si pas de regions detectees
+            return self._split_into_chunks(text)
+
+        chunks = []
+
+        for region in regions:
+            if region.atomic:
+                # Region atomique: garder entiere (TABLE, VISION)
+                # Meme si elle depasse chunk_size
+                token_count = self._count_tokens(region.text)
+                chunks.append({
+                    "text": region.text.strip(),
+                    "char_start": region.char_start,
+                    "char_end": region.char_end,
+                    "token_count": token_count,
+                    "is_atomic": True,
+                    "region_type": region.type.value,
+                })
+
+                if token_count > self.chunk_size:
+                    logger.debug(
+                        f"[HybridAnchorChunker] Atomic region kept whole: "
+                        f"{region.type.value} ({token_count} tokens > {self.chunk_size})"
+                    )
+            else:
+                # Region non-atomique: chunker normalement si assez grande
+                region_text = region.text
+                if not region_text.strip():
+                    continue
+
+                token_count = self._count_tokens(region_text)
+
+                if token_count <= self.chunk_size:
+                    # Region petite: un seul chunk
+                    if token_count >= self.min_chunk_tokens:
+                        chunks.append({
+                            "text": region_text.strip(),
+                            "char_start": region.char_start,
+                            "char_end": region.char_end,
+                            "token_count": token_count,
+                            "is_atomic": False,
+                            "region_type": region.type.value,
+                        })
+                else:
+                    # Region grande: decouper en plusieurs chunks
+                    sub_chunks = self._split_region_into_chunks(
+                        region_text,
+                        region.char_start,
+                    )
+                    for sc in sub_chunks:
+                        sc["is_atomic"] = False
+                        sc["region_type"] = region.type.value
+                    chunks.extend(sub_chunks)
+
+        # Stats
+        atomic_chunks = sum(1 for c in chunks if c.get("is_atomic", False))
+        logger.debug(
+            f"[HybridAnchorChunker] Layout-aware: {len(chunks)} chunks "
+            f"({atomic_chunks} atomic, {len(regions)} regions)"
+        )
+
+        return chunks
+
+    def _split_region_into_chunks(
+        self,
+        region_text: str,
+        base_offset: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Decoupe une region non-atomique en chunks de taille fixe.
+
+        Args:
+            region_text: Texte de la region
+            base_offset: Offset de debut de la region dans le texte complet
+
+        Returns:
+            Liste de chunks
+        """
+        chunks = []
+
+        if self.tokenizer:
+            tokens = self.tokenizer.encode(region_text)
+
+            start_idx = 0
+            while start_idx < len(tokens):
+                end_idx = min(start_idx + self.chunk_size, len(tokens))
+                chunk_tokens = tokens[start_idx:end_idx]
+
+                # Skip si chunk trop petit (sauf le dernier)
+                if len(chunk_tokens) < self.min_chunk_tokens and chunks:
+                    break
+
+                chunk_text = self.tokenizer.decode(chunk_tokens)
+
+                # Positions relatives dans la region
+                rel_char_start = len(self.tokenizer.decode(tokens[:start_idx]))
+                rel_char_end = len(self.tokenizer.decode(tokens[:end_idx]))
+
+                chunks.append({
+                    "text": chunk_text.strip(),
+                    "char_start": base_offset + rel_char_start,
+                    "char_end": base_offset + rel_char_end,
+                    "token_count": len(chunk_tokens),
+                })
+
+                # Avancer avec overlap
+                start_idx += (self.chunk_size - self.overlap)
+
+        else:
+            # Fallback char-based
+            chunk_chars = self.chunk_size * 4
+            overlap_chars = self.overlap * 4
+
+            start_idx = 0
+            while start_idx < len(region_text):
+                end_idx = min(start_idx + chunk_chars, len(region_text))
+                chunk_text = region_text[start_idx:end_idx]
+
+                if len(chunk_text) < self.min_chunk_tokens * 4 and chunks:
+                    break
+
+                chunks.append({
+                    "text": chunk_text.strip(),
+                    "char_start": base_offset + start_idx,
+                    "char_end": base_offset + end_idx,
+                    "token_count": len(chunk_text) // 4,
+                })
+
+                start_idx += (chunk_chars - overlap_chars)
+
+        return chunks
+
+    def _count_tokens(self, text: str) -> int:
+        """Compte le nombre de tokens dans un texte."""
+        if self.tokenizer:
+            return len(self.tokenizer.encode(text))
+        else:
+            # Approximation: 1 token = 4 chars
+            return len(text) // 4
 
     def _generate_embeddings(self, texts: List[str]) -> List[Any]:
         """

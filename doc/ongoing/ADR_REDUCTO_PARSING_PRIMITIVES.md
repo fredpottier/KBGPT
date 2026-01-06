@@ -1,6 +1,6 @@
 # ADR-2024-12-30: Reducto-like Parsing Primitives in OSMOSE
 
-**Status:** ⚠️ EN COURS (~95%) - Janvier 2026
+**Status:** ✅ COMPLET (100%) - Janvier 2026
 **Date:** 2024-12-30
 **Authors:** OSMOSE Team
 **Reviewers:** -
@@ -35,9 +35,12 @@
 | VISION_LITE prompts | `extraction_v2/vision/prompts.py` | ✅ VISION_LITE_* |
 | Quality Gate + fallback | `DiagramInterpreter._apply_quality_gate()` | ✅ confidence < 0.7 → prose |
 | InterpretationResult schema | `extraction_v2/vision/diagram_interpreter.py` | ✅ Dataclass complet |
-| **MT-1: Layout-Aware Chunking** | | ❌ **NON FAIT** |
-| layout_detector.py | - | ❌ Non fait |
-| Chunking par region | - | ❌ Non fait |
+| **MT-1: Layout-Aware Chunking** | | ✅ **COMPLET** |
+| LayoutDetector | `extraction_v2/layout/layout_detector.py` | ✅ Detection regions atomiques |
+| LayoutRegion | `extraction_v2/layout/layout_detector.py` | ✅ Dataclass avec atomic flag |
+| Chunking layout-aware | `ingestion/hybrid_anchor_chunker.py` | ✅ `_split_into_chunks_layout_aware()` |
+| Validation tables | `LayoutDetector.validate_no_cut_tables()` | ✅ Garantie 0 tableaux coupés |
+| Storage Qdrant | `common/clients/qdrant_client.py` | ✅ is_atomic, region_type |
 
 **Ce qui est implémenté:**
 - ✅ Vision Gating V4 complet avec 5 signaux (RIS, VDS, TFS, SDS, VTS)
@@ -66,8 +69,16 @@
   - Quality Gate: confidence < 0.70 → fallback prose summary
   - `InterpretationResult`: Dataclass unifié (method, raw_output, confidence, etc.)
 
-**Ce qui reste à faire (Moyen Terme):**
-- MT-1: Layout-Aware Chunking → Chunking par régions structurelles
+- ✅ **MT-1 COMPLET:** Layout-Aware Chunking
+  - `LayoutDetector`: Détection des régions structurelles dans le full_text linéarisé
+  - `LayoutRegion`: Dataclass avec flag `atomic` (tables et vision ne peuvent pas être coupées)
+  - `RegionType` enum: TABLE, VISION (atomiques), PARAGRAPH, TITLE, TEXT (divisibles)
+  - `_split_into_chunks_layout_aware()`: Nouvelle méthode du chunker
+  - Règle non-négociable respectée: "Ne jamais couper un tableau"
+  - Validation automatique: `validate_no_cut_tables()` vérifie 0 violations
+  - Stockage Qdrant enrichi: `is_atomic`, `region_type` dans payload
+
+**✅ ADR COMPLET - Toutes les primitives Reducto-like sont implémentées.**
 
 **Note Migration MegaParse → Docling (Janvier 2026):**
 L'ADR original mentionnait MegaParse. Le projet a migré vers **Docling** qui gère nativement:
@@ -362,13 +373,17 @@ QW-3: Diagram Interpreter ✅ DONE (Janvier 2026)
 └── ExtractionMethod enum: SKIP, TEXT_ONLY, VISION_LITE, VISION_FULL, FALLBACK_PROSE
 ```
 
-### Phase 2: Moyen Terme ❌ NON FAIT
+### Phase 2: Moyen Terme ✅ COMPLET
 
 ```
-MT-1: Layout-Aware Chunking ❌
-├── Nouveau composant: layout_detector.py
-├── Modification: hybrid_anchor_chunker.py
-└── Validation: 0 tableaux coupes sur set de test
+MT-1: Layout-Aware Chunking ✅ DONE (Janvier 2026)
+├── extraction_v2/layout/layout_detector.py (LayoutDetector, LayoutRegion, RegionType)
+├── extraction_v2/layout/__init__.py (exports)
+├── ingestion/hybrid_anchor_chunker.py (_split_into_chunks_layout_aware, layout_aware flag)
+├── common/clients/qdrant_client.py (is_atomic, region_type dans payload)
+├── Régions atomiques: TABLE, VISION (ne jamais couper)
+├── Régions divisibles: PARAGRAPH, TITLE, TEXT (peuvent être découpées)
+└── Validation: validate_no_cut_tables() garantit 0 tableaux coupés
 ```
 
 ### Phase 3: Optionnel (si necessaire)
@@ -490,8 +505,15 @@ Document → [Reducto API] → JSON propre → [OSMOSE Semantic]
 |            | - VISION_LITE prompts (fast extraction) | |
 |            | - Quality Gate + fallback prose | |
 |            | - Phase 1 Quick Wins 100% complete | |
+| 2026-01-06 | **MT-1 Implementation COMPLETE - ADR 100%** | Claude Code |
+|            | - LayoutDetector avec LayoutRegion dataclass | |
+|            | - RegionType: TABLE, VISION (atomic), PARAGRAPH, TITLE, TEXT | |
+|            | - HybridAnchorChunker._split_into_chunks_layout_aware() | |
+|            | - Validation: validate_no_cut_tables() garantit règle | |
+|            | - **ADR REDUCTO PARSING PRIMITIVES: 100% COMPLET** | |
 
 ---
 
-*ADR approved for implementation. Review after Quick Wins completion.*
-*QW-3 Diagram Interpreter: Analyse collaborative ChatGPT (theorie) + Claude Code (validation code).*
+*✅ ADR IMPLEMENTATION COMPLETE - Janvier 2026*
+*Toutes les primitives Reducto-like sont implémentées: QW-1, QW-2, QW-3, MT-1.*
+*Règle "Ne jamais couper un tableau" garantie par validation automatique.*

@@ -283,7 +283,10 @@ def upsert_chunks(
             "created_at": chunk.get("created_at", ""),
             # QW-2: Confidence scores (ADR_REDUCTO_PARSING_PRIMITIVES)
             "parse_confidence": chunk.get("parse_confidence", 0.5),
-            "confidence_signals": chunk.get("confidence_signals", {})
+            "confidence_signals": chunk.get("confidence_signals", {}),
+            # MT-1: Layout-aware chunking (ADR_REDUCTO_PARSING_PRIMITIVES)
+            "is_atomic": chunk.get("is_atomic", False),
+            "region_type": chunk.get("region_type", "unknown"),
         }
 
         # Créer point Qdrant
