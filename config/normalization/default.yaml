@@ -1,0 +1,97 @@
+# Marker Normalization Configuration - Default Tenant
+#
+# ADR: doc/ongoing/ADR_MARKER_NORMALIZATION_LAYER.md
+#
+# IMPORTANT: Ce fichier est 100% tenant-specific.
+# Les exemples ci-dessous sont ILLUSTRATIFS - chaque organisation
+# définit ses propres règles selon son domaine métier.
+
+version: "1.0"
+tenant_id: "default"
+
+# =============================================================
+# ALIASES EXACTS (priorité haute)
+# Mapping direct raw_marker → canonical_form
+# Utiliser quand l'Entity Anchor est DÉJÀ dans le marker
+# =============================================================
+aliases:
+  # Exemples SAP (illustratifs)
+  # "Edition 2508": "S/4HANA Cloud 2508"
+  # "PCE 2023": "S/4HANA Cloud Private Edition 2023"
+
+# =============================================================
+# RÈGLES REGEX (priorité moyenne)
+# Patterns avec capture groups + Entity Anchor obligatoire
+# =============================================================
+rules:
+  - id: "edition_year"
+    description: "Pattern 'Edition YYYY' avec entity anchor"
+    pattern: "^Edition\\s+(20\\d{2}|25\\d{2})$"
+    requires_entity: true
+    output_template: "{entity} {$1}"
+    priority: 10
+    confidence: 0.85
+
+  - id: "version_standalone"
+    description: "Année seule (YYYY) avec entity anchor"
+    pattern: "^(20\\d{2}|25\\d{2})$"
+    requires_entity: true
+    output_template: "{entity} {$1}"
+    priority: 5
+    confidence: 0.70
+
+  - id: "fps_patch"
+    description: "FPS patch level"
+    pattern: "^FPS(\\d{2})$"
+    requires_entity: true
+    requires_base_version: true
+    output_template: "{entity} {base_version} FPS{$1}"
+    priority: 8
+    confidence: 0.75
+
+  - id: "sp_patch"
+    description: "SP patch level"
+    pattern: "^SP(\\d{2,3})$"
+    requires_entity: true
+    requires_base_version: true
+    output_template: "{entity} {base_version} SP{$1}"
+    priority: 8
+    confidence: 0.75
+
+# =============================================================
+# CONTRAINTES DE SÉCURITÉ
+# =============================================================
+constraints:
+  # Si pas d'entity anchor → marker reste "unresolved"
+  require_entity_for_ambiguous: true
+
+  # Seuil de confiance pour application automatique
+  # En dessous = suggestion seulement (humain décide)
+  auto_apply_threshold: 0.95
+
+  # Limite du nombre d'aliases (évite explosion)
+  max_aliases: 100
+
+  # Si plusieurs entities possibles → unresolved (pas de guess)
+  single_entity_required: true
+
+# =============================================================
+# BLACKLIST (rejeter ces markers, jamais normaliser)
+# Faux positifs connus du tenant
+# =============================================================
+blacklist:
+  # Artefacts d'extraction communs
+  - "Content 2"
+  - "PUBLIC 3"
+  - "Level 2"
+  - "Phase 1"
+  - "Phase 2"
+  - "Phase 3"
+  - "Step 1"
+  - "Step 2"
+  - "Option 1"
+  - "Option 2"
+  # Marqueurs de document (pas de version)
+  - "Page 1"
+  - "Part 1"
+  - "Section 1"

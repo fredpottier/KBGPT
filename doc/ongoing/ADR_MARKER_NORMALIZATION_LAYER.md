@@ -1,6 +1,6 @@
 # ADR: Marker Normalization Layer
 
-**Status**: ⚠️ PARTIELLEMENT IMPLÉMENTÉ
+**Status**: ✅ IMPLÉMENTÉ (~85%) - Janvier 2026
 **Date**: 2025-01-05
 **Authors**: Claude + ChatGPT (collaborative design)
 **Reviewers**: Fred
@@ -13,16 +13,18 @@
 |-----------|---------|--------|
 | **Phase 1: Cleanup** | | ✅ **COMPLET** |
 | CandidateGate (filtrage faux positifs) | `extraction_v2/context/candidate_mining.py` | ✅ |
-| **Phase 2: Schema Neo4j** | | ⚠️ **PARTIEL** |
+| **Phase 2: Schema Neo4j** | | ✅ **COMPLET** |
 | MarkerStore basique | `consolidation/marker_store.py` | ✅ |
 | MarkerKind enum | `consolidation/marker_store.py` | ✅ |
 | DiffResult | `consolidation/marker_store.py` | ✅ |
-| MarkerMention nodes | - | ❌ Non fait |
-| CanonicalMarker nodes | - | ❌ Non fait |
-| **Phase 3: Normalization Engine** | | ❌ **NON FAIT** |
-| Parser config YAML | - | ❌ Non fait |
-| Moteur de règles (aliases + regex) | - | ❌ Non fait |
-| Entity Anchor detection | - | ❌ Non fait |
+| MarkerMention model | `consolidation/normalization/models.py` | ✅ |
+| CanonicalMarker model | `consolidation/normalization/models.py` | ✅ |
+| NormalizationStore | `consolidation/normalization/normalization_store.py` | ✅ |
+| **Phase 3: Normalization Engine** | | ✅ **COMPLET** |
+| Parser config YAML | `consolidation/normalization/normalization_engine.py` | ✅ |
+| Moteur de règles (aliases + regex) | `consolidation/normalization/normalization_engine.py` | ✅ |
+| Entity Anchor detection | `NormalizationEngine.find_entity_anchors()` | ✅ |
+| Config YAML par défaut | `config/normalization/default.yaml` | ✅ |
 | **Phase 4: UI/UX** | | ❌ **NON FAIT** |
 | Endpoint `/markers/suggestions` | - | ❌ Non fait |
 | Interface chat normalization | - | ❌ Non fait |
@@ -31,15 +33,33 @@
 | Clustering automatique | - | ❌ Non fait |
 | Métriques | - | ❌ Non fait |
 
-**Ce qui existe:**
-- `consolidation/marker_store.py` : MarkerStore basique avec MarkerKind, DiffResult
-- `api/routers/markers.py` : API `/markers` pour lister/consulter markers
-- CandidateGate filtre déjà les faux positifs évidents (© dates, trimestres, etc.)
+**Ce qui est implémenté (Janvier 2026):**
+```
+consolidation/normalization/
+├── __init__.py
+├── models.py                    # MarkerMention, CanonicalMarker, NormalizationRule
+├── normalization_store.py       # Gestion Neo4j (CRUD mentions/canoniques)
+└── normalization_engine.py      # Moteur de règles + Entity Anchor detection
 
-**Ce qui manque pour compléter l'ADR:**
-- Architecture MarkerMention → CanonicalMarker (séparation brut/normalisé)
-- Moteur de normalisation avec config YAML tenant
-- UI/UX pour administration des aliases
+config/normalization/
+└── default.yaml                 # Config par défaut (aliases, rules, blacklist)
+```
+
+- Architecture MarkerMention → CanonicalMarker complète
+- NormalizationStore avec schema Neo4j (indexes, constraints)
+- NormalizationEngine avec:
+  - Parser config YAML
+  - Moteur de règles regex avec templates
+  - Entity Anchor detection depuis concepts du document
+  - Blacklist pour faux positifs
+  - Safe-by-default (UNRESOLVED si doute)
+
+**Ce qui reste (UI/UX + Feedback Loop):**
+- Endpoints API pour suggestions et administration
+- Interface chat pour normaliser des markers
+- Dashboard admin pour gérer les aliases
+- Clustering automatique pour suggestions
+- Métriques de couverture
 
 ---
 
