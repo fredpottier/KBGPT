@@ -16,6 +16,8 @@ from enum import Enum
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 
+from knowbase.common.context_id import make_context_id, make_section_hash
+
 
 class ContextNodeKind(str, Enum):
     """Types de ContextNode."""
@@ -71,7 +73,7 @@ class DocumentContext(ContextNode):
                document_type: Optional[str] = None) -> "DocumentContext":
         """Factory pour créer un DocumentContext."""
         return cls(
-            context_id=f"doc:{document_id}",
+            context_id=make_context_id(document_id),  # Utilise helper partagé
             doc_id=document_id,
             tenant_id=tenant_id,
             document_name=document_name,
@@ -106,10 +108,10 @@ class SectionContext(ContextNode):
                tenant_id: str = "default",
                section_level: int = 0) -> "SectionContext":
         """Factory pour créer un SectionContext."""
-        import hashlib
-        section_hash = hashlib.sha256(section_path.encode()).hexdigest()[:12]
+        # Utilise helpers partagés pour cohérence Neo4j ↔ Qdrant
+        section_hash = make_section_hash(document_id, section_path)
         return cls(
-            context_id=f"sec:{document_id}:{section_hash}",
+            context_id=make_context_id(document_id, section_path),
             doc_id=document_id,
             tenant_id=tenant_id,
             section_path=section_path,

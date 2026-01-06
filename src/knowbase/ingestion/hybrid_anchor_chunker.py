@@ -29,6 +29,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import tiktoken
 
 from knowbase.common.clients.embeddings import get_embedding_manager
+from knowbase.common.context_id import make_context_id  # Phase 0: Pont SectionContext → Qdrant
 from knowbase.api.schemas.concepts import Anchor, AnchorPayload
 from knowbase.config.feature_flags import get_hybrid_anchor_config
 from knowbase.extraction_v2.confidence import get_confidence_scorer  # QW-2
@@ -184,6 +185,10 @@ class HybridAnchorChunker:
                 confidence_result = self._confidence_scorer.compute(chunk_data["text"])
                 parse_confidence = confidence_result.score
 
+                # Phase 0: Générer context_id pour pont SectionContext → Qdrant
+                section_path = chunk_data.get("section_path")
+                context_id = make_context_id(document_id, section_path) if section_path else None
+
                 final_chunks.append({
                     "id": chunk_id,
                     "text": chunk_data["text"],
@@ -199,6 +204,9 @@ class HybridAnchorChunker:
                     # V2.1: Segment mapping
                     "segment_id": chunk_data.get("segment_id"),
                     "segment_overlap_chars": chunk_data.get("segment_overlap_chars", 0),
+                    # Phase 0: Pont SectionContext → Qdrant (ADR_GRAPH_FIRST_ARCHITECTURE)
+                    "context_id": context_id,
+                    "section_path": section_path,
                     # Payload enrichi avec anchored_concepts (Invariant d'Architecture)
                     "anchored_concepts": anchored_concepts,
                     # Champs legacy pour compatibilite
@@ -637,6 +645,7 @@ class HybridAnchorChunker:
         Modifie raw_chunks in-place en ajoutant:
         - segment_id: ID du segment mappe (ou None si orphelin)
         - segment_overlap_chars: Nombre de chars d'overlap
+        - section_path: section_id du segment (pour context_id)
 
         Tie-breakers si overlap egaux:
         1. Centre du chunk le plus proche du centre du segment
@@ -653,6 +662,7 @@ class HybridAnchorChunker:
             c_center = (c_start + c_end) / 2.0
 
             best_seg_id = None
+            best_section_path = None  # Phase 0: Pour context_id
             best_overlap = 0
             best_center_dist = float("inf")
             best_seg_idx = float("inf")
@@ -679,12 +689,14 @@ class HybridAnchorChunker:
 
                 if is_better:
                     best_seg_id = seg.get("segment_id")
+                    best_section_path = seg.get("section_id")  # Phase 0: section_path
                     best_overlap = overlap
                     best_center_dist = center_dist
                     best_seg_idx = seg_idx
 
             # Mettre a jour le chunk in-place
             chunk["segment_id"] = best_seg_id
+            chunk["section_path"] = best_section_path  # Phase 0: Pour context_id
             chunk["segment_overlap_chars"] = best_overlap
 
     def _validate_segment_coverage(
