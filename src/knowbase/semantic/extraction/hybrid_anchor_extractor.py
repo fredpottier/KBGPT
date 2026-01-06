@@ -238,12 +238,28 @@ class HybridAnchorExtractor:
             valid_concepts = []
             for c in concepts:
                 if all(k in c for k in ["label", "quote"]):
+                    # QW-2: Parse confidence (default 0.5 si absent)
+                    confidence = c.get("confidence", 0.5)
+                    if isinstance(confidence, (int, float)):
+                        confidence = max(0.0, min(1.0, float(confidence)))
+                    else:
+                        confidence = 0.5
+
+                    # QW-2: Filtrer concepts à faible confiance
+                    if confidence < 0.4:
+                        logger.debug(
+                            f"[OSMOSE:EXTRACT_CONCEPTS] Skipping low-confidence concept: "
+                            f"'{c['label']}' (confidence={confidence:.2f})"
+                        )
+                        continue
+
                     valid_concepts.append({
                         "label": c["label"],
                         "definition": c.get("definition", ""),
                         "quote": c["quote"],
                         "role": c.get("role", "context"),
-                        "type_heuristic": c.get("type_heuristic", "abstract")
+                        "type_heuristic": c.get("type_heuristic", "abstract"),
+                        "extract_confidence": confidence  # QW-2
                     })
                 else:
                     logger.debug(
@@ -320,7 +336,9 @@ class HybridAnchorExtractor:
             section_id=section_id,
             embedding=None,  # Calculé après en batch
             anchors=[anchor],
-            tenant_id=self.tenant_id
+            tenant_id=self.tenant_id,
+            # QW-2: Confidence score from LLM
+            extract_confidence=concept_data.get("extract_confidence", 0.5)
         )
 
         return proto_concept

@@ -408,11 +408,26 @@ Your task is to extract concepts WITH EXACT QUOTES from the source text.
       "definition": "A process to identify and minimize data protection risks",
       "type_heuristic": "procedural",
       "quote": "A DPIA shall be carried out prior to the processing",
-      "role": "requirement"
+      "role": "requirement",
+      "confidence": 0.92
     }
   ]
 }
 ```
+
+## Confidence Scoring (REQUIRED)
+For EACH concept, you MUST provide a confidence score (0.0-1.0):
+- 0.90-1.00: Explicit, clear definition or statement in text
+- 0.75-0.89: Strong evidence, concept clearly identifiable
+- 0.60-0.74: Moderate evidence, some interpretation required
+- 0.40-0.59: Weak evidence, significant interpretation
+- < 0.40: Do NOT include (too uncertain)
+
+Factors affecting confidence:
+- Quote exactness: Verbatim quote = higher confidence
+- Context clarity: Ambiguous context = lower confidence
+- Terminology: Official terms = higher confidence
+- Multiple mentions: Reinforced concept = higher confidence
 
 ## Quality Rules
 - Extract 3-15 concepts per segment (quality over quantity)
@@ -434,8 +449,12 @@ HYBRID_ANCHOR_EXTRACT_USER_PROMPT = """Extract concepts with EXACT QUOTES from t
 2. For EACH concept, find the EXACT quote that supports it
 3. Classify the quote's semantic role
 4. Assign a heuristic type based on text patterns
+5. Assign a confidence score (0.0-1.0) reflecting extraction certainty
 
-CRITICAL: Quotes must be VERBATIM from the text above. Do not paraphrase.
+CRITICAL:
+- Quotes must be VERBATIM from the text above. Do not paraphrase.
+- Include confidence score for EVERY concept (required field).
+- Exclude concepts with confidence < 0.40.
 
 Return only valid JSON."""
 

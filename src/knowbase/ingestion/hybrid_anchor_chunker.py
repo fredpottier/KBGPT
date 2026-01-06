@@ -31,6 +31,7 @@ import tiktoken
 from knowbase.common.clients.embeddings import get_embedding_manager
 from knowbase.api.schemas.concepts import Anchor, AnchorPayload
 from knowbase.config.feature_flags import get_hybrid_anchor_config
+from knowbase.extraction_v2.confidence import get_confidence_scorer  # QW-2
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,9 @@ class HybridAnchorChunker:
         except Exception as e:
             logger.warning(f"[HybridAnchorChunker] Tokenizer failed: {e}")
             self.tokenizer = None
+
+        # QW-2: Confidence scorer pour parse_confidence
+        self._confidence_scorer = get_confidence_scorer()
 
         logger.info(
             f"[HybridAnchorChunker] Initialized "
@@ -166,6 +170,10 @@ class HybridAnchorChunker:
                     chunk_id, chunk_data, anchor_mapping.get(i, []), labels_map
                 )
 
+                # QW-2: Calculer parse_confidence pour ce chunk
+                confidence_result = self._confidence_scorer.compute(chunk_data["text"])
+                parse_confidence = confidence_result.score
+
                 final_chunks.append({
                     "id": chunk_id,
                     "text": chunk_data["text"],
@@ -185,7 +193,10 @@ class HybridAnchorChunker:
                     "anchored_concepts": anchored_concepts,
                     # Champs legacy pour compatibilite
                     "proto_concept_ids": [ac["concept_id"] for ac in anchored_concepts],
-                    "canonical_concept_ids": []
+                    "canonical_concept_ids": [],
+                    # QW-2: Confidence scores (ADR_REDUCTO_PARSING_PRIMITIVES)
+                    "parse_confidence": parse_confidence,
+                    "confidence_signals": confidence_result.signals
                 })
 
             # 6. Valider couverture segment (V2.1)

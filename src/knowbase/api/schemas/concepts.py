@@ -299,6 +299,13 @@ class ProtoConcept(BaseModel):
         description="Anchors vers les passages sources"
     )
     tenant_id: str = Field(default="default")
+    # === QW-2: Confidence Scores (ADR_REDUCTO_PARSING_PRIMITIVES) ===
+    extract_confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Confiance LLM sur l'extraction (0.0-1.0)"
+    )
     # === PR2: Aggregated Context ===
     context: Optional[ProtoConceptContext] = Field(
         None,

@@ -280,7 +280,10 @@ def upsert_chunks(
             "char_start": chunk.get("char_start", 0),
             "char_end": chunk.get("char_end", 0),
             "token_count": chunk.get("token_count", 0),
-            "created_at": chunk.get("created_at", "")
+            "created_at": chunk.get("created_at", ""),
+            # QW-2: Confidence scores (ADR_REDUCTO_PARSING_PRIMITIVES)
+            "parse_confidence": chunk.get("parse_confidence", 0.5),
+            "confidence_signals": chunk.get("confidence_signals", {})
         }
 
         # Créer point Qdrant

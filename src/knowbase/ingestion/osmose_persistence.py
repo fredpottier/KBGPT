@@ -226,9 +226,11 @@ def _create_proto_concepts(
         p.document_id = proto.document_id,
         p.section_id = proto.section_id,
         p.created_at = datetime(),
-        p.extraction_method = 'hybrid_anchor'
+        p.extraction_method = 'hybrid_anchor',
+        p.extract_confidence = proto.extract_confidence
     ON MATCH SET
         p.definition = COALESCE(proto.definition, p.definition),
+        p.extract_confidence = COALESCE(proto.extract_confidence, p.extract_confidence),
         p.updated_at = datetime()
     RETURN count(p) AS created
     """
@@ -240,7 +242,9 @@ def _create_proto_concepts(
             "definition": pc.definition,
             "type_heuristic": pc.type_heuristic,
             "document_id": pc.document_id,
-            "section_id": getattr(pc, 'section_id', None)
+            "section_id": getattr(pc, 'section_id', None),
+            # QW-2: Confidence score from LLM
+            "extract_confidence": getattr(pc, 'extract_confidence', 0.5)
         }
         for pc in proto_concepts
     ]

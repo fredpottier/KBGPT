@@ -1,6 +1,6 @@
 # ADR-2024-12-30: Reducto-like Parsing Primitives in OSMOSE
 
-**Status:** ⚠️ EN COURS (~70%) - Janvier 2026
+**Status:** ⚠️ EN COURS (~85%) - Janvier 2026
 **Date:** 2024-12-30
 **Authors:** OSMOSE Team
 **Reviewers:** -
@@ -23,9 +23,12 @@
 | **LLM summarization** | `extraction_v2/tables/table_summarizer.py` | ✅ TableSummarizer |
 | **Storage summary + raw** | `TableData.summary` + Linearizer format enrichi | ✅ |
 | **Pipeline integration** | `extraction_v2/pipeline.py` (ETAPE 4.5) | ✅ |
-| **QW-2: Confidence Scores** | | ⚠️ **PARTIEL** |
-| parse_confidence (heuristique) | - | ❌ Non fait |
-| extract_confidence (LLM) | - | ❌ Non fait |
+| **QW-2: Confidence Scores** | | ✅ **COMPLET** |
+| parse_confidence (heuristique) | `extraction_v2/confidence/confidence_scorer.py` | ✅ ConfidenceScorer |
+| extract_confidence (LLM) | `semantic/extraction/prompts.py` + `hybrid_anchor_extractor.py` | ✅ |
+| Storage Qdrant | `common/clients/qdrant_client.py` | ✅ parse_confidence, confidence_signals |
+| Storage Neo4j | `ingestion/osmose_persistence.py` | ✅ extract_confidence sur ProtoConcept |
+| ProtoConcept schema | `api/schemas/concepts.py` | ✅ extract_confidence field |
 | **QW-3: Diagram Interpreter** | | ❌ **NON FAIT** |
 | Pass 0 pre-analyse | - | ❌ Non fait |
 | Pass 1 VLM adaptatif | - | ❌ Non fait |
@@ -45,9 +48,15 @@
   - Intégré dans pipeline comme ETAPE 4.5 (après Merge, avant Linearisation)
   - Batch processing avec concurrence limitée (5 appels parallèles)
   - Métriques: `tables_summarized`, `table_summary_time_ms`
+- ✅ **QW-2 COMPLET:** Confidence Scores
+  - `ConfidenceScorer`: Calcul heuristique du `parse_confidence` (5 signaux: length, structure, ocr_quality, coherence, markers)
+  - Prompts LLM modifiés pour demander `extract_confidence` (0.0-1.0)
+  - Filtrage automatique: concepts avec confidence < 0.4 rejetés
+  - Stockage Qdrant: `parse_confidence`, `confidence_signals` dans payload chunks
+  - Stockage Neo4j: `extract_confidence` sur nodes ProtoConcept
+  - Schema ProtoConcept étendu avec `extract_confidence: float`
 
 **Ce qui reste à faire (Quick Wins):**
-- QW-2: Confidence Scores → Debuggabilité
 - QW-3: Diagram Interpreter → Extraction structurée diagrammes
 
 **Note Migration MegaParse → Docling (Janvier 2026):**
@@ -326,11 +335,13 @@ QW-1: Table Summaries ✅ DONE (Janvier 2026)
 ├── extraction_v2/pipeline.py (ETAPE 4.5, PipelineConfig.enable_table_summaries)
 └── Marqueurs: [TABLE_SUMMARY]...[TABLE_RAW]...[TABLE_END]
 
-QW-2: Confidence Scores ❌
-├── parse_confidence: heuristique (longueur, structure, coherence)
-├── extract_confidence: retourne par LLM dans prompt
-├── Stockage: payload Qdrant + Neo4j
-└── Insertion: osmose_agentique.py + hybrid_anchor_chunker.py
+QW-2: Confidence Scores ✅ DONE (Janvier 2026)
+├── extraction_v2/confidence/confidence_scorer.py (ConfidenceScorer)
+├── semantic/extraction/prompts.py (extract_confidence dans output JSON)
+├── api/schemas/concepts.py (ProtoConcept.extract_confidence)
+├── ingestion/hybrid_anchor_chunker.py (parse_confidence + confidence_signals)
+├── common/clients/qdrant_client.py (payload enrichi)
+└── ingestion/osmose_persistence.py (Neo4j extract_confidence)
 
 QW-3: Diagram Interpreter ❌
 ├── Pass 0 - Pre-analyse locale
