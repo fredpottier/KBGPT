@@ -119,6 +119,19 @@ PAGE_REFERENCE_PATTERNS = [
 ]
 
 
+# =============================================================================
+# STRUCTURE NUMBERING DETECTION - Patterns (Plan v2.1 - ChatGPT validated)
+# Detection agnostique de numerotation structurelle sans listes de mots
+# =============================================================================
+
+# Patterns indiquant une position de titre/section (debut de ligne + ponctuation)
+# Utilise pour Signal S2 du StructureNumberingGate
+SECTION_POSITION_PATTERNS = [
+    r'^([A-Z][a-zA-Z]*)\s+(\d{1,2})\s*[:\.\-–—]',  # "PUBLIC 3:" ou "PUBLIC 3."
+    r'^([A-Z][a-zA-Z]*)\s+(\d{1,2})\s*$',          # "PUBLIC 3" seul sur ligne
+]
+
+
 # === PHASE 2: PATTERNS STRUCTURELS AGNOSTIQUES ===
 # Formes universelles qui indiquent une version/variante dans N'IMPORTE quel domaine
 
@@ -392,6 +405,416 @@ def get_candidate_gate() -> CandidateGate:
 
 
 # =============================================================================
+# STRUCTURE NUMBERING GATE - Plan v2.1 (ChatGPT validated 2026-01-07)
+# Detection agnostique basee sur signaux S1/S2/S3
+# =============================================================================
+
+@dataclass
+class StructureGateConfig:
+    """
+    Configuration du StructureNumberingGate.
+
+    Parametres valides par ChatGPT - Plan v2.1.
+    """
+    # Seuil de sequence pour HARD_REJECT (default: 3 consecutifs)
+    sequence_threshold: int = 3
+
+    # Action pour SOFT_FLAG: "llm" (passe au LLM) ou "weak_marker" (conserve comme weak)
+    soft_flag_action: str = "llm"
+
+    # Max weak markers en fallback si document devient silencieux
+    fallback_max_markers: int = 3
+
+    # Activer/desactiver le gate
+    enabled: bool = True
+
+    # Logging des changements de config
+    log_config_changes: bool = True
+
+
+@dataclass
+class SequenceDetectionResult:
+    """
+    Resultat de detection de sequence pour un prefixe.
+
+    Ex: Si on trouve "PUBLIC 1", "PUBLIC 2", "PUBLIC 3" dans le document,
+    c'est une sequence de numerotation structurelle (3 consecutifs).
+    """
+    prefix: str
+    numbers_found: List[int]
+    max_consecutive: int  # Longueur de la plus longue sequence consecutive
+    is_sequence: bool     # True si max_consecutive >= 2
+    evidence: str = ""
+
+
+class StructureNumberingGate:
+    """
+    Detection agnostique de numerotation structurelle.
+
+    Implemente les pistes A + B + C validees par ChatGPT (Plan v2.1):
+    - S1: Sequentialite (X 1/2/3... meme prefixe)
+    - S2: Position structurelle (debut ligne + ponctuation)
+    - S3: Prefixe quasi-toujours numerote
+
+    Decisions:
+    - HARD_REJECT: Seq >= 3 ET (S2 ou S3)
+    - SOFT_FLAG: Seq = 2 OU signal isole
+    - LOW: Aucun signal
+
+    100% agnostique - fonctionne pour PUBLIC, Chapter, Module, Resources...
+    sans les connaitre a l'avance.
+    """
+
+    def __init__(self, config: Optional[StructureGateConfig] = None):
+        """Initialise le gate avec configuration."""
+        self.config = config or StructureGateConfig()
+        self._section_patterns = [
+            re.compile(p, re.MULTILINE) for p in SECTION_POSITION_PATTERNS
+        ]
+
+    def detect_sequences(
+        self,
+        candidates: List["MarkerCandidate"],
+    ) -> Dict[str, SequenceDetectionResult]:
+        """
+        Detecte les sequences de numerotation pour chaque prefixe (Signal S1).
+
+        Contrainte: Meme prefixe X avec numeros consecutifs uniquement.
+        Ex: "PUBLIC 1", "PUBLIC 2", "PUBLIC 3" -> sequence de 3
+
+        Args:
+            candidates: Liste de candidats entity_numeral
+
+        Returns:
+            Dict[prefix] -> SequenceDetectionResult
+        """
+        # Grouper les numeros par prefixe (entity_numeral seulement)
+        prefix_numbers: Dict[str, List[int]] = {}
+
+        for c in candidates:
+            if c.lexical_shape != "entity_numeral":
+                continue
+
+            # Extraire prefixe et numero du format "PREFIX NUM"
+            parts = c.value.rsplit(" ", 1)
+            if len(parts) != 2:
+                continue
+
+            prefix, num_str = parts
+            try:
+                num = int(num_str)
+                # Ne traiter que les numeros 1-2 digits (1-99)
+                if 1 <= num <= 99:
+                    if prefix not in prefix_numbers:
+                        prefix_numbers[prefix] = []
+                    prefix_numbers[prefix].append(num)
+            except ValueError:
+                continue
+
+        # Calculer sequences pour chaque prefixe
+        results = {}
+        for prefix, numbers in prefix_numbers.items():
+            numbers_sorted = sorted(set(numbers))
+
+            # Calculer la plus longue sequence consecutive
+            max_consec = 1
+            current_consec = 1
+
+            for i in range(1, len(numbers_sorted)):
+                if numbers_sorted[i] == numbers_sorted[i - 1] + 1:
+                    current_consec += 1
+                    max_consec = max(max_consec, current_consec)
+                else:
+                    current_consec = 1
+
+            results[prefix] = SequenceDetectionResult(
+                prefix=prefix,
+                numbers_found=numbers_sorted,
+                max_consecutive=max_consec if len(numbers_sorted) > 1 else 1,
+                is_sequence=max_consec >= 2,
+                evidence=f"Found {prefix} with numbers: {numbers_sorted}",
+            )
+
+        return results
+
+    def check_position_indicator(
+        self,
+        candidate_value: str,
+        full_text: str,
+    ) -> bool:
+        """
+        Verifie si le candidat apparait en position de titre/section (Signal S2).
+
+        Args:
+            candidate_value: Valeur du candidat (ex: "PUBLIC 3")
+            full_text: Texte complet du document
+
+        Returns:
+            True si le candidat apparait en position structurelle
+        """
+        lines = full_text.split('\n')
+
+        for line in lines:
+            line_stripped = line.strip()
+            if candidate_value not in line_stripped:
+                continue
+
+            # Seul sur la ligne = indicateur fort
+            if line_stripped == candidate_value:
+                return True
+
+            # Quasi-seul (+ quelques caracteres)
+            if line_stripped.startswith(candidate_value) and len(line_stripped) < len(candidate_value) + 5:
+                return True
+
+            # Debut de ligne + ponctuation
+            for pattern in self._section_patterns:
+                if pattern.match(line_stripped):
+                    return True
+
+        return False
+
+    def check_prefix_mostly_numbered(
+        self,
+        prefix: str,
+        full_text: str,
+    ) -> bool:
+        """
+        Verifie si le prefixe apparait quasi-toujours avec des numeros (Signal S3).
+
+        Definition robuste (ChatGPT):
+        - count(X + number) >= 3 ET
+        - count(X standalone) <= 1 ET
+        - distinct_numbers >= 2
+
+        Args:
+            prefix: Le prefixe a verifier (ex: "PUBLIC")
+            full_text: Texte complet du document
+
+        Returns:
+            True si le prefixe est principalement utilise avec des numeros
+        """
+        # Pattern pour "PREFIX N" (1-2 digits)
+        pattern_numbered = re.compile(
+            rf'\b{re.escape(prefix)}\s+\d{{1,2}}\b',
+            re.IGNORECASE
+        )
+        matches_numbered = pattern_numbered.findall(full_text)
+        count_numbered = len(matches_numbered)
+
+        # Pattern pour PREFIX standalone (pas suivi d'un numero)
+        pattern_standalone = re.compile(
+            rf'\b{re.escape(prefix)}\b(?!\s+\d)',
+            re.IGNORECASE
+        )
+        count_standalone = len(pattern_standalone.findall(full_text))
+
+        # Distinct numbers
+        distinct_numbers = len(set(
+            int(m.split()[-1]) for m in matches_numbered
+            if m.split()[-1].isdigit()
+        )) if matches_numbered else 0
+
+        return (
+            count_numbered >= 3 and
+            count_standalone <= 1 and
+            distinct_numbers >= 2
+        )
+
+    def compute_structure_risk(
+        self,
+        candidate: "MarkerCandidate",
+        sequences: Dict[str, SequenceDetectionResult],
+        full_text: str,
+    ) -> Tuple[str, str]:
+        """
+        Calcule le niveau de risque structurel pour un candidat.
+
+        Matrice de decision (Plan v2.1):
+        - HARD_REJECT: Seq >= 3 ET (S2 ou S3)
+        - SOFT_FLAG: Seq = 2 OU signal isole avec S2+S3
+        - LOW: Aucun signal significatif
+
+        Args:
+            candidate: Le candidat a evaluer
+            sequences: Resultats de detection de sequences
+            full_text: Texte complet du document
+
+        Returns:
+            Tuple (decision, reason)
+            decision: "HARD_REJECT", "SOFT_FLAG", ou "LOW"
+            reason: Explication pour debug/LLM
+        """
+        if candidate.lexical_shape != "entity_numeral":
+            return ("LOW", "Not entity_numeral pattern")
+
+        # Extraire prefixe
+        parts = candidate.value.rsplit(" ", 1)
+        if len(parts) != 2:
+            return ("LOW", "Cannot parse prefix")
+
+        prefix, num_str = parts
+
+        # Verifier si c'est un numero 1-2 digits
+        try:
+            num = int(num_str)
+            if num >= 100:  # 3+ digits = probablement annee/version, pas section
+                return ("LOW", "Number >= 100, likely version not section")
+        except ValueError:
+            return ("LOW", "Not a valid number")
+
+        # === Evaluer les 3 signaux ===
+        # S1: Sequentialite
+        seq_result = sequences.get(prefix)
+        seq_count = seq_result.max_consecutive if seq_result else 0
+
+        # S2: Position structurelle
+        s2_position = self.check_position_indicator(candidate.value, full_text)
+
+        # S3: Prefixe quasi-toujours numerote
+        s3_prefix = self.check_prefix_mostly_numbered(prefix, full_text)
+
+        # === Appliquer la matrice de decision ===
+
+        # HARD_REJECT: Seq >= threshold ET (S2 ou S3)
+        if seq_count >= self.config.sequence_threshold:
+            if s2_position or s3_prefix:
+                reason = (
+                    f"HARD: sequence={seq_count} (>={self.config.sequence_threshold}), "
+                    f"S2_position={s2_position}, S3_prefix={s3_prefix}"
+                )
+                return ("HARD_REJECT", reason)
+
+        # SOFT_FLAG: Seq = 2 OU (signal isole avec contexte)
+        if seq_count == 2:
+            reason = f"SOFT: sequence=2, S2_position={s2_position}, S3_prefix={s3_prefix}"
+            return ("SOFT_FLAG", reason)
+
+        if seq_count == 1 and s2_position and s3_prefix:
+            reason = f"SOFT: sequence=1 but S2+S3 both true"
+            return ("SOFT_FLAG", reason)
+
+        # LOW: Aucun signal fort
+        return ("LOW", f"No strong signals: seq={seq_count}, S2={s2_position}, S3={s3_prefix}")
+
+    def filter_candidates(
+        self,
+        candidates: List["MarkerCandidate"],
+        full_text: str,
+        doc_id: str = "",
+    ) -> Tuple[List["MarkerCandidate"], List["MarkerCandidate"], List["MarkerCandidate"]]:
+        """
+        Filtre les candidats selon les signaux structurels.
+
+        Args:
+            candidates: Liste de candidats a filtrer
+            full_text: Texte complet du document
+            doc_id: ID du document (pour logging)
+
+        Returns:
+            Tuple (survivors, soft_flagged, hard_rejected)
+        """
+        if not self.config.enabled:
+            return (candidates, [], [])
+
+        # Detecter les sequences
+        sequences = self.detect_sequences(candidates)
+
+        survivors = []
+        soft_flagged = []
+        hard_rejected = []
+
+        for candidate in candidates:
+            decision, reason = self.compute_structure_risk(candidate, sequences, full_text)
+
+            # Stocker le resultat dans le candidat
+            candidate.structure_risk = decision
+            candidate.structure_risk_reason = reason
+
+            if decision == "HARD_REJECT":
+                hard_rejected.append(candidate)
+                logger.debug(
+                    f"[StructureNumberingGate] HARD_REJECT '{candidate.value}': {reason}"
+                )
+            elif decision == "SOFT_FLAG":
+                soft_flagged.append(candidate)
+                logger.debug(
+                    f"[StructureNumberingGate] SOFT_FLAG '{candidate.value}': {reason}"
+                )
+            else:
+                survivors.append(candidate)
+
+        # Log summary
+        if hard_rejected or soft_flagged:
+            logger.info(
+                f"[StructureNumberingGate] Doc '{doc_id}': "
+                f"{len(survivors)} pass, {len(soft_flagged)} soft, {len(hard_rejected)} hard_reject"
+            )
+
+        return (survivors, soft_flagged, hard_rejected)
+
+    def apply_fallback_if_silent(
+        self,
+        final_markers: List["MarkerCandidate"],
+        rejected: List["MarkerCandidate"],
+        doc_id: str,
+    ) -> List["MarkerCandidate"]:
+        """
+        Si tous les markers sont rejetes, conserver K weak markers en fallback.
+
+        Evite les documents "silencieux" par erreur.
+
+        Args:
+            final_markers: Markers survivants
+            rejected: Markers rejetes (HARD + SOFT non recuperes)
+            doc_id: ID du document
+
+        Returns:
+            Liste finale avec eventuels fallback markers
+        """
+        if len(final_markers) > 0 or len(rejected) == 0:
+            return final_markers
+
+        # Document silencieux - appliquer fallback
+        logger.warning(
+            f"[StructureNumberingGate] Doc '{doc_id}' silencieux! "
+            f"Rejected: {[c.value for c in rejected]}"
+        )
+
+        # Selectionner top K par frequence + dispersion
+        fallback = sorted(
+            rejected,
+            key=lambda c: (c.occurrences, c.pages_covered),
+            reverse=True
+        )[:self.config.fallback_max_markers]
+
+        # Taguer comme fallback
+        for m in fallback:
+            m.structure_fallback = True
+            m.structure_risk = "FALLBACK"
+
+        logger.info(
+            f"[StructureNumberingGate] Fallback markers: {[m.value for m in fallback]}"
+        )
+
+        return fallback
+
+
+# Singleton
+_structure_numbering_gate: Optional[StructureNumberingGate] = None
+
+
+def get_structure_numbering_gate(
+    config: Optional[StructureGateConfig] = None
+) -> StructureNumberingGate:
+    """Retourne l'instance singleton du StructureNumberingGate."""
+    global _structure_numbering_gate
+    if _structure_numbering_gate is None or config is not None:
+        _structure_numbering_gate = StructureNumberingGate(config)
+    return _structure_numbering_gate
+
+
+# =============================================================================
 # DATACLASSES
 # =============================================================================
 
@@ -448,6 +871,12 @@ class MarkerCandidate:
     lexical_shape: str = ""  # numeric_4, alphanumeric, semantic_token (ex pattern_type)
     occurrences: int = 1
 
+    # === Structure Numbering Gate (Plan v2.1) ===
+    is_weak_candidate: bool = False      # True si entity_numeral \d{1,2}
+    structure_risk: str = "LOW"          # "HARD_REJECT", "SOFT_FLAG", "LOW", "FALLBACK"
+    structure_risk_reason: str = ""      # Raison du risque (pour debug/LLM)
+    structure_fallback: bool = False     # True si conserve en fallback doc silencieux
+
     # === Distribution (PR6) ===
     pages_covered: int = 0
     pages_covered_ratio: float = 0.0
@@ -491,7 +920,7 @@ class MarkerCandidate:
         }
 
     def to_dict_enriched(self) -> Dict[str, Any]:
-        """Serialise en dictionnaire avec features structurelles (PR6)."""
+        """Serialise en dictionnaire avec features structurelles (PR6) et risque structurel (Plan v2.1)."""
         result = {
             "value": self.value,
             "lexical_shape": self.lexical_shape,
@@ -509,6 +938,16 @@ class MarkerCandidate:
             result["contextual_cues"] = self._contextual_cues.to_dict()
         if self._structural_confidence:
             result["structural_confidence"] = self._structural_confidence
+
+        # Plan v2.1: Inclure risque structurel pour arbitrage LLM
+        if self.structure_risk and self.structure_risk != "LOW":
+            result["structure_risk"] = self.structure_risk
+            result["structure_risk_reason"] = self.structure_risk_reason
+        if self.is_weak_candidate:
+            result["is_weak_candidate"] = True
+        if self.structure_fallback:
+            result["structure_fallback"] = True
+
         return result
 
 
@@ -522,11 +961,17 @@ class MiningResult:
         scope_language_hits: Nombre de hits de scope language
         conflict_hits: Nombre de hits de patterns de conflit
         source_coverage: Sources couvertes (filename, cover, etc.)
+        _rejected_candidates: Candidats rejetés par CandidateGate (debug)
+        _soft_flag_candidates: Candidats SOFT_FLAG par StructureNumberingGate (pour LLM)
     """
     candidates: List[MarkerCandidate] = field(default_factory=list)
     scope_language_hits: int = 0
     conflict_hits: int = 0
     source_coverage: Set[str] = field(default_factory=set)
+
+    # === Debug/Analysis fields (Plan v2.1) ===
+    _rejected_candidates: List[MarkerCandidate] = field(default_factory=list)
+    _soft_flag_candidates: List[MarkerCandidate] = field(default_factory=list)
 
     def get_unique_values(self) -> Set[str]:
         """Retourne les valeurs uniques des candidats."""
@@ -593,6 +1038,7 @@ class CandidateMiner:
         custom_patterns: List[str] = None,
         blacklist_additions: Set[str] = None,
         use_gate: bool = True,
+        structure_gate_config: Optional[StructureGateConfig] = None,
     ):
         """
         Initialise le miner.
@@ -602,6 +1048,7 @@ class CandidateMiner:
             custom_patterns: Patterns additionnels a utiliser
             blacklist_additions: Marqueurs additionnels a ignorer
             use_gate: Utiliser le CandidateGate pour filtrer (default: True)
+            structure_gate_config: Config pour StructureNumberingGate (Plan v2.1)
         """
         self.languages = languages or ["en", "fr", "de"]
         self.custom_patterns = custom_patterns or []
@@ -609,6 +1056,7 @@ class CandidateMiner:
         if blacklist_additions:
             self.blacklist.update(blacklist_additions)
         self.use_gate = use_gate
+        self.structure_gate_config = structure_gate_config
 
         # === PHASE 2: PATTERNS STRUCTURELS AGNOSTIQUES ===
         # Ces patterns detectent des formes universelles, pas des termes metier
@@ -639,6 +1087,12 @@ class CandidateMiner:
 
         # CandidateGate pour filtrage Phase 1
         self._gate = get_candidate_gate() if use_gate else None
+
+        # StructureNumberingGate pour filtrage faux positifs numérotation (Plan v2.1)
+        self._structure_gate = (
+            StructureNumberingGate(structure_gate_config or StructureGateConfig())
+            if use_gate else None
+        )
 
     def mine_document(
         self,
@@ -728,6 +1182,60 @@ class CandidateMiner:
             # Stocker les rejetes pour debug/analyse
             result._rejected_candidates = rejected
 
+        # 9. PHASE 2 (Plan v2.1): StructureNumberingGate - Filtrer faux positifs numérotation
+        full_text = "\n".join(pages_text)  # Texte complet pour analyse structurelle
+        doc_id = Path(filename).stem if filename else "unknown"
+
+        if self._structure_gate and self.use_gate:
+            # Appliquer le gate de numérotation structurelle
+            gate_survivors, gate_rejected, gate_soft = self._structure_gate.filter_candidates(
+                result.candidates, full_text, doc_id
+            )
+
+            # Log des décisions
+            if gate_rejected:
+                logger.info(
+                    f"[StructureNumberingGate] Doc '{doc_id}' HARD_REJECT: "
+                    f"{[c.value for c in gate_rejected]}"
+                )
+            if gate_soft:
+                logger.info(
+                    f"[StructureNumberingGate] Doc '{doc_id}' SOFT_FLAG: "
+                    f"{[c.value for c in gate_soft]}"
+                )
+
+            # Décider du traitement des SOFT_FLAG selon config
+            config = self.structure_gate_config or StructureGateConfig()
+
+            if config.soft_flag_action == "llm":
+                # Inclure les SOFT_FLAG dans les candidats pour arbitrage LLM
+                # Le LLM verra structure_risk="SOFT_FLAG" et sera extra skeptical
+                result.candidates = gate_survivors + gate_soft
+            elif config.soft_flag_action == "weak_marker":
+                # Conserver les SOFT_FLAG comme weak_markers (pas d'appel LLM)
+                # Ils seront traités comme weak_markers par défaut
+                result.candidates = gate_survivors + gate_soft
+            else:
+                # Default: seulement les survivants
+                result.candidates = gate_survivors
+
+            # Stocker les SOFT_FLAG pour référence/debug
+            result._soft_flag_candidates = gate_soft
+
+            # Appliquer fallback si document silencieux (tous rejets HARD)
+            if len(result.candidates) == 0 and gate_rejected:
+                fallback_markers = self._structure_gate.apply_fallback_if_silent(
+                    final_markers=result.candidates,
+                    rejected=gate_rejected,
+                    doc_id=doc_id,
+                )
+                if fallback_markers:
+                    result.candidates = fallback_markers
+                    logger.warning(
+                        f"[StructureNumberingGate] Doc '{doc_id}' silencieux - "
+                        f"Fallback: {[c.value for c in fallback_markers]}"
+                    )
+
         logger.info(
             f"[CandidateMiner] Final: {len(result.candidates)} candidates "
             f"(scope_lang={result.scope_language_hits}, conflicts={result.conflict_hits})"
@@ -763,12 +1271,21 @@ class CandidateMiner:
                     value = value.strip()
 
                     if self._is_valid_marker(value):
+                        # Plan v2.1: Marquer entity_numeral avec 1-2 chiffres comme weak
+                        is_weak = False
+                        if pattern_type == "entity_numeral":
+                            # Vérifier si le numéro a 1-2 chiffres (pattern \d{1,2})
+                            num_part = numeral if len(match.groups()) >= 2 else value.split()[-1]
+                            if num_part.isdigit() and len(num_part) <= 2:
+                                is_weak = True
+
                         candidates.append(MarkerCandidate(
                             value=value,
                             source="filename",
                             position=0,
                             evidence=name,
                             lexical_shape=pattern_type,
+                            is_weak_candidate=is_weak,
                         ))
 
         return candidates
@@ -810,12 +1327,21 @@ class CandidateMiner:
                         end = min(len(text), match.end() + 50)
                         evidence = text[start:end].strip()
 
+                        # Plan v2.1: Marquer entity_numeral avec 1-2 chiffres comme weak
+                        is_weak = False
+                        if pattern_type == "entity_numeral":
+                            # Vérifier si le numéro a 1-2 chiffres (pattern \d{1,2})
+                            num_part = numeral if len(match.groups()) >= 2 else value.split()[-1]
+                            if num_part.isdigit() and len(num_part) <= 2:
+                                is_weak = True
+
                         candidates.append(MarkerCandidate(
                             value=value,
                             source=source,
                             position=position,
                             evidence=evidence,
                             lexical_shape=pattern_type,
+                            is_weak_candidate=is_weak,
                         ))
 
         return candidates
@@ -1009,6 +1535,11 @@ __all__ = [
     "CandidateGate",
     "GateResult",
     "get_candidate_gate",
+    # Phase 2 (Plan v2.1): StructureNumberingGate
+    "StructureNumberingGate",
+    "StructureGateConfig",
+    "SequenceDetectionResult",
+    "get_structure_numbering_gate",
     # Functions
     "enrich_candidates_with_structural_analysis",
 ]
