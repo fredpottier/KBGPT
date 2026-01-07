@@ -398,12 +398,26 @@ SEULE source de relations sémantiques prouvées.
 
 **Livrable** : Relations prouvées avec traçabilité complète
 
-### Phase C - Runtime Graph-First
+### Phase C - Runtime Graph-First ✅ IMPLÉMENTÉ (2026-01-07)
 
-1. Refactorer `graph_guided_search.py` avec pathfinding GDS
-2. Implémenter les 3 modes (Reasoned/Anchored/Text-only)
-3. Modifier `search.py` pour orchestration graph-first
-4. Filtrage Qdrant par `context_id` (evidence plan)
+> **Module** : `src/knowbase/api/services/graph_first_search.py`
+> **Intégration** : `search.py` → paramètre `use_graph_first=True`
+
+1. ✅ Créé `GraphFirstSearchService` avec 3 modes (REASONED/ANCHORED/TEXT_ONLY)
+   - `build_search_plan()` détermine le mode selon les paths trouvés
+   - `SearchMode.REASONED` : Paths sémantiques trouvés avec evidence
+   - `SearchMode.ANCHORED` : Routing structural via HAS_TOPIC/COVERS
+   - `SearchMode.TEXT_ONLY` : Fallback Qdrant classique
+2. ✅ Pathfinding GDS Yen k-shortest paths
+   - `_gds_yen_paths()` utilise `gds.shortestPath.yens.stream`
+   - `_ensure_gds_projection()` crée la projection SemanticGraph
+   - Fallback sur `allShortestPaths` Cypher si GDS indisponible
+3. ✅ Intégration dans `search.py`
+   - Nouveau paramètre `use_graph_first: bool = False`
+   - Réponse inclut `graph_first_plan` avec mode et metadata
+4. ✅ Filtrage Qdrant par `context_id`
+   - `search_qdrant_filtered()` filtre par context_ids du plan
+   - Utilise le pont Phase 0 (`make_context_id` dans hybrid_anchor_chunker)
 
 **Livrable** : Runtime graph-first opérationnel
 

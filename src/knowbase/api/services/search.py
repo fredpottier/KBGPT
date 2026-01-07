@@ -67,6 +67,7 @@ def search_documents(
     graph_enrichment_level: str = "standard",
     session_id: str | None = None,
     use_hybrid_anchor_search: bool = False,
+    use_graph_first: bool = False,
 ) -> dict[str, Any]:
     """
     Recherche sémantique avec enrichissement Knowledge Graph (OSMOSE) et contexte conversationnel.
@@ -82,6 +83,7 @@ def search_documents(
         graph_enrichment_level: Niveau d'enrichissement (none, light, standard, deep)
         session_id: ID de session pour contexte conversationnel (Memory Layer Phase 2.5)
         use_hybrid_anchor_search: Utiliser le HybridAnchorSearchService (Phase 7)
+        use_graph_first: Utiliser le runtime Graph-First (ADR Phase C)
 
     Returns:
         Résultats de recherche avec synthèse enrichie
@@ -138,6 +140,61 @@ def search_documents(
     elif hasattr(query_vector, "numpy"):
         query_vector = query_vector.numpy().tolist()
     query_vector = [float(x) for x in query_vector]
+
+    # 🌊 ADR_GRAPH_FIRST_ARCHITECTURE Phase C: Graph-First Search Mode
+    graph_first_plan = None
+    graph_first_chunks = None
+    graph_first_succeeded = False
+
+    if use_graph_first:
+        try:
+            from .graph_first_search import get_graph_first_service, SearchMode as GFSearchMode
+
+            gf_service = get_graph_first_service(tenant_id)
+
+            # Construire le plan de recherche (détermine le mode)
+            loop = asyncio.new_event_loop()
+            try:
+                graph_first_plan = loop.run_until_complete(
+                    gf_service.build_search_plan(query)
+                )
+            finally:
+                loop.close()
+
+            # Exécuter la recherche selon le mode
+            if graph_first_plan.mode in (GFSearchMode.REASONED, GFSearchMode.ANCHORED):
+                context_ids = graph_first_plan.get_context_ids_for_qdrant()
+
+                if context_ids:
+                    # Recherche Qdrant filtrée par context_ids
+                    loop = asyncio.new_event_loop()
+                    try:
+                        graph_first_chunks = loop.run_until_complete(
+                            gf_service.search_qdrant_filtered(
+                                query=enriched_query,
+                                context_ids=context_ids,
+                                collection_name=settings.qdrant_collection,
+                                top_k=TOP_K,
+                            )
+                        )
+                    finally:
+                        loop.close()
+
+                    if graph_first_chunks:
+                        graph_first_succeeded = True
+                        logger.info(
+                            f"[GRAPH-FIRST] Mode {graph_first_plan.mode.value}: "
+                            f"{len(graph_first_chunks)} chunks from {len(context_ids)} contexts"
+                        )
+
+            if not graph_first_succeeded:
+                logger.info(
+                    f"[GRAPH-FIRST] Falling back to standard search "
+                    f"(mode={graph_first_plan.mode.value}, reason={graph_first_plan.fallback_reason})"
+                )
+
+        except Exception as e:
+            logger.warning(f"[GRAPH-FIRST] Search failed, falling back to standard: {e}")
 
     # 🚀 OSMOSE Phase 7: Hybrid Anchor Search Mode
     reranked_chunks = None
@@ -208,8 +265,14 @@ def search_documents(
                 f"[OSMOSE:HybridAnchor] Search failed, falling back to standard: {e}"
             )
 
-    # Recherche classique (seulement si hybrid search n'a pas fonctionné)
-    if not hybrid_search_succeeded:
+    # ADR_GRAPH_FIRST: Si graph-first a réussi, utiliser ces chunks
+    if graph_first_succeeded and graph_first_chunks:
+        reranked_chunks = graph_first_chunks
+        # Reranker pour améliorer l'ordre
+        reranked_chunks = rerank_chunks(query, reranked_chunks, top_k=TOP_K)
+
+    # Recherche classique (seulement si graph-first ET hybrid search n'ont pas fonctionné)
+    if not graph_first_succeeded and not hybrid_search_succeeded:
         # Construction du filtre de base (pour recherche classique)
         filter_conditions = [FieldCondition(key="type", match=MatchValue(value="rfp_qa"))]
 
@@ -237,6 +300,7 @@ def search_documents(
                 "status": "no_results",
                 "results": [],
                 "message": "Aucune information pertinente n'a été trouvée dans la base de connaissance.",
+                "graph_first_plan": graph_first_plan.to_dict() if graph_first_plan else None,
             }
 
         public_url = PUBLIC_URL
@@ -366,6 +430,10 @@ def search_documents(
         "results": reranked_chunks,
         "synthesis": synthesis_result
     }
+
+    # 🌊 ADR_GRAPH_FIRST Phase C: Ajouter le plan graph-first
+    if graph_first_plan:
+        response["graph_first_plan"] = graph_first_plan.to_dict()
 
     # 🌊 Phase 2.12: Ajouter le profil de visibilité actif
     try:
