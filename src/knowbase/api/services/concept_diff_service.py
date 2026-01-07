@@ -303,12 +303,12 @@ class ConceptDiffService:
         # Query pour obtenir les concepts de chaque document
         query = """
         // Concepts du document A
-        MATCH (pc_a:ProtoConcept)-[:EXTRACTED_FROM]->(d_a:Document {id: $doc_a})
+        MATCH (pc_a:ProtoConcept)-[:EXTRACTED_FROM]->(d_a:Document {document_id: $doc_a})
         WHERE pc_a.tenant_id = $tenant_id
         WITH collect(DISTINCT {id: pc_a.concept_id, label: pc_a.concept_name}) AS concepts_a
 
         // Concepts du document B
-        MATCH (pc_b:ProtoConcept)-[:EXTRACTED_FROM]->(d_b:Document {id: $doc_b})
+        MATCH (pc_b:ProtoConcept)-[:EXTRACTED_FROM]->(d_b:Document {document_id: $doc_b})
         WHERE pc_b.tenant_id = $tenant_id
         WITH concepts_a, collect(DISTINCT {id: pc_b.concept_id, label: pc_b.concept_name}) AS concepts_b
 

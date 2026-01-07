@@ -23,6 +23,8 @@ from knowbase.ingestion.pass2_orchestrator import (
     Pass2Orchestrator,
     Pass2Mode,
     Pass2Phase,
+    DocumentPhase,
+    CorpusPhase,
     get_pass2_orchestrator,
 )
 from knowbase.relations.raw_assertion_writer import get_raw_assertion_writer, RawAssertionWriter
@@ -35,6 +37,8 @@ from knowbase.common.clients.neo4j_client import Neo4jClient
 from knowbase.config.settings import get_settings
 from knowbase.common.llm_router import get_llm_router, TaskType
 from knowbase.relations.types import RelationType, RawAssertionFlags
+from knowbase.relations.structural_topic_extractor import process_document_topics
+from knowbase.relations.semantic_consolidation_pass3 import run_pass3_consolidation
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +70,46 @@ class Pass2Status:
 
 
 @dataclass
+class EnrichmentStatus:
+    """
+    Statut étendu pour la page Enrichment.
+
+    ADR 2026-01-07: Nomenclature Document-level vs Corpus-level.
+    """
+    # === DOCUMENT-LEVEL OUTPUT ===
+
+    # Pass 1 output
+    proto_concepts: int = 0
+    canonical_concepts: int = 0
+    mentioned_in_count: int = 0
+
+    # Pass 2a output (Structural Topics)
+    topics_count: int = 0
+    has_topic_count: int = 0
+    covers_count: int = 0
+
+    # Pass 2b output
+    raw_assertions: int = 0
+
+    # Pass 3 output (Semantic Consolidation)
+    proven_relations: int = 0  # Relations avec evidence_context_ids non vide
+
+    # === CORPUS-LEVEL OUTPUT (Pass 4) ===
+
+    # Pass 4a: Entity Resolution
+    er_standalone_concepts: int = 0
+    er_merged_concepts: int = 0
+    er_pending_proposals: int = 0
+
+    # Pass 4b: Corpus Links
+    co_occurs_relations: int = 0  # CO_OCCURS_IN_CORPUS count
+
+    # === JOBS ===
+    pending_jobs: int = 0
+    running_jobs: int = 0
+
+
+@dataclass
 class Pass2Result:
     """Résultat d'exécution Pass 2."""
 
@@ -89,14 +133,19 @@ class Pass2Result:
 
 class Pass2Service:
     """
-    Service Pass 2 - Orchestration des enrichissements post-ingestion.
+    Service Enrichment - Orchestration des phases Document + Corpus level.
 
-    Phases disponibles:
-    1. CLASSIFY_FINE - Classification LLM fine-grained des concepts
-    2. ENRICH_RELATIONS - Extraction relations cross-segment + persistence
-    3. CONSOLIDATE_CLAIMS - Consolidation RawClaims → CanonicalClaims
-    4. CONSOLIDATE_RELATIONS - Consolidation RawAssertions → CanonicalRelations
-    5. CROSS_DOC - Consolidation corpus-level (TODO)
+    ADR 2026-01-07: Nomenclature validée Claude + ChatGPT.
+
+    === DOCUMENT-LEVEL PHASES ===
+    Pass 2a: STRUCTURAL_TOPICS - Topics H1/H2 + COVERS (scope)
+    Pass 2b: CLASSIFY_FINE - Classification LLM fine-grained
+    Pass 2b: ENRICH_RELATIONS - Relations candidates (RawAssertions)
+    Pass 3:  SEMANTIC_CONSOLIDATION - Relations prouvées (evidence_quote)
+
+    === CORPUS-LEVEL PHASES ===
+    Pass 4a: ENTITY_RESOLUTION - Merge doublons cross-doc (PATCH-ER)
+    Pass 4b: CORPUS_LINKS - CO_OCCURS_IN_CORPUS (PATCH-LINK)
     """
 
     def __init__(self, tenant_id: str = "default"):
@@ -792,6 +841,84 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
         result.execution_time_ms = (time.time() - start_time) * 1000
         return result
 
+    async def run_corpus_links(self) -> Pass2Result:
+        """
+        Pass 4b: Corpus Links (PATCH-LINK).
+
+        ADR 2026-01-07: Crée des liens faibles cross-documents.
+
+        - CO_OCCURS_IN_CORPUS: concepts qui apparaissent ensemble dans ≥2 documents
+        - Phase déterministe, SANS LLM
+        - Les liens sont des "indices" pour navigation, pas des relations sémantiques
+
+        Returns:
+            Pass2Result avec statistiques
+        """
+        start_time = time.time()
+        result = Pass2Result(phase="CORPUS_LINKS")
+
+        try:
+            # Créer les relations CO_OCCURS_IN_CORPUS
+            query = """
+            // Trouver les paires de concepts qui co-occurent dans ≥2 documents
+            MATCH (c1:CanonicalConcept {tenant_id: $tenant_id})
+            MATCH (c2:CanonicalConcept {tenant_id: $tenant_id})
+            WHERE c1.canonical_id < c2.canonical_id
+              AND coalesce(c1.concept_type, '') <> 'TOPIC'
+              AND coalesce(c2.concept_type, '') <> 'TOPIC'
+
+            // Trouver les documents communs via MENTIONED_IN
+            MATCH (c1)-[:MENTIONED_IN]->(ctx1:SectionContext)-[:IN_DOC]->(doc:DocumentContext)
+            MATCH (c2)-[:MENTIONED_IN]->(ctx2:SectionContext)-[:IN_DOC]->(doc)
+            WHERE ctx1.tenant_id = $tenant_id AND ctx2.tenant_id = $tenant_id
+
+            WITH c1, c2, collect(DISTINCT doc.doc_id) AS shared_docs
+            WHERE size(shared_docs) >= 2
+
+            // Créer ou mettre à jour la relation
+            MERGE (c1)-[r:CO_OCCURS_IN_CORPUS]->(c2)
+            ON CREATE SET
+                r.created_at = datetime(),
+                r.doc_count = size(shared_docs),
+                r.shared_doc_ids = shared_docs,
+                r.tenant_id = $tenant_id
+            ON MATCH SET
+                r.updated_at = datetime(),
+                r.doc_count = size(shared_docs),
+                r.shared_doc_ids = shared_docs
+
+            RETURN count(r) AS links_created,
+                   sum(CASE WHEN r.created_at = datetime() THEN 1 ELSE 0 END) AS new_links
+            """
+
+            results = self._execute_query(query, {"tenant_id": self.tenant_id})
+
+            links_created = results[0]["links_created"] if results else 0
+            new_links = results[0].get("new_links", links_created) if results else 0
+
+            result.items_processed = links_created
+            result.items_created = new_links
+            result.items_updated = links_created - new_links
+
+            result.details = {
+                "co_occurs_relations_total": links_created,
+                "new_relations_created": new_links,
+                "existing_relations_updated": links_created - new_links,
+                "min_doc_threshold": 2,
+            }
+
+            logger.info(
+                f"[Pass2Service] CORPUS_LINKS complete: {links_created} CO_OCCURS_IN_CORPUS relations"
+            )
+
+        except Exception as e:
+            logger.error(f"[Pass2Service] CORPUS_LINKS failed: {e}")
+            result.success = False
+            result.errors.append(str(e))
+
+        result.execution_time_ms = (time.time() - start_time) * 1000
+        return result
+
     async def run_full_pass2(
         self,
         document_id: Optional[str] = None,
@@ -843,6 +970,311 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
 
         logger.info(f"[Pass2Service] FULL Pass 2 complete: {len(results)} phases executed")
         return results
+
+    async def run_structural_topics(
+        self,
+        document_id: Optional[str] = None
+    ) -> Pass2Result:
+        """
+        Exécute Pass 2a: Structural Topics.
+
+        Extrait Topics depuis H1/H2 headers et crée:
+        - CanonicalConcept type=TOPIC
+        - HAS_TOPIC (Document → Topic)
+        - COVERS (Topic → Concept)
+
+        Args:
+            document_id: Document à traiter (optionnel, tous si None)
+
+        Returns:
+            Pass2Result avec statistiques
+        """
+        start_time = time.time()
+        result = Pass2Result(phase="STRUCTURAL_TOPICS")
+
+        try:
+            # Récupérer documents à traiter
+            if document_id:
+                doc_ids = [document_id]
+            else:
+                doc_ids = self._get_documents_without_topics()
+
+            if not doc_ids:
+                result.details["message"] = "No documents to process"
+                result.success = True
+                return result
+
+            total_topics = 0
+            total_covers = 0
+
+            for doc_id in doc_ids:
+                # Récupérer le texte du document depuis Qdrant
+                text = await self._get_document_text(doc_id)
+                if not text:
+                    logger.warning(f"[Pass2Service] No text for document {doc_id}")
+                    continue
+
+                # Extraire et persister les topics
+                stats = process_document_topics(
+                    document_id=doc_id,
+                    text=text,
+                    neo4j_client=self._neo4j_client,
+                    tenant_id=self.tenant_id
+                )
+
+                total_topics += stats.get("topics_count", 0)
+                total_covers += stats.get("covers_stats", {}).get("covers_created", 0)
+
+            result.items_processed = len(doc_ids)
+            result.items_created = total_topics
+            result.success = True
+            result.details = {
+                "documents_processed": len(doc_ids),
+                "topics_created": total_topics,
+                "covers_created": total_covers
+            }
+
+        except Exception as e:
+            logger.error(f"[Pass2Service] STRUCTURAL_TOPICS failed: {e}")
+            result.success = False
+            result.errors.append(str(e))
+
+        result.execution_time_ms = (time.time() - start_time) * 1000
+        logger.info(
+            f"[Pass2Service] STRUCTURAL_TOPICS complete: "
+            f"{result.items_created} topics, {result.execution_time_ms/1000:.1f}s"
+        )
+        return result
+
+    def _get_documents_without_topics(self) -> List[str]:
+        """Récupère les documents qui n'ont pas encore de Topics."""
+        query = """
+        MATCH (d:Document {tenant_id: $tenant_id})
+        WHERE d.document_id IS NOT NULL
+
+        // Compter les HAS_TOPIC existants
+        OPTIONAL MATCH (d)-[:HAS_TOPIC]->(t:CanonicalConcept {concept_type: 'TOPIC'})
+        WITH d, count(t) AS existing_topics
+
+        // Ne retourner que les documents sans Topics
+        WHERE existing_topics = 0
+
+        RETURN d.document_id AS doc_id
+        ORDER BY d.document_id
+        LIMIT 100
+        """
+        results = self._execute_query(query, {"tenant_id": self.tenant_id})
+        return [r["doc_id"] for r in results if r.get("doc_id")]
+
+    async def _get_document_text(self, document_id: str) -> Optional[str]:
+        """Récupère le texte complet d'un document depuis Qdrant."""
+        from knowbase.common.clients.qdrant_client import get_qdrant_client
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+        try:
+            qdrant = get_qdrant_client()
+
+            scroll_result = qdrant.scroll(
+                collection_name="knowbase",
+                scroll_filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="document_id",
+                            match=MatchValue(value=document_id)
+                        ),
+                        FieldCondition(
+                            key="tenant_id",
+                            match=MatchValue(value=self.tenant_id)
+                        )
+                    ]
+                ),
+                limit=200,
+                with_payload=True,
+                with_vectors=False
+            )
+
+            if scroll_result and scroll_result[0]:
+                # Concaténer tous les chunks
+                chunks = sorted(
+                    scroll_result[0],
+                    key=lambda p: p.payload.get("chunk_index", 0) if p.payload else 0
+                )
+                texts = [p.payload.get("text", "") for p in chunks if p.payload]
+                return "\n\n".join(texts)
+
+        except Exception as e:
+            logger.error(f"[Pass2Service] Failed to get document text: {e}")
+
+        return None
+
+    async def run_semantic_consolidation(
+        self,
+        document_id: Optional[str] = None,
+        max_candidates: int = 50
+    ) -> Pass2Result:
+        """
+        Exécute Pass 3: Semantic Consolidation.
+
+        Pipeline:
+        1. Génère candidats via co-présence Topic/Section
+        2. Vérifie chaque candidat avec LLM extractif
+        3. Persiste les relations avec preuves
+
+        Args:
+            document_id: Document à traiter (optionnel, tous si None)
+            max_candidates: Nombre max de candidats par document
+
+        Returns:
+            Pass2Result avec statistiques
+        """
+        start_time = time.time()
+        result = Pass2Result(phase="SEMANTIC_CONSOLIDATION")
+
+        try:
+            # Récupérer documents à traiter
+            if document_id:
+                doc_ids = [document_id]
+            else:
+                doc_ids = self._get_documents_with_topics()
+
+            if not doc_ids:
+                result.details["message"] = "No documents with Topics to consolidate"
+                result.success = True
+                return result
+
+            llm_router = get_llm_router()
+            total_candidates = 0
+            total_relations = 0
+            total_abstained = 0
+
+            for doc_id in doc_ids:
+                stats = await run_pass3_consolidation(
+                    document_id=doc_id,
+                    neo4j_client=self._neo4j_client,
+                    llm_router=llm_router,
+                    tenant_id=self.tenant_id,
+                    max_candidates=max_candidates
+                )
+
+                total_candidates += stats.candidates_generated
+                total_relations += stats.relations_created
+                total_abstained += stats.abstained
+
+            result.items_processed = total_candidates
+            result.items_created = total_relations
+            result.success = True
+            result.details = {
+                "documents_processed": len(doc_ids),
+                "candidates_evaluated": total_candidates,
+                "relations_created": total_relations,
+                "abstained": total_abstained
+            }
+
+        except Exception as e:
+            logger.error(f"[Pass2Service] SEMANTIC_CONSOLIDATION failed: {e}")
+            result.success = False
+            result.errors.append(str(e))
+
+        result.execution_time_ms = (time.time() - start_time) * 1000
+        logger.info(
+            f"[Pass2Service] SEMANTIC_CONSOLIDATION complete: "
+            f"{result.items_created} relations, {result.execution_time_ms/1000:.1f}s"
+        )
+        return result
+
+    def _get_documents_with_topics(self) -> List[str]:
+        """Récupère les documents qui ont des Topics (prêts pour Pass 3)."""
+        query = """
+        MATCH (d:Document {tenant_id: $tenant_id})-[:HAS_TOPIC]->(t:CanonicalConcept {concept_type: 'TOPIC'})
+        RETURN DISTINCT d.document_id AS doc_id
+        ORDER BY d.document_id
+        LIMIT 100
+        """
+        results = self._execute_query(query, {"tenant_id": self.tenant_id})
+        return [r["doc_id"] for r in results if r.get("doc_id")]
+
+    def get_enrichment_status(self) -> EnrichmentStatus:
+        """
+        Récupère le statut étendu pour la page Enrichment.
+
+        Inclut les métriques Pass 2a (Topics/COVERS) et Pass 3 (relations prouvées).
+
+        Returns:
+            EnrichmentStatus avec toutes les métriques
+        """
+        status = EnrichmentStatus()
+
+        # Requêtes pour toutes les métriques
+        queries = {
+            "proto_concepts": "MATCH (p:ProtoConcept {tenant_id: $tenant_id}) RETURN count(p) AS count",
+            "canonical_concepts": "MATCH (c:CanonicalConcept {tenant_id: $tenant_id}) WHERE c.concept_type <> 'TOPIC' OR c.concept_type IS NULL RETURN count(c) AS count",
+            "mentioned_in_count": "MATCH ()-[r:MENTIONED_IN]->() RETURN count(r) AS count",
+            "topics_count": "MATCH (c:CanonicalConcept {tenant_id: $tenant_id, concept_type: 'TOPIC'}) RETURN count(c) AS count",
+            "has_topic_count": "MATCH ()-[r:HAS_TOPIC]->() RETURN count(r) AS count",
+            "covers_count": "MATCH ()-[r:COVERS]->() RETURN count(r) AS count",
+            "raw_assertions": "MATCH (ra:RawAssertion {tenant_id: $tenant_id}) RETURN count(ra) AS count",
+        }
+
+        for key, query in queries.items():
+            try:
+                result = self._execute_query(query, {"tenant_id": self.tenant_id})
+                setattr(status, key, result[0]["count"] if result else 0)
+            except Exception as e:
+                logger.error(f"[Pass2Service] Error counting {key}: {e}")
+
+        # Compter relations prouvées (avec evidence_context_ids non vide)
+        proven_query = """
+        MATCH (s:CanonicalConcept {tenant_id: $tenant_id})-[r]->(o:CanonicalConcept {tenant_id: $tenant_id})
+        WHERE r.evidence_context_ids IS NOT NULL
+          AND size(r.evidence_context_ids) > 0
+          AND r.source = 'pass3_extractive'
+        RETURN count(r) AS count
+        """
+        try:
+            result = self._execute_query(proven_query, {"tenant_id": self.tenant_id})
+            status.proven_relations = result[0]["count"] if result else 0
+        except Exception as e:
+            logger.error(f"[Pass2Service] Error counting proven_relations: {e}")
+
+        # === CORPUS-LEVEL STATS (Pass 4) ===
+
+        # Pass 4a: Entity Resolution stats
+        er_query = """
+        MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+        WITH count(c) AS total,
+             sum(CASE WHEN c.er_status = 'STANDALONE' OR c.er_status IS NULL THEN 1 ELSE 0 END) AS standalone,
+             sum(CASE WHEN c.er_status = 'MERGED' THEN 1 ELSE 0 END) AS merged
+        OPTIONAL MATCH (p:MergeProposal {tenant_id: $tenant_id})
+        WHERE p.applied = false OR p.applied IS NULL
+        WITH total, standalone, merged, count(p) AS pending
+        RETURN standalone, merged, pending
+        """
+        try:
+            result = self._execute_query(er_query, {"tenant_id": self.tenant_id})
+            if result:
+                status.er_standalone_concepts = result[0].get("standalone", 0)
+                status.er_merged_concepts = result[0].get("merged", 0)
+                status.er_pending_proposals = result[0].get("pending", 0)
+        except Exception as e:
+            logger.error(f"[Pass2Service] Error counting ER stats: {e}")
+
+        # Pass 4b: Corpus Links stats (CO_OCCURS_IN_CORPUS)
+        co_occurs_query = """
+        MATCH ()-[r:CO_OCCURS_IN_CORPUS]->()
+        WHERE r.tenant_id = $tenant_id OR r.tenant_id IS NULL
+        RETURN count(r) AS count
+        """
+        try:
+            result = self._execute_query(co_occurs_query, {"tenant_id": self.tenant_id})
+            status.co_occurs_relations = result[0]["count"] if result else 0
+        except Exception as e:
+            logger.error(f"[Pass2Service] Error counting co_occurs_relations: {e}")
+
+        # Jobs en attente
+        status.pending_jobs = self._orchestrator.queue_size
+        status.running_jobs = len(self._orchestrator.running_jobs)
+
+        return status
 
 
 # Singleton

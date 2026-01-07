@@ -699,18 +699,19 @@ class CoversBuilder:
         5. Créer COVERS
         """
         # Requête pour trouver concepts avec leur salience dans le scope du topic
+        # NOTE: SectionContext utilise 'doc_id' (pas 'document_id')
         query = """
         // Trouver tous les concepts mentionnés dans les sections du document
         MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
               -[m:MENTIONED_IN]->
               (ctx:SectionContext {tenant_id: $tenant_id})
-        WHERE ctx.document_id = $document_id
+        WHERE ctx.doc_id = $document_id
 
         // Calculer le max de mentions pour normalisation
         WITH c, m, ctx
         MATCH (c2:CanonicalConcept {tenant_id: $tenant_id})
               -[m2:MENTIONED_IN]->
-              (ctx2:SectionContext {document_id: $document_id, tenant_id: $tenant_id})
+              (ctx2:SectionContext {doc_id: $document_id, tenant_id: $tenant_id})
         WITH c, m, ctx, max(m2.count) AS max_count
 
         // Calculer salience
@@ -729,6 +730,18 @@ class CoversBuilder:
         """
 
         try:
+            # Debug: vérifier le driver
+            if not self.neo4j.driver:
+                logger.error("[OSMOSE:Pass2a] CoversBuilder: neo4j.driver is None!")
+                return 0
+
+            logger.info(
+                f"[OSMOSE:Pass2a] CoversBuilder query params: "
+                f"document_id={document_id}, tenant_id={self.tenant_id}, "
+                f"salience_threshold={self.salience_threshold}, "
+                f"neo4j_database={self.neo4j.database}"
+            )
+
             with self.neo4j.driver.session(database=self.neo4j.database) as session:
                 result = session.run(
                     query,
@@ -738,6 +751,7 @@ class CoversBuilder:
                 )
 
                 candidates = list(result)
+                logger.info(f"[OSMOSE:Pass2a] CoversBuilder found {len(candidates)} candidates")
                 self._stats["concepts_evaluated"] += len(candidates)
 
                 for record in candidates:

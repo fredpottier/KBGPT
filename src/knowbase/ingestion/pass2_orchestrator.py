@@ -1,21 +1,33 @@
 """
-Hybrid Anchor Model - Pass 2 Orchestrator
+OSMOSE Enrichment Orchestrator
 
-Orchestrateur configurable pour l'enrichissement Pass 2.
+ADR 2026-01-07: Nomenclature validée Claude + ChatGPT
+Séparation claire Document-level vs Corpus-level phases.
+
+=== DOCUMENT-LEVEL PHASES (Pass 1-3) ===
+Travaillent sur UN document à la fois.
+
+- Pass 2a: STRUCTURAL_TOPICS - Topics H1/H2 + COVERS (scope)
+- Pass 2b: CLASSIFY_FINE - Classification LLM fine-grained
+- Pass 2b: ENRICH_RELATIONS - Relations candidates (RawAssertions)
+- Pass 3:  SEMANTIC_CONSOLIDATION - Relations prouvées (evidence_quote)
+
+=== CORPUS-LEVEL PHASES (Pass 4) ===
+Travaillent sur le corpus ENTIER.
+IMPORTANT: Exécuter APRÈS document-level pour préserver l'auditabilité.
+
+- Pass 4a: ENTITY_RESOLUTION - Merge doublons cross-doc (PATCH-ER)
+- Pass 4b: CORPUS_LINKS - CO_OCCURS_IN_CORPUS (PATCH-LINK)
+
 Modes d'exécution:
 - inline: Exécuté immédiatement après Pass 1 (Burst mode)
 - background: Job asynchrone (mode normal)
 - scheduled: Batch nocturne (corpus stable)
 
-Phases Pass 2:
-- CLASSIFY_FINE: Classification LLM fine-grained
-- ENRICH_RELATIONS: Relations cross-segment + inférences
-- CROSS_DOC: Consolidation corpus-level
+ADR: doc/ongoing/ADR_GRAPH_FIRST_ARCHITECTURE.md
 
-ADR: doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md
-
-Author: OSMOSE Phase 2
-Date: 2024-12
+Author: OSMOSE
+Date: 2026-01-07
 """
 
 import logging
@@ -50,21 +62,57 @@ class Pass2Mode(str, Enum):
     DISABLED = "disabled"      # Pass 2 désactivé
 
 
+# =============================================================================
+# NOMENCLATURE ADR 2026-01-07 (validée Claude + ChatGPT)
+# Séparation claire : Document-level vs Corpus-level
+# =============================================================================
+
+class DocumentPhase(str, Enum):
+    """
+    Phases Document-Level (Pass 1-3).
+
+    Chaque phase travaille sur UN document à la fois.
+    Les relations créées sont intra-document avec preuves extractives.
+    """
+    # Pass 2a: Structure documentaire
+    STRUCTURAL_TOPICS = "structural_topics"  # Topics H1/H2 + COVERS (scope)
+
+    # Pass 2b: Typage et candidates
+    CLASSIFY_FINE = "classify_fine"          # Classification LLM fine-grained
+    ENRICH_RELATIONS = "enrich_relations"    # Relations candidates (RawAssertions)
+
+    # Pass 3: Preuves sémantiques
+    SEMANTIC_CONSOLIDATION = "semantic_consolidation"  # Relations prouvées (evidence_quote)
+
+
+class CorpusPhase(str, Enum):
+    """
+    Phases Corpus-Level (Pass 4).
+
+    Ces phases travaillent sur le corpus ENTIER.
+    Elles unifient les identités et créent des liens faibles cross-doc.
+
+    IMPORTANT: Exécuter APRÈS les DocumentPhases pour garantir
+    que les preuves sont attachées avant le rewiring.
+    """
+    # Pass 4a: Entity Resolution
+    ENTITY_RESOLUTION = "entity_resolution"  # Merge doublons cross-doc (PATCH-ER)
+
+    # Pass 4b: Liens faibles corpus
+    CORPUS_LINKS = "corpus_links"            # CO_OCCURS_IN_CORPUS (PATCH-LINK)
+
+
+# Alias pour compatibilité arrière (deprecated)
 class Pass2Phase(str, Enum):
-    """Phases de Pass 2."""
-
-    # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 2a: Structural Topics / COVERS
-    STRUCTURAL_TOPICS = "structural_topics"  # Extract Topics from H1/H2, create COVERS
-
-    # Pass 2b: Classification et Relations
+    """
+    DEPRECATED: Utiliser DocumentPhase ou CorpusPhase.
+    Conservé pour compatibilité avec code existant.
+    """
+    STRUCTURAL_TOPICS = "structural_topics"
     CLASSIFY_FINE = "classify_fine"
     ENRICH_RELATIONS = "enrich_relations"
-
-    # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 3: Semantic Consolidation
-    SEMANTIC_CONSOLIDATION = "semantic_consolidation"  # Extractive verification + proven relations
-
-    # Cross-document consolidation
-    CROSS_DOC = "cross_doc"
+    SEMANTIC_CONSOLIDATION = "semantic_consolidation"
+    CROSS_DOC = "cross_doc"  # Mapped to CorpusPhase.ENTITY_RESOLUTION
 
 
 @dataclass
@@ -91,8 +139,17 @@ class Pass2Stats:
     pass3_verified: int = 0
     pass3_abstained: int = 0
 
-    # Cross-doc
-    cross_doc_concepts: int = 0
+    # Pass 4a: Entity Resolution (corpus-level)
+    er_candidates: int = 0
+    er_merged: int = 0
+    er_proposals: int = 0
+
+    # Pass 4b: Corpus Links (corpus-level)
+    corpus_links_created: int = 0
+    co_occurs_relations: int = 0
+
+    # Legacy (deprecated)
+    cross_doc_concepts: int = 0  # Mapped to er_merged
 
     # Erreurs
     errors: List[str] = field(default_factory=list)
@@ -106,14 +163,23 @@ class Pass2Stats:
 
 @dataclass
 class Pass2Job:
-    """Job Pass 2 en attente."""
+    """
+    Job d'enrichissement (Document + Corpus phases).
 
+    ADR 2026-01-07: Séparation claire des phases document-level vs corpus-level.
+    """
     job_id: str
     document_id: str
     tenant_id: str
     mode: Pass2Mode
+
+    # Document-level phases (Pass 2-3)
     phases: List[Pass2Phase]
-    concepts: List[Dict[str, Any]]
+
+    # Corpus-level phases (Pass 4) - Optionnel
+    corpus_phases: List[CorpusPhase] = field(default_factory=list)
+
+    concepts: List[Dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     priority: int = 0  # 0 = normal, 1 = high
 
@@ -279,10 +345,22 @@ class Pass2Orchestrator:
                 await self._phase_semantic_consolidation(job, stats)
                 phases_completed.append(Pass2Phase.SEMANTIC_CONSOLIDATION.value)
 
-            # Phase finale: CROSS_DOC
-            if Pass2Phase.CROSS_DOC in job.phases:
-                await self._phase_cross_doc(job, stats)
-                phases_completed.append(Pass2Phase.CROSS_DOC.value)
+            # =================================================================
+            # CORPUS-LEVEL PHASES (Pass 4) - ADR 2026-01-07
+            # Exécutées APRÈS les phases document-level
+            # =================================================================
+
+            # Pass 4a: Entity Resolution (PATCH-ER)
+            # Support both new CorpusPhase and legacy Pass2Phase.CROSS_DOC
+            if (hasattr(job, 'corpus_phases') and CorpusPhase.ENTITY_RESOLUTION in getattr(job, 'corpus_phases', [])) or \
+               Pass2Phase.CROSS_DOC in job.phases:
+                await self._phase_entity_resolution(job, stats)
+                phases_completed.append(CorpusPhase.ENTITY_RESOLUTION.value)
+
+            # Pass 4b: Corpus Links (PATCH-LINK)
+            if hasattr(job, 'corpus_phases') and CorpusPhase.CORPUS_LINKS in getattr(job, 'corpus_phases', []):
+                await self._phase_corpus_links(job, stats)
+                phases_completed.append(CorpusPhase.CORPUS_LINKS.value)
 
             # ADR 2024-12-30: Update enrichment tracking - Pass 2 complete
             enrichment_tracker.update_pass2_status(
@@ -290,7 +368,7 @@ class Pass2Orchestrator:
                 status=EnrichmentStatus.COMPLETE,
                 relations_extracted=stats.enrich_relations_count,
                 classifications_updated=stats.classify_fine_changes,
-                cross_doc_links=stats.cross_doc_concepts,
+                cross_doc_links=stats.er_merged + stats.corpus_links_created,
                 phases_completed=phases_completed
             )
 
@@ -930,56 +1008,140 @@ Return JSON with "relations" array."""
             )
             stats.errors.append(f"SEMANTIC_CONSOLIDATION: {e}")
 
-    async def _phase_cross_doc(self, job: Pass2Job, stats: Pass2Stats):
-        """
-        Phase CROSS_DOC: Consolidation corpus-level.
+    # =========================================================================
+    # CORPUS-LEVEL PHASES (Pass 4)
+    # =========================================================================
 
-        - Consolide RawAssertions → CanonicalRelations
-        - Regroupe CanonicalConcepts similaires cross-documents
-        - Calcule scores corpus-level
+    async def _phase_entity_resolution(self, job: Pass2Job, stats: Pass2Stats):
         """
-        from knowbase.relations.relation_consolidator import get_relation_consolidator
-        from knowbase.relations.canonical_relation_writer import get_canonical_relation_writer
+        Pass 4a: Entity Resolution corpus-level (PATCH-ER).
+
+        Fusionne les CanonicalConcepts dupliqués cross-documents.
+        Crée des relations MERGED_INTO réversibles.
+
+        Note: Cette phase travaille sur le corpus ENTIER, pas juste un document.
+        Le job.document_id sert uniquement de point d'entrée.
+        """
+        from knowbase.consolidation.corpus_er_pipeline import CorpusERPipeline
 
         logger.info(
-            f"[OSMOSE:Pass2:CROSS_DOC] Starting for doc {job.document_id}"
+            f"[OSMOSE:Pass4a:ENTITY_RESOLUTION] Starting corpus-level ER"
         )
 
         try:
-            # Étape 1: Consolider les RawAssertions du document en CanonicalRelations
-            consolidator = get_relation_consolidator(tenant_id=job.tenant_id)
-            consolidator.reset_stats()
+            # Lancer l'Entity Resolution sur tout le corpus
+            er_pipeline = CorpusERPipeline(tenant_id=job.tenant_id)
+            er_stats = await er_pipeline.run()
 
-            canonical_relations = consolidator.consolidate_all(doc_id=job.document_id)
-            stats.cross_doc_concepts = len(canonical_relations)
+            # Mettre à jour stats
+            stats.er_candidates = er_stats.candidates_found
+            stats.er_merged = er_stats.auto_merged
+            stats.er_proposals = er_stats.proposals_created
 
-            if canonical_relations:
-                # Étape 2: Persister les CanonicalRelations
-                writer = get_canonical_relation_writer(tenant_id=job.tenant_id)
-                writer.reset_stats()
+            # Legacy mapping
+            stats.cross_doc_concepts = stats.er_merged
 
-                for cr in canonical_relations:
-                    writer.write_canonical_relation(cr)
-
-                writer_stats = writer.get_stats()
-                logger.info(
-                    f"[OSMOSE:Pass2:CROSS_DOC] Persisted {writer_stats.get('written', 0)} CanonicalRelations "
-                    f"(merged={writer_stats.get('merged', 0)}, skipped={writer_stats.get('skipped', 0)})"
-                )
-
-            # Étape 3: Update scores corpus-level des concepts
-            await self._update_corpus_level_scores(job)
-
-            consolidator_stats = consolidator.get_stats()
             logger.info(
-                f"[OSMOSE:Pass2:CROSS_DOC] Complete: "
-                f"{consolidator_stats.get('canonical_created', 0)} relations consolidated, "
-                f"{consolidator_stats.get('validated', 0)} validated"
+                f"[OSMOSE:Pass4a:ENTITY_RESOLUTION] Complete: "
+                f"{stats.er_merged} merged, {stats.er_proposals} proposals"
             )
 
         except Exception as e:
-            logger.error(f"[OSMOSE:Pass2:CROSS_DOC] Failed: {e}")
-            stats.errors.append(f"CROSS_DOC: {e}")
+            logger.error(f"[OSMOSE:Pass4a:ENTITY_RESOLUTION] Failed: {e}")
+            stats.errors.append(f"ENTITY_RESOLUTION: {e}")
+
+    async def _phase_corpus_links(self, job: Pass2Job, stats: Pass2Stats):
+        """
+        Pass 4b: Corpus Links (PATCH-LINK).
+
+        Crée des liens faibles cross-documents:
+        - CO_OCCURS_IN_CORPUS: concepts qui apparaissent ensemble dans ≥2 documents
+
+        IMPORTANT: Phase déterministe, SANS LLM.
+        Ces liens sont des "indices" pour la navigation, pas des relations sémantiques.
+        """
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+        from knowbase.config.settings import get_settings
+
+        logger.info(
+            f"[OSMOSE:Pass4b:CORPUS_LINKS] Starting corpus-level linking"
+        )
+
+        settings = get_settings()
+        neo4j_client = get_neo4j_client(
+            uri=settings.neo4j_uri,
+            user=settings.neo4j_user,
+            password=settings.neo4j_password,
+            database="neo4j"
+        )
+
+        if not neo4j_client.is_connected():
+            logger.warning("[OSMOSE:Pass4b:CORPUS_LINKS] Neo4j not connected, skipping")
+            return
+
+        try:
+            # Créer les relations CO_OCCURS_IN_CORPUS
+            # Deux concepts "co-occur" s'ils apparaissent dans ≥2 documents différents
+            query = """
+            // Trouver les paires de concepts qui co-occurent dans ≥2 documents
+            MATCH (c1:CanonicalConcept {tenant_id: $tenant_id})
+            MATCH (c2:CanonicalConcept {tenant_id: $tenant_id})
+            WHERE c1.canonical_id < c2.canonical_id  // Éviter doublons
+              AND coalesce(c1.concept_type, '') <> 'TOPIC'
+              AND coalesce(c2.concept_type, '') <> 'TOPIC'
+
+            // Trouver les documents communs via MENTIONED_IN
+            MATCH (c1)-[:MENTIONED_IN]->(ctx1:SectionContext)-[:IN_DOC]->(doc:DocumentContext)
+            MATCH (c2)-[:MENTIONED_IN]->(ctx2:SectionContext)-[:IN_DOC]->(doc)
+            WHERE ctx1.tenant_id = $tenant_id AND ctx2.tenant_id = $tenant_id
+
+            WITH c1, c2, collect(DISTINCT doc.doc_id) AS shared_docs
+            WHERE size(shared_docs) >= 2  // Co-occurrence dans ≥2 documents
+
+            // Créer ou mettre à jour la relation
+            MERGE (c1)-[r:CO_OCCURS_IN_CORPUS]->(c2)
+            ON CREATE SET
+                r.created_at = datetime(),
+                r.doc_count = size(shared_docs),
+                r.shared_doc_ids = shared_docs,
+                r.tenant_id = $tenant_id
+            ON MATCH SET
+                r.updated_at = datetime(),
+                r.doc_count = size(shared_docs),
+                r.shared_doc_ids = shared_docs
+
+            RETURN count(r) AS links_created
+            """
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(query, tenant_id=job.tenant_id)
+                record = result.single()
+                links_created = record["links_created"] if record else 0
+
+            stats.corpus_links_created = links_created
+            stats.co_occurs_relations = links_created
+
+            logger.info(
+                f"[OSMOSE:Pass4b:CORPUS_LINKS] Complete: {links_created} CO_OCCURS_IN_CORPUS relations"
+            )
+
+        except Exception as e:
+            logger.error(f"[OSMOSE:Pass4b:CORPUS_LINKS] Failed: {e}")
+            stats.errors.append(f"CORPUS_LINKS: {e}")
+
+    # Legacy method for backward compatibility
+    async def _phase_cross_doc(self, job: Pass2Job, stats: Pass2Stats):
+        """
+        DEPRECATED: Utiliser _phase_entity_resolution + _phase_corpus_links.
+        Conservé pour compatibilité.
+        """
+        logger.warning(
+            "[OSMOSE:DEPRECATED] _phase_cross_doc is deprecated. "
+            "Use _phase_entity_resolution and _phase_corpus_links instead."
+        )
+        # Exécuter les deux nouvelles phases
+        await self._phase_entity_resolution(job, stats)
+        await self._phase_corpus_links(job, stats)
 
     async def _update_corpus_level_scores(self, job: Pass2Job) -> None:
         """

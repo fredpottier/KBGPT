@@ -160,7 +160,7 @@ def _create_document_node(
 ) -> int:
     """Crée ou met à jour le nœud Document."""
     doc_query = """
-    MERGE (d:Document {id: $doc_id, tenant_id: $tenant_id})
+    MERGE (d:Document {document_id: $doc_id, tenant_id: $tenant_id})
     ON CREATE SET
         d.name = $doc_name,
         d.detected_variant = $detected_variant,
@@ -188,11 +188,20 @@ def _create_document_node(
     global_markers: List[str] = []
 
     if doc_context_frame:
-        detected_variant = doc_context_frame.get_dominant_marker()
+        doc_scope_value = doc_context_frame.doc_scope.value if hasattr(doc_context_frame.doc_scope, 'value') else str(doc_context_frame.doc_scope)
+        doc_scope = doc_scope_value
         variant_confidence = doc_context_frame.scope_confidence
-        doc_scope = doc_context_frame.doc_scope.value if hasattr(doc_context_frame.doc_scope, 'value') else str(doc_context_frame.doc_scope)
-        edition = detected_variant if doc_context_frame.doc_scope.value == "VARIANT_SPECIFIC" else None
-        global_markers = list(doc_context_frame.strong_markers) + list(doc_context_frame.weak_markers)
+
+        # ADR: Si doc_scope == GENERAL, pas de markers (no inherited markers)
+        # Les markers ne sont pertinents que pour VARIANT_SPECIFIC ou MIXED
+        if doc_scope_value != "GENERAL":
+            detected_variant = doc_context_frame.get_dominant_marker()
+            edition = detected_variant if doc_scope_value == "VARIANT_SPECIFIC" else None
+            global_markers = list(doc_context_frame.strong_markers) + list(doc_context_frame.weak_markers)
+        else:
+            detected_variant = None
+            edition = None
+            global_markers = []  # Pas de markers pour GENERAL
 
     with neo4j_client.driver.session(database="neo4j") as session:
         result = session.run(
@@ -337,7 +346,7 @@ def _create_extracted_from_relations(
     extracted_from_query = """
     UNWIND $assertions AS a
     MATCH (pc:ProtoConcept {concept_id: a.proto_id, tenant_id: $tenant_id})
-    MATCH (d:Document {id: $doc_id, tenant_id: $tenant_id})
+    MATCH (d:Document {document_id: $doc_id, tenant_id: $tenant_id})
     MERGE (pc)-[r:EXTRACTED_FROM]->(d)
     ON CREATE SET
         r.polarity = a.polarity,

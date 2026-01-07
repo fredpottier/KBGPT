@@ -237,6 +237,12 @@ class CorpusERStats:
     reject_lex_sem_low: int = 0
     reject_not_proposal: int = 0
 
+    # LLM Merge Gate stats (V1)
+    llm_gate_calls: int = 0                 # Nombre d'appels LLM
+    llm_gate_blocked: int = 0               # Paires bloquées par LLM (DISTINCT)
+    llm_gate_low_confidence: int = 0        # Paires MERGE low-confidence
+    llm_gate_latency_ms: float = 0.0        # Latence totale LLM Gate
+
     edges_rewired: int = 0
     instance_of_rewired: int = 0
 
@@ -258,6 +264,12 @@ class CorpusERStats:
                 "compat_low": self.reject_compat_low,
                 "lex_sem_low": self.reject_lex_sem_low,
                 "not_proposal": self.reject_not_proposal,
+            },
+            "llm_gate": {
+                "calls": self.llm_gate_calls,
+                "blocked": self.llm_gate_blocked,
+                "low_confidence": self.llm_gate_low_confidence,
+                "latency_ms": self.llm_gate_latency_ms,
             },
             "edges_rewired": self.edges_rewired,
             "instance_of_rewired": self.instance_of_rewired,

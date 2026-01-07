@@ -428,6 +428,31 @@ def execute_pass2_full_job(job_id: str):
         phase_results = {}
         phase_index = 0
 
+        # Phase 0: STRUCTURAL_TOPICS (Pass 2a) - Extraction Topics et COVERS
+        if not manager.is_cancelled(job_id):
+            manager.update_progress(job_id, current_phase="STRUCTURAL_TOPICS",
+                                   phase_index=phase_index, message="Extracting document sections...")
+
+            try:
+                result = asyncio.run(service.run_structural_topics(state.document_id))
+                phase_results["structural_topics"] = {
+                    "success": result.success,
+                    "items_processed": result.items_processed,
+                    "items_created": result.items_created,
+                    "execution_time_ms": result.execution_time_ms,
+                    "details": result.details
+                }
+                manager.set_phase_result(job_id, "structural_topics", phase_results["structural_topics"])
+                manager.update_progress(job_id,
+                    message=f"Topics: {result.details.get('topics_created', 0)} sections, {result.details.get('covers_created', 0)} couvertures")
+            except Exception as e:
+                logger.warning(f"[Pass2Worker] STRUCTURAL_TOPICS failed: {e}")
+                phase_results["structural_topics"] = {
+                    "success": False,
+                    "error": str(e)
+                }
+            phase_index += 1
+
         # Phase 1: CLASSIFY_FINE - Skip si aucun concept à classifier
         if not state.skip_classify and total_concepts > 0 and not manager.is_cancelled(job_id):
             manager.update_progress(job_id, current_phase="CLASSIFY_FINE",

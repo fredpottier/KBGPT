@@ -30,12 +30,46 @@ from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 from knowbase.semantic.inference import InferenceEngine, InsightType
 
-# ADR_GRAPH_FIRST_ARCHITECTURE: Relations sémantiques pour pathfinding
-# Ces relations forment le graphe de raisonnement (Reasoned mode)
+# ============================================================================
+# ADR_GRAPH_FIRST_ARCHITECTURE: Approche DENYLIST pour les relations
+# ============================================================================
+# POURQUOI DENYLIST au lieu de ALLOWLIST ?
+# - Evite le bug ou de nouvelles relations sont ignorees (INTEGRATES_WITH, USES...)
+# - Plus stable : on exclut les relations techniques/faibles
+# - Tout le reste est semantique pour le pathfinding
+# Ref: doc/ongoing/ANALYSE_ECHEC_KG_FIRST_TEST.md - Section 10.1
+
+# Relations EXCLUES du pathfinding (techniques, navigation, faibles)
+EXCLUDED_RELATION_TYPES = frozenset({
+    # Relations techniques/internes
+    "INSTANCE_OF", "MERGED_INTO", "COVERS", "HAS_TOPIC",
+    # Relations navigation (evidence retrieval, pas pathfinding)
+    "MENTIONED_IN", "HAS_SECTION", "CONTAINED_IN",
+    # Relations faibles (co-occurrence)
+    "CO_OCCURS", "APPEARS_WITH", "CO_OCCURS_IN_DOCUMENT", "CO_OCCURS_IN_CORPUS",
+})
+
+
+def is_semantic_relation(relation_type: str) -> bool:
+    """True si relation semantique (utile pour pathfinding). Approche DENYLIST."""
+    return relation_type not in EXCLUDED_RELATION_TYPES
+
+
+# SEMANTIC_RELATION_TYPES etendu (indicatif - vraie logique dans is_semantic_relation)
 SEMANTIC_RELATION_TYPES = frozenset({
+    # Relations causales/dependances
     "REQUIRES", "ENABLES", "PREVENTS", "CAUSES",
-    "APPLIES_TO", "DEPENDS_ON", "PART_OF", "MITIGATES",
-    "CONFLICTS_WITH", "DEFINES", "EXAMPLE_OF", "GOVERNED_BY",
+    "APPLIES_TO", "DEPENDS_ON", "MITIGATES",
+    # Relations structurelles
+    "PART_OF", "DEFINES", "EXAMPLE_OF", "GOVERNED_BY", "CONFLICTS_WITH",
+    # Relations integration (AJOUTEES - Fix bug KG-First 2026-01-07)
+    "USES", "INTEGRATES_WITH", "COMPLIES_WITH",
+    # Relations taxonomiques
+    "RELATED_TO", "SUBTYPE_OF", "EXTENDS",
+    # Relations temporelles/versioning
+    "VERSION_OF", "PRECEDES", "REPLACES", "DEPRECATES", "ALTERNATIVE_TO",
+    # Relations generiques
+    "TRANSITIVE",
 })
 
 # ADR_GRAPH_FIRST_ARCHITECTURE: Relations navigation pour evidence retrieval
@@ -177,6 +211,10 @@ class GraphContext:
     # 🌊 Phase 2.13: Statut semantic pour observabilité
     concept_semantic_status: Optional[ConceptSemanticStatus] = None
 
+
+    # P1 Fallback: Mappings concept isole -> variante connectee
+    fallback_mappings: List[Dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convertit en dictionnaire pour la réponse API."""
         result = {
@@ -191,6 +229,7 @@ class GraphContext:
             # 🌊 Phase 2.12: Info profil visibilité
             "visibility_profile": self.visibility_profile,
             "visibility_filtered_count": self.visibility_filtered_count,
+            "fallback_mappings": self.fallback_mappings,
         }
         # 🌊 Phase 2.13: Statut semantic
         if self.concept_semantic_status:
@@ -646,6 +685,46 @@ class GraphGuidedSearchService:
                     # Concept trouvé par les deux systèmes = boost
                     c["rrf_score"] *= SEMANTIC_BOOST
 
+
+        # =====================================================================
+        # P1 Connectivity-First Reranking
+        # Favoriser les concepts qui ont des relations sémantiques dans le KG
+        # =====================================================================
+        CONNECTIVITY_BOOST = 1.3
+
+        try:
+            candidate_names = [c["name"] for c in candidates[:20]]
+            if candidate_names:
+                cypher = """
+                UNWIND $names AS cname
+                MATCH (c:CanonicalConcept {canonical_name: cname, tenant_id: $tid})
+                OPTIONAL MATCH (c)-[r]-(other:CanonicalConcept)
+                WHERE type(r) IN $sem_types
+                RETURN cname AS name, count(r) AS rel_count
+                """
+                counts = self.neo4j_client.execute_query(cypher, {
+                    "names": candidate_names,
+                    "tid": tenant_id,
+                    "sem_types": list(SEMANTIC_RELATION_TYPES)
+                })
+                count_map = {r["name"]: r["rel_count"] for r in counts}
+
+                connected_count = 0
+                for c in candidates:
+                    rel_count = count_map.get(c["name"], 0)
+                    c["kg_relations"] = rel_count
+                    if rel_count > 0:
+                        c["rrf_score"] *= CONNECTIVITY_BOOST
+                        connected_count += 1
+
+                if connected_count > 0:
+                    logger.debug(
+                        f"[OSMOSE:Connectivity] {connected_count}/{len(candidates)} "
+                        f"concepts have KG relations"
+                    )
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Connectivity] Check failed: {e}")
+
         # Normaliser RRF, popularity, quality
         rrf_values = [c["rrf_score"] for c in candidates]
         pop_values = [math.log(1 + c["popularity"]) for c in candidates]
@@ -794,6 +873,107 @@ class GraphGuidedSearchService:
         except Exception as e:
             logger.warning(f"[OSMOSE] Failed to get related concepts: {e}")
             return []
+
+
+    # =========================================================================
+    # P1 FALLBACK: Variantes connectées pour concepts isolés
+    # Ref: doc/ongoing/ANALYSE_ECHEC_KG_FIRST_TEST.md - Section 12.4
+    # =========================================================================
+
+    async def find_connected_variants(
+        self,
+        isolated_concepts: List[str],
+        tenant_id: str = "default",
+        embedding_threshold: float = 0.80,
+        max_variants: int = 3
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Pour concepts sans relations, chercher variantes embedding-similaires
+        qui ONT des relations sémantiques.
+        """
+        if not isolated_concepts:
+            return {}
+
+        results = {}
+        for concept_name in isolated_concepts:
+            try:
+                similar = await self.search_concepts_semantic(concept_name, tenant_id, top_k=10)
+                candidates = [
+                    c for c in similar
+                    if c.get("sem_score", 0) >= embedding_threshold
+                    and c.get("canonical_name") != concept_name
+                ]
+                if not candidates:
+                    continue
+
+                candidate_names = [c["canonical_name"] for c in candidates[:5]]
+                cypher = """
+                UNWIND $names AS cname
+                MATCH (c:CanonicalConcept {canonical_name: cname, tenant_id: $tid})
+                MATCH (c)-[r]-(other:CanonicalConcept)
+                WHERE type(r) IN $sem_types
+                RETURN cname AS name, count(r) AS rel_count
+                """
+                counts = self.neo4j_client.execute_query(cypher, {
+                    "names": candidate_names, "tid": tenant_id,
+                    "sem_types": list(SEMANTIC_RELATION_TYPES)
+                })
+                count_map = {r["name"]: r["rel_count"] for r in counts}
+
+                connected = []
+                for c in candidates:
+                    cname = c["canonical_name"]
+                    if count_map.get(cname, 0) > 0:
+                        connected.append({
+                            "original": concept_name, "variant": cname,
+                            "similarity": c.get("sem_score", 0),
+                            "relation_count": count_map[cname],
+                            "concept_id": c.get("concept_id"),
+                        })
+                if connected:
+                    connected.sort(key=lambda x: (x["relation_count"], x["similarity"]), reverse=True)
+                    results[concept_name] = connected[:max_variants]
+                    logger.info(f"[OSMOSE:Fallback] '{concept_name}' -> {[v['variant'] for v in results[concept_name]]}")
+            except Exception as e:
+                logger.warning(f"[OSMOSE:Fallback] Error for '{concept_name}': {e}")
+        return results
+
+    async def enrich_with_connected_variants(
+        self,
+        query_concepts: List[str],
+        related_concepts: List[Dict[str, Any]],
+        tenant_id: str = "default"
+    ) -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Enrichit les concepts avec variantes connectées si isolés."""
+        with_relations = {r["source"] for r in related_concepts}
+        isolated = [c for c in query_concepts if c not in with_relations]
+        if not isolated:
+            return query_concepts, related_concepts, []
+
+        logger.info(f"[OSMOSE:Fallback] {len(isolated)} isolated: {isolated}")
+        variants_map = await self.find_connected_variants(isolated, tenant_id)
+        if not variants_map:
+            return query_concepts, related_concepts, []
+
+        enriched_concepts = list(query_concepts)
+        fallback_mappings = []
+        for original, variants in variants_map.items():
+            if variants:
+                best = variants[0]
+                if best["variant"] not in enriched_concepts:
+                    enriched_concepts.append(best["variant"])
+                    fallback_mappings.append({
+                        "original": original, "fallback": best["variant"],
+                        "similarity": best["similarity"], "relation_count": best["relation_count"]
+                    })
+
+        if fallback_mappings:
+            new_variants = [m["fallback"] for m in fallback_mappings]
+            additional = await self.get_related_concepts(new_variants, tenant_id)
+            related_concepts = related_concepts + additional
+            logger.info(f"[OSMOSE:Fallback] +{len(fallback_mappings)} variants, +{len(additional)} relations")
+
+        return enriched_concepts, related_concepts, fallback_mappings
 
     async def get_evidence_context_ids(
         self,
@@ -1060,6 +1240,34 @@ class GraphGuidedSearchService:
         context.related_concepts = await self.get_related_concepts(
             context.query_concepts, tenant_id
         )
+
+
+        # P3: Logging explicite des concepts isoles (avant fallback)
+        concepts_with_rels = {r["source"] for r in context.related_concepts}
+        isolated_before = [c for c in context.query_concepts if c not in concepts_with_rels]
+        if isolated_before:
+            logger.warning(
+                f"[OSMOSE:ISOLATED] {len(isolated_before)} concepts sans relations: "
+                f"{isolated_before}. Consider Entity Resolution."
+            )
+
+        # P1 Fallback: Enrichir avec variantes connectees si concepts isoles
+        (
+            context.query_concepts,
+            context.related_concepts,
+            context.fallback_mappings
+        ) = await self.enrich_with_connected_variants(
+            context.query_concepts, context.related_concepts, tenant_id
+        )
+
+        # P3: Log résumé après fallback
+        if context.fallback_mappings:
+            for mapping in context.fallback_mappings:
+                logger.info(
+                    f"[OSMOSE:FALLBACK] '{mapping['original']}' -> '{mapping['fallback']}' "
+                    f"(sim={mapping['similarity']:.2f}, rels={mapping['relation_count']})"
+                )
+
 
         if enrichment_level == EnrichmentLevel.LIGHT:
             context.processing_time_ms = (time.time() - start_time) * 1000

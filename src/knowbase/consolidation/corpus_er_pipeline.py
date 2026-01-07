@@ -4,20 +4,24 @@ Corpus-Level Entity Resolution Pipeline
 Orchestrates cross-document Entity Resolution to merge duplicate
 CanonicalConcepts across the entire corpus.
 
-Pipeline Flow (v2 with PATCH-ER-04/05/06):
+Pipeline Flow (v2 with PATCH-ER-04/05/06 + LLM Gate V1):
 1. Load all active CanonicalConcepts
 2. Compute lex_keys if missing
 3. Find candidates via blocking (lexical + semantic + acronym)
 4. Score candidates (lex, sem, compat)
 5. PATCH-ER-04: Prune candidates (Top-K + mutual best)
-6. PATCH-ER-05: Decide v2 (AUTO_MERGE, PROPOSE_ONLY, REJECT)
-7. PATCH-ER-06: Cap proposals (budget)
-8. Execute AUTO_MERGE via MergeStore
-9. Store proposals for manual review
+6. LLM Gate V1: Filter bad merges via LLM (Qwen 14B/GPT-4o-mini)
+   - DISTINCT + high conf → BLOCKED (filtered out)
+   - MERGE + low conf → PROPOSE_ONLY (no auto-merge)
+7. PATCH-ER-05: Decide v2 (AUTO_MERGE, PROPOSE_ONLY, REJECT)
+8. PATCH-ER-06: Cap proposals (budget)
+9. Execute AUTO_MERGE via MergeStore
+10. Store proposals for manual review
 
 Author: Claude Code
 Date: 2026-01-01
 Spec: doc/ongoing/SPEC_CORPUS_CONSOLIDATION.md + ChatGPT PATCH-ER-04/05/06
+LLM Gate: doc/ongoing/PLAN_LLM_MERGE_GATE_V1.md
 """
 
 from __future__ import annotations
@@ -39,6 +43,11 @@ from .types import (
 )
 from .lex_utils import compute_lex_key, lex_score, extract_acronym, is_acronym_of
 from .merge_store import MergeStore, get_merge_store
+
+# LLM Merge Gate (V1)
+from knowbase.entity_resolution.llm_merge_gate import (
+    LLMMergeGate, LLMGateConfig, LLMGateResult, get_llm_merge_gate
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +78,8 @@ class CorpusERPipeline:
     def __init__(
         self,
         tenant_id: str = "default",
-        config: Optional[CorpusERConfig] = None
+        config: Optional[CorpusERConfig] = None,
+        llm_gate_config: Optional[LLMGateConfig] = None
     ):
         """Initialize CorpusERPipeline."""
         self.tenant_id = tenant_id
@@ -87,6 +97,10 @@ class CorpusERPipeline:
 
         # Store
         self.merge_store = get_merge_store(tenant_id)
+
+        # LLM Merge Gate (V1)
+        self.llm_gate = get_llm_merge_gate(llm_gate_config)
+        self._low_confidence_pairs: Set[Tuple[str, str]] = set()
 
         # Caches
         self._concepts_cache: Dict[str, Dict[str, Any]] = {}
@@ -170,6 +184,36 @@ class CorpusERPipeline:
                 f"topK={stats.candidates_after_topk} -> "
                 f"mutual={stats.candidates_after_mutual}"
             )
+
+            # Step 6.5: LLM Merge Gate V1 - Filter bad merges
+            if self.llm_gate.config.enabled and pruned:
+                gate_result = self.llm_gate.run(
+                    candidates=[{"id_a": c.id_a, "id_b": c.id_b} for c in pruned],
+                    concepts_cache=self._concepts_cache
+                )
+
+                # Filtrer les paires bloquées par le LLM (DISTINCT avec haute confiance)
+                before_gate = len(pruned)
+                pruned = [
+                    c for c in pruned
+                    if (c.id_a, c.id_b) not in gate_result.blocked_pairs
+                    and (c.id_b, c.id_a) not in gate_result.blocked_pairs
+                ]
+
+                # Stocker les paires low-confidence pour forcer PROPOSE_ONLY
+                self._low_confidence_pairs = gate_result.low_confidence_pairs
+
+                # Métriques LLM Gate
+                stats.llm_gate_calls = gate_result.total_calls
+                stats.llm_gate_blocked = len(gate_result.blocked_pairs)
+                stats.llm_gate_low_confidence = len(gate_result.low_confidence_pairs)
+                stats.llm_gate_latency_ms = gate_result.total_latency_ms
+
+                logger.info(
+                    f"[CorpusER] LLM Gate: {before_gate} -> {len(pruned)} "
+                    f"(blocked={stats.llm_gate_blocked}, low_conf={stats.llm_gate_low_confidence}, "
+                    f"latency={stats.llm_gate_latency_ms:.0f}ms)"
+                )
 
             # Step 7: PATCH-ER-05 - Decision v2
             decisions = self._decide_all(pruned, stats)
@@ -490,7 +534,9 @@ class CorpusERPipeline:
         results = []
 
         for c in candidates:
-            decision, reason = self._decide_v2(c.scores)
+            # Passer les IDs pour vérifier les low_confidence_pairs
+            pair_ids = (c.id_a, c.id_b)
+            decision, reason = self._decide_v2(c.scores, pair_ids)
 
             # Update stats based on rejection reason
             if decision == DecisionType.REJECT:
@@ -519,9 +565,13 @@ class CorpusERPipeline:
 
         return results
 
-    def _decide_v2(self, scores: MergeScores) -> Tuple[DecisionType, str]:
+    def _decide_v2(
+        self,
+        scores: MergeScores,
+        pair_ids: Optional[Tuple[str, str]] = None
+    ) -> Tuple[DecisionType, str]:
         """
-        PATCH-ER-05: Decision function v2.
+        PATCH-ER-05 + LLM Gate V1: Decision function v2.
 
         Returns (decision, reason).
         """
@@ -530,6 +580,11 @@ class CorpusERPipeline:
         sem = scores.sem_score
         compat = scores.compat_score
         combined = scores.combined
+
+        # LLM Gate V1: Si paire marquée low-confidence, forcer PROPOSE_ONLY (pas d'auto-merge)
+        if pair_ids and self._low_confidence_pairs:
+            if pair_ids in self._low_confidence_pairs or (pair_ids[1], pair_ids[0]) in self._low_confidence_pairs:
+                return DecisionType.PROPOSE_ONLY, f"llm_low_confidence ({lex:.3f}/{sem:.3f})"
 
         # REJECT Gate 1: compat too low
         if compat < cfg.min_compat:
@@ -690,10 +745,15 @@ _pipeline_instance: Optional[CorpusERPipeline] = None
 
 def get_corpus_er_pipeline(
     tenant_id: str = "default",
-    config: Optional[CorpusERConfig] = None
+    config: Optional[CorpusERConfig] = None,
+    llm_gate_config: Optional[LLMGateConfig] = None
 ) -> CorpusERPipeline:
     """Get or create CorpusERPipeline instance."""
     global _pipeline_instance
     if _pipeline_instance is None or _pipeline_instance.tenant_id != tenant_id:
-        _pipeline_instance = CorpusERPipeline(tenant_id=tenant_id, config=config)
+        _pipeline_instance = CorpusERPipeline(
+            tenant_id=tenant_id,
+            config=config,
+            llm_gate_config=llm_gate_config
+        )
     return _pipeline_instance

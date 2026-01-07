@@ -151,14 +151,15 @@ class CandidateGenerator:
         logger.info(f"[OSMOSE:Pass3] Generating candidates for {document_id}")
 
         # 1. Trouver toutes les paires de concepts co-présents
+        # NOTE: SectionContext utilise 'doc_id' (pas 'document_id')
         co_presence_query = """
         // Trouver concepts du document via MENTIONED_IN
         MATCH (c1:CanonicalConcept {tenant_id: $tenant_id})
-              -[m1:MENTIONED_IN]->(ctx:SectionContext {document_id: $document_id, tenant_id: $tenant_id})
+              -[m1:MENTIONED_IN]->(ctx:SectionContext {doc_id: $document_id, tenant_id: $tenant_id})
               <-[m2:MENTIONED_IN]-(c2:CanonicalConcept {tenant_id: $tenant_id})
         WHERE c1.canonical_id < c2.canonical_id  // Éviter doublons
-          AND c1.concept_type <> 'TOPIC'         // Exclure Topics
-          AND c2.concept_type <> 'TOPIC'
+          AND coalesce(c1.concept_type, '') <> 'TOPIC'  // Exclure Topics (NULL-safe)
+          AND coalesce(c2.concept_type, '') <> 'TOPIC'
 
         // Compter co-occurrences
         WITH c1, c2, collect(DISTINCT ctx.context_id) AS shared_sections
@@ -259,11 +260,151 @@ class ExtractiveVerifier:
     C'est la garde-fou principale contre les hallucinations.
     """
 
-    # Prédicats du set fermé
+    # =========================================================================
+    # PREDICATS AGNOSTIQUES - Invariants structurels du langage documentaire
+    # =========================================================================
+    # Ces prédicats ne portent aucune sémantique métier, uniquement des
+    # relations logiques universelles observables dans des textes.
+    # Validé: Claude + ChatGPT consensus (2026-01-07)
+    # =========================================================================
+
     VALID_PREDICATES = {
-        "REQUIRES", "ENABLES", "USES", "INTEGRATES_WITH",
-        "APPLIES_TO", "PART_OF", "SUBTYPE_OF", "CAUSES",
-        "PREVENTS", "REPLACES", "VERSION_OF", "ASSOCIATED_WITH"
+        # --- Dépendances (contraintes fonctionnelles) ---
+        "REQUIRES",           # A nécessite B (hard dependency)
+        "USES",               # A utilise B (soft dependency)
+
+        # --- Hiérarchie / Composition (taxonomies) ---
+        "PART_OF",            # A est composant de B
+        "SUBTYPE_OF",         # A est un sous-type de B
+        "EXTENDS",            # A étend B (héritage, extension)
+
+        # --- Implémentation / Conformité (abstrait → concret) ---
+        "IMPLEMENTS",         # A est une réalisation concrète de B
+        "COMPLIES_WITH",      # A est conforme à B (relation normative)
+
+        # --- Capacités / Compatibilité (relations systémiques) ---
+        "ENABLES",            # A rend possible B
+        "SUPPORTS",           # A est compatible avec B
+        "INTEGRATES_WITH",    # A s'intègre avec B (bidirectionnel)
+
+        # --- Cycle de vie (temporel) ---
+        "REPLACES",           # A remplace B
+        "VERSION_OF",         # A est une version de B
+
+        # --- Causalité (avec preuve obligatoire) ---
+        "CAUSES",             # A cause B
+        "PREVENTS",           # A empêche B
+
+        # --- Scope / Applicabilité ---
+        "APPLIES_TO",         # A s'applique à B (périmètre, conditions)
+    }
+    # NOTE: ASSOCIATED_WITH supprimé volontairement (fallback générique = poison pour KG agnostique)
+
+    # Mapping des variantes linguistiques vers les prédicats canoniques
+    PREDICATE_ALIASES = {
+        # Variantes de REQUIRES
+        "REQUIRE": "REQUIRES",
+        "REQUIRING": "REQUIRES",
+        "NEEDS": "REQUIRES",
+        "DEPENDS_ON": "REQUIRES",
+        "DEPENDS": "REQUIRES",
+        "DEPENDENT_ON": "REQUIRES",
+
+        # Variantes de USES
+        "USE": "USES",
+        "USING": "USES",
+        "UTILIZES": "USES",
+        "EMPLOYS": "USES",
+        "LEVERAGES": "USES",
+
+        # Variantes de PART_OF
+        "INCLUDES": "PART_OF",
+        "INCLUDE": "PART_OF",
+        "CONTAINS": "PART_OF",
+        "IS_PART_OF": "PART_OF",
+        "COMPONENT_OF": "PART_OF",
+        "BELONGS_TO": "PART_OF",
+
+        # Variantes de SUBTYPE_OF
+        "IS_A": "SUBTYPE_OF",
+        "TYPE_OF": "SUBTYPE_OF",
+        "KIND_OF": "SUBTYPE_OF",
+        "INSTANCE_OF": "SUBTYPE_OF",
+        "SPECIALIZES": "SUBTYPE_OF",
+
+        # Variantes de EXTENDS
+        "EXTEND": "EXTENDS",
+        "EXTENDING": "EXTENDS",
+        "AUGMENTS": "EXTENDS",
+        "ENHANCES": "EXTENDS",
+
+        # Variantes de IMPLEMENTS
+        "IMPLEMENT": "IMPLEMENTS",
+        "IMPLEMENTING": "IMPLEMENTS",
+        "REALIZES": "IMPLEMENTS",
+        "REALISES": "IMPLEMENTS",
+        "PROVIDES": "IMPLEMENTS",  # "provides capability" = implements
+        "PROVIDE": "IMPLEMENTS",
+
+        # Variantes de COMPLIES_WITH
+        "COMPLIES": "COMPLIES_WITH",
+        "CONFORMS_TO": "COMPLIES_WITH",
+        "ADHERES_TO": "COMPLIES_WITH",
+        "FOLLOWS": "COMPLIES_WITH",
+        "MEETS": "COMPLIES_WITH",
+
+        # Variantes de ENABLES
+        "ENABLE": "ENABLES",
+        "ENABLING": "ENABLES",
+        "ALLOWS": "ENABLES",
+        "PERMITS": "ENABLES",
+        "MAKES_POSSIBLE": "ENABLES",
+
+        # Variantes de SUPPORTS
+        "SUPPORT": "SUPPORTS",
+        "SUPPORTING": "SUPPORTS",
+        "COMPATIBLE_WITH": "SUPPORTS",
+        "WORKS_WITH": "SUPPORTS",
+
+        # Variantes de INTEGRATES_WITH
+        "INTEGRATES": "INTEGRATES_WITH",
+        "INTEGRATE": "INTEGRATES_WITH",
+        "CONNECTS_TO": "INTEGRATES_WITH",
+        "INTERFACES_WITH": "INTEGRATES_WITH",
+
+        # Variantes de REPLACES
+        "REPLACE": "REPLACES",
+        "REPLACING": "REPLACES",
+        "SUPERSEDES": "REPLACES",
+        "OBSOLETES": "REPLACES",
+        "DEPRECATES": "REPLACES",
+
+        # Variantes de VERSION_OF
+        "VERSION": "VERSION_OF",
+        "VARIANT_OF": "VERSION_OF",
+        "EDITION_OF": "VERSION_OF",
+        "RELEASE_OF": "VERSION_OF",
+
+        # Variantes de CAUSES
+        "CAUSE": "CAUSES",
+        "CAUSING": "CAUSES",
+        "LEADS_TO": "CAUSES",
+        "RESULTS_IN": "CAUSES",
+        "TRIGGERS": "CAUSES",
+
+        # Variantes de PREVENTS
+        "PREVENT": "PREVENTS",
+        "PREVENTING": "PREVENTS",
+        "BLOCKS": "PREVENTS",
+        "MITIGATES": "PREVENTS",
+        "AVOIDS": "PREVENTS",
+
+        # Variantes de APPLIES_TO
+        "APPLIES": "APPLIES_TO",
+        "APPLY": "APPLIES_TO",
+        "RELEVANT_TO": "APPLIES_TO",
+        "TARGETS": "APPLIES_TO",
+        "CONCERNS": "APPLIES_TO",
     }
 
     def __init__(
@@ -350,33 +491,66 @@ class ExtractiveVerifier:
         combined_text: str
     ) -> str:
         """Construit le prompt de vérification extractive."""
-        return f"""## Concepts à analyser
-- **Concept A**: {candidate.subject_name}
-- **Concept B**: {candidate.object_name}
+        return f"""## Tâche
+Identifier si une relation EXPLICITE existe entre deux concepts dans le texte fourni.
 
-## Texte source (sections où les concepts co-apparaissent)
+## Concepts
+- **A**: {candidate.subject_name}
+- **B**: {candidate.object_name}
+
+## Texte source
 {combined_text}
 
-## Instructions
-1. Cherche dans le texte un passage qui établit une relation EXPLICITE entre "{candidate.subject_name}" et "{candidate.object_name}"
-2. Le passage doit EXPLICITEMENT mentionner les deux concepts et leur relation
-3. Si tu trouves un tel passage:
-   - Cite-le EXACTEMENT (copier-coller)
-   - Identifie le type de relation
-4. Si tu ne trouves PAS de passage explicite → ABSTAIN
+## Règles STRICTES
+1. La relation doit être EXPLICITEMENT présente dans le texte
+2. Tu dois citer le passage EXACT (copier-coller mot pour mot)
+3. Si aucun passage explicite → ABSTAIN (ne PAS inventer)
 
-## Types de relations valides
-REQUIRES, ENABLES, USES, INTEGRATES_WITH, APPLIES_TO, PART_OF, SUBTYPE_OF, CAUSES, PREVENTS, REPLACES, VERSION_OF
+## Types de relations autorisés (UTILISER EXACTEMENT ces termes)
 
-## Format de réponse JSON
+### Dépendances
+- **REQUIRES**: A nécessite B pour fonctionner (dépendance forte)
+- **USES**: A utilise B (dépendance optionnelle)
+
+### Hiérarchie
+- **PART_OF**: A est un composant/élément de B
+- **SUBTYPE_OF**: A est un type/catégorie de B
+- **EXTENDS**: A étend/augmente B
+
+### Implémentation
+- **IMPLEMENTS**: A est une réalisation concrète de B (abstrait → concret)
+- **COMPLIES_WITH**: A est conforme à B (relation normative)
+
+### Capacités
+- **ENABLES**: A rend possible B
+- **SUPPORTS**: A est compatible avec B
+- **INTEGRATES_WITH**: A s'intègre avec B (bidirectionnel)
+
+### Cycle de vie
+- **REPLACES**: A remplace B
+- **VERSION_OF**: A est une version de B
+
+### Causalité
+- **CAUSES**: A provoque/entraîne B
+- **PREVENTS**: A empêche/bloque B
+
+### Scope
+- **APPLIES_TO**: A s'applique à B (périmètre)
+
+## IMPORTANT
+- Utilise UNIQUEMENT les prédicats listés ci-dessus
+- NE PAS utiliser de synonymes ou variantes
+- Si la relation ne correspond à aucun prédicat → ABSTAIN
+
+## Réponse JSON
 ```json
 {{
-  "result": "VERIFIED" | "ABSTAIN",
-  "predicate": "REQUIRES" | ... | null,
-  "quote": "passage exact du texte" | null,
-  "quote_section": "context_id de la section" | null,
+  "result": "VERIFIED" ou "ABSTAIN",
+  "predicate": "REQUIRES" ou "USES" ou ... ou null,
+  "quote": "citation exacte du texte" ou null,
+  "quote_section": "identifiant section" ou null,
   "confidence": 0.0-1.0,
-  "reasoning": "explication courte"
+  "reasoning": "justification courte"
 }}
 ```"""
 
@@ -408,14 +582,17 @@ REQUIRES, ENABLES, USES, INTEGRATES_WITH, APPLIES_TO, PART_OF, SUBTYPE_OF, CAUSE
                 return None
 
             # Extraire données
-            predicate = data.get("predicate", "").upper()
+            predicate_raw = data.get("predicate", "").upper()
             quote = data.get("quote", "")
             quote_section = data.get("quote_section", "")
             confidence = float(data.get("confidence", 0.5))
 
+            # Normaliser prédicat via aliases
+            predicate = self.PREDICATE_ALIASES.get(predicate_raw, predicate_raw)
+
             # Valider prédicat
             if predicate not in self.VALID_PREDICATES:
-                logger.debug(f"[OSMOSE:Pass3] Invalid predicate: {predicate}")
+                logger.debug(f"[OSMOSE:Pass3] Invalid predicate: {predicate_raw} (normalized: {predicate})")
                 return None
 
             # Valider quote (doit exister dans le texte source)

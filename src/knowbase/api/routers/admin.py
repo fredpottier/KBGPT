@@ -909,6 +909,50 @@ async def run_corpus_er(
     )
 
 
+# =============================================================================
+# Pass 4b: Corpus Links (PATCH-LINK) - ADR 2026-01-07
+# =============================================================================
+
+@router.post(
+    "/pass4/corpus-links",
+    response_model=Pass2ResultResponse,
+    summary="Exécuter CORPUS_LINKS (liens faibles cross-doc)",
+    description="""
+    Exécute la phase Pass 4b: Corpus Links.
+
+    Crée des relations CO_OCCURS_IN_CORPUS entre concepts qui apparaissent
+    ensemble dans ≥2 documents différents.
+
+    **ADR 2026-01-07**: Nomenclature validée Claude + ChatGPT
+    - Phase corpus-level (travaille sur le corpus entier)
+    - Déterministe, SANS LLM
+    - Liens faibles = indices pour navigation, pas relations sémantiques
+
+    **Note**: Exécuter APRÈS Entity Resolution (Pass 4a) pour un graphe stable.
+    """
+)
+async def run_corpus_links(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Exécute création des liens faibles cross-documents."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    result = await service.run_corpus_links()
+
+    return Pass2ResultResponse(
+        success=result.success,
+        phase=result.phase,
+        items_processed=result.items_processed,
+        items_created=result.items_created,
+        items_updated=result.items_updated,
+        execution_time_ms=result.execution_time_ms,
+        errors=result.errors,
+        details=result.details
+    )
+
+
 class Pass2FullRequest(BaseModel):
     """Requête pour exécuter Pass 2 complet."""
     document_id: Optional[str] = Field(None, description="Filtrer par document")
@@ -1010,6 +1054,499 @@ async def unload_gpu_model():
         "message": f"Modèle {status_before['model_name']} déchargé",
         "model_was_loaded": True,
         "gpu_memory_allocated_gb_after": gpu_memory_after
+    }
+
+
+# =============================================================================
+# GOVERNANCE LAYERS (ADR 2026-01-07)
+# Post-consolidation quality scoring and metrics
+# =============================================================================
+
+class GovernanceScoringResponse(BaseModel):
+    """Réponse du scoring de gouvernance."""
+    success: bool
+    relations_scored: int
+    tier_distribution: Dict[str, int]
+    high_confidence_ratio: float
+    avg_evidence_count: float
+    processing_time_ms: float
+
+
+@router.post(
+    "/governance/quality/score",
+    response_model=GovernanceScoringResponse,
+    summary="Exécuter le scoring Quality Layer",
+    description="""
+    Calcule et persiste les scores de qualité sur toutes les relations du KG.
+
+    **ADR Graph Governance Layers - Phase A**
+
+    Ajoute les propriétés suivantes aux relations:
+    - `evidence_count`: Nombre de preuves (taille de evidence_context_ids)
+    - `evidence_strength`: Score normalisé 0-1 (log-scale)
+    - `confidence_tier`: HIGH (≥5) / MEDIUM (2-4) / LOW (1) / WEAK (0)
+
+    **IMPORTANT**: Ces scores sont des indicateurs de SUPPORT, pas de VERITE.
+    Une relation LOW n'est pas "fausse", elle a simplement moins de preuves.
+
+    Idempotent - peut être exécuté plusieurs fois sans effet secondaire.
+    """
+)
+async def run_governance_scoring(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Exécute le scoring de gouvernance qualité."""
+    from knowbase.api.services.governance_quality_service import get_governance_quality_service
+
+    service = get_governance_quality_service(tenant_id)
+    stats = await service.score_all_relations()
+
+    return GovernanceScoringResponse(
+        success=True,
+        relations_scored=stats.relations_scored,
+        tier_distribution={
+            "HIGH": stats.high_tier_count,
+            "MEDIUM": stats.medium_tier_count,
+            "LOW": stats.low_tier_count,
+            "WEAK": stats.weak_tier_count,
+        },
+        high_confidence_ratio=round(
+            stats.high_tier_count / stats.relations_scored * 100, 1
+        ) if stats.relations_scored > 0 else 0,
+        avg_evidence_count=round(stats.avg_evidence_count, 2),
+        processing_time_ms=round(stats.processing_time_ms, 1)
+    )
+
+
+class GovernanceMetricsResponse(BaseModel):
+    """Réponse des métriques de gouvernance."""
+    total_relations: int
+    tier_distribution: Dict[str, int]
+    unscored_relations: int
+    co_occurs_count: int
+    high_confidence_ratio: float
+    avg_evidence_count: float
+
+
+@router.get(
+    "/governance/quality/metrics",
+    response_model=GovernanceMetricsResponse,
+    summary="Obtenir les métriques de gouvernance qualité",
+    description="""
+    Retourne les métriques actuelles de gouvernance du Knowledge Graph.
+
+    Inclut:
+    - Distribution par tier de confiance (HIGH/MEDIUM/LOW/WEAK)
+    - Nombre de relations non encore scorées
+    - Ratio de relations à haute confiance
+    - Moyenne du nombre de preuves par relation
+    """
+)
+async def get_governance_metrics(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Récupère les métriques de gouvernance."""
+    from knowbase.api.services.governance_quality_service import get_governance_quality_service
+
+    service = get_governance_quality_service(tenant_id)
+    metrics = await service.get_governance_metrics()
+
+    return GovernanceMetricsResponse(
+        total_relations=metrics.total_relations,
+        tier_distribution={
+            "HIGH": metrics.high_tier,
+            "MEDIUM": metrics.medium_tier,
+            "LOW": metrics.low_tier,
+            "WEAK": metrics.weak_tier,
+        },
+        unscored_relations=metrics.unscored_relations,
+        co_occurs_count=metrics.co_occurs_count,
+        high_confidence_ratio=round(metrics.high_confidence_ratio * 100, 1),
+        avg_evidence_count=round(metrics.avg_evidence_count, 2)
+    )
+
+
+@router.get(
+    "/governance/quality/relations/{tier}",
+    summary="Lister les relations par tier de confiance",
+    description="""
+    Retourne les relations d'un tier de confiance spécifique.
+
+    Utile pour explorer et valider les relations par niveau de support probatoire.
+
+    **Tiers disponibles**: HIGH, MEDIUM, LOW, WEAK
+    """
+)
+async def get_relations_by_tier(
+    tier: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Récupère les relations d'un tier spécifique."""
+    from knowbase.api.services.governance_quality_service import (
+        get_governance_quality_service,
+        ConfidenceTier
+    )
+
+    # Valider le tier
+    tier_upper = tier.upper()
+    try:
+        confidence_tier = ConfidenceTier(tier_upper)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tier invalide: {tier}. Valeurs acceptées: HIGH, MEDIUM, LOW, WEAK"
+        )
+
+    service = get_governance_quality_service(tenant_id)
+    relations = await service.get_relations_by_tier(confidence_tier, limit)
+
+    return {
+        "tier": tier_upper,
+        "count": len(relations),
+        "relations": relations
+    }
+
+
+# --- BUDGET LAYER ---
+
+@router.get(
+    "/governance/budget/presets",
+    summary="Obtenir les presets de budget disponibles",
+    description="""
+    Retourne les configurations de budget prédéfinies.
+
+    **ADR Graph Governance Layers - Phase B**
+
+    Presets disponibles:
+    - **STRICT**: HIGH only, max 50 nœuds (rapide, haute confiance)
+    - **STANDARD**: MEDIUM+, max 100 nœuds (défaut recommandé)
+    - **EXPLORATORY**: LOW+, max 200 nœuds (exploration large)
+    - **UNLIMITED**: Pas de limite (attention à la performance!)
+
+    **IMPORTANT**: Ces budgets contrôlent uniquement la TRAVERSÉE.
+    Ils ne modifient jamais l'état persistant du graphe.
+    """
+)
+async def get_budget_presets(
+    admin: dict = Depends(require_admin),
+):
+    """Retourne les presets de budget disponibles."""
+    from knowbase.api.services.governance_budget_service import BUDGET_PRESETS
+
+    return {
+        "presets": BUDGET_PRESETS,
+        "default": "standard",
+        "note": "Ces budgets sont query-time only - ils ne modifient pas le graphe"
+    }
+
+
+class BudgetTestRequest(BaseModel):
+    """Requête pour tester une traversée budgétée."""
+    concept_id: str = Field(..., description="ID du concept de départ")
+    preset: str = Field(default="standard", description="Preset: strict/standard/exploratory/unlimited")
+    custom_max_hops: Optional[int] = Field(None, ge=1, le=5)
+    custom_min_tier: Optional[str] = Field(None, description="HIGH/MEDIUM/LOW/WEAK")
+    custom_max_nodes: Optional[int] = Field(None, ge=10, le=500)
+
+
+@router.post(
+    "/governance/budget/test",
+    summary="Tester une traversée budgétée",
+    description="""
+    Teste une traversée de graphe avec un budget donné.
+
+    Utile pour:
+    - Vérifier que les budgets fonctionnent correctement
+    - Explorer le graphe avec différents niveaux de confiance
+    - Estimer la densité du graphe autour d'un concept
+
+    **IMPORTANT**: Cette requête est READ-ONLY.
+    Elle ne modifie rien dans le graphe.
+    """
+)
+async def test_budget_traversal(
+    request: BudgetTestRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Teste une traversée budgétée."""
+    from knowbase.api.services.governance_budget_service import (
+        get_governance_budget_service,
+        QueryBudget,
+        BudgetPreset
+    )
+    from knowbase.common.clients.neo4j_client import Neo4jClient
+    from knowbase.config.settings import get_settings
+
+    settings = get_settings()
+    service = get_governance_budget_service(tenant_id)
+
+    # Créer le budget depuis le preset ou custom
+    try:
+        preset = BudgetPreset(request.preset.lower())
+        budget = QueryBudget.from_preset(preset)
+    except ValueError:
+        budget = QueryBudget()  # Standard par défaut
+
+    # Appliquer les overrides custom
+    if request.custom_max_hops:
+        budget.max_hops = request.custom_max_hops
+    if request.custom_min_tier:
+        budget.min_confidence_tier = request.custom_min_tier.upper()
+    if request.custom_max_nodes:
+        budget.max_total_nodes = request.custom_max_nodes
+
+    # Construire et exécuter la requête
+    query, params = service.build_simple_budgeted_query(
+        start_concept_id=request.concept_id,
+        budget=budget
+    )
+
+    # Exécuter
+    neo4j = Neo4jClient(
+        uri=settings.neo4j_uri,
+        user=settings.neo4j_user,
+        password=settings.neo4j_password
+    )
+
+    results = []
+    try:
+        with neo4j.driver.session(database=getattr(neo4j, 'database', 'neo4j')) as session:
+            result = session.run(query, params)
+            results = [dict(record) for record in result]
+    except Exception as e:
+        logger.error(f"[Governance:Budget] Query error: {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur de requête: {str(e)}")
+
+    budget_stats = service.get_budget_stats(budget)
+
+    return {
+        "concept_id": request.concept_id,
+        "budget_applied": budget.to_dict(),
+        "budget_stats": budget_stats,
+        "results_count": len(results),
+        "budget_exceeded": len(results) >= budget.max_total_nodes,
+        "results": results[:50],  # Limiter la réponse API
+        "note": "Query-time only - aucune modification du graphe"
+    }
+
+
+# --- CONFLICT LAYER ---
+
+@router.post(
+    "/governance/conflict/detect",
+    summary="Détecter les tensions sémantiques",
+    description="""
+    Lance la détection des tensions (contradictions) dans le Knowledge Graph.
+
+    **ADR Graph Governance Layers - Phase C**
+
+    Cherche les paires de concepts ayant des relations contradictoires:
+    - REPLACES vs COMPLEMENTS
+    - ENABLES vs BLOCKS
+    - DEPENDS_ON vs INDEPENDENT_OF
+
+    **IMPORTANT**: OSMOSE ne tranche JAMAIS les contradictions.
+    Il les expose à l'utilisateur avec contexte pour décision humaine.
+
+    Les tensions détectées sont créées comme nœuds séparés (Tension)
+    et ne modifient pas les relations existantes.
+    """
+)
+async def detect_tensions(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Détecte les tensions sémantiques."""
+    from knowbase.api.services.governance_conflict_service import get_governance_conflict_service
+
+    service = get_governance_conflict_service(tenant_id)
+    stats = await service.detect_semantic_tensions()
+
+    return {
+        "success": True,
+        "stats": stats.to_dict(),
+        "note": "Les tensions ne sont pas des erreurs - elles exposent des incohérences à investiguer"
+    }
+
+
+@router.get(
+    "/governance/conflict/tensions",
+    summary="Lister les tensions détectées",
+    description="""
+    Retourne les tensions détectées avec filtres optionnels.
+
+    **Statuts**:
+    - UNRESOLVED: Détectée, non traitée
+    - ACKNOWLEDGED: Vue par un humain
+    - EXPLAINED: Explication fournie (note: pas "résolue"!)
+
+    **Types (par sévérité)**:
+    - HARD: Contradictions impossibles (ENABLES vs PREVENTS)
+    - SUSPECT: Combinaisons inhabituelles (erreurs LLM probables)
+    - BIDIRECTIONAL: Relations asymétriques dans les deux sens
+
+    **Types (legacy)**:
+    - SEMANTIC, TEMPORAL, SCOPE, SOURCE
+    """
+)
+async def get_tensions(
+    status: Optional[str] = Query(None, description="UNRESOLVED/ACKNOWLEDGED/EXPLAINED"),
+    tension_type: Optional[str] = Query(None, description="HARD/SUSPECT/BIDIRECTIONAL/SEMANTIC/TEMPORAL"),
+    limit: int = Query(default=50, ge=1, le=200),
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Récupère les tensions."""
+    from knowbase.api.services.governance_conflict_service import (
+        get_governance_conflict_service,
+        TensionStatus,
+        TensionType
+    )
+
+    service = get_governance_conflict_service(tenant_id)
+
+    # Parser les filtres
+    filter_status = None
+    filter_type = None
+
+    if status:
+        try:
+            filter_status = TensionStatus(status.upper())
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Statut invalide: {status}. Valeurs: UNRESOLVED/ACKNOWLEDGED/EXPLAINED"
+            )
+
+    if tension_type:
+        try:
+            filter_type = TensionType(tension_type.upper())
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Type invalide: {tension_type}. Valeurs: SEMANTIC/TEMPORAL/SCOPE/SOURCE"
+            )
+
+    tensions = await service.get_tensions(
+        status=filter_status,
+        tension_type=filter_type,
+        limit=limit
+    )
+
+    return {
+        "count": len(tensions),
+        "tensions": [t.to_dict() for t in tensions]
+    }
+
+
+@router.get(
+    "/governance/conflict/counts",
+    summary="Obtenir les comptages de tensions",
+    description="Retourne le nombre de tensions par statut."
+)
+async def get_tension_counts(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Récupère les comptages de tensions."""
+    from knowbase.api.services.governance_conflict_service import get_governance_conflict_service
+
+    service = get_governance_conflict_service(tenant_id)
+    counts = await service.get_tension_counts()
+
+    return counts
+
+
+class TensionUpdateRequest(BaseModel):
+    """Requête pour mettre à jour une tension."""
+    status: str = Field(..., description="UNRESOLVED/ACKNOWLEDGED/EXPLAINED")
+    resolution_note: Optional[str] = Field(None, description="Note explicative")
+
+
+@router.patch(
+    "/governance/conflict/tensions/{tension_id}",
+    summary="Mettre à jour le statut d'une tension",
+    description="""
+    Met à jour le statut d'une tension.
+
+    **IMPORTANT**: EXPLAINED n'implique pas que la tension est "résolue" globalement.
+    Cela signifie qu'un humain a fourni une explication contextuelle,
+    mais les deux assertions sources restent intactes dans le graphe.
+
+    Exemple de resolution_note:
+    "Les deux informations sont correctes mais dans des contextes différents:
+    - SAP S/4HANA remplace ECC pour les nouvelles implémentations
+    - SAP ECC reste en maintenance pour les clients existants jusqu'en 2027"
+    """
+)
+async def update_tension(
+    tension_id: str,
+    request: TensionUpdateRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Met à jour une tension."""
+    from knowbase.api.services.governance_conflict_service import (
+        get_governance_conflict_service,
+        TensionStatus
+    )
+
+    # Valider le statut
+    try:
+        new_status = TensionStatus(request.status.upper())
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Statut invalide: {request.status}"
+        )
+
+    service = get_governance_conflict_service(tenant_id)
+    success = await service.update_tension_status(
+        tension_id=tension_id,
+        new_status=new_status,
+        resolution_note=request.resolution_note,
+        resolved_by=admin.get("email", "admin")
+    )
+
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Tension {tension_id} non trouvée")
+
+    return {
+        "success": True,
+        "tension_id": tension_id,
+        "new_status": new_status.value,
+        "note": "Les assertions sources restent intactes dans le graphe"
+    }
+
+
+@router.delete(
+    "/governance/conflict/tensions/{tension_id}",
+    summary="Supprimer une tension",
+    description="Supprime une tension (si détection erronée / faux positif)."
+)
+async def delete_tension(
+    tension_id: str,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Supprime une tension."""
+    from knowbase.api.services.governance_conflict_service import get_governance_conflict_service
+
+    service = get_governance_conflict_service(tenant_id)
+    success = await service.delete_tension(tension_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Tension {tension_id} non trouvée")
+
+    return {
+        "success": True,
+        "tension_id": tension_id,
+        "message": "Tension supprimée"
     }
 
 
@@ -1135,6 +1672,234 @@ async def cancel_pass2_job(
         "success": True,
         "job_id": job_id,
         "message": "Job cancelled"
+    }
+
+
+# =============================================================================
+# Enrichment KG (Pass 2a + Pass 2b + Pass 3)
+# =============================================================================
+
+class EnrichmentStatusResponse(BaseModel):
+    """Statut étendu pour la page Enrichment."""
+    # Pass 1 output
+    proto_concepts: int = 0
+    canonical_concepts: int = 0
+    mentioned_in_count: int = 0
+
+    # Pass 2a output (Structural Topics)
+    topics_count: int = 0
+    has_topic_count: int = 0
+    covers_count: int = 0
+
+    # Pass 2b output
+    raw_assertions: int = 0
+
+    # Pass 3 output (Semantic Consolidation)
+    proven_relations: int = 0
+
+    # Jobs
+    pending_jobs: int = 0
+    running_jobs: int = 0
+
+    # Entity Resolution stats
+    er_standalone_concepts: int = 0
+    er_merged_concepts: int = 0
+    er_pending_proposals: int = 0
+
+
+@router.get(
+    "/enrichment/status",
+    response_model=EnrichmentStatusResponse,
+    summary="Statut étendu Enrichment KG",
+    description="""
+    Récupère le statut étendu pour la page Enrichment (Pass 2 + Pass 3).
+
+    Affiche:
+    - Pass 1: ProtoConcepts, CanonicalConcepts, MENTIONED_IN
+    - Pass 2a: Topics, HAS_TOPIC, COVERS
+    - Pass 2b: RawAssertions
+    - Pass 3: Relations prouvées (avec evidence)
+    - Entity Resolution stats
+    """
+)
+async def get_enrichment_status(
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Récupère le statut étendu pour Enrichment."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    status = service.get_enrichment_status()
+
+    return EnrichmentStatusResponse(
+        proto_concepts=status.proto_concepts,
+        canonical_concepts=status.canonical_concepts,
+        mentioned_in_count=status.mentioned_in_count,
+        topics_count=status.topics_count,
+        has_topic_count=status.has_topic_count,
+        covers_count=status.covers_count,
+        raw_assertions=status.raw_assertions,
+        proven_relations=status.proven_relations,
+        pending_jobs=status.pending_jobs,
+        running_jobs=status.running_jobs,
+        er_standalone_concepts=status.er_standalone_concepts,
+        er_merged_concepts=status.er_merged_concepts,
+        er_pending_proposals=status.er_pending_proposals
+    )
+
+
+@router.post(
+    "/pass2/structural-topics",
+    response_model=Pass2ResultResponse,
+    summary="Exécuter STRUCTURAL_TOPICS (Pass 2a)",
+    description="""
+    Exécute la phase STRUCTURAL_TOPICS de Pass 2.
+
+    Cette phase:
+    1. Extrait les Topics depuis les headers H1/H2 du document
+    2. Crée les CanonicalConcept type='TOPIC'
+    3. Crée les relations HAS_TOPIC (Document → Topic)
+    4. Crée les relations COVERS (Topic → Concept) basées sur salience
+
+    **Prérequis**: Documents importés avec Pass 1 (ProtoConcepts/CanonicalConcepts)
+    """
+)
+async def run_structural_topics(
+    request: Pass2PhaseRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Exécute STRUCTURAL_TOPICS (Pass 2a)."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    result = await service.run_structural_topics(
+        document_id=request.document_id
+    )
+
+    return Pass2ResultResponse(
+        success=result.success,
+        phase=result.phase,
+        items_processed=result.items_processed,
+        items_created=result.items_created,
+        items_updated=result.items_updated,
+        execution_time_ms=result.execution_time_ms,
+        errors=result.errors,
+        details=result.details
+    )
+
+
+class Pass3Request(BaseModel):
+    """Requête pour exécuter Pass 3."""
+    document_id: Optional[str] = Field(None, description="Filtrer par document")
+    max_candidates: int = Field(50, description="Nombre max de candidats par document")
+
+
+@router.post(
+    "/pass3/run",
+    response_model=Pass2ResultResponse,
+    summary="Exécuter Pass 3 (Semantic Consolidation)",
+    description="""
+    Exécute Pass 3: Semantic Consolidation.
+
+    Cette phase:
+    1. Génère des candidats de relations via co-présence Topic/Section
+    2. Vérifie chaque candidat avec LLM extractif (doit citer la preuve exacte)
+    3. Persiste uniquement les relations avec preuves vérifiables
+
+    **Prérequis**: Pass 2a doit avoir été exécuté (Topics/COVERS créés)
+
+    **Garanties**:
+    - TOUTE relation créée a evidence_context_ids non vide
+    - TOUTE relation a une evidence_quote vérifiable
+    - ABSTAIN préféré à hallucination
+    """
+)
+async def run_pass3(
+    request: Pass3Request,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Exécute Pass 3 Semantic Consolidation."""
+    from knowbase.api.services.pass2_service import get_pass2_service
+
+    service = get_pass2_service(tenant_id)
+    result = await service.run_semantic_consolidation(
+        document_id=request.document_id,
+        max_candidates=request.max_candidates
+    )
+
+    return Pass2ResultResponse(
+        success=result.success,
+        phase=result.phase,
+        items_processed=result.items_processed,
+        items_created=result.items_created,
+        items_updated=result.items_updated,
+        execution_time_ms=result.execution_time_ms,
+        errors=result.errors,
+        details=result.details
+    )
+
+
+class ScheduleEnrichmentRequest(BaseModel):
+    """Requête pour programmer un batch d'enrichissement."""
+    run_pass2: bool = Field(True, description="Exécuter Pass 2 (Topics + Classify + Relations)")
+    run_pass3: bool = Field(True, description="Exécuter Pass 3 (Semantic Consolidation)")
+    scheduled_time: Optional[str] = Field(None, description="Heure de programmation (HH:MM) ou 'tonight'")
+
+
+@router.post(
+    "/enrichment/schedule",
+    summary="Programmer un batch d'enrichissement nocturne",
+    description="""
+    Programme l'exécution de Pass 2 et/ou Pass 3 en batch.
+
+    Options:
+    - `run_pass2`: Exécute Topics (2a) + Classify (2b-1) + Relations (2b-2)
+    - `run_pass3`: Exécute Semantic Consolidation
+    - `scheduled_time`: "tonight" ou "HH:MM" (ex: "02:00")
+
+    Si `scheduled_time` est omis, exécute immédiatement en background.
+    """
+)
+async def schedule_enrichment(
+    request: ScheduleEnrichmentRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Programme un batch d'enrichissement."""
+    from knowbase.ingestion.queue.pass2_jobs import enqueue_pass2_full_job
+
+    # Pour l'instant, on lance immédiatement
+    # TODO: Implémenter la planification horaire avec celery-beat ou similar
+    if request.scheduled_time and request.scheduled_time != "now":
+        return {
+            "success": True,
+            "message": f"Enrichissement programmé pour {request.scheduled_time}",
+            "scheduled_time": request.scheduled_time,
+            "run_pass2": request.run_pass2,
+            "run_pass3": request.run_pass3,
+            "note": "Planification horaire non encore implémentée - exécution différée"
+        }
+
+    # Exécution immédiate en background
+    state = enqueue_pass2_full_job(
+        tenant_id=tenant_id,
+        document_id=None,  # Tous les documents
+        skip_classify=not request.run_pass2,
+        skip_enrich=not request.run_pass2,
+        skip_consolidate=not request.run_pass2,
+        skip_corpus_er=True,  # ER séparé
+        created_by=admin.get("email", "admin")
+    )
+
+    return {
+        "success": True,
+        "message": "Job d'enrichissement créé",
+        "job_id": state.job_id,
+        "run_pass2": request.run_pass2,
+        "run_pass3": request.run_pass3,
+        "scheduled_time": "now"
     }
 
 

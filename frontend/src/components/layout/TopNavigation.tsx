@@ -34,6 +34,7 @@ import {
   FiBarChart2,
   FiGitBranch,
   FiTag,
+  FiShield,
 } from 'react-icons/fi'
 
 // Configuration des menus
@@ -67,7 +68,8 @@ const navigationConfig = {
       { label: 'Dashboard', href: '/admin', icon: FiHome },
       { label: 'Domain Context', href: '/admin/domain-context', icon: FiGlobe },
       { label: 'Profil Visibilite', href: '/admin/visibility-profile', icon: FiSliders },
-      { label: 'Enrichissement KG', href: '/admin/pass2', icon: FiActivity },
+      { label: 'Enrichissement KG', href: '/admin/enrichment', icon: FiActivity },
+      { label: 'Governance / Tensions', href: '/admin/enrichment', icon: FiShield },
       { label: 'Markers', href: '/admin/markers', icon: FiTag },
       { label: 'Mode Burst (Spot)', href: '/admin/burst', icon: FiCloud },
       { label: 'Import Analytics', href: '/analytics', icon: FiBarChart2 },

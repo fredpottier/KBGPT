@@ -109,6 +109,7 @@ class BurstState:
     instance_id: Optional[str] = None
     instance_ip: Optional[str] = None
     instance_type: Optional[str] = None
+    instance_launch_time: Optional[str] = None  # Vrai launch time AWS (début facturation)
 
     # URLs des services
     vllm_url: Optional[str] = None
@@ -156,6 +157,7 @@ class BurstState:
             "instance_id": self.instance_id,
             "instance_ip": self.instance_ip,
             "instance_type": self.instance_type,
+            "instance_launch_time": self.instance_launch_time,
             "vllm_url": self.vllm_url,
             "embeddings_url": self.embeddings_url,
             "created_at": self.created_at,
@@ -214,6 +216,7 @@ class BurstState:
             instance_id=data.get("instance_id"),
             instance_ip=data.get("instance_ip"),
             instance_type=data.get("instance_type"),
+            instance_launch_time=data.get("instance_launch_time"),
             vllm_url=data.get("vllm_url"),
             embeddings_url=data.get("embeddings_url"),
             created_at=data.get("created_at"),
@@ -311,6 +314,11 @@ class BurstConfig:
     # L'instance EC2 appellera cette URL pour prévenir 2 min avant l'interruption
     callback_url: Optional[str] = None
 
+    # Parallélisme: nombre de documents traités simultanément
+    # 2 = bon compromis CPU/RAM local + charge EC2
+    # Augmenter si machine locale puissante et EC2 sous-utilisée
+    max_concurrent_docs: int = 2
+
     def to_dict(self) -> Dict[str, Any]:
         """Convertit en dictionnaire."""
         return {
@@ -337,7 +345,8 @@ class BurstConfig:
             "use_deep_learning_ami": self.use_deep_learning_ami,
             "deep_learning_ami_os": self.deep_learning_ami_os,
             "burst_pending_dir": self.burst_pending_dir,
-            "callback_url": self.callback_url
+            "callback_url": self.callback_url,
+            "max_concurrent_docs": self.max_concurrent_docs
         }
 
     @classmethod
@@ -394,5 +403,8 @@ class BurstConfig:
             burst_pending_dir=os.getenv("BURST_PENDING_DIR", "/data/burst/pending"),
 
             # Callback URL pour notification d'interruption Spot
-            callback_url=os.getenv("BURST_CALLBACK_URL")
+            callback_url=os.getenv("BURST_CALLBACK_URL"),
+
+            # Parallélisme (nombre de docs traités simultanément)
+            max_concurrent_docs=int(os.getenv("BURST_MAX_CONCURRENT_DOCS", "2"))
         )

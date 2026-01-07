@@ -21,11 +21,70 @@ from pathlib import Path
 import os
 
 from knowbase.api.dependencies import require_admin, get_tenant_id
-from knowbase.common.logging import setup_logging
+from knowbase.common.logging import setup_logging, LazyFlushingFileHandler
 from knowbase.config.settings import get_settings
+import logging
 
 settings = get_settings()
 logger = setup_logging(settings.logs_dir, "burst_router.log")
+
+
+def _setup_burst_module_logging():
+    """
+    Configure le logging pour tous les modules burst (orchestrator, importer, etc.)
+    afin que leurs logs aillent dans le même fichier burst_router.log.
+    """
+    # Modules burst à capturer
+    burst_modules = [
+        # Modules burst core
+        "knowbase.ingestion.burst",
+        "knowbase.ingestion.burst.orchestrator",
+        "knowbase.ingestion.burst.artifact_importer",
+        "knowbase.ingestion.burst.artifact_exporter",
+        "knowbase.ingestion.burst.provider_switch",
+        "knowbase.ingestion.burst.resilient_client",
+        # Modules OSMOSE appelés pendant le processing burst
+        "knowbase.ingestion.osmose_agentique",
+        "knowbase.ingestion.osmose_integration",
+        "knowbase.ingestion.osmose_persistence",
+        "knowbase.ingestion.osmose_enrichment",
+        "knowbase.ingestion.osmose_utils",
+        "knowbase.ingestion.extraction_cache",
+        "knowbase.ingestion.text_chunker",
+        "knowbase.ingestion.hybrid_anchor_chunker",
+        "knowbase.ingestion.enrichment_tracker",
+        # Modules extraction V2 (Docling, etc.)
+        "knowbase.extraction_v2",
+        "knowbase.extraction_v2.extractors.docling_extractor",
+        "knowbase.extraction_v2.adapters.docling_adapter",
+    ]
+
+    log_file = settings.logs_dir / "burst_router.log"
+    formatter = logging.Formatter("%(asctime)s %(levelname)s [%(name)s]: %(message)s")
+
+    # Créer un handler partagé
+    file_handler = LazyFlushingFileHandler(str(log_file), mode='a', encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+
+    for module_name in burst_modules:
+        module_logger = logging.getLogger(module_name)
+        module_logger.setLevel(logging.DEBUG)
+        module_logger.propagate = False
+
+        # Éviter d'ajouter plusieurs fois le même handler
+        has_file_handler = any(
+            isinstance(h, (logging.FileHandler, LazyFlushingFileHandler))
+            for h in module_logger.handlers
+        )
+        if not has_file_handler:
+            module_logger.addHandler(file_handler)
+
+    logger.info("[BURST] Module logging configured for all burst components")
+
+
+# Configurer le logging des modules burst au démarrage
+_setup_burst_module_logging()
 
 router = APIRouter(prefix="/api/burst", tags=["burst"])
 
@@ -659,57 +718,82 @@ async def process_batch(
         # Lancer le traitement en arrière-plan (async)
         import asyncio
         from datetime import datetime, timezone
+        from knowbase.ingestion.burst.types import BurstConfig
+
+        # Configuration parallélisme depuis BurstConfig (défaut: 2 documents en parallèle)
+        burst_config = BurstConfig.from_env()
+        MAX_CONCURRENT_DOCS = burst_config.max_concurrent_docs
 
         async def run_batch():
-            """Traite les documents du batch de manière async."""
+            """Traite les documents du batch de manière async avec parallélisme."""
             import traceback
             from knowbase.ingestion.queue.jobs_v2 import ingest_document_v2_job
 
-            try:
-                orchestrator.state.status = BurstStatus.PROCESSING
-                orchestrator.state.started_at = datetime.now(timezone.utc).isoformat()
-                orchestrator._add_event("processing_started", "Traitement du batch démarré")
+            # Lock pour les mises à jour d'état partagé
+            state_lock = asyncio.Lock()
+            # Semaphore pour limiter la concurrence
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOCS)
 
-                # Copier la liste pour éviter modification pendant itération
-                docs_to_process = [d for d in orchestrator.state.documents if d.status == "pending"]
-                logger.info(f"[BURST] Traitement de {len(docs_to_process)} documents...")
-
-                for doc_status in docs_to_process:
+            async def process_single_doc(doc_status):
+                """Traite un document avec contrôle de concurrence."""
+                async with semaphore:
                     doc_path = Path(doc_status.path)
-                    doc_status.status = "processing"
-                    doc_status.started_at = datetime.now(timezone.utc).isoformat()
+
+                    async with state_lock:
+                        doc_status.status = "processing"
+                        doc_status.started_at = datetime.now(timezone.utc).isoformat()
 
                     try:
                         suffix = doc_path.suffix.lower()
-                        logger.info(f"[BURST] Processing: {doc_path.name}")
+                        logger.info(f"[BURST] Processing: {doc_path.name} (concurrency: {MAX_CONCURRENT_DOCS})")
 
                         # Pipeline V2 unifié (Docling + Vision Gating V4 + OSMOSE)
                         # Supporte: .pdf, .pptx, .docx, .xlsx
                         if suffix in [".pdf", ".pptx", ".docx", ".xlsx"]:
                             result = await asyncio.to_thread(
-                                lambda: ingest_document_v2_job(file_path=str(doc_path))
+                                lambda p=str(doc_path): ingest_document_v2_job(file_path=p)
                             )
                         else:
                             raise ValueError(f"Format non supporté: {suffix}")
 
-                        doc_status.status = "completed"
-                        doc_status.completed_at = datetime.now(timezone.utc).isoformat()
-                        # Récupérer le nombre de concepts depuis le résultat V2
-                        if isinstance(result, dict):
-                            osmose = result.get("osmose", {})
-                            doc_status.chunks_count = osmose.get("canonical_concepts", 0)
-                        else:
-                            doc_status.chunks_count = 0
-                        orchestrator.state.documents_done += 1
+                        async with state_lock:
+                            doc_status.status = "completed"
+                            doc_status.completed_at = datetime.now(timezone.utc).isoformat()
+                            # Récupérer le nombre de concepts depuis le résultat V2
+                            if isinstance(result, dict):
+                                osmose = result.get("osmose", {})
+                                doc_status.chunks_count = osmose.get("canonical_concepts", 0)
+                            else:
+                                doc_status.chunks_count = 0
+                            orchestrator.state.documents_done += 1
+
                         logger.info(f"[BURST] ✅ Completed: {doc_path.name} ({doc_status.chunks_count} concepts)")
 
                     except Exception as e:
-                        doc_status.status = "failed"
-                        doc_status.error = str(e)
-                        doc_status.completed_at = datetime.now(timezone.utc).isoformat()
-                        orchestrator.state.documents_failed += 1
+                        async with state_lock:
+                            doc_status.status = "failed"
+                            doc_status.error = str(e)
+                            doc_status.completed_at = datetime.now(timezone.utc).isoformat()
+                            orchestrator.state.documents_failed += 1
+
                         logger.error(f"[BURST] ❌ Failed: {doc_path.name} - {e}")
                         logger.error(f"[BURST] Traceback: {traceback.format_exc()}")
+
+            try:
+                orchestrator.state.status = BurstStatus.PROCESSING
+                orchestrator.state.started_at = datetime.now(timezone.utc).isoformat()
+                orchestrator._add_event(
+                    "processing_started",
+                    f"Traitement du batch démarré (parallélisme: {MAX_CONCURRENT_DOCS} docs)"
+                )
+
+                # Copier la liste pour éviter modification pendant itération
+                docs_to_process = [d for d in orchestrator.state.documents if d.status == "pending"]
+                logger.info(f"[BURST] Traitement de {len(docs_to_process)} documents (max {MAX_CONCURRENT_DOCS} en parallèle)...")
+
+                # Lancer tous les traitements en parallèle (limités par le semaphore)
+                tasks = [process_single_doc(doc) for doc in docs_to_process]
+                await asyncio.gather(*tasks, return_exceptions=True)
 
                 # Batch terminé
                 orchestrator.state.status = BurstStatus.COMPLETED
@@ -1038,9 +1122,30 @@ async def get_instance_details(
         spot_price = None
         availability_zone = getattr(state, 'availability_zone', None)
 
+        # Variable pour stocker le vrai launch_time AWS
+        aws_launch_time = getattr(state, 'instance_launch_time', None)
+
         try:
             import boto3
             ec2 = boto3.client('ec2', region_name=os.getenv('AWS_DEFAULT_REGION', 'eu-central-1'))
+
+            # Récupérer le launch_time réel depuis AWS si pas dans le state
+            instance_id = getattr(state, 'instance_id', None)
+            if not aws_launch_time and instance_id:
+                try:
+                    instance_response = ec2.describe_instances(InstanceIds=[instance_id])
+                    reservations = instance_response.get('Reservations', [])
+                    if reservations and reservations[0].get('Instances'):
+                        instance_data = reservations[0]['Instances'][0]
+                        launch_time_dt = instance_data.get('LaunchTime')
+                        if launch_time_dt:
+                            aws_launch_time = launch_time_dt.isoformat()
+                            # Mettre à jour le state pour les prochains appels
+                            if hasattr(state, 'instance_launch_time'):
+                                state.instance_launch_time = aws_launch_time
+                            logger.info(f"[BURST] Retrieved EC2 launch time from AWS: {aws_launch_time}")
+                except Exception as e:
+                    logger.warning(f"Impossible de récupérer le launch_time AWS: {e}")
 
             # Récupérer le prix Spot actuel pour ce type d'instance
             # Ne pas inclure AvailabilityZone si None (l'API n'accepte pas None)
@@ -1102,7 +1207,7 @@ async def get_instance_details(
             vllm_status=vllm_status,
             embeddings_status=embeddings_status,
             ami_id=getattr(state, 'ami_id', None),
-            launch_time=state.started_at,
+            launch_time=aws_launch_time or state.started_at,  # Vrai AWS launch time
         )
 
     except ImportError:
@@ -1147,6 +1252,46 @@ class SavedStatesResponse(BaseModel):
     """Liste des états sauvegardés."""
     states: List[SavedStateInfo]
     has_resumable: bool
+
+
+# ============================================================================
+# Schemas Standalone Mode
+# ============================================================================
+
+class StartStandaloneRequest(BaseModel):
+    """Requête pour démarrer EC2 sans batch."""
+    hibernate_on_stop: bool = Field(
+        True,
+        description="Si True, garde le fleet avec capacity=0 pour redémarrage rapide"
+    )
+
+
+class StartStandaloneResponse(BaseModel):
+    """Réponse démarrage standalone."""
+    success: bool
+    standalone_id: str
+    status: str
+    instance_ip: Optional[str] = None
+    instance_type: Optional[str] = None
+    vllm_url: Optional[str] = None
+    embeddings_url: Optional[str] = None
+    message: str
+
+
+class StopStandaloneRequest(BaseModel):
+    """Requête pour arrêter le mode standalone."""
+    terminate_infrastructure: bool = Field(
+        False,
+        description="Si True, détruit complètement la stack. Si False (défaut), scale le fleet à 0 pour redémarrage rapide."
+    )
+
+
+class StopStandaloneResponse(BaseModel):
+    """Réponse arrêt standalone."""
+    success: bool
+    infrastructure_terminated: bool
+    fleet_hibernated: bool
+    message: str
 
 
 @router.post(
@@ -1392,6 +1537,229 @@ async def resume_batch(
 
     except Exception as e:
         logger.error(f"Error resuming batch: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Standalone EC2 Mode - On-demand vLLM (sans batch)
+# ============================================================================
+
+@router.post(
+    "/start-standalone",
+    response_model=StartStandaloneResponse,
+    summary="Démarrer EC2 vLLM sans batch",
+    description="""
+    Démarre l'infrastructure EC2 Spot en mode standalone (sans batch de documents).
+
+    **Cas d'usage:**
+    - Enrichissement KG (Pass 2/3) avec LLM local
+    - Entity Resolution avec LLM Merge Gate
+    - Tests et expérimentations LLM
+
+    **Comportement:**
+    - Lance EC2 Spot avec vLLM + TEI
+    - Active le mode Burst sur LLMRouter (tous les appels LLM vont vers vLLM)
+    - Les appels Vision restent sur GPT-4o Vision
+    - Ne crée pas de batch de documents
+
+    **Note:** Pour un batch d'ingestion, utilisez /prepare puis /start.
+    """,
+    tags=["burst"]
+)
+async def start_standalone(
+    request: StartStandaloneRequest = StartStandaloneRequest(),
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> StartStandaloneResponse:
+    """Démarre EC2 en mode standalone (vLLM on-demand sans batch)."""
+    try:
+        from knowbase.ingestion.burst import get_burst_orchestrator, BurstStatus
+        from knowbase.ingestion.burst.types import BurstState, BurstConfig
+        from datetime import datetime, timezone
+        import asyncio
+
+        orchestrator = get_burst_orchestrator()
+
+        # Vérifier si déjà actif
+        if orchestrator.state is not None:
+            if orchestrator.state.status in [BurstStatus.READY, BurstStatus.PROCESSING]:
+                return StartStandaloneResponse(
+                    success=True,
+                    standalone_id=orchestrator.state.batch_id,
+                    status=orchestrator.state.status.value,
+                    instance_ip=orchestrator.state.instance_ip,
+                    instance_type=orchestrator.state.instance_type,
+                    vllm_url=orchestrator.state.vllm_url,
+                    embeddings_url=orchestrator.state.embeddings_url,
+                    message="Infrastructure déjà active. Utilisez /stop-standalone pour arrêter."
+                )
+
+        # Créer un état minimal "standalone" (sans documents)
+        standalone_id = f"standalone-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        config = BurstConfig.from_env()
+
+        orchestrator.state = BurstState(
+            batch_id=standalone_id,
+            status=BurstStatus.PREPARING,
+            documents=[],  # Pas de documents en mode standalone
+            total_documents=0,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            config=config.to_dict()
+        )
+
+        orchestrator._add_event(
+            "standalone_starting",
+            "Démarrage mode standalone (vLLM on-demand)",
+            details={"hibernate_on_stop": request.hibernate_on_stop}
+        )
+
+        logger.info(f"[BURST] Starting standalone mode: {standalone_id}")
+
+        # Démarrer l'infrastructure (sync call wrapped)
+        success = await asyncio.to_thread(orchestrator.start_infrastructure)
+
+        if not success:
+            return StartStandaloneResponse(
+                success=False,
+                standalone_id=standalone_id,
+                status=orchestrator.state.status.value,
+                message="Échec du démarrage de l'infrastructure EC2."
+            )
+
+        logger.info(
+            f"[BURST] ✅ Standalone mode ready: {standalone_id} @ {orchestrator.state.instance_ip}"
+        )
+
+        return StartStandaloneResponse(
+            success=True,
+            standalone_id=standalone_id,
+            status=orchestrator.state.status.value,
+            instance_ip=orchestrator.state.instance_ip,
+            instance_type=orchestrator.state.instance_type,
+            vllm_url=orchestrator.state.vllm_url,
+            embeddings_url=orchestrator.state.embeddings_url,
+            message="Mode standalone actif. Tous les appels LLM (sauf Vision) utilisent vLLM sur EC2."
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur start_standalone: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/stop-standalone",
+    response_model=StopStandaloneResponse,
+    summary="Arrêter EC2 mode standalone",
+    description="""
+    Arrête le mode standalone et désactive le routing vers vLLM.
+
+    **Options:**
+    - `terminate_infrastructure: false` (défaut) - Scale le fleet à 0 (hibernate)
+      → Redémarrage rapide (~1-2 min vs ~5-7 min)
+      → L'instance est détruite mais la stack reste
+    - `terminate_infrastructure: true` - Détruit complètement la stack CloudFormation
+
+    **Comportement:**
+    - Désactive le mode Burst sur LLMRouter
+    - Les appels LLM retournent vers OpenAI/Anthropic
+    - L'infrastructure est stoppée/hibernée selon l'option
+    """,
+    tags=["burst"]
+)
+async def stop_standalone(
+    request: StopStandaloneRequest = StopStandaloneRequest(),
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> StopStandaloneResponse:
+    """Arrête le mode standalone EC2."""
+    try:
+        from knowbase.ingestion.burst import get_burst_orchestrator, deactivate_burst_providers
+        from knowbase.ingestion.burst.types import BurstStatus
+        import boto3
+
+        orchestrator = get_burst_orchestrator()
+
+        if not orchestrator.state:
+            # Vérifier quand même si des providers sont actifs
+            deactivate_burst_providers()
+            return StopStandaloneResponse(
+                success=True,
+                infrastructure_terminated=False,
+                fleet_hibernated=False,
+                message="Aucune infrastructure active. Providers désactivés par précaution."
+            )
+
+        # Désactiver les providers d'abord
+        deactivate_result = deactivate_burst_providers()
+        logger.info(f"[BURST] Providers deactivated: {deactivate_result}")
+
+        if request.terminate_infrastructure:
+            # Destruction complète via cancel()
+            orchestrator.cancel()
+            logger.info("[BURST] Infrastructure completely terminated")
+            return StopStandaloneResponse(
+                success=True,
+                infrastructure_terminated=True,
+                fleet_hibernated=False,
+                message="Mode standalone arrêté. Infrastructure EC2 complètement détruite."
+            )
+        else:
+            # Hibernate: scale fleet à 0 (garde la stack pour redémarrage rapide)
+            fleet_id = orchestrator.state.spot_fleet_id
+            if fleet_id:
+                try:
+                    ec2 = boto3.client(
+                        'ec2',
+                        region_name=os.getenv('AWS_DEFAULT_REGION', 'eu-central-1')
+                    )
+                    ec2.modify_spot_fleet_request(
+                        SpotFleetRequestId=fleet_id,
+                        TargetCapacity=0
+                    )
+                    logger.info(f"[BURST] Fleet {fleet_id} scaled to 0 (hibernated)")
+
+                    # Mettre à jour l'état
+                    orchestrator.state.status = BurstStatus.IDLE
+                    orchestrator.state.instance_ip = None
+                    orchestrator.state.instance_id = None
+                    orchestrator._add_event(
+                        "standalone_hibernated",
+                        f"Fleet {fleet_id} mis en veille (capacity=0)"
+                    )
+
+                    return StopStandaloneResponse(
+                        success=True,
+                        infrastructure_terminated=False,
+                        fleet_hibernated=True,
+                        message="Mode standalone arrêté. Fleet en veille (redémarrage rapide possible)."
+                    )
+
+                except Exception as e:
+                    logger.warning(f"[BURST] Failed to hibernate fleet: {e}")
+                    # Fallback: cancel complet
+                    orchestrator.cancel()
+                    return StopStandaloneResponse(
+                        success=True,
+                        infrastructure_terminated=True,
+                        fleet_hibernated=False,
+                        message=f"Hibernate échoué ({e}). Infrastructure détruite."
+                    )
+            else:
+                # Pas de fleet_id, cancel complet
+                orchestrator.cancel()
+                return StopStandaloneResponse(
+                    success=True,
+                    infrastructure_terminated=True,
+                    fleet_hibernated=False,
+                    message="Mode standalone arrêté. Infrastructure détruite (pas de fleet à hibernater)."
+                )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur stop_standalone: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

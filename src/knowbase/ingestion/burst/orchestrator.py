@@ -545,6 +545,7 @@ class BurstOrchestrator:
                 self.state.instance_id = instance_info['instance_id']
                 self.state.instance_ip = instance_info['public_ip']
                 self.state.instance_type = instance_info['instance_type']
+                self.state.instance_launch_time = instance_info.get('launch_time')  # Vrai AWS launch time
 
                 self._add_event(
                     "instance_running",
