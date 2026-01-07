@@ -421,11 +421,46 @@ SEULE source de relations sémantiques prouvées.
 
 **Livrable** : Runtime graph-first opérationnel
 
-### Phase D - Validation
+### Phase D - Validation ✅ IMPLÉMENTÉ (2026-01-07)
 
-1. Tests North Star (Ambiguous Word, Path Recovery, Evidence Alignment)
-2. Benchmark performance (target: < 500ms total)
-3. Import corpus complet + validation qualité
+> **Module tests** : `tests/graph_first/`
+
+1. ✅ Tests North Star (`test_north_star.py`)
+   - `TestNorthStarAmbiguousWord` : Question ambiguë → bons concepts
+   - `TestNorthStarPathRecovery` : Chemin identique au KG
+   - `TestSearchModeSelection` : Sélection REASONED/ANCHORED/TEXT_ONLY
+
+2. ✅ Tests Evidence Alignment (`test_evidence_alignment.py`)
+   - `TestEvidenceAlignment` : 100% des paths ont evidence_context_ids
+   - `TestNoSpuriousEdge` : Ratio arêtes sans preuve < 1%
+   - `TestEvidenceCollectionIntegrity` : Via MENTIONED_IN
+
+3. ✅ Tests Performance (`test_performance.py`)
+   - Target: < 500ms total (sans synthèse LLM)
+   - `TestPerformanceBenchmarks` : Seuils par composant
+   - `TestScalabilityBenchmarks` : Jusqu'à 10 concepts
+   - `TestPerformanceIntegration` : End-to-end réel
+
+4. ⏳ Import corpus complet + validation qualité
+   - À faire après purge des bases par l'utilisateur
+   - Réimporter avec Pass 2a + Pass 3 complets
+
+**Seuils de performance configurés** :
+```python
+PERFORMANCE_THRESHOLDS = {
+    "build_search_plan_ms": 300,
+    "total_graph_first_ms": 500,
+}
+```
+
+**Exécution tests** :
+```bash
+# Tests unitaires (rapides)
+pytest tests/graph_first/ -v -m "not integration"
+
+# Tests intégration (nécessite Neo4j)
+pytest tests/graph_first/ -v -m integration
+```
 
 ---
 
