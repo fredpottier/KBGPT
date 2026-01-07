@@ -9,6 +9,7 @@
 import {
   Box,
   Button,
+  Checkbox,
   HStack,
   VStack,
   Text,
@@ -69,6 +70,8 @@ interface PurgeResult {
   points_deleted?: number
   nodes_deleted?: number
   relations_deleted?: number
+  constraints_deleted?: number
+  indexes_deleted?: number
   jobs_deleted?: number
   sessions_deleted?: number
   messages_deleted?: number
@@ -298,6 +301,7 @@ export default function AdminSettingsPage() {
   const queryClient = useQueryClient()
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [purgeResults, setPurgeResults] = useState<PurgeResponse | null>(null)
+  const [purgeSchema, setPurgeSchema] = useState(false)
 
   // Health check query
   const {
@@ -320,11 +324,11 @@ export default function AdminSettingsPage() {
 
   // Purge mutation
   const purgeMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (options: { purge_schema: boolean }) => {
       const token = localStorage.getItem('auth_token')
       const response = await axios.post<PurgeResponse>(
         '/api/admin/purge-data',
-        {},
+        { purge_schema: options.purge_schema },
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -372,7 +376,9 @@ export default function AdminSettingsPage() {
 
   const handlePurgeConfirm = () => {
     onClose()
-    purgeMutation.mutate()
+    purgeMutation.mutate({ purge_schema: purgeSchema })
+    // Reset option for next time
+    setPurgeSchema(false)
   }
 
   return (
@@ -663,7 +669,11 @@ export default function AdminSettingsPage() {
                     <PurgeResultItem
                       label="Neo4j"
                       success={purgeResults.results.neo4j.success}
-                      details={`${purgeResults.results.neo4j.nodes_deleted || 0} nodes, ${purgeResults.results.neo4j.relations_deleted || 0} relations supprimes`}
+                      details={
+                        purgeResults.results.neo4j.constraints_deleted
+                          ? `${purgeResults.results.neo4j.nodes_deleted || 0} nodes, ${purgeResults.results.neo4j.relations_deleted || 0} rels, ${purgeResults.results.neo4j.constraints_deleted} constraints supprimes`
+                          : `${purgeResults.results.neo4j.nodes_deleted || 0} nodes, ${purgeResults.results.neo4j.relations_deleted || 0} relations supprimes`
+                      }
                     />
                     <PurgeResultItem
                       label="Redis"
@@ -728,6 +738,32 @@ export default function AdminSettingsPage() {
               <Text fontSize="sm" color="text.muted">
                 Vous devrez reimporter tous vos documents apres cette operation.
               </Text>
+
+              {/* Option to purge Neo4j schema */}
+              <Box
+                bg="bg.tertiary"
+                border="1px solid"
+                borderColor="border.default"
+                rounded="lg"
+                p={4}
+                w="full"
+              >
+                <Checkbox
+                  isChecked={purgeSchema}
+                  onChange={(e) => setPurgeSchema(e.target.checked)}
+                  colorScheme="orange"
+                  size="md"
+                >
+                  <VStack align="start" spacing={0} ml={1}>
+                    <Text color="text.primary" fontWeight="medium" fontSize="sm">
+                      Purger aussi le schema Neo4j
+                    </Text>
+                    <Text color="text.muted" fontSize="xs">
+                      Supprime les constraints/indexes (utile apres changements de schema)
+                    </Text>
+                  </VStack>
+                </Checkbox>
+              </Box>
             </VStack>
           </ModalBody>
 

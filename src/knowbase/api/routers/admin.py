@@ -23,8 +23,17 @@ logger = setup_logging(settings.logs_dir, "admin_router.log")
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+class PurgeDataRequest(BaseModel):
+    """Requête pour purger les données."""
+    purge_schema: bool = Field(
+        default=False,
+        description="Si True, purge aussi le schéma Neo4j (constraints/indexes)"
+    )
+
+
 @router.post("/purge-data")
 async def purge_all_data(
+    request: PurgeDataRequest = None,
     admin: dict = Depends(require_admin),
     tenant_id: str = Depends(get_tenant_id),
 ) -> Dict:
@@ -35,23 +44,35 @@ async def purge_all_data(
 
     **Sécurité**: Requiert authentification JWT avec rôle 'admin'.
 
-    Nettoie:
+    **Nettoie:**
     - Collection Qdrant (tous les points vectoriels)
-    - Neo4j (tous les nodes/relations)
+    - Neo4j (tous les nodes/relations sauf OntologyEntity, OntologyAlias, DomainContextProfile)
+    - Neo4j schema (constraints/indexes) si `purge_schema=True`
     - Redis (queues RQ, jobs terminés)
+    - PostgreSQL (sessions, messages de conversation)
+    - Fichiers (docs_in, docs_done, status)
 
-    Préserve:
-    - DocumentType (SQLite)
-    - EntityTypeRegistry (SQLite)
+    **Préserve:**
+    - DocumentType, EntityTypeRegistry (PostgreSQL/SQLite)
+    - OntologyEntity, OntologyAlias, DomainContextProfile (Neo4j)
+    - Cache d'extraction (data/extraction_cache/) ⚠️ CRITIQUE
+
+    **Args:**
+    - `purge_schema`: Si True, supprime aussi les constraints/indexes Neo4j
+                     (utile après changements de schéma pour éviter les "ghost" labels/relations)
 
     Returns:
         Dict avec résultats de purge par composant
     """
-    logger.warning("🚨 Requête PURGE SYSTÈME reçue")
+    # Permettre appel sans body (compatibilité avec anciennes versions)
+    purge_schema = request.purge_schema if request else False
+
+    schema_msg = " + SCHÉMA" if purge_schema else ""
+    logger.warning(f"🚨 Requête PURGE SYSTÈME reçue{schema_msg}")
 
     try:
         purge_service = PurgeService()
-        results = await purge_service.purge_all_data()
+        results = await purge_service.purge_all_data(purge_schema=purge_schema)
 
         # Vérifier si toutes les purges ont réussi
         all_success = all(r.get("success", False) for r in results.values())
