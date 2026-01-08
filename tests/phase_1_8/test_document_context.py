@@ -144,21 +144,23 @@ class TestGenerateDocumentSummary:
     @pytest.mark.asyncio
     async def test_summary_generation_with_mock_llm(self, service):
         """Test generation resume avec LLM mocke."""
-        mock_summary = (
-            "This document is a migration guide for SAP S/4HANA Cloud, Private Edition. "
-            "It covers the architecture with SAP BTP integration and SAP Fiori UX."
-        )
+        # Note: generate_document_summary retourne maintenant (summary, density, doc_context)
+        mock_json_response = '{"summary": "This document is a migration guide for SAP S/4HANA Cloud, Private Edition.", "technical_density": 0.6}'
 
         with patch.object(service, '_get_llm_router') as mock_router:
             mock_llm = MagicMock()
-            mock_llm.acomplete = AsyncMock(return_value=mock_summary)
+            mock_llm.acomplete = AsyncMock(return_value=mock_json_response)
             mock_router.return_value = mock_llm
 
-            summary = await service._generate_document_summary(
+            result = await service._generate_document_summary(
                 document_id="test-doc-001",
                 full_text=SAP_DOCUMENT_TEXT
             )
 
+            # Retourne maintenant un tuple de 3 elements
+            assert isinstance(result, tuple)
+            assert len(result) == 3
+            summary, density, doc_context = result
             assert len(summary) > 0
             assert len(summary) <= 500
             mock_llm.acomplete.assert_called_once()
@@ -166,26 +168,27 @@ class TestGenerateDocumentSummary:
     @pytest.mark.asyncio
     async def test_cache_hit(self, service):
         """Test que le cache est utilise pour meme document_id."""
-        mock_summary = "Cached summary for SAP document."
+        mock_json_response = '{"summary": "Cached summary for SAP document.", "technical_density": 0.5}'
 
         with patch.object(service, '_get_llm_router') as mock_router:
             mock_llm = MagicMock()
-            mock_llm.acomplete = AsyncMock(return_value=mock_summary)
+            mock_llm.acomplete = AsyncMock(return_value=mock_json_response)
             mock_router.return_value = mock_llm
 
             # Premier appel - devrait appeler LLM
-            summary1 = await service._generate_document_summary(
+            result1 = await service._generate_document_summary(
                 document_id="test-doc-cache",
                 full_text=SAP_DOCUMENT_TEXT
             )
 
             # Deuxieme appel avec meme document_id - devrait utiliser cache
-            summary2 = await service._generate_document_summary(
+            result2 = await service._generate_document_summary(
                 document_id="test-doc-cache",
                 full_text=SAP_DOCUMENT_TEXT
             )
 
-            assert summary1 == summary2
+            # Les tuples doivent etre egaux (cache hit)
+            assert result1 == result2
             # LLM devrait etre appele une seule fois (cache hit au 2eme appel)
             assert mock_llm.acomplete.call_count == 1
 
@@ -195,22 +198,23 @@ class TestGenerateDocumentSummary:
         with patch.object(service, '_get_llm_router') as mock_router:
             mock_llm = MagicMock()
             mock_llm.acomplete = AsyncMock(side_effect=[
-                "Summary for document 1",
-                "Summary for document 2"
+                '{"summary": "Summary for document 1", "technical_density": 0.5}',
+                '{"summary": "Summary for document 2", "technical_density": 0.6}'
             ])
             mock_router.return_value = mock_llm
 
-            summary1 = await service._generate_document_summary(
+            result1 = await service._generate_document_summary(
                 document_id="doc-1",
                 full_text=SAP_DOCUMENT_TEXT
             )
 
-            summary2 = await service._generate_document_summary(
+            result2 = await service._generate_document_summary(
                 document_id="doc-2",
                 full_text=SHORT_DOCUMENT_TEXT
             )
 
-            assert summary1 != summary2
+            # Les summaries doivent etre differents
+            assert result1[0] != result2[0]
             assert mock_llm.acomplete.call_count == 2
 
     @pytest.mark.asyncio
@@ -222,31 +226,35 @@ class TestGenerateDocumentSummary:
             mock_router.return_value = mock_llm
 
             # Ne devrait pas lever d'exception
-            summary = await service._generate_document_summary(
+            result = await service._generate_document_summary(
                 document_id="test-doc-fallback",
                 full_text=SAP_DOCUMENT_TEXT
             )
 
-            # Devrait retourner un fallback base sur les metadonnees
+            # Devrait retourner un tuple avec fallback base sur les metadonnees
+            assert isinstance(result, tuple)
+            assert len(result) == 3
+            summary = result[0]
             assert len(summary) > 0
             assert "Document:" in summary or "Topics:" in summary
 
     @pytest.mark.asyncio
     async def test_truncate_long_summary(self, service):
         """Test que les resumes trop longs sont tronques."""
-        long_summary = "A" * 600  # Plus de 500 chars
+        long_summary_json = '{"summary": "' + "A" * 600 + '", "technical_density": 0.5}'
 
         with patch.object(service, '_get_llm_router') as mock_router:
             mock_llm = MagicMock()
-            mock_llm.acomplete = AsyncMock(return_value=long_summary)
+            mock_llm.acomplete = AsyncMock(return_value=long_summary_json)
             mock_router.return_value = mock_llm
 
-            summary = await service._generate_document_summary(
+            result = await service._generate_document_summary(
                 document_id="test-doc-long",
                 full_text=SAP_DOCUMENT_TEXT,
                 max_length=500
             )
 
+            summary = result[0]
             assert len(summary) <= 500
             assert summary.endswith("...")
 
@@ -282,45 +290,49 @@ class TestContextImprovesExtraction:
     @pytest.mark.asyncio
     async def test_context_contains_disambiguation_info(self, service):
         """Test que le contexte genere contient info pour desambiguisation."""
-        # Simuler un resume LLM qui mentionne le nom complet
-        expected_context = (
-            "This document covers SAP S/4HANA Cloud, Private Edition migration. "
-            "Key topics include SAP BTP integration and SAP Fiori user experience."
+        # Simuler un resume LLM au format JSON
+        mock_json_response = (
+            '{"summary": "This document covers SAP S/4HANA Cloud, Private Edition migration. '
+            'Key topics include SAP BTP integration and SAP Fiori user experience.", '
+            '"technical_density": 0.7}'
         )
 
         with patch.object(service, '_get_llm_router') as mock_router:
             mock_llm = MagicMock()
-            mock_llm.acomplete = AsyncMock(return_value=expected_context)
+            mock_llm.acomplete = AsyncMock(return_value=mock_json_response)
             mock_router.return_value = mock_llm
 
-            context = await service._generate_document_summary(
+            result = await service._generate_document_summary(
                 document_id="test-disambiguation",
                 full_text=SAP_DOCUMENT_TEXT
             )
 
             # Le contexte devrait contenir "SAP S/4HANA Cloud, Private Edition"
             # ce qui permet de desambiguiser "S/4HANA Cloud" seul
-            assert "S/4HANA" in context or "SAP" in context
+            summary = result[0]
+            assert "S/4HANA" in summary or "SAP" in summary
 
     @pytest.mark.asyncio
     async def test_french_document_context(self, service):
         """Test generation contexte pour document francais."""
-        french_context = (
-            "Ce document presente la migration vers SAP S/4HANA Cloud. "
-            "Il couvre l'integration SAP BTP et l'experience Fiori."
+        mock_json_response = (
+            '{"summary": "Ce document presente la migration vers SAP S/4HANA Cloud. '
+            'Il couvre l\'integration SAP BTP et l\'experience Fiori.", '
+            '"technical_density": 0.6}'
         )
 
         with patch.object(service, '_get_llm_router') as mock_router:
             mock_llm = MagicMock()
-            mock_llm.acomplete = AsyncMock(return_value=french_context)
+            mock_llm.acomplete = AsyncMock(return_value=mock_json_response)
             mock_router.return_value = mock_llm
 
-            context = await service._generate_document_summary(
+            result = await service._generate_document_summary(
                 document_id="test-french",
                 full_text=MULTI_LANGUAGE_TEXT
             )
 
-            assert len(context) > 0
+            summary = result[0]
+            assert len(summary) > 0
             # Le prompt demande de repondre dans la meme langue que le document
             mock_llm.acomplete.assert_called_once()
 
@@ -405,10 +417,15 @@ class TestRealLLMIntegration:
     @pytest.mark.asyncio
     async def test_real_summary_generation(self, service):
         """Test generation resume avec vrai LLM."""
-        summary = await service._generate_document_summary(
+        result = await service._generate_document_summary(
             document_id="test-real-llm",
             full_text=SAP_DOCUMENT_TEXT
         )
+
+        # Retourne maintenant un tuple de 3 elements
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        summary, density, doc_context = result
 
         assert len(summary) > 50
         assert len(summary) <= 500

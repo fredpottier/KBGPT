@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         ContextualCues,
         StructuralConfidence,
     )
+    from knowbase.extraction_v2.context.models import DocumentContext
 
 logger = logging.getLogger(__name__)
 
@@ -837,6 +838,239 @@ class EvidenceSample:
         }
 
 
+# =============================================================================
+# MARKER DECISION SYSTEM (ADR Document Context Markers - Section 3.4)
+# Structures pour decide_marker() et classification des markers
+# =============================================================================
+
+# Types de decision
+MarkerDecisionType = str  # "ACCEPT_STRONG", "ACCEPT_WEAK", "UNRESOLVED", "REJECT"
+
+# Shapes lexicales reconnues
+MarkerShape = str  # "WORD_NUMBER", "YEAR", "QUARTER", "VERSIONLIKE", "OTHER"
+
+
+@dataclass
+class PositionHint:
+    """
+    Indices positionnels pour un marker.
+
+    Utilise pour detecter si le marker apparait en position de titre/section,
+    ce qui augmente la probabilite qu'il s'agisse d'un artefact structurel.
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.2
+    """
+    # True si le marker apparait en debut de ligne seul ou quasi-seul
+    is_heading_like: bool = False
+
+    # True si le marker est en debut de ligne
+    line_start: bool = False
+
+    # True si le marker est suivi de ":" ou "."
+    has_colon_after: bool = False
+
+    # True si le marker apparait dans un contexte de table des matieres
+    in_toc_like: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "is_heading_like": self.is_heading_like,
+            "line_start": self.line_start,
+            "has_colon_after": self.has_colon_after,
+            "in_toc_like": self.in_toc_like,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PositionHint":
+        return cls(
+            is_heading_like=data.get("is_heading_like", False),
+            line_start=data.get("line_start", False),
+            has_colon_after=data.get("has_colon_after", False),
+            in_toc_like=data.get("in_toc_like", False),
+        )
+
+
+@dataclass
+class EvidenceRef:
+    """
+    Reference a l'evidence locale d'un marker.
+
+    Invariant D (ADR): Un marker accepte doit avoir une EvidenceRef locale.
+    Le summary LLM n'est pas une preuve.
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.2
+    """
+    document_id: str
+    context_id: Optional[str] = None  # chunk_id ou segment_id
+    section_path: Optional[str] = None  # ex: "1.2.3 Configuration"
+    excerpt: str = ""  # Texte autour du marker (max 200 chars)
+    char_start: int = 0
+    char_end: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "document_id": self.document_id,
+            "context_id": self.context_id,
+            "section_path": self.section_path,
+            "excerpt": self.excerpt[:200] if self.excerpt else "",
+            "char_start": self.char_start,
+            "char_end": self.char_end,
+        }
+
+
+@dataclass
+class MarkerMention:
+    """
+    Representation enrichie d'un marker extrait syntaxiquement.
+
+    Contient toutes les informations necessaires pour decide_marker():
+    - Le texte brut et ses composants parses (prefixe, numero)
+    - La forme lexicale (shape)
+    - L'evidence locale (excerpt + position)
+    - Les indices positionnels (heading-like, etc.)
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.2
+    """
+    # Texte brut du marker (ex: "PUBLIC 3", "iPhone 15", "S/4HANA 2023")
+    raw_text: str
+
+    # Prefixe parse (ex: "PUBLIC", "iPhone", "S/4HANA") - None si non parsable
+    prefix: Optional[str] = None
+
+    # Numero parse (ex: "3", "15", "2023") - None si non parsable
+    number: Optional[str] = None
+
+    # Longueur du numero (pour distinction 1-2 digits vs 3+ digits)
+    number_len: int = 0
+
+    # Forme lexicale: WORD_NUMBER, YEAR, QUARTER, VERSIONLIKE, OTHER
+    shape: str = "OTHER"
+
+    # Reference a l'evidence locale (obligatoire pour ACCEPT)
+    evidence: Optional[EvidenceRef] = None
+
+    # Indices positionnels
+    position_hint: PositionHint = field(default_factory=PositionHint)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "raw_text": self.raw_text,
+            "prefix": self.prefix,
+            "number": self.number,
+            "number_len": self.number_len,
+            "shape": self.shape,
+            "evidence": self.evidence.to_dict() if self.evidence else None,
+            "position_hint": self.position_hint.to_dict(),
+        }
+
+    @classmethod
+    def from_marker_candidate(
+        cls,
+        candidate: "MarkerCandidate",
+        document_id: str,
+    ) -> "MarkerMention":
+        """
+        Convertit un MarkerCandidate en MarkerMention.
+
+        Args:
+            candidate: Le MarkerCandidate source
+            document_id: ID du document
+
+        Returns:
+            MarkerMention enrichi
+        """
+        raw_text = candidate.value
+        prefix = None
+        number = None
+        number_len = 0
+        shape = "OTHER"
+
+        # Parser le format "PREFIX NUMBER"
+        if candidate.lexical_shape == "entity_numeral":
+            parts = raw_text.rsplit(" ", 1)
+            if len(parts) == 2:
+                prefix = parts[0]
+                number = parts[1]
+                number_len = len(number)
+
+                # Determiner la shape
+                if number.isdigit():
+                    if len(number) == 4 and 1900 <= int(number) <= 2100:
+                        shape = "YEAR"
+                    else:
+                        shape = "WORD_NUMBER"
+
+        elif candidate.lexical_shape == "semver":
+            shape = "VERSIONLIKE"
+
+        # Construire EvidenceRef
+        evidence = EvidenceRef(
+            document_id=document_id,
+            excerpt=candidate.evidence[:200] if candidate.evidence else "",
+        )
+
+        # Construire PositionHint depuis les infos du candidat
+        position_hint = PositionHint(
+            is_heading_like=(
+                candidate.structure_risk in ("HARD_REJECT", "SOFT_FLAG")
+                and "heading" in candidate.structure_risk_reason.lower()
+            ),
+            line_start=candidate.position == 0,  # Cover = debut
+        )
+
+        return cls(
+            raw_text=raw_text,
+            prefix=prefix,
+            number=number,
+            number_len=number_len,
+            shape=shape,
+            evidence=evidence,
+            position_hint=position_hint,
+        )
+
+
+@dataclass
+class MarkerDecision:
+    """
+    Decision finale sur un marker.
+
+    Invariants (ADR):
+    - Invariant A: DocumentContext ne cree jamais de MarkerMention
+    - Invariant B: Toute decision ACCEPT_* doit avoir des reasons[]
+    - Invariant C: Safe-by-default - en cas de doute, UNRESOLVED
+    - Invariant D: Un marker accepte doit avoir une EvidenceRef locale
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.2
+    """
+    # Decision: ACCEPT_STRONG, ACCEPT_WEAK, UNRESOLVED, REJECT
+    decision: str
+
+    # Score [0.0, 1.0] - utilise pour les seuils de finalisation
+    score: float
+
+    # Raisons de la decision (pour debug/audit)
+    reasons: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "decision": self.decision,
+            "score": round(self.score, 3),
+            "reasons": self.reasons,
+        }
+
+    def is_accepted(self) -> bool:
+        """Retourne True si le marker est accepte (strong ou weak)."""
+        return self.decision in ("ACCEPT_STRONG", "ACCEPT_WEAK")
+
+    def is_rejected(self) -> bool:
+        """Retourne True si le marker est rejete."""
+        return self.decision == "REJECT"
+
+    def is_unresolved(self) -> bool:
+        """Retourne True si le marker est non resolu."""
+        return self.decision == "UNRESOLVED"
+
+
 @dataclass
 class MarkerCandidate:
     """
@@ -1015,6 +1249,383 @@ class MiningResult:
             conflict_hits=self.conflict_hits,
             source_coverage=self.source_coverage,
         )
+
+
+# =============================================================================
+# DOCUMENT CONTEXT DECIDER (ADR Document Context Markers - Section 3.4)
+# Algorithme de decision pour markers avec contraintes document-level
+# =============================================================================
+
+def is_small_number(m: MarkerMention) -> bool:
+    """
+    Verifie si le marker a un numero de 1-2 chiffres.
+
+    Les petits numeros (1-99) sont plus susceptibles d'etre des numeros
+    de section que des versions de produit.
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.3
+    """
+    return m.number is not None and m.number_len <= 2
+
+
+def is_year_like(m: MarkerMention) -> bool:
+    """
+    Verifie si le marker ressemble a une annee (4 chiffres entre 1900-2100).
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.3
+    """
+    if m.shape != "YEAR":
+        return False
+    if m.number is None:
+        return False
+    try:
+        year = int(m.number)
+        return 1900 <= year <= 2100
+    except ValueError:
+        return False
+
+
+def is_heading_artifact(m: MarkerMention) -> bool:
+    """
+    Verifie si le marker est un artefact structurel (titre/section/TOC).
+
+    Detection agnostique basee sur:
+    - Position en debut de ligne
+    - Suivi de ponctuation (:, .)
+    - Dans un contexte TOC
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.3
+    """
+    return (
+        m.position_hint.is_heading_like
+        or m.position_hint.in_toc_like
+        or (m.position_hint.line_start and m.position_hint.has_colon_after)
+    )
+
+
+def has_entity_anchor(m: MarkerMention, ctx: "DocumentContext") -> bool:
+    """
+    Verifie si le prefixe du marker correspond a une entite dominante.
+
+    Args:
+        m: MarkerMention avec prefixe extrait
+        ctx: DocumentContext avec entity_hints
+
+    Returns:
+        True si le prefixe correspond a une entite avec confidence >= 0.75
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.3
+    """
+    if not m.prefix:
+        return False
+    return ctx.has_entity_anchor(m.prefix)
+
+
+def structure_risk_high(m: MarkerMention, ctx: "DocumentContext") -> bool:
+    """
+    Verifie si le marker a un risque structurel eleve.
+
+    Risque eleve quand:
+    - Le document a des sections numerotees (confidence >= 0.7)
+    - Le marker a la forme WORD+NUMBER
+    - Le numero est petit (1-2 chiffres)
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.3
+    """
+    if ctx.structure_hint.confidence < 0.7:
+        return False
+    if not ctx.structure_hint.has_numbered_sections:
+        return False
+    if m.shape != "WORD_NUMBER":
+        return False
+    if not is_small_number(m):
+        return False
+    return True
+
+
+def matches_year(temporal_hint, number_str: str) -> bool:
+    """
+    Verifie si un numero correspond a l'annee du temporal_hint.
+
+    Args:
+        temporal_hint: TemporalHint avec explicit ou inferred
+        number_str: Numero a verifier (ex: "2024")
+
+    Returns:
+        True si le numero correspond a l'annee
+    """
+    if not number_str or not number_str.isdigit():
+        return False
+
+    year_str = number_str
+    best_date = temporal_hint.explicit or temporal_hint.inferred
+    if not best_date:
+        return False
+
+    # Extraire l'annee de la date (ex: "2024-Q1" -> "2024")
+    if len(best_date) >= 4:
+        return year_str == best_date[:4]
+    return False
+
+
+def finalize_decision(
+    score: float,
+    reasons: List[str],
+    min_decision: str = "UNRESOLVED"
+) -> MarkerDecision:
+    """
+    Finalise la decision avec seuils safe-by-default.
+
+    Seuils (ADR Section 3.4.5):
+    - >= 0.80: ACCEPT_STRONG
+    - >= 0.60: ACCEPT_WEAK
+    - <= 0.20: REJECT
+    - Sinon: UNRESOLVED
+
+    Args:
+        score: Score calcule [0.0, 1.0]
+        reasons: Liste des raisons
+        min_decision: Decision minimum forcee (ex: "ACCEPT_WEAK" pour years)
+
+    Returns:
+        MarkerDecision finale
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.5
+    """
+    score = max(0.0, min(1.0, score))
+
+    # Determiner la decision selon les seuils
+    if score >= 0.80:
+        decision = "ACCEPT_STRONG"
+    elif score >= 0.60:
+        decision = "ACCEPT_WEAK"
+    elif score <= 0.20:
+        decision = "REJECT"
+    else:
+        decision = "UNRESOLVED"
+
+    # Appliquer la decision minimum si necessaire
+    decision_order = ["REJECT", "UNRESOLVED", "ACCEPT_WEAK", "ACCEPT_STRONG"]
+    if min_decision in decision_order:
+        min_idx = decision_order.index(min_decision)
+        current_idx = decision_order.index(decision)
+        if current_idx < min_idx:
+            decision = min_decision
+
+    return MarkerDecision(decision=decision, score=score, reasons=reasons)
+
+
+def decide_marker(m: MarkerMention, ctx: "DocumentContext") -> MarkerDecision:
+    """
+    Algorithme de decision pour un marker avec contraintes document-level.
+
+    Applique la hierarchie:
+    1. MarkerMention (syntaxique) = source de verite
+    2. DocumentContext = contraintes uniquement (jamais createur)
+
+    Etapes (ADR Section 3.4.4):
+    0. Hard rejects universels (dates, noise, etc.)
+    1. Strong accept candidates (years avec corroboration)
+    2. Structural risk gating (fix pour "PUBLIC 3")
+    3. WORD+NUMBER sans risque structurel
+    4. Fallback: shapes inconnues
+
+    Invariants:
+    - A: DocumentContext ne cree jamais de MarkerMention
+    - B: Toute decision ACCEPT_* doit avoir des reasons[]
+    - C: Safe-by-default - en cas de doute, UNRESOLVED
+    - D: Un marker accepte doit avoir une EvidenceRef locale
+
+    Args:
+        m: MarkerMention extrait syntaxiquement
+        ctx: DocumentContext avec contraintes du LLM
+
+    Returns:
+        MarkerDecision avec decision, score et raisons
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.4
+    """
+    reasons: List[str] = []
+    score = 0.50  # Baseline neutre
+
+    # ---------------------------------------------------------
+    # (1) Strong accept candidates: YEAR-like
+    # ---------------------------------------------------------
+    if is_year_like(m):
+        score += 0.20
+        reasons.append("YEAR_LIKE")
+
+        # Si le doc a un temporal hint explicite qui correspond, renforcer
+        if ctx.temporal_hint and ctx.temporal_hint.explicit:
+            if m.number and matches_year(ctx.temporal_hint, m.number):
+                score += 0.15
+                reasons.append("MATCHES_TEMPORAL_HINT_EXPLICIT")
+
+        # Les years sont au minimum ACCEPT_WEAK (markers temporels valides)
+        return finalize_decision(score, reasons, min_decision="ACCEPT_WEAK")
+
+    # ---------------------------------------------------------
+    # (2) Structural risk gating (fix pour PUBLIC 3)
+    # ---------------------------------------------------------
+    if structure_risk_high(m, ctx):
+        reasons.append("STRUCTURE_RISK_HIGH")
+
+        # Heading artifacts sont presque certainement pas des versions
+        if is_heading_artifact(m):
+            reasons.append("HEADING_OR_TOC_ARTIFACT")
+            return MarkerDecision(decision="REJECT", score=0.05, reasons=reasons)
+
+        # Pas clairement heading-like, mais risque structurel eleve
+        score -= 0.25
+
+        # Seul un entity anchor fort peut sauver ce marker
+        if has_entity_anchor(m, ctx):
+            score += 0.35
+            reasons.append("ENTITY_ANCHOR_CORROBORATES")
+        else:
+            reasons.append("NO_ENTITY_ANCHOR")
+
+        return finalize_decision(score, reasons)
+
+    # ---------------------------------------------------------
+    # (3) WORD+NUMBER sans risque structurel eleve
+    # ---------------------------------------------------------
+    if m.shape == "WORD_NUMBER" and m.number is not None:
+        reasons.append("WORD_NUMBER")
+
+        # Petits numeros sont inherently ambigus - requierent corroboration
+        if is_small_number(m):
+            reasons.append("SMALL_NUMBER_AMBIGUOUS")
+            score -= 0.15
+
+            if has_entity_anchor(m, ctx):
+                score += 0.30
+                reasons.append("ENTITY_ANCHOR_CORROBORATES")
+            else:
+                reasons.append("NO_ENTITY_ANCHOR")
+
+            return finalize_decision(score, reasons)
+
+        # Grands numeros (>= 3 digits) moins susceptibles d'etre des sections
+        score += 0.05
+        if has_entity_anchor(m, ctx):
+            score += 0.15
+            reasons.append("ENTITY_ANCHOR_CORROBORATES")
+
+        return finalize_decision(score, reasons, min_decision="ACCEPT_WEAK")
+
+    # ---------------------------------------------------------
+    # (4) VERSIONLIKE (semver) - generalement fiable
+    # ---------------------------------------------------------
+    if m.shape == "VERSIONLIKE":
+        reasons.append("VERSIONLIKE")
+        score += 0.30
+
+        if has_entity_anchor(m, ctx):
+            score += 0.10
+            reasons.append("ENTITY_ANCHOR_CORROBORATES")
+
+        return finalize_decision(score, reasons, min_decision="ACCEPT_WEAK")
+
+    # ---------------------------------------------------------
+    # (5) Fallback: shapes inconnues restent unresolved sauf corroboration
+    # ---------------------------------------------------------
+    reasons.append("UNKNOWN_SHAPE")
+    if has_entity_anchor(m, ctx):
+        score += 0.10
+        reasons.append("ENTITY_ANCHOR_LIGHT_BOOST")
+
+    return finalize_decision(score, reasons)
+
+
+class DocumentContextDecider:
+    """
+    Classe utilitaire pour appliquer decide_marker() sur une liste de candidats.
+
+    Usage:
+        >>> from knowbase.extraction_v2.context.models import DocumentContext
+        >>> decider = DocumentContextDecider(document_context)
+        >>> decisions = decider.decide_all(candidates, document_id)
+    """
+
+    def __init__(self, document_context: "DocumentContext"):
+        """
+        Initialise le decider avec un DocumentContext.
+
+        Args:
+            document_context: Contraintes extraites du document summary
+        """
+        self.ctx = document_context
+
+    def decide_all(
+        self,
+        candidates: List[MarkerCandidate],
+        document_id: str,
+    ) -> Dict[str, MarkerDecision]:
+        """
+        Applique decide_marker() sur tous les candidats.
+
+        Args:
+            candidates: Liste de MarkerCandidate
+            document_id: ID du document
+
+        Returns:
+            Dict[marker_value -> MarkerDecision]
+        """
+        decisions: Dict[str, MarkerDecision] = {}
+
+        for candidate in candidates:
+            mention = MarkerMention.from_marker_candidate(candidate, document_id)
+            decision = decide_marker(mention, self.ctx)
+            decisions[candidate.value] = decision
+
+            logger.debug(
+                f"[DocumentContextDecider] '{candidate.value}' -> "
+                f"{decision.decision} (score={decision.score:.2f}, "
+                f"reasons={decision.reasons})"
+            )
+
+        return decisions
+
+    def filter_by_decision(
+        self,
+        candidates: List[MarkerCandidate],
+        document_id: str,
+    ) -> Tuple[List[MarkerCandidate], List[MarkerCandidate], List[MarkerCandidate]]:
+        """
+        Filtre les candidats selon les decisions.
+
+        Args:
+            candidates: Liste de MarkerCandidate
+            document_id: ID du document
+
+        Returns:
+            Tuple (accepted, unresolved, rejected)
+        """
+        decisions = self.decide_all(candidates, document_id)
+
+        accepted = []
+        unresolved = []
+        rejected = []
+
+        for candidate in candidates:
+            decision = decisions.get(candidate.value)
+            if decision:
+                if decision.is_accepted():
+                    accepted.append(candidate)
+                elif decision.is_rejected():
+                    rejected.append(candidate)
+                else:
+                    unresolved.append(candidate)
+            else:
+                unresolved.append(candidate)
+
+        logger.info(
+            f"[DocumentContextDecider] Filtered {len(candidates)} candidates: "
+            f"{len(accepted)} accepted, {len(unresolved)} unresolved, {len(rejected)} rejected"
+        )
+
+        return accepted, unresolved, rejected
 
 
 class CandidateMiner:
@@ -1540,6 +2151,20 @@ __all__ = [
     "StructureGateConfig",
     "SequenceDetectionResult",
     "get_structure_numbering_gate",
+    # Document Context Markers (ADR)
+    "PositionHint",
+    "EvidenceRef",
+    "MarkerMention",
+    "MarkerDecision",
+    "DocumentContextDecider",
+    "decide_marker",
+    # Helper functions for decide_marker (exported for testing)
+    "is_small_number",
+    "is_year_like",
+    "is_heading_artifact",
+    "has_entity_anchor",
+    "structure_risk_high",
+    "finalize_decision",
     # Functions
     "enrich_candidates_with_structural_analysis",
 ]

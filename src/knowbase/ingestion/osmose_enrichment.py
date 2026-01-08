@@ -11,21 +11,29 @@ Date: 2025-01-05
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections import Counter
-from typing import Dict, List, Any, Optional, TYPE_CHECKING
+from typing import Dict, List, Any, Optional, Tuple, TYPE_CHECKING, Union
 
 import logging
 
 from knowbase.common.llm_router import LLMRouter, get_llm_router, TaskType
+from knowbase.extraction_v2.context.models import (
+    DocumentContext,
+    StructureHint,
+    EntityHint,
+    TemporalHint,
+)
 
 if TYPE_CHECKING:
-    from knowbase.extraction_v2.context.doc_context_frame import DocContextFrame
+    from knowbase.extraction_v2.context.models import DocContextFrame
 
 logger = logging.getLogger(__name__)
 
 # Cache global pour le contexte document (évite recalcul)
-_document_context_cache: Dict[str, tuple[str, float]] = {}
+# Format: (summary, technical_density, document_context)
+_document_context_cache: Dict[str, Tuple[str, float, DocumentContext]] = {}
 
 
 def get_anchor_context_analyzer():
@@ -193,20 +201,26 @@ async def generate_document_summary(
     full_text: str,
     llm_router: LLMRouter,
     max_length: int = 500
-) -> tuple[str, float]:
+) -> Tuple[str, float, DocumentContext]:
     """
-    Génère un résumé contextuel du document ET évalue sa densité technique.
+    Génère un résumé contextuel du document, évalue sa densité technique,
+    et extrait les contraintes document-level pour filtrage des markers.
 
     Phase 1.8 Task T1.8.1.0: Document Context Global.
     Phase 1.8.2: Ajout technical_density_hint pour stratégie extraction domain-agnostic.
+    ADR Document Context Markers: Ajout document_context constraints.
 
     Ce résumé est utilisé pour:
     - Désambiguïser les acronymes/abréviations
     - Préférer les noms complets officiels
     - Contexte domaine pour meilleure extraction
+    - Filtrer les faux positifs markers via structure_hint
+    - Renforcer la normalisation via entity_hints
 
-    Le technical_density_hint (0.0-1.0) indique si le document contient
-    du vocabulaire technique spécialisé nécessitant une extraction LLM.
+    IMPORTANT (ADR):
+    - Le LLM n'extrait PAS de markers, seulement des CONTRAINTES
+    - Hiérarchie: MarkerMention > Normalization > DocumentContext
+    - Safe-by-default: en cas de doute, confidence basse
 
     Args:
         document_id: ID unique pour cache
@@ -215,51 +229,93 @@ async def generate_document_summary(
         max_length: Longueur max du résumé (caractères)
 
     Returns:
-        Tuple (résumé contextuel, technical_density_hint 0.0-1.0)
+        Tuple (résumé contextuel, technical_density 0.0-1.0, document_context)
     """
-    # Vérifier cache global (inclut maintenant le hint)
+    # Vérifier cache global
     cache_key = hashlib.md5(document_id.encode()).hexdigest()
 
     if cache_key in _document_context_cache:
         cached = _document_context_cache[cache_key]
-        # Support ancien format (string) et nouveau format (tuple)
+        # Support ancien format (2-tuple) et nouveau format (3-tuple)
         if isinstance(cached, tuple):
-            logger.info(f"[PHASE1.8:Context] Cache hit for document {document_id[:20]}...")
-            return cached
-        else:
-            # Ancien format: retourner avec hint par défaut
-            return (cached, 0.5)
+            if len(cached) == 3:
+                logger.info(f"[OSMOSE:Context] Cache hit for document {document_id[:20]}...")
+                return cached
+            elif len(cached) == 2:
+                # Ancien format: ajouter DocumentContext vide
+                return (cached[0], cached[1], DocumentContext.empty())
 
-    logger.info(f"[PHASE1.8:Context] Generating document context for {document_id[:20]}...")
+    logger.info(f"[OSMOSE:Context] Generating document context for {document_id[:20]}...")
 
     # Extraction métadonnées sans LLM
     metadata = extract_document_metadata(full_text)
 
-    # Construire prompt pour LLM
     # Limiter texte envoyé au LLM (premiers 4000 chars + derniers 1000)
     text_sample = full_text[:4000]
     if len(full_text) > 5000:
         text_sample += "\n[...]\n" + full_text[-1000:]
 
-    # Prompt générique (domain-agnostic) avec évaluation densité technique
-    system_prompt = """You are a document analyst. Your task is to:
-1. Generate a concise document summary (1-2 paragraphs, max 500 characters)
-2. Evaluate the technical density of the document
+    # Prompt enrichi avec document_context (ADR Document Context Markers)
+    system_prompt = """You are a document analyst.
+
+Your tasks:
+1) Produce a concise summary (1-2 paragraphs, max 500 characters).
+2) Estimate technical density (0.0-1.0).
+3) Produce DOCUMENT CONTEXT CONSTRAINTS to help interpret locally-extracted markers.
+   IMPORTANT: You do NOT create markers. You only provide constraints and hints.
 
 For the summary, focus on:
-- Main theme/topic of the document
-- Full official names of products, solutions, or key terms mentioned
-- Industry or domain context
-- Target audience
+- Main theme/topic
+- Full official names of the dominant entities (products/systems/standards/regulations/orgs)
+- Domain context
 
-For technical density evaluation (0.0-1.0):
-- 0.0-0.3: Simple text (marketing, general communication, basic explanations)
-- 0.3-0.5: Moderate technical content (business documents, standard procedures)
-- 0.5-0.7: Technical content (specialized domain vocabulary, acronyms, jargon)
-- 0.7-1.0: Highly technical (scientific papers, technical specifications, dense terminology)
+For document_context, provide:
 
-Answer in JSON format:
-{"summary": "your summary here", "technical_density": 0.X}
+A) structure_hint:
+- Does the document use numbered headings/sections?
+- What numbering patterns are present (e.g., "WORD+NUMBER", "1.2.3")?
+- Confidence.
+
+B) entity_hints:
+- List up to 5 dominant entities that the document is mainly about.
+- For each, provide:
+  - label
+  - type_hint: product|system|standard|regulation|org|other
+  - confidence
+  - evidence: "explicit" if clearly stated, otherwise "inferred"
+- IMPORTANT: Do not fabricate versions or years.
+
+C) temporal_hint:
+- If an explicit publication/creation date is clearly stated, extract it.
+- If not explicit, you may provide a weak inferred year with low confidence.
+- Prefer "unknown" over guessing.
+
+D) scope_hints:
+- Generic deployment/variant cues (cloud/on-premise/edition/region) if explicitly mentioned.
+
+Strict rules:
+- Do NOT output "product_versions".
+- Do NOT turn section numbers into versions.
+- If the document has numbered sections, tokens like "PUBLIC 3" are likely headings, not versions.
+- If unsure, set confidence low and/or return empty lists.
+
+Output JSON only:
+{
+  "summary": "...",
+  "technical_density": 0.X,
+  "document_context": {
+    "structure_hint": {
+      "has_numbered_sections": true/false,
+      "numbering_patterns": ["..."],
+      "confidence": 0.X
+    },
+    "entity_hints": [
+      {"label":"...", "type_hint":"...", "confidence":0.X, "evidence":"explicit|inferred"}
+    ],
+    "temporal_hint": {"explicit":"YYYY-MM|YYYY-Q#", "inferred":"YYYY", "confidence":0.X},
+    "scope_hints": ["..."]
+  }
+}
 
 Write the summary in the same language as the document."""
 
@@ -267,9 +323,9 @@ Write the summary in the same language as the document."""
     try:
         injector = get_domain_context_injector()
         system_prompt = injector.inject_context(system_prompt, tenant_id="default")
-        logger.info("[PHASE1.8:Context] Domain Context injected into summary prompt")
+        logger.info("[OSMOSE:Context] Domain Context injected into summary prompt")
     except Exception as e:
-        logger.debug(f"[PHASE1.8:Context] No Domain Context available: {e}")
+        logger.debug(f"[OSMOSE:Context] No Domain Context available: {e}")
 
     user_prompt = f"""Document metadata:
 - Title: {metadata.get('title', 'Unknown')}
@@ -290,52 +346,127 @@ Analyze this document and provide JSON response:"""
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.3,
-            max_tokens=400
+            max_tokens=800  # Augmenté pour document_context
         )
 
         # Parser la réponse JSON
-        import json
-        technical_density = 0.5  # Défaut
+        technical_density = 0.5
         summary = response
+        doc_context = DocumentContext.empty()
 
         try:
-            # Chercher JSON dans la réponse
-            json_match = re.search(r'\{[^}]+\}', response, re.DOTALL)
+            # Chercher JSON complet dans la réponse (peut être multi-ligne)
+            json_match = re.search(r'\{[\s\S]*\}', response)
             if json_match:
                 data = json.loads(json_match.group(0))
                 summary = data.get("summary", response)
                 technical_density = float(data.get("technical_density", 0.5))
-                # Clamp entre 0 et 1
                 technical_density = max(0.0, min(1.0, technical_density))
+
+                # Parser document_context si présent
+                if "document_context" in data:
+                    doc_context = _parse_document_context(data["document_context"])
+                    logger.info(
+                        f"[OSMOSE:Context] Parsed document_context: {doc_context}"
+                    )
+
         except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"[PHASE1.8:Context] Failed to parse JSON response: {e}")
-            # Garder le response brut comme summary
+            logger.warning(f"[OSMOSE:Context] Failed to parse JSON response: {e}")
 
         # Tronquer si trop long
         if len(summary) > max_length:
             summary = summary[:max_length-3] + "..."
 
-        # Stocker en cache (nouveau format tuple)
-        _document_context_cache[cache_key] = (summary, technical_density)
+        # Stocker en cache (nouveau format 3-tuple)
+        result = (summary, technical_density, doc_context)
+        _document_context_cache[cache_key] = result
 
         logger.info(
-            f"[PHASE1.8:Context] Generated context ({len(summary)} chars, "
-            f"technical_density={technical_density:.2f}) for document {document_id[:20]}..."
+            f"[OSMOSE:Context] Generated context ({len(summary)} chars, "
+            f"density={technical_density:.2f}, "
+            f"numbered_sections={doc_context.structure_hint.has_numbered_sections}, "
+            f"entities={len(doc_context.entity_hints)}) "
+            f"for document {document_id[:20]}..."
         )
 
-        return (summary, technical_density)
+        return result
 
     except Exception as e:
-        logger.warning(f"[PHASE1.8:Context] Failed to generate summary: {e}")
+        logger.warning(f"[OSMOSE:Context] Failed to generate summary: {e}")
 
         # Fallback: construire contexte minimal depuis métadonnées
         fallback = f"Document: {metadata.get('title', 'Unknown')}. "
         if metadata.get('keywords'):
             fallback += f"Topics: {', '.join(metadata['keywords'][:5])}."
 
-        # Fallback hint: 0.5 (neutre)
-        _document_context_cache[cache_key] = (fallback, 0.5)
-        return (fallback, 0.5)
+        result = (fallback, 0.5, DocumentContext.empty())
+        _document_context_cache[cache_key] = result
+        return result
+
+
+def _parse_document_context(data: Dict[str, Any]) -> DocumentContext:
+    """
+    Parse le document_context depuis la réponse JSON du LLM.
+
+    Gère les cas où certains champs sont manquants ou mal formés.
+    Safe-by-default: en cas de doute, retourne des valeurs neutres.
+
+    Args:
+        data: Dictionnaire document_context du JSON
+
+    Returns:
+        DocumentContext parsé
+    """
+    # Parse structure_hint
+    structure_hint = StructureHint.empty()
+    if "structure_hint" in data and isinstance(data["structure_hint"], dict):
+        sh = data["structure_hint"]
+        structure_hint = StructureHint(
+            has_numbered_sections=bool(sh.get("has_numbered_sections", False)),
+            numbering_patterns=sh.get("numbering_patterns", []) or [],
+            confidence=float(sh.get("confidence", 0.5)),
+        )
+
+    # Parse entity_hints
+    entity_hints: List[EntityHint] = []
+    if "entity_hints" in data and isinstance(data["entity_hints"], list):
+        for eh in data["entity_hints"][:5]:  # Max 5
+            if isinstance(eh, dict) and "label" in eh:
+                entity_hints.append(EntityHint(
+                    label=str(eh.get("label", "")),
+                    type_hint=str(eh.get("type_hint", "other")),
+                    confidence=float(eh.get("confidence", 0.5)),
+                    evidence=str(eh.get("evidence", "inferred")),
+                ))
+
+    # Parse temporal_hint
+    temporal_hint = TemporalHint.empty()
+    if "temporal_hint" in data and isinstance(data["temporal_hint"], dict):
+        th = data["temporal_hint"]
+        explicit = th.get("explicit")
+        inferred = th.get("inferred")
+        # Normaliser les valeurs nulles/vides
+        if explicit in (None, "", "null", "unknown"):
+            explicit = None
+        if inferred in (None, "", "null", "unknown"):
+            inferred = None
+        temporal_hint = TemporalHint(
+            explicit=explicit,
+            inferred=inferred,
+            confidence=float(th.get("confidence", 0.0)),
+        )
+
+    # Parse scope_hints
+    scope_hints: List[str] = []
+    if "scope_hints" in data and isinstance(data["scope_hints"], list):
+        scope_hints = [str(s) for s in data["scope_hints"] if s]
+
+    return DocumentContext(
+        structure_hint=structure_hint,
+        entity_hints=entity_hints,
+        temporal_hint=temporal_hint,
+        scope_hints=scope_hints,
+    )
 
 
 def cross_reference_chunks_and_concepts(
@@ -463,4 +594,6 @@ __all__ = [
     "generate_document_summary",
     "cross_reference_chunks_and_concepts",
     "clear_document_context_cache",
+    # Re-export DocumentContext pour commodité
+    "DocumentContext",
 ]

@@ -388,11 +388,15 @@ class OsmoseAgentiqueService:
         document_id: str,
         full_text: str,
         max_length: int = 500
-    ) -> tuple[str, float]:
+    ) -> tuple:
         """
-        Génère un résumé contextuel du document ET évalue sa densité technique.
+        Génère un résumé contextuel du document, évalue sa densité technique,
+        et extrait les contraintes document-level.
 
         Délègue à osmose_enrichment.generate_document_summary().
+
+        Returns:
+            Tuple (summary, technical_density, document_context)
         """
         llm_router = self._get_llm_router()
         return await generate_document_summary(
@@ -557,15 +561,17 @@ class OsmoseAgentiqueService:
 
             # Phase 1.8: Générer document_context pour désambiguïsation concepts
             # Phase 1.8.2: Récupérer aussi technical_density_hint (domain-agnostic)
+            # ADR Document Context Markers: Récupérer document_context_constraints
             print(f"[DEBUG OSMOSE] Phase 1.8: Generating document context...")
             try:
-                document_context, technical_density_hint = await self._generate_document_summary(
+                document_context, technical_density_hint, doc_context_constraints = await self._generate_document_summary(
                     document_id=document_id,
                     full_text=text_content,
                     max_length=500
                 )
                 initial_state.document_context = document_context
                 initial_state.technical_density_hint = technical_density_hint
+                # TODO: Utiliser doc_context_constraints pour filtrage markers (ADR)
                 logger.info(
                     f"[PHASE1.8:Context] Document context generated ({len(document_context)} chars, "
                     f"technical_density={technical_density_hint:.2f})"
@@ -971,7 +977,7 @@ class OsmoseAgentiqueService:
             # Étape 2: Générer contexte document
             document_context = ""
             try:
-                document_context, _ = await self._generate_document_summary(
+                document_context, _, _ = await self._generate_document_summary(
                     document_id=document_id,
                     full_text=text_content,
                     max_length=500
