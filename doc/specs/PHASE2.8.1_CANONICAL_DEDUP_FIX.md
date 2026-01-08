@@ -341,9 +341,9 @@ FOR (p:ProtoConcept) ON (p.tenant_id, p.promotion_status);
 - **Conversation technique:** Claude Code + ChatGPT 2025-12-21
 - **Phase parente:** Phase 2.8 - ID-First Relation Extraction
 - **Documentation liée:**
-  - `doc/ongoing/PHASE2.8_ID_FIRST_EXTRACTION.md`
-  - `doc/ongoing/PHASE2.8_RAW_CANONICAL_ARCHITECTURE.md`
-  - `doc/ongoing/PHASE2.7_CONCEPT_MATCHING_ENGINE.md`
+  - `doc/specs/PHASE2.8_ID_FIRST_EXTRACTION.md`
+  - `doc/specs/PHASE2.8_RAW_CANONICAL_ARCHITECTURE.md`
+  - `doc/specs/PHASE2.7_CONCEPT_MATCHING_ENGINE.md`
 
 ---
 
@@ -459,7 +459,7 @@ Le LLM reçoit un catalogue trop volumineux → n'utilise que 11-16% des concept
 
 ### 11.4 Solution → Phase 2.9
 
-Voir `doc/ongoing/PHASE2.9_SEGMENT_LEVEL_RELATIONS.md` pour le plan d'implémentation.
+Voir `doc/specs/PHASE2.9_SEGMENT_LEVEL_RELATIONS.md` pour le plan d'implémentation.
 
 ---
 

@@ -11,14 +11,14 @@
 | Document | Chemin | Description |
 |----------|--------|-------------|
 | Cadrage initial | (conversation) | Problèmes structurels, principes directeurs |
-| Architecture cible | `doc/ongoing/OSMOSIS_ARCHITECTURE_CIBLE_V2.md` | Flow Docling → Gating → Vision → Merge |
-| Vision Gating v4 Spec | `doc/ongoing/VISION_GATING_V4_SPEC.md` | 5 signaux, scoring, pseudo-code |
-| Vision Gating v4 Checklist | `doc/ongoing/VISION_GATING_V4_CHECKLIST.md` | Checklist d'implémentation détaillée |
-| Schéma de classes Python | `doc/ongoing/VISION_GATING_V4_CLASS_SCHEMA.py` | Modèles de données, interfaces |
-| Prompt Vision canonique | `doc/ongoing/VISION_PROMPT_CANONICAL.md` | Prompt agnostique + Domain Context |
-| **Décisions consolidées** | `doc/ongoing/OSMOSIS_EXTRACTION_V2_DECISIONS.md` | **Arbitrage final - 10 décisions** |
-| Revue critique | `doc/ongoing/OSMOSIS_EXTRACTION_V2_CRITICAL_REVIEW.md` | Analyse des zones d'ombre |
-| Pipeline actuel (référence) | `doc/ongoing/EXTRACTION_PIPELINE_ARCHITECTURE.md` | Documentation du pipeline existant |
+| Architecture cible | `doc/specs/OSMOSIS_ARCHITECTURE_CIBLE_V2.md` | Flow Docling → Gating → Vision → Merge |
+| Vision Gating v4 Spec | `doc/specs/VISION_GATING_V4_SPEC.md` | 5 signaux, scoring, pseudo-code |
+| Vision Gating v4 Checklist | `doc/specs/VISION_GATING_V4_CHECKLIST.md` | Checklist d'implémentation détaillée |
+| Schéma de classes Python | `doc/specs/VISION_GATING_V4_CLASS_SCHEMA.py` | Modèles de données, interfaces |
+| Prompt Vision canonique | `doc/specs/VISION_PROMPT_CANONICAL.md` | Prompt agnostique + Domain Context |
+| **Décisions consolidées** | `doc/specs/OSMOSIS_EXTRACTION_V2_DECISIONS.md` | **Arbitrage final - 10 décisions** |
+| Revue critique | `doc/research/OSMOSIS_EXTRACTION_V2_CRITICAL_REVIEW.md` | Analyse des zones d'ombre |
+| Pipeline actuel (référence) | `doc/specs/EXTRACTION_PIPELINE_ARCHITECTURE.md` | Documentation du pipeline existant |
 
 ---
 

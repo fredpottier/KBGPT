@@ -829,7 +829,7 @@ Voir `doc/etudes/ARCHITECTURE_AGENTIQUE_OSMOSE.md` pour :
 
 - `README.md` : Overview projet
 - `CLAUDE.md` : Configuration Claude Code
-- `doc/OSMOSE_PROJECT_OVERVIEW.md` : Vue d'ensemble OSMOSE
+- `doc/README.md` : Vue d'ensemble OSMOSE
 - `doc/OSMOSE_ARCHITECTURE_TECHNIQUE.md` : Spécifications techniques
 - `doc/etudes/ARCHITECTURE_AGENTIQUE_OSMOSE.md` : Architecture agentique (coûts)
 

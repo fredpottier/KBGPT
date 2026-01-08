@@ -413,7 +413,7 @@ Le LLM ne doit PAS inventer d'expansion si incertain. Si "CRR" apparait sans con
 
 ## 🔄 Prochaines Optimisations Possibles (Phase 2)
 
-Voir analyse complète dans `doc/ongoing/REFACTORING_ANALYSIS_REPORT.md` section "Recommandations".
+Voir analyse complète dans `doc/research/REFACTORING_ANALYSIS_REPORT.md` section "Recommandations".
 
 **Quick Wins restants :**
 1. Cache in-memory EntityNormalizer (~15 sec gain)

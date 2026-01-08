@@ -457,8 +457,8 @@ Utiliser le role pour **pondérer l'importance** des concepts extraits.
 ### 📚 Analyse Best Practices Extraction (Source: OpenAI, 2025-10-15)
 
 **Documents sources** :
-- `doc/ongoing/ANALYSE_BEST_PRACTICES_EXTRACTION_VS_OSMOSE.md`
-- `doc/ongoing/ANALYSE_FILTRAGE_CONTEXTUEL_GENERALISTE.md`
+- `doc/archive/diagnostics_2024/ANALYSE_BEST_PRACTICES_EXTRACTION_VS_OSMOSE.md`
+- `doc/archive/diagnostics_2024/ANALYSE_FILTRAGE_CONTEXTUEL_GENERALISTE.md`
 
 **Pipeline 6 Étapes Recommandé (Industrie)** :
 1. ✅ Prétraitement et structuration (OSMOSE OK)

@@ -178,7 +178,7 @@ def extract_relations_chunk_aware(
 
 ## 9. Références
 
-- ADR principal : `doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md`
+- ADR principal : `doc/decisions/ADR_HYBRID_ANCHOR_MODEL.md`
 - Phase 2.8+ : ID-First Extraction
 - Phase 2.10 : Type-First Extraction (12 Core types)
 

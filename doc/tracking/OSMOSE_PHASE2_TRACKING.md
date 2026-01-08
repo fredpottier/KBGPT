@@ -116,7 +116,7 @@ Valider l'architecture de cross-référencement Neo4j ↔ Qdrant avant la Phase 
 - `src/knowbase/api/services/concept_explainer_service.py` (308 lignes)
 - `src/knowbase/api/routers/concepts.py` (193 lignes)
 - `scripts/migrate_canonical_concepts_names.py` (211 lignes)
-- `doc/ongoing/OSMOSE_PHASE2_POC_CONCEPT_EXPLAINER.md` (448 lignes)
+- `doc/specs/OSMOSE_PHASE2_POC_CONCEPT_EXPLAINER.md` (448 lignes)
 - `src/knowbase/common/clients/neo4j_client.py` (modifié)
 - `src/knowbase/api/main.py` (modifié)
 
@@ -126,7 +126,7 @@ Valider l'architecture de cross-référencement Neo4j ↔ Qdrant avant la Phase 
 
 **Période :** 3 jours (simplifié)
 **Status :** 🟡 **NOT STARTED** - Optionnel
-**Référence :** `doc/ongoing/OSMOSE_PHASE2_DOMAIN_CONTEXT_PERSONALIZER.md`
+**Référence :** `doc/specs/OSMOSE_PHASE2_DOMAIN_CONTEXT_PERSONALIZER.md`
 
 ### Contexte Architecture
 
@@ -948,8 +948,8 @@ Le composant est maintenant intégré et activé par défaut dans le pipeline OS
 
 ### Documentation Principale
 - `doc/phases/PHASE2_INTELLIGENCE.md` : Spécification complète Phase 2
-- `doc/ongoing/PHASE2_RELATION_TYPES_REFERENCE.md` : Taxonomie 12 types relations + patterns
-- `doc/ongoing/OSMOSE_PHASE2_POC_CONCEPT_EXPLAINER.md` : Documentation POC
+- `doc/specs/PHASE2_RELATION_TYPES_REFERENCE.md` : Taxonomie 12 types relations + patterns
+- `doc/specs/OSMOSE_PHASE2_POC_CONCEPT_EXPLAINER.md` : Documentation POC
 
 ### Corpus Test SAP
 - SAP S/4HANA Cloud Overview (230 slides)

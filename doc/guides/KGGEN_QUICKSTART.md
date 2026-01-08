@@ -121,8 +121,8 @@ density = calculate_graph_density(concepts)
 
 ## 📝 Documentation Complète
 
-- **Analyse détaillée:** `doc/ongoing/KGGEN_OSMOSE_COMPARATIVE_ANALYSIS.md`
-- **Tracking Phase 1.8:** `doc/ongoing/PHASE1_8_TRACKING.md`
+- **Analyse détaillée:** `doc/research/KGGEN_OSMOSE_COMPARATIVE_ANALYSIS.md`
+- **Tracking Phase 1.8:** `doc/tracking/PHASE1_8_TRACKING.md`
 - **Paper original:** https://arxiv.org/html/2502.09956v1
 
 ---

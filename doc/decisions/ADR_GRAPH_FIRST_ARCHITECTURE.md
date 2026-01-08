@@ -698,4 +698,4 @@ SEMANTIC_RELATION_TYPES = frozenset({
 - `src/knowbase/api/services/search.py` - Runtime actuel
 - `src/knowbase/api/services/graph_guided_search.py` - Service KG actuel
 - `src/knowbase/navigation/types.py` - Modèle ContextNode
-- `doc/ongoing/ADR_NAVIGATION_LAYER.md` - ADR Navigation Layer existant
+- `doc/decisions/ADR_NAVIGATION_LAYER.md` - ADR Navigation Layer existant

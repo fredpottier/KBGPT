@@ -569,7 +569,7 @@ class DomainContextProfile(BaseModel):
 ## 📎 Références
 
 - Architecture générique : `CLAUDE.md` (principe domain-agnostic)
-- Phase 2 tracking : `doc/ongoing/OSMOSE_PHASE2_TRACKING.md`
+- Phase 2 tracking : `doc/tracking/OSMOSE_PHASE2_TRACKING.md`
 - LLMCanonicalizer : `src/knowbase/ontology/llm_canonicalizer.py`
 - Neo4j Client : `src/knowbase/common/clients/neo4j_client.py`
 

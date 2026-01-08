@@ -481,8 +481,8 @@ Document → [Reducto API] → JSON propre → [OSMOSE Semantic]
 
 ## References
 
-- `doc/ongoing/REDUCTO_VS_OSMOSE_ANALYSIS.md` — Analyse comparative complete
-- `doc/ongoing/SCALING_ARCHITECTURE_REFLEXION.md` — Reflexion infrastructure
+- `doc/research/REDUCTO_VS_OSMOSE_ANALYSIS.md` — Analyse comparative complete
+- `doc/research/SCALING_ARCHITECTURE_REFLEXION.md` — Reflexion infrastructure
 - `src/knowbase/ingestion/osmose_agentique.py` — Pipeline principal
 - `src/knowbase/ingestion/hybrid_anchor_chunker.py` — Chunker actuel
 - `src/knowbase/ingestion/components/transformers/vision_analyzer.py` — Pipeline Vision actuel
