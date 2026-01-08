@@ -190,7 +190,7 @@ Phase 4 (Sem 40+)       : Production Hardening ⏸️ NOT STARTED
 │ - Palier 1: Full-text Neo4j (index créé, testé)                       │
 │ - Palier 2: Vector search Qdrant (multilingue FR↔EN↔DE)               │
 │ - Palier 3: Surface forms LLM (optionnel)                             │
-│ 📖 doc/ongoing/PHASE2.7_CONCEPT_MATCHING_ENGINE.md                    │
+│ 📖 doc/specs/PHASE2.7_CONCEPT_MATCHING_ENGINE.md                      │
 └────────────────────────────────────────────────────────────────────────┘
          │
          ↓ Checkpoint Phase 2.7 - CRITIQUE pour valeur KG
@@ -358,7 +358,7 @@ Phase 4 (Sem 40+)       : Production Hardening ⏸️ NOT STARTED
 **Source** : Analyse Best Practices Extraction (OpenAI, 2025-10-15)
 **Documents** :
 - `doc/OSMOSE_EXTRACTION_QUALITY_ANALYSIS.md` (Phase 4: Filtrage Contextuel Avancé)
-- `doc/ongoing/ANALYSE_FILTRAGE_CONTEXTUEL_GENERALISTE.md`
+- `doc/archive/diagnostics_2024/ANALYSE_FILTRAGE_CONTEXTUEL_GENERALISTE.md`
 
 **Problème Critique Identifié** :
 ```
@@ -920,12 +920,12 @@ Attendu:
 
 **Documents Associés** :
 - [`doc/README.md`](./README.md) (guide navigation documentation)
-- [`doc/ongoing/OSMOSE_STATUS_ACTUEL.md`](./ongoing/OSMOSE_STATUS_ACTUEL.md) (status actuel du projet)
+- [`doc/tracking/OSMOSE_STATUS_ACTUEL.md`](./tracking/OSMOSE_STATUS_ACTUEL.md) (status actuel du projet)
 - [`doc/OSMOSE_ARCHITECTURE_TECHNIQUE.md`](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) (architecture globale)
 - [`doc/phases/PHASE1_SEMANTIC_CORE.md`](./phases/PHASE1_SEMANTIC_CORE.md) (Phase 1 - Semantic Core)
 - [`doc/phases/PHASE2_INTELLIGENCE_AVANCEE.md`](./phases/PHASE2_INTELLIGENCE_AVANCEE.md) (Phase 2 - Intelligence Relationnelle)
 - [`doc/phases/PHASE2.5_MEMORY_LAYER.md`](./phases/PHASE2.5_MEMORY_LAYER.md) ✅ (Phase 2.5 - Memory Layer)
-- [`doc/ongoing/PHASE2.7_CONCEPT_MATCHING_ENGINE.md`](./ongoing/PHASE2.7_CONCEPT_MATCHING_ENGINE.md) ⭐ (Phase 2.7 - CRITIQUE)
+- [`doc/specs/PHASE2.7_CONCEPT_MATCHING_ENGINE.md`](./specs/PHASE2.7_CONCEPT_MATCHING_ENGINE.md) ⭐ (Phase 2.7 - CRITIQUE)
 - [`doc/phases/PHASE3.5_FRONTEND_EXPLAINABLE_GRAPH_RAG.md`](./phases/PHASE3.5_FRONTEND_EXPLAINABLE_GRAPH_RAG.md) 🟡 (Phase 3.5 - Frontend)
 - [`doc/OSMOSE_AMBITION_PRODUIT_ROADMAP.md`](./OSMOSE_AMBITION_PRODUIT_ROADMAP.md) (vision produit)
 

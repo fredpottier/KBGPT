@@ -14,6 +14,14 @@ Bienvenue dans la documentation du projet **KnowWhere** (nom commercial) / **OSM
 
 ---
 
+## 🏷️ Naming & Positionnement
+
+- **Nom commercial** : **KnowWhere**
+- **Nom de code** : **OSMOSE** (Organic Semantic Memory Organization & Smart Extraction)
+- **Positionnement** : Plateforme d'intelligence sémantique documentaire
+
+---
+
 ## 📚 Navigation Rapide
 
 ### 🎯 Documents Principaux (Racine)
@@ -24,6 +32,13 @@ Bienvenue dans la documentation du projet **KnowWhere** (nom commercial) / **OSM
 | [OSMOSE_ARCHITECTURE_TECHNIQUE.md](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) | Architecture complète V2.1 (Dual-Graph Intelligence) | Développeurs, Architectes |
 | [OSMOSE_ROADMAP_INTEGREE.md](./OSMOSE_ROADMAP_INTEGREE.md) | Roadmap 4 phases (32 semaines) | Tous |
 | [PROCESSUS_IMPORT_DOCUMENT.md](./PROCESSUS_IMPORT_DOCUMENT.md) | Guide détaillé : Comment un document est traité | Utilisateurs, PO |
+
+### 🧭 Fondations & ADN OSMOSE
+
+| Document | Description | Audience |
+|----------|-------------|----------|
+| [foundations/OSMOSE_PRINCIPLES.md](./foundations/OSMOSE_PRINCIPLES.md) | Principes non négociables (agnostique, maturité, gouvernance) | Tous |
+| [foundations/KG_AGNOSTIC_ARCHITECTURE.md](./foundations/KG_AGNOSTIC_ARCHITECTURE.md) | Modèle 5 couches & invariants | Architectes |
 
 ### 📖 Documentation par Phase
 
@@ -55,15 +70,29 @@ Bienvenue dans la documentation du projet **KnowWhere** (nom commercial) / **OSM
 | [operations/AWS_DEPLOYMENT_GUIDE.md](./operations/AWS_DEPLOYMENT_GUIDE.md) | Déploiement AWS (EC2, S3, Secrets Manager) | DevOps |
 | [operations/AWS_COST_MANAGEMENT.md](./operations/AWS_COST_MANAGEMENT.md) | Gestion des coûts AWS | DevOps, Finance |
 
-### 🔬 Travaux en Cours (ongoing/)
+### 🧭 Décisions (ADR)
 
-Docs de travail, analyses et études exploratoires :
-- Intégrations (OpenAI Vector Store, DeepSeek OCR)
-- Optimisations (PPTX Vision, cache extraction)
-- Stratégies (Pivot Learning KG, critique query-based)
-- Références techniques (Phase 2 relation types)
+| Document | Description | Audience |
+|----------|-------------|----------|
+| [decisions/README.md](./decisions/README.md) | Index des ADR (1 décision = 1 ADR) | Architectes, Leads |
 
-**📂 Voir** : [ongoing/](./ongoing/) (~20 fichiers actifs)
+### 🧱 Spécifications (Specs)
+
+| Document | Description | Audience |
+|----------|-------------|----------|
+| [specs/README.md](./specs/README.md) | Index des specs techniques | Dev, Architectes |
+
+### 📌 Suivi (Tracking)
+
+| Document | Description | Audience |
+|----------|-------------|----------|
+| [tracking/README.md](./tracking/README.md) | Statut, plans, backlog | Tous |
+
+### 🔬 Research & Analyses
+
+Docs exploratoires, comparatifs, benchmarks, audits.
+
+**📂 Voir** : [research/README.md](./research/README.md)
 
 ---
 
@@ -76,6 +105,27 @@ doc/
 ├── OSMOSE_ARCHITECTURE_TECHNIQUE.md       # Architecture technique
 ├── OSMOSE_ROADMAP_INTEGREE.md             # Roadmap 4 phases
 ├── PROCESSUS_IMPORT_DOCUMENT.md           # Guide import documents
+│
+├── foundations/                           # ADN / principes fondateurs
+│   ├── OSMOSE_PRINCIPLES.md
+│   ├── KG_AGNOSTIC_ARCHITECTURE.md
+│   └── ...
+│
+├── decisions/                             # ADR (1 décision = 1 ADR)
+│   ├── README.md
+│   └── ADR_*.md
+│
+├── specs/                                 # Spécifications techniques
+│   ├── README.md
+│   └── ...
+│
+├── tracking/                              # Suivi, plans, backlog
+│   ├── README.md
+│   └── ...
+│
+├── research/                              # Analyses, benchmarks, audits
+│   ├── README.md
+│   └── ...
 │
 ├── phases/                                # Documentation par phase
 │   ├── PHASE1_SEMANTIC_CORE.md           # ✅ Phase 1 complète
@@ -90,11 +140,6 @@ doc/
 │   ├── OPS_GUIDE.md
 │   ├── AWS_DEPLOYMENT_GUIDE.md
 │   └── AWS_COST_MANAGEMENT.md
-│
-├── ongoing/                               # Docs de travail actifs
-│   ├── OSMOSE_*.md (analyses stratégiques)
-│   ├── PHASE2_RELATION_TYPES_REFERENCE.md
-│   └── ... (~20 fichiers actifs)
 │
 └── archive/                               # Archives historiques
     ├── diagnostics_2024/                 # Diagnostics datés
@@ -131,15 +176,17 @@ doc/
 ### 👨‍💻 Développeur
 
 1. ✅ [README.md racine](../README.md) - Setup local (1h)
-2. ✅ [OSMOSE_ARCHITECTURE_TECHNIQUE.md](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) (1h)
-3. ✅ [PROCESSUS_IMPORT_DOCUMENT.md](./PROCESSUS_IMPORT_DOCUMENT.md) (30 min)
-4. ✅ [phases/PHASE1_SEMANTIC_CORE.md](./phases/PHASE1_SEMANTIC_CORE.md) (1h)
+2. ✅ [foundations/OSMOSE_PRINCIPLES.md](./foundations/OSMOSE_PRINCIPLES.md) (20 min)
+3. ✅ [OSMOSE_ARCHITECTURE_TECHNIQUE.md](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) (1h)
+4. ✅ [PROCESSUS_IMPORT_DOCUMENT.md](./PROCESSUS_IMPORT_DOCUMENT.md) (30 min)
+5. ✅ [phases/PHASE1_SEMANTIC_CORE.md](./phases/PHASE1_SEMANTIC_CORE.md) (1h)
 
 ### 👨‍💼 Product Owner
 
 1. ✅ [OSMOSE_AMBITION_PRODUIT_ROADMAP.md](./OSMOSE_AMBITION_PRODUIT_ROADMAP.md) (1h)
-2. ✅ [OSMOSE_ROADMAP_INTEGREE.md](./OSMOSE_ROADMAP_INTEGREE.md) (1h)
-3. ✅ [PROCESSUS_IMPORT_DOCUMENT.md](./PROCESSUS_IMPORT_DOCUMENT.md) (30 min)
+2. ✅ [foundations/OSMOSE_PRINCIPLES.md](./foundations/OSMOSE_PRINCIPLES.md) (20 min)
+3. ✅ [OSMOSE_ROADMAP_INTEGREE.md](./OSMOSE_ROADMAP_INTEGREE.md) (1h)
+4. ✅ [PROCESSUS_IMPORT_DOCUMENT.md](./PROCESSUS_IMPORT_DOCUMENT.md) (30 min)
 
 ### 🔧 Administrateur
 

@@ -4,7 +4,7 @@
 **Date:** 2026-01-04
 **Owner:** KnowWhere / OSMOSE Team
 **Reviewers:** Claude Code, ChatGPT
-**Path:** doc/ongoing/ADR_ASSERTION_AWARE_KG.md
+**Path:** doc/decisions/ADR_ASSERTION_AWARE_KG.md
 
 ---
 
@@ -401,5 +401,5 @@ CREATE INDEX marker_value IF NOT EXISTS FOR (m:Marker) ON (m.value);
 ## 9. References
 
 - Original discussion: Claude Code + ChatGPT brainstorming session (2026-01-04)
-- Related ADR: `doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md`
+- Related ADR: `doc/decisions/ADR_HYBRID_ANCHOR_MODEL.md`
 - OSMOSE Architecture: `doc/OSMOSE_ARCHITECTURE_TECHNIQUE.md`

@@ -36,7 +36,7 @@ DocContextFrame (strong_markers, weak_markers)
 
 ### 1.2 Probleme identifie : ~40% de faux positifs
 
-Source : `doc/ongoing/ANALYSE_FAUX_POSITIFS_MARKERS.md`
+Source : `doc/research/ANALYSE_FAUX_POSITIFS_MARKERS.md`
 
 | Type de faux positif | Exemples | Cause racine |
 |----------------------|----------|--------------|
@@ -609,8 +609,8 @@ Write the summary in the same language as the document.
 
 ## 9. References
 
-- `doc/ongoing/ANALYSE_FAUX_POSITIFS_MARKERS.md` - Analyse des 40% de faux positifs
-- `doc/ongoing/ADR_MARKER_NORMALIZATION_LAYER.md` - Architecture de normalisation
-- `doc/ongoing/ADR_DOCUMENT_STRUCTURAL_AWARENESS.md` - Principes d'extraction
-- `doc/ongoing/OSMOSE_ASSERTION_CENTRIC_IMPLEMENTATION.md` - Spec assertion-centric
+- `doc/research/ANALYSE_FAUX_POSITIFS_MARKERS.md` - Analyse des 40% de faux positifs
+- `doc/decisions/ADR_MARKER_NORMALIZATION_LAYER.md` - Architecture de normalisation
+- `doc/decisions/ADR_DOCUMENT_STRUCTURAL_AWARENESS.md` - Principes d'extraction
+- `doc/specs/OSMOSE_ASSERTION_CENTRIC_IMPLEMENTATION.md` - Spec assertion-centric
 - `src/knowbase/ingestion/osmose_enrichment.py:191-270` - Pipeline actuel document summary

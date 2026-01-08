@@ -349,5 +349,5 @@ class DomainContextProfile(BaseModel):
 **Dernière mise à jour :** 2025-11-17
 **Responsable :** Domain Context Personalizer (Composant 0 bis)
 **Références :**
-- `doc/ongoing/OSMOSE_PHASE2_DOMAIN_CONTEXT_PERSONALIZER.md`
-- `doc/ongoing/OSMOSE_PHASE2_TRACKING.md`
+- `doc/specs/OSMOSE_PHASE2_DOMAIN_CONTEXT_PERSONALIZER.md`
+- `doc/tracking/OSMOSE_PHASE2_TRACKING.md`

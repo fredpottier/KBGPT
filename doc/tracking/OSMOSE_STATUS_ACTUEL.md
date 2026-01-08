@@ -269,7 +269,7 @@ score = 0.55 × semantic_score      # Qdrant (palier 2)
 
 ### Documentation
 
-- **Spec complète** : `doc/ongoing/PHASE2.7_CONCEPT_MATCHING_ENGINE.md`
+- **Spec complète** : `doc/specs/PHASE2.7_CONCEPT_MATCHING_ENGINE.md`
 
 ---
 

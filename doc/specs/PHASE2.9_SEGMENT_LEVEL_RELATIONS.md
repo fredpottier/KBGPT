@@ -418,8 +418,8 @@ async def execute_relation_extraction(self, state: AgentState) -> AgentState:
 ## 8. Références
 
 - **Problème identifié:** Phase 2.8.1 Section 11
-- **Architecture originale:** `doc/ongoing/OSMOSE_CRITIQUE_BONNES_PRATIQUES_KG_ACADEMIQUES.md`
-- **ID-First (base):** `doc/ongoing/PHASE2.8_ID_FIRST_EXTRACTION.md`
+- **Architecture originale:** `doc/research/OSMOSE_CRITIQUE_BONNES_PRATIQUES_KG_ACADEMIQUES.md`
+- **ID-First (base):** `doc/specs/PHASE2.8_ID_FIRST_EXTRACTION.md`
 - **Conversation technique:** Claude Code + ChatGPT 2025-12-21
 
 ---

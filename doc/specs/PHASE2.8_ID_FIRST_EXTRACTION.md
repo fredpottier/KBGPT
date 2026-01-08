@@ -386,7 +386,7 @@ Cette spécification définit une extraction au niveau **DOCUMENT** : le catalog
 
 L'architecture OSMOSE prévoyait une extraction par **SEGMENT** (Topic Segmentation → Extraction par segment → PatternMiner cross-segment).
 
-Voir **`doc/ongoing/PHASE2.9_SEGMENT_LEVEL_RELATIONS.md`** pour le plan d'implémentation.
+Voir **`doc/specs/PHASE2.9_SEGMENT_LEVEL_RELATIONS.md`** pour le plan d'implémentation.
 
 ---
 

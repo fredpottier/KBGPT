@@ -1464,13 +1464,13 @@ Permettre validation métier custom par tenant via règles YAML configurables (d
   - Date: 2025-02
   - Résultat clé: +18% vs baselines sur benchmark MINE
 
-- **Critique Bonnes Pratiques KG Académiques:** `doc/ongoing/OSMOSE_CRITIQUE_BONNES_PRATIQUES_KG_ACADEMIQUES.md`
+- **Critique Bonnes Pratiques KG Académiques:** `doc/research/OSMOSE_CRITIQUE_BONNES_PRATIQUES_KG_ACADEMIQUES.md`
   - Source: Analyse OpenAI + OSMOSE Architecture Team
   - Date: 2025-11-18
   - Focus: Pragmatisme vs académisme
   - Recommandations: P0.1 (Contexte Global), P1.1 (Dict NER), P1.2 (Business Rules), P1.3 (HITL)
 
-- **Analyse Comparative KGGen vs OSMOSE:** `doc/ongoing/KGGEN_OSMOSE_COMPARATIVE_ANALYSIS.md`
+- **Analyse Comparative KGGen vs OSMOSE:** `doc/research/KGGEN_OSMOSE_COMPARATIVE_ANALYSIS.md`
   - Convergence: 85% méthodologique
   - USP OSMOSE: Cross-lingual unification (unique)
 
@@ -1516,7 +1516,7 @@ Permettre validation métier custom par tenant via règles YAML configurables (d
 
 ### Feature Flags
 
-**Documentation complète :** `doc/ongoing/FEATURE_FLAGS_GUIDE.md`
+**Documentation complète :** `doc/guides/FEATURE_FLAGS_GUIDE.md`
 
 **État actuel :** Toutes les features Phase 1.8 sont **activées par défaut** (projet en développement).
 

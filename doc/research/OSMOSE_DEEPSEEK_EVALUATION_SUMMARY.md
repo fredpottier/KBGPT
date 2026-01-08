@@ -35,7 +35,7 @@
 
 ### 1. Documentation Stratégique
 
-**`doc/ongoing/OSMOSE_DEEPSEEK_OCR_EVALUATION_PLAN.md`**
+**`doc/research/OSMOSE_DEEPSEEK_OCR_EVALUATION_PLAN.md`**
 - Plan détaillé 3 phases (6 jours, 18-24h effort)
 - Validation hardware RTX 5070 TI ✅ COMPATIBLE
 - Métriques de décision claires
@@ -413,8 +413,8 @@ Si DeepSeek-OCR PASS:
 ## 📁 Fichiers Créés
 
 ### Documentation
-- `doc/ongoing/OSMOSE_DEEPSEEK_OCR_EVALUATION_PLAN.md` - Plan détaillé 3 phases
-- `doc/ongoing/OSMOSE_DEEPSEEK_EVALUATION_SUMMARY.md` - Ce fichier (synthèse exécutive)
+- `doc/research/OSMOSE_DEEPSEEK_OCR_EVALUATION_PLAN.md` - Plan détaillé 3 phases
+- `doc/research/OSMOSE_DEEPSEEK_EVALUATION_SUMMARY.md` - Ce fichier (synthèse exécutive)
 
 ### Scripts Python
 - `tests/eval_deepseek/test_01_hello_world.py` - Phase 1: Faisabilité
@@ -438,8 +438,8 @@ tests/eval_deepseek/
 
 ### Documentation Projet
 - **Phase 1 Spec**: `doc/phases/PHASE1_SEMANTIC_CORE.md`
-- **Pivot Analysis**: `doc/ongoing/OSMOSE_PIVOT_LEARNING_KG.md`
-- **Strategic Analysis**: `doc/ongoing/OSMOSE_STRATEGIC_ANALYSIS_POST_CHATGPT.md`
+- **Pivot Analysis**: `doc/research/OSMOSE_PIVOT_LEARNING_KG.md`
+- **Strategic Analysis**: `doc/research/OSMOSE_STRATEGIC_ANALYSIS_POST_CHATGPT.md`
 
 ### DeepSeek-OCR
 - **Paper**: `C:\Users\I502446\Downloads\DeepSeek_OCR_paper.pdf`

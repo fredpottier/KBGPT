@@ -155,7 +155,7 @@ LIMIT 100
 ## 🔗 Arêtes Typées Directes (Architecture Agnostique)
 
 > **Note**: Depuis Phase 2.12, les arêtes typées sont créées pour TOUTES les relations
-> (pas seulement VALIDATED). Voir `doc/ongoing/KG_AGNOSTIC_ARCHITECTURE.md`
+> (pas seulement VALIDATED). Voir `doc/foundations/KG_AGNOSTIC_ARCHITECTURE.md`
 
 **Types de relations disponibles:**
 `REQUIRES`, `PART_OF`, `USES`, `CAUSES`, `ENABLES`, `ASSOCIATED_WITH`, `APPLIES_TO`, `INTEGRATES_WITH`, `EXTENDS`, `CONFLICTS_WITH`, `SUBTYPE_OF`, `PREVENTS`
