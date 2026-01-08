@@ -68,6 +68,7 @@ def search_documents(
     session_id: str | None = None,
     use_hybrid_anchor_search: bool = False,
     use_graph_first: bool = False,
+    use_instrumented: bool = False,
 ) -> dict[str, Any]:
     """
     Recherche sémantique avec enrichissement Knowledge Graph (OSMOSE) et contexte conversationnel.
@@ -84,6 +85,7 @@ def search_documents(
         session_id: ID de session pour contexte conversationnel (Memory Layer Phase 2.5)
         use_hybrid_anchor_search: Utiliser le HybridAnchorSearchService (Phase 7)
         use_graph_first: Utiliser le runtime Graph-First (ADR Phase C)
+        use_instrumented: Activer les reponses instrumentees (Assertion-Centric UX)
 
     Returns:
         Résultats de recherche avec synthèse enrichie
@@ -430,6 +432,41 @@ def search_documents(
         "results": reranked_chunks,
         "synthesis": synthesis_result
     }
+
+    # 🎯 OSMOSE Assertion-Centric: Construire la reponse instrumentee si demandee
+    if use_instrumented:
+        try:
+            from .instrumented_answer_builder import build_instrumented_answer
+
+            instrumented_answer, build_metadata = build_instrumented_answer(
+                question=query,
+                chunks=reranked_chunks,
+                language="fr",  # TODO: detecter la langue de la question
+                session_context=session_context_text,
+                retrieval_stats={
+                    "candidates_considered": len(reranked_chunks),
+                    "top_k_used": TOP_K,
+                    "kg_nodes_touched": len(graph_context_data.get("query_concepts", [])) if graph_context_data else 0,
+                    "kg_edges_touched": len(graph_context_data.get("typed_edges", [])) if graph_context_data else 0,
+                }
+            )
+
+            response["instrumented_answer"] = instrumented_answer.model_dump(by_alias=True)
+            response["instrumented_metadata"] = build_metadata
+
+            logger.info(
+                f"[OSMOSE:Instrumented] Built instrumented answer: "
+                f"{len(instrumented_answer.assertions)} assertions, "
+                f"FACT={instrumented_answer.truth_contract.facts_count}, "
+                f"INFERRED={instrumented_answer.truth_contract.inferred_count}, "
+                f"FRAGILE={instrumented_answer.truth_contract.fragile_count}, "
+                f"CONFLICT={instrumented_answer.truth_contract.conflict_count}"
+            )
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Instrumented] Failed to build instrumented answer (non-blocking): {e}")
+            import traceback
+            logger.debug(f"[OSMOSE:Instrumented] Traceback: {traceback.format_exc()}")
 
     # 🌊 ADR_GRAPH_FIRST Phase C: Ajouter le plan graph-first
     if graph_first_plan:

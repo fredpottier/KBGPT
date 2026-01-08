@@ -1,9 +1,22 @@
 # OSMOSE Assertion-Centric Implementation Plan
 
 **Date** : 2026-01-07
-**Status** : Spec validee, pret pour implementation
+**Status** : ✅ IMPLEMENTE (2026-01-08)
 **Auteurs** : ChatGPT (conception UX/Data), Claude Code (implementation)
 **Objectif** : Transformer l'affichage de confiance en "reponse instrumentee"
+
+## Implementation Status
+
+| Phase | Status | Fichiers |
+|-------|--------|----------|
+| Phase 1: Schemas | ✅ | `instrumented.py`, `instrumented.ts` |
+| Phase 2: Prompt LLM | ✅ | `prompts.yaml`, `assertion_generator.py` |
+| Phase 3: Classification | ✅ | `assertion_classifier.py` |
+| Phase 4: Builder | ✅ | `instrumented_answer_builder.py` |
+| Phase 5: API | ✅ | `search.py` (use_instrumented param) |
+| Phase 6: Frontend Base | ✅ | 6 composants React |
+| Phase 7: Frontend Integration | ✅ | `SearchResultDisplay.tsx` |
+| Phase 8: Polish | ✅ | Documentation + toggle switch |
 
 ---
 
@@ -513,6 +526,37 @@ class InstrumentedAnswer(BaseModel):
 | KG | Cache par defaut, bouton "Voir structure" |
 | Hover | Tooltip educatif premiere fois |
 | Statuts | 4 seulement : FACT/INFERRED/FRAGILE/CONFLICT |
+| **Toggle Auditability** | **Mode discret par defaut, revele instrumentation sur demande** |
+
+### 10.1 Toggle "Voir la verite" (Auditability Switch)
+
+**Principe UX** : L'instrumentation assertion-centric peut etre percue comme intrusive pour un utilisateur lambda.
+La solution : un toggle discret qui permet de reveler ou masquer l'instrumentation.
+
+| Mode | Comportement |
+|------|--------------|
+| **OFF (defaut)** | Texte affiche normalement : une seule couleur, pas de hover special, pas de badges de statut |
+| **ON** | Revele toute l'instrumentation : couleurs par statut, hover details, proof tickets, TruthContract visible |
+
+**Implementation Frontend** :
+- Toggle place discretement dans le header de la reponse (icone oeil ou switch)
+- Label : "Voir la verite" ou icone audit/verification
+- Etat persiste en localStorage pour sessions futures
+- Animation subtile lors du switch (fade des couleurs)
+
+**Comportement detaille** :
+- **Mode OFF** :
+  - TruthContract masque ou affiche en version simplifiee ("X sources utilisees")
+  - Assertions rendues comme texte simple (pas de ● colore, pas de souligne)
+  - Hover sur texte : comportement standard (pas de popover assertion)
+  - ProofTickets non affiches
+
+- **Mode ON** :
+  - TruthContract complet visible
+  - Chaque assertion affiche son indicateur visuel (●, italique, souligne, fond rouge)
+  - Hover revele AssertionPopover avec sources et details
+  - ProofTickets affiches en bas de reponse
+  - Animation "revelation" subtile au switch
 
 ---
 

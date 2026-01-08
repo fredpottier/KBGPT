@@ -30,6 +30,7 @@ import {
   ReasoningTrace,
   CoverageMap,
 } from '@/types/api'
+import type { InstrumentedAnswer } from '@/types/instrumented'
 import { useState } from 'react'
 import ThumbnailCarousel from './ThumbnailCarousel'
 import SynthesizedAnswer from './SynthesizedAnswer'
@@ -37,6 +38,7 @@ import SourcesSection from './SourcesSection'
 import KnowledgeProofPanel from '../chat/KnowledgeProofPanel'
 import ReasoningTracePanel from '../chat/ReasoningTracePanel'
 import CoverageMapPanel from '../chat/CoverageMapPanel'
+import { InstrumentedAnswerDisplay } from '../chat'
 import type { GraphData, ProofGraph } from '@/types/graph'
 import {
   FiAlertTriangle,
@@ -53,6 +55,7 @@ interface SearchResultDisplayProps {
   proofGraph?: ProofGraph  // 🌊 Phase 3.5+: Proof Graph prioritaire
   explorationIntelligence?: ExplorationIntelligence
   onSearch?: (query: string) => void
+  instrumentedAnswer?: InstrumentedAnswer  // 🎯 OSMOSE Assertion-Centric
 }
 
 // Configuration du badge de confiance (Bloc A)
@@ -74,6 +77,7 @@ export default function SearchResultDisplay({
   proofGraph,
   explorationIntelligence,
   onSearch,
+  instrumentedAnswer,
 }: SearchResultDisplayProps) {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [selectedImage, setSelectedImage] = useState<SearchChunk | null>(null)
@@ -121,13 +125,22 @@ export default function SearchResultDisplay({
         />
       )}
 
-      {/* Bloc A: Badge de confiance */}
-      {searchResult.confidence && (
+      {/* Bloc A: Badge de confiance (masque si instrumented) */}
+      {searchResult.confidence && !instrumentedAnswer && (
         <ConfidenceBadge confidence={searchResult.confidence} />
       )}
 
-      {/* Synthesized Answer (with integrated Knowledge Graph / Proof Graph) */}
-      {searchResult.synthesis && (
+      {/* 🎯 OSMOSE Assertion-Centric: Reponse instrumentee (prioritaire) */}
+      {instrumentedAnswer && (
+        <InstrumentedAnswerDisplay
+          answer={instrumentedAnswer}
+          chunks={searchResult.results}
+          onSlideClick={handleSlideClick}
+        />
+      )}
+
+      {/* Synthesized Answer classique (si pas d'instrumented answer) */}
+      {searchResult.synthesis && !instrumentedAnswer && (
         <SynthesizedAnswer
           synthesis={searchResult.synthesis}
           chunks={searchResult.results}
@@ -139,29 +152,31 @@ export default function SearchResultDisplay({
         />
       )}
 
-      {/* Answer+Proof Panels (Blocs B, C, D) */}
-      <VStack spacing={3} align="stretch">
-        {/* Bloc B: Knowledge Proof Summary */}
-        {searchResult.knowledge_proof && (
-          <KnowledgeProofPanel proof={searchResult.knowledge_proof} />
-        )}
+      {/* Answer+Proof Panels (Blocs B, C, D) - Masques si instrumented car il a sa propre logique */}
+      {!instrumentedAnswer && (
+        <VStack spacing={3} align="stretch">
+          {/* Bloc B: Knowledge Proof Summary */}
+          {searchResult.knowledge_proof && (
+            <KnowledgeProofPanel proof={searchResult.knowledge_proof} />
+          )}
 
-        {/* Bloc C: Reasoning Trace */}
-        {searchResult.reasoning_trace && (
-          <ReasoningTracePanel trace={searchResult.reasoning_trace} />
-        )}
+          {/* Bloc C: Reasoning Trace */}
+          {searchResult.reasoning_trace && (
+            <ReasoningTracePanel trace={searchResult.reasoning_trace} />
+          )}
 
-        {/* Bloc D: Coverage Map - DÉSACTIVÉ
-         * Raison: Les sub_domains du DomainContext sont définis au setup,
-         * mais les documents peuvent ne pas correspondre aux catégories prédéfinies.
-         * Cela donne une fausse impression de mauvaise couverture.
-         * À réactiver si on implémente une détection automatique des catégories
-         * basée sur le contenu réel du Knowledge Graph.
-         */}
-        {/* {searchResult.coverage_map && (
-          <CoverageMapPanel coverage={searchResult.coverage_map} />
-        )} */}
-      </VStack>
+          {/* Bloc D: Coverage Map - DÉSACTIVÉ
+           * Raison: Les sub_domains du DomainContext sont définis au setup,
+           * mais les documents peuvent ne pas correspondre aux catégories prédéfinies.
+           * Cela donne une fausse impression de mauvaise couverture.
+           * À réactiver si on implémente une détection automatique des catégories
+           * basée sur le contenu réel du Knowledge Graph.
+           */}
+          {/* {searchResult.coverage_map && (
+            <CoverageMapPanel coverage={searchResult.coverage_map} />
+          )} */}
+        </VStack>
+      )}
 
       {/* Sources Section */}
       {searchResult.synthesis && (
