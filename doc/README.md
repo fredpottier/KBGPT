@@ -1,8 +1,8 @@
 # Documentation KnowWhere - Projet OSMOSE
 
-**Version:** 2.0
-**Date:** 2025-11-15
-**Status:** Phase 1 Finalisée - Phase 2 En Cours
+**Version:** 2.1
+**Date:** 2026-01-06
+**Status:** Phase 2 en cours
 
 ---
 
@@ -14,92 +14,74 @@ Bienvenue dans la documentation du projet **KnowWhere** (nom commercial) / **OSM
 
 ---
 
-## 📚 Navigation Rapide
+## 📚 Accès rapides par audience
 
-### 🎯 Documents Principaux (Racine)
+### 👨‍💻 Développeurs
 
-| Document | Description | Audience |
-|----------|-------------|----------|
-| [OSMOSE_AMBITION_PRODUIT_ROADMAP.md](./OSMOSE_AMBITION_PRODUIT_ROADMAP.md) | Vision produit, différenciation vs Copilot/Gemini | Product Owners |
-| [OSMOSE_ARCHITECTURE_TECHNIQUE.md](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) | Architecture complète V2.1 (Dual-Graph Intelligence) | Développeurs, Architectes |
-| [OSMOSE_ROADMAP_INTEGREE.md](./OSMOSE_ROADMAP_INTEGREE.md) | Roadmap 4 phases (32 semaines) | Tous |
-| [PROCESSUS_IMPORT_DOCUMENT.md](./PROCESSUS_IMPORT_DOCUMENT.md) | Guide détaillé : Comment un document est traité | Utilisateurs, PO |
+1. [Architecture technique](./architecture/OSMOSE_ARCHITECTURE_TECHNIQUE.md)
+2. [Specs extraction (index)](./specs/extraction/)
+3. [Guide OSMOSE Pure](./guides/OSMOSE_PURE_GUIDE.md)
+4. [Guide import documents](./specs/ingestion/SPEC-PROCESSUS_IMPORT_DOCUMENT.md)
 
-### 📖 Documentation par Phase
+### 🧱 Architectes / Lead Tech
 
-| Document | Description | Status |
-|----------|-------------|--------|
-| [phases/PHASE1_SEMANTIC_CORE.md](./phases/PHASE1_SEMANTIC_CORE.md) | **Phase 1 complète** (Semaines 1-10) : Semantic Core | ✅ Finalisé |
-| [phases/PHASE2_INTELLIGENCE.md](./phases/PHASE2_INTELLIGENCE.md) | **Phase 2** (Semaines 14-24) : Intelligence Relationnelle | 🔄 En cours |
+1. [ADN OSMOSE - Graph First](./foundations/GRAPH_FIRST_PRINCIPLE.md)
+2. [Architecture de référence](./architecture/OSMOSE_ARCHITECTURE_TECHNIQUE.md)
+3. [Décisions d’architecture (ADR)](./adr/README.md)
+4. [Déploiement](./architecture/ARCHITECTURE_DEPLOIEMENT.md)
 
-**Réalisations Phase 1** :
-- ✅ Topic segmentation intelligente
-- ✅ Concept extraction multi-niveaux (NER + clustering + LLM)
-- ✅ Canonicalisation cross-linguale
-- ✅ Proto-KG (Neo4j + Qdrant)
-- ✅ Chunking adaptatif avec métadonnées sémantiques
+### 👨‍💼 Product Owner / Direction
 
-### 📘 Guides Pratiques
+1. [Ambition & Roadmap produit](./phases/OSMOSE_AMBITION_PRODUIT_ROADMAP.md)
+2. [Roadmap intégrée](./phases/OSMOSE_ROADMAP_INTEGREE.md)
+3. [Phase 1 : Semantic Core](./phases/PHASE1_SEMANTIC_CORE.md)
 
-| Document | Description | Audience |
-|----------|-------------|----------|
-| [guides/OSMOSE_PURE_GUIDE.md](./guides/OSMOSE_PURE_GUIDE.md) | Guide complet OSMOSE Pure (migration, rebuild, tests) | Développeurs |
-| [guides/GUIDE_CANONICALISATION_ROBUSTE.md](./guides/GUIDE_CANONICALISATION_ROBUSTE.md) | Canonicalisation robuste (37 pages) | Développeurs, Data Scientists |
+### 🔧 Ops / SRE
 
-### 🔧 Opérations & Déploiement
+1. [Guide opérations](./operations/OPS_GUIDE.md)
+2. [Guide admin](./operations/ADMIN_GUIDE.md)
+3. [Déploiement AWS](./operations/AWS_DEPLOYMENT_GUIDE.md)
+4. [Coûts AWS](./operations/AWS_COST_MANAGEMENT.md)
 
-| Document | Description | Audience |
-|----------|-------------|----------|
-| [operations/ADMIN_GUIDE.md](./operations/ADMIN_GUIDE.md) | Guide administrateur (tenants, LLM, monitoring) | Admins |
-| [operations/OPS_GUIDE.md](./operations/OPS_GUIDE.md) | Guide opérations (déploiement, scaling, DR) | DevOps/SRE |
-| [operations/AWS_DEPLOYMENT_GUIDE.md](./operations/AWS_DEPLOYMENT_GUIDE.md) | Déploiement AWS (EC2, S3, Secrets Manager) | DevOps |
-| [operations/AWS_COST_MANAGEMENT.md](./operations/AWS_COST_MANAGEMENT.md) | Gestion des coûts AWS | DevOps, Finance |
+### 🔬 Recherche & Analyse
 
-### 🔬 Travaux en Cours (ongoing/)
-
-Docs de travail, analyses et études exploratoires :
-- Intégrations (OpenAI Vector Store, DeepSeek OCR)
-- Optimisations (PPTX Vision, cache extraction)
-- Stratégies (Pivot Learning KG, critique query-based)
-- Références techniques (Phase 2 relation types)
-
-**📂 Voir** : [ongoing/](./ongoing/) (~20 fichiers actifs)
+1. [Études et analyses](./research/)
+2. [Suivi d’exécution](./tracking/)
 
 ---
 
-## 🏗️ Structure Documentation Complète
+## 🧭 Conventions de nommage
+
+- **ADR** : `ADR-YYYYMMDD-slug.md` (voir [adr/README.md](./adr/README.md))
+- **Specs** : `SPEC-<sujet>.md` par domaine (`specs/extraction`, `specs/graph`, `specs/ingestion`)
+- **Tracking** : `TRACKING-<sujet>.md`
+
+---
+
+## 🗂️ Structure documentaire (stable)
 
 ```
 doc/
-├── README.md                               # ← Vous êtes ici
-├── OSMOSE_AMBITION_PRODUIT_ROADMAP.md     # Vision produit
-├── OSMOSE_ARCHITECTURE_TECHNIQUE.md       # Architecture technique
-├── OSMOSE_ROADMAP_INTEGREE.md             # Roadmap 4 phases
-├── PROCESSUS_IMPORT_DOCUMENT.md           # Guide import documents
-│
-├── phases/                                # Documentation par phase
-│   ├── PHASE1_SEMANTIC_CORE.md           # ✅ Phase 1 complète
-│   └── PHASE2_INTELLIGENCE.md            # 🔄 Phase 2 (en cours)
-│
-├── guides/                                # Guides pratiques
-│   ├── OSMOSE_PURE_GUIDE.md              # Guide OSMOSE Pure
-│   └── GUIDE_CANONICALISATION_ROBUSTE.md  # Guide canonicalisation
-│
-├── operations/                            # Ops & Déploiement
-│   ├── ADMIN_GUIDE.md
-│   ├── OPS_GUIDE.md
-│   ├── AWS_DEPLOYMENT_GUIDE.md
-│   └── AWS_COST_MANAGEMENT.md
-│
-├── ongoing/                               # Docs de travail actifs
-│   ├── OSMOSE_*.md (analyses stratégiques)
-│   ├── PHASE2_RELATION_TYPES_REFERENCE.md
-│   └── ... (~20 fichiers actifs)
-│
-└── archive/                               # Archives historiques
-    ├── diagnostics_2024/                 # Diagnostics datés
-    ├── phase1_osmose_old/                # Ancien suivi Phase 1
-    └── feat-neo4j-native/                # Ancienne branche
+├── README.md                         # Index global + parcours par audience
+├── foundations/                      # Invariants / ADN OSMOSE
+│   ├── KG_AGNOSTIC_ARCHITECTURE.md
+│   └── GRAPH_FIRST_PRINCIPLE.md
+├── adr/                              # Decisions d’architecture
+│   ├── README.md                     # Index ADR (statut, tags)
+│   └── ADR-YYYYMMDD-graph-first-architecture.md
+├── architecture/                     # Architecture de référence (stables)
+│   ├── OSMOSE_ARCHITECTURE_TECHNIQUE.md
+│   └── ARCHITECTURE_DEPLOIEMENT.md
+├── specs/                            # Spécifications techniques
+│   ├── extraction/
+│   ├── graph/
+│   └── ingestion/
+├── guides/                           # Guides pratiques dev
+├── operations/                       # Runbook, déploiement, SRE
+├── phases/                           # Roadmaps/phase delivery
+├── research/                         # Études et analyses exploratoires
+├── tracking/                         # Suivi d’exécution (journalisé)
+└── archive/                          # Historique obsolète
 ```
 
 ---
@@ -126,49 +108,5 @@ doc/
 
 ---
 
-## 🚀 Checklist Démarrage par Rôle
-
-### 👨‍💻 Développeur
-
-1. ✅ [README.md racine](../README.md) - Setup local (1h)
-2. ✅ [OSMOSE_ARCHITECTURE_TECHNIQUE.md](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) (1h)
-3. ✅ [PROCESSUS_IMPORT_DOCUMENT.md](./PROCESSUS_IMPORT_DOCUMENT.md) (30 min)
-4. ✅ [phases/PHASE1_SEMANTIC_CORE.md](./phases/PHASE1_SEMANTIC_CORE.md) (1h)
-
-### 👨‍💼 Product Owner
-
-1. ✅ [OSMOSE_AMBITION_PRODUIT_ROADMAP.md](./OSMOSE_AMBITION_PRODUIT_ROADMAP.md) (1h)
-2. ✅ [OSMOSE_ROADMAP_INTEGREE.md](./OSMOSE_ROADMAP_INTEGREE.md) (1h)
-3. ✅ [PROCESSUS_IMPORT_DOCUMENT.md](./PROCESSUS_IMPORT_DOCUMENT.md) (30 min)
-
-### 🔧 Administrateur
-
-1. ✅ [OSMOSE_ARCHITECTURE_TECHNIQUE.md](./OSMOSE_ARCHITECTURE_TECHNIQUE.md) (1h)
-2. ✅ [operations/ADMIN_GUIDE.md](./operations/ADMIN_GUIDE.md) (2h)
-
-### 🚀 DevOps / SRE
-
-1. ✅ [operations/OPS_GUIDE.md](./operations/OPS_GUIDE.md) (2h)
-2. ✅ [operations/AWS_DEPLOYMENT_GUIDE.md](./operations/AWS_DEPLOYMENT_GUIDE.md) (1h)
-
----
-
-## 📈 État Projet (2025-11-15)
-
-### Phase 1 : Semantic Core ✅
-- **Status** : Finalisé
-- **Durée** : 10 semaines
-- **Composants** : Topic segmentation, concept extraction, canonicalisation, Proto-KG
-- **Résultat** : Pipeline production-ready avec GPU acceleration
-
-### Phase 2 : Intelligence Relationnelle 🔄
-- **Status** : En cours
-- **Objectif** : Relations sémantiques typées (12 types)
-- **Début** : Semaine 14
-- **Durée prévue** : 11 semaines
-
----
-
-**Version** : 2.0
-**Dernière mise à jour** : 2025-11-15
+**Dernière mise à jour** : 2026-01-06
 **Maintenu par** : Équipe OSMOSE
