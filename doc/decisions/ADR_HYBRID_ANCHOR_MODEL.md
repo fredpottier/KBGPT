@@ -967,3 +967,131 @@ PASS2_EXECUTION_MODE = {
 - [ ] Implémentation
 - [ ] Tests
 - [ ] Métriques observabilité
+
+---
+
+## Addendum 2026-01-09 : ADR_UNIFIED_CORPUS_PROMOTION
+
+### Changement majeur : Promotion déplacée de Pass 1 vers Pass 2.0
+
+**Contexte** : L'analyse du corpus a révélé que 46 concepts apparaissant dans ≥2 documents n'étaient jamais promus car la promotion était faite document par document en Pass 1, sans vue corpus.
+
+**Décision** : La promotion des ProtoConcepts en CanonicalConcepts est maintenant effectuée en **Pass 2.0** (nouvelle phase CORPUS_PROMOTION), AVANT toutes les autres phases Pass 2.
+
+### Impact sur ce document
+
+**Sections obsolètes** (conservées pour historique, remplacées par Pass 2.0) :
+
+1. **Section "Phase GATE_CHECK simplifiée" (lignes 202-295)** :
+   - ❌ La promotion N'EST PLUS effectuée en Pass 1
+   - ✅ Pass 1 crée uniquement des ProtoConcepts
+   - ✅ Le scoring est conservé mais la promotion est déférée
+
+2. **Section "Règle de Promotion : 3 Statuts de Concepts"** :
+   - ❌ Le code `should_promote()` ne s'exécute plus en Pass 1
+   - ✅ Cette logique est maintenant dans `CorpusPromotionEngine` (Pass 2.0)
+
+### Nouvelle architecture pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         PASS 1 - SOCLE                          │
+│              (Bloquant, ~10 min/doc, système exploitable)       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  EXTRACT ────► ANCHOR_RESOLUTION ────► CHUNK ────► ✓           │
+│                                                                 │
+│  Résultat : ProtoConcepts + Chunks, AUCUN CanonicalConcept     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     PASS 2.0 - CORPUS PROMOTION                 │
+│                    (NOUVEAU - ADR_UNIFIED_CORPUS_PROMOTION)     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  LOAD_PROTOS ────► GROUP_BY_LABEL ────► APPLY_RULES ────►      │
+│  CREATE_CANONICALS                                              │
+│                                                                 │
+│  Résultat : CanonicalConcepts avec vue corpus complète         │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     PASS 2a/2b/3 - ENRICHISSEMENT               │
+│                    (Non bloquant, optionnel SLA)                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  STRUCTURAL_TOPICS ────► CLASSIFY_FINE ────► ENRICH_RELATIONS  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Règles de promotion Pass 2.0 (remplacent celles de Pass 1)
+
+```python
+# ADR_UNIFIED_CORPUS_PROMOTION - Règles unifiées
+PROMOTION_RULES = {
+    # Règle 1: Multi-occurrence même document
+    "stable_if_multi_occurrence": "proto_count >= 2",
+
+    # Règle 2: Multi-section même document
+    "stable_if_multi_section": "section_count >= 2",
+
+    # Règle 3: Cross-document avec signal minimal
+    "stable_if_crossdoc": "document_count >= 2 AND has_minimal_signal",
+
+    # Règle 4: Singleton high-signal V2
+    "singleton_if_high_signal": "proto_count == 1 AND check_high_signal_v2()",
+}
+
+# High-Signal V2 = NORMATIF + NON-TEMPLATE + SIGNAL-CONTENU
+def check_high_signal_v2(proto):
+    # 1. NORMATIF: rôle ou modal
+    is_normative = (
+        proto.anchor_role in {"definition", "requirement", "constraint"} or
+        has_normative_modal(proto.quote)  # shall, must, required
+    )
+
+    # 2. NON-TEMPLATE: pas boilerplate
+    is_not_template = (
+        proto.template_likelihood < 0.5 and
+        proto.positional_stability < 0.8 and
+        not proto.is_repeated_bottom
+    )
+
+    # 3. SIGNAL-CONTENU: zone main ou section
+    has_content_signal = (
+        proto.dominant_zone == "main" or
+        proto.section_path not in [None, ""]
+    )
+
+    return is_normative and is_not_template and has_content_signal
+```
+
+### Signal minimal pour cross-document
+
+```python
+def has_minimal_signal(protos: List[Proto]) -> bool:
+    """Au moins un proto avec signal exploitable."""
+    return any(
+        p.anchor_status == "SPAN" or
+        p.anchor_role in {"definition", "constraint"} or
+        p.confidence >= 0.7
+        for p in protos
+    )
+```
+
+### Invariants préservés
+
+1. ✅ **Invariant #5 "Pass 1 toujours exploitable"** : Reste vrai car les chunks + ProtoConcepts permettent la recherche
+2. ✅ **Invariant #1 "Aucun concept sans anchor"** : Appliqué en Pass 1, préservé en Pass 2.0
+3. ✅ **Invariant #4 "Neo4j = Vérité"** : Les CanonicalConcepts sont créés dans Neo4j par Pass 2.0
+
+### Référence
+
+- **Spec complète** : `doc/ongoing/ADR_UNIFIED_CORPUS_PROMOTION.md`
+- **Implémentation** : `src/knowbase/consolidation/corpus_promotion.py`
+- **Phase Pass 2** : `src/knowbase/ingestion/pass2_orchestrator.py` (phase CORPUS_PROMOTION)

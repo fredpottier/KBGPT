@@ -1173,3 +1173,57 @@ Cette architecture V2.1 simplifiée fournit :
 ---
 
 **Next Steps** : Voir `OSMOSE_AMBITION_PRODUIT_ROADMAP.md` pour plan implémentation détaillé.
+
+---
+
+## Addendum 2026-01-09 : ADR_UNIFIED_CORPUS_PROMOTION
+
+### Changement Architectural Majeur
+
+L'ADR_UNIFIED_CORPUS_PROMOTION (2026-01-09) modifie le pipeline d'ingestion décrit dans ce document.
+
+### Impact sur le Schéma Neo4j (Section 3.1)
+
+**Stage "PROMOTED"** (ligne 929) : Ce statut N'EST PLUS attribué en Pass 1.
+
+**AVANT** :
+```cypher
+stage: "PROTO" | "PROMOTED" | "REJECTED"
+```
+
+**APRÈS** :
+- Pass 1 : Tous les concepts sont `stage: "PROTO"`
+- Pass 2.0 : Les concepts promus passent à `stage: "PUBLISHED"` avec création CanonicalConcept
+- Le statut `REJECTED` est remplacé par l'absence de promotion (reste `PROTO`)
+
+### Impact sur ConceptLinker (Section 2.4)
+
+**AVANT** : ConceptLinker crée CanonicalConcepts en Pass 1
+
+**APRÈS** :
+- Pass 1 : ConceptLinker crée uniquement les ProtoConcepts et leurs anchors
+- Pass 2.0 : `CorpusPromotionEngine` crée les CanonicalConcepts avec vue corpus
+
+### Nouveau Pipeline
+
+```
+Pass 1 (Extraction)
+├── TopicSegmenter → DualStorageExtractor → TextChunker
+├── Création ProtoConcepts + Chunks
+└── AUCUN CanonicalConcept
+
+Pass 2.0 (Corpus Promotion) ← NOUVEAU
+├── Chargement ProtoConcepts du document
+├── Groupement par label canonique
+├── Application règles promotion unifiées
+└── Création CanonicalConcepts + INSTANCE_OF
+
+Pass 2a/2b/3 (Enrichissement)
+└── Phases existantes inchangées
+```
+
+### Référence
+
+- **ADR complet** : `doc/ongoing/ADR_UNIFIED_CORPUS_PROMOTION.md`
+- **Implémentation** : `src/knowbase/consolidation/corpus_promotion.py`
+- **Orchestrateur** : `src/knowbase/ingestion/pass2_orchestrator.py`

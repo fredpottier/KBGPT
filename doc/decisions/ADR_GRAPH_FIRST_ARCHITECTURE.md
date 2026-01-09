@@ -699,3 +699,85 @@ SEMANTIC_RELATION_TYPES = frozenset({
 - `src/knowbase/api/services/graph_guided_search.py` - Service KG actuel
 - `src/knowbase/navigation/types.py` - Modèle ContextNode
 - `doc/decisions/ADR_NAVIGATION_LAYER.md` - ADR Navigation Layer existant
+
+---
+
+## Addendum 2026-01-09 : Intégration ADR_UNIFIED_CORPUS_PROMOTION
+
+### Impact sur le Pipeline 4 Passes
+
+La Section 4 "Pipeline d'Ingestion Cible (4 Passes)" est amendée pour refléter l'ADR_UNIFIED_CORPUS_PROMOTION.
+
+**Changement clé** : La consolidation en CanonicalConcepts N'EST PLUS effectuée en Pass 1.
+
+### Pass 1 - Extraction Concepts (MODIFIÉ)
+
+**AVANT** (obsolète) :
+> - Extraction des ProtoConcepts par segment
+> - Consolidation en CanonicalConcepts ← SUPPRIMÉ
+> - Création `MENTIONED_IN` avec salience par section
+
+**APRÈS** (actuel) :
+- Extraction des ProtoConcepts par segment
+- Création Chunks (Dual Chunking : Retrieval + Coverage)
+- **PAS de CanonicalConcepts** - création déférée à Pass 2.0
+- `MENTIONED_IN` créé sur ProtoConcepts (pas CanonicalConcepts)
+
+### Pass 2.0 - Corpus Promotion (NOUVEAU)
+
+Nouvelle phase insérée **AVANT** Pass 2a (Structural Topics) :
+
+```
+Pass 1 (Extraction)
+    ↓ ProtoConcepts uniquement
+Pass 2.0 (Corpus Promotion) ← NOUVEAU
+    ↓ CanonicalConcepts créés
+Pass 2a (Structural Topics)
+Pass 2b (Classification Fine)
+Pass 3 (Consolidation Sémantique)
+```
+
+**Responsabilités Pass 2.0** :
+1. Charger TOUS les ProtoConcepts non-liés du document
+2. Grouper par label canonique (normalisation)
+3. Appliquer règles de promotion unifiées (cross-doc aware)
+4. Créer CanonicalConcepts + relations INSTANCE_OF
+
+### Pipeline Révisé
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Pass 1 - Extraction (MODIFIÉ)                                   │
+│ ProtoConcepts + Chunks, PAS de CanonicalConcepts               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Pass 2.0 - Corpus Promotion (NOUVEAU)                           │
+│ ADR_UNIFIED_CORPUS_PROMOTION                                    │
+│ Création CanonicalConcepts avec vue corpus complète             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Pass 2a - Structural Topics / COVERS (INCHANGÉ)                 │
+│ Topics + relations COVERS                                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Pass 2b - Classification Fine (INCHANGÉ)                        │
+│ Affinage types concepts via LLM                                  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Pass 3 - Consolidation Sémantique (INCHANGÉ)                    │
+│ Relations sémantiques prouvées                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Référence
+
+- **Spec complète** : `doc/ongoing/ADR_UNIFIED_CORPUS_PROMOTION.md`
+- **Implémentation** : `src/knowbase/consolidation/corpus_promotion.py`

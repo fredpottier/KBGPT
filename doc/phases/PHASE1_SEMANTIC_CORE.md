@@ -594,3 +594,30 @@ tests/semantic/
 **Version:** 1.0 - COMPLETE
 **Date:** 2025-10-14
 **Prochain milestone:** Validation Docker + Démarrage Phase 2
+
+---
+
+## Addendum 2026-01-09 : ADR_UNIFIED_CORPUS_PROMOTION
+
+### Clarification sur les Livrables Phase 1
+
+Suite à l'ADR_UNIFIED_CORPUS_PROMOTION, les livrables de Phase 1 sont précisés :
+
+**Phase 1 produit :**
+- ✅ ProtoConcepts avec anchors validés
+- ✅ Chunks (Retrieval + Coverage)
+- ✅ Relations ANCHORED_IN, EXTRACTED_FROM
+- ❌ ~~CanonicalConcepts~~ → Déférés à Pass 2.0
+
+**Pass 2.0 (Corpus Promotion) produit :**
+- ✅ CanonicalConcepts avec vue corpus complète
+- ✅ Relations INSTANCE_OF (Proto → Canonical)
+- ✅ Statuts stability: "stable" | "singleton"
+
+### Impact sur l'Architecture Phase 1
+
+Le "Concept Linker" décrit dans ce document crée maintenant uniquement des ProtoConcepts. La consolidation en CanonicalConcepts est effectuée par `CorpusPromotionEngine` en Pass 2.0.
+
+### Référence
+
+- **ADR complet** : `doc/ongoing/ADR_UNIFIED_CORPUS_PROMOTION.md`

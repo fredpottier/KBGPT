@@ -1400,3 +1400,55 @@ services:
 **FIN Phase 2 Tracking Document**
 
 **Prochaine Mise à Jour :** Semaine 14 J3 (Checkpoint corpus test)
+
+---
+
+## Addendum 2026-01-09 : ADR_UNIFIED_CORPUS_PROMOTION
+
+### Nouvelle Phase Pass 2.0 - Corpus Promotion
+
+L'ADR_UNIFIED_CORPUS_PROMOTION ajoute une phase **Pass 2.0** qui s'exécute AVANT toutes les autres phases Pass 2 décrites dans ce document.
+
+### Ordre d'Exécution Pass 2 Révisé
+
+```
+Pass 2.0: CORPUS_PROMOTION (NOUVEAU)
+    ↓
+Pass 2a: STRUCTURAL_TOPICS
+Pass 2b: CLASSIFY_FINE
+Pass 2c: ENRICH_RELATIONS
+Pass 3:  SEMANTIC_CONSOLIDATION
+```
+
+### Pass 2.0 - Corpus Promotion
+
+**Responsabilité** : Créer les CanonicalConcepts avec vue corpus complète.
+
+**AVANT l'ADR** : Les CanonicalConcepts étaient créés en Pass 1, document par document.
+
+**APRÈS l'ADR** :
+- Pass 1 crée uniquement des ProtoConcepts
+- Pass 2.0 charge TOUS les ProtoConcepts du document
+- Pass 2.0 applique des règles de promotion cross-document aware
+- Les CanonicalConcepts sont créés avec vue corpus complète
+
+### Impact sur les Phases Décrites
+
+**Section 2.4 "Canonicalisation Robuste"** :
+- Les mécanismes P0-P1 (Sandbox/Rollback) restent valides
+- Le **timing** de promotion change : Pass 1 → Pass 2.0
+- Les règles de promotion sont maintenant dans `CorpusPromotionEngine`
+
+**Phases Pass 2a/2b/2c** :
+- Inchangées
+- Dépendent maintenant des CanonicalConcepts créés en Pass 2.0
+
+### Bénéfice
+
+46 concepts apparaissant dans ≥2 documents qui n'étaient jamais promus (car promotion document par document) sont maintenant promus avec la vue corpus complète.
+
+### Référence
+
+- **ADR complet** : `doc/ongoing/ADR_UNIFIED_CORPUS_PROMOTION.md`
+- **Implémentation** : `src/knowbase/consolidation/corpus_promotion.py`
+- **Phase orchestrator** : `src/knowbase/ingestion/pass2_orchestrator.py`
