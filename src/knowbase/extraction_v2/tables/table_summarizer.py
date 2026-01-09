@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from knowbase.extraction_v2.models.elements import TableData
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +116,9 @@ class TableSummarizer:
 
     @property
     def llm_router(self) -> LLMRouter:
-        """Lazy init du LLM router."""
+        """Lazy init du LLM router - utilise le singleton pour heriter du burst mode."""
         if self._llm_router is None:
-            self._llm_router = LLMRouter()
+            self._llm_router = get_llm_router()
         return self._llm_router
 
     def _count_cells(self, table: TableData) -> int:

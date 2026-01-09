@@ -38,6 +38,7 @@ from knowbase.extraction_v2.context.doc_context_extractor import (
     DocContextExtractor,
     get_doc_context_extractor,
 )
+from knowbase.extraction_v2.context.models import DocumentContext
 from knowbase.extraction_v2.extractors.docling_extractor import DoclingExtractor
 from knowbase.extraction_v2.gating.engine import GatingEngine
 from knowbase.extraction_v2.gating.weights import DEFAULT_GATING_WEIGHTS, GATING_THRESHOLDS
@@ -518,18 +519,54 @@ class ExtractionPipelineV2:
         full_text, page_index = self._linearizer.linearize(merged_pages)
 
         # === ETAPE 6: DocContext Extraction (ADR_ASSERTION_AWARE_KG) ===
+        # Deux phases:
+        # 6a. Générer DocumentContext (structure_hint, entity_hints) via generate_document_summary()
+        # 6b. Extraire DocContextFrame avec filtrage via decide_marker()
         doc_context = None
+        document_context_constraints: Optional[DocumentContext] = None
+
         if self.config.enable_doc_context and self._doc_context_extractor:
             doc_context_start = time.time()
             try:
                 # Extraire le texte des pages pour le miner
                 pages_text = [mp.text_content for mp in merged_pages]
 
+                # === ETAPE 6a: Générer DocumentContext (ADR Document Context Markers) ===
+                # Contient structure_hint, entity_hints pour filtrer les faux positifs
+                try:
+                    from knowbase.ingestion.osmose_enrichment import generate_document_summary
+                    from knowbase.common.llm_router import get_llm_router
+
+                    llm_router = get_llm_router()
+                    _, _, document_context_constraints = await generate_document_summary(
+                        document_id=document_id,
+                        full_text=full_text,
+                        llm_router=llm_router,
+                    )
+
+                    logger.info(
+                        f"[ExtractionPipelineV2] DocumentContext generated: "
+                        f"numbered_sections={document_context_constraints.structure_hint.has_numbered_sections}, "
+                        f"entities={len(document_context_constraints.entity_hints)}"
+                    )
+                except Exception as ctx_err:
+                    logger.warning(
+                        f"[ExtractionPipelineV2] DocumentContext generation failed: {ctx_err}, "
+                        f"continuing without context filtering"
+                    )
+                    document_context_constraints = None
+
+                # === ETAPE 6b: Extraire DocContextFrame avec filtrage ===
                 doc_context = await self._doc_context_extractor.extract(
                     document_id=document_id,
                     filename=Path(file_path).name,
                     pages_text=pages_text,
+                    document_context=document_context_constraints,  # ADR: passer les contraintes
                 )
+
+                # Stocker le DocumentContext dans le DocContextFrame pour usage ultérieur
+                if document_context_constraints is not None:
+                    doc_context.document_context = document_context_constraints
 
                 metrics.doc_context_time_ms = (time.time() - doc_context_start) * 1000
 

@@ -24,12 +24,16 @@ from knowbase.extraction_v2.context.models import (
     DocScopeAnalysis,
     MarkerEvidence,
     ScopeSignals,
+    DocumentContext,
 )
 from knowbase.extraction_v2.context.candidate_mining import (
     CandidateMiner,
     MiningResult,
     MarkerCandidate,
     enrich_candidates_with_structural_analysis,
+    DocumentContextDecider,
+    MarkerMention,
+    decide_marker,
 )
 from knowbase.extraction_v2.context.structural import (
     ZoneSegmenter,
@@ -76,6 +80,7 @@ class DocContextExtractor:
         llm_max_tokens: int = 1024,
         min_candidates_for_llm: int = 0,
         use_structural_analysis: bool = True,
+        use_document_context_filtering: bool = True,
     ):
         """
         Initialise l'extracteur.
@@ -87,12 +92,15 @@ class DocContextExtractor:
             min_candidates_for_llm: Nombre minimum de candidats pour appeler le LLM
                                     (si 0, toujours appeler meme sans candidats)
             use_structural_analysis: Utiliser l'analyse structurelle (PR6)
+            use_document_context_filtering: Utiliser DocumentContext + decide_marker()
+                                            pour filtrer les faux positifs (ADR)
         """
         self.use_llm = use_llm
         self.llm_temperature = llm_temperature
         self.llm_max_tokens = llm_max_tokens
         self.min_candidates_for_llm = min_candidates_for_llm
         self.use_structural_analysis = use_structural_analysis
+        self.use_document_context_filtering = use_document_context_filtering
 
         # Initialiser le miner
         self._miner = CandidateMiner()
@@ -157,26 +165,80 @@ class DocContextExtractor:
 
         return analysis
 
+    def _filter_candidates_with_context(
+        self,
+        candidates: List[MarkerCandidate],
+        document_context: DocumentContext,
+        document_id: str = "unknown",
+    ) -> tuple:
+        """
+        Filtre les candidats via decide_marker() avec le DocumentContext.
+
+        Applique les regles ADR Document Context Markers:
+        - structure_hint.has_numbered_sections → rejette WORD+SMALL_NUMBER en position heading
+        - entity_hints → booste confiance si prefix correspond a une entite dominante
+        - Safe-by-default: en cas de doute, rejeter
+
+        Args:
+            candidates: Liste de MarkerCandidate a filtrer
+            document_context: Contraintes document-level
+            document_id: ID du document pour EvidenceRef
+
+        Returns:
+            Tuple (filtered_candidates, rejection_log)
+        """
+        filtered = []
+        rejection_log = []
+
+        for candidate in candidates:
+            # Convertir MarkerCandidate en MarkerMention via factory method
+            mention = MarkerMention.from_marker_candidate(candidate, document_id)
+
+            # Appliquer decide_marker()
+            decision = decide_marker(mention, document_context)
+
+            if decision.decision in ("ACCEPT_STRONG", "ACCEPT_WEAK"):
+                filtered.append(candidate)
+                logger.debug(
+                    f"[DocContextExtractor] ACCEPT {candidate.value}: "
+                    f"{decision.decision} (score={decision.score:.2f}, reasons={decision.reasons})"
+                )
+            else:
+                rejection_log.append({
+                    "value": candidate.value,
+                    "decision": decision.decision,
+                    "reasons": decision.reasons,
+                })
+                logger.debug(
+                    f"[DocContextExtractor] REJECT {candidate.value}: "
+                    f"{decision.decision} (reasons={decision.reasons})"
+                )
+
+        return filtered, rejection_log
+
     async def extract(
         self,
         document_id: str,
         filename: str,
         pages_text: List[str],
         metadata: Optional[Dict[str, Any]] = None,
+        document_context: Optional[DocumentContext] = None,
     ) -> DocContextFrame:
         """
         Extrait le contexte documentaire.
 
-        Pipeline en 3 etapes:
+        Pipeline en 4 etapes (ADR Document Context Markers):
         1. Candidate Mining - extraction deterministe de marqueurs
         2. Structural Analysis - enrichissement avec zone/template/linguistic features
-        3. LLM Validation - arbitrage final par LLM
+        3. DocumentContext Filtering - filtrage via decide_marker() (ADR)
+        4. LLM Validation - arbitrage final par LLM
 
         Args:
             document_id: Identifiant unique du document
             filename: Nom du fichier
             pages_text: Liste des textes par page (index 0 = premiere page)
             metadata: Metadonnees additionnelles (headers, footers, etc.)
+            document_context: DocumentContext pre-genere (optionnel, sera genere si absent)
 
         Returns:
             DocContextFrame avec les marqueurs et la classification
@@ -227,7 +289,34 @@ class DocContextExtractor:
                     f"continuing without enrichment"
                 )
 
-        # === ETAPE 3: LLM Validation (PR7) ===
+        # === ETAPE 3: DocumentContext Filtering (ADR Document Context Markers) ===
+        # Filtre les faux positifs comme "PUBLIC 3" via structure_hint et entity_hints
+        if self.use_document_context_filtering and document_context is not None:
+            try:
+                filtered_candidates, rejection_log = self._filter_candidates_with_context(
+                    candidates=mining_result.candidates,
+                    document_context=document_context,
+                    document_id=document_id,
+                )
+
+                rejected_count = len(mining_result.candidates) - len(filtered_candidates)
+                if rejected_count > 0:
+                    logger.info(
+                        f"[DocContextExtractor] DocumentContext filtering: "
+                        f"rejected {rejected_count}/{len(mining_result.candidates)} candidates, "
+                        f"reasons: {rejection_log[:3]}"  # Log premiers rejets
+                    )
+
+                # Remplacer les candidats par ceux filtrés
+                mining_result.candidates = filtered_candidates
+
+            except Exception as e:
+                logger.warning(
+                    f"[DocContextExtractor] DocumentContext filtering failed: {e}, "
+                    f"continuing without filtering"
+                )
+
+        # === ETAPE 4: LLM Validation (PR7) ===
         if self.use_llm:
             # Appeler le LLM si on a des candidats OU si on veut quand meme classifier
             should_call_llm = (

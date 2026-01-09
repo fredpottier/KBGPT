@@ -1799,7 +1799,8 @@ class CandidateMiner:
 
         if self._structure_gate and self.use_gate:
             # Appliquer le gate de numérotation structurelle
-            gate_survivors, gate_rejected, gate_soft = self._structure_gate.filter_candidates(
+            # IMPORTANT: filter_candidates retourne (survivors, soft_flagged, hard_rejected)
+            gate_survivors, gate_soft, gate_rejected = self._structure_gate.filter_candidates(
                 result.candidates, full_text, doc_id
             )
 
