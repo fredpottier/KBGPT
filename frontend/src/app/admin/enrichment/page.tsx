@@ -153,6 +153,18 @@ interface Pass2Job {
 
 // ADR-compliant phases avec noms explicites
 const phases: PhaseConfig[] = [
+  // Pass 2.0 - Corpus Promotion (ADR_UNIFIED_CORPUS_PROMOTION)
+  {
+    id: 'corpus-promotion',
+    name: 'Promotion Corpus',
+    shortName: 'Promotion',
+    pass: 2,
+    subPhase: '0',
+    icon: FiTrendingUp,
+    color: 'yellow',
+    endpoint: '/admin/pass2/corpus-promotion',
+    description: 'Promouvoit ProtoConcepts → CanonicalConcepts (vue corpus)'
+  },
   // Enrichissement (ex-Pass 2)
   {
     id: 'structural-topics',
@@ -420,6 +432,10 @@ const JobProgress = ({ job, onCancel, onClear, isCancelling }: { job: Pass2Job; 
 const getActiveFlowStep = (jobPhase: string | undefined): string | null => {
   if (!jobPhase) return null
   const phaseMap: Record<string, string> = {
+    // Pass 2.0 - Corpus Promotion (ADR_UNIFIED_CORPUS_PROMOTION)
+    'CORPUS_PROMOTION': 'Promotion',
+    'corpus_promotion': 'Promotion',
+    'Promoting concepts': 'Promotion',
     // Pass 2a - Structure
     'STRUCTURAL_TOPICS': 'Structure',
     'structural_topics': 'Structure',
@@ -429,7 +445,7 @@ const getActiveFlowStep = (jobPhase: string | undefined): string | null => {
     'CLASSIFY_FINE': 'Typage',
     'Classification Fine': 'Typage',
     'Starting classification': 'Typage',
-    // Pass 2b - Relations candidates
+    // Pass 2c - Relations candidates
     'ENRICH_RELATIONS': 'Candidates',
     'Enrichissement Relations': 'Candidates',
     'Relations Segment': 'Candidates',
@@ -547,6 +563,7 @@ export default function EnrichmentDashboardPage() {
   const runPass2 = useMutation({
     mutationFn: async () => {
       const res = await apiClient.post<Pass2Job>('/admin/pass2/jobs', {
+        skip_promotion: false, // Pass 2.0: ProtoConcepts → CanonicalConcepts
         skip_classify: false,
         skip_enrich: false,
         skip_consolidate: true, // ADR: plus de consolidate legacy
@@ -557,7 +574,7 @@ export default function EnrichmentDashboardPage() {
       if (!res.success || !res.data) throw new Error(res.error || 'Failed')
       return res.data
     },
-    onSuccess: (job) => { setActiveJobId(job.job_id); setActiveJob(job); toast({ title: 'Pass 2 lance', status: 'info', duration: 2000 }) },
+    onSuccess: (job) => { setActiveJobId(job.job_id); setActiveJob(job); toast({ title: 'Pass 2 lance (Promotion + Enrichissement)', status: 'info', duration: 2000 }) },
     onError: (e: any) => toast({ title: 'Erreur', description: e.message, status: 'error', duration: 3000 }),
   })
 
@@ -702,7 +719,7 @@ export default function EnrichmentDashboardPage() {
           </Box>
           <Box>
             <Text fontSize="lg" fontWeight="bold" color="text.primary" lineHeight={1}>Enrichissement KG</Text>
-            <Text fontSize="2xs" color="text.muted">Structure → Typage → Candidates → Validation</Text>
+            <Text fontSize="2xs" color="text.muted">Promotion → Structure → Typage → Candidates → Validation → Corpus</Text>
           </Box>
         </HStack>
         <HStack spacing={2}>
@@ -713,19 +730,21 @@ export default function EnrichmentDashboardPage() {
       {/* Pipeline Flow Visualization */}
       <Box bg="whiteAlpha.30" rounded="lg" p={3} mb={3} border="1px solid" borderColor="whiteAlpha.100">
         <Flex gap={3} align="center" justify="center" flexWrap="wrap">
-          {/* Import (Pass 1) - always done */}
+          {/* Import (Pass 1) - ProtoConcepts only */}
           <HStack spacing={1} px={2} py={1} bg="green.900" border="1px solid" borderColor="green.600" rounded="md">
             <Icon as={FiCheckCircle} boxSize={3} color="green.400" />
             <Text fontSize="2xs" color="green.200">Import</Text>
+            <Text fontSize="2xs" color="green.500">(Proto)</Text>
           </HStack>
 
           <Icon as={FiArrowRight} boxSize={4} color="whiteAlpha.400" />
 
-          {/* Enrichissement Block */}
+          {/* Pass 2: Enrichissement (inclut Promotion 2.0) */}
           <PassBlock
             passNum={2}
             label="Enrichissement"
             steps={[
+              { name: 'Promotion', color: 'yellow' },
               { name: 'Structure', color: 'cyan' },
               { name: 'Typage', color: 'purple' },
               { name: 'Candidates', color: 'blue' },
@@ -829,13 +848,13 @@ export default function EnrichmentDashboardPage() {
       {/* Metrics Grid */}
       <Box bg="whiteAlpha.30" rounded="xl" p={3} mb={3} border="1px solid" borderColor="whiteAlpha.100">
         <Flex gap={3} flexWrap="wrap" justify="space-between">
-          {/* Pass 1 Output */}
+          {/* Pass 1 + Pass 2.0 Output */}
           <VStack align="flex-start" spacing={1}>
-            <Text fontSize="2xs" color="text.muted" fontWeight="medium">Extraction (Pass 1)</Text>
+            <Text fontSize="2xs" color="text.muted" fontWeight="medium">Extraction (Pass 1 + 2.0)</Text>
             <HStack spacing={2}>
-              <MetricCard label="Extraits" value={status?.proto_concepts || 0} icon={FiBox} color="yellow" tooltip="Nombre de concepts bruts identifies par le LLM dans les documents. Inclut les doublons et variations." />
-              <MetricCard label="Concepts" value={status?.canonical_concepts || 0} icon={FiGrid} color="green" tooltip="Concepts uniques apres regroupement des variantes (ex: 'IA' et 'Intelligence Artificielle' = 1 concept)." />
-              <MetricCard label="Apparitions" value={status?.mentioned_in_count || 0} icon={FiHash} color="gray" tooltip="Nombre total d'apparitions de concepts dans les sections. Ex: si le concept 'Budget' est cite dans 10 sections differentes, cela compte pour 10 apparitions." />
+              <MetricCard label="Proto" value={status?.proto_concepts || 0} icon={FiBox} color="yellow" tooltip="ProtoConcepts extraits par le LLM (Pass 1). Concepts bruts avant promotion." />
+              <MetricCard label="Canonical" value={status?.canonical_concepts || 0} icon={FiGrid} color="green" tooltip="CanonicalConcepts apres promotion corpus (Pass 2.0). Concepts uniques regroupes." />
+              <MetricCard label="Mentions" value={status?.mentioned_in_count || 0} icon={FiHash} color="gray" tooltip="Liens MENTIONED_IN entre concepts et documents/sections." />
             </HStack>
           </VStack>
 
@@ -1041,7 +1060,8 @@ export default function EnrichmentDashboardPage() {
       {/* Help Footer */}
       <Box mt={3} bg="whiteAlpha.50" rounded="lg" px={3} py={2} border="1px solid" borderColor="whiteAlpha.100">
         <Text fontSize="2xs" color="text.muted">
-          <Text as="span" fontWeight="semibold" color="cyan.300">Structure</Text> detecte les sections (H1/H2).
+          <Text as="span" fontWeight="semibold" color="yellow.300">Promotion</Text> transforme ProtoConcepts en CanonicalConcepts (vue corpus).
+          <Text as="span" fontWeight="semibold" color="cyan.300"> Structure</Text> detecte les sections (H1/H2).
           <Text as="span" fontWeight="semibold" color="purple.300"> Typage</Text> classifie les concepts.
           <Text as="span" fontWeight="semibold" color="blue.300"> Candidates</Text> detecte les relations.
           <Text as="span" fontWeight="semibold" color="green.300"> Validation</Text> confirme avec citation.

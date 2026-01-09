@@ -33,6 +33,7 @@ from knowbase.relations.relation_consolidator import get_relation_consolidator
 from knowbase.relations.canonical_claim_writer import get_canonical_claim_writer
 from knowbase.relations.canonical_relation_writer import get_canonical_relation_writer
 from knowbase.consolidation import get_corpus_er_pipeline, CorpusERConfig
+from knowbase.consolidation.corpus_promotion import CorpusPromotionEngine
 from knowbase.common.clients.neo4j_client import Neo4jClient
 from knowbase.config.settings import get_settings
 from knowbase.common.llm_router import get_llm_router, TaskType
@@ -922,6 +923,7 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
     async def run_full_pass2(
         self,
         document_id: Optional[str] = None,
+        skip_promotion: bool = False,
         skip_classify: bool = False,
         skip_enrich: bool = False,
         skip_consolidate: bool = False,
@@ -930,7 +932,8 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
         """
         Exécute Pass 2 complet sur TOUS les concepts.
 
-        Phases dans l'ordre:
+        Phases dans l'ordre (ADR_UNIFIED_CORPUS_PROMOTION):
+        0. CORPUS_PROMOTION - ProtoConcepts → CanonicalConcepts (vue corpus)
         1. CLASSIFY_FINE - Traite TOUS les concepts en boucle
         2. ENRICH_RELATIONS - Détecte relations cross-segment
         3. CONSOLIDATE_CLAIMS - Consolide les claims
@@ -939,6 +942,7 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
 
         Args:
             document_id: Filtrer par document
+            skip_promotion: Ignorer CORPUS_PROMOTION (Pass 2.0)
             skip_classify: Ignorer CLASSIFY_FINE
             skip_enrich: Ignorer ENRICH_RELATIONS
             skip_consolidate: Ignorer consolidation
@@ -949,6 +953,46 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
         """
         logger.info("[Pass2Service] Starting FULL Pass 2 (process_all=True)")
         results = {}
+
+        # Pass 2.0: Corpus Promotion (ADR_UNIFIED_CORPUS_PROMOTION)
+        if not skip_promotion:
+            try:
+                start_time = time.time()
+                promotion_engine = CorpusPromotionEngine(tenant_id=self.tenant_id)
+                promotion_result = await promotion_engine.promote_corpus()
+                execution_time = (time.time() - start_time) * 1000
+
+                results["corpus_promotion"] = Pass2Result(
+                    success=True,
+                    phase="CORPUS_PROMOTION",
+                    items_processed=promotion_result.proto_concepts_processed,
+                    items_created=promotion_result.canonical_concepts_created,
+                    items_updated=0,
+                    execution_time_ms=execution_time,
+                    errors=[],
+                    details={
+                        "merged_count": promotion_result.merged_count,
+                        "singleton_count": promotion_result.singleton_count,
+                        "skipped_count": promotion_result.skipped_count,
+                    }
+                )
+                logger.info(
+                    f"[Pass2Service] CORPUS_PROMOTION complete: "
+                    f"{promotion_result.canonical_concepts_created} concepts created "
+                    f"({promotion_result.merged_count} merged, {promotion_result.singleton_count} singletons)"
+                )
+            except Exception as e:
+                logger.error(f"[Pass2Service] CORPUS_PROMOTION failed: {e}", exc_info=True)
+                results["corpus_promotion"] = Pass2Result(
+                    success=False,
+                    phase="CORPUS_PROMOTION",
+                    items_processed=0,
+                    items_created=0,
+                    items_updated=0,
+                    execution_time_ms=0,
+                    errors=[str(e)],
+                    details={}
+                )
 
         if not skip_classify:
             # FIXED 2024-12-31: process_all=True pour traiter TOUS les concepts
