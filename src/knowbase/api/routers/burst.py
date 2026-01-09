@@ -660,6 +660,18 @@ async def start_infrastructure(
                 message="Échec du démarrage de l'infrastructure."
             )
 
+        # Verification explicite que le burst mode est actif
+        from knowbase.common.llm_router import get_llm_router
+        llm_router = get_llm_router()
+        burst_check = llm_router.get_burst_status()
+        logger.info(
+            f"[BURST] Provider verification after start: "
+            f"burst_mode={burst_check.get('burst_mode')}, "
+            f"endpoint={burst_check.get('burst_endpoint')}, "
+            f"model={burst_check.get('burst_model')}, "
+            f"client_ready={burst_check.get('client_ready')}"
+        )
+
         return StartInfraResponse(
             success=True,
             batch_id=orchestrator.state.batch_id,
@@ -728,6 +740,18 @@ async def process_batch(
             """Traite les documents du batch de manière async avec parallélisme."""
             import traceback
             from knowbase.ingestion.queue.jobs_v2 import ingest_document_v2_job
+            from knowbase.common.llm_router import get_llm_router
+
+            # Verification du burst mode au debut du batch
+            llm_router = get_llm_router()
+            burst_check = llm_router.get_burst_status()
+            logger.info(
+                f"[BURST:PROCESS] Batch starting - burst_mode={burst_check.get('burst_mode')}, "
+                f"endpoint={burst_check.get('burst_endpoint')}, client_ready={burst_check.get('client_ready')}"
+            )
+
+            if not burst_check.get('burst_mode'):
+                logger.warning("[BURST:PROCESS] ⚠️ BURST MODE NOT ACTIVE - LLM calls will go to OpenAI/Anthropic!")
 
             # Lock pour les mises à jour d'état partagé
             state_lock = asyncio.Lock()
@@ -759,15 +783,17 @@ async def process_batch(
                         async with state_lock:
                             doc_status.status = "completed"
                             doc_status.completed_at = datetime.now(timezone.utc).isoformat()
-                            # Récupérer le nombre de concepts depuis le résultat V2
+                            # Récupérer le nombre de ProtoConcepts extraits depuis le résultat V2
+                            # Note: Depuis ADR_UNIFIED_CORPUS_PROMOTION, canonical_concepts est 0 en Pass 1
+                            # Les CanonicalConcepts sont créés en Pass 2.0 (CORPUS_PROMOTION)
                             if isinstance(result, dict):
                                 osmose = result.get("osmose", {})
-                                doc_status.chunks_count = osmose.get("canonical_concepts", 0)
+                                doc_status.chunks_count = osmose.get("concepts_extracted", 0)
                             else:
                                 doc_status.chunks_count = 0
                             orchestrator.state.documents_done += 1
 
-                        logger.info(f"[BURST] ✅ Completed: {doc_path.name} ({doc_status.chunks_count} concepts)")
+                        logger.info(f"[BURST] ✅ Completed: {doc_path.name} ({doc_status.chunks_count} proto-concepts)")
 
                     except Exception as e:
                         async with state_lock:
