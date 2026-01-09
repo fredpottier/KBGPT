@@ -41,6 +41,7 @@ nest-asyncio  # Pour nested event loops dans RQ worker
 # === Dépendances tests (à retirer pour prod) ===
 pytest>=7.4.0
 pytest-mock>=3.11.0
+pytest-asyncio>=0.23.0  # Support async tests
 respx>=0.20.2
 
 # === Analyse PPTX / PDF (VERSION ALLÉGÉE) ===

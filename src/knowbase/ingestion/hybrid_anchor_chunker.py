@@ -1,25 +1,32 @@
 """
-Hybrid Anchor Model - Document-Centric Chunker (Phase 4)
+Hybrid Anchor Model - RetrievalChunks Generator (Phase 4)
 
-Remplace le TextChunker Phase 1.6 pour le Hybrid Anchor Model:
-- Chunking 256 tokens (vs 512) pour meilleure granularite
-- SUPPRESSION des concept-focused chunks (source de l'explosion combinatoire)
-- Enrichissement payload avec anchored_concepts (liens vers concepts via anchors)
+Génère des RetrievalChunks pour le retrieval sémantique (Neo4j + Qdrant).
+
+Architecture Dual Chunking (ADR 2026-01):
+- RetrievalChunks (ce module): Layout-aware, min 50 tokens, vectorisés dans Qdrant
+- CoverageChunks (coverage_chunk_generator.py): Linéaire, 100% couverture, Neo4j only
+
+Ce module génère des RetrievalChunks avec:
+- Chunking 256 tokens avec layout-aware (préserve tables)
+- Filtrage min_tokens=50 pour qualité embeddings
+- Enrichissement payload avec anchored_concepts (via alignement CoverageChunks)
 
 Invariants d'Architecture:
-- Les chunks sont decoupes selon des regles fixes (taille, overlap)
-- Les concepts sont lies aux chunks via anchors (pas de duplication de contenu)
-- Le payload Qdrant ne contient que: concept_id, label, role, span
+- chunk_type = "retrieval" (vs "coverage")
+- Vectorisé dans Qdrant avec embedding
+- Aucun chunk < 50 tokens (qualité retrieval)
 
 V2.1 (2024-12): Segment Mapping
 - Chaque chunk est mappe vers le segment avec overlap maximal
 - Tie-breakers: distance au centre, puis segment le plus ancien
 - Validation de couverture segment avec fail-fast optionnel
 
+ADR: doc/ongoing/ADR_DUAL_CHUNKING_ARCHITECTURE.md
 ADR: doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md
 
 Author: OSMOSE Phase 2
-Date: 2024-12
+Date: 2024-12 (updated 2026-01 for Dual Chunking)
 """
 
 import uuid
@@ -189,14 +196,18 @@ class HybridAnchorChunker:
                 section_path = chunk_data.get("section_path")
                 context_id = make_context_id(document_id, section_path) if section_path else None
 
+                # ADR Dual Chunking: chunk_id format pour Neo4j
+                neo4j_chunk_id = f"{document_id}::retrieval::{i}"
+
                 final_chunks.append({
-                    "id": chunk_id,
+                    "id": chunk_id,  # UUID pour Qdrant
+                    "chunk_id": neo4j_chunk_id,  # Format structuré pour Neo4j
                     "text": chunk_data["text"],
                     "embedding": embedding.tolist(),
                     "document_id": document_id,
                     "document_name": document_name,
                     "chunk_index": i,
-                    "chunk_type": "document_centric",  # JAMAIS "concept_focused"
+                    "chunk_type": "retrieval",  # ADR Dual Chunking: RetrievalChunks
                     "char_start": chunk_data["char_start"],
                     "char_end": chunk_data["char_end"],
                     "token_count": chunk_data["token_count"],
@@ -534,10 +545,21 @@ class HybridAnchorChunker:
             Dict chunk_index -> liste d'anchors
         """
         mapping = {}
+        unmapped_anchors = []
+
+        # 2026-01: DEBUG - Log plages des chunks
+        if chunks:
+            chunk_min = min(c["char_start"] for c in chunks)
+            chunk_max = max(c["char_end"] for c in chunks)
+            logger.info(
+                f"[HybridAnchorChunker:DEBUG] Chunks coverage: "
+                f"[{chunk_min}-{chunk_max}] ({len(chunks)} chunks)"
+            )
 
         for anchor in anchors:
             anchor_start = anchor.char_start
             anchor_end = anchor.char_end
+            mapped = False
 
             for i, chunk in enumerate(chunks):
                 chunk_start = chunk["char_start"]
@@ -548,10 +570,28 @@ class HybridAnchorChunker:
                     if i not in mapping:
                         mapping[i] = []
                     mapping[i].append(anchor)
+                    mapped = True
 
-        logger.debug(
-            f"[HybridAnchorChunker] Mapped {len(anchors)} anchors to {len(mapping)} chunks"
-        )
+            if not mapped:
+                unmapped_anchors.append((anchor.concept_id, anchor_start, anchor_end))
+
+        # 2026-01: DEBUG - Log anchors non mappés
+        mapped_count = sum(len(v) for v in mapping.values())
+        if unmapped_anchors:
+            logger.warning(
+                f"[HybridAnchorChunker:DEBUG] UNMAPPED anchors: {len(unmapped_anchors)}/{len(anchors)} "
+                f"(mapped={mapped_count})"
+            )
+            # Log les 5 premiers non mappés pour diagnostic
+            for concept_id, start, end in unmapped_anchors[:5]:
+                logger.warning(
+                    f"[HybridAnchorChunker:DEBUG] Unmapped: concept={concept_id}, "
+                    f"pos=[{start}-{end}]"
+                )
+        else:
+            logger.info(
+                f"[HybridAnchorChunker:DEBUG] All {len(anchors)} anchors mapped to {len(mapping)} chunks"
+            )
 
         return mapping
 

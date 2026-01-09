@@ -265,6 +265,21 @@ def ingest_document_v2_job(
         path = _ensure_exists(Path(file_path))
         file_type = path.suffix.lower().lstrip(".")
 
+        # Verification du mode Burst pour diagnostic
+        try:
+            from knowbase.common.llm_router import get_llm_router
+            llm_router = get_llm_router()
+            burst_status = llm_router.get_burst_status()
+            if burst_status.get("burst_mode"):
+                logger.info(
+                    f"[V2] BURST MODE ACTIVE: endpoint={burst_status.get('burst_endpoint')}, "
+                    f"model={burst_status.get('burst_model')}"
+                )
+            else:
+                logger.info("[V2] BURST MODE INACTIVE: using configured providers (OpenAI/Anthropic)")
+        except Exception as e:
+            logger.warning(f"[V2] Could not check burst status: {e}")
+
         logger.info(f"[V2] Starting ingestion: {path.name} (type={file_type})")
 
         # Etape 1: Extraction V2

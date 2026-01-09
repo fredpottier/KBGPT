@@ -1557,6 +1557,7 @@ async def delete_tension(
 class Pass2JobRequest(BaseModel):
     """Requête pour créer un job Pass2."""
     document_id: Optional[str] = None
+    skip_promotion: bool = False  # Pass 2.0: ProtoConcepts → CanonicalConcepts
     skip_classify: bool = False
     skip_enrich: bool = False
     skip_consolidate: bool = False
@@ -1587,6 +1588,7 @@ async def create_pass2_job(
     state = enqueue_pass2_full_job(
         tenant_id=tenant_id,
         document_id=request.document_id,
+        skip_promotion=request.skip_promotion,
         skip_classify=request.skip_classify,
         skip_enrich=request.skip_enrich,
         skip_consolidate=request.skip_consolidate,

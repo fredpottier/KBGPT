@@ -2,12 +2,18 @@
 Système de routage automatique pour optimiser l'usage des modèles LLM
 selon le type de tâche (vision, résumé long, métadonnées, enrichissement, etc.)
 Configuration flexible via config/llm_models.yaml
+
+IMPORTANT - Gate Redis pour vLLM:
+Ce module vérifie automatiquement si vLLM est actif via Redis à chaque appel LLM.
+Quand vLLM est actif (via page Burst ou Config), TOUS les appels non-vision sont
+redirigés vers vLLM au lieu d'OpenAI, permettant des économies importantes.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -73,6 +79,11 @@ class LLMRouter:
         self._burst_vllm_client = None
         self._burst_async_vllm_client = None
         self._burst_model: str = "Qwen/Qwen2.5-7B-Instruct"  # Modèle par défaut sur EC2
+
+        # === Gate Redis pour vLLM (partage inter-processus) ===
+        self._redis_burst_cache: Optional[Dict[str, Any]] = None
+        self._redis_burst_cache_time: float = 0
+        self._redis_burst_cache_ttl: float = 5.0  # Cache TTL en secondes
 
         # Configuration dynamique
         self._config = self._load_config(config_path)
@@ -232,6 +243,149 @@ class LLMRouter:
             "client_ready": self._burst_vllm_client is not None
         }
 
+    # =========================================================================
+    # Gate Redis - Vérification dynamique vLLM (inter-processus)
+    # =========================================================================
+
+    def _get_vllm_state_from_redis(self) -> Optional[Dict[str, Any]]:
+        """
+        Récupère l'état vLLM depuis Redis avec cache et health check.
+
+        Cette méthode est la "gate" qui permet à tous les processus de savoir
+        si vLLM est actif, avec vérification périodique de santé.
+
+        Cache:
+        - Redis state: TTL 5 secondes (évite de spammer Redis)
+        - Health check: TTL 30 secondes (évite de spammer vLLM)
+
+        Returns:
+            Dict avec vllm_url, vllm_model si vLLM actif et healthy, None sinon
+        """
+        now = time.time()
+
+        # Vérifier le cache
+        if self._redis_burst_cache is not None:
+            cache_age = now - self._redis_burst_cache_time
+            if cache_age < self._redis_burst_cache_ttl:
+                return self._redis_burst_cache if self._redis_burst_cache.get("active") else None
+
+        # Cache expiré, vérifier Redis
+        try:
+            from knowbase.ingestion.burst.provider_switch import get_burst_state_from_redis
+            state = get_burst_state_from_redis()
+
+            if state and state.get("active"):
+                # vLLM censé être actif, vérifier health (cache 30s)
+                vllm_url = state.get("vllm_url")
+                if vllm_url and self._check_vllm_health(vllm_url):
+                    # vLLM actif et healthy
+                    self._redis_burst_cache = state
+                    self._redis_burst_cache_time = now
+                    return state
+                else:
+                    # vLLM down, nettoyer l'état Redis
+                    logger.warning(f"[LLM_ROUTER:GATE] vLLM health check failed, clearing Redis state")
+                    from knowbase.ingestion.burst.provider_switch import clear_burst_state_in_redis
+                    clear_burst_state_in_redis()
+                    self._redis_burst_cache = {"active": False}
+                    self._redis_burst_cache_time = now
+                    return None
+            else:
+                # Pas de vLLM actif dans Redis
+                self._redis_burst_cache = {"active": False}
+                self._redis_burst_cache_time = now
+                return None
+
+        except Exception as e:
+            logger.debug(f"[LLM_ROUTER:GATE] Error checking Redis: {e}")
+            self._redis_burst_cache = {"active": False}
+            self._redis_burst_cache_time = now
+            return None
+
+    def _check_vllm_health(self, vllm_url: str) -> bool:
+        """
+        Vérifie si vLLM est accessible avec cache.
+
+        Health check avec cache de 30 secondes pour éviter de spammer.
+        """
+        # Utiliser un attribut pour le cache health
+        if not hasattr(self, "_vllm_health_cache"):
+            self._vllm_health_cache: Dict[str, tuple] = {}  # {url: (is_healthy, timestamp)}
+
+        now = time.time()
+        health_ttl = 30.0  # 30 secondes de cache pour le health check
+
+        # Vérifier le cache
+        if vllm_url in self._vllm_health_cache:
+            is_healthy, check_time = self._vllm_health_cache[vllm_url]
+            if now - check_time < health_ttl:
+                return is_healthy
+
+        # Cache expiré, faire le health check
+        try:
+            if HTTPX_AVAILABLE:
+                with httpx.Client(timeout=3.0) as client:
+                    response = client.get(f"{vllm_url}/health")
+                    is_healthy = response.status_code == 200
+            else:
+                # Pas de httpx, supposer healthy si URL configurée
+                is_healthy = True
+
+            self._vllm_health_cache[vllm_url] = (is_healthy, now)
+
+            if is_healthy:
+                logger.debug(f"[LLM_ROUTER:GATE] vLLM health OK: {vllm_url}")
+            else:
+                logger.warning(f"[LLM_ROUTER:GATE] vLLM health FAILED: {vllm_url}")
+
+            return is_healthy
+
+        except Exception as e:
+            logger.warning(f"[LLM_ROUTER:GATE] vLLM health check error: {e}")
+            self._vllm_health_cache[vllm_url] = (False, now)
+            return False
+
+    def _ensure_burst_client_for_redis_state(self, state: Dict[str, Any]) -> bool:
+        """
+        S'assure que les clients burst sont initialisés pour l'état Redis.
+
+        Appelé quand on détecte vLLM actif via Redis mais que le processus
+        local n'a pas encore les clients initialisés.
+        """
+        vllm_url = state.get("vllm_url")
+        vllm_model = state.get("vllm_model")
+
+        if not vllm_url:
+            return False
+
+        # Si déjà initialisé avec la même URL, OK
+        if self._burst_mode and self._burst_endpoint == vllm_url and self._burst_vllm_client:
+            return True
+
+        # Initialiser les clients
+        try:
+            from openai import OpenAI, AsyncOpenAI
+
+            self._burst_mode = True
+            self._burst_endpoint = vllm_url.rstrip("/")
+            self._burst_model = vllm_model or "Qwen/Qwen2.5-7B-Instruct"
+
+            self._burst_vllm_client = OpenAI(
+                api_key="EMPTY",
+                base_url=f"{self._burst_endpoint}/v1"
+            )
+            self._burst_async_vllm_client = AsyncOpenAI(
+                api_key="EMPTY",
+                base_url=f"{self._burst_endpoint}/v1"
+            )
+
+            logger.info(f"[LLM_ROUTER:GATE] Auto-enabled burst from Redis: {vllm_url} (model: {self._burst_model})")
+            return True
+
+        except Exception as e:
+            logger.error(f"[LLM_ROUTER:GATE] Failed to init burst client: {e}")
+            return False
+
     @property
     def openai_client(self):
         """Client OpenAI paresseux."""
@@ -379,7 +533,18 @@ class LLMRouter:
         logger.debug(f"[LLM_ROUTER] Task: {task_type.value}, Model: {model}, Provider: {provider}, Temp: {temperature}, Tokens: {max_tokens}")
 
         try:
-            # === Mode Burst : rediriger vers EC2 Spot (sauf Vision) ===
+            # === Gate Redis : vérifier si vLLM actif via Redis (inter-processus) ===
+            # Cette gate permet au worker de savoir que vLLM est actif même si
+            # enable_burst_mode() a été appelé dans un autre processus (app)
+            if task_type != TaskType.VISION:  # Vision reste TOUJOURS sur GPT-4o
+                redis_state = self._get_vllm_state_from_redis()
+                if redis_state:
+                    # vLLM actif via Redis, s'assurer que les clients sont initialisés
+                    if self._ensure_burst_client_for_redis_state(redis_state):
+                        logger.debug(f"[LLM_ROUTER:GATE] Text task → vLLM via Redis ({self._burst_endpoint})")
+                        return self._call_burst_vllm(messages, temperature, max_tokens, task_type, **kwargs)
+
+            # === Mode Burst local : rediriger vers EC2 Spot (sauf Vision) ===
             if self._burst_mode and self._burst_vllm_client:
                 # Vision reste TOUJOURS sur GPT-4o (avec gating)
                 if task_type == TaskType.VISION:
@@ -447,7 +612,18 @@ class LLMRouter:
         logger.debug(f"[LLM_ROUTER:ASYNC] Task: {task_type.value}, Model: {model}, Provider: {provider}, Temp: {temperature}, Tokens: {max_tokens}")
 
         try:
-            # === Mode Burst : rediriger vers EC2 Spot (sauf Vision) ===
+            # === Gate Redis : vérifier si vLLM actif via Redis (inter-processus) ===
+            # Cette gate permet au worker de savoir que vLLM est actif même si
+            # enable_burst_mode() a été appelé dans un autre processus (app)
+            if task_type != TaskType.VISION:  # Vision reste TOUJOURS sur GPT-4o
+                redis_state = self._get_vllm_state_from_redis()
+                if redis_state:
+                    # vLLM actif via Redis, s'assurer que les clients sont initialisés
+                    if self._ensure_burst_client_for_redis_state(redis_state):
+                        logger.debug(f"[LLM_ROUTER:GATE:ASYNC] Text task → vLLM via Redis ({self._burst_endpoint})")
+                        return await self._call_burst_vllm_async(messages, temperature, max_tokens, task_type, **kwargs)
+
+            # === Mode Burst local : rediriger vers EC2 Spot (sauf Vision) ===
             if self._burst_mode and self._burst_async_vllm_client:
                 # Vision reste TOUJOURS sur GPT-4o (avec gating)
                 if task_type == TaskType.VISION:

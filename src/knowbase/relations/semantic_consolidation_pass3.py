@@ -139,7 +139,11 @@ class CandidateGenerator:
         """
         Génère des candidats de relations pour un document.
 
-        Utilise les MENTIONED_IN et COVERS pour trouver les co-présences.
+        Phase 1 (Agnostique):
+        - Filtre sections par relation_likelihood_tier (HIGH/MEDIUM only)
+        - Exclut les concepts HUB
+        - Exclut les paires déjà reliées (avec evidence)
+        - Score basé sur recurrence + avg_relation_likelihood
 
         Args:
             document_id: ID du document source
@@ -150,48 +154,67 @@ class CandidateGenerator:
         """
         logger.info(f"[OSMOSE:Pass3] Generating candidates for {document_id}")
 
-        # 1. Trouver toutes les paires de concepts co-présents
-        # NOTE: SectionContext utilise 'doc_id' (pas 'document_id')
+        # Phase 1 Cypher: filtre tier + exclude relations + hub filter
+        # Variante B de la spec ChatGPT (agnostique)
         co_presence_query = """
-        // Trouver concepts du document via MENTIONED_IN
-        MATCH (c1:CanonicalConcept {tenant_id: $tenant_id})
-              -[m1:MENTIONED_IN]->(ctx:SectionContext {doc_id: $document_id, tenant_id: $tenant_id})
-              <-[m2:MENTIONED_IN]-(c2:CanonicalConcept {tenant_id: $tenant_id})
-        WHERE c1.canonical_id < c2.canonical_id  // Éviter doublons
-          AND coalesce(c1.concept_type, '') <> 'TOPIC'  // Exclure Topics (NULL-safe)
-          AND coalesce(c2.concept_type, '') <> 'TOPIC'
+        // Phase 1: Filtrer sections HIGH/MEDIUM uniquement
+        MATCH (s:SectionContext {doc_id: $document_id, tenant_id: $tenant_id})
+        WHERE s.relation_likelihood_tier IN ['HIGH', 'MEDIUM']
 
-        // Compter co-occurrences
-        WITH c1, c2, collect(DISTINCT ctx.context_id) AS shared_sections
+        // Trouver paires de concepts co-présents dans ces sections
+        MATCH (c1:CanonicalConcept {tenant_id: $tenant_id})-[:MENTIONED_IN]->(s)
+              <-[:MENTIONED_IN]-(c2:CanonicalConcept {tenant_id: $tenant_id})
+        WHERE c1.canonical_id < c2.canonical_id  // Anti-doublon
+          AND coalesce(c1.concept_type, '') <> 'TOPIC'
+          AND coalesce(c2.concept_type, '') <> 'TOPIC'
+          // Filtre HUB: exclure si les deux concepts sont HUB
+          AND NOT (coalesce(c1.is_hub, false) = true AND coalesce(c2.is_hub, false) = true)
+
+        // Agréger sections communes + calculer avg relation_likelihood
+        WITH c1, c2,
+             collect(DISTINCT s.context_id) AS shared_sections,
+             avg(coalesce(s.relation_likelihood, 0.5)) AS avg_relation_likelihood
+
+        // Filtre minimum co-occurrences
         WHERE size(shared_sections) >= $min_co_occurrences
 
-        // Récupérer topics communs
-        OPTIONAL MATCH (t:CanonicalConcept {concept_type: 'TOPIC', tenant_id: $tenant_id})
-                       -[:COVERS]->(c1)
-        OPTIONAL MATCH (t)-[:COVERS]->(c2)
-        WITH c1, c2, shared_sections,
-             collect(DISTINCT t.canonical_id) AS shared_topics
+        // Exclure paires déjà reliées (avec evidence)
+        // Direction c1 -> c2
+        OPTIONAL MATCH (c1)-[r1]->(c2)
+        WHERE type(r1) <> 'MENTIONED_IN'
+          AND type(r1) <> 'CO_OCCURS_IN_CORPUS'
+          AND r1.evidence_context_ids IS NOT NULL
+          AND size(r1.evidence_context_ids) > 0
+        WITH c1, c2, shared_sections, avg_relation_likelihood,
+             count(r1) AS existing_forward
 
-        // Vérifier qu'il n'y a pas déjà de relation
-        OPTIONAL MATCH (c1)-[existing]->(c2)
-        WHERE type(existing) IN ['REQUIRES', 'ENABLES', 'USES', 'PART_OF', 'APPLIES_TO']
+        // Direction c2 -> c1
+        OPTIONAL MATCH (c2)-[r2]->(c1)
+        WHERE type(r2) <> 'MENTIONED_IN'
+          AND type(r2) <> 'CO_OCCURS_IN_CORPUS'
+          AND r2.evidence_context_ids IS NOT NULL
+          AND size(r2.evidence_context_ids) > 0
+        WITH c1, c2, shared_sections, avg_relation_likelihood,
+             existing_forward, count(r2) AS existing_backward
 
-        WITH c1, c2, shared_sections, shared_topics,
-             CASE WHEN existing IS NULL THEN true ELSE false END AS no_existing_relation
-        WHERE no_existing_relation
+        // Garder uniquement les paires sans relation prouvée
+        WHERE existing_forward = 0 AND existing_backward = 0
 
         RETURN c1.canonical_id AS subject_id,
-               c1.canonical_name AS subject_name,
+               c1.label AS subject_name,
+               coalesce(c1.is_hub, false) AS subject_is_hub,
                c2.canonical_id AS object_id,
-               c2.canonical_name AS object_name,
+               c2.label AS object_name,
+               coalesce(c2.is_hub, false) AS object_is_hub,
                shared_sections,
-               shared_topics,
-               size(shared_sections) AS co_occurrence_count
-        ORDER BY co_occurrence_count DESC
+               size(shared_sections) AS co_occurrence_count,
+               avg_relation_likelihood
+        ORDER BY co_occurrence_count DESC, avg_relation_likelihood DESC
         LIMIT $max_candidates
         """
 
         candidates = []
+        stats_before_filter = 0
 
         try:
             with self.neo4j.driver.session(database=self.neo4j.database) as session:
@@ -200,25 +223,32 @@ class CandidateGenerator:
                     document_id=document_id,
                     tenant_id=self.tenant_id,
                     min_co_occurrences=self.MIN_CO_OCCURRENCES,
-                    max_candidates=max_candidates
+                    max_candidates=max_candidates * 2  # Marge pour filtres Python
                 )
 
                 for record in result:
-                    # Calculer scores
+                    stats_before_filter += 1
+
                     co_occurrence_count = record["co_occurrence_count"]
-                    shared_topics = record["shared_topics"] or []
+                    avg_rl = record["avg_relation_likelihood"] or 0.5
+                    subject_is_hub = record["subject_is_hub"]
+                    object_is_hub = record["object_is_hub"]
 
-                    # Score de récurrence (bonus si >2 sections)
+                    # Score Phase 1 (agnostique): recurrence + avg_relation_likelihood
                     recurrence_score = min(1.0, co_occurrence_count / 5.0)
-
-                    # Score de candidature
                     candidate_score = (
-                        recurrence_score * 0.6 +
-                        (len(shared_topics) > 0) * 0.4
+                        0.7 * recurrence_score +
+                        0.3 * avg_rl
                     )
 
+                    # Filtre score minimum
                     if candidate_score < self.MIN_CANDIDATE_SCORE:
                         continue
+
+                    # Filtre HUB additionnel: si un seul est HUB, on tolère
+                    # mais on baisse le score
+                    if subject_is_hub or object_is_hub:
+                        candidate_score *= 0.7  # Pénalité HUB
 
                     candidate = RelationCandidate(
                         subject_concept_id=record["subject_id"],
@@ -226,7 +256,7 @@ class CandidateGenerator:
                         object_concept_id=record["object_id"],
                         object_name=record["object_name"],
                         shared_sections=record["shared_sections"],
-                        shared_topics=shared_topics,
+                        shared_topics=[],  # Pas utilisé en Phase 1
                         co_occurrence_count=co_occurrence_count,
                         candidate_score=candidate_score,
                         recurrence_score=recurrence_score
@@ -235,14 +265,21 @@ class CandidateGenerator:
                     candidates.append(candidate)
                     self._stats["candidates_generated"] += 1
 
-                self._stats["pairs_evaluated"] = len(candidates)
+                self._stats["pairs_evaluated"] = stats_before_filter
 
         except Exception as e:
             logger.error(f"[OSMOSE:Pass3] Candidate generation failed: {e}")
 
+        # Trier et limiter
+        candidates.sort(key=lambda c: (c.co_occurrence_count, c.candidate_score), reverse=True)
+        candidates = candidates[:max_candidates]
+
+        # KPIs Phase 1
         logger.info(
             f"[OSMOSE:Pass3] Generated {len(candidates)} candidates "
-            f"(min_co_occurrences={self.MIN_CO_OCCURRENCES})"
+            f"(from {stats_before_filter} pairs, "
+            f"min_co_occurrences={self.MIN_CO_OCCURRENCES}, "
+            f"tier_filter=HIGH/MEDIUM)"
         )
 
         return candidates
@@ -454,6 +491,12 @@ class ExtractiveVerifier:
             for ctx_id, text in context_texts.items()
         ])
 
+        # Limiter la taille du texte pour éviter dépassement contexte vLLM (8192 tokens)
+        # ~4 chars/token en moyenne, on garde ~6000 tokens pour le texte
+        MAX_TEXT_CHARS = 24000
+        if len(combined_text) > MAX_TEXT_CHARS:
+            combined_text = combined_text[:MAX_TEXT_CHARS] + "\n\n[... texte tronqué ...]"
+
         # Prompt extractif strict
         prompt = self._build_extractive_prompt(candidate, combined_text)
 
@@ -467,6 +510,7 @@ class ExtractiveVerifier:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.0,  # Déterministe
+                max_tokens=500,  # Réponse JSON courte, évite dépassement contexte vLLM
                 response_format={"type": "json_object"}
             )
 
@@ -616,6 +660,15 @@ Identifier si une relation EXPLICITE existe entre deux concepts dans le texte fo
                 logger.debug("[OSMOSE:Pass3] Quote not found in source text, abstaining")
                 return None
 
+            # Vérifier que la quote mentionne au moins un des concepts
+            # Évite les hallucinations où le LLM cite un passage sans rapport
+            if not self._quote_mentions_concepts(quote, candidate):
+                logger.debug(
+                    f"[OSMOSE:Pass3] Quote doesn't mention concepts "
+                    f"'{candidate.subject_name}' or '{candidate.object_name}', abstaining"
+                )
+                return None
+
             # Créer relation vérifiée
             return VerifiedRelation(
                 subject_concept_id=candidate.subject_concept_id,
@@ -641,6 +694,86 @@ Identifier si une relation EXPLICITE existe entre deux concepts dans le texte fo
         normalized = re.sub(r'\s+', ' ', normalized)
         normalized = re.sub(r'[^\w\s]', '', normalized)
         return normalized.strip()
+
+    def _quote_mentions_concepts(
+        self,
+        quote: str,
+        candidate: "RelationCandidate"
+    ) -> bool:
+        """
+        Vérifie que la quote mentionne au moins un des concepts.
+
+        Évite les hallucinations où le LLM cite un passage réel
+        mais sans rapport avec les concepts demandés.
+
+        Args:
+            quote: Citation extraite par le LLM
+            candidate: Candidat avec les noms des concepts
+
+        Returns:
+            True si au moins un concept est mentionné dans la quote
+        """
+        quote_lower = quote.lower()
+
+        # Extraire les mots-clés significatifs de chaque concept
+        subject_keywords = self._extract_concept_keywords(candidate.subject_name)
+        object_keywords = self._extract_concept_keywords(candidate.object_name)
+
+        # Vérifier si au moins un mot-clé de chaque concept est présent
+        subject_found = any(kw in quote_lower for kw in subject_keywords)
+        object_found = any(kw in quote_lower for kw in object_keywords)
+
+        # On exige qu'AU MOINS UN des deux concepts soit mentionné
+        # (idéalement les deux, mais on tolère un seul pour éviter faux négatifs)
+        return subject_found or object_found
+
+    def _extract_concept_keywords(self, concept_name: str) -> list:
+        """
+        Extrait les mots-clés significatifs d'un nom de concept.
+
+        Ex: "Software Update Manager (SUM)" → ["software", "update", "manager", "sum"]
+        Ex: "SAP S/4HANA" → ["sap", "s4hana", "s/4hana"]
+
+        Args:
+            concept_name: Nom du concept
+
+        Returns:
+            Liste de mots-clés en lowercase
+        """
+        if not concept_name:
+            return []
+
+        # Mots à ignorer (stop words techniques)
+        stop_words = {
+            "the", "a", "an", "and", "or", "for", "of", "in", "to", "with",
+            "sap", "system", "management", "service", "services"
+        }
+
+        # Normaliser et extraire les mots
+        name_lower = concept_name.lower()
+
+        # Extraire acronymes entre parenthèses : "Software Update Manager (SUM)" → "sum"
+        acronyms = re.findall(r'\(([^)]+)\)', name_lower)
+
+        # Supprimer parenthèses et normaliser
+        name_clean = re.sub(r'\([^)]*\)', '', name_lower)
+        name_clean = re.sub(r'[^\w\s/]', ' ', name_clean)
+
+        # Extraire tous les mots
+        words = name_clean.split()
+
+        # Filtrer les stop words et mots trop courts
+        keywords = [w for w in words if w not in stop_words and len(w) > 2]
+
+        # Ajouter les acronymes
+        keywords.extend(acronyms)
+
+        # Ajouter variantes pour les noms composés (S/4HANA → s4hana)
+        for word in list(keywords):
+            if '/' in word:
+                keywords.append(word.replace('/', ''))
+
+        return keywords
 
 
 class Pass3SemanticWriter:

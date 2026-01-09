@@ -306,6 +306,22 @@ class ProtoConcept(BaseModel):
         le=1.0,
         description="Confiance LLM sur l'extraction (0.0-1.0)"
     )
+    # === Anchor Status Diagnostics (2026-01) ===
+    # Classification des concepts selon le résultat du fuzzy matching
+    anchor_status: str = Field(
+        default="SPAN",
+        description="Statut d'ancrage: SPAN (succès), FUZZY_FAILED (score < seuil), NO_MATCH, EMPTY_QUOTE"
+    )
+    fuzzy_best_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+        description="Meilleur score fuzzy obtenu (0-100). Utile pour diagnostic FUZZY_FAILED."
+    )
+    anchor_failure_reason: Optional[str] = Field(
+        None,
+        description="Raison de l'échec d'ancrage: score_below_70, no_match_found, empty_quote, etc."
+    )
     # === PR2: Aggregated Context ===
     context: Optional[ProtoConceptContext] = Field(
         None,

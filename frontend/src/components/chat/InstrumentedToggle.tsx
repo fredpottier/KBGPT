@@ -12,8 +12,8 @@ import {
   Box,
   Tooltip,
   Icon,
-  keyframes,
 } from '@chakra-ui/react'
+import { keyframes } from '@emotion/react'
 import { FiEye, FiEyeOff } from 'react-icons/fi'
 import type { InstrumentationMode } from '@/types/instrumented'
 

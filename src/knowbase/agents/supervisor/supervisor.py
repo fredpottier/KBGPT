@@ -523,10 +523,10 @@ class SupervisorAgent(BaseAgent):
                     RawAssertionWriter,
                     UnresolvedMentionWriter,
                 )
-                from knowbase.common.llm_router import LLMRouter
+                from knowbase.common.llm_router import get_llm_router
 
                 self.llm_relation_extractor = LLMRelationExtractor(
-                    llm_router=LLMRouter(),
+                    llm_router=get_llm_router(),
                     model="gpt-4o-mini",
                     use_id_first=True
                 )

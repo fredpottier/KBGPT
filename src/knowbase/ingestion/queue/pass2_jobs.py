@@ -110,6 +110,7 @@ class Pass2JobState:
     tenant_id: str
     status: Pass2JobStatus
     document_id: Optional[str] = None
+    skip_promotion: bool = False  # Pass 2.0: ProtoConcepts → CanonicalConcepts
     skip_classify: bool = False
     skip_enrich: bool = False
     skip_consolidate: bool = False
@@ -129,6 +130,7 @@ class Pass2JobState:
             "tenant_id": self.tenant_id,
             "status": self.status.value,
             "document_id": self.document_id,
+            "skip_promotion": self.skip_promotion,
             "skip_classify": self.skip_classify,
             "skip_enrich": self.skip_enrich,
             "skip_consolidate": self.skip_consolidate,
@@ -150,6 +152,7 @@ class Pass2JobState:
             tenant_id=data.get("tenant_id", "default"),
             status=Pass2JobStatus(data.get("status", "pending")),
             document_id=data.get("document_id"),
+            skip_promotion=data.get("skip_promotion", False),
             skip_classify=data.get("skip_classify", False),
             skip_enrich=data.get("skip_enrich", False),
             skip_consolidate=data.get("skip_consolidate", False),
@@ -189,6 +192,7 @@ class Pass2JobManager:
         self,
         tenant_id: str = "default",
         document_id: Optional[str] = None,
+        skip_promotion: bool = False,
         skip_classify: bool = False,
         skip_enrich: bool = False,
         skip_consolidate: bool = False,
@@ -206,6 +210,7 @@ class Pass2JobManager:
             tenant_id=tenant_id,
             status=Pass2JobStatus.PENDING,
             document_id=document_id,
+            skip_promotion=skip_promotion,
             skip_classify=skip_classify,
             skip_enrich=skip_enrich,
             skip_consolidate=skip_consolidate,
@@ -411,7 +416,44 @@ def execute_pass2_full_job(job_id: str):
     try:
         service = Pass2Service(tenant_id=state.tenant_id)
 
-        # Compter concepts à traiter
+        phase_results = {}
+        phase_index = 0
+
+        # Phase 0: CORPUS_PROMOTION (Pass 2.0) - ProtoConcepts → CanonicalConcepts
+        if not state.skip_promotion and not manager.is_cancelled(job_id):
+            manager.update_progress(job_id, current_phase="CORPUS_PROMOTION",
+                                   phase_index=phase_index, message="Promoting ProtoConcepts to CanonicalConcepts...")
+
+            try:
+                from knowbase.consolidation.corpus_promotion import CorpusPromotionEngine
+                promotion_engine = CorpusPromotionEngine(tenant_id=state.tenant_id)
+                promotion_result = asyncio.run(promotion_engine.promote_corpus())
+
+                phase_results["corpus_promotion"] = {
+                    "success": True,
+                    "proto_count": promotion_result.proto_concepts_processed,
+                    "promoted_count": promotion_result.canonical_concepts_created,
+                    "skipped_count": promotion_result.skipped_count,
+                    "merged_count": promotion_result.merged_count,
+                    "singleton_count": promotion_result.singleton_count,
+                    "documents_processed": promotion_result.documents_processed,
+                    "execution_time_ms": promotion_result.execution_time_ms
+                }
+                manager.set_phase_result(job_id, "corpus_promotion", phase_results["corpus_promotion"])
+                manager.update_progress(job_id,
+                    message=f"Promotion: {promotion_result.canonical_concepts_created} promoted, "
+                           f"{promotion_result.merged_count} merged, {promotion_result.documents_processed} docs")
+                logger.info(f"[Pass2Worker] CORPUS_PROMOTION complete: {promotion_result.to_dict()}")
+            except Exception as e:
+                logger.error(f"[Pass2Worker] CORPUS_PROMOTION failed: {e}", exc_info=True)
+                phase_results["corpus_promotion"] = {
+                    "success": False,
+                    "error": str(e)
+                }
+                manager.set_phase_result(job_id, "corpus_promotion", phase_results["corpus_promotion"])
+            phase_index += 1
+
+        # Compter concepts à traiter (après promotion pour avoir les CanonicalConcepts)
         total_concepts = 0
         if not state.skip_classify:
             count_query = """
@@ -425,10 +467,7 @@ def execute_pass2_full_job(job_id: str):
             manager.update_progress(job_id, items_total=total_concepts,
                                    message=f"Found {total_concepts} concepts to classify")
 
-        phase_results = {}
-        phase_index = 0
-
-        # Phase 0: STRUCTURAL_TOPICS (Pass 2a) - Extraction Topics et COVERS
+        # Phase 1: STRUCTURAL_TOPICS (Pass 2a) - Extraction Topics et COVERS
         if not manager.is_cancelled(job_id):
             manager.update_progress(job_id, current_phase="STRUCTURAL_TOPICS",
                                    phase_index=phase_index, message="Extracting document sections...")
@@ -455,8 +494,24 @@ def execute_pass2_full_job(job_id: str):
 
         # Phase 1: CLASSIFY_FINE - Skip si aucun concept à classifier
         if not state.skip_classify and total_concepts > 0 and not manager.is_cancelled(job_id):
+            # Compter les concepts à classifier pour cette phase
+            classify_count_query = """
+            MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+            WHERE c.type_fine IS NULL OR c.type_fine = ''
+                  OR c.type_fine_justification = 'Fallback to heuristic type'
+            RETURN count(c) AS count
+            """
+            classify_result = service._execute_query(classify_count_query, {"tenant_id": state.tenant_id})
+            concepts_to_classify = classify_result[0]["count"] if classify_result else 0
+            total_classify_batches = max(1, (concepts_to_classify + state.batch_size - 1) // state.batch_size)
+
             manager.update_progress(job_id, current_phase="CLASSIFY_FINE",
-                                   phase_index=phase_index, message="Starting classification...")
+                                   phase_index=phase_index,
+                                   items_total=concepts_to_classify,
+                                   items_processed=0,
+                                   iteration=0,
+                                   total_iterations=total_classify_batches,
+                                   message=f"Starting classification of {concepts_to_classify} concepts...")
 
             result = asyncio.run(_run_classify_with_progress(
                 service, job_id, manager, state
@@ -619,13 +674,17 @@ async def _run_classify_with_progress(
             if document_id:
                 where_clause += " AND c.source_doc_id = $doc_id"
 
+            # Récupérer les concepts à classifier
+            # unified_definition et type_coarse sont stockés sur le CanonicalConcept depuis la promotion
             query = f"""
             MATCH (c:CanonicalConcept)
             {where_clause}
             AND (c.type_fine IS NULL OR c.type_fine = ''
                  OR c.type_fine_justification = 'Fallback to heuristic type')
-            RETURN c.canonical_id AS id, c.canonical_name AS label,
-                   c.type_fine AS type_heuristic, c.unified_definition AS definition
+            RETURN c.canonical_id AS id,
+                   c.label AS label,
+                   coalesce(c.type_coarse, 'abstract') AS type_heuristic,
+                   coalesce(c.unified_definition, '') AS definition
             LIMIT $limit
             """
 
@@ -710,6 +769,7 @@ async def _run_classify_with_progress(
 def enqueue_pass2_full_job(
     tenant_id: str = "default",
     document_id: Optional[str] = None,
+    skip_promotion: bool = False,
     skip_classify: bool = False,
     skip_enrich: bool = False,
     skip_consolidate: bool = False,
@@ -724,6 +784,7 @@ def enqueue_pass2_full_job(
     Args:
         tenant_id: ID du tenant
         document_id: Optionnel - filtrer par document
+        skip_promotion: Ignorer la promotion ProtoConcepts → CanonicalConcepts
         skip_classify: Ignorer la classification
         skip_enrich: Ignorer l'enrichissement relations
         skip_consolidate: Ignorer la consolidation
@@ -740,6 +801,7 @@ def enqueue_pass2_full_job(
     state = manager.create_job(
         tenant_id=tenant_id,
         document_id=document_id,
+        skip_promotion=skip_promotion,
         skip_classify=skip_classify,
         skip_enrich=skip_enrich,
         skip_consolidate=skip_consolidate,

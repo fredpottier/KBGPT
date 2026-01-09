@@ -15,7 +15,8 @@ Date: 2024-12
 
 import logging
 from typing import Optional, Tuple, List, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 
 from rapidfuzz import fuzz, process
 
@@ -28,6 +29,40 @@ from knowbase.api.schemas.concepts import (
 from knowbase.config.feature_flags import get_hybrid_anchor_config
 
 logger = logging.getLogger(__name__)
+
+
+class AnchorStatus(str, Enum):
+    """Statut de l'ancrage d'un concept.
+
+    SPAN: Ancrage réussi avec position textuelle précise
+    FUZZY_FAILED: Quote LLM non matchée (score < seuil)
+    NO_MATCH: Aucune correspondance trouvée dans le texte
+    EMPTY_QUOTE: Quote vide ou texte source vide
+    """
+    SPAN = "SPAN"
+    FUZZY_FAILED = "FUZZY_FAILED"
+    NO_MATCH = "NO_MATCH"
+    EMPTY_QUOTE = "EMPTY_QUOTE"
+
+
+@dataclass
+class AnchorResolutionResult:
+    """Résultat complet de la résolution d'anchor avec diagnostics.
+
+    Permet de tracer pourquoi un concept n'a pas été ancré,
+    même en cas d'échec du fuzzy matching.
+    """
+    anchor: Optional[Anchor]
+    anchor_status: AnchorStatus
+    fuzzy_best_score: float = 0.0
+    failure_reason: Optional[str] = None
+    llm_quote: str = ""
+    reject_threshold: float = 70.0
+
+    @property
+    def success(self) -> bool:
+        """True si l'ancrage a réussi."""
+        return self.anchor is not None and self.anchor_status == AnchorStatus.SPAN
 
 
 @dataclass
@@ -127,6 +162,122 @@ def create_anchor_with_fuzzy_match(
     )
 
     return anchor
+
+
+def resolve_anchor_with_diagnostics(
+    concept_id: str,
+    chunk_id: str,
+    llm_quote: str,
+    source_text: str,
+    role: str = "context",
+    section_id: Optional[str] = None,
+    tenant_id: str = "default"
+) -> AnchorResolutionResult:
+    """
+    Résout un anchor avec diagnostics complets.
+
+    Contrairement à create_anchor_with_fuzzy_match qui retourne None en cas
+    d'échec, cette fonction retourne toujours un AnchorResolutionResult
+    avec les informations de diagnostic (score, raison d'échec).
+
+    Utilisé pour classifier les concepts en SPAN vs FUZZY_FAILED.
+
+    Args:
+        concept_id: ID du concept
+        chunk_id: ID du chunk contenant le texte
+        llm_quote: Quote fournie par le LLM
+        source_text: Texte source où chercher la quote
+        role: Rôle sémantique de l'anchor
+        section_id: ID de la section (optionnel)
+        tenant_id: ID tenant pour configuration
+
+    Returns:
+        AnchorResolutionResult avec anchor (si succès) et diagnostics
+    """
+    # Cas 1: Quote ou source vide
+    if not llm_quote or not source_text:
+        logger.debug(
+            f"[OSMOSE:ANCHOR_DIAG] Empty quote or source for concept {concept_id}"
+        )
+        return AnchorResolutionResult(
+            anchor=None,
+            anchor_status=AnchorStatus.EMPTY_QUOTE,
+            fuzzy_best_score=0.0,
+            failure_reason="empty_quote" if not llm_quote else "empty_source",
+            llm_quote=llm_quote or ""
+        )
+
+    # Charger configuration
+    anchor_config = get_hybrid_anchor_config("anchor_config", tenant_id) or {}
+    min_fuzzy_score = anchor_config.get("min_fuzzy_score", 85)
+    reject_below_score = anchor_config.get("reject_below_score", 70)
+
+    # Fuzzy match
+    match_result = _find_best_match(llm_quote, source_text)
+
+    # Cas 2: Aucun match trouvé
+    if match_result is None:
+        logger.debug(
+            f"[OSMOSE:ANCHOR_DIAG] No match found for concept {concept_id}, "
+            f"quote='{llm_quote[:50]}...'"
+        )
+        return AnchorResolutionResult(
+            anchor=None,
+            anchor_status=AnchorStatus.NO_MATCH,
+            fuzzy_best_score=0.0,
+            failure_reason="no_match_found",
+            llm_quote=llm_quote,
+            reject_threshold=reject_below_score
+        )
+
+    # Cas 3: Score insuffisant (FUZZY_FAILED)
+    if match_result.score < reject_below_score:
+        logger.debug(
+            f"[OSMOSE:ANCHOR_DIAG] FUZZY_FAILED for concept {concept_id}: "
+            f"score={match_result.score:.1f}% < threshold={reject_below_score}%"
+        )
+        return AnchorResolutionResult(
+            anchor=None,
+            anchor_status=AnchorStatus.FUZZY_FAILED,
+            fuzzy_best_score=match_result.score,
+            failure_reason=f"score_below_{int(reject_below_score)}",
+            llm_quote=llm_quote,
+            reject_threshold=reject_below_score
+        )
+
+    # Cas 4: Succès - créer l'anchor
+    approximate = match_result.score < min_fuzzy_score
+
+    try:
+        anchor_role = AnchorRole(role.lower())
+    except ValueError:
+        anchor_role = AnchorRole.CONTEXT
+
+    anchor = Anchor(
+        concept_id=concept_id,
+        chunk_id=chunk_id,
+        quote=match_result.matched_text,
+        role=anchor_role,
+        confidence=match_result.score / 100.0,
+        char_start=match_result.start,
+        char_end=match_result.end,
+        approximate=approximate,
+        section_id=section_id
+    )
+
+    logger.debug(
+        f"[OSMOSE:ANCHOR_DIAG] SPAN success for {concept_id}: "
+        f"score={match_result.score:.1f}%, approximate={approximate}"
+    )
+
+    return AnchorResolutionResult(
+        anchor=anchor,
+        anchor_status=AnchorStatus.SPAN,
+        fuzzy_best_score=match_result.score,
+        failure_reason=None,
+        llm_quote=llm_quote,
+        reject_threshold=reject_below_score
+    )
 
 
 def _find_best_match(

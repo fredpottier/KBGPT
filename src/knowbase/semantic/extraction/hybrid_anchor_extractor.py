@@ -25,8 +25,11 @@ from dataclasses import dataclass, field
 from knowbase.common.llm_router import get_llm_router, TaskType
 from knowbase.semantic.anchor_resolver import (
     create_anchor_with_fuzzy_match,
+    resolve_anchor_with_diagnostics,
     batch_resolve_anchors,
     check_high_signal,
+    AnchorStatus,
+    AnchorResolutionResult,
 )
 from knowbase.api.schemas.concepts import (
     Anchor,
@@ -141,12 +144,16 @@ class HybridAnchorExtractor:
             )
             return result
 
-        # Phase B: ANCHOR_RESOLUTION
+        # Phase B: ANCHOR_RESOLUTION avec diagnostics
         logger.info(
             f"[OSMOSE:ANCHOR_RESOLUTION] Resolving {len(concepts_raw)} concepts"
         )
 
+        # 2026-01: Compteurs par anchor_status (inclut NO_QUOTE pour concepts sans quote exacte)
+        status_counts = {"SPAN": 0, "FUZZY_FAILED": 0, "NO_MATCH": 0, "EMPTY_QUOTE": 0, "NO_QUOTE": 0}
+
         for concept_data in concepts_raw:
+            # 2026-01: Retourne toujours un ProtoConcept (jamais None)
             proto_concept = self._resolve_anchor_and_create_proto(
                 concept_data=concept_data,
                 segment_text=segment_text,
@@ -156,21 +163,31 @@ class HybridAnchorExtractor:
                 char_offset=char_offset
             )
 
-            if proto_concept:
-                result.proto_concepts.append(proto_concept)
-            else:
+            result.proto_concepts.append(proto_concept)
+            status_counts[proto_concept.anchor_status] = status_counts.get(
+                proto_concept.anchor_status, 0
+            ) + 1
+
+            # 2026-01: Tracker les FUZZY_FAILED dans rejected_concepts pour rétrocompatibilité
+            if proto_concept.anchor_status != "SPAN":
                 result.rejected_concepts.append({
                     **concept_data,
-                    "rejection_reason": "Anchor resolution failed"
+                    "rejection_reason": f"{proto_concept.anchor_status}: {proto_concept.anchor_failure_reason}",
+                    "fuzzy_best_score": proto_concept.fuzzy_best_score
                 })
 
-        # Stats finales
+        # Stats finales avec breakdown par statut
         result.stats["proto_concepts_created"] = len(result.proto_concepts)
-        result.stats["concepts_rejected"] = len(result.rejected_concepts)
+        result.stats["anchor_status_breakdown"] = status_counts
+        result.stats["span_count"] = status_counts.get("SPAN", 0)
+        result.stats["fuzzy_failed_count"] = status_counts.get("FUZZY_FAILED", 0)
 
         logger.info(
             f"[OSMOSE:ANCHOR_RESOLUTION] {segment_id}: "
-            f"{len(result.proto_concepts)} valid, {len(result.rejected_concepts)} rejected"
+            f"SPAN={status_counts.get('SPAN', 0)}, "
+            f"FUZZY_FAILED={status_counts.get('FUZZY_FAILED', 0)}, "
+            f"NO_MATCH={status_counts.get('NO_MATCH', 0)}, "
+            f"NO_QUOTE={status_counts.get('NO_QUOTE', 0)}"
         )
 
         return result
@@ -237,34 +254,55 @@ class HybridAnchorExtractor:
             # Valider structure minimale
             valid_concepts = []
             for c in concepts:
-                if all(k in c for k in ["label", "quote"]):
-                    # QW-2: Parse confidence (default 0.5 si absent)
-                    confidence = c.get("confidence", 0.5)
-                    if isinstance(confidence, (int, float)):
-                        confidence = max(0.0, min(1.0, float(confidence)))
-                    else:
-                        confidence = 0.5
-
-                    # QW-2: Filtrer concepts à faible confiance
-                    if confidence < 0.4:
-                        logger.debug(
-                            f"[OSMOSE:EXTRACT_CONCEPTS] Skipping low-confidence concept: "
-                            f"'{c['label']}' (confidence={confidence:.2f})"
-                        )
-                        continue
-
-                    valid_concepts.append({
-                        "label": c["label"],
-                        "definition": c.get("definition", ""),
-                        "quote": c["quote"],
-                        "role": c.get("role", "context"),
-                        "type_heuristic": c.get("type_heuristic", "abstract"),
-                        "extract_confidence": confidence  # QW-2
-                    })
-                else:
+                # 2026-01: "label" est requis, "quote" peut être vide si no_quote=true
+                if "label" not in c:
                     logger.debug(
-                        f"[OSMOSE:EXTRACT_CONCEPTS] Skipping invalid concept: {c}"
+                        f"[OSMOSE:EXTRACT_CONCEPTS] Skipping concept without label: {c}"
                     )
+                    continue
+
+                # QW-2: Parse confidence (default 0.5 si absent)
+                confidence = c.get("confidence", 0.5)
+                if isinstance(confidence, (int, float)):
+                    confidence = max(0.0, min(1.0, float(confidence)))
+                else:
+                    confidence = 0.5
+
+                # QW-2: Filtrer concepts à faible confiance
+                if confidence < 0.4:
+                    logger.debug(
+                        f"[OSMOSE:EXTRACT_CONCEPTS] Skipping low-confidence concept: "
+                        f"'{c['label']}' (confidence={confidence:.2f})"
+                    )
+                    continue
+
+                # 2026-01: Gérer no_quote flag (LLM signale absence de quote exacte)
+                no_quote = c.get("no_quote", False)
+                quote = c.get("quote", "")
+
+                # Si no_quote=true, la quote doit être vide
+                if no_quote and quote:
+                    logger.debug(
+                        f"[OSMOSE:EXTRACT_CONCEPTS] Inconsistent: no_quote=true but quote provided "
+                        f"for '{c['label']}', treating as quoted"
+                    )
+                    no_quote = False
+
+                # Si quote vide sans no_quote explicite, marquer comme no_quote
+                if not quote and not no_quote:
+                    no_quote = True
+
+                valid_concepts.append({
+                    "label": c["label"],
+                    "definition": c.get("definition", ""),
+                    "quote": quote,
+                    "role": c.get("role", "context"),
+                    "type_heuristic": c.get("type_heuristic", "abstract"),
+                    "extract_confidence": confidence,
+                    # 2026-01: Nouveaux champs pour diagnostic
+                    "no_quote": no_quote,
+                    "no_quote_reason": c.get("no_quote_reason", "") if no_quote else ""
+                })
 
             return valid_concepts
 
@@ -280,11 +318,13 @@ class HybridAnchorExtractor:
         document_id: str,
         section_id: Optional[str] = None,
         char_offset: int = 0
-    ) -> Optional[ProtoConcept]:
+    ) -> ProtoConcept:
         """
         Résout l'anchor et crée un ProtoConcept.
 
-        Invariant: Retourne None si anchor non trouvé (concept rejeté).
+        CHANGEMENT 2026-01: Crée TOUJOURS un ProtoConcept, même si l'anchor
+        échoue. Le statut d'ancrage (anchor_status) permet de classifier
+        les concepts en SPAN vs FUZZY_FAILED pour diagnostic et amélioration.
 
         Args:
             concept_data: Données du concept extrait
@@ -293,16 +333,39 @@ class HybridAnchorExtractor:
             document_id: ID du document
             section_id: ID de la section
             char_offset: Offset du segment dans le document complet
-                         (2024-12-30: Fix mapping anchors → chunks)
 
         Returns:
-            ProtoConcept ou None si anchor invalide
+            ProtoConcept (toujours, avec anchor_status approprié)
         """
         # Créer ID unique
         proto_id = f"pc_{uuid.uuid4().hex[:12]}"
 
-        # Résoudre anchor via fuzzy matching
-        anchor = create_anchor_with_fuzzy_match(
+        # 2026-01: Gérer le cas no_quote (LLM a signalé absence de quote exacte)
+        if concept_data.get("no_quote", False):
+            no_quote_reason = concept_data.get("no_quote_reason", "LLM indicated no exact quote available")
+            logger.debug(
+                f"[OSMOSE:ANCHOR_DIAG] NO_QUOTE '{concept_data['label']}': "
+                f"reason={no_quote_reason}"
+            )
+            # Créer ProtoConcept sans anchor, statut explicite
+            return ProtoConcept(
+                id=proto_id,
+                label=concept_data["label"],
+                definition=concept_data.get("definition", ""),
+                type_heuristic=concept_data.get("type_heuristic", "abstract"),
+                document_id=document_id,
+                section_id=section_id,
+                embedding=None,
+                anchors=[],
+                tenant_id=self.tenant_id,
+                extract_confidence=concept_data.get("extract_confidence", 0.5),
+                anchor_status="NO_QUOTE",
+                fuzzy_best_score=0.0,
+                anchor_failure_reason=no_quote_reason
+            )
+
+        # Résoudre anchor via fuzzy matching avec diagnostics complets
+        resolution = resolve_anchor_with_diagnostics(
             concept_id=proto_id,
             chunk_id=segment_id,  # Sera remappé vers chunk réel plus tard
             llm_quote=concept_data["quote"],
@@ -312,21 +375,30 @@ class HybridAnchorExtractor:
             tenant_id=self.tenant_id
         )
 
-        # Invariant d'Architecture: pas d'anchor = pas de concept
-        if anchor is None:
+        # Préparer anchors list et ajuster positions si succès
+        anchors = []
+        if resolution.anchor is not None:
+            anchor = resolution.anchor
+            # Ajuster positions pour être globales au document
+            if char_offset > 0:
+                anchor.char_start += char_offset
+                anchor.char_end += char_offset
+            anchors = [anchor]
+
+        # Log selon le statut
+        if resolution.anchor_status == AnchorStatus.SPAN:
             logger.debug(
-                f"[OSMOSE:ANCHOR_RESOLUTION] Rejected concept '{concept_data['label']}': "
-                "no valid anchor"
+                f"[OSMOSE:ANCHOR_DIAG] SPAN '{concept_data['label']}': "
+                f"score={resolution.fuzzy_best_score:.1f}%"
             )
-            return None
+        else:
+            logger.debug(
+                f"[OSMOSE:ANCHOR_DIAG] {resolution.anchor_status.value} "
+                f"'{concept_data['label']}': score={resolution.fuzzy_best_score:.1f}%, "
+                f"reason={resolution.failure_reason}"
+            )
 
-        # 2024-12-30: Ajuster positions de l'anchor pour être globales au document
-        # Les positions retournées par create_anchor_with_fuzzy_match sont relatives au segment
-        if char_offset > 0:
-            anchor.char_start += char_offset
-            anchor.char_end += char_offset
-
-        # Créer ProtoConcept
+        # Créer ProtoConcept avec diagnostics d'ancrage
         proto_concept = ProtoConcept(
             id=proto_id,
             label=concept_data["label"],
@@ -335,10 +407,14 @@ class HybridAnchorExtractor:
             document_id=document_id,
             section_id=section_id,
             embedding=None,  # Calculé après en batch
-            anchors=[anchor],
+            anchors=anchors,
             tenant_id=self.tenant_id,
             # QW-2: Confidence score from LLM
-            extract_confidence=concept_data.get("extract_confidence", 0.5)
+            extract_confidence=concept_data.get("extract_confidence", 0.5),
+            # 2026-01: Anchor diagnostics
+            anchor_status=resolution.anchor_status.value,
+            fuzzy_best_score=resolution.fuzzy_best_score,
+            anchor_failure_reason=resolution.failure_reason
         )
 
         return proto_concept

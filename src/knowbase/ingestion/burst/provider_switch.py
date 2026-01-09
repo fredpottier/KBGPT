@@ -5,16 +5,105 @@ Ce module coordonne l'activation/désactivation du mode Burst pour tous les prov
 - LLMRouter : bascule vers vLLM sur EC2 Spot
 - EmbeddingManager : bascule vers TEI sur EC2 Spot
 
+IMPORTANT: L'état du burst est stocké dans Redis pour être partagé entre tous les
+processus (app, worker, etc.). La clé Redis `osmose:burst:state` contient l'URL vLLM
+active, permettant à tous les processus de router vers vLLM automatiquement.
+
 Utilisé par le BurstOrchestrator quand l'instance EC2 est prête.
 
 Author: OSMOSE Burst Ingestion
 Date: 2025-12
 """
 
+import json
 import logging
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+# === Clés Redis pour l'état du burst (partagé entre tous les processus) ===
+REDIS_BURST_STATE_KEY = "osmose:burst:state"
+
+
+def _get_redis_client():
+    """Récupère le client Redis."""
+    try:
+        from knowbase.common.clients.redis_client import get_redis_client
+        return get_redis_client()
+    except Exception as e:
+        logger.warning(f"[BURST:REDIS] Cannot get Redis client: {e}")
+        return None
+
+
+def set_burst_state_in_redis(vllm_url: str, vllm_model: str, embeddings_url: str) -> bool:
+    """
+    Stocke l'état du burst dans Redis pour partage inter-processus.
+
+    Cette fonction est appelée quand le burst est activé, permettant à tous les
+    processus (worker, app, etc.) de savoir que vLLM est disponible.
+    """
+    redis = _get_redis_client()
+    if not redis:
+        return False
+
+    try:
+        state = {
+            "active": True,
+            "vllm_url": vllm_url,
+            "vllm_model": vllm_model,
+            "embeddings_url": embeddings_url
+        }
+        # RedisClient wraps the redis client, access via .client
+        redis.client.set(REDIS_BURST_STATE_KEY, json.dumps(state))
+        logger.info(f"[BURST:REDIS] State saved: vLLM={vllm_url}, model={vllm_model}")
+        return True
+    except Exception as e:
+        logger.error(f"[BURST:REDIS] Failed to save state: {e}")
+        return False
+
+
+def clear_burst_state_in_redis() -> bool:
+    """
+    Supprime l'état du burst dans Redis (désactivation).
+    """
+    redis = _get_redis_client()
+    if not redis:
+        return False
+
+    try:
+        # RedisClient wraps the redis client, access via .client
+        redis.client.delete(REDIS_BURST_STATE_KEY)
+        logger.info("[BURST:REDIS] State cleared (burst deactivated)")
+        return True
+    except Exception as e:
+        logger.error(f"[BURST:REDIS] Failed to clear state: {e}")
+        return False
+
+
+def get_burst_state_from_redis() -> Optional[Dict[str, Any]]:
+    """
+    Récupère l'état du burst depuis Redis.
+
+    Utilisé par LLMRouter pour vérifier si vLLM est actif.
+
+    Returns:
+        Dict avec vllm_url, vllm_model, embeddings_url si actif, None sinon
+    """
+    redis = _get_redis_client()
+    if not redis:
+        return None
+
+    try:
+        # RedisClient wraps the redis client, access via .client
+        data = redis.client.get(REDIS_BURST_STATE_KEY)
+        if data:
+            state = json.loads(data)
+            if state.get("active"):
+                return state
+        return None
+    except Exception as e:
+        logger.debug(f"[BURST:REDIS] Failed to get state: {e}")
+        return None
 
 
 def _convert_to_vllm_model_name(model_name: Optional[str]) -> str:
@@ -107,6 +196,14 @@ def activate_burst_providers(
 
     if result["llm_router"] and result["embedding_manager"]:
         logger.info("[BURST:SWITCH] ✅ All providers switched to EC2 Spot")
+        # Stocker l'état dans Redis pour partage inter-processus
+        vllm_model_name = _convert_to_vllm_model_name(vllm_model)
+        redis_saved = set_burst_state_in_redis(vllm_url, vllm_model_name, embeddings_url)
+        result["redis_state"] = redis_saved
+        if redis_saved:
+            logger.info("[BURST:SWITCH] ✅ State saved to Redis (inter-process)")
+        else:
+            logger.warning("[BURST:SWITCH] ⚠️ Failed to save state to Redis")
     else:
         logger.warning(f"[BURST:SWITCH] ⚠️ Partial activation: {result}")
 
@@ -163,6 +260,12 @@ def deactivate_burst_providers() -> Dict[str, Any]:
     except Exception as e:
         result["errors"].append(f"EmbeddingManager: {e}")
         logger.error(f"[BURST:SWITCH] Failed to disable EmbeddingManager burst: {e}")
+
+    # Effacer l'état dans Redis (inter-processus)
+    redis_cleared = clear_burst_state_in_redis()
+    result["redis_state_cleared"] = redis_cleared
+    if redis_cleared:
+        logger.info("[BURST:SWITCH] ✅ Redis state cleared (inter-process)")
 
     if result["llm_router"] and result["embedding_manager"]:
         logger.info("[BURST:SWITCH] ✅ All providers switched back to normal")

@@ -25,9 +25,10 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from datetime import datetime
 
-from knowbase.common.clients.neo4j_client import get_neo4j_client
+from knowbase.common.clients.neo4j_client import Neo4jClient
 from knowbase.api.schemas.concepts import ConceptStability
 from knowbase.config.feature_flags import get_hybrid_anchor_config
+from knowbase.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,30 @@ class CorpusPromotionStats:
         return self.promoted_stable + self.promoted_singleton
 
 
+@dataclass
+class CorpusPromotionResult:
+    """Résultat de promotion corpus-level (tous les documents)."""
+
+    proto_concepts_processed: int = 0
+    canonical_concepts_created: int = 0
+    merged_count: int = 0  # Cross-doc merges
+    singleton_count: int = 0
+    skipped_count: int = 0
+    documents_processed: int = 0
+    execution_time_ms: float = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "proto_count": self.proto_concepts_processed,
+            "promoted_count": self.canonical_concepts_created,
+            "merged_count": self.merged_count,
+            "singleton_count": self.singleton_count,
+            "skipped_count": self.skipped_count,
+            "documents_processed": self.documents_processed,
+            "execution_time_ms": self.execution_time_ms,
+        }
+
+
 # =============================================================================
 # High-Signal V2 Check (avec signaux structurels)
 # =============================================================================
@@ -133,15 +158,19 @@ def check_high_signal_v2(
     # === 1. NORMATIF (au moins un) ===
     is_normative = False
 
-    # Check rôle anchor
-    anchor_role = proto.get("anchor_role", "").lower()
+    # Check rôles anchor (peut être une liste)
+    anchor_roles = proto.get("anchor_roles") or []
+    if isinstance(anchor_roles, str):
+        anchor_roles = [anchor_roles]
     normative_roles = {"definition", "constraint", "requirement", "prohibition", "obligation"}
-    if anchor_role in normative_roles:
-        is_normative = True
-        reasons.append(f"normative_role:{anchor_role}")
+    for role in anchor_roles:
+        if role and role.lower() in normative_roles:
+            is_normative = True
+            reasons.append(f"normative_role:{role}")
+            break
 
     # Check modaux dans quote
-    quote = proto.get("quote", "").lower()
+    quote = (proto.get("quote") or "").lower()
     normative_modals = ["shall", "must", "required", "shall not", "must not", "prohibited"]
     for modal in normative_modals:
         if modal in quote:
@@ -153,9 +182,9 @@ def check_high_signal_v2(
         return False, []
 
     # === 2. NON-TEMPLATE (tous) ===
-    template_likelihood = proto.get("template_likelihood", 0.0)
-    positional_stability = proto.get("positional_stability", 0.0)
-    dominant_zone = proto.get("dominant_zone", "main").lower()
+    template_likelihood = proto.get("template_likelihood") or 0.0
+    positional_stability = proto.get("positional_stability") or 0.0
+    dominant_zone = (proto.get("dominant_zone") or "main").lower()
     is_repeated_bottom = proto.get("is_repeated_bottom", False)
 
     # Check template
@@ -222,7 +251,14 @@ class CorpusPromotionEngine:
     ):
         self.tenant_id = tenant_id
         self.config = config or self._load_config()
-        self.neo4j_client = get_neo4j_client()
+
+        # Créer client Neo4j avec les settings (comme Pass2Service)
+        settings = get_settings()
+        self.neo4j_client = Neo4jClient(
+            uri=settings.neo4j_uri,
+            user=settings.neo4j_user,
+            password=settings.neo4j_password
+        )
 
         logger.info(
             f"[OSMOSE:CorpusPromotion] Initialized for tenant={tenant_id} "
@@ -263,11 +299,11 @@ class CorpusPromotionEngine:
         WITH p, collect(DISTINCT dc.section_path) AS sections,
              collect(DISTINCT a.role) AS anchor_roles
         RETURN p.concept_id AS proto_id,
-               p.label AS label,
+               p.concept_name AS label,
                p.anchor_status AS anchor_status,
-               p.confidence AS confidence,
-               p.quote AS quote,
-               p.section_path AS section_path,
+               p.extract_confidence AS confidence,
+               p.definition AS quote,
+               p.section_id AS section_path,
                p.template_likelihood AS template_likelihood,
                p.positional_stability AS positional_stability,
                p.dominant_zone AS dominant_zone,
@@ -531,36 +567,42 @@ class CorpusPromotionEngine:
         canonical_id = f"cc_{uuid.uuid4().hex[:12]}"
 
         # Créer le CanonicalConcept
+        # IMPORTANT: Utiliser canonical_id (pas concept_id) pour cohérence avec le reste du code
+        # Stocker unified_definition et type_coarse depuis le meilleur ProtoConcept
         create_query = """
         CREATE (cc:CanonicalConcept {
-            concept_id: $canonical_id,
+            canonical_id: $canonical_id,
             tenant_id: $tenant_id,
             label: $label,
+            unified_definition: $unified_definition,
+            type_coarse: $type_coarse,
             stability: $stability,
             created_at: datetime(),
             promotion_reason: $reason,
             proto_count: $proto_count,
             document_count: $document_count
         })
-        RETURN cc.concept_id AS id
+        RETURN cc.canonical_id AS id
         """
 
         # Lier les ProtoConcepts du document courant
         link_query = """
         MATCH (p:ProtoConcept {tenant_id: $tenant_id})
         WHERE p.concept_id IN $proto_ids
-        MATCH (cc:CanonicalConcept {concept_id: $canonical_id, tenant_id: $tenant_id})
+        MATCH (cc:CanonicalConcept {canonical_id: $canonical_id, tenant_id: $tenant_id})
         CREATE (p)-[:INSTANCE_OF {created_at: datetime()}]->(cc)
         RETURN count(p) AS linked
         """
 
         with self.neo4j_client.driver.session(database="neo4j") as session:
-            # Créer CC
+            # Créer CC avec définition et type du meilleur proto
             session.run(
                 create_query,
                 canonical_id=canonical_id,
                 tenant_id=self.tenant_id,
                 label=best_proto.get("label"),
+                unified_definition=best_proto.get("definition") or best_proto.get("quote") or "",
+                type_coarse=best_proto.get("type_coarse") or "abstract",
                 stability=decision.stability,
                 reason=decision.reason,
                 proto_count=decision.proto_count,
@@ -600,7 +642,7 @@ class CorpusPromotionEngine:
         WHERE toLower(trim(p.label)) = $canonical_label
           AND p.document_id <> $exclude_document_id
           AND NOT (p)-[:INSTANCE_OF]->(:CanonicalConcept)
-        MATCH (cc:CanonicalConcept {concept_id: $canonical_id, tenant_id: $tenant_id})
+        MATCH (cc:CanonicalConcept {canonical_id: $canonical_id, tenant_id: $tenant_id})
         CREATE (p)-[:INSTANCE_OF {created_at: datetime(), linked_by: 'corpus_promotion'}]->(cc)
         RETURN count(p) AS linked
         """
@@ -705,6 +747,82 @@ class CorpusPromotionEngine:
 
         return stats
 
+    async def promote_corpus(self) -> CorpusPromotionResult:
+        """
+        Exécute la promotion Pass 2.0 pour TOUT le corpus.
+
+        Cette méthode:
+        1. Liste tous les documents avec des ProtoConcepts non promus
+        2. Exécute run_promotion() pour chaque document
+        3. Agrège les statistiques
+
+        Returns:
+            CorpusPromotionResult avec statistiques globales
+        """
+        import time
+        start_time = time.time()
+
+        result = CorpusPromotionResult()
+
+        # 1. Lister tous les documents avec ProtoConcepts non promus
+        query = """
+        MATCH (p:ProtoConcept {tenant_id: $tenant_id})
+        WHERE NOT (p)-[:INSTANCE_OF]->(:CanonicalConcept)
+        RETURN DISTINCT p.document_id AS document_id, count(p) AS proto_count
+        ORDER BY proto_count DESC
+        """
+
+        with self.neo4j_client.driver.session(database="neo4j") as session:
+            records = session.run(query, tenant_id=self.tenant_id)
+            documents = [(r["document_id"], r["proto_count"]) for r in records]
+
+        if not documents:
+            logger.info(
+                f"[OSMOSE:CorpusPromotion] No unlinked ProtoConcepts to promote "
+                f"for tenant={self.tenant_id}"
+            )
+            result.execution_time_ms = (time.time() - start_time) * 1000
+            return result
+
+        logger.info(
+            f"[OSMOSE:CorpusPromotion] Starting corpus promotion for "
+            f"{len(documents)} documents with {sum(d[1] for d in documents)} ProtoConcepts"
+        )
+
+        # 2. Traiter chaque document
+        for document_id, proto_count in documents:
+            if not document_id:
+                continue
+
+            try:
+                stats = self.run_promotion(document_id)
+
+                # Agréger les stats
+                result.proto_concepts_processed += stats.protos_loaded
+                result.canonical_concepts_created += stats.total_promoted
+                result.merged_count += stats.crossdoc_promotions
+                result.singleton_count += stats.promoted_singleton
+                result.skipped_count += stats.not_promoted
+                result.documents_processed += 1
+
+            except Exception as e:
+                logger.error(
+                    f"[OSMOSE:CorpusPromotion] Error promoting document {document_id}: {e}",
+                    exc_info=True
+                )
+
+        result.execution_time_ms = (time.time() - start_time) * 1000
+
+        logger.info(
+            f"[OSMOSE:CorpusPromotion] Corpus promotion complete: "
+            f"{result.documents_processed} docs, "
+            f"{result.canonical_concepts_created} concepts created "
+            f"({result.merged_count} merged, {result.singleton_count} singletons), "
+            f"{result.skipped_count} skipped"
+        )
+
+        return result
+
 
 # =============================================================================
 # Factory
@@ -724,6 +842,7 @@ __all__ = [
     "CorpusPromotionConfig",
     "PromotionDecision",
     "CorpusPromotionStats",
+    "CorpusPromotionResult",
     "CorpusPromotionEngine",
     "get_corpus_promotion_engine",
     "check_high_signal_v2",
