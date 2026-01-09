@@ -2,9 +2,16 @@
 OSMOSE Enrichment Orchestrator
 
 ADR 2026-01-07: Nomenclature validée Claude + ChatGPT
+ADR 2026-01-09: Pass 2.0 Corpus Promotion (ADR_UNIFIED_CORPUS_PROMOTION)
 Séparation claire Document-level vs Corpus-level phases.
 
-=== DOCUMENT-LEVEL PHASES (Pass 1-3) ===
+=== PASS 2.0: CORPUS PROMOTION (ADR_UNIFIED_CORPUS_PROMOTION) ===
+DOIT s'exécuter EN PREMIER, avant toute autre phase.
+Crée les CanonicalConcepts à partir des ProtoConcepts.
+
+- Pass 2.0: CORPUS_PROMOTION - Promotion unifiée doc+corpus
+
+=== DOCUMENT-LEVEL PHASES (Pass 2a-3) ===
 Travaillent sur UN document à la fois.
 
 - Pass 2a: STRUCTURAL_TOPICS - Topics H1/H2 + COVERS (scope)
@@ -25,9 +32,10 @@ Modes d'exécution:
 - scheduled: Batch nocturne (corpus stable)
 
 ADR: doc/ongoing/ADR_GRAPH_FIRST_ARCHITECTURE.md
+ADR: doc/ongoing/ADR_UNIFIED_CORPUS_PROMOTION.md
 
 Author: OSMOSE
-Date: 2026-01-07
+Date: 2026-01-07 (updated 2026-01-09)
 """
 
 import logging
@@ -49,6 +57,10 @@ from knowbase.ingestion.enrichment_tracker import (
     get_enrichment_tracker,
     EnrichmentStatus
 )  # ADR 2024-12-30: Enrichment tracking
+from knowbase.consolidation.corpus_promotion import (
+    CorpusPromotionEngine,
+    get_corpus_promotion_engine,
+)  # ADR 2026-01-09: Pass 2.0 Corpus Promotion
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +86,10 @@ class DocumentPhase(str, Enum):
     Chaque phase travaille sur UN document à la fois.
     Les relations créées sont intra-document avec preuves extractives.
     """
+    # Pass 2.0: Corpus Promotion (ADR_UNIFIED_CORPUS_PROMOTION)
+    # DOIT s'exécuter EN PREMIER, avant toute autre phase
+    CORPUS_PROMOTION = "corpus_promotion"    # Promotion unifiée doc+corpus
+
     # Pass 2a: Structure documentaire
     STRUCTURAL_TOPICS = "structural_topics"  # Topics H1/H2 + COVERS (scope)
 
@@ -108,6 +124,7 @@ class Pass2Phase(str, Enum):
     DEPRECATED: Utiliser DocumentPhase ou CorpusPhase.
     Conservé pour compatibilité avec code existant.
     """
+    CORPUS_PROMOTION = "corpus_promotion"  # Pass 2.0 (ADR_UNIFIED_CORPUS_PROMOTION)
     STRUCTURAL_TOPICS = "structural_topics"
     CLASSIFY_FINE = "classify_fine"
     ENRICH_RELATIONS = "enrich_relations"
@@ -123,6 +140,11 @@ class Pass2Stats:
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     mode: Pass2Mode = Pass2Mode.BACKGROUND
+
+    # Pass 2.0: Corpus Promotion (ADR_UNIFIED_CORPUS_PROMOTION)
+    corpus_promotion_stable: int = 0
+    corpus_promotion_singleton: int = 0
+    corpus_promotion_crossdoc: int = 0
 
     # Par phase
     # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 2a
@@ -210,7 +232,9 @@ class Pass2Orchestrator:
         self.default_mode = Pass2Mode(config.get("mode", "background"))
         self.enabled_phases = [
             Pass2Phase(p) for p in config.get("enabled_phases", [
-                # ADR_GRAPH_FIRST_ARCHITECTURE: Pass 2a en premier (Topics/COVERS)
+                # ADR_UNIFIED_CORPUS_PROMOTION: Pass 2.0 EN PREMIER (Promotion unifiée)
+                "corpus_promotion",
+                # ADR_GRAPH_FIRST_ARCHITECTURE: Pass 2a (Topics/COVERS)
                 "structural_topics",
                 # Puis Pass 2b (Classification + Relations existantes)
                 "classify_fine", "enrich_relations",
@@ -244,9 +268,13 @@ class Pass2Orchestrator:
         """
         Planifie l'exécution de Pass 2 pour un document.
 
+        ADR_UNIFIED_CORPUS_PROMOTION: La phase CORPUS_PROMOTION charge les
+        ProtoConcepts directement depuis Neo4j. Le paramètre `concepts` est
+        conservé pour compatibilité mais n'est plus utilisé par cette phase.
+
         Args:
             document_id: ID du document traité en Pass 1
-            concepts: CanonicalConcepts créés en Pass 1
+            concepts: ProtoConcepts pour référence (non utilisé par CORPUS_PROMOTION)
             mode: Mode d'exécution (utilise default si None)
             priority: Priorité du job (0=normal, 1=high)
 
@@ -323,6 +351,15 @@ class Pass2Orchestrator:
         phases_completed = []
 
         try:
+            # =================================================================
+            # Pass 2.0: CORPUS_PROMOTION (ADR_UNIFIED_CORPUS_PROMOTION)
+            # DOIT s'exécuter EN PREMIER, avant toute autre phase
+            # Crée les CanonicalConcepts à partir des ProtoConcepts
+            # =================================================================
+            if Pass2Phase.CORPUS_PROMOTION in job.phases:
+                await self._phase_corpus_promotion(job, stats)
+                phases_completed.append(Pass2Phase.CORPUS_PROMOTION.value)
+
             # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 2a: STRUCTURAL_TOPICS
             # Doit s'exécuter AVANT les autres phases pour créer Topics/COVERS
             if Pass2Phase.STRUCTURAL_TOPICS in job.phases:
@@ -390,12 +427,66 @@ class Pass2Orchestrator:
 
         logger.info(
             f"[OSMOSE:Pass2] Job {job.job_id} completed in {stats.duration_seconds:.1f}s "
-            f"(topics={stats.structural_topics_count}, covers={stats.covers_relations_count}, "
+            f"(promotion_stable={stats.corpus_promotion_stable}, promotion_singleton={stats.corpus_promotion_singleton}, "
+            f"topics={stats.structural_topics_count}, covers={stats.covers_relations_count}, "
             f"classify={stats.classify_fine_count}, relations={stats.enrich_relations_count}, "
             f"pass3_verified={stats.pass3_verified}/{stats.pass3_candidates})"
         )
 
         return stats
+
+    # =========================================================================
+    # Pass 2.0: CORPUS_PROMOTION (ADR_UNIFIED_CORPUS_PROMOTION)
+    # =========================================================================
+
+    async def _phase_corpus_promotion(self, job: Pass2Job, stats: Pass2Stats):
+        """
+        Phase CORPUS_PROMOTION: Promotion unifiée des ProtoConcepts.
+
+        ADR_UNIFIED_CORPUS_PROMOTION - Pass 2.0
+
+        DOIT s'exécuter EN PREMIER, avant toute autre phase.
+        Crée les CanonicalConcepts à partir des ProtoConcepts.
+
+        Règles de promotion:
+        - ≥2 occurrences même document → STABLE
+        - ≥2 sections différentes → STABLE
+        - ≥2 documents + signal minimal → STABLE (cross-doc)
+        - singleton + high-signal V2 → SINGLETON
+        """
+        logger.info(
+            f"[OSMOSE:Pass2.0:CORPUS_PROMOTION] Starting for doc {job.document_id}"
+        )
+
+        try:
+            # Obtenir le moteur de promotion
+            engine = get_corpus_promotion_engine(job.tenant_id)
+
+            # Exécuter la promotion
+            promotion_stats = engine.run_promotion(document_id=job.document_id)
+
+            # Mettre à jour les stats
+            stats.corpus_promotion_stable = promotion_stats.promoted_stable
+            stats.corpus_promotion_singleton = promotion_stats.promoted_singleton
+            stats.corpus_promotion_crossdoc = promotion_stats.crossdoc_promotions
+
+            logger.info(
+                f"[OSMOSE:Pass2.0:CORPUS_PROMOTION] Completed for doc {job.document_id}: "
+                f"stable={promotion_stats.promoted_stable}, "
+                f"singleton={promotion_stats.promoted_singleton}, "
+                f"crossdoc={promotion_stats.crossdoc_promotions}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE:Pass2.0:CORPUS_PROMOTION] Error for doc {job.document_id}: {e}",
+                exc_info=True
+            )
+            stats.errors.append(f"CORPUS_PROMOTION: {str(e)}")
+
+    # =========================================================================
+    # Pass 2a: STRUCTURAL_TOPICS (ADR_GRAPH_FIRST_ARCHITECTURE)
+    # =========================================================================
 
     async def _phase_structural_topics(self, job: Pass2Job, stats: Pass2Stats):
         """

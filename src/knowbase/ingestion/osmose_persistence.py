@@ -40,9 +40,15 @@ async def persist_hybrid_anchor_to_neo4j(
     - DocumentChunk nodes (si chunks fournis)
     - Relations ANCHORED_IN entre concepts et chunks
 
+    ADR_UNIFIED_CORPUS_PROMOTION (2026-01):
+    En Pass 1, canonical_concepts est VIDE (liste vide). Les CanonicalConcepts
+    sont créés en Pass 2.0 par la phase CORPUS_PROMOTION. Cette fonction
+    gère correctement ce cas en créant 0 CanonicalConcepts et 0 relations
+    INSTANCE_OF quand la liste est vide.
+
     Args:
-        proto_concepts: Liste des ProtoConcepts (promus uniquement)
-        canonical_concepts: Liste des CanonicalConcepts
+        proto_concepts: Liste des ProtoConcepts extraits
+        canonical_concepts: Liste des CanonicalConcepts (vide en Pass 1, ADR_UNIFIED_CORPUS_PROMOTION)
         document_id: ID du document
         tenant_id: ID tenant
         chunks: Liste des chunks avec anchored_concepts (optionnel)
@@ -236,10 +242,16 @@ def _create_proto_concepts(
         p.section_id = proto.section_id,
         p.created_at = datetime(),
         p.extraction_method = 'hybrid_anchor',
-        p.extract_confidence = proto.extract_confidence
+        p.extract_confidence = proto.extract_confidence,
+        p.anchor_status = proto.anchor_status,
+        p.fuzzy_best_score = proto.fuzzy_best_score,
+        p.anchor_failure_reason = proto.anchor_failure_reason
     ON MATCH SET
         p.definition = COALESCE(proto.definition, p.definition),
         p.extract_confidence = COALESCE(proto.extract_confidence, p.extract_confidence),
+        p.anchor_status = proto.anchor_status,
+        p.fuzzy_best_score = proto.fuzzy_best_score,
+        p.anchor_failure_reason = proto.anchor_failure_reason,
         p.updated_at = datetime()
     RETURN count(p) AS created
     """
@@ -253,7 +265,11 @@ def _create_proto_concepts(
             "document_id": pc.document_id,
             "section_id": getattr(pc, 'section_id', None),
             # QW-2: Confidence score from LLM
-            "extract_confidence": getattr(pc, 'extract_confidence', 0.5)
+            "extract_confidence": getattr(pc, 'extract_confidence', 0.5),
+            # 2026-01: Anchor diagnostics
+            "anchor_status": getattr(pc, 'anchor_status', 'SPAN'),
+            "fuzzy_best_score": getattr(pc, 'fuzzy_best_score', 0.0),
+            "anchor_failure_reason": getattr(pc, 'anchor_failure_reason', None)
         }
         for pc in proto_concepts
     ]
@@ -451,11 +467,12 @@ def _create_document_chunks(
 
     chunk_data = [
         {
-            "id": c.get("id"),
+            # ADR Dual Chunking: Préférer chunk_id structuré si disponible, sinon fallback sur id (UUID)
+            "id": c.get("chunk_id") or c.get("id"),
             "document_id": c.get("document_id"),
             "document_name": c.get("document_name"),
             "chunk_index": c.get("chunk_index", 0),
-            "chunk_type": c.get("chunk_type", "document_centric"),
+            "chunk_type": c.get("chunk_type", "retrieval"),  # Default to retrieval for new chunks
             "char_start": c.get("char_start", 0),
             "char_end": c.get("char_end", 0),
             "token_count": c.get("token_count", 0),
@@ -510,6 +527,306 @@ def _create_anchored_in_relations(
         result = session.run(anchored_query, relations=anchored_relations, tenant_id=tenant_id)
         record = result.single()
         return record["created"] if record else 0
+
+
+# ============================================================================
+# DUAL CHUNKING - ADR_DUAL_CHUNKING_ARCHITECTURE.md (2026-01)
+# ============================================================================
+
+
+def _create_coverage_chunks(
+    neo4j_client,
+    coverage_chunks: List[Dict[str, Any]],
+    tenant_id: str
+) -> int:
+    """
+    Crée les CoverageChunk nodes dans Neo4j.
+
+    CoverageChunks sont utilisés pour les relations ANCHORED_IN (preuve).
+    Ils ne sont PAS vectorisés dans Qdrant.
+
+    ADR: doc/ongoing/ADR_DUAL_CHUNKING_ARCHITECTURE.md
+    """
+    if not coverage_chunks:
+        return 0
+
+    chunk_query = """
+    UNWIND $chunks AS chunk
+    MERGE (dc:DocumentChunk {chunk_id: chunk.chunk_id, tenant_id: $tenant_id})
+    ON CREATE SET
+        dc.document_id = chunk.document_id,
+        dc.chunk_type = 'coverage',
+        dc.char_start = chunk.char_start,
+        dc.char_end = chunk.char_end,
+        dc.coverage_seq = chunk.coverage_seq,
+        dc.token_count = chunk.token_count,
+        dc.context_id = chunk.context_id,
+        dc.section_path = chunk.section_path,
+        dc.created_at = datetime()
+    ON MATCH SET
+        dc.updated_at = datetime()
+    RETURN count(dc) AS created
+    """
+
+    chunk_data = [
+        {
+            "chunk_id": c.get("chunk_id"),
+            "document_id": c.get("document_id"),
+            "char_start": c.get("char_start", 0),
+            "char_end": c.get("char_end", 0),
+            "coverage_seq": c.get("coverage_seq", 0),
+            "token_count": c.get("token_count", 0),
+            "context_id": c.get("context_id"),
+            "section_path": c.get("section_path"),
+        }
+        for c in coverage_chunks
+    ]
+
+    with neo4j_client.driver.session(database="neo4j") as session:
+        result = session.run(chunk_query, chunks=chunk_data, tenant_id=tenant_id)
+        record = result.single()
+        created = record["created"] if record else 0
+        logger.info(f"[OSMOSE:DualChunk] Created {created} CoverageChunks")
+        return created
+
+
+def _create_aligns_with_relations(
+    neo4j_client,
+    alignments: List[Dict[str, Any]],
+    tenant_id: str
+) -> int:
+    """
+    Crée les relations ALIGNS_WITH entre CoverageChunks et RetrievalChunks.
+
+    ADR: doc/ongoing/ADR_DUAL_CHUNKING_ARCHITECTURE.md
+    """
+    if not alignments:
+        return 0
+
+    align_query = """
+    UNWIND $alignments AS align
+    MATCH (cc:DocumentChunk {chunk_id: align.coverage_chunk_id, tenant_id: $tenant_id})
+    MATCH (rc:DocumentChunk {chunk_id: align.retrieval_chunk_id, tenant_id: $tenant_id})
+    MERGE (cc)-[r:ALIGNS_WITH]->(rc)
+    ON CREATE SET
+        r.overlap_chars = align.overlap_chars,
+        r.overlap_ratio = align.overlap_ratio,
+        r.created_at = datetime()
+    RETURN count(r) AS created
+    """
+
+    align_data = [
+        {
+            "coverage_chunk_id": a.get("coverage_chunk_id"),
+            "retrieval_chunk_id": a.get("retrieval_chunk_id"),
+            "overlap_chars": a.get("overlap_chars", 0),
+            "overlap_ratio": a.get("overlap_ratio", 0.0),
+        }
+        for a in alignments
+    ]
+
+    with neo4j_client.driver.session(database="neo4j") as session:
+        result = session.run(align_query, alignments=align_data, tenant_id=tenant_id)
+        record = result.single()
+        created = record["created"] if record else 0
+        logger.info(f"[OSMOSE:DualChunk] Created {created} ALIGNS_WITH relations")
+        return created
+
+
+def _create_anchored_in_to_coverage(
+    neo4j_client,
+    proto_concepts: List[Any],
+    coverage_chunks: List[Dict[str, Any]],
+    tenant_id: str
+) -> int:
+    """
+    Crée les relations ANCHORED_IN vers les CoverageChunks.
+
+    Pour chaque ProtoConcept avec anchor_status=SPAN, trouve le
+    CoverageChunk qui contient la position de l'anchor et crée
+    la relation ANCHORED_IN.
+
+    Invariant: Tout ProtoConcept SPAN doit avoir une relation ANCHORED_IN.
+
+    ADR: doc/ongoing/ADR_DUAL_CHUNKING_ARCHITECTURE.md
+    """
+    if not proto_concepts or not coverage_chunks:
+        return 0
+
+    # Construire l'index des coverage chunks par position
+    # Trié par char_start pour recherche efficace
+    sorted_coverage = sorted(coverage_chunks, key=lambda c: c.get("char_start", 0))
+
+    anchored_relations = []
+
+    for proto in proto_concepts:
+        # Vérifier anchor_status
+        anchor_status = getattr(proto, 'anchor_status', None)
+        if anchor_status != "SPAN":
+            continue
+
+        # Récupérer les anchors
+        anchors = getattr(proto, 'anchors', []) or []
+        concept_id = getattr(proto, 'concept_id', None) or getattr(proto, 'id', None)
+
+        if not concept_id:
+            continue
+
+        for anchor in anchors:
+            anchor_start = getattr(anchor, 'char_start', None)
+            anchor_end = getattr(anchor, 'char_end', None)
+            anchor_role = getattr(anchor, 'role', 'mention')
+
+            if anchor_start is None or anchor_end is None:
+                continue
+
+            # Trouver le CoverageChunk contenant cette position
+            matching_chunk = None
+            for chunk in sorted_coverage:
+                chunk_start = chunk.get("char_start", 0)
+                chunk_end = chunk.get("char_end", 0)
+
+                # Le chunk contient l'anchor si anchor_start est dans [chunk_start, chunk_end)
+                if chunk_start <= anchor_start < chunk_end:
+                    matching_chunk = chunk
+                    break
+
+            if matching_chunk:
+                chunk_id = matching_chunk.get("chunk_id")
+                chunk_start = matching_chunk.get("char_start", 0)
+
+                # Calculer span relatif au chunk
+                span_start = anchor_start - chunk_start
+                span_end = anchor_end - chunk_start
+
+                anchored_relations.append({
+                    "concept_id": concept_id,
+                    "chunk_id": chunk_id,
+                    "role": anchor_role.value if hasattr(anchor_role, 'value') else str(anchor_role),
+                    "span_start": span_start,
+                    "span_end": span_end,
+                })
+            else:
+                logger.warning(
+                    f"[OSMOSE:DualChunk] No coverage chunk for anchor at "
+                    f"position {anchor_start} (concept={concept_id})"
+                )
+
+    if not anchored_relations:
+        logger.warning("[OSMOSE:DualChunk] No ANCHORED_IN relations to create")
+        return 0
+
+    anchored_query = """
+    UNWIND $relations AS rel
+    MATCH (p:ProtoConcept {concept_id: rel.concept_id, tenant_id: $tenant_id})
+    MATCH (dc:DocumentChunk {chunk_id: rel.chunk_id, tenant_id: $tenant_id})
+    MERGE (p)-[r:ANCHORED_IN]->(dc)
+    ON CREATE SET
+        r.role = rel.role,
+        r.span_start = rel.span_start,
+        r.span_end = rel.span_end,
+        r.created_at = datetime()
+    RETURN count(r) AS created
+    """
+
+    with neo4j_client.driver.session(database="neo4j") as session:
+        result = session.run(anchored_query, relations=anchored_relations, tenant_id=tenant_id)
+        record = result.single()
+        created = record["created"] if record else 0
+        logger.info(
+            f"[OSMOSE:DualChunk] Created {created} ANCHORED_IN relations "
+            f"(from {len(anchored_relations)} candidates)"
+        )
+        return created
+
+
+async def persist_dual_chunks_to_neo4j(
+    coverage_chunks: List[Dict[str, Any]],
+    retrieval_chunks: List[Dict[str, Any]],
+    alignments: List[Dict[str, Any]],
+    proto_concepts: List[Any],
+    tenant_id: str
+) -> Dict[str, int]:
+    """
+    Persiste l'architecture Dual Chunking dans Neo4j.
+
+    Crée:
+    - CoverageChunks (couverture 100%)
+    - RetrievalChunks (layout-aware, vectorisés)
+    - Relations ALIGNS_WITH entre Coverage et Retrieval
+    - Relations ANCHORED_IN (ProtoConcept → CoverageChunk)
+
+    ADR: doc/ongoing/ADR_DUAL_CHUNKING_ARCHITECTURE.md
+
+    Args:
+        coverage_chunks: CoverageChunks générés
+        retrieval_chunks: RetrievalChunks générés (chunks existants)
+        alignments: Relations d'alignement (dicts avec coverage_chunk_id, retrieval_chunk_id)
+        proto_concepts: ProtoConcepts pour les relations ANCHORED_IN
+        tenant_id: ID tenant
+
+    Returns:
+        Dict avec compteurs créés
+    """
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.config.settings import get_settings
+
+    settings = get_settings()
+    stats = {
+        "coverage_chunks_created": 0,
+        "retrieval_chunks_created": 0,
+        "aligns_with_created": 0,
+        "anchored_in_created": 0,
+    }
+
+    try:
+        neo4j_client = get_neo4j_client(
+            uri=settings.neo4j_uri,
+            user=settings.neo4j_user,
+            password=settings.neo4j_password,
+            database="neo4j"
+        )
+
+        if not neo4j_client.is_connected():
+            logger.warning("[OSMOSE:DualChunk] Neo4j not connected, skipping")
+            return stats
+
+        # 1. Créer les CoverageChunks
+        stats["coverage_chunks_created"] = _create_coverage_chunks(
+            neo4j_client, coverage_chunks, tenant_id
+        )
+
+        # 2. Créer les RetrievalChunks (utilise la fonction existante)
+        stats["retrieval_chunks_created"] = _create_document_chunks(
+            neo4j_client, retrieval_chunks, tenant_id
+        )
+
+        # 3. Créer les relations ALIGNS_WITH
+        stats["aligns_with_created"] = _create_aligns_with_relations(
+            neo4j_client, alignments, tenant_id
+        )
+
+        # 4. Créer les relations ANCHORED_IN vers CoverageChunks
+        stats["anchored_in_created"] = _create_anchored_in_to_coverage(
+            neo4j_client, proto_concepts, coverage_chunks, tenant_id
+        )
+
+        logger.info(
+            f"[OSMOSE:DualChunk] ✅ Persisted Dual Chunking: "
+            f"{stats['coverage_chunks_created']} CoverageChunks, "
+            f"{stats['retrieval_chunks_created']} RetrievalChunks, "
+            f"{stats['aligns_with_created']} ALIGNS_WITH, "
+            f"{stats['anchored_in_created']} ANCHORED_IN"
+        )
+
+        return stats
+
+    except Exception as e:
+        logger.error(
+            f"[OSMOSE:DualChunk] ❌ Persistence error: {e}",
+            exc_info=True
+        )
+        return stats
 
 
 async def extract_intra_document_relations(

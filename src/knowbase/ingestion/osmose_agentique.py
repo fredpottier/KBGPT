@@ -54,6 +54,16 @@ from knowbase.ingestion.osmose_persistence import (
     persist_hybrid_anchor_to_neo4j,
     extract_intra_document_relations,
     trigger_entity_resolution_reevaluation,
+    persist_dual_chunks_to_neo4j,  # ADR Dual Chunking 2026-01
+)
+# ===== ADR Dual Chunking 2026-01 =====
+from knowbase.ingestion.coverage_chunk_generator import (
+    generate_coverage_chunks,
+    CoverageChunkGenerator,
+)
+from knowbase.ingestion.chunk_alignment import (
+    create_alignments,
+    build_alignment_index,
 )
 
 # ===== Phase 2 - Hybrid Anchor Model =====
@@ -961,7 +971,18 @@ class OsmoseAgentiqueService:
 
             segments = []
             for topic in topics:
-                segment_text = " ".join([w.text for w in topic.windows])
+                # 2026-01: CRITICAL FIX - Utiliser le texte ORIGINAL, pas reconstruit
+                # Le texte reconstruit par join() ne correspond pas au texte utilisé par le chunker
+                # ce qui causait des positions d'anchors incorrectes (85 ANCHORED_IN au lieu de 243)
+                if topic.windows:
+                    min_start = min(w.start for w in topic.windows)
+                    max_end = max(w.end for w in topic.windows)
+                    segment_length = max_end - min_start
+                    # Extraire directement du texte original
+                    segment_text = text_content[topic.char_offset : topic.char_offset + segment_length]
+                else:
+                    segment_text = ""
+
                 segments.append({
                     "segment_id": topic.topic_id,
                     "text": segment_text,
@@ -1037,165 +1058,153 @@ class OsmoseAgentiqueService:
                 )
                 pc.type_heuristic = classification.concept_type.value
 
-            # Étape 5: GATE_CHECK simplifié (scoring + promotion)
-            scorer = self._get_anchor_scorer()
+            # ================================================================
+            # ADR_UNIFIED_CORPUS_PROMOTION: Étape 5 - Promotion DÉFÉRÉE
+            # ================================================================
+            # La promotion est maintenant effectuée en Pass 2.0 (corpus_promotion)
+            # Pass 1 ne crée PLUS de CanonicalConcepts, seulement des ProtoConcepts
+            # Cela permet une promotion corpus-aware avec vue sur tous les documents
+            #
+            # Anciennes lignes supprimées:
+            # - scorer.score_proto_concepts()
+            # - scorer.determine_promotion()
+            # - create_canonical_from_protos()
+            # ================================================================
 
-            # Construire corpus labels pour TF-IDF
-            corpus_labels = [pc.label for pc in proto_concepts]
-
-            # Scorer les proto-concepts
-            scored_protos = scorer.score_proto_concepts(
-                proto_concepts=proto_concepts,
-                corpus_labels=corpus_labels
-            )
-
-            # Déterminer promotions
-            promotion_decisions = scorer.determine_promotion(scored_protos)
-
-            # Créer CanonicalConcepts pour les concepts promus
-            from knowbase.agents.gatekeeper.anchor_based_scorer import (
-                create_canonical_from_protos
-            )
-            from knowbase.api.schemas.concepts import ConceptStability
-
+            # En Pass 1, on ne crée plus de CanonicalConcepts
             canonical_concepts = []
-            promoted_protos = []
-
-            for decision in promotion_decisions:
-                if decision["promote"]:
-                    # Récupérer tous les protos pour ce label
-                    proto_ids = decision["all_proto_ids"]
-                    protos_for_label = [
-                        pc for pc in proto_concepts
-                        if pc.id in proto_ids
-                    ]
-
-                    if protos_for_label:
-                        stability = ConceptStability(decision["stability"])
-                        canonical = create_canonical_from_protos(
-                            proto_concepts=protos_for_label,
-                            stability=stability
-                        )
-                        canonical_concepts.append(canonical)
-                        promoted_protos.extend(protos_for_label)
 
             logger.info(
-                f"[OSMOSE:HybridAnchor] Promotion: {len(canonical_concepts)} CanonicalConcepts "
-                f"(stable={len([d for d in promotion_decisions if d.get('stability') == 'stable'])}, "
-                f"singleton={len([d for d in promotion_decisions if d.get('stability') == 'singleton'])})"
+                f"[OSMOSE:HybridAnchor] Pass 1: {len(proto_concepts)} ProtoConcepts extracted, "
+                f"promotion deferred to Pass 2.0 (ADR_UNIFIED_CORPUS_PROMOTION)"
             )
 
             # Étape 6: CHUNKING document-centric avec anchors
             chunker = self._get_hybrid_chunker()
 
-            # Collecter tous les anchors des proto-concepts promus
+            # 2026-01: Collecter TOUS les anchors des proto-concepts (pas juste promoted)
+            # pour que les relations ANCHORED_IN soient créées pour tous les concepts SPAN
             # + mapping concept_id → label pour enrichir le payload Qdrant
             all_anchors = []
             concept_labels: Dict[str, str] = {}
-            for pc in promoted_protos:
-                all_anchors.extend(pc.anchors)
-                concept_labels[pc.id] = pc.label
+            for pc in proto_concepts:
+                if pc.anchors:  # Seulement si le concept a des anchors valides
+                    all_anchors.extend(pc.anchors)
+                    concept_labels[pc.id] = pc.label
 
-            chunks = chunker.chunk_document(
+            # 2026-01: DEBUG - Log plage des anchors collectés
+            if all_anchors:
+                anchor_min = min(a.char_start for a in all_anchors)
+                anchor_max = max(a.char_end for a in all_anchors)
+                logger.info(
+                    f"[OSMOSE:HybridAnchor:DEBUG] Anchors collected: {len(all_anchors)} "
+                    f"covering [{anchor_min}-{anchor_max}], document length={len(text_content)}"
+                )
+
+            # ================================================================
+            # ADR Dual Chunking 2026-01: Étape 6a - RetrievalChunks
+            # ================================================================
+            # Ces chunks sont layout-aware avec min_tokens=50
+            # Ils sont vectorisés dans Qdrant pour le retrieval
+            retrieval_chunks = chunker.chunk_document(
                 text=text_content,
                 document_id=document_id,
                 document_name=document_title,
                 anchors=all_anchors,
-                concept_labels=concept_labels,  # Mapping pour enrichir le payload
+                concept_labels=concept_labels,
                 tenant_id=tenant,
-                segments=segments  # V2.1: Segment mapping
+                segments=segments
             )
 
             logger.info(
-                f"[OSMOSE:HybridAnchor] Chunking: {len(chunks)} chunks "
-                f"(0 concept-focused, {sum(len(c.get('anchored_concepts', [])) for c in chunks)} anchors)"
+                f"[OSMOSE:DualChunk] RetrievalChunks: {len(retrieval_chunks)} chunks"
             )
 
-            # Étape 7: Persister dans Qdrant
-            if chunks:
+            # ================================================================
+            # ADR Dual Chunking 2026-01: Étape 6b - CoverageChunks
+            # ================================================================
+            # Ces chunks couvrent 100% du document (pas de min_tokens)
+            # Ils sont utilisés pour les relations ANCHORED_IN (preuve)
+            coverage_chunks = generate_coverage_chunks(
+                text_content=text_content,
+                document_id=document_id,
+                tenant_id=tenant
+            )
+
+            logger.info(
+                f"[OSMOSE:DualChunk] CoverageChunks: {len(coverage_chunks)} chunks "
+                f"(100% coverage)"
+            )
+
+            # ================================================================
+            # ADR Dual Chunking 2026-01: Étape 6c - Alignements
+            # ================================================================
+            # Crée les relations ALIGNS_WITH entre Coverage et Retrieval
+            alignments = create_alignments(coverage_chunks, retrieval_chunks)
+            alignment_dicts = [a.to_dict() for a in alignments]
+
+            logger.info(
+                f"[OSMOSE:DualChunk] Alignments: {len(alignments)} ALIGNS_WITH relations"
+            )
+
+            # Étape 7: Persister RetrievalChunks dans Qdrant
+            # Note: Les anchored_concepts du payload Qdrant restent inchangés pour l'instant
+            # (alimentés via les alignements dans une future itération)
+            if retrieval_chunks:
                 chunk_ids = upsert_chunks(
-                    chunks=chunks,
+                    chunks=retrieval_chunks,
                     collection_name="knowbase",
                     tenant_id=tenant,
                 )
                 logger.info(
-                    f"[OSMOSE:HybridAnchor] Qdrant: {len(chunk_ids)} chunks inserted"
+                    f"[OSMOSE:HybridAnchor] Qdrant: {len(chunk_ids)} RetrievalChunks inserted"
                 )
 
-            # Étape 8: Persister dans Neo4j (concepts + chunks + anchored_in)
+            # Étape 8: Persister dans Neo4j (concepts + Document node)
             # PR4: Inclut Document node + EXTRACTED_FROM avec propriétés assertion
+            # 2026-01: Persister TOUS les ProtoConcepts (pas juste promoted_protos)
             await self._persist_hybrid_anchor_to_neo4j(
-                proto_concepts=promoted_protos,
+                proto_concepts=proto_concepts,
                 canonical_concepts=canonical_concepts,
                 document_id=document_id,
                 document_name=document_title,
                 tenant_id=tenant,
-                chunks=chunks,  # Passer les chunks pour créer DocumentChunk + ANCHORED_IN
-                doc_context_frame=doc_context_frame,  # PR4: DocContextFrame pour Document node
+                chunks=None,  # 2026-01: Ne pas créer chunks ici, utiliser Dual Chunking
+                doc_context_frame=doc_context_frame,
             )
 
             # ================================================================
-            # Étape 8b: Navigation Layer (ADR: ADR_NAVIGATION_LAYER.md)
+            # ADR Dual Chunking 2026-01: Étape 8bis - Dual Chunking Persistence
             # ================================================================
-            # Crée les ContextNodes (DocumentContext, SectionContext) et
-            # les liens MENTIONED_IN pour la navigation corpus-level.
-            # IMPORTANT: Couche NON-SÉMANTIQUE, jamais utilisée par le RAG.
+            # Persiste CoverageChunks, RetrievalChunks, ALIGNS_WITH, ANCHORED_IN
+            dual_chunk_stats = await persist_dual_chunks_to_neo4j(
+                coverage_chunks=coverage_chunks,
+                retrieval_chunks=retrieval_chunks,
+                alignments=alignment_dicts,
+                proto_concepts=proto_concepts,
+                tenant_id=tenant
+            )
+
+            logger.info(
+                f"[OSMOSE:DualChunk] Neo4j: "
+                f"{dual_chunk_stats.get('coverage_chunks_created', 0)} CoverageChunks, "
+                f"{dual_chunk_stats.get('retrieval_chunks_created', 0)} RetrievalChunks, "
+                f"{dual_chunk_stats.get('aligns_with_created', 0)} ALIGNS_WITH, "
+                f"{dual_chunk_stats.get('anchored_in_created', 0)} ANCHORED_IN"
+            )
+
             # ================================================================
-            try:
-                # Construire mapping section → concepts via anchors
-                section_to_concepts: Dict[str, set] = defaultdict(set)
-                proto_to_canonical: Dict[str, str] = {}
-
-                # Mapper proto_id → canonical_id
-                for cc in canonical_concepts:
-                    for proto_id in cc.proto_concept_ids:
-                        proto_to_canonical[proto_id] = cc.id
-
-                # Collecter concepts par section
-                for proto in promoted_protos:
-                    canonical_id = proto_to_canonical.get(proto.id)
-                    if not canonical_id:
-                        continue
-
-                    # Via proto.section_id
-                    if proto.section_id:
-                        section_to_concepts[proto.section_id].add(canonical_id)
-
-                    # Via anchors (peut avoir plusieurs sections)
-                    for anchor in proto.anchors:
-                        if anchor.section_id:
-                            section_to_concepts[anchor.section_id].add(canonical_id)
-
-                # Préparer sections au format attendu
-                sections_for_nav = [
-                    {"path": section_path, "level": 0, "concept_ids": list(concept_ids)}
-                    for section_path, concept_ids in section_to_concepts.items()
-                ]
-
-                # Tous les canonical_ids pour le document
-                all_canonical_ids = [cc.id for cc in canonical_concepts]
-
-                # Construire la Navigation Layer
-                nav_builder = get_navigation_layer_builder(tenant_id=tenant)
-                nav_stats = nav_builder.build_for_document(
-                    document_id=document_id,
-                    document_name=document_title,
-                    document_type=document_type,
-                    sections=sections_for_nav,
-                    concept_mentions={f"doc:{document_id}": all_canonical_ids}
-                )
-
-                logger.info(
-                    f"[OSMOSE:HybridAnchor] Navigation Layer: "
-                    f"{len(sections_for_nav)} sections, {len(all_canonical_ids)} concepts, "
-                    f"stats={nav_stats}"
-                )
-
-            except Exception as nav_error:
-                # Navigation Layer non-critique, log warning mais continue
-                logger.warning(
-                    f"[OSMOSE:HybridAnchor] Navigation Layer failed: {nav_error}"
-                )
+            # Étape 8b: Navigation Layer - DÉFÉRÉE À PASS 2.0
+            # ================================================================
+            # ADR_UNIFIED_CORPUS_PROMOTION: La Navigation Layer nécessite les
+            # CanonicalConcepts qui sont maintenant créés en Pass 2.0.
+            # La construction de la Navigation Layer est donc déférée à Pass 2.0
+            # après la phase CORPUS_PROMOTION.
+            # ================================================================
+            logger.debug(
+                f"[OSMOSE:HybridAnchor] Navigation Layer deferred to Pass 2.0 "
+                f"(ADR_UNIFIED_CORPUS_PROMOTION)"
+            )
 
             # ================================================================
             # RELATIONS: Déplacées vers Pass 2 (ADR 2024-12-30)
@@ -1208,22 +1217,27 @@ class OsmoseAgentiqueService:
             # ================================================================
 
             # ===== PASS 2: Enrichissement (async) =====
+            # ADR_UNIFIED_CORPUS_PROMOTION: Pass 2 est TOUJOURS planifié car
+            # la promotion des ProtoConcepts en CanonicalConcepts se fait
+            # maintenant dans la phase CORPUS_PROMOTION de Pass 2.0
             pass2_config = get_hybrid_anchor_config("pass2_config", tenant)
             pass2_mode = pass2_config.get("mode", "background") if pass2_config else "background"
 
-            if pass2_mode != "disabled" and canonical_concepts:
+            if pass2_mode != "disabled":
                 orchestrator = self._get_pass2_orchestrator()
 
-                # Convertir CanonicalConcepts en dicts pour Pass 2
-                concepts_for_pass2 = [
+                # Pass 2.0 commence par CORPUS_PROMOTION qui crée les CanonicalConcepts
+                # On passe les ProtoConcepts pour référence (optionnel)
+                protos_for_pass2 = [
                     {
-                        "id": cc.id,
-                        "label": cc.label,
-                        "definition": cc.definition_consolidated,
-                        "type_heuristic": cc.type_fine or "abstract",
-                        "section_id": None,  # TODO: récupérer depuis protos
+                        "id": getattr(proto, 'id', ''),
+                        "label": getattr(proto, 'label', ''),
+                        "definition": getattr(proto, 'definition', ''),
+                        "type_heuristic": getattr(proto, 'type_heuristic', 'abstract'),
+                        "section_id": getattr(proto, 'section_id', None),
                     }
-                    for cc in canonical_concepts
+                    for proto in proto_concepts
+                    if getattr(proto, 'id', None)  # Filtrer les protos sans id
                 ]
 
                 # Planifier Pass 2
@@ -1232,13 +1246,13 @@ class OsmoseAgentiqueService:
 
                 await orchestrator.schedule_pass2(
                     document_id=document_id,
-                    concepts=concepts_for_pass2,
+                    concepts=protos_for_pass2,  # ProtoConcepts (promotion en Pass 2.0)
                     mode=mode_enum
                 )
 
                 logger.info(
                     f"[OSMOSE:HybridAnchor] Pass 2 scheduled ({pass2_mode}): "
-                    f"{len(concepts_for_pass2)} concepts"
+                    f"{len(protos_for_pass2)} proto_concepts for CORPUS_PROMOTION"
                 )
 
             # ===== Finaliser résultat =====
@@ -1246,19 +1260,22 @@ class OsmoseAgentiqueService:
 
             result.osmose_success = True
             result.concepts_extracted = len(proto_concepts)
-            result.canonical_concepts = len(canonical_concepts)
+            # ADR_UNIFIED_CORPUS_PROMOTION: canonical_concepts = 0 en Pass 1
+            # La promotion se fait en Pass 2.0 (phase CORPUS_PROMOTION)
+            result.canonical_concepts = 0
             result.osmose_duration_seconds = pass1_duration
             result.total_duration_seconds = pass1_duration
 
             # ADR 2024-12-30: Update enrichment tracking - Pass 1 complete
+            # ADR_UNIFIED_CORPUS_PROMOTION: concepts_promoted = 0, promotion en Pass 2.0
             enrichment_tracker.update_pass1_status(
                 document_id=document_id,
                 status=EnrichmentStatus.COMPLETE,
                 concepts_extracted=len(proto_concepts),
-                concepts_promoted=len(canonical_concepts),
-                chunks_created=len(chunks)
+                concepts_promoted=0,  # Promotion déférée à Pass 2.0
+                chunks_created=len(retrieval_chunks) + len(coverage_chunks)  # ADR Dual Chunking
             )
-            # Mark Pass 2 as pending (ready for enrichment)
+            # Mark Pass 2 as pending (ready for CORPUS_PROMOTION + enrichment)
             enrichment_tracker.update_pass2_status(
                 document_id=document_id,
                 status=EnrichmentStatus.PENDING
@@ -1266,7 +1283,9 @@ class OsmoseAgentiqueService:
 
             logger.info(
                 f"[OSMOSE:HybridAnchor] ✅ Pass 1 complete for {document_id}: "
-                f"{len(canonical_concepts)} concepts, {len(chunks)} chunks in {pass1_duration:.1f}s"
+                f"{len(proto_concepts)} ProtoConcepts, "
+                f"{len(retrieval_chunks)}+{len(coverage_chunks)} chunks in {pass1_duration:.1f}s "
+                f"(promotion deferred to Pass 2.0)"
             )
 
             return result

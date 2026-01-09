@@ -38,6 +38,14 @@ from .assertion_store import (
     AssertionStore,
     get_assertion_store,
 )
+from .corpus_promotion import (
+    CorpusPromotionConfig,
+    PromotionDecision,
+    CorpusPromotionStats,
+    CorpusPromotionEngine,
+    get_corpus_promotion_engine,
+    check_high_signal_v2,
+)
 
 __all__ = [
     # Types
@@ -64,4 +72,11 @@ __all__ = [
     "DocumentContextData",
     "AssertionStore",
     "get_assertion_store",
+    # Pass 2.0: Corpus Promotion (ADR_UNIFIED_CORPUS_PROMOTION)
+    "CorpusPromotionConfig",
+    "PromotionDecision",
+    "CorpusPromotionStats",
+    "CorpusPromotionEngine",
+    "get_corpus_promotion_engine",
+    "check_high_signal_v2",
 ]
