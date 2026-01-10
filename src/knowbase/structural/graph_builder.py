@@ -44,7 +44,7 @@ from knowbase.structural.models import (
 )
 
 if TYPE_CHECKING:
-    from neo4j import AsyncDriver
+    from neo4j import AsyncDriver, Driver
 
 logger = logging.getLogger(__name__)
 
@@ -400,6 +400,86 @@ class StructuralGraphBuilder:
             f"{len(result.chunks)} chunks"
         )
 
+    def persist_to_neo4j_sync(
+        self,
+        result: StructuralGraphBuildResult,
+        neo4j_client: Any = None,
+    ) -> None:
+        """
+        Persiste le Structural Graph dans Neo4j (version synchrone).
+
+        Compatible avec le Neo4jClient existant du projet.
+
+        Args:
+            result: Résultat de build_from_docling()
+            neo4j_client: Instance de Neo4jClient (ou None pour auto-detect)
+        """
+        # Auto-detect Neo4j client si non fourni
+        if neo4j_client is None:
+            try:
+                from knowbase.common.clients.neo4j_client import get_neo4j_client
+                from knowbase.config.settings import get_settings
+
+                settings = get_settings()
+                neo4j_client = get_neo4j_client(
+                    uri=settings.neo4j_uri,
+                    user=settings.neo4j_user,
+                    password=settings.neo4j_password,
+                    database="neo4j"
+                )
+            except Exception as e:
+                logger.warning(f"[StructuralGraphBuilder] Could not get Neo4j client: {e}")
+                return
+
+        if not neo4j_client.is_connected():
+            logger.warning("[StructuralGraphBuilder] Neo4j not connected, skipping persistence")
+            return
+
+        logger.info(f"[StructuralGraphBuilder] Persisting to Neo4j (sync)...")
+
+        try:
+            with neo4j_client.driver.session(database="neo4j") as session:
+                # Créer DocumentVersion et Pages
+                session.execute_write(
+                    self._create_version_and_pages_tx,
+                    result.doc_version,
+                    result.page_contexts,
+                )
+
+                # Créer Sections
+                session.execute_write(
+                    self._create_sections_tx,
+                    result.sections,
+                )
+
+                # Batch les DocItems (peuvent être nombreux)
+                batch_size = 500
+                for i in range(0, len(result.doc_items), batch_size):
+                    batch = result.doc_items[i:i + batch_size]
+                    session.execute_write(
+                        self._create_docitems_tx,
+                        batch,
+                    )
+
+                # Batch les chunks
+                for i in range(0, len(result.chunks), batch_size):
+                    batch = result.chunks[i:i + batch_size]
+                    session.execute_write(
+                        self._create_chunks_tx,
+                        batch,
+                    )
+
+            logger.info(
+                f"[StructuralGraphBuilder] Persisted (sync): "
+                f"{len(result.doc_items)} items, "
+                f"{len(result.sections)} sections, "
+                f"{len(result.chunks)} chunks"
+            )
+
+        except Exception as e:
+            logger.error(f"[StructuralGraphBuilder] Neo4j persistence failed: {e}")
+            raise
+
     @staticmethod
     def _create_version_and_pages_tx(tx, doc_version: DocumentVersion, pages: List[PageContext]):
         """Transaction pour créer DocumentVersion et PageContext."""
@@ -569,6 +649,158 @@ class StructuralGraphBuilder:
 def is_structural_graph_enabled() -> bool:
     """Vérifie si le Structural Graph est activé."""
     return USE_STRUCTURAL_GRAPH
+
+
+def convert_chunks_for_relation_extraction(
+    chunks: List[TypeAwareChunk],
+    proto_concepts: List[Any],
+    relation_bearing_only: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Convertit les TypeAwareChunks au format attendu par LLMRelationExtractor.
+
+    Cette fonction:
+    1. Filtre les chunks relation-bearing si demandé (NARRATIVE_TEXT uniquement)
+    2. Annote chaque chunk avec `anchored_concepts` basé sur les ProtoConcepts
+    3. Retourne le format Dict attendu par extract_relations_chunk_aware()
+
+    Args:
+        chunks: Liste des TypeAwareChunks du Structural Graph
+        proto_concepts: Liste des ProtoConcepts extraits (avec anchors)
+        relation_bearing_only: Si True, ne retourne que les chunks NARRATIVE_TEXT
+
+    Returns:
+        Liste de dicts au format attendu par LLMRelationExtractor:
+        {
+            "chunk_id": str,
+            "text": str,
+            "char_start": int,
+            "char_end": int,
+            "page_no": int,
+            "anchored_concepts": [{"concept_id": str, ...}, ...]
+        }
+    """
+    import re
+
+    # 1. Filtrer si demandé
+    if relation_bearing_only:
+        filtered_chunks = [c for c in chunks if c.is_relation_bearing]
+        logger.info(
+            f"[StructuralGraph] Filtered {len(chunks)} chunks to "
+            f"{len(filtered_chunks)} relation-bearing chunks"
+        )
+    else:
+        filtered_chunks = chunks
+
+    if not filtered_chunks:
+        return []
+
+    # 2. Construire index texte → chunk pour lookup rapide
+    # On recherche les mentions de concepts dans le texte de chaque chunk
+
+    # 3. Construire liste de surface_forms pour chaque proto
+    proto_surface_forms: Dict[str, List[str]] = {}
+    proto_by_surface: Dict[str, List[str]] = {}  # surface_form → proto_ids
+
+    for proto in proto_concepts:
+        proto_id = getattr(proto, 'id', None) or getattr(proto, 'concept_id', None)
+        if not proto_id:
+            continue
+
+        # Collecter toutes les surface forms
+        forms = set()
+        label = getattr(proto, 'label', None) or getattr(proto, 'concept_name', '')
+        if label:
+            forms.add(label.lower())
+
+        # Ajouter les surface_forms si disponibles
+        if hasattr(proto, 'surface_forms') and proto.surface_forms:
+            for sf in proto.surface_forms:
+                forms.add(sf.lower())
+
+        # Ajouter depuis les anchors si disponibles
+        if hasattr(proto, 'anchors') and proto.anchors:
+            for anchor in proto.anchors:
+                quote = getattr(anchor, 'quote', '')
+                if quote and len(quote) < 100:  # Éviter les quotes trop longues
+                    forms.add(quote.lower())
+
+        proto_surface_forms[proto_id] = list(forms)
+
+        # Index inverse
+        for form in forms:
+            if form not in proto_by_surface:
+                proto_by_surface[form] = []
+            proto_by_surface[form].append(proto_id)
+
+    # 4. Pour chaque chunk, trouver les concepts mentionnés
+    result_chunks = []
+    char_offset = 0
+
+    for chunk in filtered_chunks:
+        chunk_text_lower = chunk.text.lower()
+
+        # Trouver les concepts ancrés dans ce chunk
+        anchored_concepts = []
+        seen_protos = set()
+
+        for form, proto_ids in proto_by_surface.items():
+            if form in chunk_text_lower:
+                for proto_id in proto_ids:
+                    if proto_id not in seen_protos:
+                        seen_protos.add(proto_id)
+                        anchored_concepts.append({
+                            "concept_id": proto_id,
+                            "surface_form": form,
+                        })
+
+        # Construire le dict au format attendu
+        chunk_dict = {
+            "chunk_id": chunk.chunk_id,
+            "text": chunk.text,
+            "char_start": char_offset,
+            "char_end": char_offset + len(chunk.text),
+            "page_no": chunk.page_no,
+            "section_id": chunk.section_id,
+            "kind": chunk.kind.value if hasattr(chunk.kind, 'value') else str(chunk.kind),
+            "is_relation_bearing": chunk.is_relation_bearing,
+            "anchored_concepts": anchored_concepts,
+            # Métadonnées additionnelles
+            "item_ids": chunk.item_ids,
+            "doc_version_id": chunk.doc_version_id,
+        }
+
+        result_chunks.append(chunk_dict)
+        char_offset += len(chunk.text) + 1  # +1 pour séparateur virtuel
+
+    logger.info(
+        f"[StructuralGraph] Converted {len(result_chunks)} chunks for relation extraction, "
+        f"avg {sum(len(c['anchored_concepts']) for c in result_chunks) / max(len(result_chunks), 1):.1f} "
+        f"concepts/chunk"
+    )
+
+    return result_chunks
+
+
+def get_narrative_chunks_for_relations(
+    structural_graph_result: "StructuralGraphBuildResult",
+    proto_concepts: List[Any],
+) -> List[Dict[str, Any]]:
+    """
+    Raccourci pour obtenir les chunks narratifs prêts pour l'extraction de relations.
+
+    Args:
+        structural_graph_result: Résultat de StructuralGraphBuilder.build_from_docling()
+        proto_concepts: Liste des ProtoConcepts extraits
+
+    Returns:
+        Liste de dicts au format LLMRelationExtractor
+    """
+    return convert_chunks_for_relation_extraction(
+        chunks=structural_graph_result.chunks,
+        proto_concepts=proto_concepts,
+        relation_bearing_only=True,
+    )
 
 
 async def build_structural_graph_from_docling(

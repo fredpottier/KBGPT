@@ -97,6 +97,7 @@ class PipelineConfig:
 
     # Options Structural Graph (Option C)
     structural_graph_max_chunk_size: int = 3000  # Taille max chunks narratifs
+    structural_graph_persist_neo4j: bool = True  # Persister dans Neo4j
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialise en dictionnaire."""
@@ -117,6 +118,7 @@ class PipelineConfig:
             "max_concurrent_vision": self.max_concurrent_vision,
             "doc_context_use_llm": self.doc_context_use_llm,
             "structural_graph_max_chunk_size": self.structural_graph_max_chunk_size,
+            "structural_graph_persist_neo4j": self.structural_graph_persist_neo4j,
         }
 
 
@@ -642,6 +644,23 @@ class ExtractionPipelineV2:
                     f"time={metrics.structural_graph_time_ms:.0f}ms"
                 )
 
+                # Persister dans Neo4j si activé
+                if self.config.structural_graph_persist_neo4j:
+                    try:
+                        persist_start = time.time()
+                        self._structural_graph_builder.persist_to_neo4j_sync(structural_graph_result)
+                        persist_time = (time.time() - persist_start) * 1000
+                        metrics.structural_graph_time_ms += persist_time
+                        logger.info(
+                            f"[ExtractionPipelineV2] StructuralGraph persisted to Neo4j "
+                            f"in {persist_time:.0f}ms"
+                        )
+                    except Exception as persist_error:
+                        logger.warning(
+                            f"[ExtractionPipelineV2] StructuralGraph Neo4j persistence failed: "
+                            f"{persist_error}, continuing without persistence"
+                        )
+
             except Exception as e:
                 logger.warning(
                     f"[ExtractionPipelineV2] StructuralGraph build failed: {e}, "
@@ -669,6 +688,21 @@ class ExtractionPipelineV2:
         }
 
         if structural_graph_result:
+            # Sérialiser les chunks pour usage downstream (osmose_agentique)
+            serialized_chunks = [
+                {
+                    "chunk_id": c.chunk_id,
+                    "text": c.text,
+                    "kind": c.kind.value,
+                    "page_no": c.page_no,
+                    "section_id": c.section_id,
+                    "item_ids": c.item_ids,
+                    "is_relation_bearing": c.is_relation_bearing,
+                    "doc_version_id": c.doc_version_id,
+                }
+                for c in structural_graph_result.chunks
+            ]
+
             result_stats["structural_graph"] = {
                 "item_count": structural_graph_result.item_count,
                 "section_count": structural_graph_result.section_count,
@@ -677,6 +711,8 @@ class ExtractionPipelineV2:
                 "doc_version_id": structural_graph_result.doc_version.doc_version_id,
                 "structure_analysis": structural_graph_result.structure_analysis,
                 "chunk_analysis": structural_graph_result.chunk_analysis,
+                # Chunks sérialisés pour usage par osmose_agentique
+                "chunks": serialized_chunks,
             }
 
         result = ExtractionResult(

@@ -784,6 +784,9 @@ class Pass2Orchestrator:
         """
         Récupère les segments d'un document depuis Neo4j.
 
+        Option C (Structural Graph): Utilise TypeAwareChunks si disponibles.
+        Fallback: Utilise DocumentChunks (legacy).
+
         Returns:
             Liste de dicts avec segment_id, text, section_id, char_offset
         """
@@ -802,20 +805,22 @@ class Pass2Orchestrator:
             return []
 
         try:
-            # Récupérer les chunks comme proxy des segments
-            # TODO: Stocker segments explicitement si nécessaire
-            query = """
-            MATCH (dc:DocumentChunk {document_id: $document_id, tenant_id: $tenant_id})
-            RETURN dc.chunk_id AS segment_id,
-                   dc.text_preview AS text,
-                   dc.section_id AS section_id,
-                   dc.char_start AS char_offset
-            ORDER BY dc.chunk_index
-            """
-
             with neo4j_client.driver.session(database="neo4j") as session:
+                # Option C: Essayer d'abord les TypeAwareChunks (Structural Graph)
+                # Filtrer par is_relation_bearing=true pour n'avoir que les narratifs
+                type_aware_query = """
+                MATCH (tac:TypeAwareChunk {doc_id: $document_id, tenant_id: $tenant_id})
+                WHERE tac.is_relation_bearing = true
+                RETURN tac.chunk_id AS segment_id,
+                       tac.text AS text,
+                       tac.section_id AS section_id,
+                       0 AS char_offset,
+                       tac.kind AS chunk_kind
+                ORDER BY tac.page_no, tac.chunk_id
+                """
+
                 result = session.run(
-                    query,
+                    type_aware_query,
                     document_id=document_id,
                     tenant_id=self.tenant_id
                 )
@@ -826,8 +831,46 @@ class Pass2Orchestrator:
                         "segment_id": record["segment_id"],
                         "text": record["text"] or "",
                         "section_id": record["section_id"],
+                        "char_offset": record["char_offset"] or 0,
+                        "chunk_kind": record.get("chunk_kind"),  # Métadonnée Option C
+                    })
+
+                if segments:
+                    logger.info(
+                        f"[OSMOSE:Pass2] Using {len(segments)} TypeAwareChunks "
+                        f"(Option C) for document {document_id}"
+                    )
+                    return segments
+
+                # Fallback: DocumentChunks (legacy)
+                legacy_query = """
+                MATCH (dc:DocumentChunk {document_id: $document_id, tenant_id: $tenant_id})
+                RETURN dc.chunk_id AS segment_id,
+                       dc.text_preview AS text,
+                       dc.section_id AS section_id,
+                       dc.char_start AS char_offset
+                ORDER BY dc.chunk_index
+                """
+
+                result = session.run(
+                    legacy_query,
+                    document_id=document_id,
+                    tenant_id=self.tenant_id
+                )
+
+                for record in result:
+                    segments.append({
+                        "segment_id": record["segment_id"],
+                        "text": record["text"] or "",
+                        "section_id": record["section_id"],
                         "char_offset": record["char_offset"] or 0
                     })
+
+                if segments:
+                    logger.info(
+                        f"[OSMOSE:Pass2] Using {len(segments)} DocumentChunks "
+                        f"(legacy) for document {document_id}"
+                    )
 
                 return segments
 

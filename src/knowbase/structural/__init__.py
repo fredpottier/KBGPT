@@ -69,6 +69,8 @@ from knowbase.structural.graph_builder import (
     build_structural_graph_from_docling,
     is_structural_graph_enabled,
     USE_STRUCTURAL_GRAPH,
+    convert_chunks_for_relation_extraction,
+    get_narrative_chunks_for_relations,
 )
 
 __all__ = [
@@ -116,4 +118,6 @@ __all__ = [
     "build_structural_graph_from_docling",
     "is_structural_graph_enabled",
     "USE_STRUCTURAL_GRAPH",
+    "convert_chunks_for_relation_extraction",
+    "get_narrative_chunks_for_relations",
 ]
