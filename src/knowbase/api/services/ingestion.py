@@ -15,10 +15,10 @@ import openpyxl
 import pandas as pd
 import tempfile
 from knowbase.common.clients import (
-    get_openai_client,
     get_qdrant_client,
     get_sentence_transformer,
 )
+from knowbase.common.llm_router import get_llm_router, TaskType
 from knowbase.config.settings import Settings
 from knowbase.ingestion.queue import (
     enqueue_excel_ingestion,
@@ -80,20 +80,18 @@ def get_canonical_solution_name(
         f"Voici la liste des solutions connues :\n{list(solution_names)}\n"
         "Donne uniquement le nom canonique le plus proche, ou une liste de suggestions si aucune correspondance parfaite."
     )
-    openai_client = get_openai_client()
-    response = openai_client.chat.completions.create(
-        model=os.getenv("GPT_MODEL", "gpt-4o"),
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-        max_tokens=100,
-    )
-    canonical_name = user_solution_name
-    if response.choices:
-        first_choice = response.choices[0]
-        message = getattr(first_choice, "message", None)
-        content = getattr(message, "content", None) if message else None
-        if isinstance(content, str) and content.strip():
-            canonical_name = content.strip()
+    # Utiliser LLMRouter pour bénéficier du vLLM EC2 en mode Burst
+    llm_router = get_llm_router()
+    try:
+        content = llm_router.complete(
+            task_type=TaskType.CANONICALIZATION,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=100,
+        )
+        canonical_name = content.strip() if content else user_solution_name
+    except Exception:
+        canonical_name = user_solution_name
     return canonical_name, solution_names
 
 
