@@ -63,6 +63,14 @@ from knowbase.structural.type_aware_chunker import (
     analyze_chunks,
 )
 
+from knowbase.structural.graph_builder import (
+    StructuralGraphBuilder,
+    StructuralGraphBuildResult,
+    build_structural_graph_from_docling,
+    is_structural_graph_enabled,
+    USE_STRUCTURAL_GRAPH,
+)
+
 __all__ = [
     # Enums
     "BboxUnit",
@@ -102,4 +110,10 @@ __all__ = [
     "get_figure_chunks",
     "get_code_chunks",
     "analyze_chunks",
+    # Graph Builder
+    "StructuralGraphBuilder",
+    "StructuralGraphBuildResult",
+    "build_structural_graph_from_docling",
+    "is_structural_graph_enabled",
+    "USE_STRUCTURAL_GRAPH",
 ]

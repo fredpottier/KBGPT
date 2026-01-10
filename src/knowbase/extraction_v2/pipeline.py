@@ -41,6 +41,11 @@ from knowbase.extraction_v2.context.doc_context_extractor import (
 from knowbase.extraction_v2.context.models import DocumentContext
 from knowbase.extraction_v2.extractors.docling_extractor import DoclingExtractor
 from knowbase.extraction_v2.gating.engine import GatingEngine
+from knowbase.structural import (
+    StructuralGraphBuilder,
+    StructuralGraphBuildResult,
+    is_structural_graph_enabled,
+)
 from knowbase.extraction_v2.gating.weights import DEFAULT_GATING_WEIGHTS, GATING_THRESHOLDS
 from knowbase.extraction_v2.vision.analyzer import VisionAnalyzer
 from knowbase.extraction_v2.merge.merger import StructuredMerger, MergedPageOutput
@@ -60,6 +65,7 @@ class PipelineConfig:
     enable_gating: bool = True
     enable_doc_context: bool = True  # Extraction contexte documentaire (ADR_ASSERTION_AWARE_KG)
     enable_table_summaries: bool = True  # QW-1: Résumé LLM des tables pour améliorer RAG
+    enable_structural_graph: bool = False  # Option C: Structural Graph depuis DoclingDocument
 
     # Seuils de gating
     vision_required_threshold: float = 0.60
@@ -89,6 +95,9 @@ class PipelineConfig:
     # Options DocContext (ADR_ASSERTION_AWARE_KG)
     doc_context_use_llm: bool = True  # Utiliser LLM pour validation
 
+    # Options Structural Graph (Option C)
+    structural_graph_max_chunk_size: int = 3000  # Taille max chunks narratifs
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialise en dictionnaire."""
         return {
@@ -96,6 +105,7 @@ class PipelineConfig:
             "enable_gating": self.enable_gating,
             "enable_doc_context": self.enable_doc_context,
             "enable_table_summaries": self.enable_table_summaries,
+            "enable_structural_graph": self.enable_structural_graph,
             "vision_required_threshold": self.vision_required_threshold,
             "vision_recommended_threshold": self.vision_recommended_threshold,
             "vision_budget": self.vision_budget,
@@ -106,6 +116,7 @@ class PipelineConfig:
             "include_recommended_in_vision": self.include_recommended_in_vision,
             "max_concurrent_vision": self.max_concurrent_vision,
             "doc_context_use_llm": self.doc_context_use_llm,
+            "structural_graph_max_chunk_size": self.structural_graph_max_chunk_size,
         }
 
 
@@ -122,6 +133,9 @@ class PipelineMetrics:
     doc_context_time_ms: float = 0  # Temps extraction contexte
     table_summary_time_ms: float = 0  # QW-1: Temps résumé tables
     tables_summarized: int = 0  # QW-1: Nombre tables résumées
+    structural_graph_time_ms: float = 0  # Option C: Temps construction graph
+    structural_graph_items: int = 0  # Option C: Nombre DocItems créés
+    structural_graph_chunks: int = 0  # Option C: Nombre TypeAwareChunks créés
     total_time_ms: float = 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -136,6 +150,9 @@ class PipelineMetrics:
             "doc_context_time_ms": round(self.doc_context_time_ms, 2),
             "table_summary_time_ms": round(self.table_summary_time_ms, 2),
             "tables_summarized": self.tables_summarized,
+            "structural_graph_time_ms": round(self.structural_graph_time_ms, 2),
+            "structural_graph_items": self.structural_graph_items,
+            "structural_graph_chunks": self.structural_graph_chunks,
             "total_time_ms": round(self.total_time_ms, 2),
         }
 
@@ -175,6 +192,7 @@ class ExtractionPipelineV2:
         self._linearizer: Optional[Linearizer] = None
         self._doc_context_extractor: Optional[DocContextExtractor] = None
         self._table_summarizer: Optional[TableSummarizer] = None
+        self._structural_graph_builder: Optional[StructuralGraphBuilder] = None
 
         # Cache V2 (évite de refaire les appels Vision)
         self._cache: Optional[VersionedCache] = None
@@ -248,6 +266,14 @@ class ExtractionPipelineV2:
                 min_cells=4,   # Tables avec au moins 4 cellules
                 max_cells=500, # Tronquer les très grandes tables
             )
+
+        # 7. Initialiser StructuralGraphBuilder (Option C)
+        if self.config.enable_structural_graph or is_structural_graph_enabled():
+            self._structural_graph_builder = StructuralGraphBuilder(
+                max_chunk_size=self.config.structural_graph_max_chunk_size,
+                persist_artifacts=True,
+            )
+            logger.info("[ExtractionPipelineV2] StructuralGraphBuilder enabled")
 
         self._initialized = True
         elapsed = (time.time() - start) * 1000
@@ -352,13 +378,21 @@ class ExtractionPipelineV2:
 
         # === ETAPE 1: Extraction Docling ===
         extraction_start = time.time()
-        units = await self._extractor.extract_to_units(file_path)
+        docling_document = None  # Pour Option C Structural Graph
+
+        # Si Structural Graph activé, récupérer aussi le DoclingDocument brut
+        if self._structural_graph_builder:
+            units, docling_document = await self._extractor.extract_to_units_with_docling(file_path)
+        else:
+            units = await self._extractor.extract_to_units(file_path)
+
         metrics.extraction_time_ms = (time.time() - extraction_start) * 1000
         metrics.total_pages = len(units)
 
         logger.info(
             f"[ExtractionPipelineV2] Extracted {len(units)} pages in "
             f"{metrics.extraction_time_ms:.0f}ms"
+            f"{' (with DoclingDocument for StructuralGraph)' if docling_document else ''}"
         )
 
         # === ETAPE 2: Vision Gating ===
@@ -581,6 +615,39 @@ class ExtractionPipelineV2:
                     f"continuing without context"
                 )
 
+        # === ETAPE 7: Structural Graph (Option C) ===
+        structural_graph_result: Optional[StructuralGraphBuildResult] = None
+
+        if self._structural_graph_builder and docling_document:
+            structural_graph_start = time.time()
+            try:
+                structural_graph_result = self._structural_graph_builder.build_from_docling(
+                    docling_document=docling_document,
+                    tenant_id=effective_tenant,
+                    doc_id=document_id,
+                    source_uri=file_path,
+                    pipeline_version="v2",
+                )
+
+                metrics.structural_graph_time_ms = (time.time() - structural_graph_start) * 1000
+                metrics.structural_graph_items = structural_graph_result.item_count
+                metrics.structural_graph_chunks = structural_graph_result.chunk_count
+
+                logger.info(
+                    f"[ExtractionPipelineV2] StructuralGraph built: "
+                    f"{structural_graph_result.item_count} items, "
+                    f"{structural_graph_result.section_count} sections, "
+                    f"{structural_graph_result.chunk_count} chunks "
+                    f"({structural_graph_result.narrative_chunk_count} narrative), "
+                    f"time={metrics.structural_graph_time_ms:.0f}ms"
+                )
+
+            except Exception as e:
+                logger.warning(
+                    f"[ExtractionPipelineV2] StructuralGraph build failed: {e}, "
+                    f"continuing without structural graph"
+                )
+
         # === Construction du resultat ===
         structure = self._build_structure(merged_pages, gating_decisions)
 
@@ -594,6 +661,24 @@ class ExtractionPipelineV2:
             if merged_pages[idx].vision_enrichment is not None
         ]
 
+        # Construire les stats avec éventuellement le summary du structural graph
+        result_stats = {
+            "tenant_id": effective_tenant,
+            "config": self.config.to_dict(),
+            "metrics": metrics.to_dict(),
+        }
+
+        if structural_graph_result:
+            result_stats["structural_graph"] = {
+                "item_count": structural_graph_result.item_count,
+                "section_count": structural_graph_result.section_count,
+                "chunk_count": structural_graph_result.chunk_count,
+                "narrative_chunk_count": structural_graph_result.narrative_chunk_count,
+                "doc_version_id": structural_graph_result.doc_version.doc_version_id,
+                "structure_analysis": structural_graph_result.structure_analysis,
+                "chunk_analysis": structural_graph_result.chunk_analysis,
+            }
+
         result = ExtractionResult(
             document_id=document_id,
             source_path=file_path,
@@ -606,11 +691,7 @@ class ExtractionPipelineV2:
             gating_decisions=gating_decisions,
             vision_results=vision_results,
             doc_context=doc_context,  # ADR_ASSERTION_AWARE_KG
-            stats={
-                "tenant_id": effective_tenant,
-                "config": self.config.to_dict(),
-                "metrics": metrics.to_dict(),
-            },
+            stats=result_stats,
         )
 
         metrics.total_time_ms = (time.time() - total_start) * 1000
