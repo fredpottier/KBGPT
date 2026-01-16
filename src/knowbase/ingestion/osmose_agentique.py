@@ -54,17 +54,13 @@ from knowbase.ingestion.osmose_persistence import (
     persist_hybrid_anchor_to_neo4j,
     extract_intra_document_relations,
     trigger_entity_resolution_reevaluation,
-    persist_dual_chunks_to_neo4j,  # ADR Dual Chunking 2026-01
+    # ADR_COVERAGE_PROPERTY_NOT_NODE - Phase 1 & 2 (Option C)
+    resolve_section_ids_for_proto_concepts,
+    anchor_proto_concepts_to_docitems,
 )
-# ===== ADR Dual Chunking 2026-01 =====
-from knowbase.ingestion.coverage_chunk_generator import (
-    generate_coverage_chunks,
-    CoverageChunkGenerator,
-)
-from knowbase.ingestion.chunk_alignment import (
-    create_alignments,
-    build_alignment_index,
-)
+# ===== ADR Option C 2026-01 (remplace Dual Chunking) =====
+# CoverageChunks supprimés - ADR_COVERAGE_PROPERTY_NOT_NODE
+# ANCHORED_IN pointe maintenant vers DocItem (voir anchor_proto_concepts_to_docitems)
 
 # ===== Phase 2 - Hybrid Anchor Model =====
 from knowbase.config.feature_flags import is_feature_enabled, get_hybrid_anchor_config
@@ -1121,31 +1117,12 @@ class OsmoseAgentiqueService:
             )
 
             # ================================================================
-            # ADR Dual Chunking 2026-01: Étape 6b - CoverageChunks
+            # ADR_COVERAGE_PROPERTY_NOT_NODE: CoverageChunks supprimés
             # ================================================================
-            # Ces chunks couvrent 100% du document (pas de min_tokens)
-            # Ils sont utilisés pour les relations ANCHORED_IN (preuve)
-            coverage_chunks = generate_coverage_chunks(
-                text_content=text_content,
-                document_id=document_id,
-                tenant_id=tenant
-            )
-
-            logger.info(
-                f"[OSMOSE:DualChunk] CoverageChunks: {len(coverage_chunks)} chunks "
-                f"(100% coverage)"
-            )
-
-            # ================================================================
-            # ADR Dual Chunking 2026-01: Étape 6c - Alignements
-            # ================================================================
-            # Crée les relations ALIGNS_WITH entre Coverage et Retrieval
-            alignments = create_alignments(coverage_chunks, retrieval_chunks)
-            alignment_dicts = [a.to_dict() for a in alignments]
-
-            logger.info(
-                f"[OSMOSE:DualChunk] Alignments: {len(alignments)} ALIGNS_WITH relations"
-            )
+            # L'ancien système Dual Chunking est remplacé par Option C:
+            # - ANCHORED_IN pointe vers DocItem (pas CoverageChunk)
+            # - DocItem a charspan_docwide pour alignement positions
+            # - Voir anchor_proto_concepts_to_docitems() plus bas
 
             # Étape 7: Persister RetrievalChunks dans Qdrant
             # Note: Les anchored_concepts du payload Qdrant restent inchangés pour l'instant
@@ -1159,6 +1136,20 @@ class OsmoseAgentiqueService:
                 logger.info(
                     f"[OSMOSE:HybridAnchor] Qdrant: {len(chunk_ids)} RetrievalChunks inserted"
                 )
+
+            # ================================================================
+            # ADR_COVERAGE_PROPERTY_NOT_NODE - Phase 1: Résolution section_id
+            # ================================================================
+            # Résout les section_id textuels vers les UUID des SectionContext
+            # AVANT la persistance pour que les ProtoConcepts aient le bon section_id
+            resolved_sections = resolve_section_ids_for_proto_concepts(
+                proto_concepts=proto_concepts,
+                doc_id=document_id,
+                tenant_id=tenant,
+            )
+            logger.info(
+                f"[OSMOSE:OptionC] Phase 1: Resolved {resolved_sections} section_ids to UUID"
+            )
 
             # Étape 8: Persister dans Neo4j (concepts + Document node)
             # PR4: Inclut Document node + EXTRACTED_FROM avec propriétés assertion
@@ -1174,23 +1165,18 @@ class OsmoseAgentiqueService:
             )
 
             # ================================================================
-            # ADR Dual Chunking 2026-01: Étape 8bis - Dual Chunking Persistence
+            # ADR_COVERAGE_PROPERTY_NOT_NODE - Phase 2: ANCHORED_IN → DocItem
             # ================================================================
-            # Persiste CoverageChunks, RetrievalChunks, ALIGNS_WITH, ANCHORED_IN
-            dual_chunk_stats = await persist_dual_chunks_to_neo4j(
-                coverage_chunks=coverage_chunks,
-                retrieval_chunks=retrieval_chunks,
-                alignments=alignment_dicts,
+            # Crée les relations ANCHORED_IN vers DocItem (remplace DocumentChunk)
+            # Les DocItems ont les charspan précis et le section_id UUID
+            anchored_to_docitem = anchor_proto_concepts_to_docitems(
                 proto_concepts=proto_concepts,
-                tenant_id=tenant
+                doc_id=document_id,
+                tenant_id=tenant,
             )
-
             logger.info(
-                f"[OSMOSE:DualChunk] Neo4j: "
-                f"{dual_chunk_stats.get('coverage_chunks_created', 0)} CoverageChunks, "
-                f"{dual_chunk_stats.get('retrieval_chunks_created', 0)} RetrievalChunks, "
-                f"{dual_chunk_stats.get('aligns_with_created', 0)} ALIGNS_WITH, "
-                f"{dual_chunk_stats.get('anchored_in_created', 0)} ANCHORED_IN"
+                f"[OSMOSE:OptionC] Phase 2: Created {anchored_to_docitem} "
+                f"ANCHORED_IN → DocItem relations"
             )
 
             # ================================================================
@@ -1273,7 +1259,7 @@ class OsmoseAgentiqueService:
                 status=EnrichmentStatus.COMPLETE,
                 concepts_extracted=len(proto_concepts),
                 concepts_promoted=0,  # Promotion déférée à Pass 2.0
-                chunks_created=len(retrieval_chunks) + len(coverage_chunks)  # ADR Dual Chunking
+                chunks_created=len(retrieval_chunks)  # ADR Option C: CoverageChunks supprimés
             )
             # Mark Pass 2 as pending (ready for CORPUS_PROMOTION + enrichment)
             enrichment_tracker.update_pass2_status(
@@ -1284,7 +1270,7 @@ class OsmoseAgentiqueService:
             logger.info(
                 f"[OSMOSE:HybridAnchor] ✅ Pass 1 complete for {document_id}: "
                 f"{len(proto_concepts)} ProtoConcepts, "
-                f"{len(retrieval_chunks)}+{len(coverage_chunks)} chunks in {pass1_duration:.1f}s "
+                f"{len(retrieval_chunks)} chunks in {pass1_duration:.1f}s "
                 f"(promotion deferred to Pass 2.0)"
             )
 

@@ -422,17 +422,23 @@ class HybridAnchorSearchService:
                 return []
 
             # Query Neo4j pour récupérer chunks via anchors
-            # CanonicalConcept ← INSTANCE_OF - ProtoConcept - ANCHORED_IN → DocumentChunk
+            # ADR_COVERAGE_PROPERTY_NOT_NODE: Support DocItem (Option C) + DocumentChunk (legacy)
             query = """
             MATCH (cc:CanonicalConcept {tenant_id: $tenant_id})
             WHERE cc.canonical_id IN $concept_ids
-            MATCH (cc)<-[:INSTANCE_OF]-(pc:ProtoConcept)-[:ANCHORED_IN]->(dc:DocumentChunk)
-            WITH dc, cc, pc, count(DISTINCT pc) AS anchor_count
-            RETURN dc.chunk_id AS chunk_id,
-                   dc.document_id AS document_id,
-                   dc.text_preview AS text_preview,
-                   dc.start_char AS start_char,
-                   dc.end_char AS end_char,
+            MATCH (cc)<-[:INSTANCE_OF]-(pc:ProtoConcept)-[:ANCHORED_IN]->(target)
+            WHERE target:DocItem OR target:DocumentChunk
+            WITH target, cc, pc, count(DISTINCT pc) AS anchor_count,
+                 COALESCE(target.item_id, target.chunk_id) AS target_id,
+                 COALESCE(target.doc_id, target.document_id) AS doc_id,
+                 COALESCE(target.text, target.text_preview) AS text_content,
+                 COALESCE(target.charspan_start_docwide, target.charspan_start, target.start_char) AS start_char,
+                 COALESCE(target.charspan_end_docwide, target.charspan_end, target.end_char) AS end_char
+            RETURN target_id AS chunk_id,
+                   doc_id AS document_id,
+                   text_content AS text_preview,
+                   start_char,
+                   end_char,
                    collect(DISTINCT cc.canonical_name)[0..3] AS concept_labels,
                    anchor_count,
                    CASE WHEN anchor_count > 2 THEN 0.9

@@ -2,12 +2,14 @@
 Corpus Promotion Engine - Pass 2.0 Unified Promotion.
 
 ADR: doc/ongoing/ADR_UNIFIED_CORPUS_PROMOTION.md
+ADR: doc/ongoing/ADR_CORPUS_AWARE_LEX_KEY_NORMALIZATION.md
 
 Responsabilités:
 1. Charger les ProtoConcepts non-promus
-2. Grouper par label canonique (via NormalizationEngine)
+2. Grouper par lex_key (normalisation canonique via compute_lex_key)
 3. Appliquer règles de promotion unifiées (doc-level + corpus-level)
 4. Créer CanonicalConcepts avec relations INSTANCE_OF
+5. Type guard soft pour éviter les faux positifs homonymes
 
 Règles de promotion:
 - ≥2 occurrences même document → STABLE
@@ -17,18 +19,21 @@ Règles de promotion:
 
 Author: OSMOSE
 Date: 2026-01-09
+Updated: 2026-01-11 (ADR lex_key normalization)
 """
 
 import logging
+import re
 from typing import List, Dict, Any, Optional, Set, Tuple
 from dataclasses import dataclass, field
-from collections import defaultdict
+from collections import defaultdict, Counter
 from datetime import datetime
 
 from knowbase.common.clients.neo4j_client import Neo4jClient
 from knowbase.api.schemas.concepts import ConceptStability
 from knowbase.config.feature_flags import get_hybrid_anchor_config
 from knowbase.config.settings import get_settings
+from knowbase.consolidation.lex_utils import compute_lex_key
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +86,11 @@ class PromotionDecision:
     proto_ids: List[str] = field(default_factory=list)
     document_ids: List[str] = field(default_factory=list)
 
+    # Type Guard Soft (ADR lex_key)
+    lex_key: str = ""
+    type_bucket: str = "__NONE__"
+    type_conflict: bool = False
+
 
 @dataclass
 class CorpusPromotionStats:
@@ -101,6 +111,11 @@ class CorpusPromotionStats:
     # Cross-doc
     crossdoc_promotions: int = 0
     corpus_protos_linked: int = 0
+
+    # ADR lex_key metrics
+    protos_without_lex_key: int = 0
+    buckets_split_by_type: int = 0
+    buckets_type_conflict: int = 0
 
     @property
     def total_promoted(self) -> int:
@@ -290,7 +305,7 @@ class CorpusPromotionEngine:
         Charge les ProtoConcepts non-promus du document courant.
 
         Returns:
-            Liste de dicts avec propriétés du ProtoConcept
+            Liste de dicts avec propriétés du ProtoConcept (incluant lex_key si présent)
         """
         query = """
         MATCH (p:ProtoConcept {tenant_id: $tenant_id, document_id: $document_id})
@@ -300,6 +315,8 @@ class CorpusPromotionEngine:
              collect(DISTINCT a.role) AS anchor_roles
         RETURN p.concept_id AS proto_id,
                p.concept_name AS label,
+               p.lex_key AS lex_key,
+               p.type_heuristic AS type_heuristic,
                p.anchor_status AS anchor_status,
                p.extract_confidence AS confidence,
                p.definition AS quote,
@@ -329,14 +346,14 @@ class CorpusPromotionEngine:
 
     def count_corpus_occurrences(
         self,
-        canonical_label: str,
+        lex_key: str,
         exclude_document_id: str,
     ) -> Tuple[int, List[str]]:
         """
-        Compte les occurrences cross-corpus pour un label canonique.
+        Compte les occurrences cross-corpus pour un lex_key.
 
         Args:
-            canonical_label: Label normalisé
+            lex_key: Clé lexicale normalisée (via compute_lex_key)
             exclude_document_id: Document à exclure (document courant)
 
         Returns:
@@ -344,7 +361,7 @@ class CorpusPromotionEngine:
         """
         query = """
         MATCH (p:ProtoConcept {tenant_id: $tenant_id})
-        WHERE toLower(trim(p.label)) = $canonical_label
+        WHERE p.lex_key = $lex_key
           AND p.document_id <> $exclude_document_id
           AND NOT (p)-[:INSTANCE_OF]->(:CanonicalConcept)
         RETURN collect(DISTINCT p.document_id) AS document_ids
@@ -354,7 +371,7 @@ class CorpusPromotionEngine:
             result = session.run(
                 query,
                 tenant_id=self.tenant_id,
-                canonical_label=canonical_label.lower().strip(),
+                lex_key=lex_key,
                 exclude_document_id=exclude_document_id,
             )
             record = result.single()
@@ -366,64 +383,149 @@ class CorpusPromotionEngine:
         return 0, []
 
     # =========================================================================
-    # Groupement par label canonique
+    # Groupement par lex_key (ADR lex_key normalization)
     # =========================================================================
 
+    def _get_lex_key(self, proto: Dict[str, Any]) -> str:
+        """
+        Récupère le lex_key d'un proto avec fallback transitoire.
+
+        Args:
+            proto: Dict avec données du ProtoConcept
+
+        Returns:
+            lex_key (depuis proto ou calculé)
+        """
+        # Prefer stored lex_key
+        if proto.get("lex_key"):
+            return proto["lex_key"]
+
+        # Fallback: compute on-the-fly + log warning
+        label = proto.get("label") or proto.get("concept_name") or ""
+        if not label:
+            return ""
+
+        logger.debug(
+            f"[OSMOSE:CorpusPromotion] Proto {proto.get('proto_id')} missing lex_key, computing on-the-fly"
+        )
+        return compute_lex_key(label)
+
+    def group_by_lex_key(
+        self,
+        protos: List[Dict[str, Any]],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Groupe les ProtoConcepts par lex_key (normalisation canonique).
+
+        ADR: doc/ongoing/ADR_CORPUS_AWARE_LEX_KEY_NORMALIZATION.md
+
+        Uses compute_lex_key() for robust matching:
+        - Accents handled (Données → donnee)
+        - Punctuation handled (S/4HANA → s 4hana)
+        - Plurals handled (documents → document)
+        """
+        groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        missing_lex_key_count = 0
+
+        for proto in protos:
+            lex_key = self._get_lex_key(proto)
+            if not proto.get("lex_key"):
+                missing_lex_key_count += 1
+            groups[lex_key].append(proto)
+
+        if missing_lex_key_count > 0:
+            logger.warning(
+                f"[OSMOSE:CorpusPromotion] {missing_lex_key_count}/{len(protos)} protos missing lex_key"
+            )
+
+        logger.debug(
+            f"[OSMOSE:CorpusPromotion] Grouped {len(protos)} protos into {len(groups)} lex_key groups"
+        )
+
+        return groups, missing_lex_key_count
+
+    def split_by_type_if_divergent(
+        self,
+        lex_key: str,
+        protos: List[Dict[str, Any]],
+    ) -> List[Tuple[str, List[Dict[str, Any]], bool]]:
+        """
+        Split un bucket par type si divergence forte (type guard soft).
+
+        ADR: doc/ongoing/ADR_CORPUS_AWARE_LEX_KEY_NORMALIZATION.md
+
+        Rules:
+        - Dominance >= 70% → pas de split, un seul bucket
+        - Divergence forte + label court/acronyme → split agressif par type
+        - Divergence forte + label normal → garder ensemble + flag type_conflict
+
+        Args:
+            lex_key: Clé lexicale du bucket
+            protos: Liste des protos du bucket
+
+        Returns:
+            Liste de (type_bucket, protos, type_conflict)
+        """
+        # Collecter les types (type_heuristic sur ProtoConcept)
+        types = [p.get("type_heuristic") for p in protos if p.get("type_heuristic")]
+
+        if not types:
+            return [("__NONE__", protos, False)]
+
+        counter = Counter(types)
+        total = sum(counter.values())
+        top_type, top_count = counter.most_common(1)[0]
+        dominance = top_count / total
+
+        # Dominance >= 70% → pas de split
+        if dominance >= 0.70:
+            return [(top_type, protos, False)]
+
+        # Divergence forte détectée
+        # Check if short label or acronym
+        label_sample = protos[0].get("label") or protos[0].get("concept_name") or ""
+        is_short_or_acronym = len(label_sample) < 6 or label_sample.isupper()
+
+        if is_short_or_acronym:
+            # Split agressif par type
+            grouped = defaultdict(list)
+            for p in protos:
+                t = p.get("type_heuristic") or "__NONE__"
+                grouped[t].append(p)
+
+            logger.info(
+                f"[OSMOSE:CorpusPromotion] Type split for short/acronym lex_key '{lex_key}': "
+                f"{len(grouped)} buckets (types: {list(grouped.keys())})"
+            )
+            return [(t, ps, False) for t, ps in grouped.items()]
+
+        # Label normal avec divergence → garder ensemble + flag conflict
+        logger.info(
+            f"[OSMOSE:CorpusPromotion] Type conflict for lex_key '{lex_key}': "
+            f"dominance={dominance:.1%}, types={dict(counter)}"
+        )
+        return [(top_type, protos, True)]  # type_conflict=True
+
+    # DEPRECATED: Use group_by_lex_key instead
     def group_by_canonical_label(
         self,
         protos: List[Dict[str, Any]],
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Groupe les ProtoConcepts par label canonique.
+        DEPRECATED: Utiliser group_by_lex_key().
 
-        Utilise une normalisation simple: lowercase + strip + collapse whitespace.
-        TODO: Intégrer NormalizationEngine quand disponible pour concepts.
+        Maintenu pour compatibilité temporaire.
         """
-        groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-
-        for proto in protos:
-            label = proto.get("label", "")
-            canonical_form = self._normalize_label(label)
-            groups[canonical_form].append(proto)
-
-        logger.debug(
-            f"[OSMOSE:CorpusPromotion] Grouped {len(protos)} protos into {len(groups)} canonical groups"
-        )
-
+        groups, _ = self.group_by_lex_key(protos)
         return groups
 
     def _normalize_label(self, label: str) -> str:
         """
-        Normalise un label de concept pour le groupement.
+        DEPRECATED: Utiliser compute_lex_key() depuis lex_utils.
 
-        Applique:
-        1. lowercase
-        2. strip
-        3. collapse multiple whitespace
-        4. normalize common abbreviations
-
-        Args:
-            label: Label brut
-
-        Returns:
-            Label normalisé pour comparaison
+        Maintenu pour compatibilité temporaire.
         """
-        import re
-
-        if not label:
-            return ""
-
-        # Lowercase + strip
-        normalized = label.lower().strip()
-
-        # Collapse whitespace
-        normalized = re.sub(r'\s+', ' ', normalized)
-
-        # Normalize common patterns (optional, domain-agnostic)
-        # Ex: "s/4 hana" → "s/4hana", "sap s/4hana" → "sap s/4hana"
-        normalized = normalized.replace('s/4 hana', 's/4hana')
-
-        return normalized
+        return compute_lex_key(label)
 
     # =========================================================================
     # Logique de promotion
@@ -460,24 +562,43 @@ class CorpusPromotionEngine:
 
     def determine_promotion(
         self,
-        canonical_label: str,
+        lex_key: str,
         protos: List[Dict[str, Any]],
         document_id: str,
+        type_bucket: str = "__NONE__",
+        type_conflict: bool = False,
     ) -> PromotionDecision:
         """
         Détermine si un groupe de ProtoConcepts doit être promu.
 
-        Règles unifiées (ADR_UNIFIED_CORPUS_PROMOTION):
+        ADR: doc/ongoing/ADR_UNIFIED_CORPUS_PROMOTION.md
+        ADR: doc/ongoing/ADR_CORPUS_AWARE_LEX_KEY_NORMALIZATION.md
+
+        Règles unifiées:
         1. ≥2 occurrences même document → STABLE
         2. ≥2 sections différentes → STABLE
         3. ≥2 documents + signal minimal → STABLE
         4. singleton + high-signal V2 → SINGLETON
+
+        Args:
+            lex_key: Clé lexicale normalisée
+            protos: Liste des ProtoConcepts du bucket
+            document_id: ID du document courant
+            type_bucket: Type dominant du bucket (ou "__NONE__")
+            type_conflict: True si divergence de types détectée
         """
+        # Sélectionner le meilleur label pour l'affichage
+        best_proto = max(protos, key=lambda p: p.get("confidence") or 0.0)
+        canonical_label = best_proto.get("label") or best_proto.get("concept_name") or lex_key
+
         decision = PromotionDecision(
             canonical_label=canonical_label,
             promote=False,
             proto_ids=[p.get("proto_id") for p in protos],
             document_ids=[document_id],
+            lex_key=lex_key,
+            type_bucket=type_bucket,
+            type_conflict=type_conflict,
         )
 
         # Compteurs doc-level
@@ -502,9 +623,9 @@ class CorpusPromotionEngine:
         # Signal minimal pour cross-doc
         decision.has_minimal_signal = self._check_minimal_signal(protos)
 
-        # Compteur corpus (autres documents)
+        # Compteur corpus (autres documents) - using lex_key
         corpus_count, corpus_doc_ids = self.count_corpus_occurrences(
-            canonical_label=canonical_label,
+            lex_key=lex_key,
             exclude_document_id=document_id,
         )
         decision.document_count = 1 + corpus_count  # doc courant + corpus
@@ -556,6 +677,8 @@ class CorpusPromotionEngine:
         """
         Crée un CanonicalConcept et lie les ProtoConcepts via INSTANCE_OF.
 
+        ADR: doc/ongoing/ADR_CORPUS_AWARE_LEX_KEY_NORMALIZATION.md
+
         Returns:
             ID du CanonicalConcept créé
         """
@@ -566,23 +689,31 @@ class CorpusPromotionEngine:
 
         canonical_id = f"cc_{uuid.uuid4().hex[:12]}"
 
-        # Créer le CanonicalConcept
+        # Créer le CanonicalConcept avec lex_key, type_bucket, type_conflict
+        # MERGE sur (tenant_id, lex_key, type_bucket) pour éviter doublons
         # IMPORTANT: Utiliser canonical_id (pas concept_id) pour cohérence avec le reste du code
-        # Stocker unified_definition et type_coarse depuis le meilleur ProtoConcept
         create_query = """
-        CREATE (cc:CanonicalConcept {
-            canonical_id: $canonical_id,
+        MERGE (cc:CanonicalConcept {
             tenant_id: $tenant_id,
-            label: $label,
-            unified_definition: $unified_definition,
-            type_coarse: $type_coarse,
-            stability: $stability,
-            created_at: datetime(),
-            promotion_reason: $reason,
-            proto_count: $proto_count,
-            document_count: $document_count
+            lex_key: $lex_key,
+            type_bucket: $type_bucket
         })
-        RETURN cc.canonical_id AS id
+        ON CREATE SET
+            cc.canonical_id = $canonical_id,
+            cc.label = $label,
+            cc.unified_definition = $unified_definition,
+            cc.type_coarse = $type_coarse,
+            cc.stability = $stability,
+            cc.created_at = datetime(),
+            cc.promotion_reason = $reason,
+            cc.proto_count = $proto_count,
+            cc.document_count = $document_count,
+            cc.type_conflict = $type_conflict
+        ON MATCH SET
+            cc.updated_at = datetime(),
+            cc.proto_count = cc.proto_count + $proto_count,
+            cc.document_count = cc.document_count + $document_count
+        RETURN cc.canonical_id AS id, cc.created_at IS NOT NULL AS is_new
         """
 
         # Lier les ProtoConcepts du document courant
@@ -595,12 +726,15 @@ class CorpusPromotionEngine:
         """
 
         with self.neo4j_client.driver.session(database="neo4j") as session:
-            # Créer CC avec définition et type du meilleur proto
-            session.run(
+            # Créer CC avec lex_key, type_bucket, définition et type du meilleur proto
+            result = session.run(
                 create_query,
                 canonical_id=canonical_id,
                 tenant_id=self.tenant_id,
                 label=best_proto.get("label"),
+                lex_key=decision.lex_key,
+                type_bucket=decision.type_bucket,
+                type_conflict=decision.type_conflict,
                 unified_definition=best_proto.get("definition") or best_proto.get("quote") or "",
                 type_coarse=best_proto.get("type_coarse") or "abstract",
                 stability=decision.stability,
@@ -608,6 +742,10 @@ class CorpusPromotionEngine:
                 proto_count=decision.proto_count,
                 document_count=decision.document_count,
             )
+            record = result.single()
+            # Si le CC existait déjà (MERGE ON MATCH), on récupère son canonical_id
+            if record and record.get("id"):
+                canonical_id = record["id"]
 
             # Lier protos
             result = session.run(
@@ -618,28 +756,110 @@ class CorpusPromotionEngine:
             )
             linked = result.single()["linked"]
 
+            # Créer les MENTIONED_IN vers les SectionContext
+            mentioned_count = self._create_mentioned_in_for_canonical(
+                session, canonical_id, decision.proto_ids
+            )
+
         logger.info(
             f"[OSMOSE:CorpusPromotion] Created CanonicalConcept '{best_proto.get('label')}' "
-            f"({decision.stability}) with {linked} linked protos"
+            f"({decision.stability}) with {linked} linked protos, {mentioned_count} MENTIONED_IN"
         )
 
         return canonical_id
 
+    def _create_mentioned_in_for_canonical(
+        self,
+        session,
+        canonical_id: str,
+        proto_ids: List[str]
+    ) -> int:
+        """
+        Crée les relations MENTIONED_IN entre un CanonicalConcept et ses SectionContext.
+
+        ADR: doc/ongoing/ADR_COVERAGE_PROPERTY_NOT_NODE.md (2026-01-16)
+        Utilise section_id (UUID) pour matcher avec SectionContext.section_id.
+        Fallback sur context_id pour rétrocompatibilité avec données legacy.
+
+        Args:
+            session: Session Neo4j active
+            canonical_id: ID du CanonicalConcept
+            proto_ids: Liste des IDs des ProtoConcepts liés
+
+        Returns:
+            Nombre de relations MENTIONED_IN créées
+        """
+        # ADR_COVERAGE_PROPERTY_NOT_NODE: Utiliser section_id UUID (prioritaire)
+        # avec fallback sur context_id pour données legacy
+        query = """
+        MATCH (p:ProtoConcept {tenant_id: $tenant_id})
+        WHERE p.concept_id IN $proto_ids
+          AND (p.section_id IS NOT NULL OR p.context_id IS NOT NULL)
+
+        // Priorité: section_id UUID (sec_*), sinon context_id
+        WITH DISTINCT
+            CASE
+                WHEN p.section_id IS NOT NULL AND p.section_id STARTS WITH 'sec_'
+                THEN p.section_id
+                ELSE p.context_id
+            END AS section_key,
+            CASE
+                WHEN p.section_id IS NOT NULL AND p.section_id STARTS WITH 'sec_'
+                THEN 'section_id'
+                ELSE 'context_id'
+            END AS key_type
+
+        MATCH (cc:CanonicalConcept {canonical_id: $canonical_id, tenant_id: $tenant_id})
+
+        // Matcher SectionContext par section_id OU context_id selon key_type
+        OPTIONAL MATCH (s1:SectionContext {section_id: section_key, tenant_id: $tenant_id})
+        OPTIONAL MATCH (s2:SectionContext {context_id: section_key, tenant_id: $tenant_id})
+
+        WITH cc, COALESCE(s1, s2) AS s
+        WHERE s IS NOT NULL
+
+        MERGE (cc)-[r:MENTIONED_IN]->(s)
+        ON CREATE SET
+            r.created_at = datetime(),
+            r.mention_count = 1,
+            r.source = 'corpus_promotion'
+        ON MATCH SET
+            r.mention_count = r.mention_count + 1,
+            r.updated_at = datetime()
+
+        RETURN count(r) AS created
+        """
+
+        result = session.run(
+            query,
+            tenant_id=self.tenant_id,
+            proto_ids=proto_ids,
+            canonical_id=canonical_id,
+        )
+        record = result.single()
+        return record["created"] if record else 0
+
     def link_corpus_protos_to_canonical(
         self,
-        canonical_label: str,
+        lex_key: str,
         canonical_id: str,
         exclude_document_id: str,
     ) -> int:
         """
         Lie les ProtoConcepts du corpus existant au CanonicalConcept.
 
+        ADR: doc/ongoing/ADR_CORPUS_AWARE_LEX_KEY_NORMALIZATION.md
+        Utilise lex_key pour le matching cross-doc.
+
+        ADR: doc/ongoing/ADR_STRUCTURAL_CONTEXT_ALIGNMENT.md (2026-01-11)
+        Utilise context_id pour MENTIONED_IN sparse.
+
         Returns:
             Nombre de protos liés
         """
         query = """
         MATCH (p:ProtoConcept {tenant_id: $tenant_id})
-        WHERE toLower(trim(p.label)) = $canonical_label
+        WHERE p.lex_key = $lex_key
           AND p.document_id <> $exclude_document_id
           AND NOT (p)-[:INSTANCE_OF]->(:CanonicalConcept)
         MATCH (cc:CanonicalConcept {canonical_id: $canonical_id, tenant_id: $tenant_id})
@@ -651,16 +871,57 @@ class CorpusPromotionEngine:
             result = session.run(
                 query,
                 tenant_id=self.tenant_id,
-                canonical_label=canonical_label.lower().strip(),
+                lex_key=lex_key,
                 canonical_id=canonical_id,
                 exclude_document_id=exclude_document_id,
             )
             linked = result.single()["linked"]
 
-        if linked > 0:
-            logger.info(
-                f"[OSMOSE:CorpusPromotion] Linked {linked} corpus protos to '{canonical_label}'"
-            )
+            # ADR_COVERAGE_PROPERTY_NOT_NODE: Utiliser section_id UUID avec fallback context_id
+            if linked > 0:
+                mentioned_query = """
+                MATCH (p:ProtoConcept {tenant_id: $tenant_id})-[:INSTANCE_OF]->(cc:CanonicalConcept {canonical_id: $canonical_id})
+                WHERE p.document_id <> $exclude_document_id
+                  AND (p.section_id IS NOT NULL OR p.context_id IS NOT NULL)
+
+                // Priorité: section_id UUID (sec_*), sinon context_id
+                WITH cc, DISTINCT
+                    CASE
+                        WHEN p.section_id IS NOT NULL AND p.section_id STARTS WITH 'sec_'
+                        THEN p.section_id
+                        ELSE p.context_id
+                    END AS section_key
+
+                // Matcher SectionContext par section_id OU context_id
+                OPTIONAL MATCH (s1:SectionContext {section_id: section_key, tenant_id: $tenant_id})
+                OPTIONAL MATCH (s2:SectionContext {context_id: section_key, tenant_id: $tenant_id})
+
+                WITH cc, COALESCE(s1, s2) AS s
+                WHERE s IS NOT NULL
+
+                MERGE (cc)-[r:MENTIONED_IN]->(s)
+                ON CREATE SET
+                    r.created_at = datetime(),
+                    r.mention_count = 1,
+                    r.source = 'corpus_promotion_link'
+                ON MATCH SET
+                    r.mention_count = r.mention_count + 1,
+                    r.updated_at = datetime()
+
+                RETURN count(r) AS created
+                """
+                mentioned_result = session.run(
+                    mentioned_query,
+                    tenant_id=self.tenant_id,
+                    canonical_id=canonical_id,
+                    exclude_document_id=exclude_document_id,
+                )
+                mentioned_count = mentioned_result.single()["created"]
+
+                logger.info(
+                    f"[OSMOSE:CorpusPromotion] Linked {linked} corpus protos to lex_key='{lex_key}', "
+                    f"{mentioned_count} MENTIONED_IN created"
+                )
 
         return linked
 
@@ -674,6 +935,8 @@ class CorpusPromotionEngine:
     ) -> CorpusPromotionStats:
         """
         Exécute la promotion Pass 2.0 pour un document.
+
+        ADR: doc/ongoing/ADR_CORPUS_AWARE_LEX_KEY_NORMALIZATION.md
 
         Args:
             document_id: ID du document à traiter
@@ -702,39 +965,52 @@ class CorpusPromotionEngine:
             stats.completed_at = datetime.now()
             return stats
 
-        # 2. Grouper par label canonique
-        groups = self.group_by_canonical_label(protos)
+        # 2. Grouper par lex_key (normalisation canonique)
+        groups, missing_lex_key_count = self.group_by_lex_key(protos)
         stats.groups_analyzed = len(groups)
+        stats.protos_without_lex_key = missing_lex_key_count
 
-        # 3. Analyser chaque groupe
-        for canonical_label, group_protos in groups.items():
-            decision = self.determine_promotion(
-                canonical_label=canonical_label,
-                protos=group_protos,
-                document_id=document_id,
-            )
+        # 3. Analyser chaque groupe avec type guard soft
+        for lex_key, group_protos in groups.items():
+            # Type guard: split par type si divergence forte
+            type_buckets = self.split_by_type_if_divergent(lex_key, group_protos)
 
-            if decision.promote:
-                # Créer CanonicalConcept
-                canonical_id = self.create_canonical_concept(decision, group_protos)
+            if len(type_buckets) > 1:
+                stats.buckets_split_by_type += 1
 
-                # Compteurs
-                if decision.stability == ConceptStability.STABLE.value:
-                    stats.promoted_stable += 1
+            for type_bucket, bucket_protos, type_conflict in type_buckets:
+                if type_conflict:
+                    stats.buckets_type_conflict += 1
+
+                decision = self.determine_promotion(
+                    lex_key=lex_key,
+                    protos=bucket_protos,
+                    document_id=document_id,
+                    type_bucket=type_bucket,
+                    type_conflict=type_conflict,
+                )
+
+                if decision.promote:
+                    # Créer CanonicalConcept
+                    canonical_id = self.create_canonical_concept(decision, bucket_protos)
+
+                    # Compteurs
+                    if decision.stability == ConceptStability.STABLE.value:
+                        stats.promoted_stable += 1
+                    else:
+                        stats.promoted_singleton += 1
+
+                    # Lier protos corpus si cross-doc
+                    if decision.document_count > 1:
+                        linked = self.link_corpus_protos_to_canonical(
+                            lex_key=lex_key,
+                            canonical_id=canonical_id,
+                            exclude_document_id=document_id,
+                        )
+                        stats.corpus_protos_linked += linked
+                        stats.crossdoc_promotions += 1
                 else:
-                    stats.promoted_singleton += 1
-
-                # Lier protos corpus si cross-doc
-                if decision.document_count > 1:
-                    linked = self.link_corpus_protos_to_canonical(
-                        canonical_label=canonical_label,
-                        canonical_id=canonical_id,
-                        exclude_document_id=document_id,
-                    )
-                    stats.corpus_protos_linked += linked
-                    stats.crossdoc_promotions += 1
-            else:
-                stats.not_promoted += 1
+                    stats.not_promoted += 1
 
         stats.completed_at = datetime.now()
 
@@ -742,7 +1018,10 @@ class CorpusPromotionEngine:
             f"[OSMOSE:CorpusPromotion] Pass 2.0 completed for {document_id}: "
             f"{stats.total_promoted} promoted (stable={stats.promoted_stable}, "
             f"singleton={stats.promoted_singleton}), {stats.not_promoted} not promoted, "
-            f"{stats.crossdoc_promotions} cross-doc"
+            f"{stats.crossdoc_promotions} cross-doc, "
+            f"missing_lex_key={stats.protos_without_lex_key}, "
+            f"type_splits={stats.buckets_split_by_type}, "
+            f"type_conflicts={stats.buckets_type_conflict}"
         )
 
         return stats

@@ -6,12 +6,15 @@ Contient les méthodes de persistance Neo4j et d'extraction de relations.
 
 Author: OSMOSE Refactoring
 Date: 2025-01-05
+Updated: 2026-01-11 (ADR lex_key normalization)
 """
 
 from __future__ import annotations
 
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 import logging
+
+from knowbase.consolidation.lex_utils import compute_lex_key
 
 if TYPE_CHECKING:
     from knowbase.extraction_v2.context.doc_context_frame import DocContextFrame
@@ -230,12 +233,18 @@ def _create_proto_concepts(
     proto_concepts: List[Any],
     tenant_id: str
 ) -> int:
-    """Crée les ProtoConcept nodes."""
+    """
+    Crée les ProtoConcept nodes.
+
+    ADR: doc/ongoing/ADR_CORPUS_AWARE_LEX_KEY_NORMALIZATION.md
+    Ajoute lex_key calculé via compute_lex_key() pour matching cross-doc.
+    """
     proto_query = """
     UNWIND $protos AS proto
     MERGE (p:ProtoConcept {concept_id: proto.id, tenant_id: $tenant_id})
     ON CREATE SET
         p.concept_name = proto.label,
+        p.lex_key = proto.lex_key,
         p.definition = proto.definition,
         p.type_heuristic = proto.type_heuristic,
         p.document_id = proto.document_id,
@@ -248,6 +257,7 @@ def _create_proto_concepts(
         p.anchor_failure_reason = proto.anchor_failure_reason
     ON MATCH SET
         p.definition = COALESCE(proto.definition, p.definition),
+        p.lex_key = COALESCE(proto.lex_key, p.lex_key),
         p.extract_confidence = COALESCE(proto.extract_confidence, p.extract_confidence),
         p.anchor_status = proto.anchor_status,
         p.fuzzy_best_score = proto.fuzzy_best_score,
@@ -260,6 +270,7 @@ def _create_proto_concepts(
         {
             "id": pc.id,
             "label": pc.label,
+            "lex_key": compute_lex_key(pc.label) if pc.label else "",  # ADR lex_key
             "definition": pc.definition,
             "type_heuristic": pc.type_heuristic,
             "document_id": pc.document_id,
@@ -540,13 +551,20 @@ def _create_coverage_chunks(
     tenant_id: str
 ) -> int:
     """
+    DEPRECATED: Utilisez anchor_proto_concepts_to_docitems() à la place.
+
     Crée les CoverageChunk nodes dans Neo4j.
 
-    CoverageChunks sont utilisés pour les relations ANCHORED_IN (preuve).
-    Ils ne sont PAS vectorisés dans Qdrant.
-
-    ADR: doc/ongoing/ADR_DUAL_CHUNKING_ARCHITECTURE.md
+    ADR_COVERAGE_PROPERTY_NOT_NODE: Cette fonction est dépréciée.
+    Le système Option C utilise DocItem comme cible de ANCHORED_IN.
     """
+    import warnings
+    warnings.warn(
+        "_create_coverage_chunks is deprecated. Use anchor_proto_concepts_to_docitems() "
+        "with DocItem instead (ADR_COVERAGE_PROPERTY_NOT_NODE).",
+        DeprecationWarning,
+        stacklevel=2
+    )
     if not coverage_chunks:
         return 0
 
@@ -596,10 +614,18 @@ def _create_aligns_with_relations(
     tenant_id: str
 ) -> int:
     """
-    Crée les relations ALIGNS_WITH entre CoverageChunks et RetrievalChunks.
+    DEPRECATED: Les relations ALIGNS_WITH ne sont plus utilisées avec Option C.
 
-    ADR: doc/ongoing/ADR_DUAL_CHUNKING_ARCHITECTURE.md
+    ADR_COVERAGE_PROPERTY_NOT_NODE: Cette fonction est dépréciée.
+    Le système Option C n'utilise plus de CoverageChunks ni d'alignements.
     """
+    import warnings
+    warnings.warn(
+        "_create_aligns_with_relations is deprecated. ALIGNS_WITH relations "
+        "are no longer used with Option C (ADR_COVERAGE_PROPERTY_NOT_NODE).",
+        DeprecationWarning,
+        stacklevel=2
+    )
     if not alignments:
         return 0
 
@@ -640,16 +666,19 @@ def _create_anchored_in_to_coverage(
     tenant_id: str
 ) -> int:
     """
-    Crée les relations ANCHORED_IN vers les CoverageChunks.
+    DEPRECATED: Utilisez anchor_proto_concepts_to_docitems() à la place.
 
-    Pour chaque ProtoConcept avec anchor_status=SPAN, trouve le
-    CoverageChunk qui contient la position de l'anchor et crée
-    la relation ANCHORED_IN.
-
-    Invariant: Tout ProtoConcept SPAN doit avoir une relation ANCHORED_IN.
-
-    ADR: doc/ongoing/ADR_DUAL_CHUNKING_ARCHITECTURE.md
+    ADR_COVERAGE_PROPERTY_NOT_NODE: Cette fonction est dépréciée.
+    Le système Option C utilise DocItem comme cible de ANCHORED_IN
+    au lieu de CoverageChunks.
     """
+    import warnings
+    warnings.warn(
+        "_create_anchored_in_to_coverage is deprecated. Use anchor_proto_concepts_to_docitems() "
+        "with DocItem instead (ADR_COVERAGE_PROPERTY_NOT_NODE).",
+        DeprecationWarning,
+        stacklevel=2
+    )
     if not proto_concepts or not coverage_chunks:
         return 0
 
@@ -658,6 +687,8 @@ def _create_anchored_in_to_coverage(
     sorted_coverage = sorted(coverage_chunks, key=lambda c: c.get("char_start", 0))
 
     anchored_relations = []
+    # ADR_STRUCTURAL_CONTEXT_ALIGNMENT: Collecter les context_id pour mise à jour des protos
+    proto_context_mappings = []
 
     for proto in proto_concepts:
         # Vérifier anchor_status
@@ -694,6 +725,8 @@ def _create_anchored_in_to_coverage(
             if matching_chunk:
                 chunk_id = matching_chunk.get("chunk_id")
                 chunk_start = matching_chunk.get("char_start", 0)
+                # ADR_STRUCTURAL_CONTEXT_ALIGNMENT: Récupérer context_id du chunk
+                context_id = matching_chunk.get("context_id")
 
                 # Calculer span relatif au chunk
                 span_start = anchor_start - chunk_start
@@ -706,6 +739,13 @@ def _create_anchored_in_to_coverage(
                     "span_start": span_start,
                     "span_end": span_end,
                 })
+
+                # ADR_STRUCTURAL_CONTEXT_ALIGNMENT: Stocker le mapping proto → context_id
+                if context_id:
+                    proto_context_mappings.append({
+                        "concept_id": concept_id,
+                        "context_id": context_id,
+                    })
             else:
                 logger.warning(
                     f"[OSMOSE:DualChunk] No coverage chunk for anchor at "
@@ -737,7 +777,64 @@ def _create_anchored_in_to_coverage(
             f"[OSMOSE:DualChunk] Created {created} ANCHORED_IN relations "
             f"(from {len(anchored_relations)} candidates)"
         )
+
+        # ADR_STRUCTURAL_CONTEXT_ALIGNMENT: Mettre à jour context_id sur les ProtoConcepts
+        if proto_context_mappings:
+            _update_proto_context_ids(neo4j_client, proto_context_mappings, tenant_id)
+
         return created
+
+
+def _update_proto_context_ids(
+    neo4j_client,
+    proto_context_mappings: List[Dict[str, str]],
+    tenant_id: str
+) -> int:
+    """
+    Met à jour le context_id sur les ProtoConcepts.
+
+    ADR: doc/ongoing/ADR_STRUCTURAL_CONTEXT_ALIGNMENT.md
+
+    Le context_id permet de lier le ProtoConcept à sa SectionContext
+    structurelle (via SectionContext.context_id), ce qui est nécessaire
+    pour créer des relations MENTIONED_IN précises en Pass 2.
+
+    Args:
+        neo4j_client: Client Neo4j
+        proto_context_mappings: Liste de {concept_id, context_id}
+        tenant_id: ID tenant
+
+    Returns:
+        Nombre de ProtoConcepts mis à jour
+    """
+    if not proto_context_mappings:
+        return 0
+
+    # Dédupliquer par concept_id (garder le premier context_id trouvé)
+    seen = set()
+    unique_mappings = []
+    for mapping in proto_context_mappings:
+        cid = mapping["concept_id"]
+        if cid not in seen:
+            seen.add(cid)
+            unique_mappings.append(mapping)
+
+    update_query = """
+    UNWIND $mappings AS m
+    MATCH (p:ProtoConcept {concept_id: m.concept_id, tenant_id: $tenant_id})
+    SET p.context_id = m.context_id
+    RETURN count(p) AS updated
+    """
+
+    with neo4j_client.driver.session(database="neo4j") as session:
+        result = session.run(update_query, mappings=unique_mappings, tenant_id=tenant_id)
+        record = result.single()
+        updated = record["updated"] if record else 0
+        logger.info(
+            f"[OSMOSE:StructuralContext] Updated {updated} ProtoConcepts with context_id "
+            f"(ADR_STRUCTURAL_CONTEXT_ALIGNMENT)"
+        )
+        return updated
 
 
 async def persist_dual_chunks_to_neo4j(
@@ -748,18 +845,14 @@ async def persist_dual_chunks_to_neo4j(
     tenant_id: str
 ) -> Dict[str, int]:
     """
-    Persiste l'architecture Dual Chunking dans Neo4j.
+    DEPRECATED: Le système Dual Chunking est remplacé par Option C.
 
-    Crée:
-    - CoverageChunks (couverture 100%)
-    - RetrievalChunks (layout-aware, vectorisés)
-    - Relations ALIGNS_WITH entre Coverage et Retrieval
-    - Relations ANCHORED_IN (ProtoConcept → CoverageChunk)
-
-    ADR: doc/ongoing/ADR_DUAL_CHUNKING_ARCHITECTURE.md
+    ADR_COVERAGE_PROPERTY_NOT_NODE: Cette fonction est dépréciée.
+    Utilisez anchor_proto_concepts_to_docitems() pour les relations ANCHORED_IN.
+    Les CoverageChunks et ALIGNS_WITH ne sont plus utilisés.
 
     Args:
-        coverage_chunks: CoverageChunks générés
+        coverage_chunks: CoverageChunks générés (ignoré avec Option C)
         retrieval_chunks: RetrievalChunks générés (chunks existants)
         alignments: Relations d'alignement (dicts avec coverage_chunk_id, retrieval_chunk_id)
         proto_concepts: ProtoConcepts pour les relations ANCHORED_IN
@@ -768,6 +861,13 @@ async def persist_dual_chunks_to_neo4j(
     Returns:
         Dict avec compteurs créés
     """
+    import warnings
+    warnings.warn(
+        "persist_dual_chunks_to_neo4j is deprecated. Use anchor_proto_concepts_to_docitems() "
+        "for ANCHORED_IN relations (ADR_COVERAGE_PROPERTY_NOT_NODE).",
+        DeprecationWarning,
+        stacklevel=2
+    )
     from knowbase.common.clients.neo4j_client import get_neo4j_client
     from knowbase.config.settings import get_settings
 
@@ -1004,8 +1104,248 @@ async def trigger_entity_resolution_reevaluation(
         logger.warning(f"[OSMOSE:EntityResolution] Reevaluation failed: {e}")
 
 
+# ============================================================================
+# ADR_COVERAGE_PROPERTY_NOT_NODE - Phase 1 & 2 (2026-01)
+# Migration CoverageChunk → DocItem pour ANCHORED_IN
+# ============================================================================
+
+
+def lookup_section_id_by_position(
+    doc_id: str,
+    char_position: int,
+    tenant_id: str = "default",
+) -> Optional[str]:
+    """
+    Trouve le section_id UUID correspondant à une position char dans le document.
+
+    Utilise les DocItems avec charspan pour trouver la section contenant
+    la position spécifiée.
+
+    ADR: ADR_COVERAGE_PROPERTY_NOT_NODE - Phase 1
+
+    Args:
+        doc_id: ID du document
+        char_position: Position caractère à localiser
+        tenant_id: Tenant ID
+
+    Returns:
+        section_id UUID ou None si non trouvé
+    """
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.config.settings import get_settings
+
+    settings = get_settings()
+
+    try:
+        neo4j_client = get_neo4j_client(
+            uri=settings.neo4j_uri,
+            user=settings.neo4j_user,
+            password=settings.neo4j_password,
+            database="neo4j"
+        )
+
+        if not neo4j_client.is_connected():
+            return None
+
+        # Query pour trouver le DocItem contenant la position
+        query = """
+        MATCH (d:DocItem {doc_id: $doc_id, tenant_id: $tenant_id})
+        WHERE d.charspan_start IS NOT NULL
+          AND d.charspan_end IS NOT NULL
+          AND d.charspan_start <= $char_position
+          AND d.charspan_end >= $char_position
+        RETURN d.section_id AS section_id
+        LIMIT 1
+        """
+
+        with neo4j_client.driver.session(database="neo4j") as session:
+            result = session.run(
+                query,
+                doc_id=doc_id,
+                char_position=char_position,
+                tenant_id=tenant_id
+            )
+            record = result.single()
+            if record and record["section_id"]:
+                return record["section_id"]
+
+        return None
+
+    except Exception as e:
+        logger.warning(f"[OSMOSE:Persistence] lookup_section_id failed: {e}")
+        return None
+
+
+def resolve_section_ids_for_proto_concepts(
+    proto_concepts: List[Any],
+    doc_id: str,
+    tenant_id: str = "default",
+) -> int:
+    """
+    Résout les section_id des ProtoConcepts vers les UUID des SectionContext.
+
+    Pour chaque ProtoConcept avec un anchor SPAN, trouve le section_id UUID
+    correspondant via le DocItem à cette position.
+
+    ADR: ADR_COVERAGE_PROPERTY_NOT_NODE - Phase 1
+
+    Args:
+        proto_concepts: Liste des ProtoConcepts à mettre à jour (in-place)
+        doc_id: ID du document
+        tenant_id: Tenant ID
+
+    Returns:
+        Nombre de section_id résolus
+    """
+    resolved_count = 0
+
+    for proto in proto_concepts:
+        # Skip si pas d'anchor avec position
+        if not hasattr(proto, 'anchors') or not proto.anchors:
+            continue
+
+        # Utiliser la position du premier anchor
+        for anchor in proto.anchors:
+            char_start = getattr(anchor, 'char_start', None)
+            if char_start is not None:
+                section_id = lookup_section_id_by_position(
+                    doc_id=doc_id,
+                    char_position=char_start,
+                    tenant_id=tenant_id
+                )
+                if section_id:
+                    proto.section_id = section_id
+                    resolved_count += 1
+                break  # Utiliser uniquement le premier anchor
+
+    logger.info(
+        f"[OSMOSE:Persistence] Resolved {resolved_count}/{len(proto_concepts)} "
+        f"section_ids to UUID format for doc={doc_id}"
+    )
+
+    return resolved_count
+
+
+def anchor_proto_concepts_to_docitems(
+    proto_concepts: List[Any],
+    doc_id: str,
+    tenant_id: str = "default",
+) -> int:
+    """
+    Crée les relations ANCHORED_IN entre ProtoConcepts et DocItems.
+
+    Pour chaque ProtoConcept avec anchor SPAN, trouve le DocItem correspondant
+    via la position char et crée la relation ANCHORED_IN.
+
+    ADR: ADR_COVERAGE_PROPERTY_NOT_NODE - Phase 2
+    Remplace l'ancien système ANCHORED_IN → DocumentChunk
+
+    Args:
+        proto_concepts: Liste des ProtoConcepts
+        doc_id: ID du document
+        tenant_id: Tenant ID
+
+    Returns:
+        Nombre de relations ANCHORED_IN créées
+    """
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.config.settings import get_settings
+
+    settings = get_settings()
+
+    try:
+        neo4j_client = get_neo4j_client(
+            uri=settings.neo4j_uri,
+            user=settings.neo4j_user,
+            password=settings.neo4j_password,
+            database="neo4j"
+        )
+
+        if not neo4j_client.is_connected():
+            logger.warning("[OSMOSE:Persistence] Neo4j not connected, skipping ANCHORED_IN creation")
+            return 0
+
+        # Collecter les anchors à créer
+        anchor_data = []
+        for proto in proto_concepts:
+            proto_id = getattr(proto, 'id', None)
+            if not proto_id:
+                continue
+
+            anchors = getattr(proto, 'anchors', [])
+            anchor_status = getattr(proto, 'anchor_status', 'NONE')
+
+            # Uniquement les anchors SPAN (position valide)
+            if anchor_status != 'SPAN' or not anchors:
+                continue
+
+            for anchor in anchors:
+                char_start = getattr(anchor, 'char_start', None)
+                char_end = getattr(anchor, 'char_end', None)
+                role = getattr(anchor, 'role', 'mention')
+
+                if char_start is not None and char_end is not None:
+                    anchor_data.append({
+                        "proto_id": proto_id,
+                        "char_start": char_start,
+                        "char_end": char_end,
+                        "role": role,
+                    })
+
+        if not anchor_data:
+            logger.debug(f"[OSMOSE:Persistence] No SPAN anchors to create for doc={doc_id}")
+            return 0
+
+        # Query pour créer ANCHORED_IN vers DocItem
+        # Match par position : le DocItem qui contient la position de l'anchor
+        query = """
+        UNWIND $anchors AS anchor
+        MATCH (p:ProtoConcept {concept_id: anchor.proto_id, tenant_id: $tenant_id})
+        MATCH (d:DocItem {doc_id: $doc_id, tenant_id: $tenant_id})
+        WHERE d.charspan_start IS NOT NULL
+          AND d.charspan_end IS NOT NULL
+          AND d.charspan_start <= anchor.char_start
+          AND d.charspan_end >= anchor.char_start
+        WITH p, d, anchor
+        LIMIT 1  // Un seul DocItem par anchor
+        MERGE (p)-[r:ANCHORED_IN]->(d)
+        ON CREATE SET
+            r.char_start = anchor.char_start,
+            r.char_end = anchor.char_end,
+            r.role = anchor.role,
+            r.created_at = datetime(),
+            r.source = 'option_c'
+        RETURN count(r) AS created
+        """
+
+        with neo4j_client.driver.session(database="neo4j") as session:
+            result = session.run(
+                query,
+                anchors=anchor_data,
+                doc_id=doc_id,
+                tenant_id=tenant_id
+            )
+            record = result.single()
+            created = record["created"] if record else 0
+
+        logger.info(
+            f"[OSMOSE:Persistence] Created {created} ANCHORED_IN relations "
+            f"(ProtoConcept → DocItem) for doc={doc_id}"
+        )
+
+        return created
+
+    except Exception as e:
+        logger.error(f"[OSMOSE:Persistence] anchor_proto_concepts_to_docitems failed: {e}")
+        return 0
+
+
 __all__ = [
     "persist_hybrid_anchor_to_neo4j",
     "extract_intra_document_relations",
     "trigger_entity_resolution_reevaluation",
+    # ADR_COVERAGE_PROPERTY_NOT_NODE
+    "lookup_section_id_by_position",
+    "resolve_section_ids_for_proto_concepts",
+    "anchor_proto_concepts_to_docitems",
 ]
