@@ -30,6 +30,11 @@ export interface AssertionSupport {
   weighted_support: number
   freshness: Freshness
   has_official: boolean
+  // 🌊 OSMOSE: Support par relation KG confirmée
+  kg_relation?: string        // Type de relation (ex: EXTENDS)
+  kg_confidence?: number      // Confiance 0.0-1.0
+  kg_evidence_quote?: string  // Citation textuelle de preuve
+  kg_source_count?: number    // Nombre de sources confirmant la relation
 }
 
 export interface AssertionMeta {

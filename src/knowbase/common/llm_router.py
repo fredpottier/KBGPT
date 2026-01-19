@@ -42,6 +42,24 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+class VLLMUnavailableError(Exception):
+    """
+    Exception levée quand vLLM est configuré (burst mode) mais temporairement indisponible.
+
+    Cette exception permet au code appelant de:
+    - Suspendre le job en cours
+    - Sauvegarder l'état (checkpoint)
+    - Retenter plus tard quand vLLM sera de nouveau disponible
+
+    Ne PAS attraper cette exception pour fallback vers OpenAI!
+    """
+
+    def __init__(self, vllm_url: str, message: str = "vLLM is temporarily unavailable"):
+        self.vllm_url = vllm_url
+        self.message = message
+        super().__init__(f"{message}: {vllm_url}")
+
+
 class TaskType(Enum):
     """Types de tâches LLM avec leurs modèles optimaux."""
     VISION = "vision"                    # Analyse d'images + texte
@@ -78,7 +96,8 @@ class LLMRouter:
         self._burst_endpoint: Optional[str] = None
         self._burst_vllm_client = None
         self._burst_async_vllm_client = None
-        self._burst_model: str = "Qwen/Qwen2.5-7B-Instruct"  # Modèle par défaut sur EC2
+        self._burst_model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ"  # Nom réel du modèle (pour logs)
+        self._burst_vllm_served_model: str = "/model"  # Nom exposé par vLLM (chemin volume Docker)
 
         # === Gate Redis pour vLLM (partage inter-processus) ===
         self._redis_burst_cache: Optional[Dict[str, Any]] = None
@@ -254,12 +273,16 @@ class LLMRouter:
         Cette méthode est la "gate" qui permet à tous les processus de savoir
         si vLLM est actif, avec vérification périodique de santé.
 
+        IMPORTANT: Ne désactive PAS automatiquement le burst mode quand vLLM est down.
+        Au lieu de ça, retourne l'état avec un flag "healthy" pour permettre au
+        code appelant de décider (suspendre le job, retenter, etc.)
+
         Cache:
         - Redis state: TTL 5 secondes (évite de spammer Redis)
         - Health check: TTL 30 secondes (évite de spammer vLLM)
 
         Returns:
-            Dict avec vllm_url, vllm_model si vLLM actif et healthy, None sinon
+            Dict avec vllm_url, vllm_model, healthy si vLLM configuré, None si pas de burst
         """
         now = time.time()
 
@@ -267,7 +290,9 @@ class LLMRouter:
         if self._redis_burst_cache is not None:
             cache_age = now - self._redis_burst_cache_time
             if cache_age < self._redis_burst_cache_ttl:
-                return self._redis_burst_cache if self._redis_burst_cache.get("active") else None
+                if self._redis_burst_cache.get("active"):
+                    return self._redis_burst_cache
+                return None
 
         # Cache expiré, vérifier Redis
         try:
@@ -277,19 +302,25 @@ class LLMRouter:
             if state and state.get("active"):
                 # vLLM censé être actif, vérifier health (cache 30s)
                 vllm_url = state.get("vllm_url")
-                if vllm_url and self._check_vllm_health(vllm_url):
+                is_healthy = vllm_url and self._check_vllm_health(vllm_url)
+
+                # Ajouter le flag healthy à l'état
+                state["healthy"] = is_healthy
+
+                if is_healthy:
                     # vLLM actif et healthy
-                    self._redis_burst_cache = state
-                    self._redis_burst_cache_time = now
-                    return state
+                    logger.debug(f"[LLM_ROUTER:GATE] vLLM healthy: {vllm_url}")
                 else:
-                    # vLLM down, nettoyer l'état Redis
-                    logger.warning(f"[LLM_ROUTER:GATE] vLLM health check failed, clearing Redis state")
-                    from knowbase.ingestion.burst.provider_switch import clear_burst_state_in_redis
-                    clear_burst_state_in_redis()
-                    self._redis_burst_cache = {"active": False}
-                    self._redis_burst_cache_time = now
-                    return None
+                    # vLLM configuré mais DOWN - NE PAS désactiver automatiquement
+                    # Le code appelant décidera quoi faire (suspendre, retenter, etc.)
+                    logger.warning(
+                        f"[LLM_ROUTER:GATE] vLLM configured but DOWN: {vllm_url}. "
+                        f"Burst mode remains active, caller should handle suspension."
+                    )
+
+                self._redis_burst_cache = state
+                self._redis_burst_cache_time = now
+                return state
             else:
                 # Pas de vLLM actif dans Redis
                 self._redis_burst_cache = {"active": False}
@@ -538,23 +569,45 @@ class LLMRouter:
             # enable_burst_mode() a été appelé dans un autre processus (app)
             if task_type != TaskType.VISION:  # Vision reste TOUJOURS sur GPT-4o
                 redis_state = self._get_vllm_state_from_redis()
+                logger.info(f"[LLM_ROUTER:GATE] Redis check: found={redis_state is not None}, local_burst={self._burst_mode}")
+
                 if redis_state:
-                    # vLLM actif via Redis, s'assurer que les clients sont initialisés
-                    if self._ensure_burst_client_for_redis_state(redis_state):
-                        logger.debug(f"[LLM_ROUTER:GATE] Text task → vLLM via Redis ({self._burst_endpoint})")
+                    # vLLM configuré via Redis
+                    vllm_url = redis_state.get("vllm_url", "unknown")
+                    is_healthy = redis_state.get("healthy", False)
+
+                    # Si vLLM configuré mais DOWN → lever exception pour suspension
+                    if not is_healthy:
+                        logger.error(
+                            f"[LLM_ROUTER:GATE] ❌ vLLM configured but DOWN: {vllm_url}. "
+                            f"Raising VLLMUnavailableError for job suspension."
+                        )
+                        raise VLLMUnavailableError(vllm_url, "vLLM health check failed")
+
+                    # vLLM healthy, s'assurer que les clients sont initialisés
+                    init_ok = self._ensure_burst_client_for_redis_state(redis_state)
+                    logger.info(f"[LLM_ROUTER:GATE] Burst init from Redis: ok={init_ok}, endpoint={self._burst_endpoint}")
+
+                    if init_ok:
+                        logger.info(f"[LLM_ROUTER:GATE] ✅ Routing to vLLM: {self._burst_endpoint}")
                         return self._call_burst_vllm(messages, temperature, max_tokens, task_type, **kwargs)
+                    else:
+                        # Init failed mais vLLM était healthy - erreur inattendue
+                        raise VLLMUnavailableError(vllm_url, "Failed to initialize burst client")
 
             # === Mode Burst local : rediriger vers EC2 Spot (sauf Vision) ===
             if self._burst_mode and self._burst_vllm_client:
                 # Vision reste TOUJOURS sur GPT-4o (avec gating)
                 if task_type == TaskType.VISION:
-                    logger.debug(f"[LLM_ROUTER:BURST] Vision task → GPT-4o (preserved)")
+                    logger.info(f"[LLM_ROUTER:BURST] Vision task → GPT-4o (preserved)")
                     return self._call_openai(model, messages, temperature, max_tokens, task_type, **kwargs)
                 else:
-                    logger.debug(f"[LLM_ROUTER:BURST] Text task → {self._burst_endpoint} ({self._burst_model})")
+                    logger.info(f"[LLM_ROUTER:BURST] ✅ Text task → {self._burst_endpoint} ({self._burst_model})")
                     return self._call_burst_vllm(messages, temperature, max_tokens, task_type, **kwargs)
 
-            # === Mode Normal ===
+            # === Mode Normal (pas de burst) ===
+            # ATTENTION: On arrive ici seulement si burst mode n'est PAS actif
+            logger.info(f"[LLM_ROUTER] No burst mode - routing to {provider} (model={model})")
             if provider == "openai":
                 return self._call_openai(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "anthropic":
@@ -568,7 +621,17 @@ class LLMRouter:
 
         except Exception as e:
             logger.error(f"[LLM_ROUTER] Error with {model} ({provider}): {e}")
-            # Fallback d'urgence vers le modèle par défaut
+
+            # IMPORTANT: Pas de fallback OpenAI si burst mode actif
+            # On laisse l'erreur remonter pour que le job puisse être suspendu/repris
+            if self._burst_mode:
+                logger.error(
+                    f"[LLM_ROUTER:BURST] ❌ vLLM call failed, NO fallback to OpenAI. "
+                    f"Error: {e}"
+                )
+                raise
+
+            # Fallback d'urgence UNIQUEMENT si pas en burst mode
             default_model = self._config.get("default_model", "gpt-4o")
             if model != default_model:
                 logger.info(f"[LLM_ROUTER] Fallback emergency to {default_model}")
@@ -617,23 +680,45 @@ class LLMRouter:
             # enable_burst_mode() a été appelé dans un autre processus (app)
             if task_type != TaskType.VISION:  # Vision reste TOUJOURS sur GPT-4o
                 redis_state = self._get_vllm_state_from_redis()
+                logger.info(f"[LLM_ROUTER:GATE] Redis check: found={redis_state is not None}, local_burst={self._burst_mode}")
+
                 if redis_state:
-                    # vLLM actif via Redis, s'assurer que les clients sont initialisés
-                    if self._ensure_burst_client_for_redis_state(redis_state):
-                        logger.debug(f"[LLM_ROUTER:GATE:ASYNC] Text task → vLLM via Redis ({self._burst_endpoint})")
+                    # vLLM configuré via Redis
+                    vllm_url = redis_state.get("vllm_url", "unknown")
+                    is_healthy = redis_state.get("healthy", False)
+
+                    # Si vLLM configuré mais DOWN → lever exception pour suspension
+                    if not is_healthy:
+                        logger.error(
+                            f"[LLM_ROUTER:GATE:ASYNC] ❌ vLLM configured but DOWN: {vllm_url}. "
+                            f"Raising VLLMUnavailableError for job suspension."
+                        )
+                        raise VLLMUnavailableError(vllm_url, "vLLM health check failed")
+
+                    # vLLM healthy, s'assurer que les clients sont initialisés
+                    init_ok = self._ensure_burst_client_for_redis_state(redis_state)
+                    logger.info(f"[LLM_ROUTER:GATE] Burst init from Redis: ok={init_ok}, endpoint={self._burst_endpoint}")
+
+                    if init_ok:
+                        logger.info(f"[LLM_ROUTER:GATE:ASYNC] ✅ Routing to vLLM: {self._burst_endpoint}")
                         return await self._call_burst_vllm_async(messages, temperature, max_tokens, task_type, **kwargs)
+                    else:
+                        # Init failed mais vLLM était healthy - erreur inattendue
+                        raise VLLMUnavailableError(vllm_url, "Failed to initialize burst client")
 
             # === Mode Burst local : rediriger vers EC2 Spot (sauf Vision) ===
             if self._burst_mode and self._burst_async_vllm_client:
                 # Vision reste TOUJOURS sur GPT-4o (avec gating)
                 if task_type == TaskType.VISION:
-                    logger.debug(f"[LLM_ROUTER:ASYNC:BURST] Vision task → GPT-4o (preserved)")
+                    logger.info(f"[LLM_ROUTER:ASYNC:BURST] Vision task → GPT-4o (preserved)")
                     return await self._call_openai_async(model, messages, temperature, max_tokens, task_type, **kwargs)
                 else:
-                    logger.debug(f"[LLM_ROUTER:ASYNC:BURST] Text task → {self._burst_endpoint} ({self._burst_model})")
+                    logger.info(f"[LLM_ROUTER:ASYNC:BURST] ✅ Text task → {self._burst_endpoint} ({self._burst_model})")
                     return await self._call_burst_vllm_async(messages, temperature, max_tokens, task_type, **kwargs)
 
-            # === Mode Normal ===
+            # === Mode Normal (pas de burst) ===
+            # ATTENTION: On arrive ici seulement si burst mode n'est PAS actif
+            logger.info(f"[LLM_ROUTER:ASYNC] No burst mode - routing to {provider} (model={model})")
             if provider == "openai":
                 return await self._call_openai_async(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "anthropic":
@@ -651,7 +736,17 @@ class LLMRouter:
 
         except Exception as e:
             logger.error(f"[LLM_ROUTER:ASYNC] Error with {model} ({provider}): {e}")
-            # Fallback d'urgence vers le modèle par défaut
+
+            # IMPORTANT: Pas de fallback OpenAI si burst mode actif
+            # On laisse l'erreur remonter pour que le job puisse être suspendu/repris
+            if self._burst_mode:
+                logger.error(
+                    f"[LLM_ROUTER:ASYNC:BURST] ❌ vLLM call failed, NO fallback to OpenAI. "
+                    f"Error: {e}"
+                )
+                raise
+
+            # Fallback d'urgence UNIQUEMENT si pas en burst mode
             default_model = self._config.get("default_model", "gpt-4o")
             if model != default_model:
                 logger.info(f"[LLM_ROUTER:ASYNC] Fallback emergency to {default_model}")
@@ -1034,11 +1129,17 @@ class LLMRouter:
         if not self._burst_vllm_client:
             raise RuntimeError("Burst mode client not initialized")
 
-        # Limite de contexte pour Qwen2.5-14B-AWQ (garder marge pour output)
-        MAX_INPUT_TOKENS = 6500  # 8192 - 1500 pour output - marge sécurité
+        # Limite de contexte pour Qwen2.5-14B-AWQ
+        # vLLM max context = 8192 tokens TOTAL (input + output)
+        # On doit réserver max_tokens pour la completion + marge sécurité 30%
+        # (l'estimation tokens est approximative, ~4 chars/token mais varie)
+        VLLM_MAX_CONTEXT = 8192
+        SAFETY_MARGIN = 0.30  # 30% de marge car estimation tokens imprécise
+        max_input_tokens = int((VLLM_MAX_CONTEXT - max_tokens) * (1 - SAFETY_MARGIN))
+        max_input_tokens = max(1000, min(max_input_tokens, 4000))  # Entre 1000 et 4000
 
         # Tronquer les messages si trop longs
-        messages = self._truncate_messages_for_context(messages, MAX_INPUT_TOKENS)
+        messages = self._truncate_messages_for_context(messages, max_input_tokens)
 
         # Filtrer les paramètres internes
         api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
@@ -1050,7 +1151,7 @@ class LLMRouter:
                 logger.debug(f"[BURST:vLLM] Removed response_format for model {self._burst_model}")
 
         response = self._burst_vllm_client.chat.completions.create(
-            model=self._burst_model,
+            model=self._burst_vllm_served_model,  # Utiliser le nom exposé par vLLM ("/model")
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -1083,11 +1184,17 @@ class LLMRouter:
         if not self._burst_async_vllm_client:
             raise RuntimeError("Burst mode async client not initialized")
 
-        # Limite de contexte pour Qwen2.5-14B-AWQ (garder marge pour output)
-        MAX_INPUT_TOKENS = 6500  # 8192 - 1500 pour output - marge sécurité
+        # Limite de contexte pour Qwen2.5-14B-AWQ
+        # vLLM max context = 8192 tokens TOTAL (input + output)
+        # On doit réserver max_tokens pour la completion + marge sécurité 30%
+        # (l'estimation tokens est approximative, ~4 chars/token mais varie)
+        VLLM_MAX_CONTEXT = 8192
+        SAFETY_MARGIN = 0.30  # 30% de marge car estimation tokens imprécise
+        max_input_tokens = int((VLLM_MAX_CONTEXT - max_tokens) * (1 - SAFETY_MARGIN))
+        max_input_tokens = max(1000, min(max_input_tokens, 4000))  # Entre 1000 et 4000
 
         # Tronquer les messages si trop longs
-        messages = self._truncate_messages_for_context(messages, MAX_INPUT_TOKENS)
+        messages = self._truncate_messages_for_context(messages, max_input_tokens)
 
         # Filtrer les paramètres internes
         api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
@@ -1098,7 +1205,7 @@ class LLMRouter:
                 api_kwargs.pop('response_format', None)
 
         response = await self._burst_async_vllm_client.chat.completions.create(
-            model=self._burst_model,
+            model=self._burst_vllm_served_model,  # Utiliser le nom exposé par vLLM ("/model")
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 # Version actuelle du cache
-CURRENT_CACHE_VERSION = "v2"
+CURRENT_CACHE_VERSION = "v4"  # v4: Inférence heading_level depuis patterns numérotation
 
 
 class VersionedCache:
@@ -92,11 +92,11 @@ class VersionedCache:
 
     def _get_cache_path_by_hash(self, file_hash: str) -> Path:
         """Retourne le chemin du fichier cache basé sur le hash."""
-        return self.cache_dir / f"{file_hash}.v2cache.json"
+        return self.cache_dir / f"{file_hash}.{self.version}cache.json"
 
     def _get_cache_path(self, document_id: str) -> Path:
         """Retourne le chemin du fichier cache (legacy, par document_id)."""
-        return self.cache_dir / f"{document_id}.v2cache.json"
+        return self.cache_dir / f"{document_id}.{self.version}cache.json"
 
     def is_valid(self, cache_data: Dict[str, Any]) -> bool:
         """
@@ -108,7 +108,7 @@ class VersionedCache:
         Returns:
             True si valide, False sinon
         """
-        return cache_data.get("cache_version") == CURRENT_CACHE_VERSION
+        return cache_data.get("cache_version") == self.version
 
     def get(
         self,

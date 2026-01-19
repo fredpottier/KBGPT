@@ -211,10 +211,13 @@ class MergeStore:
             # Step 4: Rewire INSTANCE_OF edges
             instance_of_count = self._rewire_instance_of(source_id, target_id)
 
+            # Step 5: Rewire MENTIONED_IN edges (critical for corpus links)
+            mentioned_in_count = self._rewire_mentioned_in(source_id, target_id)
+
             logger.info(
                 f"[MergeStore] Merged {source_id} -> {target_id}: "
                 f"edges_out={edges_out}, edges_in={edges_in}, "
-                f"instance_of={instance_of_count}"
+                f"instance_of={instance_of_count}, mentioned_in={mentioned_in_count}"
             )
 
             return MergeResult(
@@ -222,7 +225,7 @@ class MergeStore:
                 source_id=source_id,
                 target_id=target_id,
                 merge_reason=merge_reason,
-                edges_rewired=edges_out + edges_in,
+                edges_rewired=edges_out + edges_in + mentioned_in_count,
                 instance_of_rewired=instance_of_count,
             )
 
@@ -336,6 +339,44 @@ class MergeStore:
             return result["count"] if result else 0
         except Exception as e:
             logger.warning(f"[MergeStore] Rewire INSTANCE_OF failed: {e}")
+            return 0
+
+    def _rewire_mentioned_in(self, source_id: str, target_id: str) -> int:
+        """
+        Rewire MENTIONED_IN edges from source to target.
+
+        This is critical for corpus links: after merge, the target concept
+        should be linked to all SectionContexts from both source and target.
+        """
+        query = """
+        MATCH (source:CanonicalConcept {canonical_id: $source_id, tenant_id: $tenant_id})
+              -[r:MENTIONED_IN]->(ctx:SectionContext)
+
+        MATCH (target:CanonicalConcept {canonical_id: $target_id, tenant_id: $tenant_id})
+
+        // Create new MENTIONED_IN to target (MERGE avoids duplicates)
+        MERGE (target)-[new_r:MENTIONED_IN]->(ctx)
+        ON CREATE SET new_r.rewired_from = $source_id,
+                      new_r.rewired_at = datetime()
+
+        // Delete old MENTIONED_IN from source
+        DELETE r
+
+        RETURN count(*) AS count
+        """
+
+        try:
+            result = self._execute_write(query, {
+                "source_id": source_id,
+                "target_id": target_id,
+                "tenant_id": self.tenant_id,
+            })
+            count = result["count"] if result else 0
+            if count > 0:
+                logger.debug(f"[MergeStore] Rewired {count} MENTIONED_IN edges")
+            return count
+        except Exception as e:
+            logger.warning(f"[MergeStore] Rewire MENTIONED_IN failed: {e}")
             return 0
 
     def rollback_merge(self, source_id: str) -> bool:

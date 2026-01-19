@@ -90,7 +90,7 @@ class DocumentRegistryService:
 
         query = """
         CREATE (d:Document {
-            document_id: $document_id,
+            doc_id: $document_id,
             title: $title,
             source_path: $source_path,
             document_type: $document_type,
@@ -155,7 +155,7 @@ class DocumentRegistryService:
     def _get_document_by_id_tx(tx, document_id: str, tenant_id: str) -> Optional[DocumentResponse]:
         """Transaction récupération document."""
         query = """
-        MATCH (d:Document {document_id: $document_id, tenant_id: $tenant_id})
+        MATCH (d:Document {doc_id: $document_id, tenant_id: $tenant_id})
         OPTIONAL MATCH (d)-[:HAS_VERSION]->(v:DocumentVersion)
         WITH d,
              COUNT(v) as version_count,
@@ -384,13 +384,13 @@ class DocumentRegistryService:
 
         # 1. Marquer toutes les versions précédentes comme non-latest
         tx.run("""
-            MATCH (d:Document {document_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion)
+            MATCH (d:Document {doc_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion)
             SET v.is_latest = false
         """, {"document_id": version.document_id})
 
         # 2. Créer la nouvelle version
         query = """
-        MATCH (d:Document {document_id: $document_id})
+        MATCH (d:Document {doc_id: $document_id})
         CREATE (v:DocumentVersion {
             version_id: $version_id,
             document_id: $document_id,
@@ -540,7 +540,7 @@ class DocumentRegistryService:
         """Transaction récupération dernière version."""
         # DEBUG MODE: Simplified query without SUPERSEDES to avoid Neo4j warnings
         query = """
-        MATCH (d:Document {document_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion {is_latest: true})
+        MATCH (d:Document {doc_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion {is_latest: true})
         RETURN v, null as supersedes_version_id, null as superseded_by_version_id
         """
         # Production query (commented for debug):
@@ -598,7 +598,7 @@ class DocumentRegistryService:
     def _get_document_lineage_tx(tx, document_id: str) -> DocumentLineageResponse:
         """Transaction récupération lineage."""
         # Récupérer document
-        doc_query = "MATCH (d:Document {document_id: $document_id}) RETURN d.title as title"
+        doc_query = "MATCH (d:Document {doc_id: $document_id}) RETURN d.title as title"
         doc_result = tx.run(doc_query, {"document_id": document_id})
         doc_record = doc_result.single()
 
@@ -614,7 +614,7 @@ class DocumentRegistryService:
 
         # Récupérer toutes les versions ordonnées par effective_date
         versions_query = """
-        MATCH (d:Document {document_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion)
+        MATCH (d:Document {doc_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion)
         RETURN v.version_id as version_id,
                v.version_label as version_label,
                v.effective_date as effective_date,
@@ -725,7 +725,7 @@ class DocumentRegistryService:
         import json
 
         query = """
-        MATCH (d:Document {document_id: $document_id, tenant_id: $tenant_id})
+        MATCH (d:Document {doc_id: $document_id, tenant_id: $tenant_id})
               -[:HAS_VERSION]->(v:DocumentVersion)
         RETURN v
         ORDER BY v.effective_date DESC

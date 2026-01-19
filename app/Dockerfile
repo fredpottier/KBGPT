@@ -70,6 +70,10 @@ RUN python -m spacy download en_core_web_md || echo "spaCy en model download fai
 RUN python -m spacy download fr_core_news_md || echo "spaCy fr model download failed"
 RUN python -m spacy download xx_ent_wiki_sm || echo "spaCy xx model download failed"
 
+# FastCoref: téléchargement du modèle transformer pour coréférence (Pass 0.5)
+# Le modèle est téléchargé automatiquement au premier usage (~500MB)
+# Haute qualité (~85%+) et compatible spaCy 3.7+
+
 # Téléchargement modèle fasttext pour détection langue OSMOSE
 RUN mkdir -p /app/models && \
     curl -L https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin -o /app/models/lid.176.bin || \
@@ -78,8 +82,6 @@ RUN mkdir -p /app/models && \
 # Code application (à la fin pour optimiser cache Docker)
 COPY src/knowbase/ /app/knowbase/
 COPY app/main.py /app/main.py
-COPY app/patch_unstructured.py /app/patch_unstructured.py
-COPY app/claims_utils.py /app/claims_utils.py
 COPY app/entrypoint-worker.sh /app/entrypoint-worker.sh
 RUN chmod +x /app/entrypoint-worker.sh
 RUN mkdir -p /app/config

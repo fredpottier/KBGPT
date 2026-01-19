@@ -438,6 +438,9 @@ def search_documents(
         try:
             from .instrumented_answer_builder import build_instrumented_answer
 
+            # Extraire les relations KG confirmées pour booster la classification
+            kg_relations = graph_context_data.get("related_concepts", []) if graph_context_data else []
+
             instrumented_answer, build_metadata = build_instrumented_answer(
                 question=query,
                 chunks=reranked_chunks,
@@ -448,7 +451,8 @@ def search_documents(
                     "top_k_used": TOP_K,
                     "kg_nodes_touched": len(graph_context_data.get("query_concepts", [])) if graph_context_data else 0,
                     "kg_edges_touched": len(graph_context_data.get("typed_edges", [])) if graph_context_data else 0,
-                }
+                },
+                kg_relations=kg_relations,
             )
 
             response["instrumented_answer"] = instrumented_answer.model_dump(by_alias=True)

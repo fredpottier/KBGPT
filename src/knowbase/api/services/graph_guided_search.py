@@ -822,6 +822,7 @@ class GraphGuidedSearchService:
         # Requête avec filtres de visibilité
         # ADR_GRAPH_FIRST_ARCHITECTURE: Relations sémantiques uniquement pour pathfinding
         # MENTIONED_IN est utilisé séparément pour evidence retrieval (voir get_evidence_context_ids)
+        # 🌊 OSMOSE: Récupère aussi evidence_quote pour affichage dans le hover
         cypher = """
         UNWIND $concepts AS concept_name
         MATCH (c:CanonicalConcept {canonical_name: concept_name, tenant_id: $tenant_id})
@@ -837,7 +838,10 @@ class GraphGuidedSearchService:
             type(r) AS relation_type,
             r.confidence AS confidence,
             r.maturity AS maturity,
-            r.source_count AS source_count
+            r.source_count AS source_count,
+            r.evidence_quote AS evidence_quote,
+            r.evidence_count AS evidence_count,
+            r.document_id AS document_id
         ORDER BY r.confidence DESC
         LIMIT $limit
         """
@@ -861,7 +865,11 @@ class GraphGuidedSearchService:
                     "relation": record.get("relation_type"),
                     "confidence": record.get("confidence", 0.5),
                     "maturity": record.get("maturity", "CANDIDATE"),
-                    "source_count": record.get("source_count", 1)
+                    "source_count": record.get("source_count", 1),
+                    # 🌊 OSMOSE: Evidence pour affichage dans le hover
+                    "evidence_quote": record.get("evidence_quote"),
+                    "evidence_count": record.get("evidence_count", 0),
+                    "document_id": record.get("document_id"),
                 })
 
             logger.info(

@@ -13,6 +13,7 @@ Author: OSMOSE Phase 2
 Date: 2024-12
 """
 
+import asyncio
 import logging
 import time
 from datetime import datetime
@@ -422,23 +423,48 @@ class Pass2Service:
             total_segments = 0
             all_observability = []
 
-            for doc_id in doc_ids:
-                # Extraire avec scoring segments + budgets ADR
-                relations, observability = await extract_document_relations(
-                    document_id=doc_id,
-                    tenant_id=self.tenant_id,
-                    max_per_document=max_relations_per_doc
-                )
+            # Paralléliser le traitement des documents (max 4 en parallèle)
+            # Chaque document utilise déjà 5 workers pour ses segments
+            # 4 docs × 5 segments = 20 appels LLM max simultanés
+            max_concurrent_docs = 4
+            semaphore = asyncio.Semaphore(max_concurrent_docs)
 
-                # Persister avec guardrails ADR + Verify-to-Persist pour conflicts_with
-                written = await persist_relations(relations, doc_id, self.tenant_id)
+            async def process_document(doc_id: str):
+                """Traite un document avec contrôle de concurrence."""
+                async with semaphore:
+                    relations, observability = await extract_document_relations(
+                        document_id=doc_id,
+                        tenant_id=self.tenant_id,
+                        max_per_document=max_relations_per_doc
+                    )
+                    written = await persist_relations(relations, doc_id, self.tenant_id)
+                    return {
+                        "doc_id": doc_id,
+                        "written": written,
+                        "observability": observability
+                    }
 
-                total_relations += written
-                total_segments += len(observability)
-                all_observability.extend(observability)
+            logger.info(
+                f"[OSMOSE:Pass2:ENRICH] Processing {len(doc_ids)} documents "
+                f"(max_concurrent={max_concurrent_docs})"
+            )
+
+            # Lancer tous les documents en parallèle (limités par semaphore)
+            tasks = [process_document(doc_id) for doc_id in doc_ids]
+            doc_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Agréger les résultats
+            for doc_result in doc_results:
+                if isinstance(doc_result, Exception):
+                    logger.error(f"[OSMOSE:Pass2:ENRICH] Document error: {doc_result}")
+                    continue
+
+                total_relations += doc_result["written"]
+                total_segments += len(doc_result["observability"])
+                all_observability.extend(doc_result["observability"])
 
                 # Log observabilité par segment
-                for obs in observability:
+                for obs in doc_result["observability"]:
                     logger.info(
                         f"[OSMOSE:Pass2] Segment {obs.segment_id}: "
                         f"proposed={obs.relations_proposed}, "
@@ -484,17 +510,17 @@ class Pass2Service:
         """
         query = """
         MATCH (d:Document {tenant_id: $tenant_id})
-        WHERE d.document_id IS NOT NULL
+        WHERE d.doc_id IS NOT NULL
 
         // Compter les RawAssertions existantes pour ce document
-        OPTIONAL MATCH (ra:RawAssertion {tenant_id: $tenant_id, source_doc_id: d.document_id})
+        OPTIONAL MATCH (ra:RawAssertion {tenant_id: $tenant_id, source_doc_id: d.doc_id})
         WITH d, count(ra) AS existing_relations
 
         // Ne retourner que les documents sans RawAssertions
         WHERE existing_relations = 0
 
-        RETURN d.document_id AS doc_id
-        ORDER BY d.document_id
+        RETURN d.doc_id AS doc_id
+        ORDER BY d.doc_id
         LIMIT 100
         """
         results = self._execute_query(query, {"tenant_id": self.tenant_id})
@@ -860,24 +886,38 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
 
         try:
             # Créer les relations CO_OCCURS_IN_CORPUS
+            # FIX 2026-01-11: Utiliser la propriété doc_id sur SectionContext
+            # au lieu de la relation :IN_DOC vers DocumentContext qui n'existe pas
+            #
+            # Optimisation: Approche "document-first" pour éviter l'explosion combinatoire
+            # 1. Collecter les concepts par document
+            # 2. Pour chaque document, créer les paires (c1, c2, doc_id)
+            # 3. Grouper par paire et filtrer celles avec ≥2 docs
             query = """
-            // Trouver les paires de concepts qui co-occurent dans ≥2 documents
-            MATCH (c1:CanonicalConcept {tenant_id: $tenant_id})
-            MATCH (c2:CanonicalConcept {tenant_id: $tenant_id})
-            WHERE c1.canonical_id < c2.canonical_id
-              AND coalesce(c1.concept_type, '') <> 'TOPIC'
-              AND coalesce(c2.concept_type, '') <> 'TOPIC'
+            // Étape 1: Pour chaque document, trouver tous les concepts non-TOPIC
+            MATCH (c:CanonicalConcept {tenant_id: $tenant_id})-[:MENTIONED_IN]->(ctx:SectionContext)
+            WHERE coalesce(c.concept_type, '') <> 'TOPIC'
+              AND ctx.tenant_id = $tenant_id
+            WITH ctx.doc_id AS doc_id, collect(DISTINCT c) AS concepts_in_doc
+            WHERE size(concepts_in_doc) >= 2  // Au moins 2 concepts dans le doc
 
-            // Trouver les documents communs via MENTIONED_IN
-            MATCH (c1)-[:MENTIONED_IN]->(ctx1:SectionContext)-[:IN_DOC]->(doc:DocumentContext)
-            MATCH (c2)-[:MENTIONED_IN]->(ctx2:SectionContext)-[:IN_DOC]->(doc)
-            WHERE ctx1.tenant_id = $tenant_id AND ctx2.tenant_id = $tenant_id
+            // Étape 2: Générer toutes les paires (c1, c2) pour ce document
+            UNWIND range(0, size(concepts_in_doc) - 2) AS i
+            UNWIND range(i + 1, size(concepts_in_doc) - 1) AS j
+            WITH doc_id,
+                 concepts_in_doc[i] AS c1,
+                 concepts_in_doc[j] AS c2
+            // Assurer un ordre cohérent (par canonical_id)
+            WITH CASE WHEN c1.canonical_id < c2.canonical_id THEN c1 ELSE c2 END AS c_first,
+                 CASE WHEN c1.canonical_id < c2.canonical_id THEN c2 ELSE c1 END AS c_second,
+                 doc_id
 
-            WITH c1, c2, collect(DISTINCT doc.doc_id) AS shared_docs
+            // Étape 3: Regrouper les paires et compter les docs
+            WITH c_first, c_second, collect(DISTINCT doc_id) AS shared_docs
             WHERE size(shared_docs) >= 2
 
             // Créer ou mettre à jour la relation
-            MERGE (c1)-[r:CO_OCCURS_IN_CORPUS]->(c2)
+            MERGE (c_first)-[r:CO_OCCURS_IN_CORPUS]->(c_second)
             ON CREATE SET
                 r.created_at = datetime(),
                 r.doc_count = size(shared_docs),
@@ -1094,7 +1134,7 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
         """Récupère les documents qui n'ont pas encore de Topics."""
         query = """
         MATCH (d:Document {tenant_id: $tenant_id})
-        WHERE d.document_id IS NOT NULL
+        WHERE d.doc_id IS NOT NULL
 
         // Compter les HAS_TOPIC existants
         OPTIONAL MATCH (d)-[:HAS_TOPIC]->(t:CanonicalConcept {concept_type: 'TOPIC'})
@@ -1103,8 +1143,8 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
         // Ne retourner que les documents sans Topics
         WHERE existing_topics = 0
 
-        RETURN d.document_id AS doc_id
-        ORDER BY d.document_id
+        RETURN d.doc_id AS doc_id
+        ORDER BY d.doc_id
         LIMIT 100
         """
         results = self._execute_query(query, {"tenant_id": self.tenant_id})
@@ -1191,28 +1231,64 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
             total_relations = 0
             total_abstained = 0
 
-            for doc_id in doc_ids:
-                stats = await run_pass3_consolidation(
-                    document_id=doc_id,
-                    neo4j_client=self._neo4j_client,
-                    llm_router=llm_router,
-                    tenant_id=self.tenant_id,
-                    max_candidates=max_candidates
-                )
+            # Paralléliser le traitement des documents (4 concurrents)
+            # Chaque document génère déjà des appels LLM parallèles en interne
+            max_concurrent_docs = 4
+            semaphore = asyncio.Semaphore(max_concurrent_docs)
 
-                total_candidates += stats.candidates_generated
-                total_relations += stats.relations_created
-                total_abstained += stats.abstained
+            async def process_document(doc_id: str):
+                """Traite un document avec contrôle de concurrence."""
+                async with semaphore:
+                    try:
+                        stats = await run_pass3_consolidation(
+                            document_id=doc_id,
+                            neo4j_client=self._neo4j_client,
+                            llm_router=llm_router,
+                            tenant_id=self.tenant_id,
+                            max_candidates=max_candidates
+                        )
+                        return {
+                            "doc_id": doc_id,
+                            "candidates": stats.candidates_generated,
+                            "relations": stats.relations_created,
+                            "abstained": stats.abstained,
+                            "error": None
+                        }
+                    except Exception as e:
+                        logger.error(f"[Pass2Service] Pass 3 failed for doc {doc_id}: {e}")
+                        return {
+                            "doc_id": doc_id,
+                            "candidates": 0,
+                            "relations": 0,
+                            "abstained": 0,
+                            "error": str(e)
+                        }
+
+            # Lancer tous les documents en parallèle (limités par semaphore)
+            tasks = [process_document(doc_id) for doc_id in doc_ids]
+            doc_results = await asyncio.gather(*tasks)
+
+            # Agréger les résultats
+            errors = []
+            for res in doc_results:
+                total_candidates += res["candidates"]
+                total_relations += res["relations"]
+                total_abstained += res["abstained"]
+                if res["error"]:
+                    errors.append(f"{res['doc_id']}: {res['error']}")
 
             result.items_processed = total_candidates
             result.items_created = total_relations
-            result.success = True
+            result.success = len(errors) == 0
             result.details = {
                 "documents_processed": len(doc_ids),
+                "documents_succeeded": len(doc_ids) - len(errors),
                 "candidates_evaluated": total_candidates,
                 "relations_created": total_relations,
                 "abstained": total_abstained
             }
+            if errors:
+                result.errors.extend(errors)
 
         except Exception as e:
             logger.error(f"[Pass2Service] SEMANTIC_CONSOLIDATION failed: {e}")
@@ -1230,8 +1306,8 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
         """Récupère les documents qui ont des Topics (prêts pour Pass 3)."""
         query = """
         MATCH (d:Document {tenant_id: $tenant_id})-[:HAS_TOPIC]->(t:CanonicalConcept {concept_type: 'TOPIC'})
-        RETURN DISTINCT d.document_id AS doc_id
-        ORDER BY d.document_id
+        RETURN DISTINCT d.doc_id AS doc_id
+        ORDER BY d.doc_id
         LIMIT 100
         """
         results = self._execute_query(query, {"tenant_id": self.tenant_id})

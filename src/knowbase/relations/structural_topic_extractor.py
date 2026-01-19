@@ -528,7 +528,7 @@ class TopicNeo4jWriter:
         Crée relation HAS_TOPIC entre Document et Topic.
         """
         query = """
-        MATCH (d:Document {document_id: $document_id, tenant_id: $tenant_id})
+        MATCH (d:Document {doc_id: $document_id, tenant_id: $tenant_id})
         MATCH (t:CanonicalConcept {canonical_id: $topic_id, tenant_id: $tenant_id})
 
         MERGE (d)-[r:HAS_TOPIC]->(t)

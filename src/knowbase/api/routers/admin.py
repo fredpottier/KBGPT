@@ -1678,6 +1678,240 @@ async def cancel_pass2_job(
 
 
 # =============================================================================
+# Pass 3 Background Jobs (Semantic Consolidation / Validation)
+# =============================================================================
+
+class Pass3JobRequest(BaseModel):
+    """Requête pour créer un job Pass3."""
+    document_id: Optional[str] = None
+    max_candidates: int = Field(default=50, ge=10, le=200, description="Nombre max de candidats par document")
+
+
+@router.post(
+    "/pass3/jobs",
+    summary="Créer un job Pass3 en background",
+    description="""
+    Crée et lance un job Pass3 (Semantic Consolidation) en background.
+    Retourne immédiatement avec un job_id pour suivre la progression.
+
+    Le job s'exécute dans le worker et met à jour sa progression dans Redis.
+    Utilisez GET /pass3/jobs/{job_id} pour suivre la progression.
+    """
+)
+async def create_pass3_job(
+    request: Pass3JobRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Crée un job Pass3 en background."""
+    from knowbase.ingestion.queue.pass3_jobs import enqueue_pass3_job
+
+    state = enqueue_pass3_job(
+        tenant_id=tenant_id,
+        document_id=request.document_id,
+        max_candidates=request.max_candidates,
+        created_by=admin.get("email", "admin")
+    )
+
+    return state.to_dict()
+
+
+@router.get(
+    "/pass3/jobs/{job_id}",
+    summary="Obtenir le statut d'un job Pass3",
+    description="Retourne l'état complet du job incluant la progression en temps réel."
+)
+async def get_pass3_job(
+    job_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Récupère le statut d'un job Pass3."""
+    from knowbase.ingestion.queue.pass3_jobs import get_pass3_job_manager
+
+    manager = get_pass3_job_manager()
+    state = manager.get_job(job_id)
+
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    return state.to_dict()
+
+
+@router.get(
+    "/pass3/jobs",
+    summary="Lister les jobs Pass3",
+    description="Retourne la liste des jobs Pass3 récents."
+)
+async def list_pass3_jobs(
+    limit: int = 20,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Liste les jobs Pass3."""
+    from knowbase.ingestion.queue.pass3_jobs import get_pass3_job_manager
+
+    manager = get_pass3_job_manager()
+    jobs = manager.list_jobs(tenant_id=tenant_id, limit=limit)
+
+    return {
+        "jobs": [job.to_dict() for job in jobs],
+        "total": len(jobs)
+    }
+
+
+@router.delete(
+    "/pass3/jobs/{job_id}",
+    summary="Annuler un job Pass3",
+    description="Annule un job en cours d'exécution."
+)
+async def cancel_pass3_job(
+    job_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Annule un job Pass3."""
+    from knowbase.ingestion.queue.pass3_jobs import get_pass3_job_manager
+
+    manager = get_pass3_job_manager()
+    success = manager.cancel_job(job_id)
+
+    if not success:
+        state = manager.get_job(job_id)
+        if not state:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot cancel job in status {state.status.value}"
+            )
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "message": "Job cancelled"
+    }
+
+
+# =============================================================================
+# Pass 4 Background Jobs (Corpus Consolidation: ER + Links)
+# =============================================================================
+
+class Pass4JobRequest(BaseModel):
+    """Requête pour créer un job Pass4."""
+    skip_er: bool = Field(default=False, description="Ignorer Entity Resolution (Pass 4a)")
+    skip_links: bool = Field(default=False, description="Ignorer Corpus Links (Pass 4b)")
+    dry_run: bool = Field(default=False, description="Mode simulation pour ER")
+
+
+@router.post(
+    "/pass4/jobs",
+    summary="Créer un job Pass4 en background",
+    description="""
+    Crée et lance un job Pass4 (Corpus Consolidation) en background.
+    Retourne immédiatement avec un job_id pour suivre la progression.
+
+    Pass 4 comprend:
+    - Pass 4a: Entity Resolution (CORPUS_ER) - fusionne les concepts dupliqués
+    - Pass 4b: Corpus Links (CO_OCCURS_IN_CORPUS) - crée les liens faibles cross-doc
+
+    Le job s'exécute dans le worker et met à jour sa progression dans Redis.
+    Utilisez GET /pass4/jobs/{job_id} pour suivre la progression.
+    """
+)
+async def create_pass4_job(
+    request: Pass4JobRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Crée un job Pass4 en background."""
+    from knowbase.ingestion.queue.pass4_jobs import enqueue_pass4_job
+
+    state = enqueue_pass4_job(
+        tenant_id=tenant_id,
+        skip_er=request.skip_er,
+        skip_links=request.skip_links,
+        dry_run=request.dry_run,
+        created_by=admin.get("email", "admin")
+    )
+
+    return state.to_dict()
+
+
+@router.get(
+    "/pass4/jobs/{job_id}",
+    summary="Obtenir le statut d'un job Pass4",
+    description="Retourne l'état complet du job incluant la progression en temps réel."
+)
+async def get_pass4_job(
+    job_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Récupère le statut d'un job Pass4."""
+    from knowbase.ingestion.queue.pass4_jobs import get_pass4_job_manager
+
+    manager = get_pass4_job_manager()
+    state = manager.get_job(job_id)
+
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    return state.to_dict()
+
+
+@router.get(
+    "/pass4/jobs",
+    summary="Lister les jobs Pass4",
+    description="Retourne la liste des jobs Pass4 récents."
+)
+async def list_pass4_jobs(
+    limit: int = 20,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Liste les jobs Pass4."""
+    from knowbase.ingestion.queue.pass4_jobs import get_pass4_job_manager
+
+    manager = get_pass4_job_manager()
+    jobs = manager.list_jobs(tenant_id=tenant_id, limit=limit)
+
+    return {
+        "jobs": [job.to_dict() for job in jobs],
+        "total": len(jobs)
+    }
+
+
+@router.delete(
+    "/pass4/jobs/{job_id}",
+    summary="Annuler un job Pass4",
+    description="Annule un job en cours d'exécution."
+)
+async def cancel_pass4_job(
+    job_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Annule un job Pass4."""
+    from knowbase.ingestion.queue.pass4_jobs import get_pass4_job_manager
+
+    manager = get_pass4_job_manager()
+    success = manager.cancel_job(job_id)
+
+    if not success:
+        state = manager.get_job(job_id)
+        if not state:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot cancel job in status {state.status.value}"
+            )
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "message": "Job cancelled"
+    }
+
+
+# =============================================================================
 # Enrichment KG (Pass 2a + Pass 2b + Pass 3)
 # =============================================================================
 
@@ -1903,6 +2137,295 @@ async def schedule_enrichment(
         "run_pass3": request.run_pass3,
         "scheduled_time": "now"
     }
+
+
+# =============================================================================
+# Structural Graph Archiving (Post-Pass 3)
+# =============================================================================
+
+class ArchivableDocumentsResponse(BaseModel):
+    """Réponse liste documents archivables."""
+    count: int
+    documents: List[Dict]
+
+
+class ArchiveDocumentRequest(BaseModel):
+    """Requête pour archiver un document."""
+    document_id: str = Field(..., description="ID du document à archiver")
+    force: bool = Field(False, description="Forcer l'archivage même si Pass 3 incomplet (DANGEREUX)")
+
+
+class ArchiveDocumentResponse(BaseModel):
+    """Réponse archivage document."""
+    success: bool
+    document_id: str
+    nodes_archived: int
+    archive_path: str
+    message: str
+
+
+@router.get(
+    "/archives/archivable",
+    response_model=ArchivableDocumentsResponse,
+    summary="Lister documents archivables",
+    description="""
+    Liste les documents éligibles à l'archivage structural.
+
+    **Conditions d'éligibilité**:
+    - Pass 1 complet (status = COMPLETE)
+    - Pass 2 complet (status = COMPLETE)
+    - Phase semantic_consolidation (Pass 3) exécutée
+
+    **Nodes archivables** (72% du total):
+    - DocItem: Éléments structurels atomiques
+    - TypeAwareChunk: Chunks typés pour extraction
+    - PageContext: Contexte de pagination
+
+    **Nodes préservés** (28%):
+    - DocumentContext/DocumentVersion: Métadonnées
+    - SectionContext: Hiérarchie sections
+    - ProtoConcept/CanonicalConcept: Concepts extraits
+    """
+)
+async def list_archivable_documents(
+    min_age_days: int = Query(0, description="Âge minimum depuis Pass 3 complet"),
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Liste les documents archivables."""
+    from knowbase.structural.archiver import get_archiver
+
+    archiver = get_archiver()
+    documents = archiver.get_archivable_documents(tenant_id, min_age_days)
+
+    return ArchivableDocumentsResponse(
+        count=len(documents),
+        documents=documents
+    )
+
+
+@router.post(
+    "/archives/archive",
+    response_model=ArchiveDocumentResponse,
+    summary="Archiver un document",
+    description="""
+    Archive les nodes structurels d'un document post-Pass 3.
+
+    **Workflow**:
+    1. Vérifie que Pass 3 est complet
+    2. Exporte DocItem, TypeAwareChunk, PageContext vers JSON
+    3. Supprime ces nodes de Neo4j (transaction atomique)
+    4. Marque le document comme archivé
+
+    **Réversible**: Utilisez /archives/restore pour réimporter.
+
+    **Gain estimé**: ~77% réduction des nodes Neo4j
+    """
+)
+async def archive_document(
+    request: ArchiveDocumentRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Archive un document."""
+    from knowbase.structural.archiver import get_archiver
+
+    archiver = get_archiver()
+
+    try:
+        stats = archiver.archive_document(
+            document_id=request.document_id,
+            tenant_id=tenant_id,
+            force=request.force
+        )
+
+        if not stats:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document {request.document_id} non éligible (Pass 3 non complet ou aucun node à archiver)"
+            )
+
+        logger.info(
+            f"[ARCHIVER] Document {request.document_id} archivé par {admin.get('email')}: "
+            f"{stats.total_nodes_archived} nodes"
+        )
+
+        return ArchiveDocumentResponse(
+            success=True,
+            document_id=request.document_id,
+            nodes_archived=stats.total_nodes_archived,
+            archive_path=stats.archive_path,
+            message=f"Archivé: {stats.doc_items_archived} DocItems, {stats.type_aware_chunks_archived} Chunks, {stats.page_contexts_archived} Pages"
+        )
+
+    except Exception as e:
+        logger.error(f"[ARCHIVER] Erreur archivage {request.document_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RestoreDocumentRequest(BaseModel):
+    """Requête pour restaurer un document."""
+    document_id: str = Field(..., description="ID du document à restaurer")
+
+
+@router.post(
+    "/archives/restore",
+    summary="Restaurer un document archivé",
+    description="""
+    Réimporte les nodes structurels depuis l'archive JSON.
+
+    **Workflow**:
+    1. Lit le manifest de l'archive
+    2. Recrée PageContext, DocItem, TypeAwareChunk dans Neo4j
+    3. Rétablit les relations
+    4. Supprime l'archive si succès
+
+    **Note**: Opération idempotente - échoue si nodes déjà présents.
+    """
+)
+async def restore_document(
+    request: RestoreDocumentRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Restaure un document archivé."""
+    from knowbase.structural.archiver import get_archiver
+
+    archiver = get_archiver()
+
+    try:
+        result = archiver.restore_document(
+            document_id=request.document_id,
+            tenant_id=tenant_id
+        )
+
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Archive non trouvée pour {request.document_id}"
+            )
+
+        logger.info(
+            f"[ARCHIVER] Document {request.document_id} restauré par {admin.get('email')}: "
+            f"{result['total_nodes_restored']} nodes"
+        )
+
+        return {
+            "success": True,
+            "document_id": request.document_id,
+            "nodes_restored": result["total_nodes_restored"],
+            "counts": result["counts"],
+            "message": "Document restauré avec succès"
+        }
+
+    except Exception as e:
+        logger.error(f"[ARCHIVER] Erreur restauration {request.document_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/archives/status/{document_id}",
+    summary="Statut d'archivage d'un document",
+    description="Vérifie si un document est archivé et retourne les détails."
+)
+async def get_archive_status(
+    document_id: str,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Récupère le statut d'archivage d'un document."""
+    from knowbase.structural.archiver import get_archiver
+
+    archiver = get_archiver()
+    status = archiver.get_archive_status(document_id, tenant_id)
+
+    if not status:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} non trouvé")
+
+    return status
+
+
+@router.get(
+    "/archives/list",
+    summary="Lister toutes les archives",
+    description="Retourne la liste de tous les documents archivés pour le tenant."
+)
+async def list_archives(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Liste toutes les archives."""
+    from knowbase.structural.archiver import get_archiver
+
+    archiver = get_archiver()
+    archives = archiver.list_archives(tenant_id)
+
+    return {
+        "count": len(archives),
+        "archives": archives
+    }
+
+
+class BatchArchiveRequest(BaseModel):
+    """Requête pour archivage en batch."""
+    min_age_days: int = Field(0, description="Âge minimum depuis Pass 3")
+    max_documents: int = Field(10, description="Nombre max de documents à archiver")
+
+
+@router.post(
+    "/archives/batch",
+    summary="Archiver plusieurs documents en batch",
+    description="""
+    Archive tous les documents éligibles en un seul appel.
+
+    **Recommandé pour maintenance nocturne.**
+
+    Paramètres:
+    - `min_age_days`: Attendre X jours après Pass 3 avant d'archiver
+    - `max_documents`: Limiter le nombre de documents par batch
+
+    Les documents sont archivés dans l'ordre de leur date de Pass 3 (plus anciens d'abord).
+    """
+)
+async def batch_archive(
+    request: BatchArchiveRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Archive plusieurs documents en batch."""
+    from knowbase.structural.archiver import archive_completed_documents
+
+    try:
+        results = archive_completed_documents(
+            tenant_id=tenant_id,
+            min_age_days=request.min_age_days,
+            max_documents=request.max_documents
+        )
+
+        total_nodes = sum(r.total_nodes_archived for r in results)
+
+        logger.info(
+            f"[ARCHIVER] Batch archivage par {admin.get('email')}: "
+            f"{len(results)} documents, {total_nodes} nodes"
+        )
+
+        return {
+            "success": True,
+            "documents_archived": len(results),
+            "total_nodes_archived": total_nodes,
+            "details": [
+                {
+                    "document_id": r.document_id,
+                    "nodes_archived": r.total_nodes_archived,
+                    "archive_path": r.archive_path
+                }
+                for r in results
+            ]
+        }
+
+    except Exception as e:
+        logger.error(f"[ARCHIVER] Erreur batch archivage: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 __all__ = ["router"]

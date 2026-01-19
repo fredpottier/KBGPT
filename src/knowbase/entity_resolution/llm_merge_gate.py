@@ -17,6 +17,7 @@ Spec: doc/ongoing/PLAN_LLM_MERGE_GATE_V1.md
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -171,6 +172,160 @@ Réponds UNIQUEMENT avec un array JSON valide (pas de texte avant/après):
         )
 
         return result
+
+    def run_async_sync(
+        self,
+        candidates: List[Dict[str, Any]],
+        concepts_cache: Dict[str, Dict[str, Any]],
+        max_concurrent: int = 8
+    ) -> LLMGateResult:
+        """
+        Version parallélisée avec wrapper synchrone.
+
+        Utilise asyncio pour paralléliser les appels LLM.
+        Compatible avec les appelants synchrones.
+
+        Args:
+            candidates: Liste de candidats
+            concepts_cache: Cache des concepts
+            max_concurrent: Nombre max d'appels LLM en parallèle
+
+        Returns:
+            LLMGateResult
+        """
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                self.run_async(candidates, concepts_cache, max_concurrent)
+            )
+        finally:
+            loop.close()
+
+    async def run_async(
+        self,
+        candidates: List[Dict[str, Any]],
+        concepts_cache: Dict[str, Dict[str, Any]],
+        max_concurrent: int = 8
+    ) -> LLMGateResult:
+        """
+        Version async parallélisée du LLM Merge Gate.
+
+        Traite les batches en parallèle (limité par semaphore).
+
+        Args:
+            candidates: Liste de candidats
+            concepts_cache: Cache des concepts
+            max_concurrent: Nombre max d'appels LLM en parallèle
+
+        Returns:
+            LLMGateResult
+        """
+        result = LLMGateResult()
+
+        if not self.config.enabled or not candidates:
+            return result
+
+        start_time = datetime.utcnow()
+
+        # Batching
+        batches = self._create_batches(candidates, concepts_cache)
+        logger.info(
+            f"[LLM_GATE] Processing {len(candidates)} candidates in {len(batches)} batches "
+            f"(max_concurrent={max_concurrent})"
+        )
+
+        # Semaphore pour contrôler la concurrence
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def process_batch_async(batch_idx: int, batch: List[Dict[str, Any]]) -> List[LLMMergeVerdict]:
+            """Traite un batch avec contrôle de concurrence."""
+            async with semaphore:
+                try:
+                    verdicts = await self._process_batch_async(batch, batch_idx)
+                    return verdicts
+                except Exception as e:
+                    error_msg = f"Batch {batch_idx} failed: {e}"
+                    logger.error(f"[LLM_GATE] {error_msg}")
+                    # Fallback conservateur
+                    return [
+                        LLMMergeVerdict(
+                            source_id=pair["id_a"],
+                            target_id=pair["id_b"],
+                            source_name=pair["name_a"],
+                            target_name=pair["name_b"],
+                            decision="MERGE",
+                            confidence=0.5,
+                            reason="Async error, defaulting to cautious"
+                        )
+                        for pair in batch
+                    ]
+
+        # Lancer tous les batches en parallèle
+        tasks = [process_batch_async(idx, batch) for idx, batch in enumerate(batches)]
+        batch_results = await asyncio.gather(*tasks)
+
+        # Agréger les résultats
+        for verdicts in batch_results:
+            result.verdicts.extend(verdicts)
+            result.total_calls += 1
+
+            for v in verdicts:
+                pair = (v.source_id, v.target_id)
+
+                if v.decision == "DISTINCT" and v.confidence >= self.config.distinct_confidence_threshold:
+                    result.blocked_pairs.add(pair)
+                    logger.info(
+                        f"[LLM_GATE] BLOCKED: {v.source_name} ↔ {v.target_name} "
+                        f"(conf={v.confidence:.2f}, reason={v.reason})"
+                    )
+
+                elif v.decision == "MERGE" and v.confidence < self.config.merge_confidence_threshold:
+                    result.low_confidence_pairs.add(pair)
+
+        result.total_latency_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+
+        logger.info(
+            f"[LLM_GATE] Complete (parallel): {len(result.verdicts)} verdicts, "
+            f"{len(result.blocked_pairs)} blocked, "
+            f"{len(result.low_confidence_pairs)} low_conf, "
+            f"{result.total_calls} calls, {result.total_latency_ms:.0f}ms"
+        )
+
+        return result
+
+    async def _process_batch_async(
+        self,
+        batch: List[Dict[str, Any]],
+        batch_idx: int
+    ) -> List[LLMMergeVerdict]:
+        """Version async de _process_batch."""
+        from knowbase.common.llm_router import TaskType
+
+        # Préparer le JSON des paires pour le prompt
+        pairs_for_prompt = [
+            {
+                "index": i,
+                "concept_a": {"name": p["name_a"], "type": p["type_a"]},
+                "concept_b": {"name": p["name_b"], "type": p["type_b"]}
+            }
+            for i, p in enumerate(batch)
+        ]
+
+        pairs_json = json.dumps(pairs_for_prompt, indent=2, ensure_ascii=False)
+        prompt = self.PROMPT_TEMPLATE.format(pairs_json=pairs_json)
+
+        messages = [{"role": "user", "content": prompt}]
+
+        logger.debug(f"[LLM_GATE] Batch {batch_idx}: {len(batch)} pairs, calling LLM async...")
+
+        response = await self.llm_router.acomplete(
+            task_type=TaskType.SHORT_ENRICHMENT,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=2000
+        )
+
+        return self._parse_llm_response(response, batch)
 
     def _create_batches(
         self,

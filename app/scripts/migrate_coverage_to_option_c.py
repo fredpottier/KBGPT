@@ -205,7 +205,7 @@ def migrate_phase1_section_ids(
         count_query = """
         MATCH (p:ProtoConcept {tenant_id: $tenant_id})-[r:ANCHORED_IN]->(dc:DocumentChunk)
         WHERE r.span_start IS NOT NULL
-        MATCH (di:DocItem {tenant_id: $tenant_id, doc_id: p.document_id})
+        MATCH (di:DocItem {tenant_id: $tenant_id, doc_id: p.doc_id})
         WHERE di.section_id IS NOT NULL
           AND di.section_id STARTS WITH 'sec_'
           AND (
@@ -235,7 +235,7 @@ def migrate_phase1_section_ids(
     migrate_query = """
     MATCH (p:ProtoConcept {tenant_id: $tenant_id})-[r:ANCHORED_IN]->(dc:DocumentChunk)
     WHERE r.span_start IS NOT NULL
-    MATCH (di:DocItem {tenant_id: $tenant_id, doc_id: p.document_id})
+    MATCH (di:DocItem {tenant_id: $tenant_id, doc_id: p.doc_id})
     WHERE di.section_id IS NOT NULL
       AND di.section_id STARTS WITH 'sec_'
       AND (
@@ -309,7 +309,7 @@ def migrate_phase2_anchored_in(
         RETURN p, r
     }
     // Trouver le DocItem correspondant via charspan_docwide ou charspan original
-    MATCH (di:DocItem {tenant_id: $tenant_id, doc_id: p.document_id})
+    MATCH (di:DocItem {tenant_id: $tenant_id, doc_id: p.doc_id})
     WHERE (
         // Priorité: charspan_docwide (calculé en Phase 0)
         (di.charspan_start_docwide IS NOT NULL

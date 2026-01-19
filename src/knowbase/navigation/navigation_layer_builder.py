@@ -135,7 +135,7 @@ class NavigationLayerBuilder:
 
         query = """
         // Créer ou récupérer le Document
-        MERGE (d:Document {document_id: $doc_id, tenant_id: $tenant_id})
+        MERGE (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
 
         // Créer le DocumentContext
         MERGE (ctx:DocumentContext:ContextNode {context_id: $context_id})
@@ -205,7 +205,7 @@ class NavigationLayerBuilder:
 
         query = """
         // Récupérer le Document
-        MATCH (d:Document {document_id: $doc_id, tenant_id: $tenant_id})
+        MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
 
         // Créer le SectionContext
         MERGE (ctx:SectionContext:ContextNode {context_id: $context_id})
@@ -290,7 +290,7 @@ class NavigationLayerBuilder:
 
         query = """
         // Récupérer le Document et le Chunk
-        MATCH (d:Document {document_id: $doc_id, tenant_id: $tenant_id})
+        MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
         OPTIONAL MATCH (ch:DocumentChunk {chunk_id: $chunk_id, tenant_id: $tenant_id})
 
         // Créer le WindowContext

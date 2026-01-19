@@ -64,7 +64,7 @@ def main():
         result = session.run("""
             MATCH (p:ProtoConcept {tenant_id: $tenant_id, anchor_status: 'SPAN'})
             WHERE NOT exists((p)-[:ANCHORED_IN]->(:DocumentChunk))
-            RETURN p.concept_id AS id, p.concept_name AS name, p.document_id AS doc
+            RETURN p.concept_id AS id, p.concept_name AS name, p.doc_id AS doc
             LIMIT 10
         """, tenant_id=tenant_id)
 

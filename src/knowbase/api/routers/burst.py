@@ -296,6 +296,30 @@ class ReconnectResponse(BaseModel):
     message: str
 
 
+class AttachInstanceRequest(BaseModel):
+    """Requête pour attacher une instance EC2 existante (lancée manuellement)."""
+    instance_ip: str = Field(..., description="IP publique de l'instance EC2")
+    instance_type: str = Field("g6.2xlarge", description="Type d'instance EC2")
+    instance_id: Optional[str] = Field(None, description="ID de l'instance (optionnel)")
+    vllm_port: int = Field(8000, description="Port vLLM")
+    embeddings_port: int = Field(8001, description="Port embeddings")
+
+
+class AttachInstanceResponse(BaseModel):
+    """Réponse d'attachement d'instance."""
+    success: bool
+    batch_id: Optional[str] = None
+    instance_ip: Optional[str] = None
+    instance_type: Optional[str] = None
+    vllm_url: Optional[str] = None
+    embeddings_url: Optional[str] = None
+    vllm_healthy: bool = False
+    embeddings_healthy: bool = False
+    providers_activated: bool = False
+    status: str
+    message: str
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
@@ -498,6 +522,147 @@ async def reconnect_to_stack(
 
 
 @router.post(
+    "/attach-instance",
+    response_model=AttachInstanceResponse,
+    summary="Attacher une instance EC2 existante",
+    description="""
+    Attache une instance EC2 existante (lancée manuellement via AWS CLI ou console)
+    à l'orchestrateur Burst.
+
+    **Cas d'usage:**
+    - Instance lancée manuellement pour tests
+    - Instance créée sans CloudFormation
+    - Récupération après perte de l'état orchestrateur
+
+    **Comportement:**
+    1. Vérifie que vLLM et Embeddings sont accessibles
+    2. Active les providers Burst (routing LLM vers EC2)
+    3. Crée un état standalone dans l'orchestrateur
+
+    **Note:** Après attachement, utilisez /prepare puis /process pour lancer un batch.
+    """
+)
+async def attach_instance(
+    request: AttachInstanceRequest,
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> AttachInstanceResponse:
+    """Attache une instance EC2 existante à l'orchestrateur."""
+    try:
+        from knowbase.ingestion.burst import get_burst_orchestrator, BurstStatus
+        from knowbase.ingestion.burst.types import BurstState, BurstConfig
+        from knowbase.ingestion.burst.provider_switch import (
+            activate_burst_providers,
+            check_burst_providers_health
+        )
+        from datetime import datetime, timezone
+        import httpx
+
+        orchestrator = get_burst_orchestrator()
+
+        # Construire les URLs
+        vllm_url = f"http://{request.instance_ip}:{request.vllm_port}"
+        embeddings_url = f"http://{request.instance_ip}:{request.embeddings_port}"
+
+        logger.info(f"[BURST] Attaching instance {request.instance_ip} (vLLM: {vllm_url}, Embeddings: {embeddings_url})")
+
+        # Vérifier la santé des services
+        vllm_healthy = False
+        embeddings_healthy = False
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Check vLLM
+            try:
+                resp = await client.get(f"{vllm_url}/v1/models")
+                vllm_healthy = resp.status_code == 200
+                logger.info(f"[BURST] vLLM health check: {vllm_healthy} (status: {resp.status_code})")
+            except Exception as e:
+                logger.warning(f"[BURST] vLLM health check failed: {e}")
+
+            # Check Embeddings
+            try:
+                resp = await client.get(f"{embeddings_url}/health")
+                embeddings_healthy = resp.status_code == 200
+                logger.info(f"[BURST] Embeddings health check: {embeddings_healthy} (status: {resp.status_code})")
+            except Exception as e:
+                logger.warning(f"[BURST] Embeddings health check failed: {e}")
+
+        if not vllm_healthy and not embeddings_healthy:
+            return AttachInstanceResponse(
+                success=False,
+                instance_ip=request.instance_ip,
+                vllm_url=vllm_url,
+                embeddings_url=embeddings_url,
+                vllm_healthy=vllm_healthy,
+                embeddings_healthy=embeddings_healthy,
+                status="unhealthy",
+                message=f"Les services ne sont pas accessibles sur {request.instance_ip}. Vérifiez que l'instance est démarrée et les ports ouverts."
+            )
+
+        # Créer un état standalone avec l'instance attachée
+        config = BurstConfig.from_env()
+        standalone_id = f"attached-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+
+        orchestrator.state = BurstState(
+            batch_id=standalone_id,
+            status=BurstStatus.READY,
+            documents=[],
+            total_documents=0,
+            instance_id=request.instance_id,
+            instance_ip=request.instance_ip,
+            instance_type=request.instance_type,
+            vllm_url=vllm_url,
+            embeddings_url=embeddings_url,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            config=config.to_dict()
+        )
+
+        # Activer les providers Burst
+        providers_activated = False
+        try:
+            result = activate_burst_providers(
+                vllm_url=vllm_url,
+                embeddings_url=embeddings_url,
+                vllm_model=config.vllm_model
+            )
+            providers_activated = result.get('llm_router', False) or result.get('embedding_manager', False)
+            logger.info(f"[BURST] Providers activation result: {result}")
+        except Exception as e:
+            logger.error(f"[BURST] Failed to activate providers: {e}")
+
+        orchestrator._add_event(
+            "instance_attached",
+            f"Instance {request.instance_ip} ({request.instance_type}) attachée manuellement",
+            details={
+                "instance_id": request.instance_id,
+                "vllm_healthy": vllm_healthy,
+                "embeddings_healthy": embeddings_healthy,
+                "providers_activated": providers_activated
+            }
+        )
+
+        logger.info(f"[BURST] ✅ Instance attached: {request.instance_ip} (standalone_id: {standalone_id})")
+
+        return AttachInstanceResponse(
+            success=True,
+            batch_id=standalone_id,
+            instance_ip=request.instance_ip,
+            instance_type=request.instance_type,
+            vllm_url=vllm_url,
+            embeddings_url=embeddings_url,
+            vllm_healthy=vllm_healthy,
+            embeddings_healthy=embeddings_healthy,
+            providers_activated=providers_activated,
+            status="ready",
+            message=f"Instance {request.instance_ip} attachée. Providers {'activés' if providers_activated else 'non activés'}. Utilisez /prepare puis /process pour lancer un batch."
+        )
+
+    except Exception as e:
+        logger.error(f"Erreur attach_instance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
     "/prepare",
     response_model=PrepareBatchResponse,
     summary="Préparer un batch de documents",
@@ -523,6 +688,22 @@ async def prepare_batch(
 
         config = BurstConfig.from_env()
         orchestrator = get_burst_orchestrator()
+
+        # Sauvegarder l'instance si elle est déjà attachée (pour la préserver après prepare)
+        # MAIS PAS si le batch précédent était cancelled/failed (instance détruite)
+        existing_instance_ip = None
+        existing_instance_type = None
+        existing_instance_id = None
+        existing_vllm_url = None
+        existing_embeddings_url = None
+        from knowbase.ingestion.burst.types import BurstStatus
+        terminal_statuses = [BurstStatus.CANCELLED, BurstStatus.FAILED, BurstStatus.COMPLETED]
+        if orchestrator.state is not None and orchestrator.state.status not in terminal_statuses:
+            existing_instance_ip = orchestrator.state.instance_ip
+            existing_instance_type = orchestrator.state.instance_type
+            existing_instance_id = getattr(orchestrator.state, 'instance_id', None)
+            existing_vllm_url = orchestrator.state.vllm_url
+            existing_embeddings_url = orchestrator.state.embeddings_url
 
         # Vérifier s'il y a un batch interrompu à reprendre
         resumable_info = None
@@ -574,6 +755,18 @@ async def prepare_batch(
             document_paths=document_paths,
             batch_id=request.batch_id
         )
+
+        # Restaurer l'instance si elle était attachée avant
+        if existing_instance_ip and orchestrator.state:
+            from knowbase.ingestion.burst.types import BurstStatus
+            orchestrator.state.instance_ip = existing_instance_ip
+            orchestrator.state.instance_type = existing_instance_type
+            orchestrator.state.instance_id = existing_instance_id
+            orchestrator.state.vllm_url = existing_vllm_url
+            orchestrator.state.embeddings_url = existing_embeddings_url
+            # Mettre le statut à READY si l'instance est déjà prête
+            orchestrator.state.status = BurstStatus.READY
+            logger.info(f"[BURST] Instance préservée: {existing_instance_ip} ({existing_instance_type})")
 
         # Récupérer les documents préparés
         state = orchestrator.state

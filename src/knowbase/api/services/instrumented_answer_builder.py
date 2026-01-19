@@ -390,6 +390,7 @@ def build_instrumented_answer(
     session_context: str = "",
     classification_config: Optional[ClassificationConfig] = None,
     retrieval_stats: Optional[Dict[str, Any]] = None,
+    kg_relations: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[InstrumentedAnswer, Dict[str, Any]]:
     """
     Construit une InstrumentedAnswer complete a partir de la question et des chunks.
@@ -448,11 +449,12 @@ def build_instrumented_answer(
     available_source_ids = [s.id for s in sources]
     validated_response = validate_assertion_references(llm_response, available_source_ids)
 
-    # 4. Classifie les assertions
+    # 4. Classifie les assertions (avec relations KG si disponibles)
     classified_assertions, classification_results = classify_assertions(
         llm_response=validated_response,
         sources=sources,
         config=config,
+        kg_relations=kg_relations,
     )
 
     # 5. Construit le TruthContract

@@ -54,6 +54,23 @@ class AssertionSupport(BaseModel):
         default=False,
         description="Au moins une source officielle"
     )
+    # 🌊 OSMOSE: Support par relation KG confirmée
+    kg_relation: Optional[str] = Field(
+        default=None,
+        description="Type de relation KG supportant cette assertion (ex: EXTENDS)"
+    )
+    kg_confidence: Optional[float] = Field(
+        default=None,
+        description="Confiance de la relation KG (0.0-1.0)"
+    )
+    kg_evidence_quote: Optional[str] = Field(
+        default=None,
+        description="Citation textuelle de la source confirmant la relation KG"
+    )
+    kg_source_count: Optional[int] = Field(
+        default=None,
+        description="Nombre de sources confirmant cette relation KG"
+    )
 
 
 class AssertionMeta(BaseModel):

@@ -198,8 +198,12 @@ class DocItem(BaseModel):
     bbox_x1: Optional[float] = None
     bbox_y1: Optional[float] = None  # bottom
     bbox_unit: Optional[BboxUnit] = None
-    charspan_start: Optional[int] = None
-    charspan_end: Optional[int] = None
+    charspan_start: Optional[int] = None  # Per-page (from Docling)
+    charspan_end: Optional[int] = None    # Per-page (from Docling)
+
+    # Charspan Contract v1: Document-wide positions (ADR_CHARSPAN_CONTRACT_V1.md)
+    charspan_start_docwide: Optional[int] = None  # Document-wide start
+    charspan_end_docwide: Optional[int] = None    # Document-wide end
 
     # Ordre (D2)
     reading_order_index: int
@@ -262,6 +266,11 @@ class DocItem(BaseModel):
             props["charspan_start"] = self.charspan_start
         if self.charspan_end is not None:
             props["charspan_end"] = self.charspan_end
+        # Charspan Contract v1: docwide positions (obligatoires)
+        if self.charspan_start_docwide is not None:
+            props["charspan_start_docwide"] = self.charspan_start_docwide
+        if self.charspan_end_docwide is not None:
+            props["charspan_end_docwide"] = self.charspan_end_docwide
         if self.confidence is not None:
             props["confidence"] = self.confidence
         if self.section_id:
@@ -299,6 +308,10 @@ class StructuralProfile(BaseModel):
     # Stats
     total_items: int = 0
 
+    # Relation Likelihood (Pass 3 filtering)
+    relation_likelihood: float = 0.5
+    relation_likelihood_tier: str = "MEDIUM"  # HIGH | MEDIUM | LOW | VERY_LOW
+
     @classmethod
     def empty(cls) -> "StructuralProfile":
         """Crée un profil vide."""
@@ -312,6 +325,7 @@ class StructuralProfile(BaseModel):
         Spec: ADR D10 compute_structural_profile
         """
         from collections import Counter
+        from knowbase.structural.relation_likelihood import compute_features
 
         total = len(items)
         if total == 0:
@@ -336,6 +350,10 @@ class StructuralProfile(BaseModel):
         relation_count = text_count + heading_count + caption_count + footnote_count
         structure_count = table_count + figure_count + list_count
 
+        # Calcul du relation_likelihood_tier depuis le texte concaténé
+        section_text = "\n".join(item.text for item in items if item.text)
+        rl_features = compute_features(section_text)
+
         return cls(
             text_ratio=text_count / total,
             heading_ratio=heading_count / total,
@@ -349,6 +367,8 @@ class StructuralProfile(BaseModel):
             is_structure_bearing=structure_count / total > 0.5,
             dominant_types=top_types,
             total_items=total,
+            relation_likelihood=rl_features.relation_likelihood,
+            relation_likelihood_tier=rl_features.tier,
         )
 
     def to_neo4j_properties(self) -> Dict[str, Any]:
@@ -365,6 +385,8 @@ class StructuralProfile(BaseModel):
             "is_structure_bearing": self.is_structure_bearing,
             "dominant_types": self.dominant_types,
             "total_items": self.total_items,
+            "relation_likelihood": round(self.relation_likelihood, 4),
+            "relation_likelihood_tier": self.relation_likelihood_tier,
         }
 
 

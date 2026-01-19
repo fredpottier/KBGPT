@@ -201,10 +201,12 @@ phase_2_hybrid_anchor:
     # NOTE 2025-01-01: enrich_relations réactivé avec implémentation ADR-compliant
     # Segment-first extraction avec quote + chunk_id + span obligatoires
     # Voir: src/knowbase/relations/segment_window_relation_extractor.py
+    # NOTE 2026-01-19: Ajout structural_topics (Pass 2a) requis pour Pass 3
     enabled_phases:
-      - "classify_fine"
-      - "enrich_relations"  # ADR-compliant implementation
-      - "cross_doc"
+      - "structural_topics"   # Pass 2a: Topics + HAS_TOPIC + COVERS (requis pour Pass 3)
+      - "classify_fine"       # Pass 2b-1: Classification fine des concepts
+      - "enrich_relations"    # Pass 2b-2: ADR-compliant implementation
+      - "cross_doc"           # Cross-document linking
     # Priorité jobs background
     default_priority: 0
 

@@ -1,4 +1,5 @@
 # Phase 2 OSMOSE - Types Relations & Metadata Layer
+# Phase 2.11 - Ajout SupportSpan et CorefResolutionPath pour intégration Pass 0.5
 
 from enum import Enum
 from datetime import date, datetime
@@ -157,6 +158,109 @@ class RelationMaturity(str, Enum):
     CONTEXT_DEPENDENT = "CONTEXT_DEPENDENT"  # conditional_ratio > 0.70
 
 
+# =============================================================================
+# Phase 2.11 - AnchorType et SupportSpan (Intégration Pass 0.5 Coreference)
+# =============================================================================
+
+class AnchorType(str, Enum):
+    """
+    Type d'ancrage d'un concept dans une assertion.
+
+    Distingue l'ancrage lexical (direct) de l'ancrage référentiel (via coréférence).
+
+    - LEXICAL: Le texte nomme explicitement le concept ("TLS", "S/4HANA")
+    - REFERENTIAL: Le texte réfère au concept via pronom/anaphore ("Il" → TLS)
+
+    Ref: ADR Linguistic Coreference Layer (Pass 0.5)
+    """
+    LEXICAL = "LEXICAL"        # Le texte nomme explicitement le concept
+    REFERENTIAL = "REFERENTIAL"  # Le texte réfère au concept via pronom/anaphore
+
+
+class SupportSpanModel(BaseModel):
+    """
+    Span de support référentiel pour un sujet/objet pronominal (Pydantic).
+
+    Quand une assertion a un sujet/objet pronominal (ex: "Il sécurise..."),
+    le SupportSpan capture:
+    - Le span exact du pronom dans le texte (evidence intacte)
+    - L'ID du MentionSpan correspondant dans le CorefGraph
+    - Le type d'ancrage (toujours REFERENTIAL pour un SupportSpan)
+
+    Invariants respectés:
+    - L1: Evidence-preserving (span exact, pas de réécriture)
+    - L5: Chemin de résolution auditable
+
+    Ref: ADR Linguistic Coreference Layer (Pass 0.5)
+    """
+    span_start: int = Field(description="Position début du pronom dans le texte")
+    span_end: int = Field(description="Position fin du pronom dans le texte")
+    surface_form: str = Field(description="Forme de surface du pronom (Il, elle, it, etc.)")
+    mention_span_id: str = Field(description="ID du MentionSpan dans le CorefGraph")
+    anchor_type: AnchorType = Field(default=AnchorType.REFERENTIAL, description="Toujours REFERENTIAL")
+    mention_type: Optional[str] = Field(default=None, description="Type de mention (PRONOUN, NP, etc.)")
+    sentence_index: Optional[int] = Field(default=None, description="Index de la phrase")
+
+    class Config:
+        use_enum_values = True
+
+
+class CorefResolutionStepModel(BaseModel):
+    """
+    Étape dans le chemin de résolution de coréférence (Pydantic).
+
+    Trace un pas dans la chaîne: MentionSpan(Il) → CorefLink → MentionSpan(TLS)
+    """
+    step_type: str = Field(description="Type d'étape: COREF_LINK | COREF_DECISION | CHAIN_MEMBERSHIP")
+    source_id: str = Field(description="ID du noeud source")
+    target_id: str = Field(description="ID du noeud cible")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Confiance de l'étape")
+    method: str = Field(default="", description="Méthode: spacy_coref | coreferee | rule_based | llm_arbiter")
+
+
+class CorefResolutionPathModel(BaseModel):
+    """
+    Chemin complet de résolution de coréférence (Pydantic).
+
+    Trace comment un pronom a été résolu vers un concept:
+    MentionSpan("Il") → CorefLink → MentionSpan("TLS") → ProtoConcept(TLS)
+
+    Ce chemin est la preuve auditable que la résolution est légitime
+    et non une inférence sémantique inventée.
+
+    Exemple:
+        - source_mention_id: "mention_il_001"
+        - target_mention_id: "mention_tls_001"
+        - resolved_concept_id: "proto_tls_001"
+        - steps: [CorefResolutionStepModel(COREF_LINK, ...)]
+        - resolution_confidence: 0.92
+    """
+    # Point de départ (pronom/anaphore)
+    source_mention_id: str = Field(description="ID du MentionSpan source")
+    source_surface: str = Field(description="Surface du pronom (ex: 'Il')")
+
+    # Point d'arrivée (mention lexicale)
+    target_mention_id: str = Field(description="ID du MentionSpan cible")
+    target_surface: str = Field(description="Surface de la mention cible (ex: 'TLS')")
+
+    # Concept résolu
+    resolved_concept_id: str = Field(description="ID du concept résolu")
+    resolved_concept_name: str = Field(description="Nom du concept résolu")
+
+    # Chemin de résolution (audit trail)
+    steps: List[CorefResolutionStepModel] = Field(default_factory=list, description="Étapes de résolution")
+
+    # Confiance globale de la résolution
+    resolution_confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Confiance globale")
+
+    # Méthode utilisée
+    resolution_method: str = Field(default="", description="spacy_coref | coreferee | rule_based | hybrid")
+
+    # Flags d'audit
+    is_ambiguous: bool = Field(default=False, description="True si plusieurs candidats possibles")
+    abstained: bool = Field(default=False, description="True si résolution impossible (abstention)")
+
+
 class RawAssertionFlags(BaseModel):
     """Flags sémantiques pour une assertion (Phase 2.8)"""
     is_negated: bool = Field(default=False, description="Assertion négative")
@@ -213,6 +317,42 @@ class RawAssertion(BaseModel):
     subject_surface_form: Optional[str] = Field(default=None, description="Forme trouvée dans le texte")
     object_surface_form: Optional[str] = Field(default=None, description="Forme trouvée dans le texte")
 
+    # ==========================================================================
+    # Phase 2.11 - Support Spans pour sujets/objets pronominaux (Pass 0.5)
+    # ==========================================================================
+
+    # Type d'ancrage pour le sujet et l'objet
+    subject_anchor_type: AnchorType = Field(
+        default=AnchorType.LEXICAL,
+        description="Type d'ancrage du sujet: LEXICAL (direct) ou REFERENTIAL (via coréférence)"
+    )
+    object_anchor_type: AnchorType = Field(
+        default=AnchorType.LEXICAL,
+        description="Type d'ancrage de l'objet: LEXICAL (direct) ou REFERENTIAL (via coréférence)"
+    )
+
+    # Support spans (si sujet/objet pronominal)
+    # Contient le span exact du pronom dans le texte
+    subject_support_span: Optional[SupportSpanModel] = Field(
+        default=None,
+        description="Si sujet pronominal, span du pronom et lien vers MentionSpan"
+    )
+    object_support_span: Optional[SupportSpanModel] = Field(
+        default=None,
+        description="Si objet pronominal, span du pronom et lien vers MentionSpan"
+    )
+
+    # Chemins de résolution coréférence (audit trail)
+    # Trace comment le pronom a été résolu vers le concept
+    subject_resolution_path: Optional[CorefResolutionPathModel] = Field(
+        default=None,
+        description="Chemin de résolution coréf pour sujet pronominal"
+    )
+    object_resolution_path: Optional[CorefResolutionPathModel] = Field(
+        default=None,
+        description="Chemin de résolution coréf pour objet pronominal"
+    )
+
     # Evidence
     evidence_text: str = Field(description="Phrase source justifiant la relation")
     evidence_span_start: Optional[int] = Field(default=None)
@@ -243,7 +383,7 @@ class RawAssertion(BaseModel):
     extractor_version: str = Field(default="v1.0.0")
     prompt_hash: Optional[str] = Field(default=None, description="Hash du prompt utilisé")
     model_used: Optional[str] = Field(default=None, description="Ex: gpt-4o-mini")
-    schema_version: str = Field(default="2.10.0")
+    schema_version: str = Field(default="2.11.0")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:

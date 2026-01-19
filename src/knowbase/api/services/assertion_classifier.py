@@ -528,6 +528,7 @@ def classify_assertions(
     llm_response: LLMAssertionResponse,
     sources: List[SourceRef],
     config: ClassificationConfig = DEFAULT_CONFIG,
+    kg_relations: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[Assertion], List[ClassificationResult]]:
     """
     Classifie toutes les assertions d'une reponse LLM.
@@ -536,12 +537,38 @@ def classify_assertions(
         llm_response: Reponse du LLM avec les assertions candidates
         sources: Liste des sources disponibles
         config: Configuration des seuils
+        kg_relations: Relations KG confirmees (optionnel) pour booster la classification
 
     Returns:
         Tuple (List[Assertion], List[ClassificationResult])
     """
     # Prepare le mapping source_id -> excerpt
     source_excerpts = {s.id: s.excerpt for s in sources}
+
+    # Prepare les relations KG pour matching rapide
+    kg_concepts = set()
+    kg_relation_pairs = []
+    if kg_relations:
+        for rel in kg_relations:
+            source_concept = rel.get("source", "").lower()
+            target_concept = rel.get("concept", "").lower()
+            relation_type = rel.get("relation", "")
+            confidence = rel.get("confidence", 0.5)
+            if source_concept and target_concept and confidence >= 0.7:
+                kg_concepts.add(source_concept)
+                kg_concepts.add(target_concept)
+                kg_relation_pairs.append({
+                    "source": source_concept,
+                    "target": target_concept,
+                    "relation": relation_type,
+                    "confidence": confidence,
+                    "evidence_quote": rel.get("evidence_quote"),
+                    "evidence_count": rel.get("evidence_count", 0),
+                })
+        if kg_relation_pairs:
+            logger.info(
+                f"[CLASSIFIER] Using {len(kg_relation_pairs)} KG relations for classification boost"
+            )
 
     # Classifie les assertions une par une (ordre important pour INFERRED)
     classified_assertions: Dict[str, Assertion] = {}
@@ -582,6 +609,36 @@ def classify_assertions(
         classified_assertions[assertion.id] = assertion
 
     final_assertions = list(classified_assertions.values())
+
+    # 🌊 OSMOSE: Boost KG - Reclassifier les assertions FRAGILE soutenues par des relations KG
+    kg_boosted_count = 0
+    if kg_relation_pairs:
+        for assertion in final_assertions:
+            if assertion.status == "FRAGILE":
+                assertion_text_lower = assertion.text_md.lower()
+                # Vérifier si l'assertion mentionne des concepts liés par une relation KG
+                for rel in kg_relation_pairs:
+                    source_in = rel["source"] in assertion_text_lower
+                    target_in = rel["target"] in assertion_text_lower
+                    if source_in and target_in:
+                        # Cette assertion est soutenue par une relation KG confirmée
+                        assertion.status = "FACT"
+                        assertion.meta.support.kg_relation = rel["relation"]
+                        assertion.meta.support.kg_confidence = rel["confidence"]
+                        assertion.meta.support.kg_evidence_quote = rel.get("evidence_quote")
+                        assertion.meta.support.kg_source_count = rel.get("evidence_count", 1)
+                        kg_boosted_count += 1
+                        logger.debug(
+                            f"[CLASSIFIER:KG_BOOST] Upgraded '{assertion.id}' to FACT "
+                            f"(KG: {rel['source']} --[{rel['relation']}]--> {rel['target']})"
+                        )
+                        break  # Une seule relation suffit
+
+        if kg_boosted_count > 0:
+            logger.info(
+                f"[CLASSIFIER:KG_BOOST] Upgraded {kg_boosted_count} assertions from FRAGILE to FACT "
+                f"using KG relations"
+            )
 
     logger.info(
         f"[CLASSIFIER] Classified {len(final_assertions)} assertions: "

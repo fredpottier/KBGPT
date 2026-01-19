@@ -99,7 +99,7 @@ const EmptyState = ({ useGraphContext }: { useGraphContext: boolean }) => (
       bgClip="text"
       mb={3}
     >
-      Bienvenue dans OSMOS
+      Bienvenue dans OSMOSIS
     </Text>
 
     <Text
@@ -233,7 +233,7 @@ const MessageBubble = ({
               )}
             </Box>
             <Text fontSize="xs" color="text.muted" order={isUser ? 0 : 1}>
-              {isUser ? 'Vous' : 'OSMOS'}
+              {isUser ? 'Vous' : 'OSMOSIS'}
             </Text>
             <Text fontSize="xs" color="text.muted">
               {new Date(message.timestamp).toLocaleTimeString('fr-FR', {
@@ -268,6 +268,7 @@ const MessageBubble = ({
                 graphData={message.graphData}
                 explorationIntelligence={message.explorationIntelligence}
                 onSearch={onSearch}
+                instrumentedAnswer={message.searchResult.instrumented_answer}
               />
             ) : (
               <Text
@@ -386,7 +387,7 @@ const LoadingIndicator = () => (
           >
             <Box as={FiCpu} size={14} color="accent.400" />
           </Box>
-          <Text fontSize="xs" color="text.muted">OSMOS</Text>
+          <Text fontSize="xs" color="text.muted">OSMOSIS</Text>
         </HStack>
 
         <Box

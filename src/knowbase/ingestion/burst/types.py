@@ -285,7 +285,7 @@ class BurstConfig:
     embeddings_model: str = "intfloat/multilingual-e5-large"
 
     # vLLM Configuration pour AWQ
-    vllm_quantization: str = "awq"  # Obligatoire pour charger les poids AWQ
+    vllm_quantization: str = "awq"  # awq standard (awq_marlin crash sur vLLM v0.6.6)
     vllm_dtype: str = "half"  # FP16 pour inférence AWQ
     vllm_gpu_memory_utilization: float = 0.70  # 14B AWQ ~10GB réel, réserve 33GB, laisse ~15GB pour TEI
     vllm_max_model_len: int = 8192  # Context window raisonnable
@@ -296,8 +296,8 @@ class BurstConfig:
     embeddings_port: int = 8001
 
     # Timeouts - augmentés pour 14B (chargement plus long)
-    instance_boot_timeout: int = 900  # 15 minutes (DLAMI + vLLM 14B load)
-    model_load_timeout: int = 900  # 15 minutes (vLLM ~8-9min) pour charger le modèle seul
+    instance_boot_timeout: int = 3600  # 60 minutes (marge large pour EBS froid)
+    model_load_timeout: int = 3600  # 60 minutes (marge large pour EBS froid)
     healthcheck_interval: int = 15  # Intervalle entre checks
     healthcheck_timeout: int = 10  # Timeout par check
     max_retries: int = 3
@@ -388,8 +388,8 @@ class BurstConfig:
             embeddings_port=int(os.getenv("BURST_EMBEDDINGS_PORT", "8001")),
 
             # Timeouts (augmentés pour 14B)
-            instance_boot_timeout=int(os.getenv("BURST_INSTANCE_BOOT_TIMEOUT", "900")),
-            model_load_timeout=int(os.getenv("BURST_MODEL_LOAD_TIMEOUT", "900")),
+            instance_boot_timeout=int(os.getenv("BURST_INSTANCE_BOOT_TIMEOUT", "3600")),
+            model_load_timeout=int(os.getenv("BURST_MODEL_LOAD_TIMEOUT", "3600")),
             healthcheck_interval=int(os.getenv("BURST_HEALTHCHECK_INTERVAL", "15")),
             healthcheck_timeout=int(os.getenv("BURST_HEALTHCHECK_TIMEOUT", "10")),
             max_retries=int(os.getenv("BURST_MAX_RETRIES", "3")),

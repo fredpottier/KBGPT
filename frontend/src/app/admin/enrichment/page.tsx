@@ -479,10 +479,18 @@ export default function EnrichmentDashboardPage() {
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
   const toastShownRef = useRef<string | null>(null)
 
+  // Determine API endpoint based on job prefix
+  const getJobEndpoint = (jobId: string): string => {
+    if (jobId.startsWith('p3_')) return `/admin/pass3/jobs/${jobId}`
+    if (jobId.startsWith('p4_')) return `/admin/pass4/jobs/${jobId}`
+    return `/admin/pass2/jobs/${jobId}` // Default: p2_ or legacy
+  }
+
   // Poll job status
   const pollJob = useCallback(async (jobId: string) => {
     try {
-      const res = await apiClient.get<Pass2Job>(`/admin/pass2/jobs/${jobId}`)
+      const endpoint = getJobEndpoint(jobId)
+      const res = await apiClient.get<Pass2Job>(endpoint)
       if (res.success && res.data) {
         setActiveJob(res.data)
         if (['completed', 'failed', 'cancelled'].includes(res.data.status)) {
@@ -490,7 +498,8 @@ export default function EnrichmentDashboardPage() {
           queryClient.invalidateQueries({ queryKey: ['enrichment'] })
           if (toastShownRef.current !== jobId) {
             toastShownRef.current = jobId
-            const msg = { completed: ['Enrichissement termine', 'success'], failed: ['Enrichissement echoue', 'error'], cancelled: ['Enrichissement annule', 'warning'] }[res.data.status] as [string, 'success' | 'error' | 'warning']
+            const passName = jobId.startsWith('p3_') ? 'Validation' : jobId.startsWith('p4_') ? 'Corpus' : 'Enrichissement'
+            const msg = { completed: [`${passName} termine`, 'success'], failed: [`${passName} echoue`, 'error'], cancelled: [`${passName} annule`, 'warning'] }[res.data.status] as [string, 'success' | 'error' | 'warning']
             toast({ title: msg[0], status: msg[1], duration: 3000 })
           }
         }
@@ -519,7 +528,9 @@ export default function EnrichmentDashboardPage() {
   const handleCancel = async () => {
     if (!activeJobId) return
     setIsCancelling(true)
-    try { await apiClient.delete(`/admin/pass2/jobs/${activeJobId}`) } catch (e) { toast({ title: 'Erreur annulation', status: 'error', duration: 2000 }) }
+    try {
+      await apiClient.delete(getJobEndpoint(activeJobId))
+    } catch (e) { toast({ title: 'Erreur annulation', status: 'error', duration: 2000 }) }
     setIsCancelling(false)
   }
 
@@ -578,45 +589,36 @@ export default function EnrichmentDashboardPage() {
     onError: (e: any) => toast({ title: 'Erreur', description: e.message, status: 'error', duration: 3000 }),
   })
 
-  // Run Pass 3
+  // Run Pass 3 (async job system)
   const runPass3 = useMutation({
     mutationFn: async () => {
-      // Clear any stale job before running
-      setActiveJob(null)
-      setActiveJobId(null)
-      const res = await apiClient.post<Pass2Result>('/admin/pass3/run', { max_candidates: 50 })
-      if (!res.success) throw new Error(res.error || 'Failed')
+      const res = await apiClient.post<Pass2Job>('/admin/pass3/jobs', { max_candidates: 50 })
+      if (!res.success || !res.data) throw new Error(res.error || 'Failed')
       return res.data
     },
-    onSuccess: (result) => {
-      if (result) setPhaseResults(prev => ({ ...prev, 'semantic-consolidation': result }))
-      queryClient.invalidateQueries({ queryKey: ['enrichment'] })
-      toast({ title: `Pass 3: ${result?.items_created || 0} relations prouvees`, status: result?.success ? 'success' : 'warning', duration: 3000 })
+    onSuccess: (job) => {
+      setActiveJobId(job.job_id)
+      setActiveJob(job)
+      toast({ title: 'Validation lancee (Pass 3)', status: 'info', duration: 2000 })
     },
     onError: (e: any) => toast({ title: 'Erreur Pass 3', description: e.message, status: 'error', duration: 3000 }),
   })
 
-  // Run Corpus Consolidation (Pass 4: ER + Links)
+  // Run Corpus Consolidation (Pass 4: ER + Links) - async job system
   const runCorpusConsolidation = useMutation({
     mutationFn: async () => {
-      // Clear any stale job before running
-      setActiveJob(null)
-      setActiveJobId(null)
-      // Run Pass 4a: Entity Resolution
-      const erRes = await apiClient.post<Pass2Result>('/admin/pass2/corpus-er', { dry_run: false })
-      // Run Pass 4b: Corpus Links
-      const linksRes = await apiClient.post<Pass2Result>('/admin/pass4/corpus-links', {})
-      return { er: erRes.data, links: linksRes.data }
-    },
-    onSuccess: ({ er, links }) => {
-      if (er) setPhaseResults(prev => ({ ...prev, 'entity-resolution': er }))
-      if (links) setPhaseResults(prev => ({ ...prev, 'corpus-links': links }))
-      queryClient.invalidateQueries({ queryKey: ['enrichment'] })
-      toast({
-        title: `Corpus: ${er?.items_created || 0} merges, ${links?.items_created || 0} liens`,
-        status: 'success',
-        duration: 3000
+      const res = await apiClient.post<Pass2Job>('/admin/pass4/jobs', {
+        skip_er: false,
+        skip_links: false,
+        dry_run: false
       })
+      if (!res.success || !res.data) throw new Error(res.error || 'Failed')
+      return res.data
+    },
+    onSuccess: (job) => {
+      setActiveJobId(job.job_id)
+      setActiveJob(job)
+      toast({ title: 'Consolidation Corpus lancee (Pass 4)', status: 'info', duration: 2000 })
     },
     onError: (e: any) => toast({ title: 'Erreur Corpus', description: e.message, status: 'error', duration: 3000 }),
   })

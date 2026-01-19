@@ -38,7 +38,7 @@ def get_documents(neo4j_client, tenant_id: str = "default") -> List[str]:
     """Récupère la liste des documents avec des ProtoConcepts."""
     query = """
     MATCH (p:ProtoConcept {tenant_id: $tenant_id})
-    RETURN DISTINCT p.document_id AS document_id
+    RETURN DISTINCT p.doc_id AS document_id
     ORDER BY document_id
     """
     with neo4j_client.driver.session(database=neo4j_client.database) as session:

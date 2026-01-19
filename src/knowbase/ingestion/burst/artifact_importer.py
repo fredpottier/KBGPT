@@ -336,12 +336,12 @@ class ArtifactImporter:
         driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
         query = """
-        MERGE (d:Document {document_id: $document_id, tenant_id: $tenant_id})
+        MERGE (d:Document {doc_id: $document_id, tenant_id: $tenant_id})
         SET d.name = $document_name,
             d.chunk_count = $chunk_count,
             d.imported_at = datetime(),
             d.source = 'burst_import'
-        RETURN d.document_id AS id
+        RETURN d.doc_id AS id
         """
 
         with driver.session() as session:

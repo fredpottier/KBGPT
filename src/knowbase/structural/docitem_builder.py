@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
@@ -243,6 +244,77 @@ def compute_page_span(prov_list: List[Any]) -> Tuple[Optional[int], Optional[int
 
 
 # ===================================
+# HEADING LEVEL INFERENCE (D4.2 support)
+# ===================================
+
+# Patterns de numérotation pour inférer le niveau de heading
+# Spec: ADR TÂCHE 2.2.2 - Si Docling ne fournit pas le level, inférer depuis le texte
+
+# Pattern pour numérotation hiérarchique: 1, 1.1, 1.1.1, etc.
+_NUMBERING_PATTERN = re.compile(r'^(\d+(?:\.\d+)*)\s*\.?\s+')
+
+# Pattern pour numérotation avec lettres: A., B., a), b)
+_LETTER_PATTERN = re.compile(r'^([A-Za-z])[.)]\s+')
+
+# Pattern pour chapitres: "Chapter 1", "Chapitre 2", "Section 3"
+_CHAPTER_PATTERN = re.compile(
+    r'^(?:Chapter|Chapitre|Section|Part|Partie|Annexe|Appendix|Annex)\s+(\d+|[IVXLCDM]+|[A-Z])\b',
+    re.IGNORECASE
+)
+
+
+def infer_heading_level_from_text(text: str) -> Optional[int]:
+    """
+    Infère le niveau de heading depuis les patterns de numérotation du texte.
+
+    Spec: ADR TÂCHE 2.2.2 - Heuristique si Docling ne fournit pas level
+
+    Patterns reconnus:
+    - "1. Title" → level 1
+    - "1.1 Subtitle" → level 2
+    - "1.1.1 Sub-subtitle" → level 3
+    - "Chapter 1" / "Chapitre 1" → level 1
+    - "Annexe A" / "Appendix B" → level 1
+    - "A. Title" (lettre majuscule) → level 1
+    - "a) Title" (lettre minuscule) → level 2
+
+    Args:
+        text: Texte du heading
+
+    Returns:
+        Niveau inféré (1-6) ou None si non détectable
+    """
+    if not text or not text.strip():
+        return None
+
+    text_stripped = text.strip()
+
+    # 1) Numérotation hiérarchique: compter les points
+    # "1." → 1, "1.1" → 2, "1.1.1" → 3, etc.
+    match = _NUMBERING_PATTERN.match(text_stripped)
+    if match:
+        numbering = match.group(1)  # "1" ou "1.1" ou "1.1.1"
+        # Compter les parties séparées par des points
+        parts = numbering.split('.')
+        level = len(parts)
+        # Cap à 6 niveaux max
+        return min(level, 6)
+
+    # 2) Chapitres / Sections / Annexes → toujours niveau 1
+    if _CHAPTER_PATTERN.match(text_stripped):
+        return 1
+
+    # 3) Lettres: A. = niveau 1, a) = niveau 2
+    letter_match = _LETTER_PATTERN.match(text_stripped)
+    if letter_match:
+        letter = letter_match.group(1)
+        return 1 if letter.isupper() else 2
+
+    # Non détectable
+    return None
+
+
+# ===================================
 # READING ORDER (D2)
 # ===================================
 
@@ -271,6 +343,58 @@ def compute_reading_order(items: List[DocItem]) -> List[DocItem]:
         item.reading_order_index = idx
 
     return sorted_items
+
+
+# ===================================
+# DOCWIDE CHARSPANS (Contract v1)
+# ===================================
+
+# Séparateur entre DocItems pour le calcul docwide
+# Ce séparateur fait partie du contrat et doit être stable
+DOCWIDE_SEPARATOR = "\n\n"
+
+
+def compute_docwide_charspans(items: List[DocItem]) -> List[DocItem]:
+    """
+    Calcule les charspans document-wide pour chaque DocItem.
+
+    Spec: ADR_CHARSPAN_CONTRACT_V1.md Section 5.2
+
+    Les items DOIVENT être triés par reading_order_index avant appel.
+    Le séparateur DOCWIDE_SEPARATOR est inséré entre chaque item.
+
+    Invariant: charspan_end_docwide - charspan_start_docwide == len(text)
+
+    Args:
+        items: Liste de DocItems triés par reading_order_index
+
+    Returns:
+        Liste avec charspan_start_docwide et charspan_end_docwide mis à jour
+    """
+    cursor = 0
+    separator_len = len(DOCWIDE_SEPARATOR)
+
+    for item in items:
+        text_len = len(item.text) if item.text else 0
+
+        item.charspan_start_docwide = cursor
+        item.charspan_end_docwide = cursor + text_len
+
+        # Avancer le curseur: texte + séparateur
+        cursor = item.charspan_end_docwide + separator_len
+
+    # Log pour debug Contract v1
+    if items:
+        first = items[0]
+        last = items[-1]
+        logger.info(
+            f"[DocItemBuilder:Contract_v1] compute_docwide_charspans: {len(items)} items, "
+            f"first=[{first.charspan_start_docwide}:{first.charspan_end_docwide}], "
+            f"last=[{last.charspan_start_docwide}:{last.charspan_end_docwide}], "
+            f"total_cursor={cursor}"
+        )
+
+    return items
 
 
 # ===================================
@@ -355,6 +479,9 @@ class DocItemBuilder:
         # Calculer l'ordre de lecture (D2)
         items = compute_reading_order(items)
 
+        # Calculer les charspans document-wide (Contract v1)
+        items = compute_docwide_charspans(items)
+
         # Extraire les pages
         page_contexts = self._extract_page_contexts(doc, doc_hash)
 
@@ -396,16 +523,36 @@ class DocItemBuilder:
             label = str(getattr(text_item, 'label', 'text'))
             item_type = map_docling_label(label)
 
-            # Heading level
+            # Texte (nécessaire pour l'inférence du heading level)
+            text = str(getattr(text_item, 'text', ''))
+
+            # Heading level - stratégie multi-source (ADR D4.2 / TÂCHE 2.2.2)
             heading_level = None
             if item_type == DocItemType.HEADING:
-                # Essayer d'extraire le niveau depuis le label
-                import re
-                match = re.search(r'(\d+)', label)
-                heading_level = int(match.group(1)) if match else 1
+                # 1) Docling SectionHeaderItem.level (si > 1, c'est utile)
+                docling_level = None
+                if hasattr(text_item, 'level') and text_item.level is not None:
+                    docling_level = int(text_item.level)
 
-            # Texte
-            text = str(getattr(text_item, 'text', ''))
+                # 2) Inférence depuis patterns de numérotation du texte
+                inferred_level = infer_heading_level_from_text(text)
+
+                # 3) Choisir la meilleure source
+                if inferred_level is not None:
+                    # Pattern détecté → utiliser l'inférence (plus fiable)
+                    heading_level = inferred_level
+                elif docling_level is not None and docling_level > 1:
+                    # Docling a un level > 1 → utilisable
+                    heading_level = docling_level
+                else:
+                    # Fallback: TITLE = niveau 1, autres = niveau 2
+                    heading_level = 1 if label.lower() == 'title' else 2
+
+                logger.debug(
+                    f"[DocItemBuilder] Heading level: docling={docling_level}, "
+                    f"inferred={inferred_level}, final={heading_level} "
+                    f"for '{text[:50]}...'"
+                )
 
             # Provenance
             prov_list = getattr(text_item, 'prov', []) or []

@@ -73,6 +73,14 @@ from knowbase.structural.graph_builder import (
     get_narrative_chunks_for_relations,
 )
 
+from knowbase.structural.archiver import (
+    StructuralArchiver,
+    ArchiveStats,
+    ArchiveManifest,
+    get_archiver,
+    archive_completed_documents,
+)
+
 __all__ = [
     # Enums
     "BboxUnit",
@@ -120,4 +128,10 @@ __all__ = [
     "USE_STRUCTURAL_GRAPH",
     "convert_chunks_for_relation_extraction",
     "get_narrative_chunks_for_relations",
+    # Archiver
+    "StructuralArchiver",
+    "ArchiveStats",
+    "ArchiveManifest",
+    "get_archiver",
+    "archive_completed_documents",
 ]

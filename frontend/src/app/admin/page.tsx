@@ -362,7 +362,7 @@ export default function AdminDashboard() {
               Dashboard Administration
             </Text>
             <Text color="text.secondary">
-              Vue d'ensemble du systeme OSMOS
+              Vue d'ensemble du systeme OSMOSIS
             </Text>
           </VStack>
         </HStack>

@@ -69,7 +69,7 @@ const navigationConfig = {
       { label: 'Domain Context', href: '/admin/domain-context', icon: FiGlobe },
       { label: 'Profil Visibilite', href: '/admin/visibility-profile', icon: FiSliders },
       { label: 'Enrichissement KG', href: '/admin/enrichment', icon: FiActivity },
-      { label: 'Governance / Tensions', href: '/admin/enrichment', icon: FiShield },
+      { label: 'Governance / Tensions', href: '/admin/governance', icon: FiShield },
       { label: 'Markers', href: '/admin/markers', icon: FiTag },
       { label: 'Mode Burst (Spot)', href: '/admin/burst', icon: FiCloud },
       { label: 'Import Analytics', href: '/analytics', icon: FiBarChart2 },
@@ -217,13 +217,13 @@ export default function TopNavigation() {
         <Flex alignItems="center" gap={2}>
           <Image
             src="/logo.png"
-            alt="OSMOS Logo"
+            alt="OSMOSIS Logo"
             h={10}
             w="auto"
             objectFit="contain"
           />
           <Text fontWeight="bold" fontSize="lg" color="text.primary">
-            OSMOS
+            OSMOSIS
           </Text>
         </Flex>
 

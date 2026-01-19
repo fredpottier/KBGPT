@@ -225,10 +225,42 @@ export default function AssertionPopover({
               </Box>
             )}
 
+            {/* KG Evidence - 🌊 OSMOSE: Affiche la preuve KG si disponible */}
+            {assertion.meta?.support?.kg_relation && (
+              <Box
+                p={2}
+                bg="green.50"
+                borderLeft="3px solid"
+                borderLeftColor="green.500"
+                borderRadius="sm"
+              >
+                <HStack spacing={2} mb={1}>
+                  <Text fontSize="xs" fontWeight="semibold" color="green.700">
+                    🔗 Relation KG confirmee: {assertion.meta.support.kg_relation}
+                  </Text>
+                  {assertion.meta.support.kg_confidence && (
+                    <Badge size="sm" colorScheme="green" fontSize="9px">
+                      {Math.round(assertion.meta.support.kg_confidence * 100)}%
+                    </Badge>
+                  )}
+                </HStack>
+                {assertion.meta.support.kg_evidence_quote && (
+                  <Text fontSize="xs" color="green.600" fontStyle="italic" mt={1}>
+                    "{assertion.meta.support.kg_evidence_quote}"
+                  </Text>
+                )}
+                {assertion.meta.support.kg_source_count && assertion.meta.support.kg_source_count > 0 && (
+                  <Text fontSize="10px" color="green.500" mt={1}>
+                    Confirme par {assertion.meta.support.kg_source_count} source(s) dans le Knowledge Graph
+                  </Text>
+                )}
+              </Box>
+            )}
+
             {/* Meta info */}
             {assertion.meta?.support && (
               <Box pt={2} borderTop="1px solid" borderColor="border.default">
-                <HStack spacing={3} fontSize="10px" color="text.muted">
+                <HStack spacing={3} fontSize="10px" color="text.muted" flexWrap="wrap">
                   <Text>
                     Support: {assertion.meta.support.supporting_sources_count} source(s)
                   </Text>
@@ -238,6 +270,11 @@ export default function AssertionPopover({
                   {assertion.meta.support.has_official && (
                     <Badge size="sm" colorScheme="green" fontSize="9px">
                       Source officielle
+                    </Badge>
+                  )}
+                  {assertion.meta.support.kg_relation && (
+                    <Badge size="sm" colorScheme="teal" fontSize="9px">
+                      KG: {assertion.meta.support.kg_relation}
                     </Badge>
                   )}
                 </HStack>

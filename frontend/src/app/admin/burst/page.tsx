@@ -196,6 +196,7 @@ const formatCost = (cost: string | null): string => {
 const getStatusConfig = (status: string) => {
   const configs: Record<string, { color: string; icon: any; label: string }> = {
     idle: { color: 'gray', icon: FiClock, label: 'Inactif' },
+    no_batch: { color: 'gray', icon: FiClock, label: 'Prêt' },
     preparing: { color: 'blue', icon: FiLoader, label: 'Préparation' },
     requesting_spot: { color: 'blue', icon: FiCloud, label: 'Demande Spot' },
     waiting_capacity: { color: 'yellow', icon: FiClock, label: 'Attente' },
@@ -478,7 +479,7 @@ export default function BurstAdminPage() {
   const statusConfig = getStatusConfig(currentStatus)
   const infraStartingStates = ['requesting_spot', 'waiting_capacity', 'instance_starting']
   const isInfraStarting = infraStartingStates.includes(currentStatus)
-  const terminalStates = ['idle', 'completed', 'failed', 'cancelled']
+  const terminalStates = ['idle', 'completed', 'failed', 'cancelled', 'no_batch']
   const canPrepare = terminalStates.includes(currentStatus)
   const canStart = currentStatus === 'preparing'
   const canProcess = currentStatus === 'ready'

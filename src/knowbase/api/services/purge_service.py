@@ -161,6 +161,8 @@ class PurgeService:
         SUPPRIME :
         - Tous les autres nodes (Document, CanonicalConcept, SectionContext, etc.)
         - Constraints/indexes (si purge_schema=True) sauf ceux des labels préservés
+
+        NOTE: Utilise des batches pour éviter les timeouts avec des millions de relations.
         """
         logger.info(f"🔄 Purge Neo4j (purge_schema={purge_schema})...")
 
@@ -193,12 +195,57 @@ class PurgeService:
                     nodes_before = counts["nodes"]
                     relations_before = counts["relations"]
 
-                    # Supprimer les nodes métier (préserver configuration)
-                    session.run(f"""
-                        MATCH (n)
-                        WHERE {where_clause}
-                        DETACH DELETE n
-                    """)
+                    # BATCH DELETE: Supprimer d'abord MENTIONED_IN (souvent des millions)
+                    # car c'est la relation la plus volumineuse
+                    logger.info("  - Suppression MENTIONED_IN par batches (peut prendre du temps)...")
+                    batch_size = 50000
+                    total_mentioned_in_deleted = 0
+                    while True:
+                        result = session.run("""
+                            MATCH ()-[r:MENTIONED_IN]->()
+                            WITH r LIMIT $batch_size
+                            DELETE r
+                            RETURN count(r) as deleted
+                        """, batch_size=batch_size)
+                        deleted = result.single()["deleted"]
+                        if deleted == 0:
+                            break
+                        total_mentioned_in_deleted += deleted
+                        logger.info(f"    - {total_mentioned_in_deleted} MENTIONED_IN supprimées...")
+
+                    # BATCH DELETE: Supprimer les autres relations par batches
+                    logger.info("  - Suppression autres relations par batches...")
+                    total_other_rels_deleted = 0
+                    while True:
+                        result = session.run(f"""
+                            MATCH (n)-[r]->()
+                            WHERE {where_clause}
+                            WITH r LIMIT $batch_size
+                            DELETE r
+                            RETURN count(r) as deleted
+                        """, batch_size=batch_size)
+                        deleted = result.single()["deleted"]
+                        if deleted == 0:
+                            break
+                        total_other_rels_deleted += deleted
+                        logger.info(f"    - {total_other_rels_deleted} autres relations supprimées...")
+
+                    # BATCH DELETE: Supprimer les nodes par batches
+                    logger.info("  - Suppression nodes par batches...")
+                    total_nodes_deleted = 0
+                    while True:
+                        result = session.run(f"""
+                            MATCH (n)
+                            WHERE {where_clause}
+                            WITH n LIMIT $batch_size
+                            DETACH DELETE n
+                            RETURN count(n) as deleted
+                        """, batch_size=batch_size)
+                        deleted = result.single()["deleted"]
+                        if deleted == 0:
+                            break
+                        total_nodes_deleted += deleted
+                        logger.info(f"    - {total_nodes_deleted} nodes supprimés...")
 
                     logger.info(
                         f"  - {nodes_before} nodes, {relations_before} relations supprimés"

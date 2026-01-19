@@ -84,7 +84,7 @@ def compute_concept_stats(neo4j_client, tenant_id: str = "default") -> List[Dict
          outgoing_relations, count(r2) AS incoming_relations
 
     RETURN c.canonical_id AS concept_id,
-           c.label AS label,
+           c.canonical_name AS label,
            doc_frequency,
            section_spread,
            (outgoing_relations + incoming_relations) AS validated_relation_degree,

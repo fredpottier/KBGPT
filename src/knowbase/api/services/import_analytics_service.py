@@ -442,7 +442,7 @@ class ImportAnalyticsService:
                 # Proto concepts
                 result = session.run(
                     """
-                    MATCH (c:ProtoConcept {document_id: $doc_id})
+                    MATCH (c:ProtoConcept {doc_id: $doc_id})
                     RETURN count(c) as count
                     """,
                     doc_id=document_id,
@@ -452,7 +452,7 @@ class ImportAnalyticsService:
                 # Canonical concepts (liés via INSTANCE_OF depuis les ProtoConcepts)
                 result = session.run(
                     """
-                    MATCH (p:ProtoConcept {document_id: $doc_id})-[:INSTANCE_OF]->(c:CanonicalConcept)
+                    MATCH (p:ProtoConcept {doc_id: $doc_id})-[:INSTANCE_OF]->(c:CanonicalConcept)
                     RETURN count(DISTINCT c) as count
                     """,
                     doc_id=document_id,
@@ -462,7 +462,7 @@ class ImportAnalyticsService:
                 # Relations (depuis les ProtoConcepts du document)
                 result = session.run(
                     """
-                    MATCH (p:ProtoConcept {document_id: $doc_id})-[r]->()
+                    MATCH (p:ProtoConcept {doc_id: $doc_id})-[r]->()
                     RETURN count(r) as count
                     """,
                     doc_id=document_id,
