@@ -38,8 +38,19 @@ from knowbase.extraction_v2.context.doc_context_extractor import (
     DocContextExtractor,
     get_doc_context_extractor,
 )
+from knowbase.extraction_v2.context.models import DocumentContext
 from knowbase.extraction_v2.extractors.docling_extractor import DoclingExtractor
 from knowbase.extraction_v2.gating.engine import GatingEngine
+from knowbase.structural import (
+    StructuralGraphBuilder,
+    StructuralGraphBuildResult,
+    is_structural_graph_enabled,
+)
+from knowbase.ingestion.pipelines.pass05_coref import (
+    Pass05CoreferencePipeline,
+    Pass05Config,
+    Pass05Result,
+)
 from knowbase.extraction_v2.gating.weights import DEFAULT_GATING_WEIGHTS, GATING_THRESHOLDS
 from knowbase.extraction_v2.vision.analyzer import VisionAnalyzer
 from knowbase.extraction_v2.merge.merger import StructuredMerger, MergedPageOutput
@@ -59,6 +70,8 @@ class PipelineConfig:
     enable_gating: bool = True
     enable_doc_context: bool = True  # Extraction contexte documentaire (ADR_ASSERTION_AWARE_KG)
     enable_table_summaries: bool = True  # QW-1: Résumé LLM des tables pour améliorer RAG
+    enable_structural_graph: bool = True  # Option C: Structural Graph depuis DoclingDocument (requis pour Pass 0.5)
+    enable_linguistic_coref: bool = True  # Pass 0.5: Résolution de coréférence linguistique (actif par défaut)
 
     # Seuils de gating
     vision_required_threshold: float = 0.60
@@ -72,7 +85,7 @@ class PipelineConfig:
 
     # Options de cache
     use_cache: bool = True
-    cache_version: str = "v2"
+    cache_version: str = "v3"  # v3: Ajout structural_graph + Pass 0.5 coref
 
     # Options Vision
     vision_model: str = "gpt-4o"
@@ -88,6 +101,15 @@ class PipelineConfig:
     # Options DocContext (ADR_ASSERTION_AWARE_KG)
     doc_context_use_llm: bool = True  # Utiliser LLM pour validation
 
+    # Options Structural Graph (Option C)
+    structural_graph_max_chunk_size: int = 3000  # Taille max chunks narratifs
+    structural_graph_persist_neo4j: bool = True  # Persister dans Neo4j
+
+    # Options Linguistic Coref (Pass 0.5)
+    linguistic_coref_confidence_threshold: float = 0.85  # Seuil de confiance
+    linguistic_coref_max_sentence_distance: int = 2  # Distance max en phrases
+    linguistic_coref_skip_if_exists: bool = True  # Idempotence
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialise en dictionnaire."""
         return {
@@ -95,6 +117,7 @@ class PipelineConfig:
             "enable_gating": self.enable_gating,
             "enable_doc_context": self.enable_doc_context,
             "enable_table_summaries": self.enable_table_summaries,
+            "enable_structural_graph": self.enable_structural_graph,
             "vision_required_threshold": self.vision_required_threshold,
             "vision_recommended_threshold": self.vision_recommended_threshold,
             "vision_budget": self.vision_budget,
@@ -105,6 +128,12 @@ class PipelineConfig:
             "include_recommended_in_vision": self.include_recommended_in_vision,
             "max_concurrent_vision": self.max_concurrent_vision,
             "doc_context_use_llm": self.doc_context_use_llm,
+            "structural_graph_max_chunk_size": self.structural_graph_max_chunk_size,
+            "structural_graph_persist_neo4j": self.structural_graph_persist_neo4j,
+            "enable_linguistic_coref": self.enable_linguistic_coref,
+            "linguistic_coref_confidence_threshold": self.linguistic_coref_confidence_threshold,
+            "linguistic_coref_max_sentence_distance": self.linguistic_coref_max_sentence_distance,
+            "linguistic_coref_skip_if_exists": self.linguistic_coref_skip_if_exists,
         }
 
 
@@ -121,6 +150,14 @@ class PipelineMetrics:
     doc_context_time_ms: float = 0  # Temps extraction contexte
     table_summary_time_ms: float = 0  # QW-1: Temps résumé tables
     tables_summarized: int = 0  # QW-1: Nombre tables résumées
+    structural_graph_time_ms: float = 0  # Option C: Temps construction graph
+    structural_graph_items: int = 0  # Option C: Nombre DocItems créés
+    structural_graph_chunks: int = 0  # Option C: Nombre TypeAwareChunks créés
+    # Pass 0.5: Linguistic Coreference
+    linguistic_coref_time_ms: float = 0  # Temps résolution coréférence
+    linguistic_coref_mentions: int = 0  # Nombre de MentionSpan créés
+    linguistic_coref_chains: int = 0  # Nombre de chaînes de coréférence
+    linguistic_coref_resolution_rate: float = 0.0  # Taux de résolution
     total_time_ms: float = 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -135,6 +172,13 @@ class PipelineMetrics:
             "doc_context_time_ms": round(self.doc_context_time_ms, 2),
             "table_summary_time_ms": round(self.table_summary_time_ms, 2),
             "tables_summarized": self.tables_summarized,
+            "structural_graph_time_ms": round(self.structural_graph_time_ms, 2),
+            "structural_graph_items": self.structural_graph_items,
+            "structural_graph_chunks": self.structural_graph_chunks,
+            "linguistic_coref_time_ms": round(self.linguistic_coref_time_ms, 2),
+            "linguistic_coref_mentions": self.linguistic_coref_mentions,
+            "linguistic_coref_chains": self.linguistic_coref_chains,
+            "linguistic_coref_resolution_rate": round(self.linguistic_coref_resolution_rate, 4),
             "total_time_ms": round(self.total_time_ms, 2),
         }
 
@@ -174,6 +218,8 @@ class ExtractionPipelineV2:
         self._linearizer: Optional[Linearizer] = None
         self._doc_context_extractor: Optional[DocContextExtractor] = None
         self._table_summarizer: Optional[TableSummarizer] = None
+        self._structural_graph_builder: Optional[StructuralGraphBuilder] = None
+        self._coref_pipeline: Optional[Pass05CoreferencePipeline] = None  # Pass 0.5
 
         # Cache V2 (évite de refaire les appels Vision)
         self._cache: Optional[VersionedCache] = None
@@ -246,6 +292,30 @@ class ExtractionPipelineV2:
             self._table_summarizer = TableSummarizer(
                 min_cells=4,   # Tables avec au moins 4 cellules
                 max_cells=500, # Tronquer les très grandes tables
+            )
+
+        # 7. Initialiser StructuralGraphBuilder (Option C)
+        if self.config.enable_structural_graph or is_structural_graph_enabled():
+            self._structural_graph_builder = StructuralGraphBuilder(
+                max_chunk_size=self.config.structural_graph_max_chunk_size,
+                persist_artifacts=True,
+            )
+            logger.info("[ExtractionPipelineV2] StructuralGraphBuilder enabled")
+
+        # 8. Initialiser Pass05CoreferencePipeline (Pass 0.5 - Linguistic Layer)
+        if self.config.enable_linguistic_coref:
+            coref_config = Pass05Config(
+                confidence_threshold=self.config.linguistic_coref_confidence_threshold,
+                max_sentence_distance=self.config.linguistic_coref_max_sentence_distance,
+                skip_if_exists=self.config.linguistic_coref_skip_if_exists,
+            )
+            self._coref_pipeline = Pass05CoreferencePipeline(
+                tenant_id=self.config.tenant_id,
+                config=coref_config,
+            )
+            logger.info(
+                f"[ExtractionPipelineV2] Pass05CoreferencePipeline enabled "
+                f"(threshold={coref_config.confidence_threshold})"
             )
 
         self._initialized = True
@@ -351,13 +421,21 @@ class ExtractionPipelineV2:
 
         # === ETAPE 1: Extraction Docling ===
         extraction_start = time.time()
-        units = await self._extractor.extract_to_units(file_path)
+        docling_document = None  # Pour Option C Structural Graph
+
+        # Si Structural Graph activé, récupérer aussi le DoclingDocument brut
+        if self._structural_graph_builder:
+            units, docling_document = await self._extractor.extract_to_units_with_docling(file_path)
+        else:
+            units = await self._extractor.extract_to_units(file_path)
+
         metrics.extraction_time_ms = (time.time() - extraction_start) * 1000
         metrics.total_pages = len(units)
 
         logger.info(
             f"[ExtractionPipelineV2] Extracted {len(units)} pages in "
             f"{metrics.extraction_time_ms:.0f}ms"
+            f"{' (with DoclingDocument for StructuralGraph)' if docling_document else ''}"
         )
 
         # === ETAPE 2: Vision Gating ===
@@ -518,18 +596,54 @@ class ExtractionPipelineV2:
         full_text, page_index = self._linearizer.linearize(merged_pages)
 
         # === ETAPE 6: DocContext Extraction (ADR_ASSERTION_AWARE_KG) ===
+        # Deux phases:
+        # 6a. Générer DocumentContext (structure_hint, entity_hints) via generate_document_summary()
+        # 6b. Extraire DocContextFrame avec filtrage via decide_marker()
         doc_context = None
+        document_context_constraints: Optional[DocumentContext] = None
+
         if self.config.enable_doc_context and self._doc_context_extractor:
             doc_context_start = time.time()
             try:
                 # Extraire le texte des pages pour le miner
                 pages_text = [mp.text_content for mp in merged_pages]
 
+                # === ETAPE 6a: Générer DocumentContext (ADR Document Context Markers) ===
+                # Contient structure_hint, entity_hints pour filtrer les faux positifs
+                try:
+                    from knowbase.ingestion.osmose_enrichment import generate_document_summary
+                    from knowbase.common.llm_router import get_llm_router
+
+                    llm_router = get_llm_router()
+                    _, _, document_context_constraints = await generate_document_summary(
+                        document_id=document_id,
+                        full_text=full_text,
+                        llm_router=llm_router,
+                    )
+
+                    logger.info(
+                        f"[ExtractionPipelineV2] DocumentContext generated: "
+                        f"numbered_sections={document_context_constraints.structure_hint.has_numbered_sections}, "
+                        f"entities={len(document_context_constraints.entity_hints)}"
+                    )
+                except Exception as ctx_err:
+                    logger.warning(
+                        f"[ExtractionPipelineV2] DocumentContext generation failed: {ctx_err}, "
+                        f"continuing without context filtering"
+                    )
+                    document_context_constraints = None
+
+                # === ETAPE 6b: Extraire DocContextFrame avec filtrage ===
                 doc_context = await self._doc_context_extractor.extract(
                     document_id=document_id,
                     filename=Path(file_path).name,
                     pages_text=pages_text,
+                    document_context=document_context_constraints,  # ADR: passer les contraintes
                 )
+
+                # Stocker le DocumentContext dans le DocContextFrame pour usage ultérieur
+                if document_context_constraints is not None:
+                    doc_context.document_context = document_context_constraints
 
                 metrics.doc_context_time_ms = (time.time() - doc_context_start) * 1000
 
@@ -542,6 +656,94 @@ class ExtractionPipelineV2:
                 logger.warning(
                     f"[ExtractionPipelineV2] DocContext extraction failed: {e}, "
                     f"continuing without context"
+                )
+
+        # === ETAPE 7: Structural Graph (Option C) ===
+        structural_graph_result: Optional[StructuralGraphBuildResult] = None
+
+        if self._structural_graph_builder and docling_document:
+            structural_graph_start = time.time()
+            try:
+                structural_graph_result = self._structural_graph_builder.build_from_docling(
+                    docling_document=docling_document,
+                    tenant_id=effective_tenant,
+                    doc_id=document_id,
+                    source_uri=file_path,
+                    pipeline_version="v2",
+                )
+
+                metrics.structural_graph_time_ms = (time.time() - structural_graph_start) * 1000
+                metrics.structural_graph_items = structural_graph_result.item_count
+                metrics.structural_graph_chunks = structural_graph_result.chunk_count
+
+                logger.info(
+                    f"[ExtractionPipelineV2] StructuralGraph built: "
+                    f"{structural_graph_result.item_count} items, "
+                    f"{structural_graph_result.section_count} sections, "
+                    f"{structural_graph_result.chunk_count} chunks "
+                    f"({structural_graph_result.narrative_chunk_count} narrative), "
+                    f"time={metrics.structural_graph_time_ms:.0f}ms"
+                )
+
+                # Persister dans Neo4j si activé
+                if self.config.structural_graph_persist_neo4j:
+                    try:
+                        persist_start = time.time()
+                        self._structural_graph_builder.persist_to_neo4j_sync(structural_graph_result)
+                        persist_time = (time.time() - persist_start) * 1000
+                        metrics.structural_graph_time_ms += persist_time
+                        logger.info(
+                            f"[ExtractionPipelineV2] StructuralGraph persisted to Neo4j "
+                            f"in {persist_time:.0f}ms"
+                        )
+                    except Exception as persist_error:
+                        logger.warning(
+                            f"[ExtractionPipelineV2] StructuralGraph Neo4j persistence failed: "
+                            f"{persist_error}, continuing without persistence"
+                        )
+
+            except Exception as e:
+                logger.warning(
+                    f"[ExtractionPipelineV2] StructuralGraph build failed: {e}, "
+                    f"continuing without structural graph"
+                )
+
+        # === ETAPE 7.5: Pass 0.5 - Linguistic Coreference Resolution ===
+        coref_result: Optional[Pass05Result] = None
+
+        if self._coref_pipeline and structural_graph_result:
+            coref_start = time.time()
+            try:
+                # Pass 0.5 nécessite le doc_version_id du graphe structurel
+                coref_result = self._coref_pipeline.process_document(
+                    doc_id=document_id,
+                    doc_version_id=structural_graph_result.doc_version.doc_version_id,
+                )
+
+                metrics.linguistic_coref_time_ms = (time.time() - coref_start) * 1000
+                metrics.linguistic_coref_mentions = coref_result.mention_spans_created
+                metrics.linguistic_coref_chains = coref_result.chains_created
+                metrics.linguistic_coref_resolution_rate = coref_result.resolution_rate
+
+                if coref_result.skipped:
+                    logger.info(
+                        f"[ExtractionPipelineV2] Pass0.5 skipped (already processed): "
+                        f"{document_id}"
+                    )
+                else:
+                    logger.info(
+                        f"[ExtractionPipelineV2] Pass0.5 completed: "
+                        f"{coref_result.mention_spans_created} mentions, "
+                        f"{coref_result.chains_created} chains, "
+                        f"resolution={coref_result.resolution_rate:.1%}, "
+                        f"engine={coref_result.engine_used}, "
+                        f"time={metrics.linguistic_coref_time_ms:.0f}ms"
+                    )
+
+            except Exception as coref_error:
+                logger.warning(
+                    f"[ExtractionPipelineV2] Pass0.5 failed: {coref_error}, "
+                    f"continuing without coreference resolution"
                 )
 
         # === Construction du resultat ===
@@ -557,6 +759,54 @@ class ExtractionPipelineV2:
             if merged_pages[idx].vision_enrichment is not None
         ]
 
+        # Construire les stats avec éventuellement le summary du structural graph
+        result_stats = {
+            "tenant_id": effective_tenant,
+            "config": self.config.to_dict(),
+            "metrics": metrics.to_dict(),
+        }
+
+        if structural_graph_result:
+            # Sérialiser les chunks pour usage downstream (osmose_agentique)
+            serialized_chunks = [
+                {
+                    "chunk_id": c.chunk_id,
+                    "text": c.text,
+                    "kind": c.kind.value,
+                    "page_no": c.page_no,
+                    "section_id": c.section_id,
+                    "item_ids": c.item_ids,
+                    "is_relation_bearing": c.is_relation_bearing,
+                    "doc_version_id": c.doc_version_id,
+                }
+                for c in structural_graph_result.chunks
+            ]
+
+            result_stats["structural_graph"] = {
+                "item_count": structural_graph_result.item_count,
+                "section_count": structural_graph_result.section_count,
+                "chunk_count": structural_graph_result.chunk_count,
+                "narrative_chunk_count": structural_graph_result.narrative_chunk_count,
+                "doc_version_id": structural_graph_result.doc_version.doc_version_id,
+                "structure_analysis": structural_graph_result.structure_analysis,
+                "chunk_analysis": structural_graph_result.chunk_analysis,
+                # Chunks sérialisés pour usage par osmose_agentique
+                "chunks": serialized_chunks,
+            }
+
+        # Ajouter les résultats Pass 0.5 (Linguistic Coreference) si disponibles
+        if coref_result and coref_result.success:
+            result_stats["linguistic_coref"] = {
+                "mention_spans_created": coref_result.mention_spans_created,
+                "chains_created": coref_result.chains_created,
+                "links_created": coref_result.links_created,
+                "resolution_rate": coref_result.resolution_rate,
+                "abstention_rate": coref_result.abstention_rate,
+                "engine_used": coref_result.engine_used,
+                "processing_time_ms": coref_result.processing_time_ms,
+                "skipped": coref_result.skipped,
+            }
+
         result = ExtractionResult(
             document_id=document_id,
             source_path=file_path,
@@ -569,11 +819,7 @@ class ExtractionPipelineV2:
             gating_decisions=gating_decisions,
             vision_results=vision_results,
             doc_context=doc_context,  # ADR_ASSERTION_AWARE_KG
-            stats={
-                "tenant_id": effective_tenant,
-                "config": self.config.to_dict(),
-                "metrics": metrics.to_dict(),
-            },
+            stats=result_stats,
         )
 
         metrics.total_time_ms = (time.time() - total_start) * 1000

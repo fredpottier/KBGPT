@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         ContextualCues,
         StructuralConfidence,
     )
+    from knowbase.extraction_v2.context.models import DocumentContext
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,19 @@ REFERENCE_ID_PATTERNS = [
 PAGE_REFERENCE_PATTERNS = [
     r'(?:[Pp]age|[Pp]\.|[Ss]lide|[Ff]ig(?:ure)?\.?)\s*(\d+)',  # Page 23
     r'(\d+)\s+of\s+\d+',  # 23 of 100
+]
+
+
+# =============================================================================
+# STRUCTURE NUMBERING DETECTION - Patterns (Plan v2.1 - ChatGPT validated)
+# Detection agnostique de numerotation structurelle sans listes de mots
+# =============================================================================
+
+# Patterns indiquant une position de titre/section (debut de ligne + ponctuation)
+# Utilise pour Signal S2 du StructureNumberingGate
+SECTION_POSITION_PATTERNS = [
+    r'^([A-Z][a-zA-Z]*)\s+(\d{1,2})\s*[:\.\-–—]',  # "PUBLIC 3:" ou "PUBLIC 3."
+    r'^([A-Z][a-zA-Z]*)\s+(\d{1,2})\s*$',          # "PUBLIC 3" seul sur ligne
 ]
 
 
@@ -392,6 +406,416 @@ def get_candidate_gate() -> CandidateGate:
 
 
 # =============================================================================
+# STRUCTURE NUMBERING GATE - Plan v2.1 (ChatGPT validated 2026-01-07)
+# Detection agnostique basee sur signaux S1/S2/S3
+# =============================================================================
+
+@dataclass
+class StructureGateConfig:
+    """
+    Configuration du StructureNumberingGate.
+
+    Parametres valides par ChatGPT - Plan v2.1.
+    """
+    # Seuil de sequence pour HARD_REJECT (default: 3 consecutifs)
+    sequence_threshold: int = 3
+
+    # Action pour SOFT_FLAG: "llm" (passe au LLM) ou "weak_marker" (conserve comme weak)
+    soft_flag_action: str = "llm"
+
+    # Max weak markers en fallback si document devient silencieux
+    fallback_max_markers: int = 3
+
+    # Activer/desactiver le gate
+    enabled: bool = True
+
+    # Logging des changements de config
+    log_config_changes: bool = True
+
+
+@dataclass
+class SequenceDetectionResult:
+    """
+    Resultat de detection de sequence pour un prefixe.
+
+    Ex: Si on trouve "PUBLIC 1", "PUBLIC 2", "PUBLIC 3" dans le document,
+    c'est une sequence de numerotation structurelle (3 consecutifs).
+    """
+    prefix: str
+    numbers_found: List[int]
+    max_consecutive: int  # Longueur de la plus longue sequence consecutive
+    is_sequence: bool     # True si max_consecutive >= 2
+    evidence: str = ""
+
+
+class StructureNumberingGate:
+    """
+    Detection agnostique de numerotation structurelle.
+
+    Implemente les pistes A + B + C validees par ChatGPT (Plan v2.1):
+    - S1: Sequentialite (X 1/2/3... meme prefixe)
+    - S2: Position structurelle (debut ligne + ponctuation)
+    - S3: Prefixe quasi-toujours numerote
+
+    Decisions:
+    - HARD_REJECT: Seq >= 3 ET (S2 ou S3)
+    - SOFT_FLAG: Seq = 2 OU signal isole
+    - LOW: Aucun signal
+
+    100% agnostique - fonctionne pour PUBLIC, Chapter, Module, Resources...
+    sans les connaitre a l'avance.
+    """
+
+    def __init__(self, config: Optional[StructureGateConfig] = None):
+        """Initialise le gate avec configuration."""
+        self.config = config or StructureGateConfig()
+        self._section_patterns = [
+            re.compile(p, re.MULTILINE) for p in SECTION_POSITION_PATTERNS
+        ]
+
+    def detect_sequences(
+        self,
+        candidates: List["MarkerCandidate"],
+    ) -> Dict[str, SequenceDetectionResult]:
+        """
+        Detecte les sequences de numerotation pour chaque prefixe (Signal S1).
+
+        Contrainte: Meme prefixe X avec numeros consecutifs uniquement.
+        Ex: "PUBLIC 1", "PUBLIC 2", "PUBLIC 3" -> sequence de 3
+
+        Args:
+            candidates: Liste de candidats entity_numeral
+
+        Returns:
+            Dict[prefix] -> SequenceDetectionResult
+        """
+        # Grouper les numeros par prefixe (entity_numeral seulement)
+        prefix_numbers: Dict[str, List[int]] = {}
+
+        for c in candidates:
+            if c.lexical_shape != "entity_numeral":
+                continue
+
+            # Extraire prefixe et numero du format "PREFIX NUM"
+            parts = c.value.rsplit(" ", 1)
+            if len(parts) != 2:
+                continue
+
+            prefix, num_str = parts
+            try:
+                num = int(num_str)
+                # Ne traiter que les numeros 1-2 digits (1-99)
+                if 1 <= num <= 99:
+                    if prefix not in prefix_numbers:
+                        prefix_numbers[prefix] = []
+                    prefix_numbers[prefix].append(num)
+            except ValueError:
+                continue
+
+        # Calculer sequences pour chaque prefixe
+        results = {}
+        for prefix, numbers in prefix_numbers.items():
+            numbers_sorted = sorted(set(numbers))
+
+            # Calculer la plus longue sequence consecutive
+            max_consec = 1
+            current_consec = 1
+
+            for i in range(1, len(numbers_sorted)):
+                if numbers_sorted[i] == numbers_sorted[i - 1] + 1:
+                    current_consec += 1
+                    max_consec = max(max_consec, current_consec)
+                else:
+                    current_consec = 1
+
+            results[prefix] = SequenceDetectionResult(
+                prefix=prefix,
+                numbers_found=numbers_sorted,
+                max_consecutive=max_consec if len(numbers_sorted) > 1 else 1,
+                is_sequence=max_consec >= 2,
+                evidence=f"Found {prefix} with numbers: {numbers_sorted}",
+            )
+
+        return results
+
+    def check_position_indicator(
+        self,
+        candidate_value: str,
+        full_text: str,
+    ) -> bool:
+        """
+        Verifie si le candidat apparait en position de titre/section (Signal S2).
+
+        Args:
+            candidate_value: Valeur du candidat (ex: "PUBLIC 3")
+            full_text: Texte complet du document
+
+        Returns:
+            True si le candidat apparait en position structurelle
+        """
+        lines = full_text.split('\n')
+
+        for line in lines:
+            line_stripped = line.strip()
+            if candidate_value not in line_stripped:
+                continue
+
+            # Seul sur la ligne = indicateur fort
+            if line_stripped == candidate_value:
+                return True
+
+            # Quasi-seul (+ quelques caracteres)
+            if line_stripped.startswith(candidate_value) and len(line_stripped) < len(candidate_value) + 5:
+                return True
+
+            # Debut de ligne + ponctuation
+            for pattern in self._section_patterns:
+                if pattern.match(line_stripped):
+                    return True
+
+        return False
+
+    def check_prefix_mostly_numbered(
+        self,
+        prefix: str,
+        full_text: str,
+    ) -> bool:
+        """
+        Verifie si le prefixe apparait quasi-toujours avec des numeros (Signal S3).
+
+        Definition robuste (ChatGPT):
+        - count(X + number) >= 3 ET
+        - count(X standalone) <= 1 ET
+        - distinct_numbers >= 2
+
+        Args:
+            prefix: Le prefixe a verifier (ex: "PUBLIC")
+            full_text: Texte complet du document
+
+        Returns:
+            True si le prefixe est principalement utilise avec des numeros
+        """
+        # Pattern pour "PREFIX N" (1-2 digits)
+        pattern_numbered = re.compile(
+            rf'\b{re.escape(prefix)}\s+\d{{1,2}}\b',
+            re.IGNORECASE
+        )
+        matches_numbered = pattern_numbered.findall(full_text)
+        count_numbered = len(matches_numbered)
+
+        # Pattern pour PREFIX standalone (pas suivi d'un numero)
+        pattern_standalone = re.compile(
+            rf'\b{re.escape(prefix)}\b(?!\s+\d)',
+            re.IGNORECASE
+        )
+        count_standalone = len(pattern_standalone.findall(full_text))
+
+        # Distinct numbers
+        distinct_numbers = len(set(
+            int(m.split()[-1]) for m in matches_numbered
+            if m.split()[-1].isdigit()
+        )) if matches_numbered else 0
+
+        return (
+            count_numbered >= 3 and
+            count_standalone <= 1 and
+            distinct_numbers >= 2
+        )
+
+    def compute_structure_risk(
+        self,
+        candidate: "MarkerCandidate",
+        sequences: Dict[str, SequenceDetectionResult],
+        full_text: str,
+    ) -> Tuple[str, str]:
+        """
+        Calcule le niveau de risque structurel pour un candidat.
+
+        Matrice de decision (Plan v2.1):
+        - HARD_REJECT: Seq >= 3 ET (S2 ou S3)
+        - SOFT_FLAG: Seq = 2 OU signal isole avec S2+S3
+        - LOW: Aucun signal significatif
+
+        Args:
+            candidate: Le candidat a evaluer
+            sequences: Resultats de detection de sequences
+            full_text: Texte complet du document
+
+        Returns:
+            Tuple (decision, reason)
+            decision: "HARD_REJECT", "SOFT_FLAG", ou "LOW"
+            reason: Explication pour debug/LLM
+        """
+        if candidate.lexical_shape != "entity_numeral":
+            return ("LOW", "Not entity_numeral pattern")
+
+        # Extraire prefixe
+        parts = candidate.value.rsplit(" ", 1)
+        if len(parts) != 2:
+            return ("LOW", "Cannot parse prefix")
+
+        prefix, num_str = parts
+
+        # Verifier si c'est un numero 1-2 digits
+        try:
+            num = int(num_str)
+            if num >= 100:  # 3+ digits = probablement annee/version, pas section
+                return ("LOW", "Number >= 100, likely version not section")
+        except ValueError:
+            return ("LOW", "Not a valid number")
+
+        # === Evaluer les 3 signaux ===
+        # S1: Sequentialite
+        seq_result = sequences.get(prefix)
+        seq_count = seq_result.max_consecutive if seq_result else 0
+
+        # S2: Position structurelle
+        s2_position = self.check_position_indicator(candidate.value, full_text)
+
+        # S3: Prefixe quasi-toujours numerote
+        s3_prefix = self.check_prefix_mostly_numbered(prefix, full_text)
+
+        # === Appliquer la matrice de decision ===
+
+        # HARD_REJECT: Seq >= threshold ET (S2 ou S3)
+        if seq_count >= self.config.sequence_threshold:
+            if s2_position or s3_prefix:
+                reason = (
+                    f"HARD: sequence={seq_count} (>={self.config.sequence_threshold}), "
+                    f"S2_position={s2_position}, S3_prefix={s3_prefix}"
+                )
+                return ("HARD_REJECT", reason)
+
+        # SOFT_FLAG: Seq = 2 OU (signal isole avec contexte)
+        if seq_count == 2:
+            reason = f"SOFT: sequence=2, S2_position={s2_position}, S3_prefix={s3_prefix}"
+            return ("SOFT_FLAG", reason)
+
+        if seq_count == 1 and s2_position and s3_prefix:
+            reason = f"SOFT: sequence=1 but S2+S3 both true"
+            return ("SOFT_FLAG", reason)
+
+        # LOW: Aucun signal fort
+        return ("LOW", f"No strong signals: seq={seq_count}, S2={s2_position}, S3={s3_prefix}")
+
+    def filter_candidates(
+        self,
+        candidates: List["MarkerCandidate"],
+        full_text: str,
+        doc_id: str = "",
+    ) -> Tuple[List["MarkerCandidate"], List["MarkerCandidate"], List["MarkerCandidate"]]:
+        """
+        Filtre les candidats selon les signaux structurels.
+
+        Args:
+            candidates: Liste de candidats a filtrer
+            full_text: Texte complet du document
+            doc_id: ID du document (pour logging)
+
+        Returns:
+            Tuple (survivors, soft_flagged, hard_rejected)
+        """
+        if not self.config.enabled:
+            return (candidates, [], [])
+
+        # Detecter les sequences
+        sequences = self.detect_sequences(candidates)
+
+        survivors = []
+        soft_flagged = []
+        hard_rejected = []
+
+        for candidate in candidates:
+            decision, reason = self.compute_structure_risk(candidate, sequences, full_text)
+
+            # Stocker le resultat dans le candidat
+            candidate.structure_risk = decision
+            candidate.structure_risk_reason = reason
+
+            if decision == "HARD_REJECT":
+                hard_rejected.append(candidate)
+                logger.debug(
+                    f"[StructureNumberingGate] HARD_REJECT '{candidate.value}': {reason}"
+                )
+            elif decision == "SOFT_FLAG":
+                soft_flagged.append(candidate)
+                logger.debug(
+                    f"[StructureNumberingGate] SOFT_FLAG '{candidate.value}': {reason}"
+                )
+            else:
+                survivors.append(candidate)
+
+        # Log summary
+        if hard_rejected or soft_flagged:
+            logger.info(
+                f"[StructureNumberingGate] Doc '{doc_id}': "
+                f"{len(survivors)} pass, {len(soft_flagged)} soft, {len(hard_rejected)} hard_reject"
+            )
+
+        return (survivors, soft_flagged, hard_rejected)
+
+    def apply_fallback_if_silent(
+        self,
+        final_markers: List["MarkerCandidate"],
+        rejected: List["MarkerCandidate"],
+        doc_id: str,
+    ) -> List["MarkerCandidate"]:
+        """
+        Si tous les markers sont rejetes, conserver K weak markers en fallback.
+
+        Evite les documents "silencieux" par erreur.
+
+        Args:
+            final_markers: Markers survivants
+            rejected: Markers rejetes (HARD + SOFT non recuperes)
+            doc_id: ID du document
+
+        Returns:
+            Liste finale avec eventuels fallback markers
+        """
+        if len(final_markers) > 0 or len(rejected) == 0:
+            return final_markers
+
+        # Document silencieux - appliquer fallback
+        logger.warning(
+            f"[StructureNumberingGate] Doc '{doc_id}' silencieux! "
+            f"Rejected: {[c.value for c in rejected]}"
+        )
+
+        # Selectionner top K par frequence + dispersion
+        fallback = sorted(
+            rejected,
+            key=lambda c: (c.occurrences, c.pages_covered),
+            reverse=True
+        )[:self.config.fallback_max_markers]
+
+        # Taguer comme fallback
+        for m in fallback:
+            m.structure_fallback = True
+            m.structure_risk = "FALLBACK"
+
+        logger.info(
+            f"[StructureNumberingGate] Fallback markers: {[m.value for m in fallback]}"
+        )
+
+        return fallback
+
+
+# Singleton
+_structure_numbering_gate: Optional[StructureNumberingGate] = None
+
+
+def get_structure_numbering_gate(
+    config: Optional[StructureGateConfig] = None
+) -> StructureNumberingGate:
+    """Retourne l'instance singleton du StructureNumberingGate."""
+    global _structure_numbering_gate
+    if _structure_numbering_gate is None or config is not None:
+        _structure_numbering_gate = StructureNumberingGate(config)
+    return _structure_numbering_gate
+
+
+# =============================================================================
 # DATACLASSES
 # =============================================================================
 
@@ -412,6 +836,239 @@ class EvidenceSample:
             "zone": self.zone,
             "text": self.text[:120] if self.text else "",
         }
+
+
+# =============================================================================
+# MARKER DECISION SYSTEM (ADR Document Context Markers - Section 3.4)
+# Structures pour decide_marker() et classification des markers
+# =============================================================================
+
+# Types de decision
+MarkerDecisionType = str  # "ACCEPT_STRONG", "ACCEPT_WEAK", "UNRESOLVED", "REJECT"
+
+# Shapes lexicales reconnues
+MarkerShape = str  # "WORD_NUMBER", "YEAR", "QUARTER", "VERSIONLIKE", "OTHER"
+
+
+@dataclass
+class PositionHint:
+    """
+    Indices positionnels pour un marker.
+
+    Utilise pour detecter si le marker apparait en position de titre/section,
+    ce qui augmente la probabilite qu'il s'agisse d'un artefact structurel.
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.2
+    """
+    # True si le marker apparait en debut de ligne seul ou quasi-seul
+    is_heading_like: bool = False
+
+    # True si le marker est en debut de ligne
+    line_start: bool = False
+
+    # True si le marker est suivi de ":" ou "."
+    has_colon_after: bool = False
+
+    # True si le marker apparait dans un contexte de table des matieres
+    in_toc_like: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "is_heading_like": self.is_heading_like,
+            "line_start": self.line_start,
+            "has_colon_after": self.has_colon_after,
+            "in_toc_like": self.in_toc_like,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PositionHint":
+        return cls(
+            is_heading_like=data.get("is_heading_like", False),
+            line_start=data.get("line_start", False),
+            has_colon_after=data.get("has_colon_after", False),
+            in_toc_like=data.get("in_toc_like", False),
+        )
+
+
+@dataclass
+class EvidenceRef:
+    """
+    Reference a l'evidence locale d'un marker.
+
+    Invariant D (ADR): Un marker accepte doit avoir une EvidenceRef locale.
+    Le summary LLM n'est pas une preuve.
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.2
+    """
+    document_id: str
+    context_id: Optional[str] = None  # chunk_id ou segment_id
+    section_path: Optional[str] = None  # ex: "1.2.3 Configuration"
+    excerpt: str = ""  # Texte autour du marker (max 200 chars)
+    char_start: int = 0
+    char_end: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "document_id": self.document_id,
+            "context_id": self.context_id,
+            "section_path": self.section_path,
+            "excerpt": self.excerpt[:200] if self.excerpt else "",
+            "char_start": self.char_start,
+            "char_end": self.char_end,
+        }
+
+
+@dataclass
+class MarkerMention:
+    """
+    Representation enrichie d'un marker extrait syntaxiquement.
+
+    Contient toutes les informations necessaires pour decide_marker():
+    - Le texte brut et ses composants parses (prefixe, numero)
+    - La forme lexicale (shape)
+    - L'evidence locale (excerpt + position)
+    - Les indices positionnels (heading-like, etc.)
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.2
+    """
+    # Texte brut du marker (ex: "PUBLIC 3", "iPhone 15", "S/4HANA 2023")
+    raw_text: str
+
+    # Prefixe parse (ex: "PUBLIC", "iPhone", "S/4HANA") - None si non parsable
+    prefix: Optional[str] = None
+
+    # Numero parse (ex: "3", "15", "2023") - None si non parsable
+    number: Optional[str] = None
+
+    # Longueur du numero (pour distinction 1-2 digits vs 3+ digits)
+    number_len: int = 0
+
+    # Forme lexicale: WORD_NUMBER, YEAR, QUARTER, VERSIONLIKE, OTHER
+    shape: str = "OTHER"
+
+    # Reference a l'evidence locale (obligatoire pour ACCEPT)
+    evidence: Optional[EvidenceRef] = None
+
+    # Indices positionnels
+    position_hint: PositionHint = field(default_factory=PositionHint)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "raw_text": self.raw_text,
+            "prefix": self.prefix,
+            "number": self.number,
+            "number_len": self.number_len,
+            "shape": self.shape,
+            "evidence": self.evidence.to_dict() if self.evidence else None,
+            "position_hint": self.position_hint.to_dict(),
+        }
+
+    @classmethod
+    def from_marker_candidate(
+        cls,
+        candidate: "MarkerCandidate",
+        document_id: str,
+    ) -> "MarkerMention":
+        """
+        Convertit un MarkerCandidate en MarkerMention.
+
+        Args:
+            candidate: Le MarkerCandidate source
+            document_id: ID du document
+
+        Returns:
+            MarkerMention enrichi
+        """
+        raw_text = candidate.value
+        prefix = None
+        number = None
+        number_len = 0
+        shape = "OTHER"
+
+        # Parser le format "PREFIX NUMBER"
+        if candidate.lexical_shape == "entity_numeral":
+            parts = raw_text.rsplit(" ", 1)
+            if len(parts) == 2:
+                prefix = parts[0]
+                number = parts[1]
+                number_len = len(number)
+
+                # Determiner la shape
+                if number.isdigit():
+                    if len(number) == 4 and 1900 <= int(number) <= 2100:
+                        shape = "YEAR"
+                    else:
+                        shape = "WORD_NUMBER"
+
+        elif candidate.lexical_shape == "semver":
+            shape = "VERSIONLIKE"
+
+        # Construire EvidenceRef
+        evidence = EvidenceRef(
+            document_id=document_id,
+            excerpt=candidate.evidence[:200] if candidate.evidence else "",
+        )
+
+        # Construire PositionHint depuis les infos du candidat
+        position_hint = PositionHint(
+            is_heading_like=(
+                candidate.structure_risk in ("HARD_REJECT", "SOFT_FLAG")
+                and "heading" in candidate.structure_risk_reason.lower()
+            ),
+            line_start=candidate.position == 0,  # Cover = debut
+        )
+
+        return cls(
+            raw_text=raw_text,
+            prefix=prefix,
+            number=number,
+            number_len=number_len,
+            shape=shape,
+            evidence=evidence,
+            position_hint=position_hint,
+        )
+
+
+@dataclass
+class MarkerDecision:
+    """
+    Decision finale sur un marker.
+
+    Invariants (ADR):
+    - Invariant A: DocumentContext ne cree jamais de MarkerMention
+    - Invariant B: Toute decision ACCEPT_* doit avoir des reasons[]
+    - Invariant C: Safe-by-default - en cas de doute, UNRESOLVED
+    - Invariant D: Un marker accepte doit avoir une EvidenceRef locale
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.2
+    """
+    # Decision: ACCEPT_STRONG, ACCEPT_WEAK, UNRESOLVED, REJECT
+    decision: str
+
+    # Score [0.0, 1.0] - utilise pour les seuils de finalisation
+    score: float
+
+    # Raisons de la decision (pour debug/audit)
+    reasons: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "decision": self.decision,
+            "score": round(self.score, 3),
+            "reasons": self.reasons,
+        }
+
+    def is_accepted(self) -> bool:
+        """Retourne True si le marker est accepte (strong ou weak)."""
+        return self.decision in ("ACCEPT_STRONG", "ACCEPT_WEAK")
+
+    def is_rejected(self) -> bool:
+        """Retourne True si le marker est rejete."""
+        return self.decision == "REJECT"
+
+    def is_unresolved(self) -> bool:
+        """Retourne True si le marker est non resolu."""
+        return self.decision == "UNRESOLVED"
 
 
 @dataclass
@@ -447,6 +1104,12 @@ class MarkerCandidate:
     evidence: str = ""  # Legacy - contexte brut
     lexical_shape: str = ""  # numeric_4, alphanumeric, semantic_token (ex pattern_type)
     occurrences: int = 1
+
+    # === Structure Numbering Gate (Plan v2.1) ===
+    is_weak_candidate: bool = False      # True si entity_numeral \d{1,2}
+    structure_risk: str = "LOW"          # "HARD_REJECT", "SOFT_FLAG", "LOW", "FALLBACK"
+    structure_risk_reason: str = ""      # Raison du risque (pour debug/LLM)
+    structure_fallback: bool = False     # True si conserve en fallback doc silencieux
 
     # === Distribution (PR6) ===
     pages_covered: int = 0
@@ -491,7 +1154,7 @@ class MarkerCandidate:
         }
 
     def to_dict_enriched(self) -> Dict[str, Any]:
-        """Serialise en dictionnaire avec features structurelles (PR6)."""
+        """Serialise en dictionnaire avec features structurelles (PR6) et risque structurel (Plan v2.1)."""
         result = {
             "value": self.value,
             "lexical_shape": self.lexical_shape,
@@ -509,6 +1172,16 @@ class MarkerCandidate:
             result["contextual_cues"] = self._contextual_cues.to_dict()
         if self._structural_confidence:
             result["structural_confidence"] = self._structural_confidence
+
+        # Plan v2.1: Inclure risque structurel pour arbitrage LLM
+        if self.structure_risk and self.structure_risk != "LOW":
+            result["structure_risk"] = self.structure_risk
+            result["structure_risk_reason"] = self.structure_risk_reason
+        if self.is_weak_candidate:
+            result["is_weak_candidate"] = True
+        if self.structure_fallback:
+            result["structure_fallback"] = True
+
         return result
 
 
@@ -522,11 +1195,17 @@ class MiningResult:
         scope_language_hits: Nombre de hits de scope language
         conflict_hits: Nombre de hits de patterns de conflit
         source_coverage: Sources couvertes (filename, cover, etc.)
+        _rejected_candidates: Candidats rejetés par CandidateGate (debug)
+        _soft_flag_candidates: Candidats SOFT_FLAG par StructureNumberingGate (pour LLM)
     """
     candidates: List[MarkerCandidate] = field(default_factory=list)
     scope_language_hits: int = 0
     conflict_hits: int = 0
     source_coverage: Set[str] = field(default_factory=set)
+
+    # === Debug/Analysis fields (Plan v2.1) ===
+    _rejected_candidates: List[MarkerCandidate] = field(default_factory=list)
+    _soft_flag_candidates: List[MarkerCandidate] = field(default_factory=list)
 
     def get_unique_values(self) -> Set[str]:
         """Retourne les valeurs uniques des candidats."""
@@ -572,6 +1251,383 @@ class MiningResult:
         )
 
 
+# =============================================================================
+# DOCUMENT CONTEXT DECIDER (ADR Document Context Markers - Section 3.4)
+# Algorithme de decision pour markers avec contraintes document-level
+# =============================================================================
+
+def is_small_number(m: MarkerMention) -> bool:
+    """
+    Verifie si le marker a un numero de 1-2 chiffres.
+
+    Les petits numeros (1-99) sont plus susceptibles d'etre des numeros
+    de section que des versions de produit.
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.3
+    """
+    return m.number is not None and m.number_len <= 2
+
+
+def is_year_like(m: MarkerMention) -> bool:
+    """
+    Verifie si le marker ressemble a une annee (4 chiffres entre 1900-2100).
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.3
+    """
+    if m.shape != "YEAR":
+        return False
+    if m.number is None:
+        return False
+    try:
+        year = int(m.number)
+        return 1900 <= year <= 2100
+    except ValueError:
+        return False
+
+
+def is_heading_artifact(m: MarkerMention) -> bool:
+    """
+    Verifie si le marker est un artefact structurel (titre/section/TOC).
+
+    Detection agnostique basee sur:
+    - Position en debut de ligne
+    - Suivi de ponctuation (:, .)
+    - Dans un contexte TOC
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.3
+    """
+    return (
+        m.position_hint.is_heading_like
+        or m.position_hint.in_toc_like
+        or (m.position_hint.line_start and m.position_hint.has_colon_after)
+    )
+
+
+def has_entity_anchor(m: MarkerMention, ctx: "DocumentContext") -> bool:
+    """
+    Verifie si le prefixe du marker correspond a une entite dominante.
+
+    Args:
+        m: MarkerMention avec prefixe extrait
+        ctx: DocumentContext avec entity_hints
+
+    Returns:
+        True si le prefixe correspond a une entite avec confidence >= 0.75
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.3
+    """
+    if not m.prefix:
+        return False
+    return ctx.has_entity_anchor(m.prefix)
+
+
+def structure_risk_high(m: MarkerMention, ctx: "DocumentContext") -> bool:
+    """
+    Verifie si le marker a un risque structurel eleve.
+
+    Risque eleve quand:
+    - Le document a des sections numerotees (confidence >= 0.7)
+    - Le marker a la forme WORD+NUMBER
+    - Le numero est petit (1-2 chiffres)
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.3
+    """
+    if ctx.structure_hint.confidence < 0.7:
+        return False
+    if not ctx.structure_hint.has_numbered_sections:
+        return False
+    if m.shape != "WORD_NUMBER":
+        return False
+    if not is_small_number(m):
+        return False
+    return True
+
+
+def matches_year(temporal_hint, number_str: str) -> bool:
+    """
+    Verifie si un numero correspond a l'annee du temporal_hint.
+
+    Args:
+        temporal_hint: TemporalHint avec explicit ou inferred
+        number_str: Numero a verifier (ex: "2024")
+
+    Returns:
+        True si le numero correspond a l'annee
+    """
+    if not number_str or not number_str.isdigit():
+        return False
+
+    year_str = number_str
+    best_date = temporal_hint.explicit or temporal_hint.inferred
+    if not best_date:
+        return False
+
+    # Extraire l'annee de la date (ex: "2024-Q1" -> "2024")
+    if len(best_date) >= 4:
+        return year_str == best_date[:4]
+    return False
+
+
+def finalize_decision(
+    score: float,
+    reasons: List[str],
+    min_decision: str = "UNRESOLVED"
+) -> MarkerDecision:
+    """
+    Finalise la decision avec seuils safe-by-default.
+
+    Seuils (ADR Section 3.4.5):
+    - >= 0.80: ACCEPT_STRONG
+    - >= 0.60: ACCEPT_WEAK
+    - <= 0.20: REJECT
+    - Sinon: UNRESOLVED
+
+    Args:
+        score: Score calcule [0.0, 1.0]
+        reasons: Liste des raisons
+        min_decision: Decision minimum forcee (ex: "ACCEPT_WEAK" pour years)
+
+    Returns:
+        MarkerDecision finale
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.5
+    """
+    score = max(0.0, min(1.0, score))
+
+    # Determiner la decision selon les seuils
+    if score >= 0.80:
+        decision = "ACCEPT_STRONG"
+    elif score >= 0.60:
+        decision = "ACCEPT_WEAK"
+    elif score <= 0.20:
+        decision = "REJECT"
+    else:
+        decision = "UNRESOLVED"
+
+    # Appliquer la decision minimum si necessaire
+    decision_order = ["REJECT", "UNRESOLVED", "ACCEPT_WEAK", "ACCEPT_STRONG"]
+    if min_decision in decision_order:
+        min_idx = decision_order.index(min_decision)
+        current_idx = decision_order.index(decision)
+        if current_idx < min_idx:
+            decision = min_decision
+
+    return MarkerDecision(decision=decision, score=score, reasons=reasons)
+
+
+def decide_marker(m: MarkerMention, ctx: "DocumentContext") -> MarkerDecision:
+    """
+    Algorithme de decision pour un marker avec contraintes document-level.
+
+    Applique la hierarchie:
+    1. MarkerMention (syntaxique) = source de verite
+    2. DocumentContext = contraintes uniquement (jamais createur)
+
+    Etapes (ADR Section 3.4.4):
+    0. Hard rejects universels (dates, noise, etc.)
+    1. Strong accept candidates (years avec corroboration)
+    2. Structural risk gating (fix pour "PUBLIC 3")
+    3. WORD+NUMBER sans risque structurel
+    4. Fallback: shapes inconnues
+
+    Invariants:
+    - A: DocumentContext ne cree jamais de MarkerMention
+    - B: Toute decision ACCEPT_* doit avoir des reasons[]
+    - C: Safe-by-default - en cas de doute, UNRESOLVED
+    - D: Un marker accepte doit avoir une EvidenceRef locale
+
+    Args:
+        m: MarkerMention extrait syntaxiquement
+        ctx: DocumentContext avec contraintes du LLM
+
+    Returns:
+        MarkerDecision avec decision, score et raisons
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.4.4
+    """
+    reasons: List[str] = []
+    score = 0.50  # Baseline neutre
+
+    # ---------------------------------------------------------
+    # (1) Strong accept candidates: YEAR-like
+    # ---------------------------------------------------------
+    if is_year_like(m):
+        score += 0.20
+        reasons.append("YEAR_LIKE")
+
+        # Si le doc a un temporal hint explicite qui correspond, renforcer
+        if ctx.temporal_hint and ctx.temporal_hint.explicit:
+            if m.number and matches_year(ctx.temporal_hint, m.number):
+                score += 0.15
+                reasons.append("MATCHES_TEMPORAL_HINT_EXPLICIT")
+
+        # Les years sont au minimum ACCEPT_WEAK (markers temporels valides)
+        return finalize_decision(score, reasons, min_decision="ACCEPT_WEAK")
+
+    # ---------------------------------------------------------
+    # (2) Structural risk gating (fix pour PUBLIC 3)
+    # ---------------------------------------------------------
+    if structure_risk_high(m, ctx):
+        reasons.append("STRUCTURE_RISK_HIGH")
+
+        # Heading artifacts sont presque certainement pas des versions
+        if is_heading_artifact(m):
+            reasons.append("HEADING_OR_TOC_ARTIFACT")
+            return MarkerDecision(decision="REJECT", score=0.05, reasons=reasons)
+
+        # Pas clairement heading-like, mais risque structurel eleve
+        score -= 0.25
+
+        # Seul un entity anchor fort peut sauver ce marker
+        if has_entity_anchor(m, ctx):
+            score += 0.35
+            reasons.append("ENTITY_ANCHOR_CORROBORATES")
+        else:
+            reasons.append("NO_ENTITY_ANCHOR")
+
+        return finalize_decision(score, reasons)
+
+    # ---------------------------------------------------------
+    # (3) WORD+NUMBER sans risque structurel eleve
+    # ---------------------------------------------------------
+    if m.shape == "WORD_NUMBER" and m.number is not None:
+        reasons.append("WORD_NUMBER")
+
+        # Petits numeros sont inherently ambigus - requierent corroboration
+        if is_small_number(m):
+            reasons.append("SMALL_NUMBER_AMBIGUOUS")
+            score -= 0.15
+
+            if has_entity_anchor(m, ctx):
+                score += 0.30
+                reasons.append("ENTITY_ANCHOR_CORROBORATES")
+            else:
+                reasons.append("NO_ENTITY_ANCHOR")
+
+            return finalize_decision(score, reasons)
+
+        # Grands numeros (>= 3 digits) moins susceptibles d'etre des sections
+        score += 0.05
+        if has_entity_anchor(m, ctx):
+            score += 0.15
+            reasons.append("ENTITY_ANCHOR_CORROBORATES")
+
+        return finalize_decision(score, reasons, min_decision="ACCEPT_WEAK")
+
+    # ---------------------------------------------------------
+    # (4) VERSIONLIKE (semver) - generalement fiable
+    # ---------------------------------------------------------
+    if m.shape == "VERSIONLIKE":
+        reasons.append("VERSIONLIKE")
+        score += 0.30
+
+        if has_entity_anchor(m, ctx):
+            score += 0.10
+            reasons.append("ENTITY_ANCHOR_CORROBORATES")
+
+        return finalize_decision(score, reasons, min_decision="ACCEPT_WEAK")
+
+    # ---------------------------------------------------------
+    # (5) Fallback: shapes inconnues restent unresolved sauf corroboration
+    # ---------------------------------------------------------
+    reasons.append("UNKNOWN_SHAPE")
+    if has_entity_anchor(m, ctx):
+        score += 0.10
+        reasons.append("ENTITY_ANCHOR_LIGHT_BOOST")
+
+    return finalize_decision(score, reasons)
+
+
+class DocumentContextDecider:
+    """
+    Classe utilitaire pour appliquer decide_marker() sur une liste de candidats.
+
+    Usage:
+        >>> from knowbase.extraction_v2.context.models import DocumentContext
+        >>> decider = DocumentContextDecider(document_context)
+        >>> decisions = decider.decide_all(candidates, document_id)
+    """
+
+    def __init__(self, document_context: "DocumentContext"):
+        """
+        Initialise le decider avec un DocumentContext.
+
+        Args:
+            document_context: Contraintes extraites du document summary
+        """
+        self.ctx = document_context
+
+    def decide_all(
+        self,
+        candidates: List[MarkerCandidate],
+        document_id: str,
+    ) -> Dict[str, MarkerDecision]:
+        """
+        Applique decide_marker() sur tous les candidats.
+
+        Args:
+            candidates: Liste de MarkerCandidate
+            document_id: ID du document
+
+        Returns:
+            Dict[marker_value -> MarkerDecision]
+        """
+        decisions: Dict[str, MarkerDecision] = {}
+
+        for candidate in candidates:
+            mention = MarkerMention.from_marker_candidate(candidate, document_id)
+            decision = decide_marker(mention, self.ctx)
+            decisions[candidate.value] = decision
+
+            logger.debug(
+                f"[DocumentContextDecider] '{candidate.value}' -> "
+                f"{decision.decision} (score={decision.score:.2f}, "
+                f"reasons={decision.reasons})"
+            )
+
+        return decisions
+
+    def filter_by_decision(
+        self,
+        candidates: List[MarkerCandidate],
+        document_id: str,
+    ) -> Tuple[List[MarkerCandidate], List[MarkerCandidate], List[MarkerCandidate]]:
+        """
+        Filtre les candidats selon les decisions.
+
+        Args:
+            candidates: Liste de MarkerCandidate
+            document_id: ID du document
+
+        Returns:
+            Tuple (accepted, unresolved, rejected)
+        """
+        decisions = self.decide_all(candidates, document_id)
+
+        accepted = []
+        unresolved = []
+        rejected = []
+
+        for candidate in candidates:
+            decision = decisions.get(candidate.value)
+            if decision:
+                if decision.is_accepted():
+                    accepted.append(candidate)
+                elif decision.is_rejected():
+                    rejected.append(candidate)
+                else:
+                    unresolved.append(candidate)
+            else:
+                unresolved.append(candidate)
+
+        logger.info(
+            f"[DocumentContextDecider] Filtered {len(candidates)} candidates: "
+            f"{len(accepted)} accepted, {len(unresolved)} unresolved, {len(rejected)} rejected"
+        )
+
+        return accepted, unresolved, rejected
+
+
 class CandidateMiner:
     """
     Extracteur deterministe de marqueurs candidats avec architecture AGNOSTIQUE.
@@ -593,6 +1649,7 @@ class CandidateMiner:
         custom_patterns: List[str] = None,
         blacklist_additions: Set[str] = None,
         use_gate: bool = True,
+        structure_gate_config: Optional[StructureGateConfig] = None,
     ):
         """
         Initialise le miner.
@@ -602,6 +1659,7 @@ class CandidateMiner:
             custom_patterns: Patterns additionnels a utiliser
             blacklist_additions: Marqueurs additionnels a ignorer
             use_gate: Utiliser le CandidateGate pour filtrer (default: True)
+            structure_gate_config: Config pour StructureNumberingGate (Plan v2.1)
         """
         self.languages = languages or ["en", "fr", "de"]
         self.custom_patterns = custom_patterns or []
@@ -609,6 +1667,7 @@ class CandidateMiner:
         if blacklist_additions:
             self.blacklist.update(blacklist_additions)
         self.use_gate = use_gate
+        self.structure_gate_config = structure_gate_config
 
         # === PHASE 2: PATTERNS STRUCTURELS AGNOSTIQUES ===
         # Ces patterns detectent des formes universelles, pas des termes metier
@@ -639,6 +1698,12 @@ class CandidateMiner:
 
         # CandidateGate pour filtrage Phase 1
         self._gate = get_candidate_gate() if use_gate else None
+
+        # StructureNumberingGate pour filtrage faux positifs numérotation (Plan v2.1)
+        self._structure_gate = (
+            StructureNumberingGate(structure_gate_config or StructureGateConfig())
+            if use_gate else None
+        )
 
     def mine_document(
         self,
@@ -728,6 +1793,61 @@ class CandidateMiner:
             # Stocker les rejetes pour debug/analyse
             result._rejected_candidates = rejected
 
+        # 9. PHASE 2 (Plan v2.1): StructureNumberingGate - Filtrer faux positifs numérotation
+        full_text = "\n".join(pages_text)  # Texte complet pour analyse structurelle
+        doc_id = Path(filename).stem if filename else "unknown"
+
+        if self._structure_gate and self.use_gate:
+            # Appliquer le gate de numérotation structurelle
+            # IMPORTANT: filter_candidates retourne (survivors, soft_flagged, hard_rejected)
+            gate_survivors, gate_soft, gate_rejected = self._structure_gate.filter_candidates(
+                result.candidates, full_text, doc_id
+            )
+
+            # Log des décisions
+            if gate_rejected:
+                logger.info(
+                    f"[StructureNumberingGate] Doc '{doc_id}' HARD_REJECT: "
+                    f"{[c.value for c in gate_rejected]}"
+                )
+            if gate_soft:
+                logger.info(
+                    f"[StructureNumberingGate] Doc '{doc_id}' SOFT_FLAG: "
+                    f"{[c.value for c in gate_soft]}"
+                )
+
+            # Décider du traitement des SOFT_FLAG selon config
+            config = self.structure_gate_config or StructureGateConfig()
+
+            if config.soft_flag_action == "llm":
+                # Inclure les SOFT_FLAG dans les candidats pour arbitrage LLM
+                # Le LLM verra structure_risk="SOFT_FLAG" et sera extra skeptical
+                result.candidates = gate_survivors + gate_soft
+            elif config.soft_flag_action == "weak_marker":
+                # Conserver les SOFT_FLAG comme weak_markers (pas d'appel LLM)
+                # Ils seront traités comme weak_markers par défaut
+                result.candidates = gate_survivors + gate_soft
+            else:
+                # Default: seulement les survivants
+                result.candidates = gate_survivors
+
+            # Stocker les SOFT_FLAG pour référence/debug
+            result._soft_flag_candidates = gate_soft
+
+            # Appliquer fallback si document silencieux (tous rejets HARD)
+            if len(result.candidates) == 0 and gate_rejected:
+                fallback_markers = self._structure_gate.apply_fallback_if_silent(
+                    final_markers=result.candidates,
+                    rejected=gate_rejected,
+                    doc_id=doc_id,
+                )
+                if fallback_markers:
+                    result.candidates = fallback_markers
+                    logger.warning(
+                        f"[StructureNumberingGate] Doc '{doc_id}' silencieux - "
+                        f"Fallback: {[c.value for c in fallback_markers]}"
+                    )
+
         logger.info(
             f"[CandidateMiner] Final: {len(result.candidates)} candidates "
             f"(scope_lang={result.scope_language_hits}, conflicts={result.conflict_hits})"
@@ -763,12 +1883,21 @@ class CandidateMiner:
                     value = value.strip()
 
                     if self._is_valid_marker(value):
+                        # Plan v2.1: Marquer entity_numeral avec 1-2 chiffres comme weak
+                        is_weak = False
+                        if pattern_type == "entity_numeral":
+                            # Vérifier si le numéro a 1-2 chiffres (pattern \d{1,2})
+                            num_part = numeral if len(match.groups()) >= 2 else value.split()[-1]
+                            if num_part.isdigit() and len(num_part) <= 2:
+                                is_weak = True
+
                         candidates.append(MarkerCandidate(
                             value=value,
                             source="filename",
                             position=0,
                             evidence=name,
                             lexical_shape=pattern_type,
+                            is_weak_candidate=is_weak,
                         ))
 
         return candidates
@@ -810,12 +1939,21 @@ class CandidateMiner:
                         end = min(len(text), match.end() + 50)
                         evidence = text[start:end].strip()
 
+                        # Plan v2.1: Marquer entity_numeral avec 1-2 chiffres comme weak
+                        is_weak = False
+                        if pattern_type == "entity_numeral":
+                            # Vérifier si le numéro a 1-2 chiffres (pattern \d{1,2})
+                            num_part = numeral if len(match.groups()) >= 2 else value.split()[-1]
+                            if num_part.isdigit() and len(num_part) <= 2:
+                                is_weak = True
+
                         candidates.append(MarkerCandidate(
                             value=value,
                             source=source,
                             position=position,
                             evidence=evidence,
                             lexical_shape=pattern_type,
+                            is_weak_candidate=is_weak,
                         ))
 
         return candidates
@@ -1009,6 +2147,25 @@ __all__ = [
     "CandidateGate",
     "GateResult",
     "get_candidate_gate",
+    # Phase 2 (Plan v2.1): StructureNumberingGate
+    "StructureNumberingGate",
+    "StructureGateConfig",
+    "SequenceDetectionResult",
+    "get_structure_numbering_gate",
+    # Document Context Markers (ADR)
+    "PositionHint",
+    "EvidenceRef",
+    "MarkerMention",
+    "MarkerDecision",
+    "DocumentContextDecider",
+    "decide_marker",
+    # Helper functions for decide_marker (exported for testing)
+    "is_small_number",
+    "is_year_like",
+    "is_heading_artifact",
+    "has_entity_anchor",
+    "structure_risk_high",
+    "finalize_decision",
     # Functions
     "enrich_candidates_with_structural_analysis",
 ]

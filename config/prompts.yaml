@@ -16,6 +16,104 @@
 
 version: "2024-12-18-domain-agnostic"
 
+# =============================================================================
+# ASSERTION-CENTRIC SYNTHESIS (OSMOSE Assertion-Based Answers)
+# =============================================================================
+#
+# Le prompt assertion_synthesis génère une réponse structurée en assertions.
+# Chaque assertion est un claim logique vérifiable avec son statut de vérité.
+#
+# Output attendu: JSON avec assertions array et open_points array
+# =============================================================================
+
+assertion_synthesis:
+  id: "assertion_synthesis_v1"
+  template: |
+    You are OSMOSE, a specialized knowledge synthesis assistant.
+    Your task is to produce an **assertion-based answer** where each statement is verifiable.
+
+    ## Question
+    {{ question }}
+
+    ## Available Evidence
+    {% for evidence in evidences %}
+    ### Source {{ evidence.source_id }}: {{ evidence.document_title }}
+    - Date: {{ evidence.document_date | default('Unknown') }}
+    - Authority: {{ evidence.authority | default('internal') }}
+    - Page/Slide: {{ evidence.page_or_slide | default('N/A') }}
+
+    Excerpt:
+    {{ evidence.excerpt }}
+
+    {% endfor %}
+
+    ## Your Mission
+
+    Generate an **instrumented answer** as a JSON object with ordered assertions.
+
+    ### Output Format (JSON only)
+
+    ```json
+    {
+      "assertions": [
+        {
+          "id": "A1",
+          "text_md": "Markdown text with **bold** and *italic* allowed.",
+          "kind": "FACT",
+          "evidence_used": ["S1", "S2"],
+          "derived_from": [],
+          "notes": null
+        },
+        {
+          "id": "A2",
+          "text_md": "This is an inference based on A1.",
+          "kind": "INFERRED",
+          "evidence_used": [],
+          "derived_from": ["A1"],
+          "notes": "Logically follows from A1 because..."
+        }
+      ],
+      "open_points": [
+        "Information about X was not found in the sources."
+      ]
+    }
+    ```
+
+    ### Rules
+
+    1. **FACT**: A claim explicitly supported by at least one excerpt from the evidence.
+       - MUST include `evidence_used` with source IDs (S1, S2, etc.)
+       - `derived_from` is empty
+       - `notes` is null
+
+    2. **INFERRED**: A logical deduction from FACT assertions (not from raw evidence).
+       - MUST include `derived_from` with parent assertion IDs (A1, A2, etc.)
+       - `evidence_used` is empty
+       - `notes` explains the inference in one sentence
+
+    3. **Assertion count**: Generate between 6 and 14 assertions total.
+       - Each assertion = ONE logical claim (not a grammatical sentence)
+       - A paragraph may become 1-3 assertions max
+
+    4. **Markdown in text_md**:
+       - Allowed: **bold**, *italic*, simple lists, links
+       - Forbidden: headings (#), code blocks (```), tables
+
+    5. **Open points**: List questions or information gaps that evidence could not answer.
+
+    6. **Language**: Respond in the same language as the question ({{ language | default('fr') }}).
+
+    7. **No invention**: Never cite a source ID that does not exist in the evidence.
+
+    ### Critical Constraints
+
+    - Return ONLY the JSON object, no markdown code blocks, no explanation
+    - All source IDs must match the format: S1, S2, S3... (as provided in evidence)
+    - All assertion IDs must be sequential: A1, A2, A3...
+    - INFERRED assertions can only derive from FACT assertions, not from other INFERRED
+
+    Generate the JSON now:
+
 families:
   default:
     deck:

@@ -67,6 +67,8 @@ def search_documents(
     graph_enrichment_level: str = "standard",
     session_id: str | None = None,
     use_hybrid_anchor_search: bool = False,
+    use_graph_first: bool = False,
+    use_instrumented: bool = False,
 ) -> dict[str, Any]:
     """
     Recherche sémantique avec enrichissement Knowledge Graph (OSMOSE) et contexte conversationnel.
@@ -82,6 +84,8 @@ def search_documents(
         graph_enrichment_level: Niveau d'enrichissement (none, light, standard, deep)
         session_id: ID de session pour contexte conversationnel (Memory Layer Phase 2.5)
         use_hybrid_anchor_search: Utiliser le HybridAnchorSearchService (Phase 7)
+        use_graph_first: Utiliser le runtime Graph-First (ADR Phase C)
+        use_instrumented: Activer les reponses instrumentees (Assertion-Centric UX)
 
     Returns:
         Résultats de recherche avec synthèse enrichie
@@ -138,6 +142,61 @@ def search_documents(
     elif hasattr(query_vector, "numpy"):
         query_vector = query_vector.numpy().tolist()
     query_vector = [float(x) for x in query_vector]
+
+    # 🌊 ADR_GRAPH_FIRST_ARCHITECTURE Phase C: Graph-First Search Mode
+    graph_first_plan = None
+    graph_first_chunks = None
+    graph_first_succeeded = False
+
+    if use_graph_first:
+        try:
+            from .graph_first_search import get_graph_first_service, SearchMode as GFSearchMode
+
+            gf_service = get_graph_first_service(tenant_id)
+
+            # Construire le plan de recherche (détermine le mode)
+            loop = asyncio.new_event_loop()
+            try:
+                graph_first_plan = loop.run_until_complete(
+                    gf_service.build_search_plan(query)
+                )
+            finally:
+                loop.close()
+
+            # Exécuter la recherche selon le mode
+            if graph_first_plan.mode in (GFSearchMode.REASONED, GFSearchMode.ANCHORED):
+                context_ids = graph_first_plan.get_context_ids_for_qdrant()
+
+                if context_ids:
+                    # Recherche Qdrant filtrée par context_ids
+                    loop = asyncio.new_event_loop()
+                    try:
+                        graph_first_chunks = loop.run_until_complete(
+                            gf_service.search_qdrant_filtered(
+                                query=enriched_query,
+                                context_ids=context_ids,
+                                collection_name=settings.qdrant_collection,
+                                top_k=TOP_K,
+                            )
+                        )
+                    finally:
+                        loop.close()
+
+                    if graph_first_chunks:
+                        graph_first_succeeded = True
+                        logger.info(
+                            f"[GRAPH-FIRST] Mode {graph_first_plan.mode.value}: "
+                            f"{len(graph_first_chunks)} chunks from {len(context_ids)} contexts"
+                        )
+
+            if not graph_first_succeeded:
+                logger.info(
+                    f"[GRAPH-FIRST] Falling back to standard search "
+                    f"(mode={graph_first_plan.mode.value}, reason={graph_first_plan.fallback_reason})"
+                )
+
+        except Exception as e:
+            logger.warning(f"[GRAPH-FIRST] Search failed, falling back to standard: {e}")
 
     # 🚀 OSMOSE Phase 7: Hybrid Anchor Search Mode
     reranked_chunks = None
@@ -208,8 +267,14 @@ def search_documents(
                 f"[OSMOSE:HybridAnchor] Search failed, falling back to standard: {e}"
             )
 
-    # Recherche classique (seulement si hybrid search n'a pas fonctionné)
-    if not hybrid_search_succeeded:
+    # ADR_GRAPH_FIRST: Si graph-first a réussi, utiliser ces chunks
+    if graph_first_succeeded and graph_first_chunks:
+        reranked_chunks = graph_first_chunks
+        # Reranker pour améliorer l'ordre
+        reranked_chunks = rerank_chunks(query, reranked_chunks, top_k=TOP_K)
+
+    # Recherche classique (seulement si graph-first ET hybrid search n'ont pas fonctionné)
+    if not graph_first_succeeded and not hybrid_search_succeeded:
         # Construction du filtre de base (pour recherche classique)
         filter_conditions = [FieldCondition(key="type", match=MatchValue(value="rfp_qa"))]
 
@@ -237,6 +302,7 @@ def search_documents(
                 "status": "no_results",
                 "results": [],
                 "message": "Aucune information pertinente n'a été trouvée dans la base de connaissance.",
+                "graph_first_plan": graph_first_plan.to_dict() if graph_first_plan else None,
             }
 
         public_url = PUBLIC_URL
@@ -366,6 +432,49 @@ def search_documents(
         "results": reranked_chunks,
         "synthesis": synthesis_result
     }
+
+    # 🎯 OSMOSE Assertion-Centric: Construire la reponse instrumentee si demandee
+    if use_instrumented:
+        try:
+            from .instrumented_answer_builder import build_instrumented_answer
+
+            # Extraire les relations KG confirmées pour booster la classification
+            kg_relations = graph_context_data.get("related_concepts", []) if graph_context_data else []
+
+            instrumented_answer, build_metadata = build_instrumented_answer(
+                question=query,
+                chunks=reranked_chunks,
+                language="fr",  # TODO: detecter la langue de la question
+                session_context=session_context_text,
+                retrieval_stats={
+                    "candidates_considered": len(reranked_chunks),
+                    "top_k_used": TOP_K,
+                    "kg_nodes_touched": len(graph_context_data.get("query_concepts", [])) if graph_context_data else 0,
+                    "kg_edges_touched": len(graph_context_data.get("typed_edges", [])) if graph_context_data else 0,
+                },
+                kg_relations=kg_relations,
+            )
+
+            response["instrumented_answer"] = instrumented_answer.model_dump(by_alias=True)
+            response["instrumented_metadata"] = build_metadata
+
+            logger.info(
+                f"[OSMOSE:Instrumented] Built instrumented answer: "
+                f"{len(instrumented_answer.assertions)} assertions, "
+                f"FACT={instrumented_answer.truth_contract.facts_count}, "
+                f"INFERRED={instrumented_answer.truth_contract.inferred_count}, "
+                f"FRAGILE={instrumented_answer.truth_contract.fragile_count}, "
+                f"CONFLICT={instrumented_answer.truth_contract.conflict_count}"
+            )
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Instrumented] Failed to build instrumented answer (non-blocking): {e}")
+            import traceback
+            logger.debug(f"[OSMOSE:Instrumented] Traceback: {traceback.format_exc()}")
+
+    # 🌊 ADR_GRAPH_FIRST Phase C: Ajouter le plan graph-first
+    if graph_first_plan:
+        response["graph_first_plan"] = graph_first_plan.to_dict()
 
     # 🌊 Phase 2.12: Ajouter le profil de visibilité actif
     try:

@@ -109,6 +109,7 @@ class BurstState:
     instance_id: Optional[str] = None
     instance_ip: Optional[str] = None
     instance_type: Optional[str] = None
+    instance_launch_time: Optional[str] = None  # Vrai launch time AWS (début facturation)
 
     # URLs des services
     vllm_url: Optional[str] = None
@@ -156,6 +157,7 @@ class BurstState:
             "instance_id": self.instance_id,
             "instance_ip": self.instance_ip,
             "instance_type": self.instance_type,
+            "instance_launch_time": self.instance_launch_time,
             "vllm_url": self.vllm_url,
             "embeddings_url": self.embeddings_url,
             "created_at": self.created_at,
@@ -214,6 +216,7 @@ class BurstState:
             instance_id=data.get("instance_id"),
             instance_ip=data.get("instance_ip"),
             instance_type=data.get("instance_type"),
+            instance_launch_time=data.get("instance_launch_time"),
             vllm_url=data.get("vllm_url"),
             embeddings_url=data.get("embeddings_url"),
             created_at=data.get("created_at"),
@@ -282,7 +285,7 @@ class BurstConfig:
     embeddings_model: str = "intfloat/multilingual-e5-large"
 
     # vLLM Configuration pour AWQ
-    vllm_quantization: str = "awq"  # Obligatoire pour charger les poids AWQ
+    vllm_quantization: str = "awq"  # awq standard (awq_marlin crash sur vLLM v0.6.6)
     vllm_dtype: str = "half"  # FP16 pour inférence AWQ
     vllm_gpu_memory_utilization: float = 0.70  # 14B AWQ ~10GB réel, réserve 33GB, laisse ~15GB pour TEI
     vllm_max_model_len: int = 8192  # Context window raisonnable
@@ -293,8 +296,8 @@ class BurstConfig:
     embeddings_port: int = 8001
 
     # Timeouts - augmentés pour 14B (chargement plus long)
-    instance_boot_timeout: int = 900  # 15 minutes (DLAMI + vLLM 14B load)
-    model_load_timeout: int = 900  # 15 minutes (vLLM ~8-9min) pour charger le modèle seul
+    instance_boot_timeout: int = 3600  # 60 minutes (marge large pour EBS froid)
+    model_load_timeout: int = 3600  # 60 minutes (marge large pour EBS froid)
     healthcheck_interval: int = 15  # Intervalle entre checks
     healthcheck_timeout: int = 10  # Timeout par check
     max_retries: int = 3
@@ -310,6 +313,11 @@ class BurstConfig:
     # Callback URL pour notifications d'interruption Spot
     # L'instance EC2 appellera cette URL pour prévenir 2 min avant l'interruption
     callback_url: Optional[str] = None
+
+    # Parallélisme: nombre de documents traités simultanément
+    # 2 = bon compromis CPU/RAM local + charge EC2
+    # Augmenter si machine locale puissante et EC2 sous-utilisée
+    max_concurrent_docs: int = 2
 
     def to_dict(self) -> Dict[str, Any]:
         """Convertit en dictionnaire."""
@@ -337,7 +345,8 @@ class BurstConfig:
             "use_deep_learning_ami": self.use_deep_learning_ami,
             "deep_learning_ami_os": self.deep_learning_ami_os,
             "burst_pending_dir": self.burst_pending_dir,
-            "callback_url": self.callback_url
+            "callback_url": self.callback_url,
+            "max_concurrent_docs": self.max_concurrent_docs
         }
 
     @classmethod
@@ -379,8 +388,8 @@ class BurstConfig:
             embeddings_port=int(os.getenv("BURST_EMBEDDINGS_PORT", "8001")),
 
             # Timeouts (augmentés pour 14B)
-            instance_boot_timeout=int(os.getenv("BURST_INSTANCE_BOOT_TIMEOUT", "900")),
-            model_load_timeout=int(os.getenv("BURST_MODEL_LOAD_TIMEOUT", "900")),
+            instance_boot_timeout=int(os.getenv("BURST_INSTANCE_BOOT_TIMEOUT", "3600")),
+            model_load_timeout=int(os.getenv("BURST_MODEL_LOAD_TIMEOUT", "3600")),
             healthcheck_interval=int(os.getenv("BURST_HEALTHCHECK_INTERVAL", "15")),
             healthcheck_timeout=int(os.getenv("BURST_HEALTHCHECK_TIMEOUT", "10")),
             max_retries=int(os.getenv("BURST_MAX_RETRIES", "3")),
@@ -394,5 +403,8 @@ class BurstConfig:
             burst_pending_dir=os.getenv("BURST_PENDING_DIR", "/data/burst/pending"),
 
             # Callback URL pour notification d'interruption Spot
-            callback_url=os.getenv("BURST_CALLBACK_URL")
+            callback_url=os.getenv("BURST_CALLBACK_URL"),
+
+            # Parallélisme (nombre de docs traités simultanément)
+            max_concurrent_docs=int(os.getenv("BURST_MAX_CONCURRENT_DOCS", "2"))
         )

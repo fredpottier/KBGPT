@@ -176,7 +176,7 @@ class AssertionStore:
         ctx = context_data or DocumentContextData()
 
         query = """
-        MERGE (d:Document {id: $doc_id, tenant_id: $tenant_id})
+        MERGE (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
         ON CREATE SET
             d.name = $doc_name,
             d.detected_variant = $detected_variant,
@@ -240,7 +240,7 @@ class AssertionStore:
 
         query = """
         MATCH (pc:ProtoConcept {concept_id: $proto_id, tenant_id: $tenant_id})
-        MATCH (d:Document {id: $doc_id, tenant_id: $tenant_id})
+        MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
         MERGE (pc)-[r:EXTRACTED_FROM]->(d)
         ON CREATE SET
             r.polarity = $polarity,
@@ -320,7 +320,7 @@ class AssertionStore:
         query = """
         UNWIND $assertions AS a
         MATCH (pc:ProtoConcept {concept_id: a.proto_id, tenant_id: $tenant_id})
-        MATCH (d:Document {id: $doc_id, tenant_id: $tenant_id})
+        MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
         MERGE (pc)-[r:EXTRACTED_FROM]->(d)
         ON CREATE SET
             r.polarity = a.polarity,
@@ -388,7 +388,7 @@ class AssertionStore:
         client = self._get_neo4j_client()
 
         query = """
-        MATCH (d:Document {id: $doc_id, tenant_id: $tenant_id})
+        MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
         RETURN
             d.detected_variant AS detected_variant,
             d.variant_confidence AS variant_confidence,
@@ -442,7 +442,7 @@ class AssertionStore:
         client = self._get_neo4j_client()
 
         query = """
-        MATCH (pc:ProtoConcept)-[r:EXTRACTED_FROM]->(d:Document {id: $doc_id, tenant_id: $tenant_id})
+        MATCH (pc:ProtoConcept)-[r:EXTRACTED_FROM]->(d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
         WHERE pc.tenant_id = $tenant_id
         """ + ("""AND r.polarity = $polarity_filter""" if polarity_filter else "") + """
         """ + ("""AND r.scope = $scope_filter""" if scope_filter else "") + """

@@ -162,8 +162,9 @@ class Anchor(BaseModel):
     """
 
     concept_id: str = Field(..., description="ID du concept (proto ou canonical)")
-    chunk_id: str = Field(..., description="ID du chunk contenant la quote")
-    quote: str = Field(..., description="Citation textuelle exacte du document")
+    chunk_id: str = Field(..., description="ID du chunk contenant la surface_form")
+    # ADR_PROPERTY_NAMING_NORMALIZATION: quote -> surface_form (aligné avec Neo4j)
+    surface_form: str = Field(..., description="Citation textuelle exacte du document")
     role: AnchorRole = Field(..., description="Rôle sémantique de l'anchor")
     confidence: float = Field(
         ...,
@@ -171,8 +172,9 @@ class Anchor(BaseModel):
         le=1.0,
         description="Confiance dans l'anchor (score fuzzy matching)"
     )
-    char_start: int = Field(..., ge=0, description="Position début dans le chunk")
-    char_end: int = Field(..., gt=0, description="Position fin dans le chunk")
+    # ADR_PROPERTY_NAMING_NORMALIZATION: char_start/char_end -> span_start/span_end (aligné avec Neo4j)
+    span_start: int = Field(..., ge=0, description="Position début dans le conteneur (chunk ou DocItem)")
+    span_end: int = Field(..., gt=0, description="Position fin dans le conteneur (chunk ou DocItem)")
     approximate: bool = Field(
         default=False,
         description="True si fuzzy score < seuil exact mais > seuil minimum"
@@ -219,13 +221,14 @@ class AnchorPayload(BaseModel):
     """
 
     concept_id: str = Field(..., description="Référence vers Neo4j")
-    label: str = Field(..., description="Nom du concept (affichage rapide)")
+    # ADR_PROPERTY_NAMING_NORMALIZATION: label -> concept_name pour cohérence
+    concept_name: str = Field(..., description="Nom du concept (affichage rapide)")
     role: str = Field(..., description="Rôle de l'anchor")
     span: List[int] = Field(
         ...,
         min_length=2,
         max_length=2,
-        description="[char_start, char_end] dans le chunk"
+        description="[span_start, span_end] dans le conteneur"
     )
 
 
@@ -279,20 +282,28 @@ class ProtoConcept(BaseModel):
 
     Enrichi avec ProtoConceptContext (PR2 - ADR_ASSERTION_AWARE_KG):
     - context: contexte agrege de tous les anchors
+
+    ADR_PROPERTY_NAMING_NORMALIZATION: Propriétés alignées avec Neo4j
+    - id -> concept_id
+    - label -> concept_name
+    - document_id -> doc_id
     """
 
-    id: str = Field(..., description="ID unique du ProtoConcept (pc_xxx)")
-    label: str = Field(..., description="Nom/label du concept")
+    # ADR_PROPERTY_NAMING_NORMALIZATION: id -> concept_id (aligné avec Neo4j)
+    concept_id: str = Field(..., description="ID unique du ProtoConcept (pc_xxx)")
+    # ADR_PROPERTY_NAMING_NORMALIZATION: label -> concept_name (aligné avec Neo4j)
+    concept_name: str = Field(..., description="Nom du concept")
     definition: str = Field(..., description="Définition courte extraite")
     type_heuristic: str = Field(
         default="abstract",
         description="Type heuristique (Pass 1): abstract, structural, procedural, regulatory"
     )
-    document_id: str = Field(..., description="ID du document source")
+    # ADR_PROPERTY_NAMING_NORMALIZATION: document_id -> doc_id (aligné avec Neo4j)
+    doc_id: str = Field(..., description="ID du document source")
     section_id: Optional[str] = Field(None, description="ID de la section")
     embedding: Optional[List[float]] = Field(
         None,
-        description="Embedding du concept (label + quote principale)"
+        description="Embedding du concept (concept_name + surface_form principale)"
     )
     anchors: List[Anchor] = Field(
         default_factory=list,
@@ -305,6 +316,22 @@ class ProtoConcept(BaseModel):
         ge=0.0,
         le=1.0,
         description="Confiance LLM sur l'extraction (0.0-1.0)"
+    )
+    # === Anchor Status Diagnostics (2026-01) ===
+    # Classification des concepts selon le résultat du fuzzy matching
+    anchor_status: str = Field(
+        default="SPAN",
+        description="Statut d'ancrage: SPAN (succès), FUZZY_FAILED (score < seuil), NO_MATCH, EMPTY_QUOTE"
+    )
+    fuzzy_best_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+        description="Meilleur score fuzzy obtenu (0-100). Utile pour diagnostic FUZZY_FAILED."
+    )
+    anchor_failure_reason: Optional[str] = Field(
+        None,
+        description="Raison de l'échec d'ancrage: score_below_70, no_match_found, empty_quote, etc."
     )
     # === PR2: Aggregated Context ===
     context: Optional[ProtoConceptContext] = Field(
@@ -406,9 +433,9 @@ class CanonicalConcept(BaseModel):
     Stabilité: "stable" (≥2 sources) ou "singleton" (1 mais high-signal).
     """
 
-    id: str = Field(..., description="ID unique du CanonicalConcept (cc_xxx)")
-    label: str = Field(..., description="Nom canonique du concept")
-    definition_consolidated: Optional[str] = Field(
+    canonical_id: str = Field(..., description="ID unique du CanonicalConcept (cc_xxx)")
+    canonical_name: str = Field(..., description="Nom canonique du concept")
+    unified_definition: Optional[str] = Field(
         None,
         description="Définition consolidée (Pass 2)"
     )

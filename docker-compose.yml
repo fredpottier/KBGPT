@@ -54,6 +54,7 @@ services:
       ONNXTR_CACHE_DIR: /data/models/onnxtr  # Persister cache OnnxTR (sinon re-download à chaque restart)
       KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://redis:6379/0
+      BURST_MAX_CONCURRENT_DOCS: "2"  # 2 docs en parallèle (augmenté sur demande)
     ports:
       - "${APP_PORT}:8000"
       - "5678:5678"

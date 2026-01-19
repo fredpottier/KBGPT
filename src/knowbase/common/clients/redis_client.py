@@ -5,17 +5,44 @@ Utilisé pour:
 - Quotas tracking multi-tenant (budget caps par jour)
 - FSM state persistence (optionnel, future)
 - Cache (optionnel, future)
+- Gate Redis pour vLLM (partage inter-processus)
 
 Author: OSMOSE Phase 1.5
 Date: 2025-10-15
 """
 
+import os
 import redis
 import logging
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_redis_url(redis_url: str) -> Tuple[str, int, int]:
+    """
+    Parse une URL Redis et retourne (host, port, db).
+
+    Formats supportés:
+    - redis://host:port/db
+    - redis://host:port
+    - redis://host
+
+    Returns:
+        Tuple (host, port, db)
+    """
+    try:
+        parsed = urlparse(redis_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 6379
+        # Le path est /db_number, donc on enlève le /
+        db = int(parsed.path.lstrip('/')) if parsed.path and parsed.path != '/' else 0
+        return host, port, db
+    except Exception as e:
+        logger.warning(f"[REDIS] Failed to parse REDIS_URL '{redis_url}': {e}")
+        return "localhost", 6379, 0
 
 
 class RedisClient:
@@ -359,18 +386,21 @@ _redis_client: Optional[RedisClient] = None
 
 
 def get_redis_client(
-    host: str = "localhost",
-    port: int = 6379,
-    db: int = 0,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    db: Optional[int] = None,
     password: Optional[str] = None
 ) -> RedisClient:
     """
     Récupère instance singleton Redis client.
 
+    La configuration est lue depuis la variable d'environnement REDIS_URL si disponible,
+    sinon utilise les paramètres fournis ou localhost:6379.
+
     Args:
-        host: Redis host
-        port: Redis port
-        db: Redis database
+        host: Redis host (override REDIS_URL si fourni)
+        port: Redis port (override REDIS_URL si fourni)
+        db: Redis database (override REDIS_URL si fourni)
         password: Redis password
 
     Returns:
@@ -379,6 +409,22 @@ def get_redis_client(
     global _redis_client
 
     if _redis_client is None:
+        # Lire REDIS_URL depuis l'environnement si aucun paramètre explicite
+        redis_url = os.environ.get("REDIS_URL")
+
+        if redis_url and host is None and port is None:
+            # Utiliser REDIS_URL
+            parsed_host, parsed_port, parsed_db = _parse_redis_url(redis_url)
+            host = parsed_host
+            port = parsed_port
+            db = parsed_db if db is None else db
+            logger.debug(f"[REDIS] Using REDIS_URL: {host}:{port}/{db}")
+        else:
+            # Utiliser les valeurs par défaut
+            host = host or "localhost"
+            port = port or 6379
+            db = db if db is not None else 0
+
         _redis_client = RedisClient(
             host=host,
             port=port,

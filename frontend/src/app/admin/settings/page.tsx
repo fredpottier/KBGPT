@@ -9,6 +9,7 @@
 import {
   Box,
   Button,
+  Checkbox,
   HStack,
   VStack,
   Text,
@@ -29,7 +30,7 @@ import {
 import { motion } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   FiSettings,
   FiRefreshCw,
@@ -42,6 +43,13 @@ import {
   FiTrash2,
   FiShield,
   FiZap,
+  FiCloud,
+  FiCpu,
+  FiDollarSign,
+  FiClock,
+  FiPlay,
+  FiSquare,
+  FiLoader,
 } from 'react-icons/fi'
 
 const MotionBox = motion(Box)
@@ -69,6 +77,8 @@ interface PurgeResult {
   points_deleted?: number
   nodes_deleted?: number
   relations_deleted?: number
+  constraints_deleted?: number
+  indexes_deleted?: number
   jobs_deleted?: number
   sessions_deleted?: number
   messages_deleted?: number
@@ -85,6 +95,79 @@ interface PurgeResponse {
     postgres: PurgeResult
     files: PurgeResult
   }
+}
+
+// EC2 Spot Infrastructure Types
+interface InstanceDetails {
+  instance_id: string | null
+  public_ip: string | null
+  instance_type: string | null
+  availability_zone: string | null
+  spot_price_hourly: number | null
+  uptime_seconds: number | null
+  gpu_type: string | null
+  gpu_memory_gb: number | null
+  vllm_status: string
+  embeddings_status: string
+  ami_id: string | null
+  launch_time: string | null
+}
+
+interface BurstStatus {
+  active: boolean
+  status: string
+  batch_id: string | null
+  instance_ip: string | null
+  instance_type: string | null
+  vllm_url: string | null
+  embeddings_url: string | null
+  instance_details?: InstanceDetails
+}
+
+// API Configuration
+const API_BASE_URL = typeof window !== 'undefined'
+  ? (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000')
+  : 'http://app:8000'
+
+const getAuthHeaders = () => ({
+  'Content-Type': 'application/json',
+  Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`,
+})
+
+// Format uptime helper
+const formatUptime = (seconds: number | null): string => {
+  if (!seconds || seconds < 0) return '--'
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = seconds % 60
+  if (hours > 0) return `${hours}h${String(minutes).padStart(2, '0')}m`
+  if (minutes > 0) return `${minutes}m${String(secs).padStart(2, '0')}s`
+  return `${secs}s`
+}
+
+// Hook pour calculer l'uptime reel depuis launch_time
+const useInstanceUptime = (launchTime: string | null) => {
+  const [uptimeSeconds, setUptimeSeconds] = useState<number>(0)
+
+  useEffect(() => {
+    if (!launchTime) {
+      setUptimeSeconds(0)
+      return
+    }
+
+    const calculateUptime = () => {
+      const launchDate = new Date(launchTime)
+      const now = new Date()
+      const diffMs = now.getTime() - launchDate.getTime()
+      setUptimeSeconds(Math.max(0, Math.floor(diffMs / 1000)))
+    }
+
+    calculateUptime()
+    const interval = setInterval(calculateUptime, 1000)
+    return () => clearInterval(interval)
+  }, [launchTime])
+
+  return uptimeSeconds
 }
 
 // Status Badge Component
@@ -298,6 +381,81 @@ export default function AdminSettingsPage() {
   const queryClient = useQueryClient()
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [purgeResults, setPurgeResults] = useState<PurgeResponse | null>(null)
+  const [purgeSchema, setPurgeSchema] = useState(false)
+
+  // EC2 Burst Status Query
+  const { data: burstStatus, refetch: refetchBurst } = useQuery<BurstStatus>({
+    queryKey: ['burst', 'status'],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/api/burst/status`, { headers: getAuthHeaders() })
+      if (!res.ok) return null
+      return res.json()
+    },
+    refetchInterval: 10000,
+  })
+
+  // EC2 Instance Details Query
+  const { data: instanceDetails } = useQuery<InstanceDetails | null>({
+    queryKey: ['burst', 'instance-details'],
+    queryFn: async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/burst/instance-details`, { headers: getAuthHeaders() })
+        if (!res.ok) return null
+        return res.json()
+      } catch { return null }
+    },
+    refetchInterval: 10000,
+    enabled: !!burstStatus?.instance_ip,
+  })
+
+  // Computed uptime
+  const ec2Uptime = useInstanceUptime(instanceDetails?.launch_time || null)
+
+  // Start Standalone Mutation
+  const startStandaloneMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/api/burst/start-standalone`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ hibernate_on_stop: true })
+      })
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
+      return res.json()
+    },
+    onSuccess: (data) => {
+      toast({ title: 'Infrastructure EC2 demarree', description: data.message, status: 'success', duration: 4000 })
+      queryClient.invalidateQueries({ queryKey: ['burst'] })
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 3000 })
+    },
+  })
+
+  // Stop Standalone Mutation
+  const stopStandaloneMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/api/burst/stop-standalone`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ terminate_infrastructure: true })
+      })
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
+      return res.json()
+    },
+    onSuccess: (data) => {
+      toast({ title: 'Infrastructure EC2 arretee', description: data.message, status: 'info', duration: 4000 })
+      queryClient.invalidateQueries({ queryKey: ['burst'] })
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 3000 })
+    },
+  })
+
+  const isEc2Active = !!burstStatus?.instance_ip
+  const isEc2Starting = burstStatus?.status === 'requesting_spot' || burstStatus?.status === 'instance_starting' || burstStatus?.status === 'waiting_capacity'
+  const estimatedCost = ec2Uptime > 0 && instanceDetails?.spot_price_hourly
+    ? ((ec2Uptime / 3600) * instanceDetails.spot_price_hourly).toFixed(3)
+    : null
 
   // Health check query
   const {
@@ -320,11 +478,11 @@ export default function AdminSettingsPage() {
 
   // Purge mutation
   const purgeMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (options: { purge_schema: boolean }) => {
       const token = localStorage.getItem('auth_token')
       const response = await axios.post<PurgeResponse>(
         '/api/admin/purge-data',
-        {},
+        { purge_schema: options.purge_schema },
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -372,7 +530,9 @@ export default function AdminSettingsPage() {
 
   const handlePurgeConfirm = () => {
     onClose()
-    purgeMutation.mutate()
+    purgeMutation.mutate({ purge_schema: purgeSchema })
+    // Reset option for next time
+    setPurgeSchema(false)
   }
 
   return (
@@ -502,6 +662,174 @@ export default function AdminSettingsPage() {
                     Impossible de recuperer l'etat de sante des services
                   </Text>
                 </HStack>
+              </Box>
+            )}
+          </VStack>
+        </SectionCard>
+
+        {/* EC2 Spot Infrastructure Section */}
+        <SectionCard
+          title="Infrastructure EC2 Spot"
+          subtitle="vLLM GPU pour enrichissement et imports"
+          icon={FiCloud}
+          delay={0.3}
+        >
+          <VStack spacing={4} align="stretch">
+            {/* Status et Actions */}
+            <HStack justify="space-between" align="center">
+              <HStack spacing={3}>
+                <Box
+                  w={3}
+                  h={3}
+                  rounded="full"
+                  bg={isEc2Active ? 'green.400' : isEc2Starting ? 'yellow.400' : 'gray.500'}
+                  boxShadow={isEc2Active ? '0 0 10px rgba(34, 197, 94, 0.6)' : undefined}
+                />
+                <Text fontWeight="medium" color="text.primary">
+                  {isEc2Active ? 'Instance Active' : isEc2Starting ? 'Demarrage...' : 'Inactive'}
+                </Text>
+                {isEc2Active && instanceDetails?.instance_type && (
+                  <Text fontSize="sm" color="text.muted" fontFamily="mono">
+                    {instanceDetails.instance_type}
+                  </Text>
+                )}
+              </HStack>
+              <HStack spacing={2}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  leftIcon={<FiRefreshCw />}
+                  onClick={() => refetchBurst()}
+                  color="text.secondary"
+                  _hover={{ bg: 'bg.hover', color: 'text.primary' }}
+                >
+                  Rafraichir
+                </Button>
+                {!isEc2Active && !isEc2Starting ? (
+                  <Button
+                    size="sm"
+                    leftIcon={<FiPlay />}
+                    colorScheme="green"
+                    onClick={() => startStandaloneMutation.mutate()}
+                    isLoading={startStandaloneMutation.isPending}
+                    loadingText="Demarrage..."
+                  >
+                    Demarrer
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    leftIcon={<FiSquare />}
+                    colorScheme="red"
+                    variant="outline"
+                    onClick={() => stopStandaloneMutation.mutate()}
+                    isLoading={stopStandaloneMutation.isPending || isEc2Starting}
+                    loadingText={isEc2Starting ? 'Demarrage...' : 'Arret...'}
+                    isDisabled={isEc2Starting}
+                  >
+                    Arreter
+                  </Button>
+                )}
+              </HStack>
+            </HStack>
+
+            {/* Instance Details Panel */}
+            {isEc2Active && instanceDetails && (
+              <Box
+                bg="rgba(34, 197, 94, 0.05)"
+                border="1px solid"
+                borderColor="rgba(34, 197, 94, 0.3)"
+                rounded="lg"
+                overflow="hidden"
+              >
+                <SimpleGrid columns={{ base: 2, md: 4 }} spacing={0}>
+                  {/* IP Publique */}
+                  <Box p={3} borderRight="1px solid" borderBottom="1px solid" borderColor="whiteAlpha.100">
+                    <Text fontSize="xs" color="text.muted" mb={1}>IP Publique</Text>
+                    <Text fontSize="sm" fontWeight="bold" fontFamily="mono" color="text.primary">
+                      {instanceDetails.public_ip}
+                    </Text>
+                  </Box>
+
+                  {/* GPU */}
+                  <Box p={3} borderRight="1px solid" borderBottom="1px solid" borderColor="whiteAlpha.100">
+                    <Text fontSize="xs" color="text.muted" mb={1}>GPU</Text>
+                    <HStack spacing={1}>
+                      <Icon as={FiCpu} boxSize={3} color="purple.400" />
+                      <Text fontSize="sm" fontWeight="bold" color="text.primary">{instanceDetails.gpu_type}</Text>
+                    </HStack>
+                    <Text fontSize="xs" color="text.muted">{instanceDetails.gpu_memory_gb} GB VRAM</Text>
+                  </Box>
+
+                  {/* Uptime */}
+                  <Box p={3} borderRight="1px solid" borderBottom="1px solid" borderColor="whiteAlpha.100">
+                    <HStack spacing={1} mb={1}>
+                      <Icon as={FiClock} boxSize={3} color="blue.400" />
+                      <Text fontSize="xs" color="text.muted">Uptime</Text>
+                    </HStack>
+                    <Text fontSize="sm" fontWeight="bold" color="text.primary">{formatUptime(ec2Uptime)}</Text>
+                    <Text fontSize="xs" color="text.muted">${instanceDetails.spot_price_hourly?.toFixed(3)}/h</Text>
+                  </Box>
+
+                  {/* Cout estime */}
+                  <Box p={3} borderBottom="1px solid" borderColor="whiteAlpha.100">
+                    <HStack spacing={1} mb={1}>
+                      <Icon as={FiDollarSign} boxSize={3} color="yellow.400" />
+                      <Text fontSize="xs" color="text.muted">Cout session</Text>
+                    </HStack>
+                    <Text fontSize="lg" fontWeight="bold" color="yellow.400">
+                      {estimatedCost ? `$${estimatedCost}` : '--'}
+                    </Text>
+                  </Box>
+                </SimpleGrid>
+
+                {/* Services Status */}
+                <HStack px={3} py={2} spacing={4} bg="whiteAlpha.50">
+                  <Text fontSize="xs" color="text.muted">Services:</Text>
+                  <HStack spacing={2}>
+                    <Icon
+                      as={instanceDetails.embeddings_status === 'healthy' ? FiCheckCircle : FiLoader}
+                      boxSize={3}
+                      color={instanceDetails.embeddings_status === 'healthy' ? 'green.400' : 'yellow.400'}
+                    />
+                    <Text fontSize="xs" color="text.secondary">Embeddings</Text>
+                  </HStack>
+                  <HStack spacing={2}>
+                    <Icon
+                      as={instanceDetails.vllm_status === 'healthy' ? FiCheckCircle : FiLoader}
+                      boxSize={3}
+                      color={instanceDetails.vllm_status === 'healthy' ? 'green.400' : 'yellow.400'}
+                    />
+                    <Text fontSize="xs" color="text.secondary">vLLM</Text>
+                  </HStack>
+                </HStack>
+
+                {/* URLs */}
+                <HStack px={3} py={2} spacing={4} fontSize="xs" color="text.muted" bg="whiteAlpha.30" flexWrap="wrap">
+                  <HStack spacing={1}>
+                    <Text>Embeddings:</Text>
+                    <Text color="brand.400" fontFamily="mono">http://{instanceDetails.public_ip}:8001</Text>
+                  </HStack>
+                  <HStack spacing={1}>
+                    <Text>vLLM:</Text>
+                    <Text color="brand.400" fontFamily="mono">{burstStatus?.vllm_url || `http://${instanceDetails.public_ip}:8000`}</Text>
+                  </HStack>
+                </HStack>
+              </Box>
+            )}
+
+            {/* Info text when inactive */}
+            {!isEc2Active && !isEc2Starting && (
+              <Box
+                bg="bg.tertiary"
+                rounded="lg"
+                p={4}
+              >
+                <Text fontSize="sm" color="text.muted">
+                  L'infrastructure EC2 Spot permet d'utiliser un GPU pour les operations LLM intensives
+                  (import de documents, enrichissement KG, Entity Resolution). Une fois demarree, tous les
+                  appels LLM (sauf Vision) sont rediriges vers vLLM sur EC2.
+                </Text>
               </Box>
             )}
           </VStack>
@@ -663,7 +991,11 @@ export default function AdminSettingsPage() {
                     <PurgeResultItem
                       label="Neo4j"
                       success={purgeResults.results.neo4j.success}
-                      details={`${purgeResults.results.neo4j.nodes_deleted || 0} nodes, ${purgeResults.results.neo4j.relations_deleted || 0} relations supprimes`}
+                      details={
+                        purgeResults.results.neo4j.constraints_deleted
+                          ? `${purgeResults.results.neo4j.nodes_deleted || 0} nodes, ${purgeResults.results.neo4j.relations_deleted || 0} rels, ${purgeResults.results.neo4j.constraints_deleted} constraints supprimes`
+                          : `${purgeResults.results.neo4j.nodes_deleted || 0} nodes, ${purgeResults.results.neo4j.relations_deleted || 0} relations supprimes`
+                      }
                     />
                     <PurgeResultItem
                       label="Redis"
@@ -728,6 +1060,32 @@ export default function AdminSettingsPage() {
               <Text fontSize="sm" color="text.muted">
                 Vous devrez reimporter tous vos documents apres cette operation.
               </Text>
+
+              {/* Option to purge Neo4j schema */}
+              <Box
+                bg="bg.tertiary"
+                border="1px solid"
+                borderColor="border.default"
+                rounded="lg"
+                p={4}
+                w="full"
+              >
+                <Checkbox
+                  isChecked={purgeSchema}
+                  onChange={(e) => setPurgeSchema(e.target.checked)}
+                  colorScheme="orange"
+                  size="md"
+                >
+                  <VStack align="start" spacing={0} ml={1}>
+                    <Text color="text.primary" fontWeight="medium" fontSize="sm">
+                      Purger aussi le schema Neo4j
+                    </Text>
+                    <Text color="text.muted" fontSize="xs">
+                      Supprime les constraints/indexes (utile apres changements de schema)
+                    </Text>
+                  </VStack>
+                </Checkbox>
+              </Box>
             </VStack>
           </ModalBody>
 

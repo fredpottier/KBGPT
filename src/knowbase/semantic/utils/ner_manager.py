@@ -53,28 +53,53 @@ class MultilingualNER:
 
     def _load_models(self):
         """
-        Charge les modèles spaCy (lazy loading).
+        Initialise la config des modèles (lazy loading réel).
 
-        Ne charge que les modèles configurés disponibles.
-        Si un modèle n'est pas trouvé, log un warning et continue.
+        OOM Fix: Ne charge plus tous les modèles à l'init.
+        Les modèles sont chargés à la demande dans _get_model().
         """
-        # Charger tous les modèles configurés
+        # Stocker la config des modèles, pas les modèles eux-mêmes
+        self._model_configs = {}
         for lang in ["en", "fr", "de", "xx"]:
             model_name = self.config.ner.models.get(lang)
             if model_name:
-                try:
-                    self._models[lang] = spacy.load(model_name)
-                    logger.info(f"[OSMOSE] ✅ NER model loaded: {lang} ({model_name})")
-                except OSError:
-                    logger.warning(
-                        f"[OSMOSE] ⚠️ NER model not found: {lang} ({model_name}). "
-                        f"Run: python -m spacy download {model_name}"
-                    )
+                self._model_configs[lang] = model_name
 
-        if not self._models:
-            logger.error("[OSMOSE] ❌ No NER models loaded! Install at least one model.")
-        else:
-            logger.info(f"[OSMOSE] Loaded {len(self._models)} NER models: {list(self._models.keys())}")
+        logger.info(f"[OSMOSE] NER configured for {len(self._model_configs)} languages: {list(self._model_configs.keys())} (lazy-load)")
+
+    def _get_model(self, lang: str):
+        """
+        Charge un modèle à la demande (lazy loading).
+
+        OOM Fix: Évite de charger 3 modèles spaCy (~650MB) au démarrage.
+        Charge uniquement le modèle nécessaire quand requis.
+
+        Args:
+            lang: Code langue (en, fr, de, xx)
+
+        Returns:
+            Modèle spaCy ou None si non disponible
+        """
+        # Déjà chargé ?
+        if lang in self._models:
+            return self._models[lang]
+
+        # Config existe ?
+        model_name = self._model_configs.get(lang)
+        if not model_name:
+            return None
+
+        # Charger le modèle
+        try:
+            self._models[lang] = spacy.load(model_name)
+            logger.info(f"[OSMOSE] ✅ NER model loaded: {lang} ({model_name})")
+            return self._models[lang]
+        except OSError:
+            logger.warning(
+                f"[OSMOSE] ⚠️ NER model not found: {lang} ({model_name}). "
+                f"Run: python -m spacy download {model_name}"
+            )
+            return None
 
     # =========================================================================
     # Phase 1.8 - EntityRuler Integration
@@ -276,9 +301,9 @@ class MultilingualNER:
         Returns:
             List[Dict]: Liste d'entités avec {text, label, start, end}
         """
-        # Sélectionner modèle approprié
+        # Sélectionner modèle approprié (lazy-load)
         # Si langue non supportée → fallback xx (multilingual)
-        model = self._models.get(language, self._models.get("xx"))
+        model = self._get_model(language) or self._get_model("xx")
 
         if not model:
             logger.warning(
@@ -331,7 +356,7 @@ class MultilingualNER:
         Returns:
             List[List[Dict]]: Liste d'entités pour chaque texte
         """
-        model = self._models.get(language, self._models.get("xx"))
+        model = self._get_model(language) or self._get_model("xx")
 
         if not model:
             logger.warning(
@@ -371,24 +396,24 @@ class MultilingualNER:
 
     def is_model_available(self, language: str) -> bool:
         """
-        Vérifie si un modèle NER est disponible pour une langue.
+        Vérifie si un modèle NER est configuré pour une langue.
 
         Args:
             language: Code langue ISO 639-1
 
         Returns:
-            bool: True si modèle disponible
+            bool: True si modèle configuré (sera chargé à la demande)
         """
-        return language in self._models or "xx" in self._models
+        return language in self._model_configs or "xx" in self._model_configs
 
     def get_available_languages(self) -> List[str]:
         """
-        Retourne la liste des langues supportées.
+        Retourne la liste des langues configurées.
 
         Returns:
             List[str]: Codes ISO 639-1 des langues disponibles
         """
-        return list(self._models.keys())
+        return list(self._model_configs.keys())
 
 
 # ===================================

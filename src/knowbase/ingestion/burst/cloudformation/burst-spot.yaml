@@ -40,8 +40,8 @@ Parameters:
   VllmQuantization:
     Type: String
     Default: "awq"
-    AllowedValues: ["awq", "gptq", "squeezellm", "none"]
-    Description: Méthode de quantification (awq pour 14B AWQ)
+    AllowedValues: ["awq", "awq_marlin", "gptq", "squeezellm", "none"]
+    Description: Méthode de quantification AWQ
 
   VllmDtype:
     Type: String
@@ -93,11 +93,17 @@ Parameters:
     Description: Subnet ID (vide = subnet par défaut)
 
   # === AMI ===
-  # AMI Golden OSMOSE v5 avec vLLM + TEI préinstallés (évite SSM lookup)
+  # AMI Golden OSMOSE v7 - vLLM v0.6.6.post1 compatible CUDA 13/Driver 580
   AmiId:
     Type: String
-    Default: "ami-04235317b5d52f6c3"
-    Description: AMI ID (Golden v5 avec Qwen 14B AWQ + TEI préchargés)
+    Default: "ami-099cbd44d5be7612b"
+    Description: AMI ID (Golden v7 - vLLM v0.6.6.post1 + TEI cpu-1.6, compatible Deep Learning AMI 2026)
+
+  # === SSH ===
+  KeyName:
+    Type: String
+    Default: "osmose-burst-key"
+    Description: Nom de la Key Pair EC2 pour accès SSH
 
 Conditions:
   UseDefaultVpc: !Equals [!Ref VpcId, ""]
@@ -217,8 +223,9 @@ Resources:
           # GPU L4 24GB suffit pour Qwen 14B AWQ (~8GB) + TEI (~2GB)
           # ================================================================
           - InstanceType: g6.2xlarge
-            # AMI Golden OSMOSE v5 - Qwen 14B AWQ + TEI préchargés
+            # AMI Golden OSMOSE v7 - vLLM v0.6.6.post1 compatible CUDA 13
             ImageId: !Ref AmiId
+            KeyName: !Ref KeyName
             # NetworkInterfaces avec SubnetId explicite (requis pour SpotFleet)
             NetworkInterfaces:
               - DeviceIndex: 0
@@ -323,24 +330,36 @@ Resources:
                 echo "vLLM args: $VLLM_ARGS"
 
                 # ============================================
-                # AMI Golden : containers déjà configurés
+                # Créer container vLLM avec modèle local (EBS)
+                # Le modèle est déjà téléchargé dans /models sur l'AMI
                 # ============================================
-                # L'AMI Golden v5 a vLLM et TEI préinstallés avec --restart unless-stopped
-                # Ils démarrent automatiquement au boot, pas besoin de docker run
-                echo "AMI Golden detected - containers vllm/embeddings should auto-start"
+                VLLM_MODEL_PATH="/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
 
-                # Attendre que les containers soient prêts (max 60s)
-                echo "Waiting for containers to be ready..."
-                for i in $(seq 1 12); do
-                  if docker ps | grep -q vllm && docker ps | grep -q embeddings; then
-                    echo "Containers are running"
-                    break
-                  fi
-                  echo "Waiting for containers... ($i/12)"
-                  sleep 5
-                done
+                echo "Creating vLLM container with local model..."
+                echo "Model path: $VLLM_MODEL_PATH"
 
-                # Afficher status des containers
+                # Supprimer ancien container si existant
+                docker rm -f vllm 2>/dev/null || true
+
+                # Créer nouveau container avec modèle local
+                docker run -d --gpus all --restart unless-stopped \
+                    -p $VLLM_PORT:8000 --name vllm \
+                    -v $VLLM_MODEL_PATH:/model:ro \
+                    vllm/vllm-openai:v0.6.6.post1 \
+                    --model /model \
+                    --quantization $VLLM_QUANTIZATION \
+                    --dtype $VLLM_DTYPE \
+                    --gpu-memory-utilization $VLLM_GPU_MEM \
+                    --max-model-len $VLLM_MAX_MODEL_LEN \
+                    --max-num-seqs $VLLM_MAX_NUM_SEQS \
+                    --trust-remote-code
+
+                # Démarrer embeddings (container existant dans l'AMI)
+                docker start embeddings 2>/dev/null || echo "embeddings not found"
+
+                # Attendre que les containers soient prêts
+                echo "Waiting for containers to start..."
+                sleep 10
                 docker ps
 
                 # ============================================
@@ -475,6 +494,7 @@ Resources:
           # ================================================================
           - InstanceType: g6.xlarge
             ImageId: !Ref AmiId
+            KeyName: !Ref KeyName
             NetworkInterfaces:
               - DeviceIndex: 0
                 SubnetId: subnet-3320d458
@@ -528,19 +548,27 @@ Resources:
 
                 nvidia-smi
 
-                # vLLM avec AWQ
-                VLLM_ARGS="--model $VLLM_MODEL --max-model-len $VLLM_MAX_MODEL_LEN"
-                VLLM_ARGS="$VLLM_ARGS --gpu-memory-utilization $VLLM_GPU_MEM"
-                VLLM_ARGS="$VLLM_ARGS --max-num-seqs $VLLM_MAX_NUM_SEQS --trust-remote-code"
-                [ "$VLLM_QUANTIZATION" != "none" ] && VLLM_ARGS="$VLLM_ARGS --quantization $VLLM_QUANTIZATION"
-                VLLM_ARGS="$VLLM_ARGS --dtype $VLLM_DTYPE"
+                # ============================================
+                # Créer container vLLM avec modèle local (EBS)
+                # ============================================
+                VLLM_MODEL_PATH="/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
+                echo "Creating vLLM container with local model: $VLLM_MODEL_PATH"
 
-                # AMI Golden : containers déjà configurés, attendre qu'ils soient prêts
-                echo "AMI Golden - waiting for auto-started containers..."
-                for i in $(seq 1 12); do
-                  docker ps | grep -q vllm && docker ps | grep -q embeddings && break
-                  sleep 5
-                done
+                docker rm -f vllm 2>/dev/null || true
+                docker run -d --gpus all --restart unless-stopped \
+                    -p $VLLM_PORT:8000 --name vllm \
+                    -v $VLLM_MODEL_PATH:/model:ro \
+                    vllm/vllm-openai:v0.6.6.post1 \
+                    --model /model \
+                    --quantization $VLLM_QUANTIZATION \
+                    --dtype $VLLM_DTYPE \
+                    --gpu-memory-utilization $VLLM_GPU_MEM \
+                    --max-model-len $VLLM_MAX_MODEL_LEN \
+                    --max-num-seqs $VLLM_MAX_NUM_SEQS \
+                    --trust-remote-code
+
+                docker start embeddings 2>/dev/null || true
+                sleep 10
                 docker ps
 
                 # Health endpoint (with Spot interruption detection)

@@ -373,31 +373,99 @@ HYBRID_ANCHOR_EXTRACT_SYSTEM_PROMPT = """You are a precise concept extraction sp
 
 Your task is to extract concepts WITH EXACT QUOTES from the source text.
 
-## CRITICAL REQUIREMENTS
+## CRITICAL QUOTE REQUIREMENTS (READ CAREFULLY)
 
-1. **EXACT QUOTES ONLY**
-   - Every concept MUST have an exact textual quote from the source
-   - The quote MUST be copy-pasted verbatim from the input text
-   - Do NOT paraphrase, summarize, or rewrite quotes
-   - If you cannot find an exact quote, do NOT include the concept
+### Rule 0: QUOTES SOURCE (CRITICAL)
+- Quotes MUST come ONLY from the section labeled "TEXT TO SEARCH"
+- Do NOT extract quotes from Document Context, headers, or any other section
+- The TEXT TO SEARCH section is delimited by --- markers
 
-2. **Anchor Roles**
-   Each quote must be classified with a semantic role:
-   - `definition`: The text defines what the concept is
-   - `procedure`: The text describes a process/method involving the concept
-   - `requirement`: The text states an obligation/requirement
-   - `prohibition`: The text states something is forbidden/not allowed
-   - `constraint`: The text describes a technical/business constraint
-   - `example`: The text provides an example of the concept
-   - `reference`: The text references/cites the concept
-   - `context`: General mention without specific role
+### Rule 1: EXACT SUBSTRING ONLY
+Every "quote" field MUST be an EXACT SUBSTRING of the TEXT TO SEARCH.
+- The quote MUST be findable using Ctrl+F in the source text
+- Copy-paste the quote directly from the text - character for character
+- Include punctuation, spacing, and capitalization exactly as they appear
 
-3. **Concept Types (Heuristic)**
-   Assign a preliminary type based on text patterns:
-   - `structural`: Articles, sections, clauses (e.g., "Article 35", "Section 4.2")
-   - `regulatory`: Legal/compliance terms with normative language (shall, must)
-   - `procedural`: Processes, methods, procedures
-   - `abstract`: General concepts without clear structural/regulatory pattern
+### Rule 2: FORBIDDEN ACTIONS
+Do NOT do any of the following:
+- ❌ PARAPHRASE: Rewriting the text in different words
+- ❌ MERGE: Combining text from different sentences
+- ❌ SUMMARIZE: Condensing the meaning into fewer words
+- ❌ CORRECT: Fixing typos, grammar, or formatting in the original
+- ❌ TRUNCATE INCORRECTLY: Cutting mid-word or breaking grammar
+
+### Rule 3: USE no_quote WHEN NEEDED
+If a concept is clearly present but you cannot find an EXACT verbatim quote:
+- Set "quote": ""
+- Set "no_quote": true
+- Provide "no_quote_reason": explaining why (e.g., "concept inferred from context")
+
+### Rule 4: PREFER COMPLETE SENTENCES
+- When possible, the quote should be a full sentence or clause containing the concept
+- Avoid isolated noun phrases unless the text only contains that form
+- A complete sentence provides better context for relationship extraction
+- Quotes should include enough surrounding text to make the concept unambiguous
+
+### Rule 5: ABBREVIATIONS
+- If a concept has both a full form and an abbreviation, prefer quoting the sentence containing the full form
+- Example: prefer "Data Protection Impact Assessment (DPIA) shall be carried out" over just "DPIA"
+
+## EXAMPLES
+
+### CORRECT EXTRACTION
+Source text: "The new platform supports real-time data processing and automated workflow management."
+
+✅ GOOD:
+{
+  "label": "Real-time Data Processing",
+  "quote": "The new platform supports real-time data processing",
+  "no_quote": false
+}
+
+### INCORRECT EXTRACTIONS (DO NOT DO THIS)
+❌ BAD - Paraphrase:
+{
+  "quote": "The platform has real-time processing features"
+}
+(Changed wording - "has" instead of "supports", added "features")
+
+❌ BAD - Merge:
+{
+  "quote": "platform supports data processing and workflow"
+}
+(Merged/skipped words from the original)
+
+❌ BAD - No exact match exists:
+{
+  "quote": "real-time reporting capabilities"
+}
+(This exact string doesn't exist in the source)
+
+✅ CORRECT when no exact quote:
+{
+  "label": "Automated Workflows",
+  "quote": "",
+  "no_quote": true,
+  "no_quote_reason": "Term implied but not explicitly defined in text"
+}
+
+## Anchor Roles
+Classify each quote's semantic role:
+- `definition`: The text defines what the concept is
+- `procedure`: The text describes a process/method
+- `requirement`: The text states an obligation (shall, must)
+- `prohibition`: The text states something is forbidden
+- `constraint`: The text describes a technical/business constraint
+- `example`: The text provides an example
+- `reference`: The text references/cites the concept
+- `context`: General mention without specific role
+
+## Concept Types (Heuristic)
+Assign a preliminary type:
+- `structural`: Articles, sections, clauses (e.g., "Article 35")
+- `regulatory`: Legal/compliance terms with normative language
+- `procedural`: Processes, methods, procedures
+- `abstract`: General concepts
 
 ## Output Format
 ```json
@@ -409,52 +477,76 @@ Your task is to extract concepts WITH EXACT QUOTES from the source text.
       "type_heuristic": "procedural",
       "quote": "A DPIA shall be carried out prior to the processing",
       "role": "requirement",
-      "confidence": 0.92
+      "confidence": 0.92,
+      "no_quote": false
+    },
+    {
+      "label": "Inferred Concept Example",
+      "definition": "A concept that is implied but not explicitly quoted",
+      "type_heuristic": "abstract",
+      "quote": "",
+      "role": "context",
+      "confidence": 0.65,
+      "no_quote": true,
+      "no_quote_reason": "Concept inferred from overall context"
     }
   ]
 }
 ```
 
 ## Confidence Scoring (REQUIRED)
-For EACH concept, you MUST provide a confidence score (0.0-1.0):
-- 0.90-1.00: Explicit, clear definition or statement in text
-- 0.75-0.89: Strong evidence, concept clearly identifiable
-- 0.60-0.74: Moderate evidence, some interpretation required
-- 0.40-0.59: Weak evidence, significant interpretation
-- < 0.40: Do NOT include (too uncertain)
+- 0.90-1.00: Explicit statement, exact quote found
+- 0.75-0.89: Strong evidence, clear concept
+- 0.60-0.74: Moderate evidence, some interpretation
+- 0.40-0.59: Weak evidence (consider using no_quote: true)
+- < 0.40: Do NOT include
 
-Factors affecting confidence:
-- Quote exactness: Verbatim quote = higher confidence
-- Context clarity: Ambiguous context = lower confidence
-- Terminology: Official terms = higher confidence
-- Multiple mentions: Reinforced concept = higher confidence
+### Confidence Constraints
+- If `no_quote: true`, confidence MUST be ≤ 0.74 (since there's no textual proof)
+- If `no_quote: true`, `no_quote_reason` MUST be provided (required for diagnostics)
+- If quote is a full explicit statement, confidence SHOULD be ≥ 0.85
 
 ## Quality Rules
 - Extract 3-15 concepts per segment (quality over quantity)
-- Quotes should be 10-150 characters (capture the essence)
 - Prefer official terminology over informal mentions
-- Cross-lingual: extract concepts regardless of language
+- It's BETTER to use no_quote:true than to provide an inexact quote
+
+## FINAL SELF-CHECK (Before Returning)
+Before returning your response, mentally verify that EVERY quote can be found verbatim in the TEXT TO SEARCH section.
+If any quote cannot be found exactly as written, replace it with no_quote: true.
 """
 
 HYBRID_ANCHOR_EXTRACT_USER_PROMPT = """Extract concepts with EXACT QUOTES from this text segment.
 
-## Document Context
+## Document Context (for understanding only - DO NOT quote from here)
 {document_context}
 
-## Text Segment
+## TEXT TO SEARCH (quotes MUST come ONLY from this section)
+---
 {text}
+---
 
 ## Instructions
-1. Identify key concepts in the text
-2. For EACH concept, find the EXACT quote that supports it
-3. Classify the quote's semantic role
-4. Assign a heuristic type based on text patterns
-5. Assign a confidence score (0.0-1.0) reflecting extraction certainty
+1. Identify key concepts in the TEXT TO SEARCH above
+2. For EACH concept, find an EXACT SUBSTRING from the TEXT TO SEARCH
+3. The quote MUST be findable with Ctrl+F in the text between the --- markers
+4. If no exact quote exists, use no_quote: true instead of guessing
+5. Prefer complete sentences over isolated noun phrases
 
-CRITICAL:
-- Quotes must be VERBATIM from the text above. Do not paraphrase.
-- Include confidence score for EVERY concept (required field).
-- Exclude concepts with confidence < 0.40.
+## CRITICAL REMINDERS
+- ✅ DO: Copy-paste quotes exactly as they appear in TEXT TO SEARCH
+- ✅ DO: Use no_quote: true if you cannot find an exact match
+- ✅ DO: Set confidence ≤ 0.74 when using no_quote: true
+- ❌ DO NOT: Take quotes from Document Context
+- ❌ DO NOT: Paraphrase, merge sentences, or "clean up" quotes
+- ❌ DO NOT: Invent quotes that don't exist in the text
+
+## Required Fields
+- "quote": exact substring from TEXT TO SEARCH, OR empty string
+- "no_quote": true if quote is empty, false otherwise
+- "confidence": 0.0-1.0 (must be ≤ 0.74 if no_quote is true)
+
+Before returning, verify each quote exists verbatim in TEXT TO SEARCH.
 
 Return only valid JSON."""
 

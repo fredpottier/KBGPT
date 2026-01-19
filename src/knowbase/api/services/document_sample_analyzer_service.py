@@ -10,7 +10,7 @@ from fastapi import UploadFile
 from pathlib import Path
 import tempfile
 
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 from knowbase.config.settings import get_settings
 from knowbase.common.logging import setup_logging
 
@@ -29,7 +29,7 @@ class DocumentSampleAnalyzerService:
             llm_router: Router LLM (optionnel, créé si None)
             db_session: Session DB pour récupérer entity types existants
         """
-        self.llm_router = llm_router or LLMRouter()
+        self.llm_router = llm_router or get_llm_router()
         self.db_session = db_session
 
     async def analyze_document_sample(

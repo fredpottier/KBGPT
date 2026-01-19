@@ -13,9 +13,9 @@
 - Différenciation vs Microsoft Copilot/Google Gemini
 
 **⚠️ IMPORTANT - Utiliser dans tout nouveau code:**
-- ✅ Produit = "KnowWhere" (communication, docs, UI)
+- ✅ Produit = "OSMOSIS" (communication, docs, UI)
 - ✅ Projet Pivot = "OSMOSE" (références techniques, logs `[OSMOSE]`)
-- ❌ Ne plus utiliser "KnowBase" ou "SAP KB" (anciens noms)
+- ❌ Ne plus utiliser "KnowBase", "KnowWhere" ou "SAP KB" (anciens noms)
 
 **Documentation OSMOSE Principale:**
 - `doc/OSMOSE_AMBITION_PRODUIT_ROADMAP.md` : Vision produit, roadmap 32 semaines

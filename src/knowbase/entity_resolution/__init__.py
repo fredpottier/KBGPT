@@ -56,6 +56,16 @@ from .pipeline import (
     PipelineResult,
 )
 
+# LLM Merge Gate (V1)
+from .llm_merge_gate import (
+    LLMMergeGate,
+    LLMGateConfig,
+    LLMGateResult,
+    LLMMergeVerdict,
+    get_llm_merge_gate,
+    reset_llm_merge_gate,
+)
+
 __all__ = [
     # Types
     "ConceptType",
@@ -94,4 +104,11 @@ __all__ = [
     "get_entity_resolution_pipeline",
     "run_entity_resolution",
     "PipelineResult",
+    # LLM Merge Gate (V1)
+    "LLMMergeGate",
+    "LLMGateConfig",
+    "LLMGateResult",
+    "LLMMergeVerdict",
+    "get_llm_merge_gate",
+    "reset_llm_merge_gate",
 ]

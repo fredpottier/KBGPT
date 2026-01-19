@@ -220,6 +220,32 @@ class DoclingExtractor:
             FileNotFoundError: Si le fichier n'existe pas
             ValueError: Si format non supporté
         """
+        units, _ = await self.extract_to_units_with_docling(file_path, include_raw_output)
+        return units
+
+    async def extract_to_units_with_docling(
+        self,
+        file_path: str,
+        include_raw_output: bool = False,
+    ) -> Tuple[List[VisionUnit], Any]:
+        """
+        Extrait un document et retourne VisionUnits + DoclingDocument brut.
+
+        Utilisé par le Structural Graph (Option C) pour accéder à la structure
+        native de Docling sans re-parser.
+
+        Args:
+            file_path: Chemin vers le document
+            include_raw_output: Inclure la sortie brute Docling pour debug
+
+        Returns:
+            Tuple (liste VisionUnits, DoclingDocument brut)
+
+        Raises:
+            ImportError: Si Docling n'est pas installé
+            FileNotFoundError: Si le fichier n'existe pas
+            ValueError: Si format non supporté
+        """
         # Vérifier initialisation
         if not self._initialized:
             await self.initialize()
@@ -240,10 +266,13 @@ class DoclingExtractor:
             # Extraire les pages en VisionUnits
             units = self._convert_to_units(result, doc_format, include_raw_output)
 
+            # Retourner aussi le DoclingDocument brut pour Structural Graph
+            docling_document = result.document
+
             logger.info(
                 f"[DoclingExtractor] ✅ Extracted {len(units)} pages from {path.name}"
             )
-            return units
+            return units, docling_document
 
         except Exception as e:
             logger.error(f"[DoclingExtractor] ❌ Extraction failed: {e}")

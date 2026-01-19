@@ -35,6 +35,12 @@ class SearchRequest(BaseModel):
         """
     )
 
+    # 🎯 OSMOSE Assertion-Centric
+    use_instrumented: bool = Field(
+        default=False,
+        description="Activer les reponses instrumentees (Assertion-Centric UX)"
+    )
+
     class Config:
         json_schema_extra = {
             "example": {

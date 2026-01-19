@@ -3,6 +3,10 @@ import { verifyJWT, createAuthHeaders } from '@/lib/jwt-helpers'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8000';
 
+interface PurgeDataRequest {
+  purge_schema?: boolean;
+}
+
 export async function POST(request: NextRequest) {
   // Verifier JWT token
   const authResult = verifyJWT(request);
@@ -12,6 +16,14 @@ export async function POST(request: NextRequest) {
   const authHeader = authResult;
 
   try {
+    // Lire le body de la requête (peut être vide pour compatibilité)
+    let body: PurgeDataRequest = {};
+    try {
+      body = await request.json();
+    } catch {
+      // Body vide = valeurs par défaut
+    }
+
     const url = `${BACKEND_URL}/api/admin/purge-data`;
 
     const response = await fetch(url, {
@@ -20,6 +32,7 @@ export async function POST(request: NextRequest) {
         'Authorization': authHeader,  // ✅ JWT uniquement, pas de clé hardcodée
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {

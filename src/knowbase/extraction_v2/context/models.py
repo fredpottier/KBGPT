@@ -7,13 +7,18 @@ Ces modeles definissent:
 - ScopeSignals: signaux de scoring pour la classification
 - DocContextFrame: frame complet stocke sur le document
 - DocScopeAnalysis: sortie LLM pour validation
+- DocumentContext: contraintes document-level pour filtrage markers (ADR Document Context Markers)
+- StructureHint: detection de structure numerotee
+- EntityHint: entites dominantes du document
+- TemporalHint: indice temporel du document
 
 Spec: doc/ongoing/ADR_ASSERTION_AWARE_KG.md - Section 4
+Spec: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md
 """
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from enum import Enum
 
 
@@ -171,9 +176,13 @@ class DocContextFrame:
     # Notes du LLM (max 2 phrases)
     notes: str = ""
 
+    # Document Context Constraints (ADR Document Context Markers)
+    # Contraintes document-level pour filtrage des markers
+    document_context: Optional["DocumentContext"] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialise en dictionnaire pour stockage."""
-        return {
+        result = {
             "document_id": self.document_id,
             "strong_markers": self.strong_markers,
             "weak_markers": self.weak_markers,
@@ -184,10 +193,18 @@ class DocContextFrame:
             "scope_signals": self.scope_signals.to_dict(),
             "notes": self.notes,
         }
+        if self.document_context is not None:
+            result["document_context"] = self.document_context.to_dict()
+        return result
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "DocContextFrame":
         """Deserialise depuis un dictionnaire."""
+        document_context = None
+        if "document_context" in data and data["document_context"]:
+            # DocumentContext est défini plus bas dans ce même fichier
+            document_context = DocumentContext.from_dict(data["document_context"])
+
         return cls(
             document_id=data["document_id"],
             strong_markers=data.get("strong_markers", []),
@@ -198,6 +215,7 @@ class DocContextFrame:
             scope_confidence=data.get("scope_confidence", 0.0),
             scope_signals=ScopeSignals.from_dict(data.get("scope_signals", {})),
             notes=data.get("notes", ""),
+            document_context=document_context,
         )
 
     @classmethod
@@ -303,10 +321,264 @@ class DocScopeAnalysis:
         )
 
 
+# =============================================================================
+# DOCUMENT CONTEXT CONSTRAINTS (ADR Document Context Markers)
+# Ces modeles fournissent des CONTRAINTES, pas des markers
+# Hierarchie: MarkerMention > Normalization > DocumentContext
+# =============================================================================
+
+# Types pour les entity hints
+EntityTypeHint = Literal["product", "system", "standard", "regulation", "org", "other"]
+EvidenceType = Literal["explicit", "inferred"]
+
+
+@dataclass
+class StructureHint:
+    """
+    Indice de structure documentaire pour filtrage faux positifs.
+
+    Permet de detecter les documents avec sections numerotees
+    (ex: "PUBLIC 1", "PUBLIC 2", "PUBLIC 3") et d'eviter les faux positifs.
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.2
+    """
+    # Le document utilise-t-il des sections numerotees?
+    has_numbered_sections: bool = False
+
+    # Patterns de numerotation detectes (ex: ["WORD+NUMBER", "1.2.3"])
+    numbering_patterns: List[str] = field(default_factory=list)
+
+    # Confiance dans la detection [0.0, 1.0]
+    confidence: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise en dictionnaire."""
+        return {
+            "has_numbered_sections": self.has_numbered_sections,
+            "numbering_patterns": self.numbering_patterns,
+            "confidence": self.confidence,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "StructureHint":
+        """Deserialise depuis un dictionnaire."""
+        return cls(
+            has_numbered_sections=data.get("has_numbered_sections", False),
+            numbering_patterns=data.get("numbering_patterns", []),
+            confidence=data.get("confidence", 0.0),
+        )
+
+    @classmethod
+    def empty(cls) -> "StructureHint":
+        """Cree un hint vide (pas de structure detectee)."""
+        return cls(has_numbered_sections=False, confidence=0.5)
+
+
+@dataclass
+class EntityHint:
+    """
+    Entite dominante du document pour renforcer la normalisation des markers.
+
+    Le LLM extrait les entites dominantes (produits, systemes, etc.)
+    qui servent d'ancres pour valider les markers ambigus.
+
+    IMPORTANT: Ne cree PAS de markers, sert uniquement de contrainte/ancre.
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.2
+    """
+    # Label de l'entite (ex: "SAP S/4HANA Cloud", "iPhone")
+    label: str
+
+    # Type d'entite (product, system, standard, regulation, org, other)
+    type_hint: str = "other"
+
+    # Confiance dans la detection [0.0, 1.0]
+    confidence: float = 0.5
+
+    # Type d'evidence: "explicit" (clairement mentionne) ou "inferred"
+    evidence: str = "inferred"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise en dictionnaire."""
+        return {
+            "label": self.label,
+            "type_hint": self.type_hint,
+            "confidence": self.confidence,
+            "evidence": self.evidence,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "EntityHint":
+        """Deserialise depuis un dictionnaire."""
+        return cls(
+            label=data.get("label", ""),
+            type_hint=data.get("type_hint", "other"),
+            confidence=data.get("confidence", 0.5),
+            evidence=data.get("evidence", "inferred"),
+        )
+
+
+@dataclass
+class TemporalHint:
+    """
+    Indice temporel du document pour classification FRAGILE/STALE.
+
+    Permet de detecter la date de publication du document pour
+    determiner si les assertions sont potentiellement obsoletes.
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md - Section 3.2
+    """
+    # Date explicitement mentionnee (ex: "2024-Q1", "2025-02")
+    explicit: Optional[str] = None
+
+    # Date inferee (ex: "2024")
+    inferred: Optional[str] = None
+
+    # Confiance dans la detection [0.0, 1.0]
+    confidence: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise en dictionnaire."""
+        return {
+            "explicit": self.explicit,
+            "inferred": self.inferred,
+            "confidence": self.confidence,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "TemporalHint":
+        """Deserialise depuis un dictionnaire."""
+        return cls(
+            explicit=data.get("explicit"),
+            inferred=data.get("inferred"),
+            confidence=data.get("confidence", 0.0),
+        )
+
+    def get_best_date(self) -> Optional[str]:
+        """Retourne la meilleure date disponible (explicit > inferred)."""
+        return self.explicit or self.inferred
+
+    @classmethod
+    def empty(cls) -> "TemporalHint":
+        """Cree un hint vide."""
+        return cls()
+
+
+@dataclass
+class DocumentContext:
+    """
+    Contexte document-level pour contraindre l'interpretation des markers.
+
+    PRINCIPE FONDAMENTAL (ADR):
+    - Le LLM n'extrait PAS de markers, il produit des CONTRAINTES
+    - Ces contraintes guident la decision sur les markers extraits syntaxiquement
+    - Hierarchie de verite: MarkerMention > Normalization > DocumentContext
+
+    Utilise par decide_marker() pour:
+    - Rejeter les faux positifs structurels (ex: "PUBLIC 3" = section, pas version)
+    - Renforcer la confiance via entity anchors
+    - Classifier FRAGILE/STALE via temporal hints
+
+    ADR: doc/decisions/ADR_DOCUMENT_CONTEXT_MARKERS.md
+    """
+    # Detection de structure (sections numerotees)
+    structure_hint: StructureHint = field(default_factory=StructureHint)
+
+    # Entites dominantes du document (max 5)
+    entity_hints: List[EntityHint] = field(default_factory=list)
+
+    # Indice temporel
+    temporal_hint: TemporalHint = field(default_factory=TemporalHint)
+
+    # Scope hints (cloud, on-premise, edition, region)
+    scope_hints: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise en dictionnaire."""
+        return {
+            "structure_hint": self.structure_hint.to_dict(),
+            "entity_hints": [e.to_dict() for e in self.entity_hints],
+            "temporal_hint": self.temporal_hint.to_dict(),
+            "scope_hints": self.scope_hints,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DocumentContext":
+        """Deserialise depuis un dictionnaire."""
+        return cls(
+            structure_hint=StructureHint.from_dict(data.get("structure_hint", {})),
+            entity_hints=[
+                EntityHint.from_dict(e) for e in data.get("entity_hints", [])
+            ],
+            temporal_hint=TemporalHint.from_dict(data.get("temporal_hint", {})),
+            scope_hints=data.get("scope_hints", []),
+        )
+
+    @classmethod
+    def empty(cls) -> "DocumentContext":
+        """Cree un contexte vide (aucune contrainte)."""
+        return cls(
+            structure_hint=StructureHint.empty(),
+            entity_hints=[],
+            temporal_hint=TemporalHint.empty(),
+            scope_hints=[],
+        )
+
+    def has_numbered_sections(self) -> bool:
+        """Retourne True si le document a des sections numerotees avec confiance suffisante."""
+        return (
+            self.structure_hint.has_numbered_sections
+            and self.structure_hint.confidence >= 0.7
+        )
+
+    def get_dominant_entity(self) -> Optional[EntityHint]:
+        """Retourne l'entite dominante (premiere avec confidence >= 0.75)."""
+        for eh in self.entity_hints:
+            if eh.confidence >= 0.75:
+                return eh
+        return None
+
+    def has_entity_anchor(self, prefix: str) -> bool:
+        """
+        Verifie si un prefixe correspond a une entite dominante.
+
+        Args:
+            prefix: Prefixe du marker (ex: "iPhone", "S/4HANA")
+
+        Returns:
+            True si le prefixe correspond a une entite avec confidence >= 0.75
+        """
+        prefix_lower = prefix.lower()
+        for eh in self.entity_hints:
+            if eh.confidence >= 0.75:
+                # Token overlap: le prefixe est dans le label ou vice versa
+                label_lower = eh.label.lower()
+                if prefix_lower in label_lower or label_lower.startswith(prefix_lower):
+                    return True
+                # Verifier les tokens individuels
+                label_tokens = set(label_lower.split())
+                if prefix_lower in label_tokens:
+                    return True
+        return False
+
+    def __repr__(self) -> str:
+        entities = [e.label for e in self.entity_hints[:2]]
+        entities_str = ", ".join(entities) if entities else "none"
+        return (
+            f"DocumentContext(numbered_sections={self.structure_hint.has_numbered_sections}, "
+            f"entities=[{entities_str}], temporal={self.temporal_hint.get_best_date()})"
+        )
+
+
 __all__ = [
     "DocScope",
     "MarkerEvidence",
     "ScopeSignals",
     "DocContextFrame",
     "DocScopeAnalysis",
+    # Document Context Constraints (ADR)
+    "StructureHint",
+    "EntityHint",
+    "TemporalHint",
+    "DocumentContext",
 ]

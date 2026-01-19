@@ -99,7 +99,7 @@ class AnchorBasedScorer:
 
         # Construire corpus pour TF-IDF si non fourni
         if corpus_labels is None:
-            corpus_labels = [pc.label for pc in proto_concepts]
+            corpus_labels = [pc.concept_name for pc in proto_concepts]
 
         # Calculer IDF pour chaque label
         idf_scores = self._compute_idf(corpus_labels)
@@ -133,8 +133,8 @@ class AnchorBasedScorer:
             Dict avec scores détaillés
         """
         # 1. Score TF-IDF
-        tf = corpus_labels.count(proto.label) / len(corpus_labels) if corpus_labels else 0
-        idf = idf_scores.get(proto.label, 1.0)
+        tf = corpus_labels.count(proto.concept_name) / len(corpus_labels) if corpus_labels else 0
+        idf = idf_scores.get(proto.concept_name, 1.0)
         tfidf_score = tf * idf
 
         # 2. Score fréquence anchors
@@ -147,7 +147,7 @@ class AnchorBasedScorer:
 
         for anchor in proto.anchors:
             hs_check = check_high_signal(
-                quote=anchor.quote,
+                quote=anchor.surface_form,
                 anchor_role=anchor.role.value if hasattr(anchor.role, 'value') else str(anchor.role),
                 section_type=None,  # TODO: ajouter si disponible
                 domain=None,  # TODO: ajouter si disponible
@@ -172,8 +172,8 @@ class AnchorBasedScorer:
         )
 
         return {
-            "proto_concept_id": proto.id,
-            "label": proto.label,
+            "proto_concept_id": proto.concept_id,
+            "label": proto.concept_name,
             "scores": {
                 "tfidf": round(tfidf_score, 3),
                 "anchor_frequency": round(anchor_score, 3),
@@ -333,7 +333,7 @@ def create_canonical_from_protos(
         raise ValueError("Cannot create canonical from empty proto list")
 
     # Sélectionner le meilleur label (le plus fréquent ou le premier)
-    labels = [pc.label for pc in proto_concepts]
+    labels = [pc.concept_name for pc in proto_concepts]
     best_label = max(set(labels), key=labels.count)
 
     # Consolider les définitions (prendre la plus longue)
@@ -353,14 +353,14 @@ def create_canonical_from_protos(
 
     # Créer CanonicalConcept
     canonical = CanonicalConcept(
-        id=canonical_id or f"cc_{uuid.uuid4().hex[:12]}",
-        label=best_label,
-        definition_consolidated=best_definition,
+        canonical_id=canonical_id or f"cc_{uuid.uuid4().hex[:12]}",
+        canonical_name=best_label,
+        unified_definition=best_definition,
         type_fine=None,  # Sera enrichi en Pass 2
         stability=stability,
         needs_confirmation=(stability == ConceptStability.SINGLETON),
         embedding=centroid_embedding,
-        proto_concept_ids=[pc.id for pc in proto_concepts],
+        proto_concept_ids=[pc.concept_id for pc in proto_concepts],
         tenant_id=proto_concepts[0].tenant_id
     )
 

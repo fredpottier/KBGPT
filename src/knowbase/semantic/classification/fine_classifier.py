@@ -178,13 +178,15 @@ class FineClassifier:
     - Justification
 
     Exécuté en Pass 2 uniquement (non bloquant).
+    Supporte la parallélisation des appels LLM pour accélérer le traitement.
     """
 
     def __init__(
         self,
         llm_router=None,
         tenant_id: str = "default",
-        batch_size: int = 50  # Increased from 20 to 50 for faster processing
+        batch_size: int = 50,  # Concepts par appel LLM
+        max_concurrent: int = 8  # Appels LLM parallèles (ajuster selon capacité vLLM/API)
     ):
         """
         Initialise le classificateur.
@@ -192,17 +194,19 @@ class FineClassifier:
         Args:
             llm_router: LLM Router instance
             tenant_id: ID tenant
-            batch_size: Taille des batches LLM
+            batch_size: Taille des batches LLM (concepts par appel)
+            max_concurrent: Nombre max d'appels LLM en parallèle
         """
         self.llm_router = llm_router or get_llm_router()
         self.tenant_id = tenant_id
         self.batch_size = batch_size
+        self.max_concurrent = max_concurrent
 
         # Config
         self.config = get_hybrid_anchor_config("classification_config", tenant_id) or {}
 
         logger.info(
-            f"[OSMOSE:FineClassifier] Initialized (batch_size={batch_size})"
+            f"[OSMOSE:FineClassifier] Initialized (batch_size={batch_size}, max_concurrent={max_concurrent})"
         )
 
     async def classify_batch_async(
@@ -210,7 +214,9 @@ class FineClassifier:
         concepts: List[Dict[str, Any]]
     ) -> FineClassificationBatch:
         """
-        Classifie un batch de concepts en async.
+        Classifie un batch de concepts en async avec parallélisation.
+
+        Utilise asyncio.Semaphore pour contrôler le nombre d'appels LLM concurrents.
 
         Args:
             concepts: Liste de concepts avec 'id', 'label', 'definition', 'quote', 'type_heuristic'
@@ -221,28 +227,46 @@ class FineClassifier:
         if not concepts:
             return FineClassificationBatch()
 
+        # Découper en batches
+        batches = []
+        for i in range(0, len(concepts), self.batch_size):
+            batches.append(concepts[i:i + self.batch_size])
+
+        logger.info(
+            f"[OSMOSE:FineClassifier] Processing {len(concepts)} concepts in {len(batches)} batches "
+            f"(max_concurrent={self.max_concurrent})"
+        )
+
+        # Semaphore pour limiter la concurrence
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+
+        async def process_batch(batch_idx: int, batch: List[Dict[str, Any]]) -> List[FineClassificationResult]:
+            """Traite un batch avec contrôle de concurrence."""
+            async with semaphore:
+                try:
+                    results = await self._classify_batch_llm(batch)
+                    logger.debug(f"[OSMOSE:FineClassifier] Batch {batch_idx + 1}/{len(batches)} complete")
+                    return results
+                except Exception as e:
+                    logger.error(f"[OSMOSE:FineClassifier] Batch {batch_idx + 1} failed: {e}")
+                    # Fallback: garder types heuristiques
+                    return [self._fallback_result(concept) for concept in batch]
+
+        # Lancer tous les batches en parallèle (limités par semaphore)
+        tasks = [process_batch(idx, batch) for idx, batch in enumerate(batches)]
+        batch_results = await asyncio.gather(*tasks)
+
+        # Agréger tous les résultats
         all_results: List[FineClassificationResult] = []
         type_changes = 0
 
-        # Découper en batches
-        for i in range(0, len(concepts), self.batch_size):
-            batch = concepts[i:i + self.batch_size]
-
-            try:
-                batch_results = await self._classify_batch_llm(batch)
-                all_results.extend(batch_results)
-
-                # Compter les changements de type
-                for concept, result in zip(batch, batch_results):
-                    heuristic_type = concept.get("type_heuristic", "abstract")
-                    if not result.type_fine.value.startswith(heuristic_type):
-                        type_changes += 1
-
-            except Exception as e:
-                logger.error(f"[OSMOSE:FineClassifier] Batch {i//self.batch_size + 1} failed: {e}")
-                # Fallback: garder types heuristiques
-                for concept in batch:
-                    all_results.append(self._fallback_result(concept))
+        for batch, results in zip(batches, batch_results):
+            all_results.extend(results)
+            # Compter les changements de type
+            for concept, result in zip(batch, results):
+                heuristic_type = concept.get("type_heuristic", "abstract")
+                if not result.type_fine.value.startswith(heuristic_type):
+                    type_changes += 1
 
         result = FineClassificationBatch(
             results=all_results,

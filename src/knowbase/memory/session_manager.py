@@ -24,6 +24,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain_openai import ChatOpenAI
 
+from knowbase.common.llm_router import get_llm_router, TaskType
 from knowbase.db.base import SessionLocal
 from knowbase.db.models import Session, SessionMessage, User
 from knowbase.config.settings import get_settings
@@ -702,14 +703,19 @@ class SessionManager:
                 for msg in first_messages
             ])
 
-            # Générer titre via LLM
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
-            response = await llm.ainvoke([
-                SystemMessage(content="Génère un titre court (max 50 caractères) pour cette conversation. Réponds uniquement avec le titre, sans guillemets."),
-                HumanMessage(content=content)
-            ])
+            # Générer titre via LLMRouter (bénéficie du vLLM EC2 en mode Burst)
+            llm_router = get_llm_router()
+            title_response = await llm_router.acomplete(
+                task_type=TaskType.SHORT_ENRICHMENT,
+                messages=[
+                    {"role": "system", "content": "Génère un titre court (max 50 caractères) pour cette conversation. Réponds uniquement avec le titre, sans guillemets."},
+                    {"role": "user", "content": content}
+                ],
+                temperature=0.3,
+                max_tokens=60,
+            )
 
-            title = response.content.strip()[:100]  # Limite à 100 chars
+            title = title_response.strip()[:100]  # Limite à 100 chars
 
             # Mettre à jour
             session.title = title

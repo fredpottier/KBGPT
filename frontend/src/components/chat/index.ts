@@ -15,3 +15,11 @@ export { default as ResearchAxesSection } from './ResearchAxesSection';
 export { default as KnowledgeProofPanel } from './KnowledgeProofPanel';
 export { default as ReasoningTracePanel } from './ReasoningTracePanel';
 export { default as CoverageMapPanel } from './CoverageMapPanel';
+
+// Assertion-Centric Components (OSMOSE)
+export { default as InstrumentedToggle } from './InstrumentedToggle';
+export { default as TruthContractBadge } from './TruthContractBadge';
+export { default as AssertionRenderer } from './AssertionRenderer';
+export { default as AssertionPopover } from './AssertionPopover';
+export { default as ProofTicketCard, ProofTicketList } from './ProofTicketCard';
+export { default as InstrumentedAnswerDisplay } from './InstrumentedAnswerDisplay';

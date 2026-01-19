@@ -10,7 +10,7 @@ import logging
 import json
 
 from knowbase.ontology.domain_context import DomainContextProfile
-from knowbase.common.llm_router import LLMRouter, TaskType
+from knowbase.common.llm_router import LLMRouter, TaskType, get_llm_router
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ class DomainContextExtractor:
         Args:
             llm_router: LLMRouter instance (optionnel, créé si None)
         """
-        self.llm_router = llm_router or LLMRouter()
+        self.llm_router = llm_router or get_llm_router()
 
     async def extract_from_text(
         self,

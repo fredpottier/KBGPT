@@ -90,7 +90,7 @@ class VersionResolutionService:
     ) -> Optional[DocumentVersionResponse]:
         """Transaction résolution version effective."""
         query = """
-        MATCH (d:Document {document_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion)
+        MATCH (d:Document {doc_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion)
         WHERE v.effective_date <= datetime($effective_at)
         WITH v
         ORDER BY v.effective_date DESC
@@ -293,7 +293,7 @@ class VersionResolutionService:
         """Transaction vérification obsolescence."""
         query = """
         MATCH (v:DocumentVersion {version_id: $version_id})
-        OPTIONAL MATCH (d:Document {document_id: v.document_id})-[:HAS_VERSION]->(newer:DocumentVersion)
+        OPTIONAL MATCH (d:Document {doc_id: v.document_id})-[:HAS_VERSION]->(newer:DocumentVersion)
         WHERE newer.effective_date > v.effective_date
           AND newer.effective_date <= datetime($current_date)
         RETURN v.is_latest as is_latest, COUNT(newer) > 0 as has_newer_versions
@@ -336,7 +336,7 @@ class VersionResolutionService:
     def _get_obsolete_versions_count_tx(tx, document_id: str) -> int:
         """Transaction comptage versions obsolètes."""
         query = """
-        MATCH (d:Document {document_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion)
+        MATCH (d:Document {doc_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion)
         WHERE v.is_latest = false
         RETURN COUNT(v) as obsolete_count
         """

@@ -41,6 +41,7 @@ nest-asyncio  # Pour nested event loops dans RQ worker
 # === Dépendances tests (à retirer pour prod) ===
 pytest>=7.4.0
 pytest-mock>=3.11.0
+pytest-asyncio>=0.23.0  # Support async tests
 respx>=0.20.2
 
 # === Analyse PPTX / PDF (VERSION ALLÉGÉE) ===
@@ -87,11 +88,13 @@ langdetect
 # === OSMOSE Semantic Intelligence V2.1 (Phase 1) ===
 # NER multilingue
 spacy>=3.7.2
+# Coréférence transformer (Pass 0.5 - Linguistic Layer)
+# FastCoref: Fast, Accurate Coreference Resolution (compatible spaCy 3.7+)
+# https://github.com/shon-otmazgin/fastcoref
+fastcoref>=2.1.6
 # Modèles spaCy à installer séparément:
-# python -m spacy download en_core_web_trf
-# python -m spacy download fr_core_news_trf
-# python -m spacy download de_core_news_trf
-# python -m spacy download xx_ent_wiki_sm
+# python -m spacy download en_core_web_md (installé dans Dockerfile)
+# python -m spacy download fr_core_news_md (installé dans Dockerfile)
 
 # Clustering sémantique
 hdbscan>=0.8.33

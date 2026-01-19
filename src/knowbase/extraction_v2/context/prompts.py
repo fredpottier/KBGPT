@@ -77,6 +77,22 @@ Strong signals FOR TEMPLATE_NOISE:
 - High template_likelihood + dominant_zone=bottom
 - High legal_language_score
 
+## Structure Risk Warnings (Plan v2.1)
+
+Some candidates may include a `structure_risk` field with value "SOFT_FLAG".
+This indicates the marker was flagged as a potential STRUCTURAL NUMBERING pattern
+(e.g., "PUBLIC 3", "Content 2", "Resources 42" - section numbers, NOT versions).
+
+When you see `structure_risk: "SOFT_FLAG"`:
+- Read the `structure_risk_reason` for details (e.g., "Seq=2 avec position structurelle")
+- Be EXTRA SKEPTICAL - these are likely section numbers, not versions
+- Ask: "Does 'PUBLIC 3' mean version 3, or is it Section/Part 3 of the document?"
+- If the prefix (PUBLIC, Content, EXTERNAL) is NOT a product/entity name → TEMPLATE_NOISE
+- If there's a sequence in the document (X 1, X 2, X 3) → almost certainly TEMPLATE_NOISE
+
+Also look for `is_weak_candidate: true` which means the marker has 1-2 digit numbers
+(like "iPhone 15") that could be either versions OR section numbers - use context carefully.
+
 ## Critical Rules
 - You may ONLY classify markers from the provided candidates list
 - You may ONLY quote text that is EXPLICITLY VISIBLE in the document

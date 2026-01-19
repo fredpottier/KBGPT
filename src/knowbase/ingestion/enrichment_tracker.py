@@ -161,9 +161,9 @@ class EnrichmentTracker:
 
         try:
             query = """
-            MATCH (d:Document {document_id: $document_id, tenant_id: $tenant_id})
+            MATCH (d:Document {doc_id: $document_id, tenant_id: $tenant_id})
             RETURN d {
-                .document_id,
+                .doc_id,
                 .pass1_status, .pass1_started_at, .pass1_completed_at, .pass1_error,
                 .pass1_concepts_extracted, .pass1_concepts_promoted, .pass1_chunks_created,
                 .pass2_status, .pass2_scheduled_at, .pass2_started_at, .pass2_completed_at, .pass2_error,
@@ -252,10 +252,10 @@ class EnrichmentTracker:
                 params["error"] = error
 
             query = f"""
-            MERGE (d:Document {{document_id: $document_id, tenant_id: $tenant_id}})
+            MERGE (d:Document {{doc_id: $document_id, tenant_id: $tenant_id}})
             ON CREATE SET d.created_at = datetime()
             SET {', '.join(set_clauses)}
-            RETURN d.document_id
+            RETURN d.doc_id
             """
 
             with neo4j_client.driver.session(database="neo4j") as session:
@@ -344,9 +344,9 @@ class EnrichmentTracker:
                 params["phases"] = phases_completed
 
             query = f"""
-            MATCH (d:Document {{document_id: $document_id, tenant_id: $tenant_id}})
+            MATCH (d:Document {{doc_id: $document_id, tenant_id: $tenant_id}})
             SET {', '.join(set_clauses)}
-            RETURN d.document_id
+            RETURN d.doc_id
             """
 
             with neo4j_client.driver.session(database="neo4j") as session:

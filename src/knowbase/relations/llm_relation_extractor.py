@@ -2,9 +2,11 @@
 # Architecture robuste basée sur gpt-4o-mini
 # Phase 2.8 - Support predicate_raw + flags pour RawAssertion
 # Phase 2.8+ - ID-First Extraction avec index c1, c2... (version définitive)
+# Phase 2.11 - Integration CorefGraph (Pass 0.5 Linguistic Layer)
 
 import logging
 import json
+import re
 from typing import List, Dict, Any, Optional, Tuple, Set
 from datetime import datetime
 import uuid
@@ -32,6 +34,11 @@ from knowbase.relations.relation_extraction_models import (
     CORE_RELATION_TYPES_V4,
     ExtractedRelationV4,
     TypeFirstExtractionResult,
+    # Phase 2.11 - SupportSpan pour Pass 0.5 coreference
+    AnchorType,
+    SupportSpan,
+    CorefResolutionStep,
+    CorefResolutionPath,
 )
 from knowbase.relations.relation_extraction_prompts import (
     RELATION_EXTRACTION_PROMPT_V3,
@@ -2065,3 +2072,566 @@ class LLMRelationExtractor:
         )
 
         return result
+
+    # =========================================================================
+    # Phase 2.11 - CorefGraph Integration (Pass 0.5 Linguistic Layer)
+    # =========================================================================
+
+    def annotate_text_with_coreferences(
+        self,
+        text: str,
+        coref_data: Dict[str, Any],
+        annotation_style: str = "inline"
+    ) -> str:
+        """
+        Annote le texte avec les résolutions de coréférence de Pass 0.5.
+
+        Cette méthode enrichit le texte en ajoutant des annotations pour les
+        pronoms résolus, aidant le LLM à comprendre les références.
+
+        Args:
+            text: Texte original
+            coref_data: Données de coréférence (depuis Pass 0.5)
+                Format: {
+                    "mentions": [{"span_start": int, "span_end": int, "surface": str, "mention_id": str}],
+                    "links": [{"source_mention_id": str, "target_mention_id": str}],
+                    "chains": [{"representative_mention_id": str, "mention_ids": [str]}]
+                }
+            annotation_style: Style d'annotation
+                - "inline": "it [→ TLS protocol]"
+                - "parenthetical": "it (refers to: TLS protocol)"
+                - "bracket": "it [[TLS protocol]]"
+
+        Returns:
+            Texte annoté avec résolutions de pronoms
+
+        Example:
+            >>> text = "TLS is secure. It uses encryption."
+            >>> coref_data = {
+            ...     "mentions": [
+            ...         {"span_start": 0, "span_end": 3, "surface": "TLS", "mention_id": "m1"},
+            ...         {"span_start": 15, "span_end": 17, "surface": "It", "mention_id": "m2"}
+            ...     ],
+            ...     "links": [{"source_mention_id": "m2", "target_mention_id": "m1"}]
+            ... }
+            >>> annotate_text_with_coreferences(text, coref_data)
+            'TLS is secure. It [→ TLS] uses encryption.'
+        """
+        if not coref_data:
+            return text
+
+        mentions = coref_data.get("mentions", [])
+        links = coref_data.get("links", [])
+
+        if not mentions or not links:
+            return text
+
+        # Construire mapping mention_id → mention data
+        mention_by_id = {m["mention_id"]: m for m in mentions}
+
+        # Construire mapping source_mention_id → target surface
+        # (un pronom résolu vers son antécédent)
+        pronoun_resolutions = {}
+        for link in links:
+            source_id = link.get("source_mention_id")
+            target_id = link.get("target_mention_id")
+            if source_id and target_id and target_id in mention_by_id:
+                target_surface = mention_by_id[target_id].get("surface", "")
+                if target_surface:
+                    pronoun_resolutions[source_id] = target_surface
+
+        if not pronoun_resolutions:
+            return text
+
+        # Trier les mentions par position décroissante (pour insérer de la fin vers le début)
+        # Cela évite de décaler les offsets lors des insertions
+        sorted_mentions = sorted(
+            [m for m in mentions if m["mention_id"] in pronoun_resolutions],
+            key=lambda m: m["span_start"],
+            reverse=True
+        )
+
+        annotated_text = text
+
+        for mention in sorted_mentions:
+            mention_id = mention["mention_id"]
+            span_start = mention["span_start"]
+            span_end = mention["span_end"]
+            target_surface = pronoun_resolutions[mention_id]
+
+            # Vérifier que les offsets sont valides
+            if span_start < 0 or span_end > len(annotated_text) or span_start >= span_end:
+                continue
+
+            original_text = annotated_text[span_start:span_end]
+
+            # Construire l'annotation selon le style
+            if annotation_style == "inline":
+                replacement = f"{original_text} [→ {target_surface}]"
+            elif annotation_style == "parenthetical":
+                replacement = f"{original_text} (refers to: {target_surface})"
+            elif annotation_style == "bracket":
+                replacement = f"{original_text} [[{target_surface}]]"
+            else:
+                replacement = f"{original_text} [→ {target_surface}]"
+
+            # Remplacer dans le texte
+            annotated_text = annotated_text[:span_start] + replacement + annotated_text[span_end:]
+
+        logger.debug(
+            f"[OSMOSE:CorefIntegration] Annotated {len(sorted_mentions)} pronouns in text"
+        )
+
+        return annotated_text
+
+    def enhance_concepts_with_coreferences(
+        self,
+        concepts: List[Dict[str, Any]],
+        coref_data: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Enrichit les concepts avec des informations de coréférence.
+
+        Pour chaque concept, ajoute les mentions coréférentes (pronoms, groupes
+        nominaux) qui réfèrent à ce concept dans le texte.
+
+        Args:
+            concepts: Liste des concepts
+            coref_data: Données de coréférence (depuis Pass 0.5)
+                Format: {
+                    "mentions": [{"surface": str, "mention_id": str, "mention_type": str}],
+                    "chains": [{"representative_mention_id": str, "mention_ids": [str]}]
+                }
+
+        Returns:
+            Concepts enrichis avec 'coref_mentions' ajouté à chaque concept pertinent
+        """
+        if not coref_data:
+            return concepts
+
+        mentions = coref_data.get("mentions", [])
+        chains = coref_data.get("chains", [])
+
+        if not mentions or not chains:
+            return concepts
+
+        # Construire mapping mention_id → mention
+        mention_by_id = {m["mention_id"]: m for m in mentions}
+
+        # Pour chaque chaîne, trouver le concept correspondant
+        # (basé sur le representative mention qui est souvent un nom propre)
+        for chain in chains:
+            rep_id = chain.get("representative_mention_id")
+            if not rep_id or rep_id not in mention_by_id:
+                continue
+
+            rep_mention = mention_by_id[rep_id]
+            rep_surface = rep_mention.get("surface", "").lower()
+
+            # Trouver le concept correspondant au representative mention
+            matched_concept = None
+            for concept in concepts:
+                canonical = concept.get("canonical_name", "").lower()
+                if canonical == rep_surface:
+                    matched_concept = concept
+                    break
+
+                # Vérifier aussi les surface forms
+                for sf in concept.get("surface_forms", []):
+                    if sf and sf.lower() == rep_surface:
+                        matched_concept = concept
+                        break
+
+                if matched_concept:
+                    break
+
+            if not matched_concept:
+                continue
+
+            # Collecter toutes les mentions de la chaîne (sauf la représentative)
+            coref_mentions = []
+            for mention_id in chain.get("mention_ids", []):
+                if mention_id == rep_id or mention_id not in mention_by_id:
+                    continue
+
+                mention = mention_by_id[mention_id]
+                coref_mentions.append({
+                    "surface": mention.get("surface", ""),
+                    "type": mention.get("mention_type", "UNKNOWN"),
+                    "span_start": mention.get("span_start"),
+                    "span_end": mention.get("span_end"),
+                })
+
+            # Ajouter les mentions coréférentes au concept
+            if coref_mentions:
+                if "coref_mentions" not in matched_concept:
+                    matched_concept["coref_mentions"] = []
+                matched_concept["coref_mentions"].extend(coref_mentions)
+
+        # Compter les enrichissements
+        enriched_count = sum(
+            1 for c in concepts if c.get("coref_mentions")
+        )
+
+        logger.debug(
+            f"[OSMOSE:CorefIntegration] Enriched {enriched_count} concepts with coreference data"
+        )
+
+        return concepts
+
+    def extract_relations_with_coref(
+        self,
+        concepts: List[Dict[str, Any]],
+        full_text: str,
+        coref_data: Optional[Dict[str, Any]],
+        document_id: str,
+        chunk_id: str = "chunk_0",
+        use_annotation: bool = True,
+        annotation_style: str = "inline"
+    ) -> TypeFirstExtractionResult:
+        """
+        Extraction de relations avec intégration des coréférences (Pass 0.5).
+
+        Cette méthode utilise les données du CorefGraph pour :
+        1. Annoter le texte avec les pronoms résolus
+        2. Enrichir le catalogue de concepts avec les mentions coréférentes
+
+        Cela améliore la qualité de l'extraction en aidant le LLM à comprendre
+        les références pronominales.
+
+        Args:
+            concepts: Liste concepts avec canonical_id
+            full_text: Texte du chunk/document
+            coref_data: Données de coréférence (optionnel, depuis Pass 0.5)
+            document_id: ID document source
+            chunk_id: ID chunk source
+            use_annotation: Annoter le texte avec les résolutions de pronoms
+            annotation_style: Style d'annotation ("inline", "parenthetical", "bracket")
+
+        Returns:
+            TypeFirstExtractionResult avec relations extraites
+        """
+        logger.info(
+            f"[OSMOSE:CorefIntegration] Extraction with coreference: "
+            f"{len(concepts)} concepts, coref_data={'present' if coref_data else 'absent'}"
+        )
+
+        # Étape 1: Annoter le texte si coref_data disponible
+        processed_text = full_text
+        if coref_data and use_annotation:
+            processed_text = self.annotate_text_with_coreferences(
+                text=full_text,
+                coref_data=coref_data,
+                annotation_style=annotation_style
+            )
+
+            if processed_text != full_text:
+                logger.info(
+                    f"[OSMOSE:CorefIntegration] Text annotated: "
+                    f"{len(full_text)} → {len(processed_text)} chars"
+                )
+
+        # Étape 2: Enrichir les concepts avec les coréférences
+        enhanced_concepts = concepts
+        if coref_data:
+            enhanced_concepts = self.enhance_concepts_with_coreferences(
+                concepts=concepts.copy(),  # Copie pour ne pas modifier l'original
+                coref_data=coref_data
+            )
+
+        # Étape 3: Utiliser l'extraction Type-First standard
+        result = self.extract_relations_type_first(
+            concepts=enhanced_concepts,
+            full_text=processed_text,
+            document_id=document_id,
+            chunk_id=chunk_id
+        )
+
+        # Étape 4: Enrichir les relations avec les SupportSpan (Phase 2.11)
+        if coref_data:
+            enriched_relations, coref_stats = self._enrich_relations_with_coref_info(
+                relations=result.relations,
+                coref_data=coref_data,
+                concepts=enhanced_concepts
+            )
+            result.relations = enriched_relations
+
+            # Ajouter stats de coréférence
+            result.stats["coref_integration"] = {
+                "mentions_used": len(coref_data.get("mentions", [])),
+                "links_used": len(coref_data.get("links", [])),
+                "chains_used": len(coref_data.get("chains", [])),
+                "text_annotated": processed_text != full_text,
+                "relations_with_pronominal_subject": coref_stats.get("pronominal_subjects", 0),
+                "relations_with_pronominal_object": coref_stats.get("pronominal_objects", 0),
+                "relations_coref_derived": coref_stats.get("coref_derived", 0),
+            }
+
+        return result
+
+    def _enrich_relations_with_coref_info(
+        self,
+        relations: List[ExtractedRelationV4],
+        coref_data: Dict[str, Any],
+        concepts: List[Dict[str, Any]]
+    ) -> Tuple[List[ExtractedRelationV4], Dict[str, int]]:
+        """
+        Enrichit les relations avec les informations de coréférence (Phase 2.11).
+
+        Pour chaque relation, vérifie si le sujet ou l'objet correspond à une
+        mention pronominale résolue par Pass 0.5. Si oui:
+        - Définit anchor_type à REFERENTIAL
+        - Crée un SupportSpan avec le span du pronom
+        - Crée un CorefResolutionPath avec le chemin de résolution
+
+        Args:
+            relations: Liste des relations extraites
+            coref_data: Données de coréférence (mentions, links, chains)
+            concepts: Liste des concepts enrichis
+
+        Returns:
+            Tuple (relations enrichies, stats de coréférence)
+        """
+        stats = {
+            "pronominal_subjects": 0,
+            "pronominal_objects": 0,
+            "coref_derived": 0,
+        }
+
+        if not coref_data:
+            return relations, stats
+
+        # Construire un index des mentions par concept_id
+        # Pour chaque concept, on veut savoir quelles mentions coréférentes il a
+        concept_coref_map: Dict[str, List[Dict[str, Any]]] = {}
+        for concept in concepts:
+            concept_id = concept.get("canonical_id", "")
+            coref_mentions = concept.get("coref_mentions", [])
+            if coref_mentions:
+                concept_coref_map[concept_id] = coref_mentions
+
+        # Construire un index des mentions par mention_id
+        mentions_by_id: Dict[str, Dict[str, Any]] = {}
+        for mention in coref_data.get("mentions", []):
+            mention_id = mention.get("mention_id", "")
+            if mention_id:
+                mentions_by_id[mention_id] = mention
+
+        # Construire un index des liens de coréférence
+        coref_links: List[Dict[str, Any]] = coref_data.get("links", [])
+
+        enriched_relations = []
+        for rel in relations:
+            # Vérifier si le sujet a des mentions coréférentes pronominales
+            subject_coref_mentions = concept_coref_map.get(rel.subject_concept_id, [])
+            for coref_mention in subject_coref_mentions:
+                mention_type = coref_mention.get("mention_type", "")
+                if mention_type in ("PRONOUN", "PRONOMINAL", "pronoun"):
+                    # Sujet résolu via coréférence
+                    rel.subject_anchor_type = AnchorType.REFERENTIAL
+
+                    # Créer SupportSpan
+                    rel.subject_support_span = SupportSpan(
+                        span_start=coref_mention.get("span_start", 0),
+                        span_end=coref_mention.get("span_end", 0),
+                        surface_form=coref_mention.get("surface", ""),
+                        mention_span_id=coref_mention.get("mention_id", ""),
+                        anchor_type=AnchorType.REFERENTIAL,
+                        mention_type=mention_type,
+                        sentence_index=coref_mention.get("sentence_index")
+                    )
+
+                    # Créer CorefResolutionPath (chemin de résolution)
+                    # Trouver le lien de coréférence correspondant
+                    resolution_steps = []
+                    source_mention_id = coref_mention.get("mention_id", "")
+                    target_mention_id = coref_mention.get("antecedent_mention_id", "")
+
+                    for link in coref_links:
+                        if link.get("source_mention_id") == source_mention_id:
+                            resolution_steps.append(CorefResolutionStep(
+                                step_type="COREF_LINK",
+                                source_id=source_mention_id,
+                                target_id=link.get("target_mention_id", ""),
+                                confidence=link.get("confidence", 0.0),
+                                method=link.get("method", "rule_based")
+                            ))
+                            target_mention_id = link.get("target_mention_id", "")
+                            break
+
+                    target_surface = ""
+                    if target_mention_id and target_mention_id in mentions_by_id:
+                        target_surface = mentions_by_id[target_mention_id].get("surface", "")
+
+                    rel.subject_resolution_path = CorefResolutionPath(
+                        source_mention_id=source_mention_id,
+                        source_surface=coref_mention.get("surface", ""),
+                        target_mention_id=target_mention_id,
+                        target_surface=target_surface,
+                        resolved_concept_id=rel.subject_concept_id,
+                        resolved_concept_name=rel.subject_surface_form,
+                        steps=resolution_steps,
+                        resolution_confidence=coref_mention.get("confidence", 0.0),
+                        resolution_method=coref_mention.get("method", "rule_based"),
+                        is_ambiguous=coref_mention.get("is_ambiguous", False),
+                        abstained=False
+                    )
+
+                    stats["pronominal_subjects"] += 1
+                    break  # On prend la première mention pronominale
+
+            # Vérifier si l'objet a des mentions coréférentes pronominales
+            object_coref_mentions = concept_coref_map.get(rel.object_concept_id, [])
+            for coref_mention in object_coref_mentions:
+                mention_type = coref_mention.get("mention_type", "")
+                if mention_type in ("PRONOUN", "PRONOMINAL", "pronoun"):
+                    # Objet résolu via coréférence
+                    rel.object_anchor_type = AnchorType.REFERENTIAL
+
+                    # Créer SupportSpan
+                    rel.object_support_span = SupportSpan(
+                        span_start=coref_mention.get("span_start", 0),
+                        span_end=coref_mention.get("span_end", 0),
+                        surface_form=coref_mention.get("surface", ""),
+                        mention_span_id=coref_mention.get("mention_id", ""),
+                        anchor_type=AnchorType.REFERENTIAL,
+                        mention_type=mention_type,
+                        sentence_index=coref_mention.get("sentence_index")
+                    )
+
+                    # Créer CorefResolutionPath
+                    resolution_steps = []
+                    source_mention_id = coref_mention.get("mention_id", "")
+                    target_mention_id = coref_mention.get("antecedent_mention_id", "")
+
+                    for link in coref_links:
+                        if link.get("source_mention_id") == source_mention_id:
+                            resolution_steps.append(CorefResolutionStep(
+                                step_type="COREF_LINK",
+                                source_id=source_mention_id,
+                                target_id=link.get("target_mention_id", ""),
+                                confidence=link.get("confidence", 0.0),
+                                method=link.get("method", "rule_based")
+                            ))
+                            target_mention_id = link.get("target_mention_id", "")
+                            break
+
+                    target_surface = ""
+                    if target_mention_id and target_mention_id in mentions_by_id:
+                        target_surface = mentions_by_id[target_mention_id].get("surface", "")
+
+                    rel.object_resolution_path = CorefResolutionPath(
+                        source_mention_id=source_mention_id,
+                        source_surface=coref_mention.get("surface", ""),
+                        target_mention_id=target_mention_id,
+                        target_surface=target_surface,
+                        resolved_concept_id=rel.object_concept_id,
+                        resolved_concept_name=rel.object_surface_form,
+                        steps=resolution_steps,
+                        resolution_confidence=coref_mention.get("confidence", 0.0),
+                        resolution_method=coref_mention.get("method", "rule_based"),
+                        is_ambiguous=coref_mention.get("is_ambiguous", False),
+                        abstained=False
+                    )
+
+                    stats["pronominal_objects"] += 1
+                    break  # On prend la première mention pronominale
+
+            # Compter les relations dérivées via coréférence
+            if rel.is_coref_derived:
+                stats["coref_derived"] += 1
+
+            enriched_relations.append(rel)
+
+        logger.info(
+            f"[OSMOSE:CorefIntegration] Enriched relations: "
+            f"{stats['pronominal_subjects']} pronominal subjects, "
+            f"{stats['pronominal_objects']} pronominal objects, "
+            f"{stats['coref_derived']} coref-derived total"
+        )
+
+        return enriched_relations, stats
+
+    @staticmethod
+    def load_coref_data_from_neo4j(
+        neo4j_session,
+        doc_version_id: str,
+        tenant_id: str = "default"
+    ) -> Dict[str, Any]:
+        """
+        Charge les données de coréférence depuis Neo4j (Pass 0.5).
+
+        Args:
+            neo4j_session: Session Neo4j
+            doc_version_id: ID de la version du document
+            tenant_id: ID tenant
+
+        Returns:
+            Dict avec 'mentions', 'links', 'chains' ou dict vide si pas de données
+
+        Example:
+            >>> from neo4j import GraphDatabase
+            >>> driver = GraphDatabase.driver("bolt://localhost:7687")
+            >>> with driver.session() as session:
+            ...     coref_data = LLMRelationExtractor.load_coref_data_from_neo4j(
+            ...         session, "doc_v1_abc123", "default"
+            ...     )
+        """
+        try:
+            # Query pour récupérer les MentionSpan
+            mentions_query = """
+            MATCH (m:MentionSpan {doc_version_id: $doc_version_id, tenant_id: $tenant_id})
+            RETURN m.mention_id AS mention_id,
+                   m.span_start AS span_start,
+                   m.span_end AS span_end,
+                   m.surface AS surface,
+                   m.mention_type AS mention_type
+            """
+
+            # Query pour récupérer les CorefLink
+            links_query = """
+            MATCH (source:MentionSpan)-[r:COREFERS_TO]->(target:MentionSpan)
+            WHERE source.doc_version_id = $doc_version_id
+              AND source.tenant_id = $tenant_id
+            RETURN source.mention_id AS source_mention_id,
+                   target.mention_id AS target_mention_id,
+                   r.confidence AS confidence,
+                   r.method AS method
+            """
+
+            # Query pour récupérer les CoreferenceChain
+            chains_query = """
+            MATCH (c:CoreferenceChain {doc_version_id: $doc_version_id, tenant_id: $tenant_id})
+            RETURN c.chain_id AS chain_id,
+                   c.mention_ids AS mention_ids,
+                   c.representative_mention_id AS representative_mention_id
+            """
+
+            params = {"doc_version_id": doc_version_id, "tenant_id": tenant_id}
+
+            # Exécuter les queries
+            mentions_result = neo4j_session.run(mentions_query, params)
+            mentions = [dict(record) for record in mentions_result]
+
+            links_result = neo4j_session.run(links_query, params)
+            links = [dict(record) for record in links_result]
+
+            chains_result = neo4j_session.run(chains_query, params)
+            chains = [dict(record) for record in chains_result]
+
+            logger.info(
+                f"[OSMOSE:CorefIntegration] Loaded from Neo4j: "
+                f"{len(mentions)} mentions, {len(links)} links, {len(chains)} chains"
+            )
+
+            return {
+                "mentions": mentions,
+                "links": links,
+                "chains": chains,
+            }
+
+        except Exception as e:
+            logger.warning(
+                f"[OSMOSE:CorefIntegration] Failed to load coref data from Neo4j: {e}"
+            )
+            return {"mentions": [], "links": [], "chains": []}

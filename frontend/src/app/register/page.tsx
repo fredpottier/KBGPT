@@ -151,7 +151,7 @@ const Logo = () => (
       <HStack spacing={3}>
         <Image
           src="/logo.png"
-          alt="OSMOS Logo"
+          alt="OSMOSIS Logo"
           h={14}
           w="auto"
           objectFit="contain"
@@ -163,7 +163,7 @@ const Logo = () => (
           bgGradient="linear(to-r, text.primary, brand.400)"
           bgClip="text"
         >
-          OSMOS
+          OSMOSIS
         </Text>
       </HStack>
       <Text

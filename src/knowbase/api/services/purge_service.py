@@ -1,8 +1,10 @@
 """
 Service pour purger les données d'ingestion (Qdrant, Neo4j, Redis, PostgreSQL, fichiers).
 
-Préserve les configurations (DocumentType, EntityTypeRegistry, OntologyEntity).
+Préserve les configurations (DocumentType, EntityTypeRegistry, OntologyEntity, DomainContextProfile).
 Préserve aussi le cache d'extraction (data/extraction_cache/) pour permettre le rejeu.
+
+ADR_GRAPH_FIRST_ARCHITECTURE: Mise à jour pour purger aussi le schéma Neo4j (constraints/indexes).
 """
 import os
 import shutil
@@ -14,6 +16,19 @@ from knowbase.config.settings import get_settings
 settings = get_settings()
 logger = setup_logging(settings.logs_dir, "purge_service.log")
 
+# Labels Neo4j à PRÉSERVER (configuration)
+NEO4J_PRESERVED_LABELS = frozenset({
+    "OntologyEntity",
+    "OntologyAlias",
+    "DomainContextProfile",
+})
+
+# Préfixes de constraints à PRÉSERVER
+NEO4J_PRESERVED_CONSTRAINT_PREFIXES = (
+    "ont_",           # OntologyEntity, OntologyAlias
+    "domain_context", # DomainContextProfile
+)
+
 
 class PurgeService:
     """Service pour purger les données d'ingestion du système."""
@@ -22,13 +37,18 @@ class PurgeService:
         """Initialize purge service."""
         pass
 
-    async def purge_all_data(self) -> Dict[str, any]:
+    async def purge_all_data(self, purge_schema: bool = False) -> Dict[str, any]:
         """
         Purge toutes les données d'ingestion.
 
+        Args:
+            purge_schema: Si True, supprime aussi les constraints/indexes Neo4j
+                         (utile pour repartir de zéro après changements de schéma)
+
         Nettoie:
         - Collection Qdrant (tous les points vectoriels)
-        - Neo4j (tous les nodes/relations sauf OntologyEntity/OntologyAlias)
+        - Neo4j (tous les nodes/relations sauf OntologyEntity/OntologyAlias/DomainContextProfile)
+        - Neo4j schema (constraints/indexes) si purge_schema=True
         - Redis (queues RQ, jobs terminés)
         - PostgreSQL (sessions, messages de conversation)
         - Répertoires docs_in, docs_done, status files
@@ -36,13 +56,14 @@ class PurgeService:
         Préserve:
         - DocumentType (PostgreSQL/SQLite)
         - EntityTypeRegistry (PostgreSQL/SQLite)
-        - OntologyEntity, OntologyAlias (Neo4j)
+        - OntologyEntity, OntologyAlias, DomainContextProfile (Neo4j)
         - Cache d'extraction (data/extraction_cache/) ⚠️ CRITIQUE
 
         Returns:
             Dict avec résultats de purge par composant
         """
-        logger.warning("🚨 PURGE SYSTÈME DÉMARRÉE - Suppression données d'ingestion")
+        schema_msg = " + SCHÉMA NEO4J" if purge_schema else ""
+        logger.warning(f"🚨 PURGE SYSTÈME DÉMARRÉE - Suppression données d'ingestion{schema_msg}")
 
         results = {
             "qdrant": {"success": False, "message": "", "points_deleted": 0},
@@ -59,9 +80,9 @@ class PurgeService:
             logger.error(f"❌ Erreur purge Qdrant: {e}")
             results["qdrant"]["message"] = str(e)
 
-        # 2. Purge Neo4j
+        # 2. Purge Neo4j (données + optionnellement schéma)
         try:
-            results["neo4j"] = await self._purge_neo4j()
+            results["neo4j"] = await self._purge_neo4j(purge_schema=purge_schema)
         except Exception as e:
             logger.error(f"❌ Erreur purge Neo4j: {e}")
             results["neo4j"]["message"] = str(e)
@@ -126,17 +147,24 @@ class PurgeService:
                 "points_deleted": 0,
             }
 
-    async def _purge_neo4j(self) -> Dict:
+    async def _purge_neo4j(self, purge_schema: bool = False) -> Dict:
         """Purge Neo4j (supprime nodes et relations d'ingestion).
+
+        Args:
+            purge_schema: Si True, supprime aussi les constraints/indexes
 
         PRÉSERVE :
         - OntologyEntity (référentiel ontologies)
         - OntologyAlias (référentiel ontologies)
+        - DomainContextProfile (configuration métier)
 
         SUPPRIME :
-        - Entity, Episode, Fact, Relation (données métier)
+        - Tous les autres nodes (Document, CanonicalConcept, SectionContext, etc.)
+        - Constraints/indexes (si purge_schema=True) sauf ceux des labels préservés
+
+        NOTE: Utilise des batches pour éviter les timeouts avec des millions de relations.
         """
-        logger.info("🔄 Purge Neo4j...")
+        logger.info(f"🔄 Purge Neo4j (purge_schema={purge_schema})...")
 
         try:
             import os
@@ -146,12 +174,20 @@ class PurgeService:
             neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
             driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
+            constraints_deleted = 0
+            indexes_deleted = 0
+
             try:
                 with driver.session() as session:
-                    # Compter nodes/relations métier avant purge (EXCLURE ontologies)
-                    count_result = session.run("""
+                    # Construire la clause WHERE pour exclure les labels préservés
+                    preserved_labels = list(NEO4J_PRESERVED_LABELS)
+                    where_clauses = [f"NOT n:{label}" for label in preserved_labels]
+                    where_clause = " AND ".join(where_clauses)
+
+                    # Compter nodes/relations métier avant purge
+                    count_result = session.run(f"""
                         MATCH (n)
-                        WHERE NOT n:OntologyEntity AND NOT n:OntologyAlias
+                        WHERE {where_clause}
                         OPTIONAL MATCH (n)-[r]->()
                         RETURN count(DISTINCT n) as nodes, count(r) as relations
                     """)
@@ -159,23 +195,123 @@ class PurgeService:
                     nodes_before = counts["nodes"]
                     relations_before = counts["relations"]
 
-                    # Supprimer SEULEMENT les nodes métier (préserver ontologies)
-                    # ⚠️ IMPORTANT : Ne PAS toucher aux OntologyEntity et OntologyAlias
-                    session.run("""
-                        MATCH (n)
-                        WHERE NOT n:OntologyEntity AND NOT n:OntologyAlias
-                        DETACH DELETE n
-                    """)
+                    # BATCH DELETE: Supprimer d'abord MENTIONED_IN (souvent des millions)
+                    # car c'est la relation la plus volumineuse
+                    logger.info("  - Suppression MENTIONED_IN par batches (peut prendre du temps)...")
+                    batch_size = 50000
+                    total_mentioned_in_deleted = 0
+                    while True:
+                        result = session.run("""
+                            MATCH ()-[r:MENTIONED_IN]->()
+                            WITH r LIMIT $batch_size
+                            DELETE r
+                            RETURN count(r) as deleted
+                        """, batch_size=batch_size)
+                        deleted = result.single()["deleted"]
+                        if deleted == 0:
+                            break
+                        total_mentioned_in_deleted += deleted
+                        logger.info(f"    - {total_mentioned_in_deleted} MENTIONED_IN supprimées...")
+
+                    # BATCH DELETE: Supprimer les autres relations par batches
+                    logger.info("  - Suppression autres relations par batches...")
+                    total_other_rels_deleted = 0
+                    while True:
+                        result = session.run(f"""
+                            MATCH (n)-[r]->()
+                            WHERE {where_clause}
+                            WITH r LIMIT $batch_size
+                            DELETE r
+                            RETURN count(r) as deleted
+                        """, batch_size=batch_size)
+                        deleted = result.single()["deleted"]
+                        if deleted == 0:
+                            break
+                        total_other_rels_deleted += deleted
+                        logger.info(f"    - {total_other_rels_deleted} autres relations supprimées...")
+
+                    # BATCH DELETE: Supprimer les nodes par batches
+                    logger.info("  - Suppression nodes par batches...")
+                    total_nodes_deleted = 0
+                    while True:
+                        result = session.run(f"""
+                            MATCH (n)
+                            WHERE {where_clause}
+                            WITH n LIMIT $batch_size
+                            DETACH DELETE n
+                            RETURN count(n) as deleted
+                        """, batch_size=batch_size)
+                        deleted = result.single()["deleted"]
+                        if deleted == 0:
+                            break
+                        total_nodes_deleted += deleted
+                        logger.info(f"    - {total_nodes_deleted} nodes supprimés...")
 
                     logger.info(
-                        f"✅ Neo4j purgé: {nodes_before} nodes métier, "
-                        f"{relations_before} relations supprimés (ontologies préservées)"
+                        f"  - {nodes_before} nodes, {relations_before} relations supprimés"
+                    )
+
+                    # Purge du schéma si demandé
+                    if purge_schema:
+                        logger.info("  - Purge schéma (constraints/indexes)...")
+
+                        # Récupérer et supprimer les constraints non-préservés
+                        constraints_result = session.run("SHOW CONSTRAINTS YIELD name RETURN name")
+                        for record in constraints_result:
+                            constraint_name = record["name"]
+                            # Vérifier si c'est un constraint à préserver
+                            should_preserve = any(
+                                constraint_name.startswith(prefix)
+                                for prefix in NEO4J_PRESERVED_CONSTRAINT_PREFIXES
+                            )
+                            if not should_preserve:
+                                try:
+                                    session.run(f"DROP CONSTRAINT {constraint_name} IF EXISTS")
+                                    constraints_deleted += 1
+                                    logger.debug(f"    - Constraint supprimé: {constraint_name}")
+                                except Exception as e:
+                                    logger.warning(f"    - Échec suppression constraint {constraint_name}: {e}")
+
+                        # Récupérer et supprimer les indexes non-préservés
+                        # (les indexes liés aux constraints sont supprimés automatiquement)
+                        indexes_result = session.run("""
+                            SHOW INDEXES YIELD name, type
+                            WHERE type <> 'LOOKUP'
+                            RETURN name
+                        """)
+                        for record in indexes_result:
+                            index_name = record["name"]
+                            should_preserve = any(
+                                index_name.startswith(prefix)
+                                for prefix in NEO4J_PRESERVED_CONSTRAINT_PREFIXES
+                            )
+                            if not should_preserve:
+                                try:
+                                    session.run(f"DROP INDEX {index_name} IF EXISTS")
+                                    indexes_deleted += 1
+                                    logger.debug(f"    - Index supprimé: {index_name}")
+                                except Exception as e:
+                                    # Peut échouer si l'index était lié à un constraint déjà supprimé
+                                    pass
+
+                        logger.info(
+                            f"  - Schéma purgé: {constraints_deleted} constraints, "
+                            f"{indexes_deleted} indexes supprimés"
+                        )
+
+                    preserved_str = ", ".join(preserved_labels)
+                    schema_str = f", {constraints_deleted} constraints supprimés" if purge_schema else ""
+                    logger.info(
+                        f"✅ Neo4j purgé: {nodes_before} nodes, {relations_before} relations"
+                        f"{schema_str} (préservé: {preserved_str})"
                     )
                     return {
                         "success": True,
-                        "message": f"Neo4j purgé (ontologies préservées)",
+                        "message": f"Neo4j purgé (préservé: {preserved_str})",
                         "nodes_deleted": nodes_before,
                         "relations_deleted": relations_before,
+                        "constraints_deleted": constraints_deleted,
+                        "indexes_deleted": indexes_deleted,
                     }
             finally:
                 driver.close()
@@ -187,6 +323,8 @@ class PurgeService:
                 "message": f"Erreur: {str(e)}",
                 "nodes_deleted": 0,
                 "relations_deleted": 0,
+                "constraints_deleted": 0,
+                "indexes_deleted": 0,
             }
 
     async def _purge_redis(self) -> Dict:

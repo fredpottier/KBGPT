@@ -303,6 +303,107 @@ class NormalizationEngine:
             "role": role,
         }
 
+    def get_entity_anchors_from_hints(
+        self,
+        entity_hints: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Convertit les entity_hints du DocumentContext en anchors compatibles.
+
+        Les entity_hints sont extraits par le LLM lors de la génération du
+        document summary (ADR Document Context Markers). Ils servent de source
+        alternative aux anchors Neo4j quand ceux-ci ne sont pas disponibles.
+
+        Args:
+            entity_hints: Liste de EntityHint (sous forme de dict)
+                Format: {"label": "...", "type_hint": "...", "confidence": 0.X, "evidence": "..."}
+
+        Returns:
+            Liste d'anchors au format compatible avec _select_best_entity_anchor()
+        """
+        anchors = []
+
+        for hint in entity_hints:
+            label = hint.get("label", "")
+            confidence = float(hint.get("confidence", 0.5))
+            evidence = hint.get("evidence", "inferred")
+
+            if not label:
+                continue
+
+            # Filtrer les hints avec confiance trop basse
+            if confidence < 0.5:
+                continue
+
+            # Convertir en format anchor
+            # "mentions" est simulé à partir de confidence
+            # confidence >= 0.8 = "strong" (équivalent mentions >= 3)
+            simulated_mentions = 3 if confidence >= 0.8 else (2 if confidence >= 0.6 else 1)
+
+            anchors.append({
+                "name": label,
+                "canonical_name": label,
+                "mentions": simulated_mentions,
+                "role": "primary" if evidence == "explicit" and confidence >= 0.8 else "",
+                "source": "entity_hint",
+                "confidence": confidence,
+            })
+
+        # Trier par confidence décroissante
+        anchors.sort(key=lambda a: a.get("confidence", 0), reverse=True)
+
+        logger.debug(
+            f"[NormalizationEngine] Converted {len(entity_hints)} entity_hints "
+            f"to {len(anchors)} anchors"
+        )
+
+        return anchors
+
+    async def find_entity_anchors_with_hints(
+        self,
+        doc_id: str,
+        entity_hints: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Trouve les Entity Anchors en combinant Neo4j et entity_hints.
+
+        Priorité:
+        1. Neo4j concepts (source principale, basée sur les données)
+        2. entity_hints du DocumentContext (fallback si Neo4j vide)
+
+        Args:
+            doc_id: ID du document
+            entity_hints: EntityHints du DocumentContext (optionnel)
+
+        Returns:
+            Liste de candidats Entity Anchors
+        """
+        # 1. Essayer d'abord Neo4j
+        neo4j_anchors = await self.find_entity_anchors(doc_id)
+
+        if neo4j_anchors:
+            logger.debug(
+                f"[NormalizationEngine] Using Neo4j anchors for doc {doc_id}: "
+                f"{[a.get('name') for a in neo4j_anchors]}"
+            )
+            return neo4j_anchors
+
+        # 2. Fallback sur entity_hints si disponibles
+        if entity_hints:
+            hints_anchors = self.get_entity_anchors_from_hints(entity_hints)
+            if hints_anchors:
+                logger.info(
+                    f"[NormalizationEngine] Using entity_hints as anchors for doc {doc_id}: "
+                    f"{[a.get('name') for a in hints_anchors]}"
+                )
+                return hints_anchors
+
+        # 3. Aucun anchor trouvé
+        logger.debug(
+            f"[NormalizationEngine] No entity anchors found for doc {doc_id}"
+        )
+        return []
+
     # =========================================================================
     # Normalization Logic
     # =========================================================================

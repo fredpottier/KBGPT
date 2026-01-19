@@ -13,6 +13,7 @@ Date: 2025-10-15
 
 from neo4j import GraphDatabase, Driver, ManagedTransaction
 import logging
+import os
 from typing import Optional, Dict, List, Any
 from datetime import datetime
 
@@ -41,9 +42,9 @@ class Neo4jClient:
 
     def __init__(
         self,
-        uri: str = "bolt://localhost:7687",
-        user: str = "neo4j",
-        password: str = "password",
+        uri: str = None,
+        user: str = None,
+        password: str = None,
         database: str = "neo4j",
         redis_client=None
     ):
@@ -51,12 +52,16 @@ class Neo4jClient:
         Initialise client Neo4j.
 
         Args:
-            uri: Neo4j URI (bolt://...)
-            user: Neo4j username
-            password: Neo4j password
+            uri: Neo4j URI (bolt://...) - défaut: NEO4J_URI env var
+            user: Neo4j username - défaut: NEO4J_USER env var
+            password: Neo4j password - défaut: NEO4J_PASSWORD env var
             database: Database name (default: neo4j)
             redis_client: Instance Redis pour distributed locks (optionnel, P1.1)
         """
+        # Lire les variables d'environnement si non fourni
+        uri = uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        user = user or os.getenv("NEO4J_USER", "neo4j")
+        password = password or os.getenv("NEO4J_PASSWORD", "password")
         self.uri = uri
         self.user = user
         self.database = database
@@ -155,6 +160,66 @@ class Neo4jClient:
             logger.info("[NEO4J] Connection closed")
 
     # ========================================================================
+    # Generic Query Execution (pour Pass 0.5 Coreference et autres)
+    # ========================================================================
+
+    def execute_query(
+        self,
+        query: str,
+        **parameters: Any
+    ) -> List[Dict[str, Any]]:
+        """
+        Exécute une requête Cypher générique et retourne les résultats.
+
+        Args:
+            query: Requête Cypher à exécuter
+            **parameters: Paramètres nommés pour la requête
+
+        Returns:
+            Liste de dictionnaires avec les résultats
+        """
+        if not self.driver:
+            logger.error("[NEO4J:QUERY] Driver not connected")
+            return []
+
+        try:
+            with self.driver.session(database=self.database) as session:
+                result = session.run(query, parameters)
+                return [dict(record) for record in result]
+        except Exception as e:
+            logger.error(f"[NEO4J:QUERY] Error executing query: {e}")
+            raise
+
+    def execute_write(
+        self,
+        query: str,
+        **parameters: Any
+    ) -> List[Dict[str, Any]]:
+        """
+        Exécute une requête Cypher d'écriture dans une transaction.
+
+        Args:
+            query: Requête Cypher à exécuter
+            **parameters: Paramètres nommés pour la requête
+
+        Returns:
+            Liste de dictionnaires avec les résultats
+        """
+        if not self.driver:
+            logger.error("[NEO4J:WRITE] Driver not connected")
+            return []
+
+        try:
+            with self.driver.session(database=self.database) as session:
+                result = session.execute_write(
+                    lambda tx: list(tx.run(query, parameters))
+                )
+                return [dict(record) for record in result]
+        except Exception as e:
+            logger.error(f"[NEO4J:WRITE] Error executing write: {e}")
+            raise
+
+    # ========================================================================
     # Proto-KG: Concepts extraits (non validés)
     # ========================================================================
 
@@ -199,11 +264,16 @@ class Neo4jClient:
         # Convertir metadata en JSON string pour Neo4j (ne supporte pas les Maps)
         metadata_json = json.dumps(metadata)
 
+        # Import lex_key function locally to avoid circular imports
+        from knowbase.consolidation.lex_utils import compute_lex_key
+        lex_key = compute_lex_key(concept_name) if concept_name else ""
+
         query = """
         CREATE (c:ProtoConcept {
             concept_id: randomUUID(),
             tenant_id: $tenant_id,
             concept_name: $concept_name,
+            lex_key: $lex_key,
             concept_type: $concept_type,
             segment_id: $segment_id,
             document_id: $document_id,
@@ -222,6 +292,7 @@ class Neo4jClient:
                     query,
                     tenant_id=tenant_id,
                     concept_name=concept_name,
+                    lex_key=lex_key,
                     concept_type=concept_type,
                     segment_id=segment_id,
                     document_id=document_id,
@@ -277,7 +348,7 @@ class Neo4jClient:
             params["segment_id"] = segment_id
 
         if document_id:
-            filters.append("c.document_id = $document_id")
+            filters.append("c.doc_id = $document_id")
             params["document_id"] = document_id
 
         if concept_type:
@@ -293,10 +364,10 @@ class Neo4jClient:
                c.concept_name AS concept_name,
                c.concept_type AS concept_type,
                c.segment_id AS segment_id,
-               c.document_id AS document_id,
+               c.doc_id AS doc_id,
                c.extraction_method AS extraction_method,
                c.confidence AS confidence,
-               c.metadata AS metadata,
+               c.metadata_json AS metadata_json,
                c.created_at AS created_at
         ORDER BY c.created_at DESC
         """
@@ -312,10 +383,10 @@ class Neo4jClient:
                         "concept_name": record["concept_name"],
                         "concept_type": record["concept_type"],
                         "segment_id": record["segment_id"],
-                        "document_id": record["document_id"],
+                        "doc_id": record["doc_id"],
                         "extraction_method": record["extraction_method"],
                         "confidence": record["confidence"],
-                        "metadata": record["metadata"],
+                        "metadata_json": record["metadata_json"],
                         "created_at": record["created_at"]
                     })
 
@@ -706,7 +777,7 @@ class Neo4jClient:
                c.concept_type AS concept_type,
                c.unified_definition AS unified_definition,
                c.quality_score AS quality_score,
-               c.metadata AS metadata,
+               c.metadata_json AS metadata_json,
                c.promoted_at AS promoted_at
         ORDER BY c.quality_score DESC, c.promoted_at DESC
         """
@@ -723,7 +794,7 @@ class Neo4jClient:
                         "concept_type": record["concept_type"],
                         "unified_definition": record["unified_definition"],
                         "quality_score": record["quality_score"],
-                        "metadata": record["metadata"],
+                        "metadata_json": record["metadata_json"],
                         "promoted_at": record["promoted_at"]
                     })
 

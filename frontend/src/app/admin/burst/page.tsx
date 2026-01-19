@@ -42,7 +42,7 @@ import {
   ModalFooter,
 } from '@chakra-ui/react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   FiCloud,
   FiPlay,
@@ -173,19 +173,30 @@ const fetchInstanceDetails = async (): Promise<InstanceDetails | null> => {
   } catch { return null }
 }
 
-// Format uptime helper
+// Format uptime helper - avec secondes pour précision
 const formatUptime = (seconds: number | null): string => {
   if (!seconds || seconds < 0) return '--'
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
-  if (hours > 0) return `${hours}h${minutes}m`
-  return `${minutes}m`
+  const secs = seconds % 60
+  if (hours > 0) return `${hours}h${String(minutes).padStart(2, '0')}m`
+  if (minutes > 0) return `${minutes}m${String(secs).padStart(2, '0')}s`
+  return `${secs}s`
+}
+
+// Format cost with currency
+const formatCost = (cost: string | null): string => {
+  if (!cost) return '--'
+  const num = parseFloat(cost)
+  if (num < 0.01) return `$${(num * 100).toFixed(2)}¢`
+  return `$${num.toFixed(2)}`
 }
 
 // Status config
 const getStatusConfig = (status: string) => {
   const configs: Record<string, { color: string; icon: any; label: string }> = {
     idle: { color: 'gray', icon: FiClock, label: 'Inactif' },
+    no_batch: { color: 'gray', icon: FiClock, label: 'Prêt' },
     preparing: { color: 'blue', icon: FiLoader, label: 'Préparation' },
     requesting_spot: { color: 'blue', icon: FiCloud, label: 'Demande Spot' },
     waiting_capacity: { color: 'yellow', icon: FiClock, label: 'Attente' },
@@ -218,12 +229,47 @@ const ServiceStatus = ({ label, status }: { label: string; status: string }) => 
   )
 }
 
+// Hook pour calculer l'uptime réel depuis launch_time (facturation AWS)
+const useInstanceUptime = (launchTime: string | null) => {
+  const [uptimeSeconds, setUptimeSeconds] = useState<number>(0)
+
+  useEffect(() => {
+    if (!launchTime) {
+      setUptimeSeconds(0)
+      return
+    }
+
+    const calculateUptime = () => {
+      const launchDate = new Date(launchTime)
+      const now = new Date()
+      const diffMs = now.getTime() - launchDate.getTime()
+      setUptimeSeconds(Math.max(0, Math.floor(diffMs / 1000)))
+    }
+
+    // Calcul initial
+    calculateUptime()
+
+    // Mise à jour toutes les secondes
+    const interval = setInterval(calculateUptime, 1000)
+
+    return () => clearInterval(interval)
+  }, [launchTime])
+
+  return uptimeSeconds
+}
+
 // Compact Instance Panel
 const InstancePanel = ({ details, vllmUrl }: { details: InstanceDetails | null; vllmUrl: string | null }) => {
+  // Uptime réel calculé depuis launch_time (pas uptime_seconds qui peut être reset)
+  const realUptimeSeconds = useInstanceUptime(details?.launch_time || null)
+
   if (!details || !details.public_ip) return null
 
-  const estimatedCost = details.uptime_seconds && details.spot_price_hourly
-    ? ((details.uptime_seconds / 3600) * details.spot_price_hourly).toFixed(2)
+  // Coût estimé basé sur l'uptime en minutes complètes (évite le stress du compteur qui tourne)
+  // Se met à jour seulement quand une nouvelle minute commence
+  const uptimeMinutes = Math.floor(realUptimeSeconds / 60)
+  const estimatedCost = uptimeMinutes > 0 && details.spot_price_hourly
+    ? ((uptimeMinutes / 60) * details.spot_price_hourly).toFixed(3)
     : null
 
   return (
@@ -236,12 +282,14 @@ const InstancePanel = ({ details, vllmUrl }: { details: InstanceDetails | null; 
           <Badge colorScheme="green" fontSize="xs">{details.instance_type}</Badge>
         </HStack>
         <HStack spacing={2}>
-          <Badge colorScheme="green" variant="outline" fontSize="xs">
-            <HStack spacing={1}>
-              <Icon as={FiClock} boxSize={3} />
-              <Text>{formatUptime(details.uptime_seconds)}</Text>
-            </HStack>
-          </Badge>
+          <Tooltip label={`Lancée: ${details.launch_time ? new Date(details.launch_time).toLocaleString('fr-FR') : 'N/A'}`} placement="top">
+            <Badge colorScheme="green" variant="outline" fontSize="xs">
+              <HStack spacing={1}>
+                <Icon as={FiClock} boxSize={3} />
+                <Text>{formatUptime(realUptimeSeconds)}</Text>
+              </HStack>
+            </Badge>
+          </Tooltip>
         </HStack>
       </Flex>
 
@@ -263,13 +311,22 @@ const InstancePanel = ({ details, vllmUrl }: { details: InstanceDetails | null; 
 
         <GridItem p={3} borderRight="1px solid" borderBottom="1px solid" borderColor="whiteAlpha.100">
           <Text fontSize="xs" color="text.muted">Prix Spot</Text>
-          <Text fontSize="lg" fontWeight="bold" color="green.400">${details.spot_price_hourly?.toFixed(2)}/h</Text>
-          {estimatedCost && <Text fontSize="xs" color="text.muted">Total: ~${estimatedCost}</Text>}
+          <Text fontSize="sm" fontWeight="bold" color="green.400">${details.spot_price_hourly?.toFixed(3)}/h</Text>
         </GridItem>
 
         <GridItem p={3} borderBottom="1px solid" borderColor="whiteAlpha.100">
-          <Text fontSize="xs" color="text.muted">Zone</Text>
-          <Text fontSize="sm" fontWeight="bold" color="text.primary">{details.availability_zone}</Text>
+          <Tooltip label="Coût estimé basé sur le temps réel depuis le lancement de l'instance" placement="top">
+            <Box>
+              <HStack spacing={1}>
+                <Icon as={FiDollarSign} boxSize={3} color="yellow.400" />
+                <Text fontSize="xs" color="text.muted">Coût session</Text>
+              </HStack>
+              <Text fontSize="lg" fontWeight="bold" color="yellow.400">
+                {estimatedCost ? `$${estimatedCost}` : '--'}
+              </Text>
+              <Text fontSize="xs" color="text.muted">{details.availability_zone}</Text>
+            </Box>
+          </Tooltip>
         </GridItem>
       </Grid>
 
@@ -422,7 +479,7 @@ export default function BurstAdminPage() {
   const statusConfig = getStatusConfig(currentStatus)
   const infraStartingStates = ['requesting_spot', 'waiting_capacity', 'instance_starting']
   const isInfraStarting = infraStartingStates.includes(currentStatus)
-  const terminalStates = ['idle', 'completed', 'failed', 'cancelled']
+  const terminalStates = ['idle', 'completed', 'failed', 'cancelled', 'no_batch']
   const canPrepare = terminalStates.includes(currentStatus)
   const canStart = currentStatus === 'preparing'
   const canProcess = currentStatus === 'ready'

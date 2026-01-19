@@ -9,6 +9,7 @@ Composants:
 from knowbase.extraction_v2.confidence.confidence_scorer import (
     ConfidenceScorer,
     ConfidenceResult,
+    get_confidence_scorer,
 )
 
-__all__ = ["ConfidenceScorer", "ConfidenceResult"]
+__all__ = ["ConfidenceScorer", "ConfidenceResult", "get_confidence_scorer"]

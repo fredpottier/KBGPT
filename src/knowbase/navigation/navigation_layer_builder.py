@@ -12,12 +12,12 @@ Date: 2026-01-01
 """
 
 import logging
-import hashlib
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
 
 from knowbase.common.clients.neo4j_client import Neo4jClient, get_neo4j_client
+from knowbase.common.context_id import make_context_id, make_section_hash
 from knowbase.config.settings import get_settings
 
 from .types import (
@@ -135,7 +135,7 @@ class NavigationLayerBuilder:
 
         query = """
         // Créer ou récupérer le Document
-        MERGE (d:Document {document_id: $doc_id, tenant_id: $tenant_id})
+        MERGE (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
 
         // Créer le DocumentContext
         MERGE (ctx:DocumentContext:ContextNode {context_id: $context_id})
@@ -205,7 +205,7 @@ class NavigationLayerBuilder:
 
         query = """
         // Récupérer le Document
-        MATCH (d:Document {document_id: $doc_id, tenant_id: $tenant_id})
+        MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
 
         // Créer le SectionContext
         MERGE (ctx:SectionContext:ContextNode {context_id: $context_id})
@@ -290,7 +290,7 @@ class NavigationLayerBuilder:
 
         query = """
         // Récupérer le Document et le Chunk
-        MATCH (d:Document {document_id: $doc_id, tenant_id: $tenant_id})
+        MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
         OPTIONAL MATCH (ch:DocumentChunk {chunk_id: $chunk_id, tenant_id: $tenant_id})
 
         // Créer le WindowContext
@@ -468,9 +468,8 @@ class NavigationLayerBuilder:
         if not concept_ids:
             return 0
 
-        # Calculer context_id
-        section_hash = hashlib.sha256(section_path.encode()).hexdigest()[:12]
-        context_id = f"sec:{document_id}:{section_hash}"
+        # Utilise helper partagé pour cohérence Neo4j ↔ Qdrant
+        context_id = make_context_id(document_id, section_path)
         counts = concept_counts or {}
 
         # Batch upsert

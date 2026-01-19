@@ -327,7 +327,7 @@ class Pass2QualityService:
 
         # Estimer le total de segments (depuis les ProtoConcepts)
         query_total_segments = """
-        MATCH (pc:ProtoConcept {document_id: $doc_id, tenant_id: $tenant_id})
+        MATCH (pc:ProtoConcept {doc_id: $doc_id, tenant_id: $tenant_id})
         RETURN count(DISTINCT pc.section_id) AS total_segments
         """
         results_total = self._execute_query(query_total_segments, {
