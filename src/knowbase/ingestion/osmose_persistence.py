@@ -101,7 +101,7 @@ async def persist_hybrid_anchor_to_neo4j(
         proto_to_canonical: Dict[str, str] = {}
         for cc in canonical_concepts:
             for proto_id in cc.proto_concept_ids:
-                proto_to_canonical[proto_id] = cc.id
+                proto_to_canonical[proto_id] = cc.canonical_id
 
         stats["proto_created"] = _create_proto_concepts(
             neo4j_client, proto_concepts, tenant_id
@@ -169,7 +169,7 @@ def _create_document_node(
 ) -> int:
     """Crée ou met à jour le nœud Document."""
     doc_query = """
-    MERGE (d:Document {document_id: $doc_id, tenant_id: $tenant_id})
+    MERGE (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
     ON CREATE SET
         d.name = $doc_name,
         d.detected_variant = $detected_variant,
@@ -247,7 +247,7 @@ def _create_proto_concepts(
         p.lex_key = proto.lex_key,
         p.definition = proto.definition,
         p.type_heuristic = proto.type_heuristic,
-        p.document_id = proto.document_id,
+        p.doc_id = proto.doc_id,
         p.section_id = proto.section_id,
         p.created_at = datetime(),
         p.extraction_method = 'hybrid_anchor',
@@ -268,12 +268,12 @@ def _create_proto_concepts(
 
     proto_data = [
         {
-            "id": pc.id,
-            "label": pc.label,
-            "lex_key": compute_lex_key(pc.label) if pc.label else "",  # ADR lex_key
+            "id": pc.concept_id,
+            "label": pc.concept_name,
+            "lex_key": compute_lex_key(pc.concept_name) if pc.concept_name else "",  # ADR lex_key
             "definition": pc.definition,
             "type_heuristic": pc.type_heuristic,
-            "document_id": pc.document_id,
+            "doc_id": pc.doc_id,
             "section_id": getattr(pc, 'section_id', None),
             # QW-2: Confidence score from LLM
             "extract_confidence": getattr(pc, 'extract_confidence', 0.5),
@@ -299,18 +299,18 @@ def _create_canonical_concepts(
     """Crée les CanonicalConcept nodes avec stability."""
     canonical_query = """
     UNWIND $canonicals AS cc
-    MERGE (c:CanonicalConcept {canonical_id: cc.id, tenant_id: $tenant_id})
+    MERGE (c:CanonicalConcept {canonical_id: cc.canonical_id, tenant_id: $tenant_id})
     ON CREATE SET
-        c.canonical_name = cc.label,
-        c.canonical_key = toLower(replace(cc.label, ' ', '_')),
-        c.unified_definition = cc.definition_consolidated,
+        c.canonical_name = cc.canonical_name,
+        c.canonical_key = toLower(replace(cc.canonical_name, ' ', '_')),
+        c.unified_definition = cc.unified_definition,
         c.type_fine = cc.type_fine,
         c.stability = cc.stability,
         c.needs_confirmation = cc.needs_confirmation,
         c.status = 'HYBRID_ANCHOR',
         c.created_at = datetime()
     ON MATCH SET
-        c.unified_definition = COALESCE(cc.definition_consolidated, c.unified_definition),
+        c.unified_definition = COALESCE(cc.unified_definition, c.unified_definition),
         c.type_fine = COALESCE(cc.type_fine, c.type_fine),
         c.stability = cc.stability,
         c.needs_confirmation = cc.needs_confirmation,
@@ -320,9 +320,9 @@ def _create_canonical_concepts(
 
     canonical_data = [
         {
-            "id": cc.id,
-            "label": cc.label,
-            "definition_consolidated": cc.definition_consolidated,
+            "canonical_id": cc.canonical_id,
+            "canonical_name": cc.canonical_name,
+            "unified_definition": cc.unified_definition,
             "type_fine": cc.type_fine,
             "stability": cc.stability.value if hasattr(cc.stability, 'value') else str(cc.stability),
             "needs_confirmation": cc.needs_confirmation
@@ -373,7 +373,7 @@ def _create_extracted_from_relations(
     extracted_from_query = """
     UNWIND $assertions AS a
     MATCH (pc:ProtoConcept {concept_id: a.proto_id, tenant_id: $tenant_id})
-    MATCH (d:Document {document_id: $doc_id, tenant_id: $tenant_id})
+    MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
     MERGE (pc)-[r:EXTRACTED_FROM]->(d)
     ON CREATE SET
         r.polarity = a.polarity,
@@ -429,7 +429,7 @@ def _create_extracted_from_relations(
             qualifier_source = "inherited"
 
         assertion_data.append({
-            "proto_id": pc.id,
+            "proto_id": pc.concept_id,
             "polarity": polarity,
             "scope": scope,
             "markers": markers,
@@ -462,7 +462,7 @@ def _create_document_chunks(
     UNWIND $chunks AS chunk
     MERGE (dc:DocumentChunk {chunk_id: chunk.id, tenant_id: $tenant_id})
     ON CREATE SET
-        dc.document_id = chunk.document_id,
+        dc.doc_id = chunk.document_id,
         dc.document_name = chunk.document_name,
         dc.chunk_index = chunk.chunk_index,
         dc.chunk_type = chunk.chunk_type,
@@ -572,7 +572,7 @@ def _create_coverage_chunks(
     UNWIND $chunks AS chunk
     MERGE (dc:DocumentChunk {chunk_id: chunk.chunk_id, tenant_id: $tenant_id})
     ON CREATE SET
-        dc.document_id = chunk.document_id,
+        dc.doc_id = chunk.document_id,
         dc.chunk_type = 'coverage',
         dc.char_start = chunk.char_start,
         dc.char_end = chunk.char_end,
@@ -698,14 +698,14 @@ def _create_anchored_in_to_coverage(
 
         # Récupérer les anchors
         anchors = getattr(proto, 'anchors', []) or []
-        concept_id = getattr(proto, 'concept_id', None) or getattr(proto, 'id', None)
+        concept_id = getattr(proto, 'concept_id', None)
 
         if not concept_id:
             continue
 
         for anchor in anchors:
-            anchor_start = getattr(anchor, 'char_start', None)
-            anchor_end = getattr(anchor, 'char_end', None)
+            anchor_start = getattr(anchor, 'span_start', None)
+            anchor_end = getattr(anchor, 'span_end', None)
             anchor_role = getattr(anchor, 'role', 'mention')
 
             if anchor_start is None or anchor_end is None:
@@ -966,8 +966,8 @@ async def extract_intra_document_relations(
     concepts_for_extraction = []
     for cc in canonical_concepts:
         concept_dict = {
-            "canonical_id": cc.id,
-            "canonical_name": cc.label,
+            "canonical_id": cc.canonical_id,
+            "canonical_name": cc.canonical_name,
             "concept_type": cc.type_fine or "abstract",
             "surface_forms": list(cc.surface_forms) if hasattr(cc, 'surface_forms') and cc.surface_forms else [],
             "proto_concept_ids": list(cc.proto_concept_ids) if hasattr(cc, 'proto_concept_ids') and cc.proto_concept_ids else []
@@ -1184,10 +1184,11 @@ def resolve_section_ids_for_proto_concepts(
     """
     Résout les section_id des ProtoConcepts vers les UUID des SectionContext.
 
-    Pour chaque ProtoConcept avec un anchor SPAN, trouve le section_id UUID
-    correspondant via le DocItem à cette position.
+    Utilise la RECHERCHE TEXTUELLE (concept_name) pour trouver le DocItem
+    correspondant et obtenir son section_id.
 
-    ADR: ADR_COVERAGE_PROPERTY_NOT_NODE - Phase 1
+    ADR: ADR_COVERAGE_PROPERTY_NOT_NODE - Fix 2026-01-16
+    Le matching par position échoue car les coordonnées ne sont pas alignées.
 
     Args:
         proto_concepts: Liste des ProtoConcepts à mettre à jour (in-place)
@@ -1197,30 +1198,81 @@ def resolve_section_ids_for_proto_concepts(
     Returns:
         Nombre de section_id résolus
     """
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.config.settings import get_settings
+
+    settings = get_settings()
     resolved_count = 0
 
+    # Collecter les concept_names à résoudre
+    protos_to_resolve = []
     for proto in proto_concepts:
-        # Skip si pas d'anchor avec position
-        if not hasattr(proto, 'anchors') or not proto.anchors:
-            continue
+        concept_name = getattr(proto, 'concept_name', None)
+        proto_id = getattr(proto, 'concept_id', None)
+        if concept_name and proto_id and len(concept_name) > 2:
+            protos_to_resolve.append({
+                "proto_id": proto_id,
+                "concept_name": concept_name,
+                "proto_obj": proto
+            })
 
-        # Utiliser la position du premier anchor
-        for anchor in proto.anchors:
-            char_start = getattr(anchor, 'char_start', None)
-            if char_start is not None:
-                section_id = lookup_section_id_by_position(
-                    doc_id=doc_id,
-                    char_position=char_start,
-                    tenant_id=tenant_id
-                )
-                if section_id:
-                    proto.section_id = section_id
+    if not protos_to_resolve:
+        return 0
+
+    try:
+        neo4j_client = get_neo4j_client(
+            uri=settings.neo4j_uri,
+            user=settings.neo4j_user,
+            password=settings.neo4j_password,
+            database="neo4j"
+        )
+
+        if not neo4j_client.is_connected():
+            return 0
+
+        # Query textuelle pour trouver les section_id
+        query = """
+        UNWIND $proto_data AS pd
+        MATCH (d:DocItem {doc_id: $doc_id, tenant_id: $tenant_id})
+        WHERE d.text IS NOT NULL
+          AND d.section_id IS NOT NULL
+          AND d.section_id STARTS WITH 'sec_'
+          AND toLower(d.text) CONTAINS toLower(pd.concept_name)
+        WITH pd.proto_id AS proto_id, d.section_id AS section_id,
+             coalesce(d.reading_order_index, 0) AS roi
+        ORDER BY roi
+        WITH proto_id, collect(section_id)[0] AS best_section
+        WHERE best_section IS NOT NULL
+        RETURN proto_id, best_section
+        """
+
+        proto_data = [{"proto_id": p["proto_id"], "concept_name": p["concept_name"]}
+                      for p in protos_to_resolve]
+
+        # Créer un index pour retrouver les objets proto
+        proto_index = {p["proto_id"]: p["proto_obj"] for p in protos_to_resolve}
+
+        with neo4j_client.driver.session(database="neo4j") as session:
+            result = session.run(
+                query,
+                proto_data=proto_data,
+                doc_id=doc_id,
+                tenant_id=tenant_id
+            )
+
+            for record in result:
+                proto_id = record["proto_id"]
+                section_id = record["best_section"]
+                if proto_id in proto_index:
+                    proto_index[proto_id].section_id = section_id
                     resolved_count += 1
-                break  # Utiliser uniquement le premier anchor
+
+    except Exception as e:
+        logger.error(f"[OSMOSE:Persistence] resolve_section_ids_for_proto_concepts failed: {e}")
 
     logger.info(
         f"[OSMOSE:Persistence] Resolved {resolved_count}/{len(proto_concepts)} "
-        f"section_ids to UUID format for doc={doc_id}"
+        f"section_ids via textual matching for doc={doc_id}"
     )
 
     return resolved_count
@@ -1268,7 +1320,7 @@ def anchor_proto_concepts_to_docitems(
         # Collecter les anchors à créer
         anchor_data = []
         for proto in proto_concepts:
-            proto_id = getattr(proto, 'id', None)
+            proto_id = getattr(proto, 'concept_id', None)
             if not proto_id:
                 continue
 
@@ -1280,15 +1332,15 @@ def anchor_proto_concepts_to_docitems(
                 continue
 
             for anchor in anchors:
-                char_start = getattr(anchor, 'char_start', None)
-                char_end = getattr(anchor, 'char_end', None)
+                span_start = getattr(anchor, 'span_start', None)
+                span_end = getattr(anchor, 'span_end', None)
                 role = getattr(anchor, 'role', 'mention')
 
-                if char_start is not None and char_end is not None:
+                if span_start is not None and span_end is not None:
                     anchor_data.append({
                         "proto_id": proto_id,
-                        "char_start": char_start,
-                        "char_end": char_end,
+                        "char_start": span_start,
+                        "char_end": span_end,
                         "role": role,
                     })
 
@@ -1296,42 +1348,268 @@ def anchor_proto_concepts_to_docitems(
             logger.debug(f"[OSMOSE:Persistence] No SPAN anchors to create for doc={doc_id}")
             return 0
 
-        # Query pour créer ANCHORED_IN vers DocItem
-        # Match par position : le DocItem qui contient la position de l'anchor
-        query = """
-        UNWIND $anchors AS anchor
-        MATCH (p:ProtoConcept {concept_id: anchor.proto_id, tenant_id: $tenant_id})
-        MATCH (d:DocItem {doc_id: $doc_id, tenant_id: $tenant_id})
-        WHERE d.charspan_start IS NOT NULL
-          AND d.charspan_end IS NOT NULL
-          AND d.charspan_start <= anchor.char_start
-          AND d.charspan_end >= anchor.char_start
-        WITH p, d, anchor
-        LIMIT 1  // Un seul DocItem par anchor
-        MERGE (p)-[r:ANCHORED_IN]->(d)
-        ON CREATE SET
-            r.char_start = anchor.char_start,
-            r.char_end = anchor.char_end,
-            r.role = anchor.role,
-            r.created_at = datetime(),
-            r.source = 'option_c'
-        RETURN count(r) AS created
-        """
+        # Phase 1: Créer ANCHORED_IN par recherche TEXTUELLE (plus fiable)
+        # Le matching par position échoue souvent car les coordonnées des anchors
+        # ne sont pas alignées avec charspan_docwide des DocItems
+        # ADR_COVERAGE_PROPERTY_NOT_NODE - Fix 2026-01-16
 
-        with neo4j_client.driver.session(database="neo4j") as session:
-            result = session.run(
-                query,
-                anchors=anchor_data,
-                doc_id=doc_id,
-                tenant_id=tenant_id
+        # Collecter les concept_names pour recherche textuelle
+        # ADR_PROPERTY_NAMING_NORMALIZATION: concept_name est maintenant unifié Python ↔ Neo4j
+        proto_names = {}
+        for proto in proto_concepts:
+            proto_id = getattr(proto, 'concept_id', None)
+            concept_name = getattr(proto, 'concept_name', None)
+            section_id = getattr(proto, 'section_id', None)
+            if proto_id and concept_name and len(concept_name) > 2:
+                proto_names[proto_id] = {
+                    "concept_name": concept_name,
+                    "section_id": section_id
+                }
+
+        # ================================================================
+        # Charspan Contract v1: Créer ANCHORED_IN avec spans relatifs
+        # ADR_CHARSPAN_CONTRACT_V1.md
+        # ================================================================
+
+        # Phase 1: Essayer d'utiliser les positions NER PRIMARY (anchors du ProtoConcept)
+        # Si les positions docwide sont disponibles, on peut créer des anchors PRIMARY
+        primary_anchor_data = []
+        fallback_proto_ids = set()
+
+        for proto in proto_concepts:
+            proto_id = getattr(proto, 'concept_id', None)
+            if not proto_id:
+                continue
+
+            anchors = getattr(proto, 'anchors', [])
+            anchor_status = getattr(proto, 'anchor_status', 'NONE')
+
+            # Si SPAN et anchors avec positions, utiliser les positions NER
+            if anchor_status == 'SPAN' and anchors:
+                for anchor in anchors:
+                    span_start_docwide = getattr(anchor, 'span_start', None)
+                    span_end_docwide = getattr(anchor, 'span_end', None)
+                    surface_form = getattr(anchor, 'surface_form', '')
+                    role = getattr(anchor, 'role', 'mention')
+
+                    if span_start_docwide is not None and span_end_docwide is not None:
+                        primary_anchor_data.append({
+                            "proto_id": proto_id,
+                            "char_start_docwide": span_start_docwide,
+                            "char_end_docwide": span_end_docwide,
+                            "quote": surface_form,
+                            "role": role.value if hasattr(role, 'value') else str(role),
+                        })
+                    else:
+                        fallback_proto_ids.add(proto_id)
+            else:
+                # Pas d'anchor SPAN, fallback sur indexOf
+                fallback_proto_ids.add(proto_id)
+
+        created_primary = 0
+
+        # Log diagnostic pour PRIMARY anchors
+        logger.info(
+            f"[OSMOSE:Persistence:PRIMARY] Collected {len(primary_anchor_data)} PRIMARY anchors, "
+            f"{len(fallback_proto_ids)} concepts need fallback for doc={doc_id}"
+        )
+        if primary_anchor_data and len(primary_anchor_data) <= 3:
+            # Log les premiers anchors pour debug
+            for ad in primary_anchor_data[:3]:
+                logger.debug(
+                    f"[OSMOSE:Persistence:PRIMARY] Anchor {ad['proto_id']}: "
+                    f"char_start={ad['char_start_docwide']}, char_end={ad['char_end_docwide']}"
+                )
+
+        # Query PRIMARY: Utiliser les positions docwide NER pour trouver le DocItem
+        if primary_anchor_data:
+            primary_query = """
+            UNWIND $anchor_data AS ad
+            MATCH (p:ProtoConcept {concept_id: ad.proto_id, tenant_id: $tenant_id})
+            WHERE NOT EXISTS { MATCH (p)-[:ANCHORED_IN]->(:DocItem) }
+
+            // Trouver le DocItem contenant la position docwide
+            MATCH (d:DocItem {doc_id: $doc_id, tenant_id: $tenant_id})
+            WHERE d.charspan_start_docwide IS NOT NULL
+              AND d.charspan_end_docwide IS NOT NULL
+              AND d.charspan_start_docwide <= ad.char_start_docwide
+              AND d.charspan_end_docwide >= ad.char_end_docwide
+
+            // Calculer span relatif au DocItem.text
+            WITH p, d, ad,
+                 ad.char_start_docwide - d.charspan_start_docwide AS span_start,
+                 ad.char_end_docwide - d.charspan_start_docwide AS span_end
+
+            // Valider que les spans sont valides
+            WHERE span_start >= 0 AND span_end > span_start AND span_end <= size(d.text)
+
+            // Extraire le texte pour vérification
+            WITH p, d, ad, span_start, span_end,
+                 substring(d.text, span_start, span_end - span_start) AS extracted_text
+
+            // Générer anchor_id unique
+            WITH p, d, ad, span_start, span_end, extracted_text,
+                 p.concept_id + ':' + d.item_id + ':' + toString(span_start) + ':' + toString(span_end) AS anchor_id
+
+            MERGE (p)-[r:ANCHORED_IN {anchor_id: anchor_id}]->(d)
+            ON CREATE SET
+                r.span_start = span_start,
+                r.span_end = span_end,
+                r.surface_form = extracted_text,
+                r.anchor_quality = 'PRIMARY',
+                r.anchor_method = 'ner_extractor',
+                r.created_at = datetime()
+            RETURN count(r) AS created
+            """
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    primary_query,
+                    anchor_data=primary_anchor_data,
+                    doc_id=doc_id,
+                    tenant_id=tenant_id
+                )
+                record = result.single()
+                created_primary = record["created"] if record else 0
+
+            logger.info(
+                f"[OSMOSE:Persistence] Created {created_primary} PRIMARY ANCHORED_IN relations "
+                f"(NER positions) for doc={doc_id}"
             )
-            record = result.single()
-            created = record["created"] if record else 0
+
+        # Phase 2: Fallback indexOf pour les protos sans positions NER valides
+        # Collecter les proto_names pour fallback
+        fallback_proto_data = [
+            {"proto_id": pid, "concept_name": data["concept_name"], "section_id": data["section_id"]}
+            for pid, data in proto_names.items()
+            if pid in fallback_proto_ids or created_primary == 0
+        ]
+
+        created_approx = 0
+
+        # Log diagnostic pour fallback
+        logger.info(
+            f"[OSMOSE:Persistence:APPROX] Collected {len(fallback_proto_data)} concepts for indexOf fallback, "
+            f"proto_names has {len(proto_names)} entries for doc={doc_id}"
+        )
+
+        if fallback_proto_data:
+            # Query APPROX: indexOf fallback pour concepts sans positions NER
+            textual_query = """
+            UNWIND $proto_data AS pd
+            MATCH (p:ProtoConcept {concept_id: pd.proto_id, tenant_id: $tenant_id})
+            WHERE NOT EXISTS { MATCH (p)-[:ANCHORED_IN]->(:DocItem) }
+
+            // Chercher DocItems contenant le concept_name
+            MATCH (d:DocItem {doc_id: $doc_id, tenant_id: $tenant_id})
+            WHERE d.text IS NOT NULL
+              AND d.charspan_start_docwide IS NOT NULL
+              AND toLower(d.text) CONTAINS toLower(pd.concept_name)
+
+            // Calculer span_start relatif au DocItem.text via indexOf
+            WITH p, d, pd,
+                 apoc.text.indexOf(toLower(d.text), toLower(pd.concept_name), 0) AS span_start,
+                 CASE WHEN d.section_id = pd.section_id THEN 0 ELSE 1 END AS section_priority,
+                 coalesce(d.reading_order_index, 0) AS roi
+            WHERE span_start >= 0
+
+            // Calculer span_end
+            WITH p, d, pd, span_start,
+                 span_start + size(pd.concept_name) AS span_end,
+                 section_priority, roi
+            ORDER BY section_priority, roi
+
+            // Prendre le meilleur DocItem pour chaque ProtoConcept
+            WITH p, collect({
+                docitem: d,
+                span_start: span_start,
+                span_end: span_end,
+                concept_name: pd.concept_name
+            })[0] AS best
+            WHERE best IS NOT NULL
+
+            // Créer ANCHORED_IN avec propriétés Contract v1
+            WITH p, best.docitem AS d, best.span_start AS span_start,
+                 best.span_end AS span_end, best.concept_name AS concept_name
+
+            // Générer anchor_id unique
+            WITH p, d, span_start, span_end, concept_name,
+                 p.concept_id + ':' + d.item_id + ':' + toString(span_start) + ':' + toString(span_end) AS anchor_id
+
+            MERGE (p)-[r:ANCHORED_IN {anchor_id: anchor_id}]->(d)
+            ON CREATE SET
+                r.span_start = span_start,
+                r.span_end = span_end,
+                r.surface_form = substring(d.text, span_start, span_end - span_start),
+                r.anchor_quality = 'APPROX',
+                r.anchor_method = 'indexOf_fallback',
+                r.created_at = datetime()
+            RETURN count(r) AS created
+            """
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    textual_query,
+                    proto_data=fallback_proto_data,
+                    doc_id=doc_id,
+                    tenant_id=tenant_id
+                )
+                record = result.single()
+                created_approx = record["created"] if record else 0
+
+            if created_approx > 0:
+                logger.info(
+                    f"[OSMOSE:Persistence] Created {created_approx} APPROX ANCHORED_IN relations "
+                    f"(indexOf fallback) for doc={doc_id}"
+                )
+
+        created = created_primary + created_approx
 
         logger.info(
             f"[OSMOSE:Persistence] Created {created} ANCHORED_IN relations "
-            f"(ProtoConcept → DocItem) for doc={doc_id}"
+            f"(PRIMARY={created_primary}, APPROX={created_approx}) for doc={doc_id}"
         )
+
+        # Phase 3: Synchroniser section_id des ProtoConcepts avec le DocItem ancré
+        if created > 0:
+            sync_query = """
+            MATCH (p:ProtoConcept {tenant_id: $tenant_id})-[:ANCHORED_IN]->(d:DocItem {doc_id: $doc_id})
+            WHERE d.section_id IS NOT NULL
+              AND d.section_id STARTS WITH 'sec_'
+              AND (p.section_id IS NULL OR p.section_id <> d.section_id)
+            SET p.section_id = d.section_id
+            RETURN count(p) AS synced
+            """
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(sync_query, doc_id=doc_id, tenant_id=tenant_id)
+                record = result.single()
+                synced = record["synced"] if record else 0
+                if synced > 0:
+                    logger.info(
+                        f"[OSMOSE:Persistence] Synced {synced} ProtoConcept section_ids "
+                        f"with anchored DocItems for doc={doc_id}"
+                    )
+
+            # Phase 3b: Calculer char_start_docwide sur ProtoConcept (cache dérivé)
+            # Contract v1: docwide = d.charspan_start_docwide + r.span_start
+            charspan_sync_query = """
+            MATCH (p:ProtoConcept {tenant_id: $tenant_id})-[r:ANCHORED_IN]->(d:DocItem {doc_id: $doc_id})
+            WHERE d.charspan_start_docwide IS NOT NULL
+              AND r.span_start IS NOT NULL
+              AND (p.char_start_docwide IS NULL OR p.char_end_docwide IS NULL)
+            SET p.char_start_docwide = d.charspan_start_docwide + r.span_start,
+                p.char_end_docwide = d.charspan_start_docwide + r.span_end
+            RETURN count(p) AS synced_charspans
+            """
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(charspan_sync_query, doc_id=doc_id, tenant_id=tenant_id)
+                record = result.single()
+                synced_charspans = record["synced_charspans"] if record else 0
+                if synced_charspans > 0:
+                    logger.info(
+                        f"[OSMOSE:Persistence] Synced {synced_charspans} ProtoConcept charspans "
+                        f"(char_start_docwide = d.docwide + r.span_start) for doc={doc_id}"
+                    )
 
         return created
 

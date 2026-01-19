@@ -80,8 +80,8 @@ async def enrich_anchors_with_context(
         # Analyser chaque anchor
         for anchor in proto.anchors:
             try:
-                # Extraire le passage (quote) de l'anchor
-                passage = getattr(anchor, 'quote', '')
+                # Extraire le passage (surface_form) de l'anchor
+                passage = getattr(anchor, 'surface_form', '')
                 if not passage:
                     continue
 

@@ -47,6 +47,7 @@ class Pass2JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    SUSPENDED = "suspended"  # vLLM temporairement indisponible, reprise possible
 
 
 @dataclass
@@ -67,6 +68,11 @@ class Pass2JobProgress:
     estimated_remaining_seconds: float = 0
     last_message: str = ""
     errors: List[str] = field(default_factory=list)
+    # Checkpoint pour reprise après suspension (vLLM down)
+    processed_item_ids: List[str] = field(default_factory=list)
+    checkpoint_iteration: int = 0
+    suspended_at: Optional[str] = None
+    suspension_reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -84,6 +90,7 @@ class Pass2JobProgress:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Pass2JobProgress":
         errors = data.get("errors") or []
+        processed_item_ids = data.get("processed_item_ids") or []
         return cls(
             current_phase=data.get("current_phase", ""),
             phase_index=data.get("phase_index", 0),
@@ -99,7 +106,11 @@ class Pass2JobProgress:
             elapsed_seconds=data.get("elapsed_seconds", 0),
             estimated_remaining_seconds=data.get("estimated_remaining_seconds", 0),
             last_message=data.get("last_message", ""),
-            errors=errors
+            errors=errors,
+            processed_item_ids=processed_item_ids,
+            checkpoint_iteration=data.get("checkpoint_iteration", 0),
+            suspended_at=data.get("suspended_at"),
+            suspension_reason=data.get("suspension_reason", "")
         )
 
 
@@ -352,6 +363,82 @@ class Pass2JobManager:
         logger.info(f"[Pass2JobManager] Job {job_id} cancelled")
         return True
 
+    def suspend_job(
+        self,
+        job_id: str,
+        reason: str,
+        processed_item_ids: Optional[List[str]] = None,
+        checkpoint_iteration: int = 0
+    ) -> bool:
+        """
+        Suspend un job avec sauvegarde du checkpoint pour reprise ultérieure.
+
+        Utilisé quand vLLM devient indisponible (Spot interruption, etc.)
+        Le job pourra être repris avec resume_job() une fois vLLM disponible.
+
+        Args:
+            job_id: ID du job à suspendre
+            reason: Raison de la suspension (ex: "vLLM unavailable")
+            processed_item_ids: IDs des items déjà traités (checkpoint)
+            checkpoint_iteration: Numéro de l'itération pour reprise
+
+        Returns:
+            True si le job a été suspendu, False sinon
+        """
+        state = self.get_job(job_id)
+        if not state or state.status not in [Pass2JobStatus.RUNNING]:
+            logger.warning(f"[Pass2JobManager] Cannot suspend job {job_id}: invalid status")
+            return False
+
+        state.status = Pass2JobStatus.SUSPENDED
+        state.progress.suspended_at = datetime.utcnow().isoformat() + "Z"
+        state.progress.suspension_reason = reason
+        state.progress.last_message = f"Suspended: {reason}"
+
+        if processed_item_ids:
+            state.progress.processed_item_ids = processed_item_ids
+        state.progress.checkpoint_iteration = checkpoint_iteration
+
+        self._save_state(state)
+        logger.warning(
+            f"[Pass2JobManager] Job {job_id} SUSPENDED: {reason} "
+            f"(checkpoint: {len(processed_item_ids or [])} items, iteration {checkpoint_iteration})"
+        )
+        return True
+
+    def resume_job(self, job_id: str) -> bool:
+        """
+        Reprend un job suspendu.
+
+        Le job sera remis en status RUNNING avec son checkpoint préservé.
+        Le worker vérifiera le checkpoint pour ne pas retraiter les items déjà traités.
+
+        Args:
+            job_id: ID du job à reprendre
+
+        Returns:
+            True si le job a été repris, False sinon
+        """
+        state = self.get_job(job_id)
+        if not state or state.status != Pass2JobStatus.SUSPENDED:
+            logger.warning(f"[Pass2JobManager] Cannot resume job {job_id}: not suspended")
+            return False
+
+        state.status = Pass2JobStatus.RUNNING
+        state.progress.last_message = f"Resumed from checkpoint (iteration {state.progress.checkpoint_iteration})"
+        self._save_state(state)
+
+        logger.info(
+            f"[Pass2JobManager] Job {job_id} RESUMED from checkpoint "
+            f"({len(state.progress.processed_item_ids)} items already processed)"
+        )
+        return True
+
+    def get_suspended_jobs(self, tenant_id: str = "default") -> List[Pass2JobState]:
+        """Retourne tous les jobs suspendus d'un tenant."""
+        all_jobs = self.list_jobs(tenant_id, limit=100)
+        return [j for j in all_jobs if j.status == Pass2JobStatus.SUSPENDED]
+
     def is_cancelled(self, job_id: str) -> bool:
         """Vérifie si un job a été annulé."""
         state = self.get_job(job_id)
@@ -393,12 +480,17 @@ def execute_pass2_full_job(job_id: str):
     """
     Fonction worker RQ: Exécute Pass 2 complet avec mise à jour progression.
 
+    Gère:
+    - Reprise automatique depuis checkpoint si job suspendu
+    - Suspension si vLLM devient indisponible
+
     Args:
         job_id: ID du job à exécuter
     """
     from knowbase.api.services.pass2_service import Pass2Service, Pass2Result
     from knowbase.ingestion.pass2_orchestrator import Pass2Job, Pass2Stats, Pass2Mode
     from knowbase.ingestion.pass2_orchestrator import Pass2Phase as OrchestratorPhase
+    from knowbase.common.llm_router import VLLMUnavailableError
 
     manager = get_pass2_job_manager()
     state = manager.get_job(job_id)
@@ -411,7 +503,17 @@ def execute_pass2_full_job(job_id: str):
         logger.info(f"[Pass2Worker] Job {job_id} was cancelled, skipping")
         return
 
-    manager.start_job(job_id)
+    # Support reprise depuis état suspendu
+    is_resume = state.status == Pass2JobStatus.SUSPENDED
+    if is_resume:
+        logger.info(
+            f"[Pass2Worker] Resuming SUSPENDED job {job_id} from checkpoint "
+            f"(phase={state.progress.current_phase}, iteration={state.progress.checkpoint_iteration})"
+        )
+        manager.resume_job(job_id)
+        state = manager.get_job(job_id)
+    else:
+        manager.start_job(job_id)
 
     try:
         service = Pass2Service(tenant_id=state.tenant_id)
@@ -525,6 +627,15 @@ def execute_pass2_full_job(job_id: str):
                 "details": result.details
             }
             manager.set_phase_result(job_id, "classify_fine", phase_results["classify_fine"])
+
+            # Si le job a été suspendu (vLLM down), arrêter ici sans marquer comme complet
+            if result.details.get("suspended"):
+                logger.warning(
+                    f"[Pass2Worker] Job {job_id} SUSPENDED during CLASSIFY_FINE. "
+                    f"Will resume when vLLM is available."
+                )
+                return  # Ne pas continuer, le job est en état SUSPENDED
+
             phase_index += 1
         elif not state.skip_classify and total_concepts == 0:
             # Tous les concepts déjà classifiés - skip intelligent
@@ -636,6 +747,11 @@ async def _run_classify_with_progress(
     """
     Exécute CLASSIFY_FINE avec mise à jour progression Redis.
 
+    Gère:
+    - Checkpoint des items traités pour reprise sur incident
+    - Suspension automatique si vLLM devient indisponible
+    - Reprise depuis le dernier checkpoint
+
     Args:
         service: Pass2Service instance
         job_id: ID du job pour suivi progression
@@ -645,14 +761,22 @@ async def _run_classify_with_progress(
     from knowbase.ingestion.pass2_orchestrator import Pass2Job, Pass2Stats, Pass2Mode
     from knowbase.ingestion.pass2_orchestrator import Pass2Phase as OrchestratorPhase
     from knowbase.api.services.pass2_service import Pass2Result
+    from knowbase.common.llm_router import VLLMUnavailableError
 
     start_time = time.time()
     result = Pass2Result(phase="CLASSIFY_FINE")
 
-    total_processed = 0
-    total_updated = 0
-    total_type_changes = 0
-    iteration = 0
+    # Récupérer l'état actuel pour checkpoint (reprise possible)
+    current_state = manager.get_job(job_id)
+
+    # Initialiser depuis checkpoint si reprise
+    processed_item_ids = set(current_state.progress.processed_item_ids if current_state else [])
+    start_iteration = current_state.progress.checkpoint_iteration if current_state else 0
+
+    total_processed = current_state.progress.items_processed if current_state else 0
+    total_updated = current_state.progress.items_updated if current_state else 0
+    total_type_changes = current_state.progress.type_changes if current_state else 0
+    iteration = start_iteration
 
     # Utilise les paramètres du job
     batch_size = state.batch_size
@@ -661,6 +785,12 @@ async def _run_classify_with_progress(
 
     # Limite de sécurité: si process_all=False, une seule itération
     max_iterations = 1000 if process_all else 1
+
+    if start_iteration > 0:
+        logger.info(
+            f"[Pass2Worker] CLASSIFY_FINE resuming from checkpoint: "
+            f"iteration={start_iteration}, processed={len(processed_item_ids)} items"
+        )
 
     try:
         while iteration < max_iterations:
@@ -674,6 +804,11 @@ async def _run_classify_with_progress(
             if document_id:
                 where_clause += " AND c.source_doc_id = $doc_id"
 
+            # Exclure les items déjà traités (checkpoint)
+            exclude_clause = ""
+            if processed_item_ids:
+                exclude_clause = " AND NOT c.canonical_id IN $processed_ids"
+
             # Récupérer les concepts à classifier
             # unified_definition et type_coarse sont stockés sur le CanonicalConcept depuis la promotion
             query = f"""
@@ -681,8 +816,9 @@ async def _run_classify_with_progress(
             {where_clause}
             AND (c.type_fine IS NULL OR c.type_fine = ''
                  OR c.type_fine_justification = 'Fallback to heuristic type')
+            {exclude_clause}
             RETURN c.canonical_id AS id,
-                   c.label AS label,
+                   c.canonical_name AS label,
                    coalesce(c.type_coarse, 'abstract') AS type_heuristic,
                    coalesce(c.unified_definition, '') AS definition
             LIMIT $limit
@@ -691,6 +827,8 @@ async def _run_classify_with_progress(
             params = {"tenant_id": service.tenant_id, "limit": batch_size}
             if document_id:
                 params["doc_id"] = document_id
+            if processed_item_ids:
+                params["processed_ids"] = list(processed_item_ids)
 
             concepts = service._execute_query(query, params)
             if not concepts:
@@ -718,10 +856,36 @@ async def _run_classify_with_progress(
             )
 
             stats = Pass2Stats(document_id=job.document_id)
-            await service._orchestrator._phase_classify_fine(job, stats)
+
+            try:
+                await service._orchestrator._phase_classify_fine(job, stats)
+            except VLLMUnavailableError as e:
+                # vLLM down - suspendre le job avec checkpoint
+                logger.warning(
+                    f"[Pass2Worker] vLLM unavailable during CLASSIFY_FINE: {e}. "
+                    f"Suspending job {job_id} with checkpoint."
+                )
+
+                # Sauvegarder le checkpoint et suspendre
+                manager.suspend_job(
+                    job_id=job_id,
+                    reason=f"vLLM unavailable: {e.vllm_url}",
+                    processed_item_ids=list(processed_item_ids),
+                    checkpoint_iteration=iteration - 1  # Reprendre ce batch
+                )
+
+                result.success = False
+                result.details["suspended"] = True
+                result.details["checkpoint_iteration"] = iteration - 1
+                result.details["processed_item_ids_count"] = len(processed_item_ids)
+                result.errors.append(f"Suspended: vLLM unavailable ({e.vllm_url})")
+                result.execution_time_ms = (time.time() - start_time) * 1000
+                return result
 
             batch_updates = 0
+            batch_item_ids = []
             for concept in job.concepts:
+                batch_item_ids.append(concept["id"])
                 if concept.get("type_fine"):
                     service._execute_query("""
                         MATCH (c:CanonicalConcept {canonical_id: $id, tenant_id: $tenant_id})
@@ -736,6 +900,9 @@ async def _run_classify_with_progress(
                         "justification": concept.get("type_fine_justification", "")
                     })
                     batch_updates += 1
+
+            # Mettre à jour le checkpoint après chaque batch réussi
+            processed_item_ids.update(batch_item_ids)
 
             total_processed += len(concepts)
             total_updated += batch_updates
@@ -754,13 +921,30 @@ async def _run_classify_with_progress(
             "iterations": iteration,
             "type_changes": total_type_changes,
             "batch_size": batch_size,
-            "process_all": process_all
+            "process_all": process_all,
+            "resumed_from_checkpoint": start_iteration > 0
         }
+
+    except VLLMUnavailableError as e:
+        # vLLM down hors de la boucle - suspendre
+        logger.warning(
+            f"[Pass2Worker] vLLM unavailable: {e}. Suspending job {job_id}."
+        )
+        manager.suspend_job(
+            job_id=job_id,
+            reason=f"vLLM unavailable: {e.vllm_url}",
+            processed_item_ids=list(processed_item_ids),
+            checkpoint_iteration=iteration
+        )
+        result.success = False
+        result.details["suspended"] = True
+        result.errors.append(f"Suspended: vLLM unavailable ({e.vllm_url})")
 
     except Exception as e:
         result.success = False
         result.errors.append(str(e))
         manager.update_progress(job_id, error=str(e))
+        logger.exception(f"[Pass2Worker] CLASSIFY_FINE failed: {e}")
 
     result.execution_time_ms = (time.time() - start_time) * 1000
     return result
@@ -1101,7 +1285,135 @@ def enqueue_pass2_processing(
         return None
 
 
+def resume_suspended_jobs(tenant_id: str = "default") -> Dict[str, Any]:
+    """
+    Vérifie si vLLM est disponible et reprend les jobs suspendus.
+
+    Cette fonction peut être appelée:
+    - Périodiquement par un scheduler (ex: toutes les 5 minutes)
+    - Manuellement depuis l'admin
+    - Automatiquement quand un nouveau burst mode est activé
+
+    Args:
+        tenant_id: ID du tenant
+
+    Returns:
+        Stats de reprise avec les jobs re-enqueueed
+    """
+    from knowbase.common.llm_router import get_llm_router
+
+    manager = get_pass2_job_manager()
+    stats = {
+        "success": True,
+        "vllm_available": False,
+        "suspended_jobs_found": 0,
+        "jobs_resumed": 0,
+        "job_ids": [],
+        "errors": []
+    }
+
+    # Vérifier si vLLM est disponible
+    try:
+        router = get_llm_router()
+        # Force refresh du cache Redis
+        router._redis_burst_cache = None
+        redis_state = router._get_vllm_state_from_redis()
+
+        if not redis_state or not redis_state.get("active"):
+            logger.info("[Pass2Jobs] resume_suspended_jobs: No burst mode configured")
+            return stats
+
+        if not redis_state.get("healthy"):
+            logger.info(
+                f"[Pass2Jobs] resume_suspended_jobs: vLLM still unavailable "
+                f"({redis_state.get('vllm_url')})"
+            )
+            return stats
+
+        stats["vllm_available"] = True
+        vllm_url = redis_state.get("vllm_url")
+        logger.info(f"[Pass2Jobs] vLLM is available at {vllm_url}, checking for suspended jobs...")
+
+    except Exception as e:
+        logger.warning(f"[Pass2Jobs] Error checking vLLM availability: {e}")
+        stats["errors"].append(str(e))
+        return stats
+
+    # Récupérer les jobs suspendus
+    suspended_jobs = manager.get_suspended_jobs(tenant_id)
+    stats["suspended_jobs_found"] = len(suspended_jobs)
+
+    if not suspended_jobs:
+        logger.info("[Pass2Jobs] No suspended jobs to resume")
+        return stats
+
+    # Re-enqueue chaque job suspendu
+    settings = get_settings()
+    redis_url = f"redis://{settings.redis_host}:{settings.redis_port}/0"
+    redis_conn = redis.from_url(redis_url)
+    queue = Queue("ingestion", connection=redis_conn)
+
+    for job_state in suspended_jobs:
+        try:
+            # Enqueue la reprise du job (le worker appellera resume_job via execute_pass2_full_job)
+            queue.enqueue(
+                execute_pass2_full_job,
+                job_state.job_id,
+                job_timeout="4h",
+                result_ttl=86400,
+                job_id=f"rq_{job_state.job_id}_resume"
+            )
+
+            stats["jobs_resumed"] += 1
+            stats["job_ids"].append(job_state.job_id)
+
+            logger.info(
+                f"[Pass2Jobs] Re-enqueued suspended job {job_state.job_id} for resume "
+                f"(checkpoint: {len(job_state.progress.processed_item_ids)} items processed)"
+            )
+
+        except Exception as e:
+            logger.error(f"[Pass2Jobs] Failed to re-enqueue job {job_state.job_id}: {e}")
+            stats["errors"].append(f"{job_state.job_id}: {str(e)}")
+
+    logger.info(
+        f"[Pass2Jobs] Resume complete: {stats['jobs_resumed']}/{stats['suspended_jobs_found']} "
+        f"jobs re-enqueued"
+    )
+
+    return stats
+
+
+def check_vllm_and_resume_jobs(tenant_id: str = "default") -> Dict[str, Any]:
+    """
+    Job RQ: Vérifie périodiquement vLLM et reprend les jobs suspendus.
+
+    À planifier avec RQ-scheduler (ex: toutes les 2 minutes).
+
+    Args:
+        tenant_id: ID du tenant
+
+    Returns:
+        Stats d'exécution
+    """
+    logger.debug("[Pass2Jobs] Periodic vLLM check and resume...")
+    return resume_suspended_jobs(tenant_id)
+
+
 __all__ = [
+    # Job Status and State
+    "Pass2JobStatus",
+    "Pass2JobProgress",
+    "Pass2JobState",
+    "Pass2JobManager",
+    "get_pass2_job_manager",
+    # Main job functions
+    "execute_pass2_full_job",
+    "enqueue_pass2_full_job",
+    # Resume/suspension handling
+    "resume_suspended_jobs",
+    "check_vllm_and_resume_jobs",
+    # Legacy functions
     "process_pass2_queue",
     "run_pass2_for_document",
     "scheduled_pass2_consolidation",

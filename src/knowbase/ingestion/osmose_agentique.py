@@ -275,8 +275,8 @@ class OsmoseAgentiqueService:
             # Analyser chaque anchor
             for anchor in proto.anchors:
                 try:
-                    # Extraire le passage (quote) de l'anchor
-                    passage = getattr(anchor, 'quote', '')
+                    # Extraire le passage (surface_form) de l'anchor
+                    passage = getattr(anchor, 'surface_form', '')
                     if not passage:
                         continue
 
@@ -1046,11 +1046,11 @@ class OsmoseAgentiqueService:
             # Étape 4: Classification heuristique (Pass 1)
             classifier = self._get_heuristic_classifier()
             for pc in proto_concepts:
-                quote = pc.anchors[0].quote if pc.anchors else ""
+                surface = pc.anchors[0].surface_form if pc.anchors else ""
                 classification = classifier.classify(
-                    label=pc.label,
+                    label=pc.concept_name,
                     context=pc.definition or "",
-                    quote=quote
+                    quote=surface
                 )
                 pc.type_heuristic = classification.concept_type.value
 
@@ -1086,12 +1086,12 @@ class OsmoseAgentiqueService:
             for pc in proto_concepts:
                 if pc.anchors:  # Seulement si le concept a des anchors valides
                     all_anchors.extend(pc.anchors)
-                    concept_labels[pc.id] = pc.label
+                    concept_labels[pc.concept_id] = pc.concept_name
 
             # 2026-01: DEBUG - Log plage des anchors collectés
             if all_anchors:
-                anchor_min = min(a.char_start for a in all_anchors)
-                anchor_max = max(a.char_end for a in all_anchors)
+                anchor_min = min(a.span_start for a in all_anchors)
+                anchor_max = max(a.span_end for a in all_anchors)
                 logger.info(
                     f"[OSMOSE:HybridAnchor:DEBUG] Anchors collected: {len(all_anchors)} "
                     f"covering [{anchor_min}-{anchor_max}], document length={len(text_content)}"
@@ -1216,14 +1216,14 @@ class OsmoseAgentiqueService:
                 # On passe les ProtoConcepts pour référence (optionnel)
                 protos_for_pass2 = [
                     {
-                        "id": getattr(proto, 'id', ''),
-                        "label": getattr(proto, 'label', ''),
+                        "concept_id": getattr(proto, 'concept_id', ''),
+                        "concept_name": getattr(proto, 'concept_name', ''),
                         "definition": getattr(proto, 'definition', ''),
                         "type_heuristic": getattr(proto, 'type_heuristic', 'abstract'),
                         "section_id": getattr(proto, 'section_id', None),
                     }
                     for proto in proto_concepts
-                    if getattr(proto, 'id', None)  # Filtrer les protos sans id
+                    if getattr(proto, 'concept_id', None)  # Filtrer les protos sans concept_id
                 ]
 
                 # Planifier Pass 2

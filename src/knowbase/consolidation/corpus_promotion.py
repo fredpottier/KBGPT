@@ -294,6 +294,121 @@ class CorpusPromotionEngine:
         )
 
     # =========================================================================
+    # ANCHORED_IN Fallback (Option C)
+    # =========================================================================
+
+    def ensure_anchored_in_relations(self, document_id: str) -> int:
+        """
+        Crée les relations ANCHORED_IN manquantes pour les ProtoConcepts du document.
+
+        Cette méthode est un fallback robuste qui s'exécute au début de Pass 2.0.
+        Elle crée les ANCHORED_IN pour tous les ProtoConcepts qui n'en ont pas,
+        en utilisant une correspondance textuelle entre concept_name et DocItem.text.
+
+        ADR: ADR_COVERAGE_PROPERTY_NOT_NODE - Option C Fallback
+
+        Args:
+            document_id: ID du document
+
+        Returns:
+            Nombre de relations ANCHORED_IN créées
+        """
+        # Query: Créer ANCHORED_IN pour ProtoConcepts sans relation
+        # Utilise indexOf pour trouver la position du concept_name dans DocItem.text
+        create_query = """
+        MATCH (p:ProtoConcept {doc_id: $doc_id, tenant_id: $tenant_id})
+        WHERE NOT EXISTS { (p)-[:ANCHORED_IN]->(:DocItem) }
+          AND p.anchor_status = 'SPAN'
+          AND p.concept_name IS NOT NULL
+          AND size(p.concept_name) > 2
+
+        WITH p, p.concept_name AS concept_name, p.section_id AS proto_section_id
+
+        MATCH (d:DocItem {doc_id: $doc_id, tenant_id: $tenant_id})
+        WHERE d.text IS NOT NULL
+          AND d.charspan_start_docwide IS NOT NULL
+          AND toLower(d.text) CONTAINS toLower(concept_name)
+
+        WITH p, d, concept_name, proto_section_id,
+             apoc.text.indexOf(toLower(d.text), toLower(concept_name), 0) AS span_start,
+             CASE WHEN d.section_id = proto_section_id THEN 0 ELSE 1 END AS section_priority,
+             coalesce(d.reading_order_index, 0) AS roi
+        WHERE span_start >= 0
+
+        WITH p, d, concept_name, span_start,
+             span_start + size(concept_name) AS span_end,
+             section_priority, roi
+        ORDER BY section_priority, roi
+
+        WITH p, collect({
+            docitem: d,
+            span_start: span_start,
+            span_end: span_end,
+            concept_name: concept_name
+        })[0] AS best
+        WHERE best IS NOT NULL
+
+        WITH p, best.docitem AS d, best.span_start AS span_start,
+             best.span_end AS span_end, best.concept_name AS concept_name
+
+        WITH p, d, span_start, span_end, concept_name,
+             p.concept_id + ':' + d.item_id + ':' + toString(span_start) + ':' + toString(span_end) AS anchor_id
+
+        MERGE (p)-[r:ANCHORED_IN {anchor_id: anchor_id}]->(d)
+        ON CREATE SET
+            r.span_start = span_start,
+            r.span_end = span_end,
+            r.surface_form = substring(d.text, span_start, span_end - span_start),
+            r.anchor_quality = 'APPROX',
+            r.anchor_method = 'pass2_fallback',
+            r.created_at = datetime()
+        RETURN count(r) AS created
+        """
+
+        try:
+            with self.neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    create_query,
+                    doc_id=document_id,
+                    tenant_id=self.tenant_id,
+                )
+                record = result.single()
+                created = record["created"] if record else 0
+
+            if created > 0:
+                logger.info(
+                    f"[OSMOSE:CorpusPromotion] Created {created} ANCHORED_IN relations "
+                    f"(fallback) for document {document_id}"
+                )
+
+                # Synchroniser char_start_docwide sur ProtoConcepts
+                sync_query = """
+                MATCH (p:ProtoConcept {tenant_id: $tenant_id})-[r:ANCHORED_IN]->(d:DocItem {doc_id: $doc_id})
+                WHERE d.charspan_start_docwide IS NOT NULL
+                  AND r.span_start IS NOT NULL
+                  AND (p.char_start_docwide IS NULL OR p.char_end_docwide IS NULL)
+                SET p.char_start_docwide = d.charspan_start_docwide + r.span_start,
+                    p.char_end_docwide = d.charspan_start_docwide + r.span_end
+                RETURN count(p) AS synced
+                """
+                with self.neo4j_client.driver.session(database="neo4j") as session:
+                    result = session.run(sync_query, doc_id=document_id, tenant_id=self.tenant_id)
+                    record = result.single()
+                    synced = record["synced"] if record else 0
+                    if synced > 0:
+                        logger.debug(
+                            f"[OSMOSE:CorpusPromotion] Synced {synced} ProtoConcept charspans"
+                        )
+
+            return created
+
+        except Exception as e:
+            logger.warning(
+                f"[OSMOSE:CorpusPromotion] ANCHORED_IN fallback failed for {document_id}: {e}"
+            )
+            return 0
+
+    # =========================================================================
     # Chargement Neo4j
     # =========================================================================
 
@@ -308,7 +423,7 @@ class CorpusPromotionEngine:
             Liste de dicts avec propriétés du ProtoConcept (incluant lex_key si présent)
         """
         query = """
-        MATCH (p:ProtoConcept {tenant_id: $tenant_id, document_id: $document_id})
+        MATCH (p:ProtoConcept {tenant_id: $tenant_id, doc_id: $document_id})
         WHERE NOT (p)-[:INSTANCE_OF]->(:CanonicalConcept)
         OPTIONAL MATCH (p)-[a:ANCHORED_IN]->(dc:DocumentChunk)
         WITH p, collect(DISTINCT dc.section_path) AS sections,
@@ -326,7 +441,7 @@ class CorpusPromotionEngine:
                p.dominant_zone AS dominant_zone,
                sections,
                anchor_roles,
-               p.document_id AS document_id
+               p.doc_id AS document_id
         """
 
         with self.neo4j_client.driver.session(database="neo4j") as session:
@@ -362,9 +477,9 @@ class CorpusPromotionEngine:
         query = """
         MATCH (p:ProtoConcept {tenant_id: $tenant_id})
         WHERE p.lex_key = $lex_key
-          AND p.document_id <> $exclude_document_id
+          AND p.doc_id <> $exclude_document_id
           AND NOT (p)-[:INSTANCE_OF]->(:CanonicalConcept)
-        RETURN collect(DISTINCT p.document_id) AS document_ids
+        RETURN collect(DISTINCT p.doc_id) AS document_ids
         """
 
         with self.neo4j_client.driver.session(database="neo4j") as session:
@@ -700,7 +815,7 @@ class CorpusPromotionEngine:
         })
         ON CREATE SET
             cc.canonical_id = $canonical_id,
-            cc.label = $label,
+            cc.canonical_name = $label,
             cc.unified_definition = $unified_definition,
             cc.type_coarse = $type_coarse,
             cc.stability = $stability,
@@ -860,7 +975,7 @@ class CorpusPromotionEngine:
         query = """
         MATCH (p:ProtoConcept {tenant_id: $tenant_id})
         WHERE p.lex_key = $lex_key
-          AND p.document_id <> $exclude_document_id
+          AND p.doc_id <> $exclude_document_id
           AND NOT (p)-[:INSTANCE_OF]->(:CanonicalConcept)
         MATCH (cc:CanonicalConcept {canonical_id: $canonical_id, tenant_id: $tenant_id})
         CREATE (p)-[:INSTANCE_OF {created_at: datetime(), linked_by: 'corpus_promotion'}]->(cc)
@@ -881,16 +996,17 @@ class CorpusPromotionEngine:
             if linked > 0:
                 mentioned_query = """
                 MATCH (p:ProtoConcept {tenant_id: $tenant_id})-[:INSTANCE_OF]->(cc:CanonicalConcept {canonical_id: $canonical_id})
-                WHERE p.document_id <> $exclude_document_id
+                WHERE p.doc_id <> $exclude_document_id
                   AND (p.section_id IS NOT NULL OR p.context_id IS NOT NULL)
 
                 // Priorité: section_id UUID (sec_*), sinon context_id
-                WITH cc, DISTINCT
+                WITH cc,
                     CASE
                         WHEN p.section_id IS NOT NULL AND p.section_id STARTS WITH 'sec_'
                         THEN p.section_id
                         ELSE p.context_id
                     END AS section_key
+                WITH DISTINCT cc, section_key
 
                 // Matcher SectionContext par section_id OU context_id
                 OPTIONAL MATCH (s1:SectionContext {section_id: section_key, tenant_id: $tenant_id})
@@ -953,6 +1069,15 @@ class CorpusPromotionEngine:
         logger.info(
             f"[OSMOSE:CorpusPromotion] Starting Pass 2.0 for document {document_id}"
         )
+
+        # 0. Fallback: Créer ANCHORED_IN manquantes (Option C)
+        # ADR_COVERAGE_PROPERTY_NOT_NODE: S'assure que tous les ProtoConcepts
+        # ont une relation ANCHORED_IN vers DocItem avant la promotion
+        anchored_created = self.ensure_anchored_in_relations(document_id)
+        if anchored_created > 0:
+            logger.info(
+                f"[OSMOSE:CorpusPromotion] Fallback: {anchored_created} ANCHORED_IN created"
+            )
 
         # 1. Charger ProtoConcepts non-promus
         protos = self.load_unlinked_proto_concepts(document_id)
@@ -1047,7 +1172,7 @@ class CorpusPromotionEngine:
         query = """
         MATCH (p:ProtoConcept {tenant_id: $tenant_id})
         WHERE NOT (p)-[:INSTANCE_OF]->(:CanonicalConcept)
-        RETURN DISTINCT p.document_id AS document_id, count(p) AS proto_count
+        RETURN DISTINCT p.doc_id AS document_id, count(p) AS proto_count
         ORDER BY proto_count DESC
         """
 

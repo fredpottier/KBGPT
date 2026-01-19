@@ -185,11 +185,12 @@ class CorpusERPipeline:
                 f"mutual={stats.candidates_after_mutual}"
             )
 
-            # Step 6.5: LLM Merge Gate V1 - Filter bad merges
+            # Step 6.5: LLM Merge Gate V1 - Filter bad merges (PARALLEL)
             if self.llm_gate.config.enabled and pruned:
-                gate_result = self.llm_gate.run(
+                gate_result = self.llm_gate.run_async_sync(
                     candidates=[{"id_a": c.id_a, "id_b": c.id_b} for c in pruned],
-                    concepts_cache=self._concepts_cache
+                    concepts_cache=self._concepts_cache,
+                    max_concurrent=8  # 8 batches LLM en parallèle
                 )
 
                 # Filtrer les paires bloquées par le LLM (DISTINCT avec haute confiance)
@@ -252,6 +253,7 @@ class CorpusERPipeline:
         """Load active (non-merged) CanonicalConcepts."""
         limit_clause = f"LIMIT {limit}" if limit else ""
 
+        # ADR_PROPERTY_NAMING_NORMALIZATION 2026-01-19: canonical_name is now the standard property
         query = f"""
         MATCH (c:CanonicalConcept {{tenant_id: $tenant_id}})
         WHERE c.er_status IS NULL OR c.er_status = 'STANDALONE'

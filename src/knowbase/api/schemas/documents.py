@@ -30,7 +30,7 @@ class DocumentType(str, Enum):
 
 class DocumentBase(BaseModel):
     """Base document (champs communs)."""
-    title: str = Field(..., min_length=1, max_length=500, description="Titre du document")
+    name: str = Field(..., min_length=1, max_length=500, description="Nom du document")
     source_path: str = Field(..., description="Chemin source unique (ex: /data/docs_in/budget_2024.pdf)")
     document_type: DocumentType = Field(default=DocumentType.UNKNOWN, description="Type de document")
     tenant_id: str = Field(default="default", description="ID tenant pour isolation multi-tenant")
@@ -44,7 +44,7 @@ class DocumentCreate(DocumentBase):
 
 class DocumentUpdate(BaseModel):
     """Mise à jour document (champs optionnels)."""
-    title: Optional[str] = Field(None, min_length=1, max_length=500)
+    name: Optional[str] = Field(None, min_length=1, max_length=500)
     description: Optional[str] = Field(None, max_length=2000)
     status: Optional[DocumentStatus] = None
     metadata: Optional[Dict[str, Any]] = None
@@ -52,7 +52,7 @@ class DocumentUpdate(BaseModel):
 
 class DocumentResponse(DocumentBase):
     """Response document complète."""
-    document_id: str = Field(..., description="UUID unique du document")
+    doc_id: str = Field(..., description="UUID unique du document")
     description: Optional[str] = None
     status: DocumentStatus = Field(default=DocumentStatus.ACTIVE)
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -77,7 +77,7 @@ class DocumentVersionBase(BaseModel):
 
 class DocumentVersionCreate(DocumentVersionBase):
     """Création nouvelle version."""
-    document_id: str = Field(..., description="ID du document parent")
+    doc_id: str = Field(..., description="ID du document parent")
     checksum: str = Field(..., description="SHA256 checksum du contenu (anti-duplicatas)")
 
     # Metadata extraction
@@ -117,7 +117,7 @@ class DocumentVersionUpdate(BaseModel):
 class DocumentVersionResponse(DocumentVersionBase):
     """Response version complète."""
     version_id: str = Field(..., description="UUID unique de la version")
-    document_id: str
+    doc_id: str
     checksum: str
 
     # Metadata
@@ -160,15 +160,15 @@ class DocumentLineageNode(BaseModel):
 
 class DocumentLineageResponse(BaseModel):
     """Response lineage complet d'un document."""
-    document_id: str
-    document_title: str
+    doc_id: str
+    document_name: str
     versions: List[DocumentLineageNode] = Field(default_factory=list, description="Versions ordonnées chronologiquement")
     total_versions: int = 0
 
 
 class DocumentVersionComparison(BaseModel):
     """Comparaison entre 2 versions."""
-    document_id: str
+    doc_id: str
 
     # Version 1 (ancienne)
     version_1_id: str
@@ -202,7 +202,7 @@ class DocumentQueryFilters(BaseModel):
 
 class DocumentVersionQueryFilters(BaseModel):
     """Filtres pour requêtes versions."""
-    document_id: Optional[str] = None
+    doc_id: Optional[str] = None
     is_latest: Optional[bool] = None
     effective_date_from: Optional[datetime] = None
     effective_date_to: Optional[datetime] = None

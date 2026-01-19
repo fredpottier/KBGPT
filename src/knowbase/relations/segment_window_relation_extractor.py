@@ -894,7 +894,7 @@ def get_concept_labels(
         query = """
         UNWIND $proto_ids AS pid
         MATCH (pc:ProtoConcept {concept_id: pid, tenant_id: $tenant_id})
-        RETURN pid AS proto_id, pc.label AS label
+        RETURN pid AS proto_id, pc.concept_name AS label
         """
 
         database = getattr(neo4j_client, 'database', 'neo4j')

@@ -612,7 +612,7 @@ class Pass2Orchestrator:
             # Pour l'extraction de Topics (H1/H2), c'est suffisant car les headers
             # sont généralement au début des chunks
             query_chunks = """
-            MATCH (dc:DocumentChunk {document_id: $document_id, tenant_id: $tenant_id})
+            MATCH (dc:DocumentChunk {doc_id: $document_id, tenant_id: $tenant_id})
             RETURN dc.text_preview AS text, dc.chunk_index AS idx
             ORDER BY dc.chunk_index
             """
@@ -844,7 +844,7 @@ class Pass2Orchestrator:
 
                 # Fallback: DocumentChunks (legacy)
                 legacy_query = """
-                MATCH (dc:DocumentChunk {document_id: $document_id, tenant_id: $tenant_id})
+                MATCH (dc:DocumentChunk {doc_id: $document_id, tenant_id: $tenant_id})
                 RETURN dc.chunk_id AS segment_id,
                        dc.text_preview AS text,
                        dc.section_id AS section_id,
@@ -905,7 +905,7 @@ class Pass2Orchestrator:
 
         try:
             query = """
-            MATCH (p:ProtoConcept {document_id: $document_id, tenant_id: $tenant_id})
+            MATCH (p:ProtoConcept {doc_id: $document_id, tenant_id: $tenant_id})
                   -[:ANCHORED_IN]->(dc:DocumentChunk)
             RETURN p.concept_id AS concept_id, collect(DISTINCT dc.chunk_id) AS segment_ids
             """
@@ -1311,7 +1311,7 @@ Return JSON with "relations" array."""
             UNWIND $concept_ids AS cid
             MATCH (c:CanonicalConcept {canonical_id: cid, tenant_id: $tenant_id})
             OPTIONAL MATCH (c)<-[:INSTANCE_OF]-(p:ProtoConcept)
-            WITH c, count(DISTINCT p.document_id) AS doc_freq
+            WITH c, count(DISTINCT p.doc_id) AS doc_freq
             SET c.document_frequency = doc_freq,
                 c.corpus_updated_at = datetime()
             RETURN count(c) AS updated

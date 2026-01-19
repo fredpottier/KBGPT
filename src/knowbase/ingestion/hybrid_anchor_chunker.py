@@ -557,8 +557,8 @@ class HybridAnchorChunker:
             )
 
         for anchor in anchors:
-            anchor_start = anchor.char_start
-            anchor_end = anchor.char_end
+            anchor_start = anchor.span_start
+            anchor_end = anchor.span_end
             mapped = False
 
             for i, chunk in enumerate(chunks):
@@ -622,8 +622,8 @@ class HybridAnchorChunker:
 
         for anchor in anchors:
             # Recalculer span relatif au chunk
-            relative_start = max(0, anchor.char_start - chunk_start)
-            relative_end = anchor.char_end - chunk_start
+            relative_start = max(0, anchor.span_start - chunk_start)
+            relative_end = anchor.span_end - chunk_start
 
             # Payload minimal (Invariant d'Architecture ADR)
             anchored_concepts.append({

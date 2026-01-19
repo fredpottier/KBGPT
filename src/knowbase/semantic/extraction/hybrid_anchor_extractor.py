@@ -381,8 +381,8 @@ class HybridAnchorExtractor:
             anchor = resolution.anchor
             # Ajuster positions pour être globales au document
             if char_offset > 0:
-                anchor.char_start += char_offset
-                anchor.char_end += char_offset
+                anchor.span_start += char_offset
+                anchor.span_end += char_offset
             anchors = [anchor]
 
         # Log selon le statut
@@ -400,11 +400,11 @@ class HybridAnchorExtractor:
 
         # Créer ProtoConcept avec diagnostics d'ancrage
         proto_concept = ProtoConcept(
-            id=proto_id,
-            label=concept_data["label"],
+            concept_id=proto_id,
+            concept_name=concept_data["label"],
             definition=concept_data.get("definition", ""),
             type_heuristic=concept_data.get("type_heuristic", "abstract"),
-            document_id=document_id,
+            doc_id=document_id,
             section_id=section_id,
             embedding=None,  # Calculé après en batch
             anchors=anchors,

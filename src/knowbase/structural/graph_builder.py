@@ -703,13 +703,13 @@ def convert_chunks_for_relation_extraction(
     proto_by_surface: Dict[str, List[str]] = {}  # surface_form → proto_ids
 
     for proto in proto_concepts:
-        proto_id = getattr(proto, 'id', None) or getattr(proto, 'concept_id', None)
+        proto_id = getattr(proto, 'concept_id', None)
         if not proto_id:
             continue
 
         # Collecter toutes les surface forms
         forms = set()
-        label = getattr(proto, 'label', None) or getattr(proto, 'concept_name', '')
+        label = getattr(proto, 'concept_name', '')
         if label:
             forms.add(label.lower())
 
@@ -721,9 +721,9 @@ def convert_chunks_for_relation_extraction(
         # Ajouter depuis les anchors si disponibles
         if hasattr(proto, 'anchors') and proto.anchors:
             for anchor in proto.anchors:
-                quote = getattr(anchor, 'quote', '')
-                if quote and len(quote) < 100:  # Éviter les quotes trop longues
-                    forms.add(quote.lower())
+                surface_form = getattr(anchor, 'surface_form', '')
+                if surface_form and len(surface_form) < 100:  # Éviter les quotes trop longues
+                    forms.add(surface_form.lower())
 
         proto_surface_forms[proto_id] = list(forms)
 

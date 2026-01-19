@@ -145,11 +145,11 @@ def create_anchor_with_fuzzy_match(
     anchor = Anchor(
         concept_id=concept_id,
         chunk_id=chunk_id,
-        quote=match_result.matched_text,
+        surface_form=match_result.matched_text,
         role=anchor_role,
         confidence=match_result.score / 100.0,
-        char_start=match_result.start,
-        char_end=match_result.end,
+        span_start=match_result.start,
+        span_end=match_result.end,
         approximate=approximate,
         section_id=section_id
     )
@@ -256,11 +256,11 @@ def resolve_anchor_with_diagnostics(
     anchor = Anchor(
         concept_id=concept_id,
         chunk_id=chunk_id,
-        quote=match_result.matched_text,
+        surface_form=match_result.matched_text,
         role=anchor_role,
         confidence=match_result.score / 100.0,
-        char_start=match_result.start,
-        char_end=match_result.end,
+        span_start=match_result.start,
+        span_end=match_result.end,
         approximate=approximate,
         section_id=section_id
     )
@@ -374,9 +374,9 @@ def create_anchor_payload(anchor: Anchor, label: str) -> AnchorPayload:
     """
     return AnchorPayload(
         concept_id=anchor.concept_id,
-        label=label,
+        concept_name=label,
         role=anchor.role.value,
-        span=[anchor.char_start, anchor.char_end]
+        span=[anchor.span_start, anchor.span_end]
     )
 
 
