@@ -70,6 +70,89 @@ class ExtractionMethod(str, Enum):
     INFERRED = "inferred"  # Inférence transitive
 
 
+# =============================================================================
+# ADR Relations Discursivement Déterminées - Enums
+# =============================================================================
+
+class AssertionKind(str, Enum):
+    """
+    Mode d'obtention d'une assertion.
+
+    Ref: ADR_DISCURSIVE_RELATIONS.md
+
+    - EXPLICIT: la relation est directement exprimée comme énoncé relationnel dans le texte
+    - DISCURSIVE: la relation est reconstructible par un lecteur rigoureux à partir des
+                  preuves fournies, sans connaissance externe, inférence transitive,
+                  ou complétion causale
+    """
+    EXPLICIT = "EXPLICIT"      # Relation directement exprimée
+    DISCURSIVE = "DISCURSIVE"  # Reconstructible sans ajout externe
+
+
+class DiscursiveBasis(str, Enum):
+    """
+    Base textuelle rendant une assertion discursive déterminable.
+
+    Les assertions discursives DOIVENT déclarer la base textuelle qui les rend déterminables.
+
+    Bases déterministes fortes (→ STRICT): ALTERNATIVE, DEFAULT, EXCEPTION
+    Bases moins déterministes (→ STRICT si bundle fort, sinon EXTENDED): SCOPE, COREF, ENUMERATION
+
+    Ref: ADR_DISCURSIVE_RELATIONS.md
+    """
+    ALTERNATIVE = "ALTERNATIVE"   # "X ou Y" explicite (or, either...or)
+    DEFAULT = "DEFAULT"           # Comportement par défaut (by default, par défaut)
+    EXCEPTION = "EXCEPTION"       # "sauf si", "à moins que" (unless, except)
+    SCOPE = "SCOPE"               # Maintien de portée entre spans
+    COREF = "COREF"               # Résolution référentielle (pronoms)
+    ENUMERATION = "ENUMERATION"   # Listes explicites
+
+
+class DiscursiveAbstainReason(str, Enum):
+    """
+    Raison structurée pour un ABSTAIN sur une assertion discursive.
+
+    Tout ABSTAIN doit être motivé par une raison structurée pour la gouvernance.
+
+    Ref: ADR_DISCURSIVE_RELATIONS.md
+    """
+    WEAK_BUNDLE = "WEAK_BUNDLE"                     # Bundle trop court/peu diversifié
+    SCOPE_BREAK = "SCOPE_BREAK"                     # Rupture de portée référentielle
+    COREF_UNRESOLVED = "COREF_UNRESOLVED"           # Coréférence non résolue
+    TYPE2_RISK = "TYPE2_RISK"                       # Risque de relation déduite (Type 2)
+    WHITELIST_VIOLATION = "WHITELIST_VIOLATION"    # RelationType interdit pour DISCURSIVE
+    AMBIGUOUS_PREDICATE = "AMBIGUOUS_PREDICATE"    # Prédicat ambigu
+
+
+class SemanticGrade(str, Enum):
+    """
+    Grade indiquant la nature des preuves d'une SemanticRelation.
+
+    Purement descriptif - n'implique aucune hiérarchie de fiabilité.
+    Indique l'origine des preuves, pas leur qualité.
+
+    Ref: ADR_DISCURSIVE_RELATIONS.md
+    """
+    EXPLICIT = "EXPLICIT"      # Uniquement des preuves EXPLICIT
+    DISCURSIVE = "DISCURSIVE"  # Uniquement des preuves DISCURSIVE
+    MIXED = "MIXED"            # Combinaison EXPLICIT + DISCURSIVE
+
+
+class DefensibilityTier(str, Enum):
+    """
+    Tier de défendabilité d'une relation pour le filtrage runtime.
+
+    STRICT ≠ EXPLICIT. Le terme "Strict" réfère à la défendabilité épistémique,
+    pas à la méthode d'extraction. Une traversée Strict inclut toute relation dont
+    l'existence est pleinement défendable à partir du texte.
+
+    Ref: ADR_DISCURSIVE_RELATIONS.md
+    """
+    STRICT = "STRICT"           # Utilisable en mode strict (production)
+    EXTENDED = "EXTENDED"       # Utilisable en mode élargi (exploration)
+    EXPERIMENTAL = "EXPERIMENTAL"  # Réservé (INFERRED, hors scope V1)
+
+
 class RelationStrength(str, Enum):
     """Force de la relation"""
     WEAK = "weak"
@@ -366,6 +449,23 @@ class RawAssertion(BaseModel):
     # Flags sémantiques
     flags: RawAssertionFlags = Field(default_factory=RawAssertionFlags)
 
+    # ==========================================================================
+    # ADR Relations Discursivement Déterminées - Champs
+    # ==========================================================================
+
+    assertion_kind: AssertionKind = Field(
+        default=AssertionKind.EXPLICIT,
+        description="Mode d'obtention: EXPLICIT (direct) ou DISCURSIVE (reconstructible)"
+    )
+    discursive_basis: List[DiscursiveBasis] = Field(
+        default_factory=list,
+        description="Base(s) textuelle(s) rendant l'assertion discursive déterminable"
+    )
+    abstain_reason: Optional[DiscursiveAbstainReason] = Field(
+        default=None,
+        description="Si ABSTAIN, raison structurée pour la gouvernance"
+    )
+
     # Source
     source_doc_id: str
     source_chunk_id: str
@@ -383,7 +483,7 @@ class RawAssertion(BaseModel):
     extractor_version: str = Field(default="v1.0.0")
     prompt_hash: Optional[str] = Field(default=None, description="Hash du prompt utilisé")
     model_used: Optional[str] = Field(default=None, description="Ex: gpt-4o-mini")
-    schema_version: str = Field(default="2.11.0")
+    schema_version: str = Field(default="2.12.0")  # ADR Relations Discursivement Déterminées
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
@@ -422,6 +522,20 @@ class CanonicalRelation(BaseModel):
     last_seen_utc: datetime = Field(default_factory=datetime.utcnow)
     extractor_versions: List[str] = Field(default_factory=list)
 
+    # ADR Relations Discursivement Déterminées - Compteurs séparés
+    explicit_support_count: int = Field(
+        default=0,
+        description="Nombre de RawAssertion EXPLICIT supportant cette relation"
+    )
+    discursive_support_count: int = Field(
+        default=0,
+        description="Nombre de RawAssertion DISCURSIVE supportant cette relation"
+    )
+    distinct_sections: int = Field(
+        default=0,
+        description="Nombre de SectionContext distincts (pour bundle_diversity)"
+    )
+
     # Profil prédicats
     predicate_profile: PredicateProfile = Field(default_factory=PredicateProfile)
 
@@ -440,6 +554,115 @@ class CanonicalRelation(BaseModel):
 
     class Config:
         use_enum_values = True
+
+
+# =============================================================================
+# ADR Relations Discursivement Déterminées - SemanticRelation
+# =============================================================================
+
+class SupportStrength(BaseModel):
+    """
+    Métriques agrégées pour évaluer la force d'une CanonicalRelation.
+
+    Utilisé pour décider de la promotion vers SemanticRelation et
+    l'attribution du DefensibilityTier.
+
+    Ref: ADR_DISCURSIVE_RELATIONS.md
+    """
+    support_count: int = Field(default=0, description="Nombre total de RawAssertion")
+    explicit_count: int = Field(default=0, description="Nombre de RawAssertion EXPLICIT")
+    discursive_count: int = Field(default=0, description="Nombre de RawAssertion DISCURSIVE")
+    doc_coverage: int = Field(default=0, description="Nombre de documents distincts")
+    distinct_sections: int = Field(default=0, description="Nombre de SectionContext distincts")
+    bundle_diversity: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Score de diversité: min(1.0, distinct_sections / 3)"
+    )
+
+
+class SemanticRelation(BaseModel):
+    """
+    Relation sémantique promue, traversable par le runtime Graph-First.
+
+    Troisième couche du pipeline: RawAssertion → CanonicalRelation → SemanticRelation
+
+    Porte:
+    - semantic_grade: transparence sur l'origine des preuves (EXPLICIT/DISCURSIVE/MIXED)
+    - defensibility_tier: autorisation d'usage runtime (STRICT/EXTENDED)
+
+    Le runtime STRICT traverse les relations défendables (defensibility_tier=STRICT),
+    indépendamment de leur semantic_grade.
+
+    Ref: ADR_DISCURSIVE_RELATIONS.md
+    """
+
+    # Identité
+    semantic_relation_id: str = Field(description="ULID unique")
+    canonical_relation_id: str = Field(description="ID de la CanonicalRelation source")
+    tenant_id: str = Field(default="default")
+
+    # Relation
+    relation_type: RelationType = Field(description="Type de relation")
+    subject_concept_id: str = Field(description="ID concept source")
+    object_concept_id: str = Field(description="ID concept cible")
+
+    # ADR Relations Discursivement Déterminées
+    semantic_grade: SemanticGrade = Field(
+        description="Nature des preuves: EXPLICIT, DISCURSIVE, ou MIXED (transparence)"
+    )
+    defensibility_tier: DefensibilityTier = Field(
+        description="Tier de défendabilité: STRICT (production) ou EXTENDED (exploration)"
+    )
+
+    # Métriques de support (snapshot à la promotion)
+    support_strength: SupportStrength = Field(
+        default_factory=SupportStrength,
+        description="Métriques de support au moment de la promotion"
+    )
+
+    # Scores
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence agrégée")
+
+    # Traçabilité
+    promoted_at: datetime = Field(default_factory=datetime.utcnow)
+    promotion_reason: Optional[str] = Field(
+        default=None,
+        description="Raison de la promotion (pour audit)"
+    )
+
+    class Config:
+        use_enum_values = True
+
+
+def compute_semantic_grade(explicit_count: int, discursive_count: int) -> SemanticGrade:
+    """
+    Calcule le SemanticGrade à partir des compteurs.
+
+    - Si explicit_count > 0 et discursive_count == 0 → EXPLICIT
+    - Si explicit_count == 0 et discursive_count > 0 → DISCURSIVE
+    - Si explicit_count > 0 et discursive_count > 0 → MIXED
+    """
+    if explicit_count > 0 and discursive_count == 0:
+        return SemanticGrade.EXPLICIT
+    elif explicit_count == 0 and discursive_count > 0:
+        return SemanticGrade.DISCURSIVE
+    else:
+        return SemanticGrade.MIXED
+
+
+def compute_bundle_diversity(distinct_sections: int) -> float:
+    """
+    Calcule bundle_diversity de façon déterministe.
+
+    bundle_diversity = min(1.0, distinct_sections / 3)
+
+    | Sections | diversity |
+    |----------|-----------|
+    | 1        | 0.33      |
+    | 2        | 0.66      |
+    | ≥ 3      | 1.0       |
+    """
+    return min(1.0, distinct_sections / 3)
 
 
 # =============================================================================

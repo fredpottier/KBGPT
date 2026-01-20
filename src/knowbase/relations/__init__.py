@@ -15,6 +15,16 @@ from .types import (
     RawAssertion,
     PredicateProfile,
     CanonicalRelation,
+    # ADR Relations Discursivement Déterminées
+    AssertionKind,
+    DiscursiveBasis,
+    DiscursiveAbstainReason,
+    SemanticGrade,
+    DefensibilityTier,
+    SupportStrength,
+    SemanticRelation,
+    compute_semantic_grade,
+    compute_bundle_diversity,
     # Phase 2.11 - Claims (Assertions Unaires)
     ClaimValueType,
     ClaimMaturity,
@@ -114,6 +124,16 @@ __all__ = [
     "RawAssertion",
     "PredicateProfile",
     "CanonicalRelation",
+    # ADR Relations Discursivement Déterminées
+    "AssertionKind",
+    "DiscursiveBasis",
+    "DiscursiveAbstainReason",
+    "SemanticGrade",
+    "DefensibilityTier",
+    "SupportStrength",
+    "SemanticRelation",
+    "compute_semantic_grade",
+    "compute_bundle_diversity",
     # Engines
     "RelationExtractionEngine",
     "PatternMatcher",
