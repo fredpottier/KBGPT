@@ -25,6 +25,28 @@ from .types import (
     SemanticRelation,
     compute_semantic_grade,
     compute_bundle_diversity,
+)
+# ADR Relations Discursivement Déterminées - Règles d'attribution du tier
+from .tier_attribution import (
+    # Whitelists
+    DISCURSIVE_ALLOWED_RELATION_TYPES,
+    DISCURSIVE_FORBIDDEN_RELATION_TYPES,
+    DISCURSIVE_ALLOWED_EXTRACTION_METHODS,
+    # Bases
+    STRONG_DETERMINISTIC_BASES,
+    WEAK_DETERMINISTIC_BASES,
+    STRONG_BASIS_MARKERS,
+    # Classes et fonctions
+    TierAttributionResult,
+    is_relation_type_allowed_for_discursive,
+    is_extraction_method_allowed_for_discursive,
+    has_strong_deterministic_basis,
+    compute_tier_for_discursive,
+    compute_defensibility_tier,
+    validate_discursive_assertion,
+    should_abstain,
+)
+from .types import (
     # Phase 2.11 - Claims (Assertions Unaires)
     ClaimValueType,
     ClaimMaturity,
@@ -134,6 +156,21 @@ __all__ = [
     "SemanticRelation",
     "compute_semantic_grade",
     "compute_bundle_diversity",
+    # ADR Relations Discursivement Déterminées - Tier Attribution
+    "DISCURSIVE_ALLOWED_RELATION_TYPES",
+    "DISCURSIVE_FORBIDDEN_RELATION_TYPES",
+    "DISCURSIVE_ALLOWED_EXTRACTION_METHODS",
+    "STRONG_DETERMINISTIC_BASES",
+    "WEAK_DETERMINISTIC_BASES",
+    "STRONG_BASIS_MARKERS",
+    "TierAttributionResult",
+    "is_relation_type_allowed_for_discursive",
+    "is_extraction_method_allowed_for_discursive",
+    "has_strong_deterministic_basis",
+    "compute_tier_for_discursive",
+    "compute_defensibility_tier",
+    "validate_discursive_assertion",
+    "should_abstain",
     # Engines
     "RelationExtractionEngine",
     "PatternMatcher",
