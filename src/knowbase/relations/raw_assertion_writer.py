@@ -29,6 +29,10 @@ from knowbase.relations.types import (
     RawAssertion,
     RawAssertionFlags,
     RelationType,
+    # ADR Relations Discursivement Déterminées
+    AssertionKind,
+    DiscursiveBasis,
+    DiscursiveAbstainReason,
 )
 
 logger = logging.getLogger(__name__)
@@ -220,6 +224,10 @@ class RawAssertionWriter:
         context_hint: Optional[str] = None,
         # ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
         evidence_context_ids: Optional[List[str]] = None,
+        # ADR Relations Discursivement Déterminées
+        assertion_kind: AssertionKind = AssertionKind.EXPLICIT,
+        discursive_basis: Optional[List[DiscursiveBasis]] = None,
+        abstain_reason: Optional[DiscursiveAbstainReason] = None,
     ) -> Optional[str]:
         """
         Write a single RawAssertion to Neo4j.
@@ -246,6 +254,10 @@ class RawAssertionWriter:
             alt_type_confidence: Confidence on alternative type
             relation_subtype_raw: Semantic nuance (audit only)
             context_hint: Local scope/context
+            # ADR Relations Discursivement Déterminées:
+            assertion_kind: EXPLICIT or DISCURSIVE
+            discursive_basis: List of DiscursiveBasis for DISCURSIVE assertions
+            abstain_reason: Reason for abstention if assertion is rejected
 
         Returns:
             raw_assertion_id if written, None if skipped
@@ -331,6 +343,10 @@ class RawAssertionWriter:
             source_language=source_language,
             # ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
             evidence_context_ids=evidence_context_ids or [],
+            # ADR Relations Discursivement Déterminées
+            assertion_kind=assertion_kind,
+            discursive_basis=discursive_basis or [],
+            abstain_reason=abstain_reason,
             # Traçabilité
             extractor_name="llm_relation_extractor",
             extractor_version=self.extractor_version,
@@ -454,6 +470,10 @@ class RawAssertionWriter:
             source_language: $source_language,
             // ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
             evidence_context_ids: $evidence_context_ids,
+            // ADR Relations Discursivement Déterminées
+            assertion_kind: $assertion_kind,
+            discursive_basis: $discursive_basis,
+            abstain_reason: $abstain_reason,
             // Traçabilité
             extractor_name: $extractor_name,
             extractor_version: $extractor_version,
@@ -524,6 +544,10 @@ class RawAssertionWriter:
             "source_language": assertion.source_language,
             # ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
             "evidence_context_ids": assertion.evidence_context_ids,
+            # ADR Relations Discursivement Déterminées
+            "assertion_kind": assertion.assertion_kind.value if hasattr(assertion.assertion_kind, 'value') else str(assertion.assertion_kind),
+            "discursive_basis": [b.value if hasattr(b, 'value') else str(b) for b in assertion.discursive_basis],
+            "abstain_reason": assertion.abstain_reason.value if assertion.abstain_reason and hasattr(assertion.abstain_reason, 'value') else (str(assertion.abstain_reason) if assertion.abstain_reason else None),
             # Traçabilité
             "extractor_name": assertion.extractor_name,
             "extractor_version": assertion.extractor_version,

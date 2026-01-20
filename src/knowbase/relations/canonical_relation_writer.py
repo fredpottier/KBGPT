@@ -146,6 +146,9 @@ class CanonicalRelationWriter:
             cr.status = $status,
             cr.mapping_version = $mapping_version,
             cr.last_rebuilt_at = datetime($last_rebuilt_at),
+            cr.explicit_support_count = $explicit_support_count,
+            cr.discursive_support_count = $discursive_support_count,
+            cr.distinct_sections = $distinct_sections,
             cr._created = true
         ON MATCH SET
             cr.distinct_documents = $distinct_documents,
@@ -161,6 +164,9 @@ class CanonicalRelationWriter:
             cr.status = $status,
             cr.mapping_version = $mapping_version,
             cr.last_rebuilt_at = datetime($last_rebuilt_at),
+            cr.explicit_support_count = $explicit_support_count,
+            cr.discursive_support_count = $discursive_support_count,
+            cr.distinct_sections = $distinct_sections,
             cr._created = false
         RETURN cr._created AS created
         """
@@ -197,7 +203,11 @@ class CanonicalRelationWriter:
             "maturity": maturity_str,
             "status": status_str,
             "mapping_version": relation.mapping_version,
-            "last_rebuilt_at": relation.last_rebuilt_at.isoformat() if relation.last_rebuilt_at else datetime.utcnow().isoformat()
+            "last_rebuilt_at": relation.last_rebuilt_at.isoformat() if relation.last_rebuilt_at else datetime.utcnow().isoformat(),
+            # ADR Relations Discursivement Déterminées
+            "explicit_support_count": relation.explicit_support_count,
+            "discursive_support_count": relation.discursive_support_count,
+            "distinct_sections": relation.distinct_sections,
         }
 
         results = self._execute_query(query, params)

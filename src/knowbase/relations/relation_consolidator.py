@@ -34,6 +34,10 @@ from knowbase.relations.types import (
     RelationStatus,
     RelationType,
     PredicateProfile,
+    # ADR Relations Discursivement Déterminées
+    AssertionKind,
+    SemanticGrade,
+    compute_semantic_grade,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,10 +171,12 @@ class RelationConsolidator:
             .alt_type_confidence,
             .source_doc_id,
             .source_chunk_id,
+            .source_segment_id,
             .confidence_final,
             .is_conditional,
             .extractor_version,
-            .created_at
+            .created_at,
+            .assertion_kind
         }} AS assertion
         ORDER BY ra.created_at DESC
         """
@@ -308,9 +314,35 @@ class RelationConsolidator:
         # Build predicate profile
         predicate_profile = self.build_predicate_profile(assertions)
 
+        # ADR Relations Discursivement Déterminées - Compteurs de support
+        explicit_count = 0
+        discursive_count = 0
+        for a in assertions:
+            kind_str = a.get("assertion_kind")
+            if kind_str:
+                try:
+                    kind = AssertionKind(kind_str) if isinstance(kind_str, str) else kind_str
+                    if kind == AssertionKind.EXPLICIT:
+                        explicit_count += 1
+                    elif kind == AssertionKind.DISCURSIVE:
+                        discursive_count += 1
+                except ValueError:
+                    explicit_count += 1  # Default to EXPLICIT if unknown
+            else:
+                explicit_count += 1  # Default to EXPLICIT if not set
+
+        # Compute semantic_grade from counters
+        semantic_grade = compute_semantic_grade(explicit_count, discursive_count)
+
         # Aggregate stats
         doc_ids = set(a.get("source_doc_id", "") for a in assertions)
         chunk_ids = set(a.get("source_chunk_id", "") for a in assertions)
+        # Comptage des sections distinctes (via source_segment_id)
+        segment_ids = set(
+            a.get("source_segment_id", "") for a in assertions
+            if a.get("source_segment_id")
+        )
+        distinct_sections = len(segment_ids) if segment_ids else 0
         confidences = [a.get("confidence_final", 0.0) for a in assertions if a.get("confidence_final")]
         extractor_versions = list(set(a.get("extractor_version", "") for a in assertions if a.get("extractor_version")))
 
@@ -357,8 +389,12 @@ class RelationConsolidator:
             quality_score=median(confidences) if confidences else 0.0,
             maturity=maturity,
             status=RelationStatus.ACTIVE,
-            mapping_version="v2.11",
-            last_rebuilt_at=datetime.utcnow()
+            mapping_version="v2.12",
+            last_rebuilt_at=datetime.utcnow(),
+            # ADR Relations Discursivement Déterminées
+            explicit_support_count=explicit_count,
+            discursive_support_count=discursive_count,
+            distinct_sections=distinct_sections,
         )
 
     def _infer_relation_type(

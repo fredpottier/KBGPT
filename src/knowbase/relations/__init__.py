@@ -130,6 +130,11 @@ from .canonical_relation_writer import (
     CanonicalRelationWriter,
     get_canonical_relation_writer,
 )
+# ADR Relations Discursivement Déterminées - SemanticRelation Writer
+from .semantic_relation_writer import (
+    SemanticRelationWriter,
+    get_semantic_relation_writer,
+)
 
 __all__ = [
     # Types de base
@@ -231,4 +236,7 @@ __all__ = [
     # Phase 2.8/2.10 - CanonicalRelation Writer
     "CanonicalRelationWriter",
     "get_canonical_relation_writer",
+    # ADR Relations Discursivement Déterminées - SemanticRelation Writer
+    "SemanticRelationWriter",
+    "get_semantic_relation_writer",
 ]
