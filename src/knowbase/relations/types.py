@@ -1057,3 +1057,314 @@ class ScopeMiningConfig(BaseModel):
 
     class Config:
         use_enum_values = True
+
+
+# =============================================================================
+# ADR NormativeRule & SpecFact - Enums et Modèles
+# =============================================================================
+
+class NormativeModality(str, Enum):
+    """
+    Force de l'obligation normative.
+
+    Ref: ADR_NORMATIVE_RULES_SPEC_FACTS.md
+
+    Invariant INV-AGN-01: Ces modalités sont domain-agnostic.
+    Elles s'appliquent à tout domaine (IT, médical, automobile, etc.)
+    """
+    MUST = "MUST"           # Obligation (shall, must, required, mandatory)
+    MUST_NOT = "MUST_NOT"   # Interdiction (must not, shall not, no X allowed)
+    SHOULD = "SHOULD"       # Recommandation forte (should, recommended)
+    SHOULD_NOT = "SHOULD_NOT"  # Déconseillé (should not)
+    MAY = "MAY"             # Permission/Option (may, can, optional)
+
+
+class ConstraintType(str, Enum):
+    """
+    Type de contrainte sur une valeur.
+
+    Ref: ADR_NORMATIVE_RULES_SPEC_FACTS.md
+
+    Invariant INV-AGN-01: Ces types sont domain-agnostic.
+    """
+    EQUALS = "EQUALS"       # Valeur exacte (= X)
+    MIN = "MIN"             # Minimum (>= X, at least)
+    MAX = "MAX"             # Maximum (<= X, at most, no more than)
+    RANGE = "RANGE"         # Entre min et max ([X, Y])
+    ENUM = "ENUM"           # Liste de valeurs possibles (X or Y or Z)
+    PATTERN = "PATTERN"     # Format (regex, format string)
+
+
+class SpecType(str, Enum):
+    """
+    Type de spécification pour un SpecFact.
+
+    Ref: ADR_NORMATIVE_RULES_SPEC_FACTS.md
+    """
+    VALUE = "VALUE"             # Valeur simple
+    MIN = "MIN"                 # Minimum
+    MAX = "MAX"                 # Maximum
+    DEFAULT = "DEFAULT"         # Valeur par défaut
+    RECOMMENDED = "RECOMMENDED" # Valeur recommandée
+
+
+class StructureType(str, Enum):
+    """
+    Type de structure source pour un SpecFact.
+
+    Ref: ADR_NORMATIVE_RULES_SPEC_FACTS.md - INV-NORM-03
+    """
+    TABLE = "TABLE"                     # Tableau avec headers
+    KEY_VALUE_LIST = "KEY_VALUE_LIST"   # Label: Value ou Label = Value
+    BULLET_LIST = "BULLET_LIST"         # - Label: Value
+    DEFINITION_LIST = "DEFINITION_LIST" # dt/dd ou terme: définition
+
+
+class ScopeAnchor(BaseModel):
+    """
+    Ancrage non-traversable d'une règle/fact dans le scope.
+
+    Ref: ADR_NORMATIVE_RULES_SPEC_FACTS.md
+
+    Permet de répondre à "Montre-moi les règles applicables à X"
+    SANS créer de relation fausse.
+
+    Invariant: scope_tags sont dérivés des scope setters documentaires,
+    jamais inférés par LLM.
+    """
+    doc_id: str = Field(description="ID du document source")
+    section_id: Optional[str] = Field(default=None, description="ID de la section")
+    scope_setter_ids: List[str] = Field(
+        default_factory=list,
+        description="Titres, captions qui définissent le scope"
+    )
+    scope_tags: List[str] = Field(
+        default_factory=list,
+        description="Tags dérivés des scope setters, pas du LLM"
+    )
+
+
+class NormativeRule(BaseModel):
+    """
+    Règle normative extraite d'un document.
+
+    Ref: ADR_NORMATIVE_RULES_SPEC_FACTS.md
+
+    Une NormativeRule capture une obligation, interdiction ou recommandation
+    explicite avec un marqueur modal détectable.
+
+    Invariants:
+    - INV-NORM-01: Preuve locale obligatoire (evidence_span)
+    - INV-NORM-02: Marqueur modal explicite requis
+    - INV-NORM-04: Pas de sujet inventé (subject_text = ce qui est mentionné)
+    - INV-AGN-01: Domain-agnostic (pas de prédicats métier)
+
+    NON-TRAVERSABLE: Les règles ne sont pas des edges du graphe.
+    Elles sont indexables, filtrables par scope, requêtables, citables.
+    """
+    rule_id: str = Field(description="ULID unique")
+    tenant_id: str = Field(default="default")
+
+    # Le sujet de la règle (ce qui est contraint)
+    subject_text: str = Field(
+        description="Ex: 'HTTP connections', 'password length' (explicite dans le texte)"
+    )
+    subject_concept_id: Optional[str] = Field(
+        default=None,
+        description="Si mappable à un concept connu"
+    )
+
+    # La modalité (force de l'obligation)
+    modality: NormativeModality = Field(
+        description="MUST, SHOULD, MAY, MUST_NOT, etc."
+    )
+
+    # La contrainte ou valeur
+    constraint_type: ConstraintType = Field(
+        description="EQUALS, MIN, MAX, RANGE, ENUM, PATTERN"
+    )
+    constraint_value: str = Field(
+        description="Ex: 'TLS 1.2', '256', '8 characters'"
+    )
+    constraint_unit: Optional[str] = Field(
+        default=None,
+        description="Ex: 'GB', 'seconds', 'characters'"
+    )
+
+    # Condition (si clause conditionnelle détectée)
+    constraint_condition_span: Optional[str] = Field(
+        default=None,
+        description="Ex: 'when connecting externally', 'if using cloud'"
+    )
+
+    # Evidence (preuve locale - INV-NORM-01)
+    evidence_span: str = Field(
+        description="La phrase source exacte contenant le marqueur modal"
+    )
+    evidence_section: Optional[str] = Field(
+        default=None,
+        description="Le scope setter (titre section)"
+    )
+
+    # Scope anchors (pour retrouver, pas prouver)
+    scope_anchors: List[ScopeAnchor] = Field(
+        default_factory=list,
+        description="Ancrages non-traversables pour filtrage par scope"
+    )
+
+    # Source
+    source_doc_id: str
+    source_chunk_id: str
+    source_segment_id: Optional[str] = Field(default=None)
+
+    # Traçabilité
+    extraction_method: ExtractionMethod = Field(
+        description="PATTERN ou HYBRID (jamais LLM seul pour décider si normatif)"
+    )
+    confidence: float = Field(ge=0.0, le=1.0)
+    extractor_version: str = Field(default="v1.0.0")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        use_enum_values = True
+
+
+class SpecFact(BaseModel):
+    """
+    Fait structuré extrait d'un tableau ou liste clé-valeur.
+
+    Ref: ADR_NORMATIVE_RULES_SPEC_FACTS.md
+
+    Un SpecFact capture une valeur ou spécification extraite d'une
+    structure tabulaire ou liste clé-valeur explicite.
+
+    Invariants:
+    - INV-NORM-01: Preuve locale obligatoire (evidence_text)
+    - INV-NORM-03: Structure explicite requise
+    - INV-NORM-04: Pas de sujet inventé
+    - INV-AGN-01: Domain-agnostic
+
+    NON-TRAVERSABLE: Les facts ne sont pas des edges du graphe.
+    """
+    fact_id: str = Field(description="ULID unique")
+    tenant_id: str = Field(default="default")
+
+    # L'attribut spécifié
+    attribute_name: str = Field(
+        description="Ex: 'RAM', 'Timeout', 'Port'"
+    )
+    attribute_concept_id: Optional[str] = Field(
+        default=None,
+        description="Si mappable à un concept connu"
+    )
+
+    # Le type de spécification
+    spec_type: SpecType = Field(
+        description="VALUE, MIN, MAX, DEFAULT, RECOMMENDED"
+    )
+
+    # La valeur
+    value: str = Field(description="Ex: '256', '30', '8080'")
+    value_numeric: Optional[float] = Field(
+        default=None,
+        description="Valeur numérique si applicable"
+    )
+    unit: Optional[str] = Field(
+        default=None,
+        description="Ex: 'GB', 'seconds', ''"
+    )
+
+    # Contexte structurel (la preuve - INV-NORM-03)
+    source_structure: StructureType = Field(
+        description="TABLE, KEY_VALUE_LIST, BULLET_LIST"
+    )
+    structure_context: Optional[str] = Field(
+        default=None,
+        description="Ex: 'System Requirements table'"
+    )
+    row_header: Optional[str] = Field(
+        default=None,
+        description="Pour les tableaux"
+    )
+    column_header: Optional[str] = Field(
+        default=None,
+        description="Pour les tableaux"
+    )
+
+    # Evidence (preuve locale - INV-NORM-01)
+    evidence_text: str = Field(
+        description="Le texte brut de la cellule/ligne"
+    )
+    evidence_section: Optional[str] = Field(
+        default=None,
+        description="Scope setter"
+    )
+
+    # Scope anchors
+    scope_anchors: List[ScopeAnchor] = Field(
+        default_factory=list,
+        description="Ancrages non-traversables pour filtrage par scope"
+    )
+
+    # Source
+    source_doc_id: str
+    source_chunk_id: str
+    source_segment_id: Optional[str] = Field(default=None)
+
+    # Traçabilité
+    extraction_method: ExtractionMethod = Field(
+        description="PATTERN (structure détectée)"
+    )
+    confidence: float = Field(ge=0.0, le=1.0)
+    extractor_version: str = Field(default="v1.0.0")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        use_enum_values = True
+
+
+# =============================================================================
+# Fonctions utilitaires pour déduplication
+# =============================================================================
+
+def normalize_for_dedup(text: str) -> str:
+    """Normalise un texte pour la déduplication."""
+    import re
+    # Lowercase, supprimer ponctuation, normaliser espaces
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\s]', '', text)
+    text = re.sub(r'\s+', '_', text)
+    return text
+
+
+def dedup_key_rule(rule: NormativeRule) -> str:
+    """
+    Clé unique pour déduplication NormativeRule.
+
+    Ref: ADR_NORMATIVE_RULES_SPEC_FACTS.md
+
+    Format: subject|modality|constraint_type|value|unit
+    """
+    return "|".join([
+        normalize_for_dedup(rule.subject_text),
+        rule.modality.value if hasattr(rule.modality, 'value') else str(rule.modality),
+        rule.constraint_type.value if hasattr(rule.constraint_type, 'value') else str(rule.constraint_type),
+        normalize_for_dedup(rule.constraint_value),
+        rule.constraint_unit or ""
+    ])
+
+
+def dedup_key_fact(fact: SpecFact) -> str:
+    """
+    Clé unique pour déduplication SpecFact.
+
+    Ref: ADR_NORMATIVE_RULES_SPEC_FACTS.md
+
+    Format: attribute|spec_type|value|unit
+    """
+    return "|".join([
+        normalize_for_dedup(fact.attribute_name),
+        fact.spec_type.value if hasattr(fact.spec_type, 'value') else str(fact.spec_type),
+        normalize_for_dedup(fact.value),
+        fact.unit or ""
+    ])

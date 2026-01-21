@@ -169,6 +169,28 @@ from .scope_verifier import (
     candidate_to_raw_assertion,
     get_scope_verifier,
 )
+# ADR NormativeRule & SpecFact - Types
+from .types import (
+    NormativeModality,
+    ConstraintType,
+    SpecType,
+    StructureType,
+    ScopeAnchor,
+    NormativeRule,
+    SpecFact,
+    normalize_for_dedup,
+    dedup_key_rule,
+    dedup_key_fact,
+)
+# ADR NormativeRule & SpecFact - Extractors
+from .normative_pattern_extractor import (
+    NormativePatternExtractor,
+    extract_normative_rules,
+)
+from .structure_parser import (
+    StructureParser,
+    extract_spec_facts,
+)
 
 __all__ = [
     # Types de base
@@ -299,4 +321,20 @@ __all__ = [
     "BatchVerificationResult",
     "candidate_to_raw_assertion",
     "get_scope_verifier",
+    # ADR NormativeRule & SpecFact - Types
+    "NormativeModality",
+    "ConstraintType",
+    "SpecType",
+    "StructureType",
+    "ScopeAnchor",
+    "NormativeRule",
+    "SpecFact",
+    "normalize_for_dedup",
+    "dedup_key_rule",
+    "dedup_key_fact",
+    # ADR NormativeRule & SpecFact - Extractors
+    "NormativePatternExtractor",
+    "extract_normative_rules",
+    "StructureParser",
+    "extract_spec_facts",
 ]
