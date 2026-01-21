@@ -39,7 +39,8 @@ class RelationType(str, Enum):
     DEPRECATES = "DEPRECATES"
 
     # VARIANTES (Alternatives & Compétition)
-    ALTERNATIVE_TO = "ALTERNATIVE_TO"
+    ALTERNATIVE_TO = "ALTERNATIVE_TO"  # Substituabilité explicite ("instead of", "replaces")
+    CHOICE_BETWEEN = "CHOICE_BETWEEN"  # ADR Discursive: choice-set linguistique ("X or Y")
 
     # GOUVERNANCE / SCOPE (Phase 2.8)
     APPLIES_TO = "APPLIES_TO"
@@ -114,14 +115,21 @@ class DiscursiveAbstainReason(str, Enum):
 
     Tout ABSTAIN doit être motivé par une raison structurée pour la gouvernance.
 
-    Ref: ADR_DISCURSIVE_RELATIONS.md
+    Ref: ADR_DISCURSIVE_RELATIONS.md, ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md
     """
+    # Raisons générales
     WEAK_BUNDLE = "WEAK_BUNDLE"                     # Bundle trop court/peu diversifié
-    SCOPE_BREAK = "SCOPE_BREAK"                     # Rupture de portée référentielle
+    SCOPE_BREAK = "SCOPE_BREAK"                     # Rupture de portée référentielle (structural)
     COREF_UNRESOLVED = "COREF_UNRESOLVED"           # Coréférence non résolue
     TYPE2_RISK = "TYPE2_RISK"                       # Risque de relation déduite (Type 2)
     WHITELIST_VIOLATION = "WHITELIST_VIOLATION"    # RelationType interdit pour DISCURSIVE
     AMBIGUOUS_PREDICATE = "AMBIGUOUS_PREDICATE"    # Prédicat ambigu
+
+    # ADR SCOPE - Niveau Miner (déterministe, sans LLM)
+    NO_SCOPE_SETTER = "NO_SCOPE_SETTER"            # Section sans scope_setter valide
+
+    # ADR SCOPE - Niveau Verifier (LLM)
+    SCOPE_BREAK_LINGUISTIC = "SCOPE_BREAK_LINGUISTIC"  # Rupture de portée linguistique détectée
 
 
 class SemanticGrade(str, Enum):
@@ -809,6 +817,225 @@ class CanonicalClaim(BaseModel):
     # Métadonnées
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_seen_utc: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        use_enum_values = True
+
+
+# =============================================================================
+# ADR SCOPE Discursive Candidate Mining - Structures de données
+# =============================================================================
+
+class EvidenceSpanRole(str, Enum):
+    """
+    Rôle d'un span dans un EvidenceBundle SCOPE.
+
+    Ref: ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md
+    """
+    SCOPE_SETTER = "SCOPE_SETTER"   # DocItem définissant le scope (heading ou premier)
+    MENTION = "MENTION"              # DocItem contenant une mention de concept
+
+
+class EvidenceSpan(BaseModel):
+    """
+    Span de preuve unitaire pour une assertion SCOPE.
+
+    Ref: ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md - INV-SCOPE-03
+
+    Un EvidenceBundle SCOPE doit contenir ≥2 EvidenceSpans distincts.
+    """
+    doc_item_id: str = Field(description="ID du DocItem dans Neo4j")
+    role: EvidenceSpanRole = Field(description="Rôle du span: SCOPE_SETTER ou MENTION")
+    text_excerpt: str = Field(description="Extrait textuel (pour audit)")
+    concept_id: Optional[str] = Field(
+        default=None,
+        description="ID du concept mentionné (si role=MENTION)"
+    )
+    concept_surface_form: Optional[str] = Field(
+        default=None,
+        description="Forme de surface du concept dans le texte"
+    )
+
+    class Config:
+        use_enum_values = True
+
+
+class EvidenceBundle(BaseModel):
+    """
+    Bundle de preuves multi-span pour une assertion SCOPE.
+
+    Ref: ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md
+
+    Invariants:
+    - INV-SCOPE-03: ≥2 DocItems distincts obligatoires
+    - Le bundle est sérialisé en JSON dans RawAssertion.evidence_bundle (pas de nœud)
+    """
+    basis: DiscursiveBasis = Field(
+        default=DiscursiveBasis.SCOPE,
+        description="Base discursive (toujours SCOPE pour ce type)"
+    )
+    spans: List[EvidenceSpan] = Field(
+        description="Liste des spans (≥2 obligatoire)"
+    )
+    section_id: str = Field(description="ID de la section source")
+    document_id: str = Field(description="ID du document source")
+
+    def is_valid(self) -> bool:
+        """Vérifie INV-SCOPE-03: ≥2 DocItems distincts."""
+        unique_doc_items = {span.doc_item_id for span in self.spans}
+        return len(unique_doc_items) >= 2
+
+    def get_scope_setter(self) -> Optional[EvidenceSpan]:
+        """Retourne le span SCOPE_SETTER."""
+        for span in self.spans:
+            if span.role == EvidenceSpanRole.SCOPE_SETTER:
+                return span
+        return None
+
+    def get_mentions(self) -> List[EvidenceSpan]:
+        """Retourne les spans MENTION."""
+        return [s for s in self.spans if s.role == EvidenceSpanRole.MENTION]
+
+    def to_json(self) -> str:
+        """Sérialise pour stockage dans RawAssertion."""
+        import json
+        return json.dumps(self.model_dump(), default=str)
+
+    class Config:
+        use_enum_values = True
+
+
+class CandidatePairStatus(str, Enum):
+    """
+    Statut d'un CandidatePair dans le pipeline SCOPE.
+
+    Ref: ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md
+    """
+    PENDING = "PENDING"           # En attente de vérification
+    VERIFIED = "VERIFIED"         # Vérifié par LLM → RawAssertion créée
+    ABSTAINED = "ABSTAINED"       # ABSTAIN (Miner ou Verifier)
+
+
+class CandidatePair(BaseModel):
+    """
+    Paire de concepts candidate générée par SCOPE mining.
+
+    Ref: ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md
+
+    Sortie du Miner, entrée du Verifier.
+
+    Invariants:
+    - INV-SCOPE-01: Ce n'est PAS une relation, c'est un candidat à vérifier
+    - INV-SCOPE-04: Si abstained, abstain_reason doit être renseigné
+    """
+    # Identité
+    candidate_id: str = Field(description="ULID unique du candidat")
+
+    # Concepts (pivot, other)
+    pivot_concept_id: str = Field(description="ID du concept pivot (plus saillant)")
+    other_concept_id: str = Field(description="ID de l'autre concept")
+    pivot_surface_form: Optional[str] = Field(default=None)
+    other_surface_form: Optional[str] = Field(default=None)
+
+    # Evidence
+    evidence_bundle: EvidenceBundle = Field(description="Bundle de preuves multi-span")
+
+    # Contexte
+    section_id: str = Field(description="ID de la section source")
+    document_id: str = Field(description="ID du document source")
+
+    # Salience (pour audit)
+    pivot_salience_score: float = Field(
+        default=0.0, ge=0.0,
+        description="Score de saillance du pivot dans la section"
+    )
+    other_salience_score: float = Field(
+        default=0.0, ge=0.0,
+        description="Score de saillance de l'autre concept"
+    )
+
+    # Statut
+    status: CandidatePairStatus = Field(default=CandidatePairStatus.PENDING)
+
+    # ABSTAIN (si status=ABSTAINED)
+    abstain_reason: Optional[DiscursiveAbstainReason] = Field(
+        default=None,
+        description="Raison si ABSTAIN (INV-SCOPE-04)"
+    )
+    abstain_justification: Optional[str] = Field(
+        default=None,
+        description="Justification textuelle (pour audit)"
+    )
+
+    # Verifier output (si status=VERIFIED)
+    verified_relation_type: Optional[RelationType] = Field(
+        default=None,
+        description="Type de relation validé par le Verifier"
+    )
+    verified_direction: Optional[str] = Field(
+        default=None,
+        description="Direction: 'pivot_to_other' ou 'other_to_pivot'"
+    )
+    verified_confidence: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Confidence du Verifier"
+    )
+
+    # Traçabilité
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    verified_at: Optional[datetime] = Field(default=None)
+
+    class Config:
+        use_enum_values = True
+
+
+# =============================================================================
+# ADR SCOPE - Budgets et Configuration
+# =============================================================================
+
+class ScopeMiningConfig(BaseModel):
+    """
+    Configuration du SCOPE Candidate Mining.
+
+    Ref: ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md - INV-SCOPE-05
+
+    Ces paramètres sont des garde-fous épistémiques, pas des optimisations.
+    Modifier ces valeurs nécessite une justification documentée.
+    """
+    # Budgets (INV-SCOPE-05)
+    top_k_pivots: int = Field(
+        default=5,
+        ge=1, le=20,
+        description="Nombre max de pivots par section (limite explosion combinatoire)"
+    )
+    max_concepts_per_scope: int = Field(
+        default=30,
+        ge=5, le=100,
+        description="Nombre max de concepts par section (évite bruit)"
+    )
+    max_pairs_per_scope: int = Field(
+        default=50,
+        ge=10, le=200,
+        description="Budget strict de paires par section"
+    )
+    require_min_spans: int = Field(
+        default=2,
+        ge=2, le=5,
+        description="Nombre minimum de spans pour un bundle valide (INV-SCOPE-03)"
+    )
+
+    # Scope setter selection
+    min_text_length_for_scope_setter: int = Field(
+        default=20,
+        ge=5,
+        description="Longueur min du texte pour scope_setter (si pas de heading)"
+    )
+
+    # Whitelist SCOPE V1
+    allowed_relation_types: List[RelationType] = Field(
+        default_factory=lambda: [RelationType.APPLIES_TO, RelationType.REQUIRES],
+        description="Types de relations autorisés pour SCOPE V1"
+    )
 
     class Config:
         use_enum_values = True

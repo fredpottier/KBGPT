@@ -62,6 +62,18 @@ from knowbase.consolidation.corpus_promotion import (
     get_corpus_promotion_engine,
 )  # ADR 2026-01-09: Pass 2.0 Corpus Promotion
 
+# ADR SCOPE Discursive Candidate Mining
+from knowbase.relations.scope_candidate_miner import (
+    ScopeCandidateMiner,
+    get_mining_stats,
+)
+from knowbase.relations.scope_verifier import (
+    ScopeVerifier,
+    candidate_to_raw_assertion,
+    get_scope_verifier,
+)
+from knowbase.relations.types import ScopeMiningConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -160,6 +172,12 @@ class Pass2Stats:
     pass3_candidates: int = 0
     pass3_verified: int = 0
     pass3_abstained: int = 0
+
+    # ADR SCOPE Discursive Candidate Mining
+    scope_sections_processed: int = 0
+    scope_candidates_mined: int = 0
+    scope_asserted: int = 0
+    scope_abstained: int = 0
 
     # Pass 4a: Entity Resolution (corpus-level)
     er_candidates: int = 0
@@ -430,6 +448,7 @@ class Pass2Orchestrator:
             f"(promotion_stable={stats.corpus_promotion_stable}, promotion_singleton={stats.corpus_promotion_singleton}, "
             f"topics={stats.structural_topics_count}, covers={stats.covers_relations_count}, "
             f"classify={stats.classify_fine_count}, relations={stats.enrich_relations_count}, "
+            f"scope={stats.scope_asserted}/{stats.scope_candidates_mined}, "
             f"pass3_verified={stats.pass3_verified}/{stats.pass3_candidates})"
         )
 
@@ -690,7 +709,12 @@ class Pass2Orchestrator:
             get_segment_relation_extractor,
             PREDICATE_TO_RELATION_TYPE
         )
-        from knowbase.relations.types import RawAssertionFlags
+        from knowbase.relations.types import RawAssertionFlags, AssertionKind
+        # ADR Relations Discursivement Déterminées
+        from knowbase.relations.discursive_pattern_extractor import (
+            DiscursivePatternExtractor,
+            get_discursive_pattern_extractor,
+        )
 
         logger.info(
             f"[OSMOSE:Pass2:ENRICH_RELATIONS] Starting segment-level extraction "
@@ -729,16 +753,16 @@ class Pass2Orchestrator:
 
             stats.enrich_relations_count = len(extraction_result.relations)
 
-            # Persister les relations extraites
-            if extraction_result.relations:
-                writer = get_raw_assertion_writer(
-                    tenant_id=job.tenant_id,
-                    extractor_version="pass2_segment_v1",
-                    model_used="gpt-4o-mini"
-                )
-                writer.reset_stats()
+            # Persister les relations LLM extraites (EXPLICIT)
+            writer = get_raw_assertion_writer(
+                tenant_id=job.tenant_id,
+                extractor_version="pass2_segment_v1",
+                model_used="gpt-4o-mini"
+            )
+            writer.reset_stats()
 
-                written_count = 0
+            written_llm_count = 0
+            if extraction_result.relations:
                 for rel in extraction_result.relations:
                     if not rel.subject_concept_id or not rel.object_concept_id:
                         continue
@@ -760,20 +784,196 @@ class Pass2Orchestrator:
                         type_confidence=rel.confidence,
                         evidence_span_start=rel.evidence_span[0] if rel.evidence_span else None,
                         evidence_span_end=rel.evidence_span[1] if rel.evidence_span else None,
-                        # ADR_GRAPH_FIRST_ARCHITECTURE Phase B: Lien vers Navigation Layer
                         evidence_context_ids=rel.evidence_context_ids,
+                        # ADR Relations Discursivement Déterminées: LLM = EXPLICIT
+                        assertion_kind=AssertionKind.EXPLICIT,
                     )
                     if result:
-                        written_count += 1
+                        written_llm_count += 1
 
                 logger.info(
-                    f"[OSMOSE:Pass2:ENRICH_RELATIONS] Persisted {written_count}/{len(extraction_result.relations)} relations"
+                    f"[OSMOSE:Pass2:ENRICH_RELATIONS] Persisted {written_llm_count}/{len(extraction_result.relations)} LLM relations (EXPLICIT)"
                 )
+
+            # ===== ADR Relations Discursivement Déterminées =====
+            # Extraction des relations discursives via patterns textuels
+            # Contrat E1-E6: Pattern-first, concepts existants uniquement
+            discursive_extractor = get_discursive_pattern_extractor()
+
+            # Préparer les concepts pour l'extracteur discursif
+            # Format: [{"concept_id": str, "canonical_name": str, "surface_forms": List[str]}]
+            # Note: Les concepts peuvent avoir "canonical_id", "concept_id", ou "id" selon la source
+            concepts_for_discursive = [
+                {
+                    "concept_id": c.get("canonical_id") or c.get("concept_id") or c.get("id") or "",
+                    "canonical_name": c.get("canonical_name") or c.get("name") or "",
+                    "surface_forms": c.get("surface_forms") or [c.get("canonical_name") or c.get("name") or ""],
+                }
+                for c in job.concepts
+            ]
+
+            # Concaténer le texte des segments pour l'analyse discursive
+            full_text = " ".join([s.get("text", "") for s in segments])
+
+            discursive_result = discursive_extractor.extract(
+                text=full_text,
+                concepts=concepts_for_discursive,
+                document_id=job.document_id,
+            )
+
+            written_discursive_count = 0
+            if discursive_result.valid_candidates:
+                for candidate in discursive_result.valid_candidates:
+                    result = writer.write_assertion(
+                        subject_concept_id=candidate.subject_concept_id,
+                        object_concept_id=candidate.object_concept_id,
+                        predicate_raw=candidate.predicate_raw,
+                        evidence_text=candidate.evidence_text,
+                        source_doc_id=job.document_id,
+                        source_chunk_id=f"{job.document_id}_discursive",
+                        confidence=candidate.pattern_confidence,
+                        source_language="MULTI",
+                        flags=RawAssertionFlags(cross_sentence=False),
+                        relation_type=candidate.relation_type,
+                        type_confidence=candidate.pattern_confidence,
+                        evidence_span_start=candidate.evidence_start,
+                        evidence_span_end=candidate.evidence_end,
+                        # ADR Relations Discursivement Déterminées: Pattern = DISCURSIVE
+                        assertion_kind=AssertionKind.DISCURSIVE,
+                        discursive_basis=[candidate.discursive_basis],
+                    )
+                    if result:
+                        written_discursive_count += 1
+
+                logger.info(
+                    f"[OSMOSE:Pass2:ENRICH_RELATIONS] Persisted {written_discursive_count}/{len(discursive_result.valid_candidates)} discursive relations"
+                )
+
+            # ===== ADR SCOPE Discursive Candidate Mining =====
+            # Mining de relations basé sur co-présence dans SectionContext
+            # Ref: doc/ongoing/ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md
+            written_scope_count = 0
+            scope_abstained_count = 0
+            scope_sections_count = 0
+            scope_candidates_count = 0
+
+            try:
+                from knowbase.common.clients.neo4j_client import get_neo4j_client
+                from knowbase.config.settings import get_settings
+
+                settings = get_settings()
+                neo4j_client = get_neo4j_client(
+                    uri=settings.neo4j_uri,
+                    user=settings.neo4j_user,
+                    password=settings.neo4j_password,
+                    database="neo4j"
+                )
+
+                if neo4j_client.is_connected():
+                    # Récupérer les sections du document avec concepts
+                    sections_query = """
+                    MATCH (sc:SectionContext {tenant_id: $tenant_id})
+                    WHERE sc.doc_id = $document_id
+                    MATCH (sc)-[:CONTAINS]->(di:DocItem)
+                    MATCH (pc:ProtoConcept)-[:ANCHORED_IN]->(di)
+                    WITH sc, count(DISTINCT pc) as concept_count
+                    WHERE concept_count >= 2
+                    RETURN sc.context_id as section_id
+                    """
+
+                    with neo4j_client.driver.session(database="neo4j") as session:
+                        result = session.run(
+                            sections_query,
+                            tenant_id=job.tenant_id,
+                            document_id=job.document_id
+                        )
+                        section_ids = [r["section_id"] for r in result]
+
+                    if section_ids:
+                        # Configurer le miner et verifier SCOPE
+                        scope_config = ScopeMiningConfig(
+                            max_pairs_per_scope=20,  # Budget par section
+                            top_k_pivots=5,
+                        )
+                        scope_miner = ScopeCandidateMiner(
+                            neo4j_client.driver,
+                            config=scope_config,
+                            tenant_id=job.tenant_id
+                        )
+                        scope_verifier = get_scope_verifier(config=scope_config)
+
+                        scope_sections_count = len(section_ids)
+
+                        # Traiter chaque section
+                        for section_id in section_ids:
+                            try:
+                                # 1. Mining
+                                mining_result = scope_miner.mine_section(section_id)
+                                candidates = mining_result.candidates
+                                scope_candidates_count += len(candidates)
+
+                                if not candidates:
+                                    continue
+
+                                # 2. Verification LLM
+                                batch_result = await scope_verifier.verify_batch(
+                                    candidates, max_concurrent=3
+                                )
+
+                                scope_abstained_count += batch_result.abstained
+
+                                # 3. Écrire les relations validées
+                                for cand, vr in zip(candidates, batch_result.results):
+                                    if vr.verdict == "ASSERT":
+                                        raw_assertion = candidate_to_raw_assertion(
+                                            cand, vr, tenant_id=job.tenant_id
+                                        )
+                                        if raw_assertion:
+                                            result = writer.write_assertion(
+                                                subject_concept_id=raw_assertion.subject_concept_id,
+                                                object_concept_id=raw_assertion.object_concept_id,
+                                                predicate_raw=raw_assertion.predicate_raw,
+                                                evidence_text=raw_assertion.evidence_text,
+                                                source_doc_id=raw_assertion.source_doc_id,
+                                                source_chunk_id=raw_assertion.source_chunk_id,
+                                                confidence=raw_assertion.confidence_final,
+                                                source_language="MULTI",
+                                                flags=raw_assertion.flags,
+                                                relation_type=raw_assertion.relation_type,
+                                                type_confidence=raw_assertion.type_confidence,
+                                                assertion_kind=raw_assertion.assertion_kind,
+                                                discursive_basis=raw_assertion.discursive_basis,
+                                            )
+                                            if result:
+                                                written_scope_count += 1
+
+                            except Exception as section_err:
+                                logger.warning(
+                                    f"[OSMOSE:Pass2:SCOPE] Section {section_id} error: {section_err}"
+                                )
+
+                        logger.info(
+                            f"[OSMOSE:Pass2:SCOPE] Complete: {scope_sections_count} sections, "
+                            f"{scope_candidates_count} candidates, "
+                            f"{written_scope_count} asserted, {scope_abstained_count} abstained"
+                        )
+
+            except Exception as scope_err:
+                logger.warning(f"[OSMOSE:Pass2:SCOPE] SCOPE extraction skipped: {scope_err}")
+
+            # Update stats for SCOPE
+            stats.scope_sections_processed = scope_sections_count
+            stats.scope_candidates_mined = scope_candidates_count
+            stats.scope_asserted = written_scope_count
+            stats.scope_abstained = scope_abstained_count
+
+            # Update stats to include LLM, discursive, AND SCOPE relations
+            stats.enrich_relations_count = written_llm_count + written_discursive_count + written_scope_count
 
             logger.info(
                 f"[OSMOSE:Pass2:ENRICH_RELATIONS] Complete: "
                 f"{extraction_result.segments_processed} segments processed, "
-                f"{stats.enrich_relations_count} relations found"
+                f"{written_llm_count} LLM, {written_discursive_count} discursive, {written_scope_count} SCOPE relations"
             )
 
         except Exception as e:

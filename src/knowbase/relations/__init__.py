@@ -135,6 +135,40 @@ from .semantic_relation_writer import (
     SemanticRelationWriter,
     get_semantic_relation_writer,
 )
+# ADR Relations Discursivement Déterminées - Discursive Pattern Extractor
+from .discursive_pattern_extractor import (
+    DiscursivePatternExtractor,
+    DiscursiveCandidate,
+    DiscursiveExtractionResult,
+    get_discursive_pattern_extractor,
+)
+# ADR SCOPE Discursive Candidate Mining
+from .types import (
+    EvidenceSpanRole,
+    EvidenceSpan,
+    EvidenceBundle,
+    CandidatePairStatus,
+    CandidatePair,
+    ScopeMiningConfig,
+)
+from .scope_candidate_miner import (
+    ScopeCandidateMiner,
+    MiningResult,
+    DocItemInfo,
+    ConceptInScope,
+    SectionScope,
+    select_scope_setter,
+    compute_salience_score,
+    get_mining_stats,
+)
+# ADR SCOPE - Verifier LLM (Pass 3)
+from .scope_verifier import (
+    ScopeVerifier,
+    VerificationResult,
+    BatchVerificationResult,
+    candidate_to_raw_assertion,
+    get_scope_verifier,
+)
 
 __all__ = [
     # Types de base
@@ -239,4 +273,30 @@ __all__ = [
     # ADR Relations Discursivement Déterminées - SemanticRelation Writer
     "SemanticRelationWriter",
     "get_semantic_relation_writer",
+    # ADR Relations Discursivement Déterminées - Discursive Pattern Extractor
+    "DiscursivePatternExtractor",
+    "DiscursiveCandidate",
+    "DiscursiveExtractionResult",
+    "get_discursive_pattern_extractor",
+    # ADR SCOPE Discursive Candidate Mining
+    "EvidenceSpanRole",
+    "EvidenceSpan",
+    "EvidenceBundle",
+    "CandidatePairStatus",
+    "CandidatePair",
+    "ScopeMiningConfig",
+    "ScopeCandidateMiner",
+    "MiningResult",
+    "DocItemInfo",
+    "ConceptInScope",
+    "SectionScope",
+    "select_scope_setter",
+    "compute_salience_score",
+    "get_mining_stats",
+    # ADR SCOPE - Verifier LLM (Pass 3)
+    "ScopeVerifier",
+    "VerificationResult",
+    "BatchVerificationResult",
+    "candidate_to_raw_assertion",
+    "get_scope_verifier",
 ]
