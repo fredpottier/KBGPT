@@ -29,6 +29,10 @@ from .types import (
     NavigationLayerConfig,
     NAVIGATION_RELATION_TYPES,
 )
+from .scope_extractor import (
+    extract_document_topic,
+    derive_scope_from_section_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -589,20 +593,31 @@ class NavigationLayerBuilder:
         # Reset stats
         self._stats = defaultdict(int)
 
-        # 1. Créer DocumentContext
+        # 1. Créer DocumentContext avec topic extrait (Scope Layer)
+        topic = extract_document_topic(
+            document_name=document_name,
+            document_title=None,  # TODO: extraire du contenu si disponible
+            document_path=None
+        )
         doc_ctx = self.create_document_context(
             document_id=document_id,
             document_name=document_name,
-            document_type=document_type
+            document_type=document_type,
+            topic=topic
         )
+        if topic:
+            logger.debug(f"[NavigationLayerBuilder] Extracted topic: {topic}")
 
-        # 2. Créer SectionContexts
+        # 2. Créer SectionContexts avec scope_description (Scope Layer)
         if sections:
             for section in sections:
+                section_path = section.get("path", "")
+                scope_description = derive_scope_from_section_path(section_path)
                 sec_ctx = self.create_section_context(
                     document_id=document_id,
-                    section_path=section.get("path", ""),
-                    section_level=section.get("level", 0)
+                    section_path=section_path,
+                    section_level=section.get("level", 0),
+                    scope_description=scope_description
                 )
 
                 # Lier concepts à la section
