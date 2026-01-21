@@ -25,6 +25,7 @@ from knowbase.relations.types import (
     CandidatePairStatus,
     DiscursiveAbstainReason,
     DiscursiveBasis,
+    EvidenceSpanRole,
     RawAssertion,
     RawAssertionFlags,
     RelationType,
@@ -38,7 +39,33 @@ logger = logging.getLogger(__name__)
 # Prompt de vérification SCOPE (ultra-concis)
 # =============================================================================
 
-SCOPE_VERIFY_PROMPT = """You are validating a candidate relationship based on document scope co-presence.
+# Prompt V2: Utilise le span BRIDGE quand il existe (A et B dans la même phrase)
+SCOPE_VERIFY_PROMPT_WITH_BRIDGE = """You are validating a candidate relationship based on document evidence.
+
+CONTEXT (scope setter):
+"{scope_setter_text}"
+
+CRITICAL EVIDENCE - Both concepts appear together:
+"{bridge_text}"
+
+CONCEPT A: {concept_a}
+CONCEPT B: {concept_b}
+
+TASK: Does this text establish a DIRECT relationship between A and B?
+
+VALID relationships:
+- APPLIES_TO: A applies to / is used in context of B (markers: "for", "in", "applies to", "used in")
+- REQUIRES: A requires / needs B (markers: "shall", "must", "required", "needs")
+
+REJECT if no explicit marker connects A to B.
+
+Answer (JSON only):
+{{"verdict": "ASSERT", "relation": "APPLIES_TO", "direction": "A_TO_B", "confidence": 0.8, "marker": "for"}}
+or
+{{"verdict": "ABSTAIN", "reason": "NO_EXPLICIT_MARKER"}}"""
+
+# Prompt V1: Sans bridge (moins fiable, gardé pour fallback)
+SCOPE_VERIFY_PROMPT_NO_BRIDGE = """You are validating a candidate relationship based on document scope co-presence.
 
 Two concepts appear in the same document section. Determine if there is a DIRECT relationship.
 
@@ -137,20 +164,42 @@ class ScopeVerifier:
         # Whitelist V1
         self.allowed_relations = set(self.config.allowed_relation_types)
 
-    async def verify(self, candidate: CandidatePair) -> VerificationResult:
+    async def verify(
+        self,
+        candidate: CandidatePair,
+        require_bridge: bool = True,
+    ) -> VerificationResult:
         """
         Vérifie un CandidatePair unique.
 
         Args:
             candidate: CandidatePair à vérifier
+            require_bridge: Si True, ABSTAIN immédiatement si pas de BRIDGE span
+                           (garde-fou déterministe pour éviter les appels LLM inutiles)
 
         Returns:
             VerificationResult avec ASSERT ou ABSTAIN
         """
         bundle = candidate.evidence_bundle
 
+        # =================================================================
+        # GARDE-FOU DÉTERMINISTE: Pas de bridge → ABSTAIN sans appeler LLM
+        # =================================================================
+        # Un span BRIDGE contient les deux concepts A et B ensemble.
+        # Sans bridge, le LLM ne peut pas trouver de marqueur explicite A↔B
+        # car A et B sont dans des phrases/DocItems séparés.
+        # =================================================================
+        if require_bridge and not bundle.has_bridge:
+            return VerificationResult(
+                candidate_id=candidate.candidate_id,
+                verdict="ABSTAIN",
+                abstain_reason=DiscursiveAbstainReason.NO_BRIDGE_EVIDENCE,
+                abstain_justification="No DocItem contains both concepts together",
+            )
+
         # Extraire les textes du bundle
         scope_setter = bundle.get_scope_setter()
+        bridge_span = bundle.get_bridge()
         mentions = bundle.get_mentions()
 
         if not scope_setter:
@@ -161,26 +210,35 @@ class ScopeVerifier:
                 abstain_justification="No scope_setter in bundle",
             )
 
-        # Trouver les mentions pour pivot et other
-        pivot_mention = None
-        other_mention = None
-        for m in mentions:
-            if m.concept_id == candidate.pivot_concept_id:
-                pivot_mention = m
-            elif m.concept_id == candidate.other_concept_id:
-                other_mention = m
+        # Construire le prompt selon la présence du bridge
+        if bridge_span:
+            # Prompt V2 avec BRIDGE (meilleur signal pour le LLM)
+            prompt = SCOPE_VERIFY_PROMPT_WITH_BRIDGE.format(
+                scope_setter_text=scope_setter.text_excerpt[:300],
+                bridge_text=bridge_span.text_excerpt[:400],  # Plus de contexte pour le bridge
+                concept_a=candidate.pivot_surface_form,
+                concept_b=candidate.other_surface_form,
+            )
+        else:
+            # Prompt V1 sans bridge (fallback si require_bridge=False)
+            pivot_mention = None
+            other_mention = None
+            for m in mentions:
+                if m.concept_id == candidate.pivot_concept_id:
+                    pivot_mention = m
+                elif m.concept_id == candidate.other_concept_id:
+                    other_mention = m
 
-        # Construire le prompt
-        prompt = SCOPE_VERIFY_PROMPT.format(
-            scope_setter_text=scope_setter.text_excerpt[:300],
-            concept_a=candidate.pivot_surface_form,
-            concept_a_text=pivot_mention.text_excerpt[:200] if pivot_mention else scope_setter.text_excerpt[:200],
-            concept_b=candidate.other_surface_form,
-            concept_b_text=other_mention.text_excerpt[:200] if other_mention else scope_setter.text_excerpt[:200],
-        )
+            prompt = SCOPE_VERIFY_PROMPT_NO_BRIDGE.format(
+                scope_setter_text=scope_setter.text_excerpt[:300],
+                concept_a=candidate.pivot_surface_form,
+                concept_a_text=pivot_mention.text_excerpt[:200] if pivot_mention else scope_setter.text_excerpt[:200],
+                concept_b=candidate.other_surface_form,
+                concept_b_text=other_mention.text_excerpt[:200] if other_mention else scope_setter.text_excerpt[:200],
+            )
 
         try:
-            # Utiliser SHORT_ENRICHMENT (claude-3-haiku) pour éviter les coûts OpenAI
+            # Utiliser SHORT_ENRICHMENT (claude-3-haiku ou vLLM burst)
             response = await self.llm_router.acomplete(
                 task_type=TaskType.SHORT_ENRICHMENT,
                 messages=[{"role": "user", "content": prompt}],
@@ -212,6 +270,7 @@ class ScopeVerifier:
         self,
         candidates: List[CandidatePair],
         max_concurrent: int = 5,
+        require_bridge: bool = True,
     ) -> BatchVerificationResult:
         """
         Vérifie un batch de CandidatePairs.
@@ -219,6 +278,7 @@ class ScopeVerifier:
         Args:
             candidates: Liste de CandidatePairs à vérifier
             max_concurrent: Nombre max d'appels LLM concurrents
+            require_bridge: Si True, ABSTAIN immédiatement si pas de BRIDGE span
 
         Returns:
             BatchVerificationResult avec stats et résultats
@@ -227,10 +287,14 @@ class ScopeVerifier:
 
         batch_result = BatchVerificationResult(total=len(candidates))
 
+        # Stats additionnelles
+        no_bridge_count = 0
+        llm_called_count = 0
+
         # Traiter par lots pour limiter la concurrence
         for i in range(0, len(candidates), max_concurrent):
             batch = candidates[i:i + max_concurrent]
-            tasks = [self.verify(c) for c in batch]
+            tasks = [self.verify(c, require_bridge=require_bridge) for c in batch]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for result in results:
@@ -241,8 +305,20 @@ class ScopeVerifier:
                     batch_result.results.append(result)
                     if result.verdict == "ASSERT":
                         batch_result.asserted += 1
+                        llm_called_count += 1
                     else:
                         batch_result.abstained += 1
+                        if result.abstain_reason == DiscursiveAbstainReason.NO_BRIDGE_EVIDENCE:
+                            no_bridge_count += 1
+                        else:
+                            llm_called_count += 1  # LLM a été appelé et a retourné ABSTAIN
+
+        # Log des stats
+        logger.info(
+            f"[ScopeVerifier] Batch complete: {batch_result.total} candidates, "
+            f"{batch_result.asserted} ASSERT, {batch_result.abstained} ABSTAIN "
+            f"(NO_BRIDGE: {no_bridge_count}, LLM called: {llm_called_count})"
+        )
 
         return batch_result
 

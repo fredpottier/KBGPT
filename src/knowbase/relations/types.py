@@ -127,6 +127,7 @@ class DiscursiveAbstainReason(str, Enum):
 
     # ADR SCOPE - Niveau Miner (déterministe, sans LLM)
     NO_SCOPE_SETTER = "NO_SCOPE_SETTER"            # Section sans scope_setter valide
+    NO_BRIDGE_EVIDENCE = "NO_BRIDGE_EVIDENCE"      # Pas de phrase/fenêtre contenant A et B ensemble
 
     # ADR SCOPE - Niveau Verifier (LLM)
     SCOPE_BREAK_LINGUISTIC = "SCOPE_BREAK_LINGUISTIC"  # Rupture de portée linguistique détectée
@@ -834,6 +835,7 @@ class EvidenceSpanRole(str, Enum):
     """
     SCOPE_SETTER = "SCOPE_SETTER"   # DocItem définissant le scope (heading ou premier)
     MENTION = "MENTION"              # DocItem contenant une mention de concept
+    BRIDGE = "BRIDGE"                # DocItem contenant BOTH concepts A et B (phrase pont)
 
 
 class EvidenceSpan(BaseModel):
@@ -869,6 +871,11 @@ class EvidenceBundle(BaseModel):
     Invariants:
     - INV-SCOPE-03: ≥2 DocItems distincts obligatoires
     - Le bundle est sérialisé en JSON dans RawAssertion.evidence_bundle (pas de nœud)
+
+    Bridge sentence:
+    - Un span BRIDGE contient BOTH concepts A et B dans le même DocItem
+    - C'est l'évidence la plus forte pour la vérification LLM
+    - Si has_bridge=False, le LLM aura du mal à trouver un marqueur explicite
     """
     basis: DiscursiveBasis = Field(
         default=DiscursiveBasis.SCOPE,
@@ -879,6 +886,10 @@ class EvidenceBundle(BaseModel):
     )
     section_id: str = Field(description="ID de la section source")
     document_id: str = Field(description="ID du document source")
+    has_bridge: bool = Field(
+        default=False,
+        description="True si un span BRIDGE (A+B ensemble) a été trouvé"
+    )
 
     def is_valid(self) -> bool:
         """Vérifie INV-SCOPE-03: ≥2 DocItems distincts."""
@@ -889,6 +900,13 @@ class EvidenceBundle(BaseModel):
         """Retourne le span SCOPE_SETTER."""
         for span in self.spans:
             if span.role == EvidenceSpanRole.SCOPE_SETTER:
+                return span
+        return None
+
+    def get_bridge(self) -> Optional[EvidenceSpan]:
+        """Retourne le span BRIDGE (contenant A ET B) si présent."""
+        for span in self.spans:
+            if span.role == EvidenceSpanRole.BRIDGE:
                 return span
         return None
 

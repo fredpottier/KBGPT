@@ -25,11 +25,13 @@ from .types import (
 
 # RelationType autorisés pour DISCURSIVE (contrainte C4)
 DISCURSIVE_ALLOWED_RELATION_TYPES: Set[RelationType] = {
-    RelationType.ALTERNATIVE_TO,  # Toujours autorisé
+    RelationType.CHOICE_BETWEEN,  # ADR Discursive: choice-set linguistique ("X or Y")
+    RelationType.ALTERNATIVE_TO,  # Seulement si substituabilité explicite ("instead of", "replaces")
     RelationType.APPLIES_TO,      # Toujours autorisé
     RelationType.REQUIRES,        # Seulement si obligation explicite (must/shall/required)
     RelationType.REPLACES,        # Seulement si temporalité explicite
     RelationType.DEPRECATES,      # Seulement si temporalité explicite
+    RelationType.USES,            # Pour pattern DEFAULT ("X uses Y by default")
 }
 
 # RelationType interdits pour DISCURSIVE (causalité = raisonnement monde)

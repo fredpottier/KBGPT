@@ -531,6 +531,432 @@ Ce tableau synthétise les combinaisons possibles et leur comportement runtime :
 
 ---
 
+## Extraction des Relations Discursives
+
+Cette section définit **comment** extraire les relations discursives à partir du texte. Elle complète les sections précédentes qui définissaient **quoi** stocker et **comment** le promouvoir.
+
+---
+
+### Discursive Candidate Generation — Extraction Contract (V1)
+
+L'extraction discursive est **strictement limitée à la génération de candidates déclenchée par pattern**.
+
+Un candidat discursif **DOIT** satisfaire **TOUTES** les conditions suivantes :
+
+#### Règle E1. Local Textual Trigger (Déclencheur textuel local)
+
+Le candidat est généré **uniquement** à partir de segments textuels contenant un marqueur discursif explicite (`or`, `unless`, `by default`, énumération, etc.).
+
+**Interdit** : scanner un document à la recherche de paires de concepts sans marqueur.
+
+#### Règle E2. Local Co-presence (Co-présence locale)
+
+Les concepts Subject et Object **DOIVENT** être présents (lexicalement ou référentiellement) dans le **même contexte textuel borné** :
+- Même phrase, ou
+- Même paragraphe, ou
+- Même fenêtre EvidenceBundle (≤ 500 caractères autour du marqueur)
+
+**Interdit** : relier deux concepts qui n'apparaissent pas ensemble localement.
+
+#### Règle E3. No Global Pairing (Pas de pairing global)
+
+L'extracteur **NE DOIT PAS** générer de candidates en appariant arbitrairement des concepts à travers un document ou une section.
+
+**Interdit** : "Concept A est en page 1, Concept B est en page 5, le LLM pense qu'ils sont liés".
+
+> **Rationale** : Cette règle protège explicitement contre les approches de type "pairwise concept testing" ou "concept graph completion", même lorsqu'un LLM est contraint. Ces approches génèrent du bruit massif et des relations non-défendables.
+
+#### Règle E4. Pattern-First, LLM-Second
+
+La génération de candidates discursives **DOIT** être initiée par une détection de pattern (déterministe ou heuristique).
+
+Le LLM est utilisé **uniquement** pour :
+- Valider ou rejeter un candidat proposé par le pattern
+- Confirmer l'identification des concepts
+- Jamais pour proposer librement une relation
+
+**Séquence obligatoire** :
+```
+Pattern détecte marqueur → Pattern identifie concepts → [LLM valide] → Candidate créé
+```
+
+**Interdit** :
+```
+LLM scanne le texte → LLM propose une relation → Pattern vérifie après coup
+```
+
+#### Règle E5. Candidate ≠ Assertion
+
+Un candidat généré **n'a aucun statut sémantique** tant qu'il n'est pas :
+1. Validé par les contraintes (C3bis, C4, etc.)
+2. Matérialisé comme `RawAssertion`
+3. Promu via le pipeline standard
+
+**Conséquence** : l'extracteur peut générer des candidates qui seront rejetés. C'est normal et attendu. Le taux de rejet est une métrique de qualité de l'extracteur.
+
+#### Règle E6. No Concept Creation (Pas de création de concepts)
+
+L'extraction discursive **NE DOIT PAS** introduire de nouveaux concepts. Elle opère **strictement** sur l'inventaire de concepts existant (CanonicalConcept).
+
+**Interdit** : "Le pattern détecte un terme inconnu, on crée un concept pour pouvoir créer la relation".
+
+**Conséquence** : si un marqueur discursif est détecté mais qu'un des termes n'est pas un concept connu, le candidat est rejeté (pas de RawAssertion créée).
+
+---
+
+### Objectif
+
+Créer un mécanisme d'extraction qui:
+1. Détecte les patterns discursifs dans le texte (marqueurs linguistiques)
+2. Identifie les concepts impliqués autour de ces marqueurs
+3. Génère des `RawAssertion` avec `assertion_kind=DISCURSIVE`
+4. Respecte la contrainte C3bis (PATTERN ou HYBRID, pas LLM seul)
+
+### Architecture proposée: Pattern-First avec validation LLM optionnelle
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ PIPELINE D'EXTRACTION (ordre séquentiel)                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. LLM Relation Extractor (existant)                                   │
+│     → Extrait relations EXPLICIT                                        │
+│     → assertion_kind = EXPLICIT                                         │
+│     → ExtractionMethod = LLM ou HYBRID                                  │
+│                                                                         │
+│  2. Discursive Pattern Extractor (nouveau)                              │
+│     → Scanne pour marqueurs discursifs                                  │
+│     → Identifie concepts adjacents                                      │
+│     → assertion_kind = DISCURSIVE                                       │
+│     → ExtractionMethod = PATTERN (ou HYBRID si LLM valide)              │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Rationale**: L'extraction discursive est un **complément** à l'extraction explicite, pas un remplacement. Les deux extracteurs tournent séquentiellement sur le même texte.
+
+### Algorithmes de détection par DiscursiveBasis
+
+#### A. ALTERNATIVE — Pattern "X or Y"
+
+**Marqueurs détectés**:
+- EN: `or`, `either...or`, `alternatively`
+- FR: `ou`, `soit...soit`, `alternativement`
+
+**Algorithme**:
+```
+1. Regex: trouver patterns "(Concept1) (or|ou) (Concept2)"
+2. Vérifier que Concept1 et Concept2 sont dans le catalogue de concepts connus
+3. Si oui:
+   - Créer: ALTERNATIVE_TO(Concept1, Concept2)
+   - Créer: ALTERNATIVE_TO(Concept2, Concept1)  # Symétrique
+   - discursive_basis = [ALTERNATIVE]
+   - ExtractionMethod = PATTERN
+```
+
+**Exemple**:
+```
+Texte: "You can deploy on SAP HANA or Oracle Database"
+Détection: "SAP HANA" OR "Oracle Database"
+Output: ALTERNATIVE_TO(SAP HANA, Oracle Database), ALTERNATIVE_TO(Oracle Database, SAP HANA)
+```
+
+**Cas limite - ABSTAIN**:
+- Si un seul concept reconnu → ABSTAIN (WEAK_BUNDLE)
+- Si "or" dans contexte négatif ("not X or Y") → ABSTAIN (AMBIGUOUS_PREDICATE)
+
+#### B. DEFAULT — Pattern "by default"
+
+**Marqueurs détectés**:
+- EN: `by default`, `defaults to`, `default is`, `default value`
+- FR: `par défaut`, `défaut est`, `valeur par défaut`
+
+**Algorithme**:
+```
+1. Regex: trouver "by default" ou "par défaut" dans une phrase
+2. Identifier le sujet (ce qui a un défaut) et l'objet (la valeur par défaut)
+3. Patterns typiques:
+   - "[Subject] defaults to [Object]"
+   - "[Subject] uses [Object] by default"
+   - "By default, [Subject] is configured with [Object]"
+4. Si Subject et Object sont des concepts connus:
+   - Créer: USES(Subject, Object) ou APPLIES_TO(Object, Subject)
+   - discursive_basis = [DEFAULT]
+   - ExtractionMethod = PATTERN
+```
+
+**Exemple**:
+```
+Texte: "SAP S/4HANA uses SAP HANA by default"
+Détection: Subject="SAP S/4HANA", Object="SAP HANA", marker="by default"
+Output: USES(SAP S/4HANA, SAP HANA) avec basis=[DEFAULT]
+```
+
+**Cas limite - ABSTAIN**:
+- Si le défaut est une valeur non-concept (ex: "timeout defaults to 30s") → ABSTAIN (pas de relation inter-concepts)
+
+#### C. EXCEPTION — Pattern "unless/except"
+
+**Marqueurs détectés**:
+- EN: `unless`, `except`, `except when`, `except if`, `excluding`
+- FR: `sauf`, `sauf si`, `à moins que`, `excepté`, `hormis`
+
+**Algorithme**:
+```
+1. Regex: trouver "unless|except|sauf" suivi d'une condition
+2. Identifier:
+   - La règle générale (avant le marqueur)
+   - L'exception (après le marqueur)
+3. Si les concepts sont identifiables:
+   - Créer relation de la règle générale
+   - Annoter avec discursive_basis = [EXCEPTION]
+   - Stocker la condition d'exception dans evidence_text
+```
+
+**Exemple**:
+```
+Texte: "All modules require SAP HANA, unless you use the legacy adapter"
+Détection: règle="modules require SAP HANA", exception="legacy adapter"
+Output: REQUIRES(modules, SAP HANA) avec basis=[EXCEPTION]
+        Note: l'exception est tracée mais ne crée pas de relation séparée (trop risqué)
+```
+
+**Cas limite - ABSTAIN**:
+- Si l'exception invalide complètement la règle → ABSTAIN (SCOPE_BREAK)
+- Si l'exception introduit un concept non-résolu → ABSTAIN (COREF_UNRESOLVED)
+
+#### D. SCOPE — Maintien de portée inter-phrases
+
+**Marqueurs détectés**:
+- Références anaphoriques structurelles: "This module", "These components", "The following"
+- Listes avec contexte partagé
+
+**Algorithme**:
+```
+1. Détecter une phrase établissant un scope (ex: "SAP S/4HANA includes:")
+2. Identifier les éléments dans le scope (liste, paragraphe suivant)
+3. Pour chaque élément:
+   - Hériter le sujet du scope
+   - Créer relation avec discursive_basis = [SCOPE]
+   - Exiger ≥ 2 spans (span scope + span élément)
+```
+
+**Exemple**:
+```
+Texte: "SAP S/4HANA includes the following modules:
+        - Finance
+        - Logistics
+        - HR"
+Détection: Scope="SAP S/4HANA includes", éléments=[Finance, Logistics, HR]
+Output: PART_OF(Finance, SAP S/4HANA), PART_OF(Logistics, SAP S/4HANA), PART_OF(HR, SAP S/4HANA)
+        Chacun avec basis=[SCOPE], 2 spans requis
+```
+
+**Risque élevé** → ExtractionMethod = HYBRID recommandé (pattern + validation LLM)
+
+#### E. COREF — Résolution de coréférence
+
+**Dépendance**: Nécessite le module de coréférence (Pass 0.5) déjà implémenté.
+
+**Algorithme**:
+```
+1. Utiliser le résolveur de coréférence existant
+2. Si un pronom est résolu vers un concept:
+   - Créer la relation avec le concept résolu (pas le pronom)
+   - discursive_basis = [COREF]
+   - Stocker coref_resolution_path
+   - Exiger ≥ 2 spans (span pronom + span antécédent)
+```
+
+**Exemple**:
+```
+Texte: "SAP HANA provides in-memory computing. It requires 256GB RAM minimum."
+Coref: "It" → "SAP HANA"
+Output: REQUIRES(SAP HANA, 256GB RAM) avec basis=[COREF]
+```
+
+#### F. ENUMERATION — Listes explicites
+
+**Marqueurs détectés**:
+- Listes numérotées ou à puces
+- Patterns: "includes:", "consists of:", "comprend:", "se compose de:"
+
+**Algorithme**:
+```
+1. Détecter structure de liste (markdown, HTML, ou textuelle)
+2. Identifier le sujet de la liste
+3. Pour chaque élément:
+   - Vérifier si c'est un concept connu
+   - Créer relation PART_OF ou USES selon contexte
+   - discursive_basis = [ENUMERATION]
+```
+
+**Chevauchement avec SCOPE**: ENUMERATION est un cas particulier de SCOPE avec structure de liste explicite. Utiliser ENUMERATION si la liste est clairement délimitée.
+
+#### Garde-fou pour SCOPE et ENUMERATION
+
+> **Important** : Les relations structurelles (ex: `PART_OF`) extraites via SCOPE ou ENUMERATION **DOIVENT** rester document-scoped et **NE DOIVENT PAS** être interprétées comme une composition ontologique.
+>
+> Ces relations expriment "dans ce document, X est présenté comme partie de Y", pas "X est ontologiquement une partie de Y dans l'absolu".
+
+### Règles de création de RawAssertion
+
+#### Champs obligatoires pour DISCURSIVE
+
+```python
+RawAssertion(
+    # Standard
+    raw_assertion_id=generate_ulid(),
+    subject_concept_id=subject_id,
+    object_concept_id=object_id,
+    predicate_raw=detected_predicate,      # Ex: "alternative to", "uses by default"
+    predicate_norm=normalize(predicate),
+    evidence_text=matched_span,            # Le texte contenant le marqueur
+
+    # DISCURSIVE spécifique
+    assertion_kind=AssertionKind.DISCURSIVE,
+    discursive_basis=[detected_basis],     # Ex: [DiscursiveBasis.ALTERNATIVE]
+
+    # Contrainte C3bis
+    extraction_method=ExtractionMethod.PATTERN,  # ou HYBRID si LLM valide
+
+    # Contrainte C4 - vérifier whitelist
+    relation_type=validated_relation_type,  # Doit être dans whitelist DISCURSIVE
+
+    # Confidence
+    confidence_extractor=pattern_confidence,  # Typiquement 0.7-0.9 selon pattern
+)
+```
+
+#### Validation pré-écriture
+
+Avant de créer une RawAssertion DISCURSIVE, vérifier:
+
+```python
+def validate_before_write(assertion: RawAssertion) -> Optional[DiscursiveAbstainReason]:
+    # C3bis: ExtractionMethod
+    if assertion.extraction_method == ExtractionMethod.LLM:
+        return DiscursiveAbstainReason.TYPE2_RISK
+
+    # C4: Whitelist RelationType
+    if assertion.relation_type not in DISCURSIVE_ALLOWED_RELATION_TYPES:
+        return DiscursiveAbstainReason.WHITELIST_VIOLATION
+
+    # Basis requise
+    if not assertion.discursive_basis:
+        return DiscursiveAbstainReason.WEAK_BUNDLE
+
+    return None  # OK
+```
+
+### Intégration dans le pipeline existant
+
+#### Option A: Extracteur séparé (recommandée)
+
+```python
+# Dans le pipeline d'ingestion
+
+# 1. Extraction EXPLICIT (existant)
+explicit_relations = llm_extractor.extract_relations(text, concepts)
+for rel in explicit_relations:
+    raw_assertion_writer.write_assertion(..., assertion_kind=AssertionKind.EXPLICIT)
+
+# 2. Extraction DISCURSIVE (nouveau)
+discursive_relations = discursive_pattern_extractor.extract_relations(text, concepts)
+for rel in discursive_relations:
+    # Dédoublonner avec EXPLICIT (même paire de concepts + même type)
+    if not is_duplicate(rel, explicit_relations):
+        raw_assertion_writer.write_assertion(..., assertion_kind=AssertionKind.DISCURSIVE)
+```
+
+**Avantage**: Séparation claire des responsabilités, facile à activer/désactiver.
+
+#### Option B: Mode HYBRID intégré
+
+```python
+# L'extracteur LLM existant détecte aussi les patterns discursifs
+relations = llm_extractor.extract_relations(text, concepts, detect_discursive=True)
+
+# Le LLM retourne assertion_kind dans sa réponse
+for rel in relations:
+    if rel.assertion_kind == "DISCURSIVE":
+        # Valider avec pattern matcher avant d'accepter
+        if pattern_matcher.confirms(rel):
+            extraction_method = ExtractionMethod.HYBRID
+        else:
+            continue  # Rejeter si LLM dit DISCURSIVE mais pas de pattern
+```
+
+**Avantage**: Un seul appel LLM. **Risque**: Le LLM peut sur-classifier en DISCURSIVE.
+
+#### Recommandation
+
+**Option A** pour V1 (extracteur séparé, PATTERN uniquement).
+**Option B** peut être explorée en V2 si les patterns purs manquent trop de relations.
+
+### Déduplication EXPLICIT vs DISCURSIVE
+
+Si la même relation est trouvée par les deux extracteurs:
+
+| Cas | Action |
+|-----|--------|
+| EXPLICIT trouvé, DISCURSIVE trouvé | Garder les deux (compteurs séparés sur CanonicalRelation) |
+| Même evidence_text | Garder seulement EXPLICIT (plus direct) |
+| Evidence différente | Garder les deux (renforce la relation) |
+
+La déduplication finale se fait au niveau `CanonicalRelation` via les compteurs `explicit_support_count` et `discursive_support_count`.
+
+### Métriques de succès
+
+| Métrique | Cible V1 | Mesure |
+|----------|----------|--------|
+| **Nouvelles relations trouvées** | +20-50% vs EXPLICIT seul | Count après extraction |
+| **Précision DISCURSIVE** | ≥ 90% | Validation manuelle échantillon |
+| **FP Type 2** | = 0% | Tests de régression |
+| **Patterns couverts** | ALTERNATIVE, DEFAULT, EXCEPTION | Bases fortes uniquement en V1 |
+
+### Limitations V1
+
+1. **Bases faibles (SCOPE, COREF, ENUMERATION)** : Implémentation différée ou EXTENDED-only
+2. **Multilingual** : FR + EN uniquement
+3. **Pas de LLM validation** : PATTERN pur (ExtractionMethod.PATTERN)
+4. **Concepts connus uniquement** : Pas de découverte de nouveaux concepts
+
+### Tests de validation
+
+#### Test A/B requis
+
+```
+1. Corpus de test : 10 documents SAP représentatifs
+2. Run A : Extraction EXPLICIT seule (baseline)
+3. Run B : Extraction EXPLICIT + DISCURSIVE
+4. Mesurer :
+   - Δ relations trouvées
+   - Δ concepts connectés (densité du graphe)
+   - Précision manuelle sur échantillon DISCURSIVE
+   - 0% FP Type 2 (invariant)
+```
+
+#### Cas de régression obligatoires
+
+Chaque release doit passer les cas "pièges Type 2" :
+
+```python
+TYPE2_REGRESSION_CASES = [
+    # Ne doit PAS créer de relation
+    ("SAP is better than Oracle", None),  # Opinion, pas fait
+    ("HANA enables real-time analytics", None),  # ENABLES interdit pour DISCURSIVE
+    ("If you use BW, you need HANA", None),  # Causal implicite
+
+    # DOIT créer une relation
+    ("Use HANA or Oracle for the database", ALTERNATIVE_TO),
+    ("S/4HANA uses HANA by default", USES),
+    ("All modules require HANA, unless legacy", REQUIRES),
+]
+```
+
+---
+
 ## Prochaines étapes
 
 1. **Implémentation RawAssertion** : Ajouter `AssertionKind`, `DiscursiveBasis` et `DiscursiveAbstainReason`

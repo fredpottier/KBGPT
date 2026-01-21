@@ -62,19 +62,28 @@ Si le bundle ne peut pas être construit avec ≥2 spans → `ABSTAIN(WEAK_BUNDL
 
 ### INV-SCOPE-04 : Abstain motivé (unifié)
 
-Toute décision négative **DOIT** produire un `abstain_reason` structuré. L'ABSTAIN peut être émis à **deux niveaux** :
+Toute décision négative **DOIT** produire un `abstain_reason` structuré. L'ABSTAIN peut être émis à **trois niveaux** :
 
 **Niveau Miner (déterministe, sans LLM) :**
 - `WEAK_BUNDLE` : bundle insuffisant (<2 spans)
 - `SCOPE_BREAK` : rupture de portée détectée (structural)
 - `NO_SCOPE_SETTER` : section sans scope_setter valide
 
+**Niveau Bridge Detector (déterministe, sans LLM) :**
+- `NO_BRIDGE_EVIDENCE` : aucun DocItem ne contient les deux concepts A et B ensemble
+
 **Niveau Verifier (LLM) :**
 - `TYPE2_RISK` : risque de relation déduite
-- `AMBIGUOUS_PREDICATE` : prédicat non défendable
+- `AMBIGUOUS_PREDICATE` : prédicat non défendable (pas de marqueur explicite)
 - `SCOPE_BREAK_LINGUISTIC` : rupture de portée linguistique détectée
 
-**Important** : Un ABSTAIN niveau Miner évite l'appel LLM. Le CandidatePair n'est pas transmis au Verifier.
+**Important** : Les ABSTAIN niveau Miner et Bridge Detector évitent l'appel LLM. Seuls les candidats avec bridge sont transmis au Verifier.
+
+**Distribution typique observée (2026-01-21) :**
+- ~75% des candidats : `ABSTAIN(NO_BRIDGE_EVIDENCE)` — sans appel LLM
+- ~25% des candidats : transmis au LLM Verifier
+  - ~22% de ceux-ci : `ASSERT` (relation validée)
+  - ~78% de ceux-ci : `ABSTAIN(AMBIGUOUS_PREDICATE)` (pas de marqueur)
 
 ### INV-SCOPE-05 : Budgets = garde-fous sémantiques
 
@@ -97,6 +106,45 @@ La fonction "Routing" de SCOPE (justification du mode Anchored) est **exclusivem
 ❌ Interdit : Créer un edge "SCOPE_FALLBACK" ou "ANCHORED_PATH" à l'ingestion
 ✅ Autorisé : À la requête, si pas de path sémantique, utiliser ANCHORED_IN via section
 ```
+
+### INV-SCOPE-07 : Bridge Eligibility (VALIDÉ expérimentalement 2026-01-21)
+
+> **Loi structurelle** : Une relation ne peut être évaluée par le LLM que s'il existe une **unité textuelle locale** (DocItem) capable de la porter — c'est-à-dire contenant **les deux concepts A et B ensemble**.
+
+Cette unité minimale s'appelle le **BRIDGE**.
+
+```
+❌ Sans BRIDGE : Le LLM voit A dans phrase1, B dans phrase2 → ne peut PAS trouver de marqueur A↔B
+✅ Avec BRIDGE : Le LLM voit "A applies to B" dans une même phrase → peut valider
+```
+
+**Conséquences opérationnelles :**
+
+1. **Garde-fou déterministe** : Si `has_bridge = false`, le candidat est `ABSTAIN(NO_BRIDGE_EVIDENCE)` **sans appeler le LLM** (économie de tokens)
+
+2. **Model Interchangeability** : Quand le bridge existe, Qwen 2.5 14B ≈ Claude 3 Haiku en performance (22% vs 18.6% ASSERT)
+
+3. **Qualité architecturale** : La qualité vient de l'architecture (bridge detection), pas du modèle LLM
+
+**Validation expérimentale (2026-01-21) :**
+
+| Métrique | Sans bridge detection | Avec bridge detection |
+|----------|----------------------|----------------------|
+| Candidats testés | 890 | 50 (filtrés) |
+| ASSERT | 0 (0%) | 11 (22%) |
+| Économie appels LLM | - | ~75% |
+
+### INV-SCOPE-08 : Role Separation
+
+Le pipeline SCOPE respecte une **séparation stricte des rôles** :
+
+| Composant | Rôle | Ne fait PAS |
+|-----------|------|-------------|
+| **Miner** | Propose des candidats (A, B) | Ne juge pas la relation |
+| **Bridge Detector** | Qualifie l'éligibilité textuelle | Ne juge pas la sémantique |
+| **LLM Verifier** | Tranche sur la relation | Ne répare pas une absence de preuve |
+
+> **Principe** : Le LLM ne **répare jamais** une absence de preuve. Il ne fait que **confirmer ou infirmer** une relation déjà supportée textuellement.
 
 ---
 
@@ -145,7 +193,7 @@ CREATE (ra:RawAssertion {
 
 ---
 
-## Pipeline SCOPE V1
+## Pipeline SCOPE V1.1 (avec Bridge Detection)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -164,11 +212,29 @@ CREATE (ra:RawAssertion {
 │     └─ Paires (pivot, other) uniquement                         │
 │     └─ Budget: max_pairs_per_scope                              │
 │                                                                 │
-│  4. Bundle Building                                             │
-│     └─ scope_setter + mention spans                             │
-│     └─ Si <2 spans → ABSTAIN(WEAK_BUNDLE) (pas de candidate)    │
+│  4. Bundle Building + Bridge Detection                          │
+│     └─ scope_setter (SCOPE_SETTER)                              │
+│     └─ bridge = intersection(pivot.doc_items, other.doc_items)  │
+│     └─ Si bridge existe → span BRIDGE (A+B ensemble)            │
+│     └─ mentions séparées (MENTION)                              │
+│     └─ has_bridge = true/false                                  │
+│     └─ Si <2 spans → ABSTAIN(WEAK_BUNDLE)                       │
 │                                                                 │
-│  5. Output: List[CandidatePair]                                 │
+│  5. Output: List[CandidatePair] avec has_bridge                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ BRIDGE ELIGIBILITY GATE (déterministe, sans LLM)                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Si has_bridge = false:                                         │
+│     → ABSTAIN(NO_BRIDGE_EVIDENCE) immédiat                      │
+│     → Pas d'appel LLM (économie ~75% des tokens)                │
+│                                                                 │
+│  Si has_bridge = true:                                          │
+│     → Transmettre au VERIFIER LLM                               │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -177,13 +243,17 @@ CREATE (ra:RawAssertion {
 │ VERIFIER LLM (Pass 3)                                           │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  Input: CandidatePair + EvidenceBundle + Whitelist              │
+│  Input: CandidatePair (avec BRIDGE) + Whitelist                 │
+│                                                                 │
+│  Prompt V2 (focalisé sur le bridge):                            │
+│    "CRITICAL EVIDENCE - Both concepts appear together:          │
+│     {bridge_text}"                                              │
 │                                                                 │
 │  Output:                                                        │
-│    ├─ ASSERT(relation_type, direction, confidence)              │
-│    │   └─ used_span_ids (audit trail)                           │
+│    ├─ ASSERT(relation_type, direction, confidence, marker)      │
+│    │   └─ marker = "for", "in", "requires", etc.                │
 │    │                                                            │
-│    └─ ABSTAIN(reason, justification)                            │
+│    └─ ABSTAIN(AMBIGUOUS_PREDICATE) si pas de marqueur           │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -196,7 +266,7 @@ CREATE (ra:RawAssertion {
 │    assertion_kind = DISCURSIVE                                  │
 │    discursive_basis = ["SCOPE"]                                 │
 │    relation_type = (from verifier, whitelist-checked)           │
-│    evidence_bundle = (multi-span)                               │
+│    evidence_bundle = (multi-span avec BRIDGE)                   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -288,25 +358,91 @@ En cas de rupture détectée → `ABSTAIN(SCOPE_BREAK)`.
 
 ---
 
-## Métriques de succès V1
+## Métriques de succès V1.1
 
-| Métrique | Cible | Mesure |
-|----------|-------|--------|
-| Candidates / section | p95 < 50 | Monitoring |
-| Taux ABSTAIN | Attendu élevé (>50%) | Distribution des raisons |
-| FP Type 2 | = 0% | Tests de régression |
-| Multi-span compliance | = 100% | Invariant INV-SCOPE-03 |
+| Métrique | Cible | Observé (2026-01-21) |
+|----------|-------|----------------------|
+| Candidates / section | p95 < 50 | ✅ 45-50 |
+| Taux bridge coverage | > 20% | ✅ 24.1% |
+| Taux ASSERT (sur bridged) | > 15% | ✅ 22% |
+| FP Type 2 | = 0% | ✅ 0% (tests) |
+| Multi-span compliance | = 100% | ✅ 100% |
+| Économie tokens (vs naive) | > 50% | ✅ ~75% |
 
 ---
 
-## Limitations V1
+## Résultats expérimentaux (2026-01-21)
+
+### Test 1 : Bridge Coverage
+
+Sur 10 sections avec ≥3 concepts :
+
+```
+Candidats totaux: 440
+  - Avec BRIDGE (A+B ensemble): 106 (24.1%)
+  - Sans BRIDGE (A et B séparés): 334 (75.9%)
+```
+
+**Conclusion** : ~75% des candidats sont éliminés sans appeler le LLM.
+
+### Test 2 : Qwen 2.5 14B avec Bridge Detection
+
+Sur 50 candidats avec bridge, vérifiés par Qwen 2.5 14B (vLLM) :
+
+```
+ASSERT: 11 (22.0%)
+ABSTAIN: 39 (78.0%)
+  - Raison: AMBIGUOUS_PREDICATE (pas de marqueur explicite)
+```
+
+**Comparaison avec Claude 3 Haiku (sans bridge detection) :**
+
+| Modèle | ASSERT rate | Note |
+|--------|-------------|------|
+| Qwen 2.5 14B (sans bridge) | 0% | Candidats non éligibles |
+| Qwen 2.5 14B (avec bridge) | 22% | ✅ Comparable |
+| Claude 3 Haiku | 18.6% | Référence |
+
+**Conclusion** : La qualité vient de l'architecture (bridge detection), pas du modèle.
+
+---
+
+## EvidenceSpanRole (V1.1)
+
+Les spans dans un `EvidenceBundle` portent un rôle explicite :
+
+| Role | Description | Obligatoire |
+|------|-------------|-------------|
+| `SCOPE_SETTER` | DocItem définissant le contexte (heading ou premier) | Oui (1) |
+| `BRIDGE` | DocItem contenant A **ET** B ensemble | Non (0-1) |
+| `MENTION` | DocItem contenant une mention de A ou B séparément | Non (0-n) |
+
+**Structure typique d'un bundle avec bridge :**
+
+```json
+{
+  "basis": "SCOPE",
+  "has_bridge": true,
+  "spans": [
+    {"role": "SCOPE_SETTER", "doc_item_id": "di_001", "text_excerpt": "SAP S/4HANA Features"},
+    {"role": "BRIDGE", "doc_item_id": "di_005", "text_excerpt": "TLS encryption is required for all API calls"},
+    {"role": "MENTION", "doc_item_id": "di_003", "concept_id": "c_tls", "text_excerpt": "...TLS 1.3..."},
+    {"role": "MENTION", "doc_item_id": "di_007", "concept_id": "c_api", "text_excerpt": "...API endpoints..."}
+  ]
+}
+```
+
+---
+
+## Limitations V1.1
 
 1. **Scope = section strict** : pas de propagation aux sous-sections
-2. **Pas de bridge spans** : pas de DocItem intermédiaire entre A et B
+2. ~~**Pas de bridge spans**~~ ✅ **RÉSOLU** : Bridge detection implémentée
 3. **Pas de document fallback** : si section pauvre, pas de remontée au document
 4. **Whitelist très stricte** : APPLIES_TO et REQUIRES uniquement
+5. **Bridge = intersection stricte** : pas de fenêtre ±1 phrase (V2)
 
-Ces limitations seront levées en V2 si les métriques V1 sont satisfaisantes.
+Ces limitations seront levées en V2 si les métriques V1.1 sont satisfaisantes.
 
 ---
 

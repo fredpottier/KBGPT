@@ -367,9 +367,10 @@ class ScopeCandidateMiner:
                  position: di.reading_order_index
              }) AS doc_items,
              collect(DISTINCT {
-                 concept_id: COALESCE(cc.concept_id, pc.concept_id),
+                 concept_id: COALESCE(cc.canonical_id, pc.concept_id),
                  canonical_name: COALESCE(cc.label, cc.canonical_name, pc.concept_name),
-                 doc_item_id: di.item_id
+                 doc_item_id: di.item_id,
+                 has_canonical: cc IS NOT NULL
              }) AS concept_mentions
         RETURN sc.context_id AS section_id,
                sc.doc_id AS document_id,
@@ -402,10 +403,18 @@ class ScopeCandidateMiner:
                     ))
 
             # Agrège les concepts avec leurs métriques
+            # Note: On ne garde que les concepts avec un CanonicalConcept promu
+            # car le RawAssertionWriter ne peut écrire que des relations entre CanonicalConcepts
             concept_map: Dict[str, ConceptInScope] = {}
+            skipped_no_canonical = 0
             for idx, cm in enumerate(record["concept_mentions"]):
                 cid = cm.get("concept_id")
                 if not cid:
+                    continue
+
+                # Filtrer les concepts sans CanonicalConcept promu (INSTANCE_OF)
+                if not cm.get("has_canonical"):
+                    skipped_no_canonical += 1
                     continue
 
                 if cid not in concept_map:
@@ -420,6 +429,12 @@ class ScopeCandidateMiner:
                 concept_map[cid].mention_count += 1
                 if cm.get("doc_item_id"):
                     concept_map[cid].doc_item_ids.append(cm["doc_item_id"])
+
+            if skipped_no_canonical > 0:
+                logger.debug(
+                    f"[ScopeCandidateMiner] Section {section_id}: "
+                    f"filtered {skipped_no_canonical} ProtoConcepts without CanonicalConcept"
+                )
 
             return SectionScope(
                 section_id=section_id,
@@ -457,9 +472,12 @@ class ScopeCandidateMiner:
 
         Structure:
         - span1: scope_setter (role=SCOPE_SETTER)
-        - span2+: mentions des concepts (role=MENTION)
+        - span2: bridge DocItem contenant A ET B (role=BRIDGE) si trouvé
+        - span3+: mentions des concepts (role=MENTION)
 
         Le bundle doit avoir ≥2 DocItems distincts pour être valide (INV-SCOPE-03).
+        Un span BRIDGE est ajouté si un DocItem contient les deux concepts,
+        ce qui est critique pour la vérification LLM.
         """
         spans = []
 
@@ -472,8 +490,29 @@ class ScopeCandidateMiner:
             concept_surface_form=None,
         ))
 
-        # Spans pour le pivot
-        for di_id in pivot.doc_item_ids[:2]:  # Max 2 spans par concept
+        # Cherche les DocItems "bridge" contenant BOTH pivot ET other
+        # (intersection des doc_item_ids)
+        pivot_di_set = set(pivot.doc_item_ids)
+        other_di_set = set(other.doc_item_ids)
+        bridge_di_ids = pivot_di_set & other_di_set  # Intersection
+
+        # Span 2: bridge DocItem (le plus important pour la vérification LLM)
+        bridge_found = False
+        for bridge_di_id in list(bridge_di_ids)[:1]:  # Max 1 bridge span
+            di = next((d for d in section_scope.doc_items if d.doc_item_id == bridge_di_id), None)
+            if di:
+                spans.append(EvidenceSpan(
+                    doc_item_id=bridge_di_id,
+                    role=EvidenceSpanRole.BRIDGE,
+                    text_excerpt=di.text[:300] if di.text else "",  # Plus long pour le bridge
+                    concept_id=None,  # Bridge contient les deux concepts
+                    concept_surface_form=f"{pivot.canonical_name} + {other.canonical_name}",
+                ))
+                bridge_found = True
+
+        # Spans pour le pivot (exclure les bridge déjà ajoutés)
+        pivot_only_ids = [di_id for di_id in pivot.doc_item_ids if di_id not in bridge_di_ids]
+        for di_id in pivot_only_ids[:2]:  # Max 2 spans par concept
             di = next((d for d in section_scope.doc_items if d.doc_item_id == di_id), None)
             if di:
                 spans.append(EvidenceSpan(
@@ -484,8 +523,9 @@ class ScopeCandidateMiner:
                     concept_surface_form=pivot.canonical_name,
                 ))
 
-        # Spans pour other
-        for di_id in other.doc_item_ids[:2]:  # Max 2 spans par concept
+        # Spans pour other (exclure les bridge déjà ajoutés)
+        other_only_ids = [di_id for di_id in other.doc_item_ids if di_id not in bridge_di_ids]
+        for di_id in other_only_ids[:2]:  # Max 2 spans par concept
             di = next((d for d in section_scope.doc_items if d.doc_item_id == di_id), None)
             if di:
                 spans.append(EvidenceSpan(
@@ -501,6 +541,7 @@ class ScopeCandidateMiner:
             spans=spans,
             section_id=section_scope.section_id,
             document_id=section_scope.document_id,
+            has_bridge=bridge_found,  # Flag pour garde-fou déterministe
         )
 
 
