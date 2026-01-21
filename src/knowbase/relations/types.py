@@ -932,6 +932,7 @@ class CandidatePairStatus(str, Enum):
     PENDING = "PENDING"           # En attente de vérification
     VERIFIED = "VERIFIED"         # Vérifié par LLM → RawAssertion créée
     ABSTAINED = "ABSTAINED"       # ABSTAIN (Miner ou Verifier)
+    REJECTED = "REJECTED"         # Rejeté par validation (C3bis, C4, INV-SEP)
 
 
 class CandidatePair(BaseModel):
@@ -999,9 +1000,43 @@ class CandidatePair(BaseModel):
         description="Confidence du Verifier"
     )
 
+    # Phase B: Validation fields
+    assertion_kind: AssertionKind = Field(
+        default=AssertionKind.DISCURSIVE,
+        description="Type d'assertion (DISCURSIVE pour SCOPE candidates)"
+    )
+    extraction_method: ExtractionMethod = Field(
+        default=ExtractionMethod.PATTERN,
+        description="Méthode d'extraction utilisée"
+    )
+    discursive_basis: List[DiscursiveBasis] = Field(
+        default_factory=list,
+        description="Bases discursives pour la validation"
+    )
+    rejection_reason: Optional[str] = Field(
+        default=None,
+        description="Raison de rejet si status=REJECTED"
+    )
+
     # Traçabilité
     created_at: datetime = Field(default_factory=datetime.utcnow)
     verified_at: Optional[datetime] = Field(default=None)
+
+    # Aliases pour compatibilité (subject/object vs pivot/other)
+    @property
+    def subject_id(self) -> str:
+        """Alias pour pivot_concept_id."""
+        return self.pivot_concept_id
+
+    @property
+    def object_id(self) -> str:
+        """Alias pour other_concept_id."""
+        return self.other_concept_id
+
+    @property
+    def relation_type(self) -> Optional[RelationType]:
+        """Alias pour verified_relation_type."""
+        return self.verified_relation_type
 
     class Config:
         use_enum_values = True

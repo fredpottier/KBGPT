@@ -4,7 +4,7 @@
 **ADR de référence**: `doc/ongoing/ADR_DISCURSIVE_RELATIONS.md`
 **ADR complémentaire**: `doc/ongoing/ADR_SCOPE_VS_ASSERTION_SEPARATION.md` ✅ APPROVED
 **ADR extension**: `doc/ongoing/ADR_NORMATIVE_RULES_SPEC_FACTS.md` ✅ APPROVED – V1
-**Statut global**: ADR validés — Prêt pour implémentation Phase A
+**Statut global**: Phase A ✅ + Phase B ✅ — Prêt pour Phase C
 
 ---
 
@@ -405,12 +405,12 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 - INV-NORM-04 : Pas de sujet inventé ✅
 - INV-AGN-01 : Domain-Agnostic Semantics (pas de prédicats métier) ✅
 
-### Phase B - Compléter l'extraction assertions (Moyenne priorité - DÉBLOQUÉE)
+### Phase B - Compléter l'extraction assertions (✅ COMPLÈTE)
 
-5. [ ] Intégrer `DiscursivePatternExtractor` dans Pass 2
-6. [ ] Valider intégration COREF avec Pass 0.5
-7. [ ] Implémenter `validate_before_write()` (C3bis + C4)
-8. [ ] Implémenter `can_create_assertion()` (INV-SEP-01, INV-SEP-02)
+5. [x] Intégrer `DiscursivePatternExtractor` dans Pass 2 — Déjà fait dans pass2_orchestrator.py
+6. [x] Valider intégration COREF avec Pass 0.5 — `coref_assertion_bridge.py` créé
+7. [x] Implémenter `validate_before_write()` (C3bis + C4) — `assertion_validation.py`
+8. [x] Implémenter `can_create_assertion()` (INV-SEP-01, INV-SEP-02) — 24 tests passent
 
 ### Phase C - Pipeline de promotion (Moyenne priorité - 🔒 ATTEND PHASE A)
 
@@ -485,6 +485,7 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 
 | Date | Changement | Auteur |
 |------|------------|--------|
+| 2026-01-21 | **Phase B COMPLÈTE** : COREF bridge + validation C3bis/C4/INV-SEP (24 tests) | Claude |
 | 2026-01-21 | **Phase A COMPLÈTE** : Scope Layer + NormativeRule/SpecFact extracteurs | Claude |
 | 2026-01-21 | Ajout section "Évolutions futures V1.x/V2" pour tracer les non-goals | Claude |
 | 2026-01-21 | **VALIDATION** : ADR Scope vs Assertion APPROVED + NormativeRule APPROVED V1 | Claude |

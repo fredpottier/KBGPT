@@ -29,10 +29,15 @@ from knowbase.relations.types import (
     RawAssertion,
     RawAssertionFlags,
     RelationType,
+    ExtractionMethod,
     # ADR Relations Discursivement Déterminées
     AssertionKind,
     DiscursiveBasis,
     DiscursiveAbstainReason,
+)
+from knowbase.relations.assertion_validation import (
+    validate_before_write,
+    ValidationResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -288,6 +293,38 @@ class RawAssertionWriter:
                 f"[RawAssertionWriter] Concept not found: {subject_concept_id} or {object_concept_id}"
             )
             return None
+
+        # ADR validation: C3bis, C4, INV-SEP-01, INV-SEP-02
+        # Determine extraction method from model_used or default
+        extraction_method = ExtractionMethod.HYBRID
+        if self.model_used and "pattern" in self.model_used.lower():
+            extraction_method = ExtractionMethod.PATTERN
+        elif self.model_used and self.model_used.startswith("gpt"):
+            extraction_method = ExtractionMethod.LLM
+
+        validation_result = validate_before_write(
+            assertion_kind=assertion_kind,
+            relation_type=relation_type,
+            extraction_method=extraction_method,
+            evidence_text=evidence_text,
+            discursive_basis=discursive_basis,
+        )
+
+        if not validation_result.is_valid:
+            self._stats["skipped_validation"] = self._stats.get("skipped_validation", 0) + 1
+            logger.warning(
+                f"[RawAssertionWriter] Validation failed: {validation_result.error_code} - "
+                f"{validation_result.error_message}"
+            )
+            # Si on avait déjà un abstain_reason du caller, on le garde
+            # Sinon on utilise celui de la validation
+            if abstain_reason is None:
+                abstain_reason = validation_result.abstain_reason
+            return None
+
+        # Log warnings from validation
+        for warning in validation_result.warnings:
+            logger.debug(f"[RawAssertionWriter] Validation warning: {warning}")
 
         # Normalize predicate
         predicate_norm = normalize_predicate(predicate_raw)

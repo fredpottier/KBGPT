@@ -191,6 +191,25 @@ from .structure_parser import (
     StructureParser,
     extract_spec_facts,
 )
+# Phase B - COREF Assertion Bridge
+from .coref_assertion_bridge import (
+    CorefAssertionBridge,
+    CorefChainInfo,
+    MentionInfo,
+    get_coref_assertion_bridge,
+    can_use_coref_as_evidence,
+)
+# Phase B - Assertion Validation (C3bis, C4, INV-SEP)
+from .assertion_validation import (
+    ValidationErrorCode,
+    ValidationResult,
+    validate_extraction_method_c3bis,
+    validate_relation_type_c4,
+    validate_evidence_inv_sep,
+    validate_before_write,
+    can_create_assertion,
+    filter_valid_candidates,
+)
 
 __all__ = [
     # Types de base
@@ -337,4 +356,19 @@ __all__ = [
     "extract_normative_rules",
     "StructureParser",
     "extract_spec_facts",
+    # Phase B - COREF Assertion Bridge
+    "CorefAssertionBridge",
+    "CorefChainInfo",
+    "MentionInfo",
+    "get_coref_assertion_bridge",
+    "can_use_coref_as_evidence",
+    # Phase B - Assertion Validation (C3bis, C4, INV-SEP)
+    "ValidationErrorCode",
+    "ValidationResult",
+    "validate_extraction_method_c3bis",
+    "validate_relation_type_c4",
+    "validate_evidence_inv_sep",
+    "validate_before_write",
+    "can_create_assertion",
+    "filter_valid_candidates",
 ]
