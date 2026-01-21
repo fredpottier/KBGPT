@@ -109,6 +109,9 @@ class DocumentPhase(str, Enum):
     CLASSIFY_FINE = "classify_fine"          # Classification LLM fine-grained
     ENRICH_RELATIONS = "enrich_relations"    # Relations candidates (RawAssertions)
 
+    # Pass 2c: Assertions normatives (ADR_NORMATIVE_RULES_SPEC_FACTS)
+    NORMATIVE_EXTRACTION = "normative_extraction"  # NormativeRule + SpecFact
+
     # Pass 3: Preuves sémantiques
     SEMANTIC_CONSOLIDATION = "semantic_consolidation"  # Relations prouvées (evidence_quote)
 
@@ -140,6 +143,7 @@ class Pass2Phase(str, Enum):
     STRUCTURAL_TOPICS = "structural_topics"
     CLASSIFY_FINE = "classify_fine"
     ENRICH_RELATIONS = "enrich_relations"
+    NORMATIVE_EXTRACTION = "normative_extraction"  # Pass 2c (ADR_NORMATIVE_RULES_SPEC_FACTS)
     SEMANTIC_CONSOLIDATION = "semantic_consolidation"
     CROSS_DOC = "cross_doc"  # Mapped to CorpusPhase.ENTITY_RESOLUTION
 
@@ -178,6 +182,12 @@ class Pass2Stats:
     scope_candidates_mined: int = 0
     scope_asserted: int = 0
     scope_abstained: int = 0
+
+    # Pass 2c: Normative Extraction (ADR_NORMATIVE_RULES_SPEC_FACTS)
+    normative_rules_extracted: int = 0
+    normative_rules_deduplicated: int = 0
+    spec_facts_extracted: int = 0
+    spec_facts_deduplicated: int = 0
 
     # Pass 4a: Entity Resolution (corpus-level)
     er_candidates: int = 0
@@ -256,6 +266,8 @@ class Pass2Orchestrator:
                 "structural_topics",
                 # Puis Pass 2b (Classification + Relations existantes)
                 "classify_fine", "enrich_relations",
+                # ADR_NORMATIVE_RULES_SPEC_FACTS: Pass 2c (NormativeRule + SpecFact)
+                "normative_extraction",
                 # ADR_GRAPH_FIRST_ARCHITECTURE: Pass 3 (Semantic Consolidation - proven relations)
                 "semantic_consolidation",
                 # Enfin Cross-doc
@@ -394,6 +406,11 @@ class Pass2Orchestrator:
                 await self._phase_enrich_relations(job, stats)
                 phases_completed.append(Pass2Phase.ENRICH_RELATIONS.value)
 
+            # Phase 2c: NORMATIVE_EXTRACTION (ADR_NORMATIVE_RULES_SPEC_FACTS)
+            if Pass2Phase.NORMATIVE_EXTRACTION in job.phases:
+                await self._phase_normative_extraction(job, stats)
+                phases_completed.append(Pass2Phase.NORMATIVE_EXTRACTION.value)
+
             # ADR_GRAPH_FIRST_ARCHITECTURE - Pass 3: SEMANTIC_CONSOLIDATION
             # Extractive verification + proven relations (SEULE source de relations sémantiques)
             if Pass2Phase.SEMANTIC_CONSOLIDATION in job.phases:
@@ -449,6 +466,7 @@ class Pass2Orchestrator:
             f"topics={stats.structural_topics_count}, covers={stats.covers_relations_count}, "
             f"classify={stats.classify_fine_count}, relations={stats.enrich_relations_count}, "
             f"scope={stats.scope_asserted}/{stats.scope_candidates_mined}, "
+            f"normative_rules={stats.normative_rules_extracted}, spec_facts={stats.spec_facts_extracted}, "
             f"pass3_verified={stats.pass3_verified}/{stats.pass3_candidates})"
         )
 
@@ -1129,6 +1147,134 @@ class Pass2Orchestrator:
         except Exception as e:
             logger.warning(f"[OSMOSE:Pass2] Failed to get concept anchors: {e}")
             return {}
+
+    # =========================================================================
+    # Pass 2c: NORMATIVE_EXTRACTION (ADR_NORMATIVE_RULES_SPEC_FACTS)
+    # =========================================================================
+
+    async def _phase_normative_extraction(self, job: Pass2Job, stats: Pass2Stats):
+        """
+        Phase NORMATIVE_EXTRACTION: Extraction de NormativeRule et SpecFact.
+
+        ADR_NORMATIVE_RULES_SPEC_FACTS - Pass 2c
+
+        Pipeline:
+        1. NormativePatternExtractor: Détecte les marqueurs modaux (must/shall/required)
+        2. StructureParser: Parse les tables et listes clé-valeur
+        3. NormativeWriter: Persiste dans Neo4j avec déduplication
+
+        Les NormativeRule et SpecFact sont NON-TRAVERSABLES mais indexables.
+        """
+        from knowbase.relations.normative_pattern_extractor import (
+            NormativePatternExtractor,
+        )
+        from knowbase.relations.structure_parser import StructureParser
+        from knowbase.relations.normative_writer import (
+            NormativeWriter,
+            get_normative_writer,
+        )
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+        from knowbase.config.settings import get_settings
+
+        logger.info(
+            f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Starting for doc {job.document_id}"
+        )
+
+        try:
+            # Initialiser Neo4j client
+            settings = get_settings()
+            neo4j_client = get_neo4j_client(
+                uri=settings.neo4j_uri,
+                user=settings.neo4j_user,
+                password=settings.neo4j_password,
+                database="neo4j"
+            )
+
+            if not neo4j_client.is_connected():
+                logger.warning(
+                    f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Neo4j not connected, skipping"
+                )
+                return
+
+            # Récupérer les segments du document
+            segments = await self._get_document_segments(job.document_id)
+
+            if not segments:
+                logger.info(
+                    f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] No segments found for {job.document_id}"
+                )
+                return
+
+            # Initialiser les extracteurs
+            normative_extractor = NormativePatternExtractor(min_confidence=0.6)
+            structure_parser = StructureParser(min_confidence=0.6)
+
+            all_rules = []
+            all_facts = []
+
+            # Traiter chaque segment
+            for segment in segments:
+                segment_id = segment.get("segment_id", "")
+                segment_text = segment.get("text", "")
+                section_id = segment.get("section_id")
+
+                if not segment_text or len(segment_text) < 20:
+                    continue
+
+                # 1. Extraire les règles normatives
+                rules = normative_extractor.extract_from_text(
+                    text=segment_text,
+                    source_doc_id=job.document_id,
+                    source_chunk_id=segment_id,
+                    source_segment_id=segment_id,
+                    evidence_section=section_id,
+                    tenant_id=job.tenant_id,
+                )
+                all_rules.extend(rules)
+
+                # 2. Extraire les SpecFacts depuis les structures
+                facts = structure_parser.extract_from_text(
+                    text=segment_text,
+                    source_doc_id=job.document_id,
+                    source_chunk_id=segment_id,
+                    source_segment_id=segment_id,
+                    evidence_section=section_id,
+                    tenant_id=job.tenant_id,
+                )
+                all_facts.extend(facts)
+
+            # 3. Persister dans Neo4j
+            writer = get_normative_writer(
+                neo4j_client=neo4j_client,
+                tenant_id=job.tenant_id,
+            )
+
+            if all_rules:
+                rule_stats = writer.write_rules(all_rules)
+                stats.normative_rules_extracted = rule_stats.rules_written
+                stats.normative_rules_deduplicated = rule_stats.rules_deduplicated
+
+            if all_facts:
+                fact_stats = writer.write_facts(all_facts)
+                stats.spec_facts_extracted = fact_stats.facts_written
+                stats.spec_facts_deduplicated = fact_stats.facts_deduplicated
+
+            # 4. Créer les liens vers le document
+            links_created = writer.link_to_document(job.document_id)
+
+            logger.info(
+                f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Complete for {job.document_id}: "
+                f"{stats.normative_rules_extracted} rules (+{stats.normative_rules_deduplicated} dedup), "
+                f"{stats.spec_facts_extracted} facts (+{stats.spec_facts_deduplicated} dedup), "
+                f"{links_created} doc links"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Failed for {job.document_id}: {e}",
+                exc_info=True
+            )
+            stats.errors.append(f"NORMATIVE_EXTRACTION: {e}")
 
     def _predicate_to_relation_type(self, predicate: str) -> Optional["RelationType"]:
         """Convertit un prédicat brut vers un RelationType du set fermé."""

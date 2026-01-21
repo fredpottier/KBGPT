@@ -773,7 +773,7 @@ async def run_enrich_relations(
     service = get_pass2_service(tenant_id)
     result = await service.run_enrich_relations(
         document_id=request.document_id,
-        max_pairs=request.limit
+        max_relations_per_doc=request.limit or 150
     )
 
     return Pass2ResultResponse(

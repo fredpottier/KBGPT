@@ -191,6 +191,12 @@ from .structure_parser import (
     StructureParser,
     extract_spec_facts,
 )
+# ADR NormativeRule & SpecFact - Writer (Pass 2c)
+from .normative_writer import (
+    NormativeWriter,
+    NormativeWriteStats,
+    get_normative_writer,
+)
 # Phase B - COREF Assertion Bridge
 from .coref_assertion_bridge import (
     CorefAssertionBridge,
@@ -365,6 +371,10 @@ __all__ = [
     "extract_normative_rules",
     "StructureParser",
     "extract_spec_facts",
+    # ADR NormativeRule & SpecFact - Writer (Pass 2c)
+    "NormativeWriter",
+    "NormativeWriteStats",
+    "get_normative_writer",
     # Phase B - COREF Assertion Bridge
     "CorefAssertionBridge",
     "CorefChainInfo",

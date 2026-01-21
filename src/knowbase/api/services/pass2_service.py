@@ -42,6 +42,18 @@ from knowbase.relations.types import RelationType, RawAssertionFlags
 from knowbase.relations.structural_topic_extractor import process_document_topics
 from knowbase.relations.semantic_consolidation_pass3 import run_pass3_consolidation
 
+# ADR SCOPE Discursive Candidate Mining
+from knowbase.relations.scope_candidate_miner import (
+    ScopeCandidateMiner,
+    get_mining_stats,
+)
+from knowbase.relations.scope_verifier import (
+    ScopeVerifier,
+    candidate_to_raw_assertion,
+    get_scope_verifier,
+)
+from knowbase.relations.types import ScopeMiningConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -422,6 +434,7 @@ class Pass2Service:
             total_relations = 0
             total_segments = 0
             all_observability = []
+            scope_relations = 0  # ADR SCOPE
 
             # Paralléliser le traitement des documents (max 4 en parallèle)
             # Chaque document utilise déjà 5 workers pour ses segments
@@ -473,18 +486,35 @@ class Pass2Service:
                         f"fuzzy_rate={obs.fuzzy_match_rate:.1%}"
                     )
 
-            result.items_processed = total_segments
-            result.items_created = total_relations
+            # =================================================================
+            # ADR SCOPE Discursive Candidate Mining
+            # Mine relations based on section co-presence + LLM verification
+            # =================================================================
+            scope_stats = await self._run_scope_mining(doc_ids)
+            scope_relations = scope_stats.get("asserted", 0)
+
+            # Combine segment + SCOPE relations
+            total_relations_combined = total_relations + scope_relations
+
+            result.items_processed = total_segments + scope_stats.get("sections_processed", 0)
+            result.items_created = total_relations_combined
             result.success = True
             result.details = {
                 "documents_processed": len(doc_ids),
                 "segments_analyzed": total_segments,
-                "relations_created": total_relations,
+                "relations_created": total_relations_combined,
                 "budget_per_doc": max_relations_per_doc,
                 "observability_summary": {
                     "total_proposed": sum(o.relations_proposed for o in all_observability),
                     "total_validated": sum(o.relations_validated for o in all_observability),
                     "total_rejected": sum(o.relations_rejected for o in all_observability),
+                },
+                # ADR SCOPE stats
+                "scope_mining": {
+                    "sections_processed": scope_stats.get("sections_processed", 0),
+                    "candidates_mined": scope_stats.get("candidates_mined", 0),
+                    "asserted": scope_stats.get("asserted", 0),
+                    "abstained": scope_stats.get("abstained", 0),
                 }
             }
 
@@ -494,9 +524,14 @@ class Pass2Service:
             result.errors.append(str(e))
 
         result.execution_time_ms = (time.time() - start_time) * 1000
+
+        # Log avec stats SCOPE si disponibles
+        scope_info = result.details.get("scope_mining", {}) if result.details else {}
         logger.info(
             f"[Pass2Service] ENRICH_RELATIONS complete: "
-            f"{result.items_created} relations from {result.items_processed} segments, "
+            f"{result.items_created} relations "
+            f"(segment + {scope_info.get('asserted', 0)} SCOPE) "
+            f"from {result.items_processed} segments/sections, "
             f"{result.execution_time_ms/1000:.1f}s"
         )
         return result
@@ -528,6 +563,148 @@ class Pass2Service:
 
         logger.info(f"[Pass2Service] Found {len(doc_ids)} documents needing enrichment (excluding already processed)")
         return doc_ids
+
+    async def _run_scope_mining(
+        self,
+        doc_ids: List[str],
+    ) -> Dict[str, Any]:
+        """
+        ADR SCOPE Discursive Candidate Mining.
+
+        Mine les relations SCOPE (co-présence dans une section documentaire)
+        et les vérifie avec LLM pour éviter les faux positifs.
+
+        Ref: doc/ongoing/ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md
+
+        Args:
+            doc_ids: Liste des documents à traiter
+
+        Returns:
+            Dict avec statistiques SCOPE:
+            - sections_processed: nombre de sections traitées
+            - candidates_mined: nombre de candidats extraits
+            - asserted: nombre de relations validées (ASSERT)
+            - abstained: nombre de candidats rejetés (ABSTAIN)
+        """
+        from knowbase.config.settings import get_settings
+
+        stats = {
+            "sections_processed": 0,
+            "candidates_mined": 0,
+            "asserted": 0,
+            "abstained": 0,
+            "errors": [],
+        }
+
+        try:
+            settings = get_settings()
+
+            # Configuration SCOPE
+            scope_config = ScopeMiningConfig(
+                max_pairs_per_scope=20,  # Budget par section
+                top_k_pivots=5,
+            )
+
+            # Initialiser le miner avec le driver Neo4j
+            scope_miner = ScopeCandidateMiner(
+                self._neo4j_client.driver,
+                config=scope_config,
+                tenant_id=self.tenant_id
+            )
+            scope_verifier = get_scope_verifier(config=scope_config)
+
+            # Writer pour persister les assertions
+            writer = get_raw_assertion_writer(self.tenant_id)
+
+            # Pour chaque document, récupérer les sections avec concepts
+            for doc_id in doc_ids:
+                sections_query = """
+                MATCH (sc:SectionContext {tenant_id: $tenant_id})
+                WHERE sc.doc_id = $document_id
+                MATCH (sc)-[:CONTAINS]->(di:DocItem)
+                MATCH (pc:ProtoConcept)-[:ANCHORED_IN]->(di)
+                WITH sc, count(DISTINCT pc) as concept_count
+                WHERE concept_count >= 2
+                RETURN sc.context_id as section_id
+                """
+
+                database = getattr(self._neo4j_client, 'database', 'neo4j')
+                with self._neo4j_client.driver.session(database=database) as session:
+                    result = session.run(
+                        sections_query,
+                        tenant_id=self.tenant_id,
+                        document_id=doc_id
+                    )
+                    section_ids = [r["section_id"] for r in result]
+
+                if not section_ids:
+                    continue
+
+                logger.info(
+                    f"[OSMOSE:SCOPE] Document {doc_id}: {len(section_ids)} sections with concepts"
+                )
+
+                # Traiter chaque section
+                for section_id in section_ids:
+                    try:
+                        # 1. Mining
+                        mining_result = scope_miner.mine_section(section_id)
+                        candidates = mining_result.candidates
+                        stats["candidates_mined"] += len(candidates)
+                        stats["sections_processed"] += 1
+
+                        if not candidates:
+                            continue
+
+                        # 2. Verification LLM (batch)
+                        batch_result = await scope_verifier.verify_batch(
+                            candidates, max_concurrent=3
+                        )
+
+                        stats["abstained"] += batch_result.abstained
+
+                        # 3. Écrire les relations validées (ASSERT)
+                        for cand, vr in zip(candidates, batch_result.results):
+                            if vr.verdict == "ASSERT":
+                                raw_assertion = candidate_to_raw_assertion(
+                                    cand, vr, tenant_id=self.tenant_id
+                                )
+                                if raw_assertion:
+                                    write_result = writer.write_assertion(
+                                        subject_concept_id=raw_assertion.subject_concept_id,
+                                        object_concept_id=raw_assertion.object_concept_id,
+                                        predicate_raw=raw_assertion.predicate_raw,
+                                        evidence_text=raw_assertion.evidence_text,
+                                        source_doc_id=raw_assertion.source_doc_id,
+                                        source_chunk_id=raw_assertion.source_chunk_id,
+                                        confidence=raw_assertion.confidence_final,
+                                        source_language="MULTI",
+                                        flags=raw_assertion.flags,
+                                        relation_type=raw_assertion.relation_type,
+                                        type_confidence=raw_assertion.type_confidence,
+                                        assertion_kind=raw_assertion.assertion_kind,
+                                        discursive_basis=raw_assertion.discursive_basis,
+                                    )
+                                    if write_result:
+                                        stats["asserted"] += 1
+
+                    except Exception as section_err:
+                        logger.warning(
+                            f"[OSMOSE:SCOPE] Section {section_id} error: {section_err}"
+                        )
+                        stats["errors"].append(f"Section {section_id}: {str(section_err)[:50]}")
+
+            logger.info(
+                f"[OSMOSE:SCOPE] Complete: {stats['sections_processed']} sections, "
+                f"{stats['candidates_mined']} candidates, "
+                f"{stats['asserted']} asserted, {stats['abstained']} abstained"
+            )
+
+        except Exception as e:
+            logger.error(f"[OSMOSE:SCOPE] Mining failed: {e}")
+            stats["errors"].append(str(e))
+
+        return stats
 
     def _generate_cross_section_pairs(
         self,

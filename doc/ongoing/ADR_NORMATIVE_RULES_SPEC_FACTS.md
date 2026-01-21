@@ -657,13 +657,28 @@ SPECFACT_REGRESSION_CASES = [
 
 ## Prochaines étapes
 
-1. **Valider l'ADR** avec l'équipe
-2. **Implémenter les enums** dans `types.py`
-3. **Créer les modèles** `NormativeRule` et `SpecFact`
-4. **Implémenter le NormativePatternExtractor** (marqueurs modaux)
-5. **Implémenter le StructureParser** (tableaux, listes)
-6. **Intégrer dans Pass 2** ou créer un Pass dédié
-7. **Tests de régression**
+1. ✅ **Valider l'ADR** avec l'équipe (Status: APPROVED V1)
+2. ✅ **Implémenter les enums** dans `types.py` - `NormativeModality`, `ConstraintType`, `SpecType`, `StructureType`
+3. ✅ **Créer les modèles** `NormativeRule` et `SpecFact` dans `types.py`
+4. ✅ **Implémenter le NormativePatternExtractor** - `normative_pattern_extractor.py`
+5. ✅ **Implémenter le StructureParser** - `structure_parser.py`
+6. ✅ **Intégrer dans Pass 2** - Phase 2c `NORMATIVE_EXTRACTION` dans `pass2_orchestrator.py` (2026-01-22)
+7. ✅ **Tests de régression** - `test_normative_extractors.py` (28 tests) + `test_normative_writer.py` (22 tests)
+
+### Implémentation Pass 2c (2026-01-22)
+
+Nouveaux fichiers:
+- `src/knowbase/relations/normative_writer.py` - Writer Neo4j pour NormativeRule/SpecFact
+
+Modifications:
+- `src/knowbase/ingestion/pass2_orchestrator.py` - Ajout phase `NORMATIVE_EXTRACTION`
+- `src/knowbase/relations/__init__.py` - Export `NormativeWriter`, `get_normative_writer`
+
+Pipeline Pass 2c:
+1. `NormativePatternExtractor.extract_from_text()` → `List[NormativeRule]`
+2. `StructureParser.extract_from_text()` → `List[SpecFact]`
+3. `NormativeWriter.write_rules()` / `.write_facts()` → Neo4j avec déduplication
+4. `NormativeWriter.link_to_document()` → Relations `EXTRACTED_FROM`
 
 ---
 
