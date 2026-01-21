@@ -355,17 +355,15 @@ class TestScopeFilterUnit:
         """Test filtrage par scope keywords."""
         client, session = mock_neo4j_client
 
-        # Mock des résultats
-        doc_result = AsyncMock()
-        doc_result.data = AsyncMock(return_value=[])
-
+        # Mock du résultat - quand on n'a que scope_keywords (pas de topic),
+        # seul _get_sections_by_scope est appelé, donc une seule requête
         section_result = AsyncMock()
         section_result.data = AsyncMock(return_value=[
             {"section_id": "sec-1", "doc_id": "doc-1"},
             {"section_id": "sec-2", "doc_id": "doc-1"}
         ])
 
-        session.run = AsyncMock(side_effect=[doc_result, section_result])
+        session.run = AsyncMock(return_value=section_result)
 
         scope_filter = ScopeFilter(client, tenant_id="default")
         result = await scope_filter.filter_by_scope(

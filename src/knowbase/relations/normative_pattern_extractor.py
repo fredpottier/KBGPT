@@ -21,7 +21,7 @@ import logging
 from typing import List, Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
-import ulid
+from ulid import ULID
 
 from .types import (
     NormativeRule,
@@ -562,7 +562,7 @@ class NormativePatternExtractor:
         tenant_id: str,
     ) -> NormativeRule:
         """Crée une NormativeRule à partir d'un candidat validé."""
-        rule_id = str(ulid.new())
+        rule_id = str(ULID())
 
         # Créer le scope anchor
         scope_anchor = ScopeAnchor(

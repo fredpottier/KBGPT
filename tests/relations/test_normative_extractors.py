@@ -16,6 +16,7 @@ from knowbase.relations.types import (
     StructureType,
     NormativeRule,
     SpecFact,
+    ExtractionMethod,
     normalize_for_dedup,
     dedup_key_rule,
     dedup_key_fact,
@@ -86,7 +87,7 @@ class TestNormativePatternExtractor:
         """Test extraction d'une règle MUST en anglais."""
         text = "All HTTP connections must use TLS 1.2 or higher."
         rules = extractor.extract_from_text(
-            text, doc_id="doc1", source_chunk_id="chunk1"
+            text, source_doc_id="doc1", source_chunk_id="chunk1"
         )
 
         assert len(rules) == 1
@@ -99,7 +100,7 @@ class TestNormativePatternExtractor:
         """Test extraction d'une règle SHALL en anglais."""
         text = "Passwords shall be at least 8 characters long."
         rules = extractor.extract_from_text(
-            text, doc_id="doc1", source_chunk_id="chunk1"
+            text, source_doc_id="doc1", source_chunk_id="chunk1"
         )
 
         assert len(rules) == 1
@@ -110,7 +111,7 @@ class TestNormativePatternExtractor:
         """Test extraction d'une règle MUST_NOT en anglais."""
         text = "Users must not share their credentials."
         rules = extractor.extract_from_text(
-            text, doc_id="doc1", source_chunk_id="chunk1"
+            text, source_doc_id="doc1", source_chunk_id="chunk1"
         )
 
         assert len(rules) == 1
@@ -121,7 +122,7 @@ class TestNormativePatternExtractor:
         """Test extraction d'une règle SHOULD en anglais."""
         text = "It is recommended to use 512GB RAM for production."
         rules = extractor.extract_from_text(
-            text, doc_id="doc1", source_chunk_id="chunk1"
+            text, source_doc_id="doc1", source_chunk_id="chunk1"
         )
 
         assert len(rules) == 1
@@ -132,7 +133,7 @@ class TestNormativePatternExtractor:
         """Test extraction d'une règle MUST en français."""
         text = "Les connexions doivent utiliser TLS 1.2 au minimum."
         rules = extractor.extract_from_text(
-            text, doc_id="doc1", source_chunk_id="chunk1"
+            text, source_doc_id="doc1", source_chunk_id="chunk1"
         )
 
         assert len(rules) == 1
@@ -143,7 +144,7 @@ class TestNormativePatternExtractor:
         """Test qu'on n'extrait pas sans marqueur modal."""
         text = "TLS 1.2 provides better security than older versions."
         rules = extractor.extract_from_text(
-            text, doc_id="doc1", source_chunk_id="chunk1"
+            text, source_doc_id="doc1", source_chunk_id="chunk1"
         )
 
         # Pas de marqueur modal = pas de règle
@@ -153,7 +154,7 @@ class TestNormativePatternExtractor:
         """Test détection de contrainte MIN."""
         text = "RAM must be at least 256GB."
         rules = extractor.extract_from_text(
-            text, doc_id="doc1", source_chunk_id="chunk1"
+            text, source_doc_id="doc1", source_chunk_id="chunk1"
         )
 
         assert len(rules) == 1
@@ -163,7 +164,7 @@ class TestNormativePatternExtractor:
         """Test détection de condition."""
         text = "TLS is required when connecting externally."
         rules = extractor.extract_from_text(
-            text, doc_id="doc1", source_chunk_id="chunk1"
+            text, source_doc_id="doc1", source_chunk_id="chunk1"
         )
 
         assert len(rules) == 1
@@ -179,7 +180,7 @@ class TestNormativePatternExtractor:
         It is recommended to enable 2FA.
         """
         rules = extractor.extract_from_text(
-            text, doc_id="doc1", source_chunk_id="chunk1"
+            text, source_doc_id="doc1", source_chunk_id="chunk1"
         )
 
         assert len(rules) == 3
@@ -189,7 +190,7 @@ class TestNormativePatternExtractor:
         text = "All APIs must use authentication."
         rules = extractor.extract_from_text(
             text,
-            doc_id="doc123",
+            source_doc_id="doc123",
             source_chunk_id="chunk456",
             source_segment_id="slide_7",
             evidence_section="Security Requirements"
@@ -370,7 +371,7 @@ class TestDeduplication:
             evidence_span="All HTTP connections must use TLS 1.2",
             source_doc_id="doc1",
             source_chunk_id="chunk1",
-            extraction_method="PATTERN",
+            extraction_method=ExtractionMethod.PATTERN,
             confidence=0.9,
         )
 
@@ -390,7 +391,7 @@ class TestDeduplication:
             evidence_text="RAM: 256GB",
             source_doc_id="doc1",
             source_chunk_id="chunk1",
-            extraction_method="PATTERN",
+            extraction_method=ExtractionMethod.PATTERN,
             confidence=0.9,
         )
 
@@ -419,7 +420,7 @@ class TestInvariants:
                 # evidence_span manquant
                 source_doc_id="doc1",
                 source_chunk_id="chunk1",
-                extraction_method="PATTERN",
+                extraction_method=ExtractionMethod.PATTERN,
                 confidence=0.9,
             )
 
@@ -436,7 +437,7 @@ class TestInvariants:
                 evidence_text="RAM: 256GB",
                 source_doc_id="doc1",
                 source_chunk_id="chunk1",
-                extraction_method="PATTERN",
+                extraction_method=ExtractionMethod.PATTERN,
                 confidence=0.9,
             )
 

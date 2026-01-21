@@ -21,7 +21,7 @@ import logging
 from typing import List, Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
-import ulid
+from ulid import ULID
 
 from .types import (
     SpecFact,
@@ -56,8 +56,8 @@ KEY_VALUE_PATTERNS = [
     re.compile(r'^([A-Za-z][A-Za-z0-9\s_-]*?)\s*:\s*(.+?)$', re.MULTILINE),
     # Label = Value
     re.compile(r'^([A-Za-z][A-Za-z0-9\s_-]*?)\s*=\s*(.+?)$', re.MULTILINE),
-    # Label → Value (arrow)
-    re.compile(r'^([A-Za-z][A-Za-z0-9\s_-]*?)\s*[→->]+\s*(.+?)$', re.MULTILINE),
+    # Label -> Value (arrow)
+    re.compile(r'^([A-Za-z][A-Za-z0-9\s_-]*?)\s*(?:->|→)+\s*(.+?)$', re.MULTILINE),
 ]
 
 # Pattern pour bullet list avec key-value
@@ -316,7 +316,7 @@ class StructureParser:
 
                 # Créer le fact
                 fact = SpecFact(
-                    fact_id=str(ulid.new()),
+                    fact_id=str(ULID()),
                     tenant_id=tenant_id,
                     attribute_name=attribute_name,
                     attribute_concept_id=None,
@@ -440,7 +440,7 @@ class StructureParser:
         confidence = 0.75 if kv.structure_type == StructureType.KEY_VALUE_LIST else 0.70
 
         return SpecFact(
-            fact_id=str(ulid.new()),
+            fact_id=str(ULID()),
             tenant_id=tenant_id,
             attribute_name=kv.key,
             attribute_concept_id=None,
