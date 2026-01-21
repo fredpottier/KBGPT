@@ -27,6 +27,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 from knowbase.config.feature_flags import get_hybrid_anchor_config
+from knowbase.common.clients.neo4j_client import get_neo4j_client
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +175,9 @@ class HybridAnchorSearchService:
         collection_name: str,
         top_k: int = 10,
         mode: SearchMode = SearchMode.HYBRID,
-        filter_params: Optional[Dict[str, Any]] = None
+        filter_params: Optional[Dict[str, Any]] = None,
+        scope_topic: Optional[str] = None,
+        scope_keywords: Optional[List[str]] = None
     ) -> HybridSearchResponse:
         """
         Exécute une recherche hybride.
@@ -185,11 +188,27 @@ class HybridAnchorSearchService:
             top_k: Nombre de résultats
             mode: Mode de recherche
             filter_params: Filtres Qdrant optionnels
+            scope_topic: Topic pour filtrage Scope Layer (ex: "S/4HANA")
+            scope_keywords: Keywords de scope (ex: ["security", "requirements"])
 
         Returns:
             HybridSearchResponse
         """
         start_time = time.time()
+
+        # 0. Appliquer filtrage par scope si demandé (Scope Layer - ADR)
+        scope_boosts: Dict[str, float] = {}
+        if scope_topic or scope_keywords:
+            scope_boosts = await self._apply_scope_filter(
+                scope_topic=scope_topic,
+                scope_keywords=scope_keywords,
+                filter_params=filter_params
+            )
+            logger.debug(
+                f"[OSMOSE:HybridSearch] Scope filter applied: "
+                f"topic={scope_topic}, keywords={scope_keywords}, "
+                f"boosted_docs={len(scope_boosts)}"
+            )
 
         # 1. Encoder la query
         query_vector = self._encode_query(query)
@@ -223,6 +242,10 @@ class HybridAnchorSearchService:
             mode,
             top_k
         )
+
+        # 5.5 Appliquer boosts de scope (Scope Layer - ADR)
+        if scope_boosts:
+            fused_results = self._apply_scope_boosts(fused_results, scope_boosts)
 
         # 6. Enrichir avec citations
         enriched_results = self._enrich_with_citations(fused_results)
@@ -264,6 +287,74 @@ class HybridAnchorSearchService:
             return vector.numpy().tolist()
 
         return [float(x) for x in vector]
+
+    async def _apply_scope_filter(
+        self,
+        scope_topic: Optional[str] = None,
+        scope_keywords: Optional[List[str]] = None,
+        filter_params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, float]:
+        """
+        Applique le filtrage par scope (Scope Layer - ADR_SCOPE_VS_ASSERTION).
+
+        Interroge Neo4j pour trouver les documents correspondant au scope,
+        puis retourne un dict de boosts pour le reranking.
+
+        Args:
+            scope_topic: Topic à rechercher (ex: "S/4HANA")
+            scope_keywords: Keywords de scope (ex: ["security"])
+            filter_params: Filtres existants (non modifiés)
+
+        Returns:
+            Dict[doc_id, boost_score] pour le reranking
+        """
+        from knowbase.navigation.scope_filter import ScopeFilter
+
+        try:
+            neo4j_client = get_neo4j_client()
+            scope_filter = ScopeFilter(neo4j_client, self.tenant_id)
+
+            boosts = await scope_filter.get_scope_boosted_doc_ids(
+                topic=scope_topic,
+                scope_keywords=scope_keywords
+            )
+
+            return boosts
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:HybridSearch] Scope filter failed: {e}")
+            return {}
+
+    def _apply_scope_boosts(
+        self,
+        results: List[Dict[str, Any]],
+        scope_boosts: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
+        """
+        Applique les boosts de scope aux résultats.
+
+        Args:
+            results: Résultats bruts
+            scope_boosts: Dict[doc_id, boost_score]
+
+        Returns:
+            Résultats avec scores boostés
+        """
+        if not scope_boosts:
+            return results
+
+        boosted = []
+        for r in results:
+            doc_id = r.get("payload", {}).get("doc_id") or r.get("document_id")
+            boost = scope_boosts.get(doc_id, 1.0)
+            boosted_result = dict(r)
+            boosted_result["score"] = r.get("score", 0) * boost
+            boosted_result["scope_boost"] = boost
+            boosted.append(boosted_result)
+
+        # Re-trier par score boosté
+        boosted.sort(key=lambda x: x.get("score", 0), reverse=True)
+        return boosted
 
     async def _search_chunks(
         self,
