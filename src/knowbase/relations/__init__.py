@@ -210,6 +210,15 @@ from .assertion_validation import (
     can_create_assertion,
     filter_valid_candidates,
 )
+# Phase C - Relation Promoter avec seuils différenciés
+from .relation_promoter import (
+    PromotionDecision,
+    PromotionThresholds,
+    PromotionResult,
+    RelationPromoter,
+    get_relation_promoter,
+    should_promote,
+)
 
 __all__ = [
     # Types de base
@@ -371,4 +380,11 @@ __all__ = [
     "validate_before_write",
     "can_create_assertion",
     "filter_valid_candidates",
+    # Phase C - Relation Promoter avec seuils différenciés
+    "PromotionDecision",
+    "PromotionThresholds",
+    "PromotionResult",
+    "RelationPromoter",
+    "get_relation_promoter",
+    "should_promote",
 ]

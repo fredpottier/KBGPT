@@ -4,7 +4,7 @@
 **ADR de référence**: `doc/ongoing/ADR_DISCURSIVE_RELATIONS.md`
 **ADR complémentaire**: `doc/ongoing/ADR_SCOPE_VS_ASSERTION_SEPARATION.md` ✅ APPROVED
 **ADR extension**: `doc/ongoing/ADR_NORMATIVE_RULES_SPEC_FACTS.md` ✅ APPROVED – V1
-**Statut global**: Phase A ✅ + Phase B ✅ — Prêt pour Phase C
+**Statut global**: Phase A ✅ + Phase B ✅ + Phase C ✅ + Phase D ✅ + Phase E ✅ — **ADR COMPLET**
 
 ---
 
@@ -70,15 +70,17 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 
 | Champ | Statut | Notes |
 |-------|--------|-------|
-| `explicit_support_count: int` | ⏳ | Compteur RawAssertion EXPLICIT |
-| `discursive_support_count: int` | ⏳ | Compteur RawAssertion DISCURSIVE |
+| `explicit_support_count: int` | ✅ | Compteur RawAssertion EXPLICIT |
+| `discursive_support_count: int` | ✅ | Compteur RawAssertion DISCURSIVE |
+| `distinct_sections: int` | ✅ | Pour bundle_diversity |
 
 ### 1.4 Champs sur SemanticRelation
 
 | Champ | Statut | Notes |
 |-------|--------|-------|
-| `semantic_grade: SemanticGrade` | ⏳ | Calculé à la promotion |
-| `defensibility_tier: DefensibilityTier` | ⏳ | Calculé selon matrice basis→tier |
+| `semantic_grade: SemanticGrade` | ✅ | Calculé à la promotion |
+| `defensibility_tier: DefensibilityTier` | ✅ | Calculé selon matrice basis→tier |
+| `support_strength: SupportStrength` | ✅ | Métriques complètes |
 
 ---
 
@@ -154,35 +156,41 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 
 ## 4. Promotion (Ingestion-time)
 
-### 4.1 SupportStrength
+### 4.1 SupportStrength ✅
 
 | Métrique | Statut | Notes |
 |----------|--------|-------|
-| `support_count` | ⏳ | Nombre total RawAssertion |
-| `explicit_count` | ⏳ | Nombre EXPLICIT |
-| `discursive_count` | ⏳ | Nombre DISCURSIVE |
-| `doc_coverage` | ⏳ | Documents distincts |
-| `distinct_sections` | ⏳ | SectionContext distincts |
-| `bundle_diversity` | ⏳ | Score 0-1 (sections/3) |
+| `support_count` | ✅ | Nombre total RawAssertion |
+| `explicit_count` | ✅ | Nombre EXPLICIT |
+| `discursive_count` | ✅ | Nombre DISCURSIVE |
+| `doc_coverage` | ✅ | Documents distincts |
+| `distinct_sections` | ✅ | SectionContext distincts |
+| `bundle_diversity` | ✅ | Score 0-1 (sections/3) |
 
-### 4.2 Seuils de promotion
+**Implémenté** : `relation_promoter.py` + `compute_bundle_diversity()` dans `types.py`
 
-| Type | min_support | min_sections | Statut |
-|------|-------------|--------------|--------|
-| EXPLICIT seul | 1 | - | ⏳ |
-| DISCURSIVE seul | 2 | 2 | ⏳ |
-| MIXED | 1 EXPLICIT + 1 DISCURSIVE | - | ⏳ |
+### 4.2 Seuils de promotion ✅
 
-### 4.3 Attribution DefensibilityTier
+| Type | min_support | min_confidence | Statut |
+|------|-------------|----------------|--------|
+| EXPLICIT | 1 | 0.60 | ✅ |
+| MIXED | 1 (EXPLICIT requis) | 0.65 | ✅ |
+| DISCURSIVE | 2 (ou 2 docs) | 0.70 + diversity ≥ 0.33 | ✅ |
+
+**Implémenté** : `PromotionThresholds` dans `relation_promoter.py`
+
+### 4.3 Attribution DefensibilityTier ✅
 
 | SemanticGrade | Tier | Condition | Statut |
 |---------------|------|-----------|--------|
-| EXPLICIT | STRICT | Toujours | 🔒 Bloqué ADR |
-| MIXED | STRICT | Toujours | 🔒 Bloqué ADR |
-| DISCURSIVE | STRICT | Bases fortes (ALTERNATIVE, DEFAULT, EXCEPTION) | 🔒 Bloqué ADR |
-| DISCURSIVE | EXTENDED | Bases faibles ou bundle insuffisant | 🔒 Bloqué ADR |
+| EXPLICIT | STRICT | Toujours | ✅ |
+| MIXED | STRICT | Toujours | ✅ |
+| DISCURSIVE | STRICT | Bases fortes (ALTERNATIVE, DEFAULT, EXCEPTION) | ✅ |
+| DISCURSIVE | EXTENDED | Bases faibles ou bundle insuffisant | ✅ |
 
-### 4.4 Matrice Basis → Tier (DISCURSIVE)
+**Implémenté** : `tier_attribution.py` + `compute_defensibility_tier()`
+
+### 4.4 Matrice Basis → Tier (DISCURSIVE) ✅
 
 | DiscursiveBasis | Conditions STRICT | Sinon |
 |-----------------|-------------------|-------|
@@ -193,34 +201,42 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 | COREF | ≥ 2 spans + coref_path documenté | EXTENDED |
 | ENUMERATION | Liste complète dans bundle | EXTENDED |
 
-**Statut**: ⏳ À implémenter dans `tier_attribution.py`
+**Implémenté** : `tier_attribution.py` avec `STRONG_DETERMINISTIC_BASES` et `WEAK_DETERMINISTIC_BASES`
 
 ---
 
-## 5. Runtime (Traversal) — 🔒 Bloqué par ADR Scope vs Assertion
+## 5. Runtime (Traversal) — ✅ IMPLÉMENTÉ Phase D
 
-### 5.1 Paramètre de filtrage
+### 5.1 Paramètre de filtrage ✅
 
 | Élément | Statut | Notes |
 |---------|--------|-------|
-| `allowed_tiers: Set[DefensibilityTier]` | 🔒 | Paramètre mode Reasoned |
-| Défaut = `{STRICT}` | 🔒 | Production |
-| Extended = `{STRICT, EXTENDED}` | 🔒 | Exploration |
+| `allowed_tiers: Set[DefensibilityTier]` | ✅ | Paramètre mode Reasoned |
+| Défaut = `{STRICT}` | ✅ | TraversalPolicy.STRICT |
+| Extended = `{STRICT, EXTENDED}` | ✅ | TraversalPolicy.BALANCED |
+| Exploratory (escalade) | ✅ | TraversalPolicy.EXPLORATORY |
 
-### 5.2 Stratégie d'escalade
+**Implémenté** : `tier_filter.py` avec `TierFilterConfig` et `TraversalPolicy`
+
+### 5.2 Stratégie d'escalade ✅
 
 | Étape | Statut | Notes |
 |-------|--------|-------|
-| 1. STRICT | 🔒 | Défaut |
-| 2. EXTENDED (si vide) | 🔒 | Optionnel |
-| 3. Anchored fallback | 🔒 | Dépend de Scope Layer |
+| 1. STRICT | ✅ | Défaut |
+| 2. EXTENDED (si vide) | ✅ | Via enable_escalation |
+| 3. Anchored fallback | ✅ | Via fallback_to_anchored |
 
-### 5.3 Anti-contamination
+**Implémenté** : `TierFilterService.should_escalate()` + `build_search_plan()` boucle d'escalade
+
+### 5.3 Anti-contamination ✅
 
 | Règle | Statut | Notes |
 |-------|--------|-------|
-| Pas de transitivité EXPLICIT→DISCURSIVE→? | 🔒 | |
-| Traçabilité semantic_grade sur chaque edge | 🔒 | |
+| Pas de transitivité EXPLICIT→DISCURSIVE→? | ✅ | `validate_path_semantic_integrity()` avec warning |
+| Traçabilité semantic_grade sur chaque edge | ✅ | `SemanticPath.edge_grades` retourné par Cypher |
+| Calcul tier effectif du chemin | ✅ | `compute_path_tier()` = min(edge_tiers) |
+
+**Implémenté** : `tier_filter.py` fonctions de validation + `graph_first_search.py` intégration
 
 ---
 
@@ -253,6 +269,9 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 | SCOPE verifier | `tests/relations/test_scope_verifier.py` | ✅ |
 | Tier attribution | `tests/relations/test_tier_attribution.py` | ✅ |
 | Discursive pattern extractor | `tests/relations/test_discursive_pattern_extractor.py` | ✅ |
+| Assertion validation (C3bis/C4/INV-SEP) | `tests/relations/test_assertion_validation.py` | ✅ (24 tests) |
+| Relation promoter | `tests/relations/test_relation_promoter.py` | ✅ (28 tests) |
+| Tier filter (Runtime) | `tests/api/services/test_tier_filter.py` | ✅ (31 tests) |
 | Tests régression Type 2 | - | ⏳ |
 
 ---
@@ -412,25 +431,41 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 7. [x] Implémenter `validate_before_write()` (C3bis + C4) — `assertion_validation.py`
 8. [x] Implémenter `can_create_assertion()` (INV-SEP-01, INV-SEP-02) — 24 tests passent
 
-### Phase C - Pipeline de promotion (Moyenne priorité - 🔒 ATTEND PHASE A)
+### Phase C - Pipeline de promotion (✅ COMPLÈTE)
 
-9. [ ] Ajouter compteurs sur `CanonicalRelation`
-10. [ ] Implémenter `SupportStrength` calcul
-11. [ ] Implémenter attribution `DefensibilityTier` (matrice basis→tier)
-12. [ ] Ajouter `semantic_grade` et `defensibility_tier` sur `SemanticRelation`
-13. [ ] Implémenter seuils de promotion différenciés
+9. [x] Ajouter compteurs sur `CanonicalRelation` — Déjà dans types.py
+10. [x] Implémenter `SupportStrength` calcul — `compute_support_strength()` dans relation_promoter.py
+11. [x] Implémenter attribution `DefensibilityTier` (matrice basis→tier) — tier_attribution.py
+12. [x] Ajouter `semantic_grade` et `defensibility_tier` sur `SemanticRelation` — types.py
+13. [x] Implémenter seuils de promotion différenciés — `RelationPromoter` (28 tests)
 
-### Phase D - Runtime Reasoned (Moyenne priorité - 🔒 ATTEND PHASE A+C)
+**Fichiers** :
+- `relation_promoter.py` : PromotionThresholds, RelationPromoter, PromotionDecision
+- `tier_attribution.py` : compute_defensibility_tier(), STRONG/WEAK_DETERMINISTIC_BASES
+- `tests/relations/test_relation_promoter.py` : 28 tests (seuils par grade, batch, stats)
 
-14. [ ] Ajouter paramètre `allowed_tiers` au mode Reasoned
-15. [ ] Implémenter filtrage traversée par tier
-16. [ ] Implémenter stratégie d'escalade STRICT → EXTENDED → Anchored
+### Phase D - Runtime Reasoned (✅ COMPLÈTE)
 
-### Phase E - Tests et validation (Continue en parallèle)
+14. [x] Ajouter paramètre `allowed_tiers` au mode Reasoned — `TraversalPolicy` enum
+15. [x] Implémenter filtrage traversée par tier — Cypher avec `ALL(rel IN ... WHERE tier IN ...)`
+16. [x] Implémenter stratégie d'escalade STRICT → EXTENDED → Anchored — `TierFilterService`
 
-17. [ ] Créer suite de tests régression Type 2
-18. [ ] Tests de validation séparation Scope/Assertion
-19. [ ] Dashboard KPI Sentinel
+**Fichiers** :
+- `api/services/tier_filter.py` : TraversalPolicy, TierFilterConfig, TierFilterService, EscalationResult
+- `api/services/graph_first_search.py` : Intégration tier filtering dans build_search_plan + _cypher_all_paths
+- `tests/api/services/test_tier_filter.py` : 31 tests (policies, escalade, anti-contamination)
+
+### Phase E - Tests et validation (✅ COMPLÈTE)
+
+17. [x] Créer suite de tests régression Type 2 — 36 tests dans `test_type2_regression.py`
+18. [x] Tests de validation séparation Scope/Assertion — 45 tests dans `test_scope_separation.py`
+19. [x] Dashboard KPI Sentinel — 32 tests dans `test_kpi_sentinel.py` + `kpi_sentinel.py`
+
+**Fichiers** :
+- `tests/relations/test_type2_regression.py` : Tests anti-hallucination Type 2
+- `tests/navigation/test_scope_separation.py` : Séparation Scope/Assertion
+- `tests/relations/test_kpi_sentinel.py` : Tests du dashboard KPI
+- `src/knowbase/relations/kpi_sentinel.py` : Dashboard KPI Sentinel
 
 ---
 
@@ -485,6 +520,9 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 
 | Date | Changement | Auteur |
 |------|------------|--------|
+| 2026-01-21 | **Phase E COMPLÈTE** : Tests validation + KPI Sentinel (113 tests Phase E) | Claude |
+| 2026-01-21 | **Phase D COMPLÈTE** : Runtime tier filtering + escalade (31 tests) | Claude |
+| 2026-01-21 | **Phase C COMPLÈTE** : RelationPromoter + seuils différenciés (28 tests) | Claude |
 | 2026-01-21 | **Phase B COMPLÈTE** : COREF bridge + validation C3bis/C4/INV-SEP (24 tests) | Claude |
 | 2026-01-21 | **Phase A COMPLÈTE** : Scope Layer + NormativeRule/SpecFact extracteurs | Claude |
 | 2026-01-21 | Ajout section "Évolutions futures V1.x/V2" pour tracer les non-goals | Claude |
