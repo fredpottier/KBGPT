@@ -257,30 +257,30 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 
 ---
 
-## 7. Scope Layer (nouveau - ADR Scope vs Assertion)
+## 7. Scope Layer (✅ COMPLET - ADR Scope vs Assertion)
 
 ### 7.1 Formalisation du schéma
 
 | Élément | Statut | Notes |
 |---------|--------|-------|
-| `Document.topic` (sujet principal) | ⏳ | Extraction du titre/metadata |
-| `SectionContext.scope_description` | ⏳ | De quoi parle cette section |
-| `DocItem.mentioned_concepts` | ⏳ | Liste sans relation (scope) |
+| `DocumentContext.topic` (sujet principal) | ✅ | `navigation/types.py` |
+| `SectionContext.scope_description` | ✅ | `navigation/types.py` |
+| `DocItem.mentioned_concepts` | ✅ | `structural/models.py` |
 
 ### 7.2 Exploitation dans Anchored
 
 | Élément | Statut | Notes |
 |---------|--------|-------|
-| Filtrage par `doc.topic` avant recherche | ⏳ | |
-| Filtrage par `section.scope` | ⏳ | |
-| Boost scoring par pertinence scope | ⏳ | |
+| Filtrage par `doc.topic` avant recherche | ✅ | `ScopeFilter._get_documents_by_topic()` |
+| Filtrage par `section.scope` | ✅ | `ScopeFilter._get_sections_by_scope()` |
+| Boost scoring par pertinence scope | ✅ | `HybridAnchorSearchService._apply_scope_boosts()` |
 
 ### 7.3 Documentation
 
 | Élément | Statut | Notes |
 |---------|--------|-------|
-| Guide "Quand assertion vs scope" | ⏳ | Pour développeurs |
-| Tests de validation séparation | ⏳ | |
+| Guide "Quand assertion vs scope" | ✅ | ADR_SCOPE_VS_ASSERTION_SEPARATION.md |
+| Tests de validation séparation | ✅ | `tests/navigation/test_scope_separation.py` |
 
 ---
 
@@ -313,65 +313,69 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 - [x] Définition des invariants INV-NORM-01 à INV-NORM-04 + INV-AGN-01
 - [x] Backlog mis à jour avec dépendances
 
-### Phase A - Scope Layer (Haute priorité - DÉBLOQUÉE)
+### Phase A - Scope Layer (✅ COMPLÈTE)
 
 > **Objectif** : Rendre OSMOSIS "utile" très vite via navigation dense + réponses citables
 > **KPI** : L'utilisateur trouve l'info sans que le graphe soit dense
 
-#### A.1 — Formaliser le schéma Scope en Neo4j
+#### A.1 — Formaliser le schéma Scope en Neo4j ✅
 
 | Champ | Noeud | Description | Statut |
 |-------|-------|-------------|--------|
-| `topic` | Document | Sujet principal du document | ⏳ |
-| `scope_description` | SectionContext | De quoi parle cette section | ⏳ |
-| `mentioned_concepts` | DocItem | Concepts mentionnés (liste, pas relations) | ⏳ |
+| `topic` | DocumentContext | Sujet principal du document | ✅ |
+| `scope_description` | SectionContext | De quoi parle cette section | ✅ |
+| `mentioned_concepts` | DocItem | Concepts mentionnés (liste, pas relations) | ✅ |
 
 **But** : Pouvoir faire un filtrage "intelligent" avant même la recherche vectorielle.
 
-#### A.2 — Extraire `doc.topic` + "scope setters" au Pass 1
+#### A.2 — Extraire `doc.topic` + "scope setters" au Pass 1 ✅
 
 | Élément | Source | Statut |
 |---------|--------|--------|
-| `doc.topic` | Titre + métadonnées + fréquence concepts pivot | ⏳ |
-| Scope setters | Titres de sections + captions + entêtes listes/tableaux | ⏳ |
+| `doc.topic` | Titre + métadonnées | ✅ `scope_extractor.py` |
+| Scope setters | Titres de sections | ✅ `derive_scope_from_section_path()` |
 
-**But** : Préparer le terrain pour retrouver "TLS 1.2" ou "pression pneus" sans inventer de relation.
+**Implémenté** : `navigation/scope_extractor.py` + intégration `NavigationLayerBuilder`
 
-#### A.3 — Brancher le Scope dans le mode Anchored
+#### A.3 — Brancher le Scope dans le mode Anchored ✅
 
 | Fonctionnalité | Description | Statut |
 |----------------|-------------|--------|
-| Filtre par `doc.topic` | Restreindre la recherche au sujet | ⏳ |
-| Boost par section | Keywords "requirements", "security", "configuration" | ⏳ |
-| Renvoi chunks + citations | Résultats traçables | ⏳ |
+| Filtre par `doc.topic` | Restreindre la recherche au sujet | ✅ `ScopeFilter` |
+| Boost par section | Keywords "requirements", "security", "configuration" | ✅ `_apply_scope_boosts()` |
+| Renvoi chunks + citations | Résultats traçables | ✅ |
 
-#### A.4 — Tests de la séparation Scope/Assertion
+**Implémenté** : `navigation/scope_filter.py` + `api/services/hybrid_anchor_search.py`
+
+#### A.4 — Tests de la séparation Scope/Assertion ✅
 
 | Test | Statut |
 |------|--------|
-| Scope ne crée pas d'assertion | ⏳ |
-| Assertion a toujours une preuve locale | ⏳ |
-| Anchored utilise le scope pour filtrer | ⏳ |
+| Scope ne crée pas d'assertion | ✅ |
+| Assertion a toujours une preuve locale | ✅ |
+| Anchored utilise le scope pour filtrer | ✅ |
 
-#### A.5 — NormativeRule & SpecFact (Assertions Non-Relationnelles)
+**Implémenté** : `tests/navigation/test_scope_separation.py`
+
+#### A.5 — NormativeRule & SpecFact (Assertions Non-Relationnelles) ✅
 
 > **ADR**: `doc/ongoing/ADR_NORMATIVE_RULES_SPEC_FACTS.md` ✅ APPROVED V1
 > **Contexte**: Capturer les informations "high-value" qui ne sont pas des relations A→B
 
 | Type | Description | Statut |
 |------|-------------|--------|
-| **NormativeRule** | Règles avec marqueurs modaux (must/shall/required) | ⏳ |
-| **SpecFact** | Valeurs structurées (tableaux, listes clé-valeur) | ⏳ |
+| **NormativeRule** | Règles avec marqueurs modaux (must/shall/required) | ✅ |
+| **SpecFact** | Valeurs structurées (tableaux, listes clé-valeur) | ✅ |
 
 **NormativeRule — Détection par patterns** :
 
 | Élément | Description | Statut |
 |---------|-------------|--------|
-| Pattern Matcher | Détecte marqueurs modaux EN/FR | ⏳ |
-| Parser sujet/contrainte | Extrait subject_text + constraint | ⏳ |
-| Enums `NormativeModality` | MUST, SHOULD, MAY, MUST_NOT, SHOULD_NOT | ⏳ |
-| Enums `ConstraintType` | EQUALS, MIN, MAX, RANGE, ENUM, PATTERN | ⏳ |
-| `NormativePatternExtractor` | Implémentation dans `relations/` | ⏳ |
+| Pattern Matcher | Détecte marqueurs modaux EN/FR | ✅ |
+| Parser sujet/contrainte | Extrait subject_text + constraint | ✅ |
+| Enums `NormativeModality` | MUST, SHOULD, MAY, MUST_NOT, SHOULD_NOT | ✅ |
+| Enums `ConstraintType` | EQUALS, MIN, MAX, RANGE, ENUM, PATTERN | ✅ |
+| `NormativePatternExtractor` | Implémentation dans `relations/` | ✅ |
 
 **Marqueurs détectés** :
 - EN: must, shall, are to be, is required, required, mandatory, should, recommended, may, optional
@@ -381,19 +385,25 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 
 | Élément | Description | Statut |
 |---------|-------------|--------|
-| Structure Detector | Identifie TABLE, KEY_VALUE_LIST, BULLET_LIST | ⏳ |
-| Table Parser | Extrait headers + cells | ⏳ |
-| Key-Value Parser | Pattern `Label: Value` ou `Label = Value` | ⏳ |
-| Enums `SpecType` | VALUE, MIN, MAX, DEFAULT, RECOMMENDED | ⏳ |
-| Enums `StructureType` | TABLE, KEY_VALUE_LIST, BULLET_LIST, DEFINITION_LIST | ⏳ |
-| `StructureParser` | Implémentation dans `relations/` | ⏳ |
+| Structure Detector | Identifie TABLE, KEY_VALUE_LIST, BULLET_LIST | ✅ |
+| Table Parser | Extrait headers + cells | ✅ |
+| Key-Value Parser | Pattern `Label: Value` ou `Label = Value` | ✅ |
+| Enums `SpecType` | VALUE, MIN, MAX, DEFAULT, RECOMMENDED | ✅ |
+| Enums `StructureType` | TABLE, KEY_VALUE_LIST, BULLET_LIST, DEFINITION_LIST | ✅ |
+| `StructureParser` | Implémentation dans `relations/` | ✅ |
 
-**Invariants** :
-- INV-NORM-01 : Preuve locale obligatoire
-- INV-NORM-02 : Marqueur explicite requis pour NormativeRule
-- INV-NORM-03 : Structure explicite requise pour SpecFact
-- INV-NORM-04 : Pas de sujet inventé
-- INV-AGN-01 : Domain-Agnostic Semantics (pas de prédicats métier)
+**Implémenté** :
+- `relations/types.py` : Enums + Models
+- `relations/normative_pattern_extractor.py` : NormativePatternExtractor
+- `relations/structure_parser.py` : StructureParser
+- `tests/relations/test_normative_extractors.py` : Tests unitaires
+
+**Invariants** (tous testés) :
+- INV-NORM-01 : Preuve locale obligatoire ✅
+- INV-NORM-02 : Marqueur explicite requis pour NormativeRule ✅
+- INV-NORM-03 : Structure explicite requise pour SpecFact ✅
+- INV-NORM-04 : Pas de sujet inventé ✅
+- INV-AGN-01 : Domain-Agnostic Semantics (pas de prédicats métier) ✅
 
 ### Phase B - Compléter l'extraction assertions (Moyenne priorité - DÉBLOQUÉE)
 
@@ -475,6 +485,7 @@ L'objectif n'est **PAS** d'augmenter le taux de capture des assertions, mais de 
 
 | Date | Changement | Auteur |
 |------|------------|--------|
+| 2026-01-21 | **Phase A COMPLÈTE** : Scope Layer + NormativeRule/SpecFact extracteurs | Claude |
 | 2026-01-21 | Ajout section "Évolutions futures V1.x/V2" pour tracer les non-goals | Claude |
 | 2026-01-21 | **VALIDATION** : ADR Scope vs Assertion APPROVED + NormativeRule APPROVED V1 | Claude |
 | 2026-01-21 | ADR NormativeRule & SpecFact complété (review ChatGPT) + Phase A.5 | Claude |
