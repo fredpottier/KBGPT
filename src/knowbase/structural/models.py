@@ -212,6 +212,11 @@ class DocItem(BaseModel):
     confidence: Optional[float] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+    # Scope Layer (ADR_SCOPE_VS_ASSERTION_SEPARATION)
+    # Liste des concept_ids mentionnés dans cet item - pour navigation, pas assertions
+    # Peuplé par Pass 2 après extraction des concepts
+    mentioned_concepts: List[str] = Field(default_factory=list)
+
     # Computed (non stocké en Neo4j directement)
     section_id: Optional[str] = None  # Assigné après analyse
 
@@ -275,6 +280,9 @@ class DocItem(BaseModel):
             props["confidence"] = self.confidence
         if self.section_id:
             props["section_id"] = self.section_id
+        # Scope Layer: concepts mentionnés (pour navigation)
+        if self.mentioned_concepts:
+            props["mentioned_concepts"] = self.mentioned_concepts
 
         return props
 

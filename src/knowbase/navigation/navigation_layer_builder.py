@@ -109,7 +109,8 @@ class NavigationLayerBuilder:
         self,
         document_id: str,
         document_name: Optional[str] = None,
-        document_type: Optional[str] = None
+        document_type: Optional[str] = None,
+        topic: Optional[str] = None
     ) -> Optional[DocumentContext]:
         """
         Crée un DocumentContext pour un document.
@@ -118,6 +119,7 @@ class NavigationLayerBuilder:
             document_id: ID du document
             document_name: Nom du document (optionnel)
             document_type: Type du document (optionnel)
+            topic: Sujet principal du document (Scope Layer - ADR_SCOPE_VS_ASSERTION)
 
         Returns:
             DocumentContext créé ou None si erreur
@@ -130,7 +132,8 @@ class NavigationLayerBuilder:
             document_id=document_id,
             tenant_id=self.tenant_id,
             document_name=document_name,
-            document_type=document_type
+            document_type=document_type,
+            topic=topic
         )
 
         query = """
@@ -145,7 +148,8 @@ class NavigationLayerBuilder:
             ctx.doc_id = $doc_id,
             ctx.created_at = datetime(),
             ctx.document_name = $document_name,
-            ctx.document_type = $document_type
+            ctx.document_type = $document_type,
+            ctx.topic = $topic
 
         // Lier au Document
         MERGE (ctx)-[:IN_DOCUMENT]->(d)
@@ -160,6 +164,7 @@ class NavigationLayerBuilder:
             "doc_id": document_id,
             "document_name": document_name,
             "document_type": document_type,
+            "topic": topic,
         }
 
         result = self._execute_query(query, params)
@@ -179,7 +184,8 @@ class NavigationLayerBuilder:
         self,
         document_id: str,
         section_path: str,
-        section_level: int = 0
+        section_level: int = 0,
+        scope_description: Optional[str] = None
     ) -> Optional[SectionContext]:
         """
         Crée un SectionContext pour une section de document.
@@ -188,6 +194,7 @@ class NavigationLayerBuilder:
             document_id: ID du document
             section_path: Chemin de la section (ex: "1.2.3 Security Architecture")
             section_level: Niveau hiérarchique (0 = root)
+            scope_description: Description de la portée (Scope Layer - ADR_SCOPE_VS_ASSERTION)
 
         Returns:
             SectionContext créé ou None si erreur
@@ -200,7 +207,8 @@ class NavigationLayerBuilder:
             document_id=document_id,
             section_path=section_path,
             tenant_id=self.tenant_id,
-            section_level=section_level
+            section_level=section_level,
+            scope_description=scope_description
         )
 
         query = """
@@ -216,6 +224,7 @@ class NavigationLayerBuilder:
             ctx.section_path = $section_path,
             ctx.section_hash = $section_hash,
             ctx.section_level = $section_level,
+            ctx.scope_description = $scope_description,
             ctx.created_at = datetime()
 
         // Lier au Document
@@ -232,6 +241,7 @@ class NavigationLayerBuilder:
             "section_path": section_path,
             "section_hash": ctx.section_hash,
             "section_level": section_level,
+            "scope_description": scope_description,
         }
 
         result = self._execute_query(query, params)

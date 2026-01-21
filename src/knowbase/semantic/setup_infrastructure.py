@@ -323,10 +323,38 @@ async def setup_neo4j_proto_kg():
             """)
             logger.info("  ✅ Index CanonicalClaim.maturity créé")
 
+            # ============================================
+            # SCOPE LAYER INDEXES (ADR_SCOPE_VS_ASSERTION_SEPARATION)
+            # ============================================
+            logger.info("  📊 Création indexes Scope Layer...")
+
+            # DocumentContext.topic (filtrage par sujet principal)
+            await session.run("""
+                CREATE INDEX document_context_topic_idx IF NOT EXISTS
+                FOR (dc:DocumentContext) ON (dc.topic)
+            """)
+            logger.info("  ✅ Index DocumentContext.topic créé")
+
+            # SectionContext.scope_description (filtrage par portée section)
+            await session.run("""
+                CREATE INDEX section_context_scope_idx IF NOT EXISTS
+                FOR (sc:SectionContext) ON (sc.scope_description)
+            """)
+            logger.info("  ✅ Index SectionContext.scope_description créé")
+
+            # DocItem.mentioned_concepts (recherche par concepts mentionnés)
+            # Note: Neo4j supporte les indexes sur listes pour recherche IN
+            await session.run("""
+                CREATE INDEX docitem_mentioned_concepts_idx IF NOT EXISTS
+                FOR (di:DocItem) ON (di.mentioned_concepts)
+            """)
+            logger.info("  ✅ Index DocItem.mentioned_concepts créé")
+
         logger.info("[OSMOSE] ✅ Neo4j Proto-KG Schema V2.1 configuré avec succès")
         logger.info("  📊 Labels: Document, Topic, Concept, CanonicalConcept, CandidateEntity, CandidateRelation")
         logger.info("  📊 Labels Phase 2: RawAssertion, CanonicalRelation, RawClaim, CanonicalClaim")
-        logger.info("  🔍 Total: 14 constraints + 26 indexes")
+        logger.info("  📊 Labels Scope Layer: DocumentContext, SectionContext, DocItem")
+        logger.info("  🔍 Total: 14 constraints + 29 indexes (incl. 3 Scope Layer)")
 
     except Exception as e:
         logger.error(f"[OSMOSE] ❌ Erreur setup Neo4j: {e}")

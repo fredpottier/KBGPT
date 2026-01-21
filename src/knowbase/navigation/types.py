@@ -67,10 +67,15 @@ class DocumentContext(ContextNode):
     document_name: Optional[str] = None
     document_type: Optional[str] = None
 
+    # Scope Layer (ADR_SCOPE_VS_ASSERTION_SEPARATION)
+    # Le sujet principal du document - utilisé pour filtrage navigation, pas pour assertions
+    topic: Optional[str] = None
+
     @classmethod
     def create(cls, document_id: str, tenant_id: str = "default",
                document_name: Optional[str] = None,
-               document_type: Optional[str] = None) -> "DocumentContext":
+               document_type: Optional[str] = None,
+               topic: Optional[str] = None) -> "DocumentContext":
         """Factory pour créer un DocumentContext."""
         return cls(
             context_id=make_context_id(document_id),  # Utilise helper partagé
@@ -78,6 +83,7 @@ class DocumentContext(ContextNode):
             tenant_id=tenant_id,
             document_name=document_name,
             document_type=document_type,
+            topic=topic,
         )
 
     def to_neo4j_props(self) -> Dict[str, Any]:
@@ -86,6 +92,8 @@ class DocumentContext(ContextNode):
             props["document_name"] = self.document_name
         if self.document_type:
             props["document_type"] = self.document_type
+        if self.topic:
+            props["topic"] = self.topic
         return props
 
 
@@ -103,10 +111,16 @@ class SectionContext(ContextNode):
     section_hash: str                   # Hash du section_path pour l'ID
     section_level: int = 0              # Niveau hiérarchique (0 = root)
 
+    # Scope Layer (ADR_SCOPE_VS_ASSERTION_SEPARATION)
+    # Description de la portée de cette section - utilisé pour filtrage navigation
+    # Dérivé du titre de section et des scope setters (captions, entêtes)
+    scope_description: Optional[str] = None
+
     @classmethod
     def create(cls, document_id: str, section_path: str,
                tenant_id: str = "default",
-               section_level: int = 0) -> "SectionContext":
+               section_level: int = 0,
+               scope_description: Optional[str] = None) -> "SectionContext":
         """Factory pour créer un SectionContext."""
         # Utilise helpers partagés pour cohérence Neo4j ↔ Qdrant
         section_hash = make_section_hash(document_id, section_path)
@@ -117,6 +131,7 @@ class SectionContext(ContextNode):
             section_path=section_path,
             section_hash=section_hash,
             section_level=section_level,
+            scope_description=scope_description,
         )
 
     def to_neo4j_props(self) -> Dict[str, Any]:
@@ -124,6 +139,8 @@ class SectionContext(ContextNode):
         props["section_path"] = self.section_path
         props["section_hash"] = self.section_hash
         props["section_level"] = self.section_level
+        if self.scope_description:
+            props["scope_description"] = self.scope_description
         return props
 
 
