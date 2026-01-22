@@ -166,15 +166,18 @@ def search_documents(
             # Exécuter la recherche selon le mode
             if graph_first_plan.mode in (GFSearchMode.REASONED, GFSearchMode.ANCHORED):
                 context_ids = graph_first_plan.get_context_ids_for_qdrant()
+                document_ids = graph_first_plan.get_document_ids_for_qdrant()
 
-                if context_ids:
-                    # Recherche Qdrant filtrée par context_ids
+                # Utiliser context_ids si disponible, sinon document_ids (fix 2026-01-23)
+                if context_ids or document_ids:
+                    # Recherche Qdrant filtrée par context_ids ou document_ids
                     loop = asyncio.new_event_loop()
                     try:
                         graph_first_chunks = loop.run_until_complete(
                             gf_service.search_qdrant_filtered(
                                 query=enriched_query,
                                 context_ids=context_ids,
+                                document_ids=document_ids if not context_ids else None,
                                 collection_name=settings.qdrant_collection,
                                 top_k=TOP_K,
                             )
@@ -184,9 +187,11 @@ def search_documents(
 
                     if graph_first_chunks:
                         graph_first_succeeded = True
+                        filter_type = "contexts" if context_ids else "documents"
+                        filter_count = len(context_ids) if context_ids else len(document_ids)
                         logger.info(
                             f"[GRAPH-FIRST] Mode {graph_first_plan.mode.value}: "
-                            f"{len(graph_first_chunks)} chunks from {len(context_ids)} contexts"
+                            f"{len(graph_first_chunks)} chunks from {filter_count} {filter_type}"
                         )
 
             if not graph_first_succeeded:

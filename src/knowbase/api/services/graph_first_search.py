@@ -107,6 +107,20 @@ class GraphFirstPlan:
             return self.structural_context_ids
         return []  # TEXT_ONLY: pas de filtrage
 
+    def get_document_ids_for_qdrant(self) -> List[str]:
+        """
+        Retourne les document_ids à utiliser pour filtrer Qdrant.
+
+        Utilisé quand context_ids est vide mais qu'on a des routes structurelles
+        avec des document_ids (fix 2026-01-23).
+        """
+        if self.mode == SearchMode.ANCHORED and self.structural_routes:
+            doc_ids = set()
+            for route in self.structural_routes:
+                doc_ids.update(route.document_ids)
+            return list(doc_ids)
+        return []
+
     def to_dict(self) -> Dict[str, Any]:
         """Sérialisation pour la réponse API."""
         result = {
@@ -850,12 +864,16 @@ class GraphFirstSearchService:
         context_ids: List[str],
         collection_name: str = "knowbase",
         top_k: int = 10,
+        document_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Recherche Qdrant filtrée par context_ids.
+        Recherche Qdrant filtrée par context_ids ou document_ids.
 
         ADR Phase C.4: Filtrage par context_id pour récupérer
         uniquement les chunks des sections pertinentes.
+
+        Fix 2026-01-23: Si context_ids est vide mais document_ids fourni,
+        filtre par document_id (mode ANCHORED avec routes structurelles).
         """
         from qdrant_client.models import Filter, FieldCondition, MatchAny
 
@@ -873,6 +891,18 @@ class GraphFirstSearchService:
                     key="context_id",
                     match=MatchAny(any=context_ids)
                 )
+            )
+        elif document_ids:
+            # Fallback sur document_ids si pas de context_ids
+            filter_conditions.append(
+                FieldCondition(
+                    key="document_id",
+                    match=MatchAny(any=document_ids)
+                )
+            )
+            logger.info(
+                f"[GRAPH-FIRST:QDRANT] Filtering by {len(document_ids)} document_ids "
+                f"(no context_ids available)"
             )
 
         query_filter = Filter(must=filter_conditions)
