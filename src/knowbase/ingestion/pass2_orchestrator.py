@@ -1201,6 +1201,44 @@ class Pass2Orchestrator:
             logger.warning(f"[OSMOSE:Pass2c] Failed to get DocItems: {e}")
             return []
 
+    async def _get_all_document_ids(
+        self,
+        neo4j_client,
+        tenant_id: str
+    ) -> List[str]:
+        """
+        Récupère tous les IDs de documents du corpus depuis Neo4j.
+
+        Utilisé quand document_id == "all" pour traiter tout le corpus.
+
+        Returns:
+            Liste des document IDs uniques
+        """
+        if not neo4j_client.is_connected():
+            return []
+
+        try:
+            # Récupérer les doc_id uniques depuis DocItem
+            query = """
+            MATCH (di:DocItem {tenant_id: $tenant_id})
+            WHERE di.doc_id IS NOT NULL
+            RETURN DISTINCT di.doc_id AS doc_id
+            ORDER BY doc_id
+            """
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(query, tenant_id=tenant_id)
+                doc_ids = [record["doc_id"] for record in result if record["doc_id"]]
+
+            logger.info(
+                f"[OSMOSE:Pass2c] Found {len(doc_ids)} documents in corpus"
+            )
+            return doc_ids
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Pass2c] Failed to get document IDs: {e}")
+            return []
+
     # =========================================================================
     # Pass 2c: NORMATIVE_EXTRACTION (ADR_NORMATIVE_RULES_SPEC_FACTS)
     # =========================================================================
@@ -1217,6 +1255,8 @@ class Pass2Orchestrator:
         3. NormativeWriter: Persiste dans Neo4j avec déduplication
 
         Les NormativeRule et SpecFact sont NON-TRAVERSABLES mais indexables.
+
+        NOTE: Si document_id == "all", itère sur tous les documents du corpus.
         """
         from knowbase.relations.normative_pattern_extractor import (
             NormativePatternExtractor,
@@ -1249,86 +1289,126 @@ class Pass2Orchestrator:
                 )
                 return
 
-            # Récupérer les DocItem du document (refactored: utilise DocItem pas Segment)
-            docitems = await self._get_document_docitems(job.document_id, neo4j_client)
-
-            if not docitems:
+            # Déterminer les documents à traiter
+            # Si document_id == "all" ou vide, traiter tous les documents du corpus
+            doc_ids_to_process = []
+            if not job.document_id or job.document_id == "all":
+                # Récupérer tous les document IDs depuis Neo4j
+                doc_ids_to_process = await self._get_all_document_ids(neo4j_client, job.tenant_id)
                 logger.info(
-                    f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] No DocItem found for {job.document_id}"
+                    f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Corpus mode: {len(doc_ids_to_process)} documents to process"
+                )
+            else:
+                doc_ids_to_process = [job.document_id]
+
+            if not doc_ids_to_process:
+                logger.info(
+                    f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] No documents found for tenant {job.tenant_id}"
                 )
                 return
-
-            logger.info(
-                f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Found {len(docitems)} DocItems"
-            )
 
             # Initialiser les extracteurs
             normative_extractor = NormativePatternExtractor(min_confidence=0.6)
             structure_parser = StructureParser(min_confidence=0.6)
 
-            all_rules = []
-            all_facts = []
-
-            # Traiter chaque DocItem
-            for docitem in docitems:
-                item_id = docitem.get("item_id", "")
-                item_text = docitem.get("text", "")
-                section_id = docitem.get("section_id")
-
-                if not item_text or len(item_text) < 20:
-                    continue
-
-                # 1. Extraire les règles normatives
-                rules = normative_extractor.extract_from_text(
-                    text=item_text,
-                    source_doc_id=job.document_id,
-                    source_chunk_id=item_id,
-                    source_segment_id=item_id,
-                    evidence_section=section_id,
-                    tenant_id=job.tenant_id,
-                )
-                all_rules.extend(rules)
-
-                # 2. Extraire les SpecFacts depuis les structures
-                facts = structure_parser.extract_from_text(
-                    text=item_text,
-                    source_doc_id=job.document_id,
-                    source_chunk_id=item_id,
-                    source_segment_id=item_id,
-                    evidence_section=section_id,
-                    tenant_id=job.tenant_id,
-                )
-                all_facts.extend(facts)
-
-            # 3. Persister dans Neo4j
+            # Initialiser le writer
             writer = get_normative_writer(
                 neo4j_client=neo4j_client,
                 tenant_id=job.tenant_id,
             )
 
-            if all_rules:
-                rule_stats = writer.write_rules(all_rules)
-                stats.normative_rules_extracted = rule_stats.rules_written
-                stats.normative_rules_deduplicated = rule_stats.rules_deduplicated
+            total_rules = 0
+            total_rules_dedup = 0
+            total_facts = 0
+            total_facts_dedup = 0
+            total_links = 0
 
-            if all_facts:
-                fact_stats = writer.write_facts(all_facts)
-                stats.spec_facts_extracted = fact_stats.facts_written
-                stats.spec_facts_deduplicated = fact_stats.facts_deduplicated
+            # Traiter chaque document
+            for doc_id in doc_ids_to_process:
+                # Récupérer les DocItem du document
+                docitems = await self._get_document_docitems(doc_id, neo4j_client)
 
-            # 4. Créer les liens vers le document
-            links_created = writer.link_to_document(job.document_id)
+                if not docitems:
+                    logger.debug(
+                        f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] No DocItem for {doc_id}, skipping"
+                    )
+                    continue
+
+                logger.info(
+                    f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Processing {doc_id}: {len(docitems)} DocItems"
+                )
+
+                all_rules = []
+                all_facts = []
+
+                # Traiter chaque DocItem
+                for docitem in docitems:
+                    item_id = docitem.get("item_id", "")
+                    item_text = docitem.get("text", "")
+                    section_id = docitem.get("section_id")
+
+                    if not item_text or len(item_text) < 20:
+                        continue
+
+                    # 1. Extraire les règles normatives
+                    rules = normative_extractor.extract_from_text(
+                        text=item_text,
+                        source_doc_id=doc_id,
+                        source_chunk_id=item_id,
+                        source_segment_id=item_id,
+                        evidence_section=section_id,
+                        tenant_id=job.tenant_id,
+                    )
+                    all_rules.extend(rules)
+
+                    # 2. Extraire les SpecFacts depuis les structures
+                    facts = structure_parser.extract_from_text(
+                        text=item_text,
+                        source_doc_id=doc_id,
+                        source_chunk_id=item_id,
+                        source_segment_id=item_id,
+                        evidence_section=section_id,
+                        tenant_id=job.tenant_id,
+                    )
+                    all_facts.extend(facts)
+
+                # 3. Persister dans Neo4j
+                if all_rules:
+                    rule_stats = writer.write_rules(all_rules)
+                    total_rules += rule_stats.rules_written
+                    total_rules_dedup += rule_stats.rules_deduplicated
+
+                if all_facts:
+                    fact_stats = writer.write_facts(all_facts)
+                    total_facts += fact_stats.facts_written
+                    total_facts_dedup += fact_stats.facts_deduplicated
+
+                # 4. Créer les liens vers le document
+                links_created = writer.link_to_document(doc_id)
+                total_links += links_created
+
+                logger.debug(
+                    f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] {doc_id}: "
+                    f"{len(all_rules)} rules, {len(all_facts)} facts"
+                )
+
+            # Mettre à jour les stats globales
+            stats.normative_rules_extracted = total_rules
+            stats.normative_rules_deduplicated = total_rules_dedup
+            stats.spec_facts_extracted = total_facts
+            stats.spec_facts_deduplicated = total_facts_dedup
 
             logger.info(
-                f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Complete for {job.document_id}: "
-                f"{stats.normative_rules_extracted} rules (+{stats.normative_rules_deduplicated} dedup), "
-                f"{stats.spec_facts_extracted} facts (+{stats.spec_facts_deduplicated} dedup), "
-                f"{links_created} doc links"
+                f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Complete: "
+                f"{len(doc_ids_to_process)} docs processed, "
+                f"{total_rules} rules (+{total_rules_dedup} dedup), "
+                f"{total_facts} facts (+{total_facts_dedup} dedup), "
+                f"{total_links} doc links"
             )
 
         except Exception as e:
             logger.error(
-                f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Failed for {job.document_id}: {e}",
+                f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Failed: {e}",
                 exc_info=True
             )
             stats.errors.append(f"NORMATIVE_EXTRACTION: {e}")
