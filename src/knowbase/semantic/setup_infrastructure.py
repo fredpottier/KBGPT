@@ -1,14 +1,21 @@
 """
-🌊 OSMOSE Semantic Intelligence V2.1 - Infrastructure Setup
+🌊 OSMOSE Semantic Intelligence V2.2 - Infrastructure Setup
 
-Script d'initialisation de l'infrastructure Proto-KG V2.1:
-- Neo4j: Constraints + Indexes (Concepts, pas narratives)
+Script d'initialisation de l'infrastructure Proto-KG V2.2:
+- Neo4j: Constraints + Indexes (18 constraints, 46 indexes)
 - Qdrant: Collection concepts_proto (multilingual-e5-large 1024D)
+
+Labels Neo4j:
+- Core: Document, Topic, Concept, CanonicalConcept, CandidateEntity, CandidateRelation
+- Phase 2: RawAssertion, CanonicalRelation, RawClaim, CanonicalClaim
+- Scope Layer: DocumentContext, SectionContext, DocItem
+- Normative (Pass 2c): NormativeRule, SpecFact
+- Semantic (ADR Discursive): SemanticRelation, EvidenceBundle
 
 Exécution:
     python -m knowbase.semantic.setup_infrastructure
 
-Phase 1 V2.1 - Semaine 1
+V2.2 - 2026-01-22: Ajout NormativeRule, SpecFact, SemanticRelation, EvidenceBundle
 """
 
 import asyncio
@@ -350,11 +357,144 @@ async def setup_neo4j_proto_kg():
             """)
             logger.info("  ✅ Index DocItem.mentioned_concepts créé")
 
-        logger.info("[OSMOSE] ✅ Neo4j Proto-KG Schema V2.1 configuré avec succès")
-        logger.info("  📊 Labels: Document, Topic, Concept, CanonicalConcept, CandidateEntity, CandidateRelation")
+            # ============================================
+            # NORMATIVE RULE & SPEC FACT (ADR_NORMATIVE_RULES_SPEC_FACTS)
+            # Pass 2c - Assertions non-traversables mais indexables
+            # ============================================
+            logger.info("  📊 Création schema NormativeRule & SpecFact...")
+
+            # NormativeRule.rule_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT normative_rule_id_unique IF NOT EXISTS
+                FOR (n:NormativeRule) REQUIRE n.rule_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint NormativeRule.rule_id créée")
+
+            # SpecFact.fact_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT spec_fact_id_unique IF NOT EXISTS
+                FOR (f:SpecFact) REQUIRE f.fact_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint SpecFact.fact_id créée")
+
+            # NormativeRule.dedup_key + tenant_id (déduplication)
+            await session.run("""
+                CREATE INDEX normative_rule_dedup_idx IF NOT EXISTS
+                FOR (n:NormativeRule) ON (n.dedup_key, n.tenant_id)
+            """)
+            logger.info("  ✅ Index NormativeRule.dedup_key créé")
+
+            # SpecFact.dedup_key + tenant_id (déduplication)
+            await session.run("""
+                CREATE INDEX spec_fact_dedup_idx IF NOT EXISTS
+                FOR (f:SpecFact) ON (f.dedup_key, f.tenant_id)
+            """)
+            logger.info("  ✅ Index SpecFact.dedup_key créé")
+
+            # NormativeRule.source_doc_id + tenant_id (filtrage par document)
+            await session.run("""
+                CREATE INDEX normative_rule_doc_idx IF NOT EXISTS
+                FOR (n:NormativeRule) ON (n.source_doc_id, n.tenant_id)
+            """)
+            logger.info("  ✅ Index NormativeRule.source_doc_id créé")
+
+            # SpecFact.source_doc_id + tenant_id (filtrage par document)
+            await session.run("""
+                CREATE INDEX spec_fact_doc_idx IF NOT EXISTS
+                FOR (f:SpecFact) ON (f.source_doc_id, f.tenant_id)
+            """)
+            logger.info("  ✅ Index SpecFact.source_doc_id créé")
+
+            # NormativeRule.modality + tenant_id (filtrage par modalité MUST/SHOULD/MAY)
+            await session.run("""
+                CREATE INDEX normative_rule_modality_idx IF NOT EXISTS
+                FOR (n:NormativeRule) ON (n.modality, n.tenant_id)
+            """)
+            logger.info("  ✅ Index NormativeRule.modality créé")
+
+            # SpecFact.attribute_name + tenant_id (recherche par attribut)
+            await session.run("""
+                CREATE INDEX spec_fact_attribute_idx IF NOT EXISTS
+                FOR (f:SpecFact) ON (f.attribute_name, f.tenant_id)
+            """)
+            logger.info("  ✅ Index SpecFact.attribute_name créé")
+
+            # ============================================
+            # SEMANTIC RELATION & EVIDENCE BUNDLE (ADR_DISCURSIVE_RELATIONS)
+            # Relations prouvées avec bundles d'évidence
+            # ============================================
+            logger.info("  📊 Création schema SemanticRelation & EvidenceBundle...")
+
+            # EvidenceBundle.bundle_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT evidence_bundle_id_unique IF NOT EXISTS
+                FOR (eb:EvidenceBundle) REQUIRE eb.bundle_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint EvidenceBundle.bundle_id créée")
+
+            # SemanticRelation.semantic_relation_id UNIQUE
+            await session.run("""
+                CREATE CONSTRAINT semantic_relation_id_unique IF NOT EXISTS
+                FOR (sr:SemanticRelation) REQUIRE sr.semantic_relation_id IS UNIQUE
+            """)
+            logger.info("  ✅ Constraint SemanticRelation.semantic_relation_id créée")
+
+            # EvidenceBundle.tenant_id + status (workflow filtrage)
+            await session.run("""
+                CREATE INDEX evidence_bundle_tenant_status_idx IF NOT EXISTS
+                FOR (eb:EvidenceBundle) ON (eb.tenant_id, eb.status)
+            """)
+            logger.info("  ✅ Index EvidenceBundle.tenant_id+status créé")
+
+            # EvidenceBundle.tenant_id + source_doc_id (filtrage par document)
+            await session.run("""
+                CREATE INDEX evidence_bundle_tenant_doc_idx IF NOT EXISTS
+                FOR (eb:EvidenceBundle) ON (eb.tenant_id, eb.source_doc_id)
+            """)
+            logger.info("  ✅ Index EvidenceBundle.source_doc_id créé")
+
+            # EvidenceBundle.confidence (tri par qualité)
+            await session.run("""
+                CREATE INDEX evidence_bundle_confidence_idx IF NOT EXISTS
+                FOR (eb:EvidenceBundle) ON (eb.confidence)
+            """)
+            logger.info("  ✅ Index EvidenceBundle.confidence créé")
+
+            # SemanticRelation.tenant_id + relation_type (filtrage par type)
+            await session.run("""
+                CREATE INDEX semantic_relation_tenant_type_idx IF NOT EXISTS
+                FOR (sr:SemanticRelation) ON (sr.tenant_id, sr.relation_type)
+            """)
+            logger.info("  ✅ Index SemanticRelation.relation_type créé")
+
+            # SemanticRelation.source_bundle_id (jointure avec EvidenceBundle)
+            await session.run("""
+                CREATE INDEX semantic_relation_bundle_idx IF NOT EXISTS
+                FOR (sr:SemanticRelation) ON (sr.source_bundle_id)
+            """)
+            logger.info("  ✅ Index SemanticRelation.source_bundle_id créé")
+
+            # SemanticRelation.defensibility_tier (filtrage STRICT/EXTENDED/HEURISTIC)
+            await session.run("""
+                CREATE INDEX semantic_relation_tier_idx IF NOT EXISTS
+                FOR (sr:SemanticRelation) ON (sr.defensibility_tier, sr.tenant_id)
+            """)
+            logger.info("  ✅ Index SemanticRelation.defensibility_tier créé")
+
+            # SemanticRelation.semantic_grade (filtrage par qualité A/B/C/D)
+            await session.run("""
+                CREATE INDEX semantic_relation_grade_idx IF NOT EXISTS
+                FOR (sr:SemanticRelation) ON (sr.semantic_grade, sr.tenant_id)
+            """)
+            logger.info("  ✅ Index SemanticRelation.semantic_grade créé")
+
+        logger.info("[OSMOSE] ✅ Neo4j Proto-KG Schema V2.2 configuré avec succès")
+        logger.info("  📊 Labels Core: Document, Topic, Concept, CanonicalConcept, CandidateEntity, CandidateRelation")
         logger.info("  📊 Labels Phase 2: RawAssertion, CanonicalRelation, RawClaim, CanonicalClaim")
         logger.info("  📊 Labels Scope Layer: DocumentContext, SectionContext, DocItem")
-        logger.info("  🔍 Total: 14 constraints + 29 indexes (incl. 3 Scope Layer)")
+        logger.info("  📊 Labels Normative: NormativeRule, SpecFact")
+        logger.info("  📊 Labels Semantic: SemanticRelation, EvidenceBundle")
+        logger.info("  🔍 Total: 18 constraints + 46 indexes")
 
     except Exception as e:
         logger.error(f"[OSMOSE] ❌ Erreur setup Neo4j: {e}")

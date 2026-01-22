@@ -11,10 +11,11 @@ from knowbase.semantic.config import load_semantic_config, get_semantic_config
 
 from knowbase.semantic.models import (
     SemanticProfile,
-    NarrativeThread,
     ComplexityZone,
     CandidateEntity,
-    CandidateRelation
+    CandidateRelation,
+    Topic,
+    Concept,
 )
 
 
