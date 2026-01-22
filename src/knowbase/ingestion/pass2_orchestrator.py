@@ -1570,6 +1570,8 @@ Return JSON with "relations" array."""
         3. Relation writing: persiste uniquement si preuve valide
 
         IMPORTANT: ABSTAIN préféré à relation douteuse.
+
+        NOTE: Si document_id == "all", itère sur tous les documents du corpus.
         """
         from knowbase.relations.semantic_consolidation_pass3 import run_pass3_consolidation
         from knowbase.common.clients.neo4j_client import get_neo4j_client
@@ -1598,24 +1600,61 @@ Return JSON with "relations" array."""
 
             llm_router = get_llm_router()
 
-            # Exécuter Pass 3
-            pass3_stats = await run_pass3_consolidation(
-                document_id=job.document_id,
-                neo4j_client=neo4j_client,
-                llm_router=llm_router,
-                tenant_id=job.tenant_id,
-                max_candidates=50
-            )
+            # Déterminer les documents à traiter
+            # Si document_id == "all" ou vide, traiter tous les documents du corpus
+            doc_ids_to_process = []
+            if not job.document_id or job.document_id == "all":
+                # Récupérer tous les document IDs depuis Neo4j
+                doc_ids_to_process = await self._get_all_document_ids(neo4j_client, job.tenant_id)
+                logger.info(
+                    f"[OSMOSE:Pass3:SEMANTIC_CONSOLIDATION] Corpus mode: {len(doc_ids_to_process)} documents to process"
+                )
+            else:
+                doc_ids_to_process = [job.document_id]
 
-            # Mettre à jour stats
-            stats.pass3_candidates = pass3_stats.candidates_generated
-            stats.pass3_verified = pass3_stats.relations_created
-            stats.pass3_abstained = pass3_stats.abstained
+            if not doc_ids_to_process:
+                logger.info(
+                    f"[OSMOSE:Pass3:SEMANTIC_CONSOLIDATION] No documents found for tenant {job.tenant_id}"
+                )
+                return
+
+            # Agrégateurs globaux
+            total_candidates = 0
+            total_verified = 0
+            total_abstained = 0
+
+            # Traiter chaque document
+            for doc_id in doc_ids_to_process:
+                logger.info(f"[OSMOSE:Pass3] Processing document {doc_id}")
+
+                # Exécuter Pass 3 pour ce document
+                pass3_stats = await run_pass3_consolidation(
+                    document_id=doc_id,
+                    neo4j_client=neo4j_client,
+                    llm_router=llm_router,
+                    tenant_id=job.tenant_id,
+                    max_candidates=50
+                )
+
+                total_candidates += pass3_stats.candidates_generated
+                total_verified += pass3_stats.relations_created
+                total_abstained += pass3_stats.abstained
+
+                if pass3_stats.candidates_generated > 0:
+                    logger.info(
+                        f"[OSMOSE:Pass3] {doc_id}: {pass3_stats.relations_created}/{pass3_stats.candidates_generated} verified"
+                    )
+
+            # Mettre à jour stats globales
+            stats.pass3_candidates = total_candidates
+            stats.pass3_verified = total_verified
+            stats.pass3_abstained = total_abstained
 
             logger.info(
                 f"[OSMOSE:Pass3:SEMANTIC_CONSOLIDATION] Complete: "
-                f"{stats.pass3_verified}/{stats.pass3_candidates} verified, "
-                f"{stats.pass3_abstained} abstained"
+                f"{len(doc_ids_to_process)} docs processed, "
+                f"{total_verified}/{total_candidates} verified, "
+                f"{total_abstained} abstained"
             )
 
         except Exception as e:
