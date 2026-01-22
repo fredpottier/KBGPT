@@ -39,7 +39,10 @@ from knowbase.common.clients.neo4j_client import Neo4jClient
 from knowbase.config.settings import get_settings
 from knowbase.common.llm_router import get_llm_router, TaskType
 from knowbase.relations.types import RelationType, RawAssertionFlags
-from knowbase.relations.structural_topic_extractor import process_document_topics
+from knowbase.relations.structural_topic_extractor import (
+    process_document_topics,
+    process_document_topics_v2,
+)
 from knowbase.relations.semantic_consolidation_pass3 import run_pass3_consolidation
 
 # ADR SCOPE Discursive Candidate Mining
@@ -1269,18 +1272,13 @@ Return JSON: {{"relations": [{{"source_id": "...", "target_id": "...", "predicat
             total_covers = 0
 
             for doc_id in doc_ids:
-                # Récupérer le texte du document depuis Qdrant
-                text = await self._get_document_text(doc_id)
-                if not text:
-                    logger.warning(f"[Pass2Service] No text for document {doc_id}")
-                    continue
-
-                # Extraire et persister les topics
-                stats = process_document_topics(
+                # V2: Utilise SectionContext existants (pas parsing texte H1/H2)
+                stats = process_document_topics_v2(
                     document_id=doc_id,
-                    text=text,
                     neo4j_client=self._neo4j_client,
-                    tenant_id=self.tenant_id
+                    tenant_id=self.tenant_id,
+                    max_topics=30,
+                    max_level=2
                 )
 
                 total_topics += stats.get("topics_count", 0)

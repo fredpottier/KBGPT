@@ -1056,3 +1056,66 @@ def process_document_topics(
         "write_stats": write_stats,
         "covers_stats": covers_stats
     }
+
+
+def process_document_topics_v2(
+    document_id: str,
+    neo4j_client,
+    tenant_id: str = "default",
+    max_topics: int = 30,
+    max_level: int = 2
+) -> Dict[str, Any]:
+    """
+    Fonction Pass 2a V2: extrait topics depuis SectionContext (pas texte H1/H2).
+
+    Version refactored qui utilise les SectionContext existants dans Neo4j
+    au lieu de parser le texte brut.
+
+    Args:
+        document_id: ID du document
+        neo4j_client: Client Neo4j avec driver
+        tenant_id: ID du tenant
+        max_topics: Gating anti-explosion (défaut: 30)
+        max_level: Niveau max de section (1=H1, 2=H2)
+
+    Returns:
+        Résultats combinés extraction + écriture
+    """
+    # 1. Extraction des topics depuis SectionContext
+    extractor = StructuralTopicExtractor()
+    extraction_result = extractor.extract_topics_from_section_contexts(
+        document_id=document_id,
+        neo4j_driver=neo4j_client.driver,
+        tenant_id=tenant_id,
+        max_topics=max_topics,
+        max_level=max_level
+    )
+
+    # 2. Écriture dans Neo4j
+    writer = TopicNeo4jWriter(neo4j_client, tenant_id)
+    write_stats = writer.write_topics(document_id, extraction_result.topics)
+
+    # 3. Construction des COVERS
+    covers_builder = CoversBuilder(neo4j_client, tenant_id)
+    covers_stats = covers_builder.build_covers_for_document(
+        document_id,
+        extraction_result.topics
+    )
+
+    return {
+        "document_id": document_id,
+        "topics_count": len(extraction_result.topics),
+        "topics": [
+            {
+                "topic_id": t.topic_id,
+                "title": t.title,
+                "level": t.level,
+                "section_path": t.section_path
+            }
+            for t in extraction_result.topics
+        ],
+        "extraction_time_ms": extraction_result.extraction_time_ms,
+        "write_stats": write_stats,
+        "covers_stats": covers_stats,
+        "method": "section_context_v2"
+    }
