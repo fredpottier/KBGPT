@@ -35,6 +35,16 @@ class SearchRequest(BaseModel):
         """
     )
 
+    # 🔍 OSMOSE Graph-First Search (Topics/COVERS routing)
+    use_graph_first: bool = Field(
+        default=True,
+        description="""
+        Activer le runtime Graph-First (ADR Phase C).
+        Utilise les Topics et relations COVERS pour router vers les documents pertinents.
+        Modes: REASONED (paths sémantiques), ANCHORED (Topics/COVERS), TEXT_ONLY (fallback)
+        """
+    )
+
     # 🎯 OSMOSE Assertion-Centric
     use_instrumented: bool = Field(
         default=False,

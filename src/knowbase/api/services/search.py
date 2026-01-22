@@ -67,7 +67,7 @@ def search_documents(
     graph_enrichment_level: str = "standard",
     session_id: str | None = None,
     use_hybrid_anchor_search: bool = False,
-    use_graph_first: bool = False,
+    use_graph_first: bool = True,  # Activé par défaut pour utiliser Topics/COVERS (mode ANCHORED)
     use_instrumented: bool = False,
 ) -> dict[str, Any]:
     """
