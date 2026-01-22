@@ -203,10 +203,15 @@ phase_2_hybrid_anchor:
     # Voir: src/knowbase/relations/segment_window_relation_extractor.py
     # NOTE 2026-01-19: Ajout structural_topics (Pass 2a) requis pour Pass 3
     enabled_phases:
-      - "structural_topics"   # Pass 2a: Topics + HAS_TOPIC + COVERS (requis pour Pass 3)
-      - "classify_fine"       # Pass 2b-1: Classification fine des concepts
-      - "enrich_relations"    # Pass 2b-2: ADR-compliant implementation
-      - "cross_doc"           # Cross-document linking
+      - "corpus_promotion"       # Pass 2.0: Promotion unifiée (ADR_UNIFIED_CORPUS_PROMOTION)
+      - "structural_topics"      # Pass 2a: Topics + HAS_TOPIC + COVERS (requis pour Pass 3)
+      - "classify_fine"          # Pass 2b-1: Classification fine des concepts
+      - "enrich_relations"       # Pass 2b-2: ADR-compliant implementation
+      - "normative_extraction"   # Pass 2c: NormativeRule + SpecFact (ADR_NORMATIVE_RULES_SPEC_FACTS)
+      - "semantic_consolidation" # Pass 3: Semantic Consolidation (proven relations)
+      - "consolidate_claims"     # Consolidation claims
+      - "consolidate_relations"  # Consolidation relations
+      - "cross_doc"              # Cross-document linking (Entity Resolution)
     # Priorité jobs background
     default_priority: 0
 

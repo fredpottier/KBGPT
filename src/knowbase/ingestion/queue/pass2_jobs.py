@@ -37,6 +37,60 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# Phase Registry for Dynamic Execution (ADR Dynamic Phases)
+# =============================================================================
+
+@dataclass
+class PhaseConfig:
+    """Configuration pour une phase Pass2."""
+    name: str                    # Nom dans feature_flags.yaml
+    display_name: str            # Nom pour le progress tracking
+    handler: str                 # Nom de la fonction handler
+    skip_flag: Optional[str]     # Flag skip_* correspondant (None = toujours exécuter)
+
+
+# Registre des phases - ordre d'exécution déterminé par enabled_phases dans config
+PHASE_REGISTRY: Dict[str, PhaseConfig] = {
+    "corpus_promotion": PhaseConfig(
+        "corpus_promotion", "CORPUS_PROMOTION",
+        "_execute_corpus_promotion", "skip_promotion"
+    ),
+    "structural_topics": PhaseConfig(
+        "structural_topics", "STRUCTURAL_TOPICS",
+        "_execute_structural_topics", None
+    ),
+    "classify_fine": PhaseConfig(
+        "classify_fine", "CLASSIFY_FINE",
+        "_execute_classify_fine", "skip_classify"
+    ),
+    "enrich_relations": PhaseConfig(
+        "enrich_relations", "ENRICH_RELATIONS",
+        "_execute_enrich_relations", "skip_enrich"
+    ),
+    "normative_extraction": PhaseConfig(
+        "normative_extraction", "NORMATIVE_EXTRACTION",
+        "_execute_normative_extraction", None
+    ),
+    "semantic_consolidation": PhaseConfig(
+        "semantic_consolidation", "SEMANTIC_CONSOLIDATION",
+        "_execute_semantic_consolidation", None
+    ),
+    "consolidate_claims": PhaseConfig(
+        "consolidate_claims", "CONSOLIDATE_CLAIMS",
+        "_execute_consolidate_claims", "skip_consolidate"
+    ),
+    "consolidate_relations": PhaseConfig(
+        "consolidate_relations", "CONSOLIDATE_RELATIONS",
+        "_execute_consolidate_relations", "skip_consolidate"
+    ),
+    "cross_doc": PhaseConfig(
+        "cross_doc", "CORPUS_ER",
+        "_execute_corpus_er", "skip_corpus_er"
+    ),
+}
+
+
+# =============================================================================
 # Job State Management (Redis-backed)
 # =============================================================================
 
@@ -473,6 +527,346 @@ def get_pass2_job_manager() -> Pass2JobManager:
 
 
 # =============================================================================
+# Phase Handlers - Extracted from execute_pass2_full_job for dynamic execution
+# =============================================================================
+
+def _execute_corpus_promotion(
+    state: Pass2JobState,
+    job_id: str,
+    manager: Pass2JobManager,
+    service: Any
+) -> Dict[str, Any]:
+    """
+    Execute CORPUS_PROMOTION phase (Pass 2.0).
+    Promotes ProtoConcepts to CanonicalConcepts.
+    """
+    try:
+        from knowbase.consolidation.corpus_promotion import CorpusPromotionEngine
+        promotion_engine = CorpusPromotionEngine(tenant_id=state.tenant_id)
+        promotion_result = asyncio.run(promotion_engine.promote_corpus())
+
+        result = {
+            "success": True,
+            "proto_count": promotion_result.proto_concepts_processed,
+            "promoted_count": promotion_result.canonical_concepts_created,
+            "skipped_count": promotion_result.skipped_count,
+            "merged_count": promotion_result.merged_count,
+            "singleton_count": promotion_result.singleton_count,
+            "documents_processed": promotion_result.documents_processed,
+            "execution_time_ms": promotion_result.execution_time_ms
+        }
+        manager.update_progress(job_id,
+            message=f"Promotion: {promotion_result.canonical_concepts_created} promoted, "
+                   f"{promotion_result.merged_count} merged, {promotion_result.documents_processed} docs")
+        logger.info(f"[Pass2Worker] CORPUS_PROMOTION complete: {promotion_result.to_dict()}")
+        return result
+    except Exception as e:
+        logger.error(f"[Pass2Worker] CORPUS_PROMOTION failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+def _execute_structural_topics(
+    state: Pass2JobState,
+    job_id: str,
+    manager: Pass2JobManager,
+    service: Any
+) -> Dict[str, Any]:
+    """Execute STRUCTURAL_TOPICS phase (Pass 2a)."""
+    try:
+        result = asyncio.run(service.run_structural_topics(state.document_id))
+        phase_result = {
+            "success": result.success,
+            "items_processed": result.items_processed,
+            "items_created": result.items_created,
+            "execution_time_ms": result.execution_time_ms,
+            "details": result.details
+        }
+        manager.update_progress(job_id,
+            message=f"Topics: {result.details.get('topics_created', 0)} sections, "
+                   f"{result.details.get('covers_created', 0)} couvertures")
+        return phase_result
+    except Exception as e:
+        logger.warning(f"[Pass2Worker] STRUCTURAL_TOPICS failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def _execute_classify_fine(
+    state: Pass2JobState,
+    job_id: str,
+    manager: Pass2JobManager,
+    service: Any
+) -> Dict[str, Any]:
+    """
+    Execute CLASSIFY_FINE phase (Pass 2b-1).
+    Classifies concepts with LLM, supports checkpointing and suspension.
+    """
+    # Compter les concepts à classifier
+    classify_count_query = """
+    MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
+    WHERE c.type_fine IS NULL OR c.type_fine = ''
+          OR c.type_fine_justification = 'Fallback to heuristic type'
+    RETURN count(c) AS count
+    """
+    classify_result = service._execute_query(classify_count_query, {"tenant_id": state.tenant_id})
+    concepts_to_classify = classify_result[0]["count"] if classify_result else 0
+
+    if concepts_to_classify == 0:
+        logger.info(f"[Pass2Worker] CLASSIFY_FINE skipped for job {job_id}: all concepts already classified")
+        manager.update_progress(job_id, message="Classification skipped: all concepts already have type_fine")
+        return {
+            "success": True,
+            "items_processed": 0,
+            "items_updated": 0,
+            "execution_time_ms": 0,
+            "details": {"skipped": True, "reason": "All concepts already classified"}
+        }
+
+    total_classify_batches = max(1, (concepts_to_classify + state.batch_size - 1) // state.batch_size)
+
+    manager.update_progress(job_id,
+                           items_total=concepts_to_classify,
+                           items_processed=0,
+                           iteration=0,
+                           total_iterations=total_classify_batches,
+                           message=f"Starting classification of {concepts_to_classify} concepts...")
+
+    result = asyncio.run(_run_classify_with_progress(
+        service, job_id, manager, state
+    ))
+
+    phase_result = {
+        "success": result.success,
+        "items_processed": result.items_processed,
+        "items_updated": result.items_updated,
+        "execution_time_ms": result.execution_time_ms,
+        "details": result.details,
+        "suspended": result.details.get("suspended", False)
+    }
+
+    return phase_result
+
+
+def _execute_enrich_relations(
+    state: Pass2JobState,
+    job_id: str,
+    manager: Pass2JobManager,
+    service: Any
+) -> Dict[str, Any]:
+    """Execute ENRICH_RELATIONS phase (Pass 2b-2)."""
+    # Check feature flag
+    pass2_config = get_hybrid_anchor_config("pass2_config", state.tenant_id) or {}
+    enabled_phases = pass2_config.get("enabled_phases", [])
+    enrich_enabled = "enrich_relations" in enabled_phases
+
+    if not enrich_enabled:
+        logger.info(f"[Pass2Worker] ENRICH_RELATIONS skipped for job {job_id}: disabled in feature_flags.yaml")
+        return {
+            "success": True,
+            "items_processed": 0,
+            "items_created": 0,
+            "execution_time_ms": 0,
+            "details": {"skipped": True, "reason": "Disabled in feature_flags.yaml (ADR violation)"}
+        }
+
+    try:
+        result = asyncio.run(service.run_enrich_relations(state.document_id))
+        return {
+            "success": result.success,
+            "items_processed": result.items_processed,
+            "items_created": result.items_created,
+            "execution_time_ms": result.execution_time_ms
+        }
+    except Exception as e:
+        logger.error(f"[Pass2Worker] ENRICH_RELATIONS failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+def _execute_normative_extraction(
+    state: Pass2JobState,
+    job_id: str,
+    manager: Pass2JobManager,
+    service: Any
+) -> Dict[str, Any]:
+    """
+    Execute NORMATIVE_EXTRACTION phase (Pass 2c).
+    Extracts NormativeRule and SpecFact from document segments.
+    ADR: ADR_NORMATIVE_RULES_SPEC_FACTS
+    """
+    from knowbase.ingestion.pass2_orchestrator import (
+        Pass2Job, Pass2Stats, Pass2Mode, Pass2Phase, get_pass2_orchestrator
+    )
+
+    logger.info(f"[Pass2Worker] NORMATIVE_EXTRACTION starting for job {job_id}")
+
+    try:
+        orchestrator = get_pass2_orchestrator(state.tenant_id)
+        job = Pass2Job(
+            job_id=f"p2_norm_{job_id[:8]}",
+            document_id=state.document_id or "all",
+            tenant_id=state.tenant_id,
+            mode=Pass2Mode.INLINE,
+            phases=[Pass2Phase.NORMATIVE_EXTRACTION],
+            concepts=[]
+        )
+        stats = Pass2Stats(document_id=job.document_id)
+        asyncio.run(orchestrator._phase_normative_extraction(job, stats))
+
+        result = {
+            "success": len(stats.errors) == 0,
+            "normative_rules_extracted": stats.normative_rules_extracted,
+            "normative_rules_deduplicated": stats.normative_rules_deduplicated,
+            "spec_facts_extracted": stats.spec_facts_extracted,
+            "spec_facts_deduplicated": stats.spec_facts_deduplicated,
+            "errors": stats.errors
+        }
+
+        manager.update_progress(job_id,
+            message=f"Normative: {stats.normative_rules_extracted} rules, {stats.spec_facts_extracted} facts")
+        logger.info(
+            f"[Pass2Worker] NORMATIVE_EXTRACTION complete: "
+            f"{stats.normative_rules_extracted} rules, {stats.spec_facts_extracted} facts"
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"[Pass2Worker] NORMATIVE_EXTRACTION failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "errors": [str(e)]}
+
+
+def _execute_semantic_consolidation(
+    state: Pass2JobState,
+    job_id: str,
+    manager: Pass2JobManager,
+    service: Any
+) -> Dict[str, Any]:
+    """
+    Execute SEMANTIC_CONSOLIDATION phase (Pass 3).
+    Extractive verification with proven relations.
+    ADR: ADR_GRAPH_FIRST_ARCHITECTURE
+    """
+    from knowbase.ingestion.pass2_orchestrator import (
+        Pass2Job, Pass2Stats, Pass2Mode, Pass2Phase, get_pass2_orchestrator
+    )
+
+    logger.info(f"[Pass2Worker] SEMANTIC_CONSOLIDATION starting for job {job_id}")
+
+    try:
+        orchestrator = get_pass2_orchestrator(state.tenant_id)
+        job = Pass2Job(
+            job_id=f"p2_pass3_{job_id[:8]}",
+            document_id=state.document_id or "all",
+            tenant_id=state.tenant_id,
+            mode=Pass2Mode.INLINE,
+            phases=[Pass2Phase.SEMANTIC_CONSOLIDATION],
+            concepts=[]
+        )
+        stats = Pass2Stats(document_id=job.document_id)
+        asyncio.run(orchestrator._phase_semantic_consolidation(job, stats))
+
+        result = {
+            "success": len(stats.errors) == 0,
+            "candidates": stats.pass3_candidates,
+            "verified": stats.pass3_verified,
+            "abstained": stats.pass3_abstained,
+            "errors": stats.errors
+        }
+
+        manager.update_progress(job_id,
+            message=f"Pass 3: {stats.pass3_verified}/{stats.pass3_candidates} verified, {stats.pass3_abstained} abstained")
+        logger.info(
+            f"[Pass2Worker] SEMANTIC_CONSOLIDATION complete: "
+            f"{stats.pass3_verified}/{stats.pass3_candidates} verified"
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"[Pass2Worker] SEMANTIC_CONSOLIDATION failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "errors": [str(e)]}
+
+
+def _execute_consolidate_claims(
+    state: Pass2JobState,
+    job_id: str,
+    manager: Pass2JobManager,
+    service: Any
+) -> Dict[str, Any]:
+    """Execute CONSOLIDATE_CLAIMS phase."""
+    try:
+        result = service.run_consolidate_claims()
+        return {
+            "success": result.success,
+            "items_processed": result.items_processed,
+            "items_created": result.items_created
+        }
+    except Exception as e:
+        logger.error(f"[Pass2Worker] CONSOLIDATE_CLAIMS failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+def _execute_consolidate_relations(
+    state: Pass2JobState,
+    job_id: str,
+    manager: Pass2JobManager,
+    service: Any
+) -> Dict[str, Any]:
+    """Execute CONSOLIDATE_RELATIONS phase."""
+    try:
+        result = service.run_consolidate_relations()
+        return {
+            "success": result.success,
+            "items_processed": result.items_processed,
+            "items_created": result.items_created
+        }
+    except Exception as e:
+        logger.error(f"[Pass2Worker] CONSOLIDATE_RELATIONS failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+def _execute_corpus_er(
+    state: Pass2JobState,
+    job_id: str,
+    manager: Pass2JobManager,
+    service: Any
+) -> Dict[str, Any]:
+    """Execute CORPUS_ER phase (Entity Resolution)."""
+    try:
+        result = service.run_corpus_er(dry_run=False)
+        phase_result = {
+            "success": result.success,
+            "items_processed": result.items_processed,
+            "items_created": result.items_created,
+            "items_updated": result.items_updated,
+            "execution_time_ms": result.execution_time_ms,
+            "details": result.details
+        }
+
+        if result.details:
+            manager.update_progress(
+                job_id,
+                message=f"ER: {result.details.get('auto_merges', 0)} auto-merges, "
+                       f"{result.details.get('proposals_created', 0)} proposals"
+            )
+        return phase_result
+    except Exception as e:
+        logger.error(f"[Pass2Worker] CORPUS_ER failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+# Handler dispatch table
+_PHASE_HANDLERS: Dict[str, Any] = {
+    "_execute_corpus_promotion": _execute_corpus_promotion,
+    "_execute_structural_topics": _execute_structural_topics,
+    "_execute_classify_fine": _execute_classify_fine,
+    "_execute_enrich_relations": _execute_enrich_relations,
+    "_execute_normative_extraction": _execute_normative_extraction,
+    "_execute_semantic_consolidation": _execute_semantic_consolidation,
+    "_execute_consolidate_claims": _execute_consolidate_claims,
+    "_execute_consolidate_relations": _execute_consolidate_relations,
+    "_execute_corpus_er": _execute_corpus_er,
+}
+
+
+# =============================================================================
 # Main Worker Function - Execute Full Pass2 with Progress
 # =============================================================================
 
@@ -518,220 +912,87 @@ def execute_pass2_full_job(job_id: str):
     try:
         service = Pass2Service(tenant_id=state.tenant_id)
 
+        # =====================================================================
+        # ADR Dynamic Phases: Iterate over enabled_phases from config
+        # =====================================================================
+        pass2_config = get_hybrid_anchor_config("pass2_config", state.tenant_id) or {}
+        enabled_phases = pass2_config.get("enabled_phases", list(PHASE_REGISTRY.keys()))
+
+        # Build effective phase list (respect skip flags)
+        effective_phases = []
+        for phase_name in enabled_phases:
+            config = PHASE_REGISTRY.get(phase_name)
+            if not config:
+                logger.warning(f"[Pass2Worker] Unknown phase '{phase_name}' in enabled_phases, skipping")
+                continue
+
+            # Check skip flag if defined
+            if config.skip_flag:
+                skip_value = getattr(state, config.skip_flag, False)
+                if skip_value:
+                    logger.info(f"[Pass2Worker] Phase {phase_name} skipped via {config.skip_flag}")
+                    continue
+
+            effective_phases.append(phase_name)
+
+        logger.info(
+            f"[Pass2Worker] Job {job_id} executing {len(effective_phases)} phases: "
+            f"{effective_phases}"
+        )
+
+        # Update total phases for progress tracking
+        manager.update_progress(job_id, total_phases=len(effective_phases))
+
         phase_results = {}
-        phase_index = 0
 
-        # Phase 0: CORPUS_PROMOTION (Pass 2.0) - ProtoConcepts → CanonicalConcepts
-        if not state.skip_promotion and not manager.is_cancelled(job_id):
-            manager.update_progress(job_id, current_phase="CORPUS_PROMOTION",
-                                   phase_index=phase_index, message="Promoting ProtoConcepts to CanonicalConcepts...")
+        # Execute phases dynamically
+        for phase_index, phase_name in enumerate(effective_phases):
+            # Check cancellation before each phase
+            if manager.is_cancelled(job_id):
+                logger.info(f"[Pass2Worker] Job {job_id} cancelled before {phase_name}")
+                break
 
-            try:
-                from knowbase.consolidation.corpus_promotion import CorpusPromotionEngine
-                promotion_engine = CorpusPromotionEngine(tenant_id=state.tenant_id)
-                promotion_result = asyncio.run(promotion_engine.promote_corpus())
+            config = PHASE_REGISTRY.get(phase_name)
+            if not config:
+                continue
 
-                phase_results["corpus_promotion"] = {
-                    "success": True,
-                    "proto_count": promotion_result.proto_concepts_processed,
-                    "promoted_count": promotion_result.canonical_concepts_created,
-                    "skipped_count": promotion_result.skipped_count,
-                    "merged_count": promotion_result.merged_count,
-                    "singleton_count": promotion_result.singleton_count,
-                    "documents_processed": promotion_result.documents_processed,
-                    "execution_time_ms": promotion_result.execution_time_ms
-                }
-                manager.set_phase_result(job_id, "corpus_promotion", phase_results["corpus_promotion"])
-                manager.update_progress(job_id,
-                    message=f"Promotion: {promotion_result.canonical_concepts_created} promoted, "
-                           f"{promotion_result.merged_count} merged, {promotion_result.documents_processed} docs")
-                logger.info(f"[Pass2Worker] CORPUS_PROMOTION complete: {promotion_result.to_dict()}")
-            except Exception as e:
-                logger.error(f"[Pass2Worker] CORPUS_PROMOTION failed: {e}", exc_info=True)
-                phase_results["corpus_promotion"] = {
-                    "success": False,
-                    "error": str(e)
-                }
-                manager.set_phase_result(job_id, "corpus_promotion", phase_results["corpus_promotion"])
-            phase_index += 1
+            # Update progress with current phase
+            manager.update_progress(
+                job_id,
+                current_phase=config.display_name,
+                phase_index=phase_index,
+                message=f"Starting {config.display_name}..."
+            )
 
-        # Compter concepts à traiter (après promotion pour avoir les CanonicalConcepts)
-        total_concepts = 0
-        if not state.skip_classify:
-            count_query = """
-            MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
-            WHERE c.type_fine IS NULL OR c.type_fine = ''
-                  OR c.type_fine_justification = 'Fallback to heuristic type'
-            RETURN count(c) AS count
-            """
-            result = service._execute_query(count_query, {"tenant_id": state.tenant_id})
-            total_concepts = result[0]["count"] if result else 0
-            manager.update_progress(job_id, items_total=total_concepts,
-                                   message=f"Found {total_concepts} concepts to classify")
+            # Get handler function
+            handler = _PHASE_HANDLERS.get(config.handler)
+            if not handler:
+                logger.error(f"[Pass2Worker] No handler found for {config.handler}")
+                phase_results[phase_name] = {"success": False, "error": "No handler"}
+                continue
 
-        # Phase 1: STRUCTURAL_TOPICS (Pass 2a) - Extraction Topics et COVERS
-        if not manager.is_cancelled(job_id):
-            manager.update_progress(job_id, current_phase="STRUCTURAL_TOPICS",
-                                   phase_index=phase_index, message="Extracting document sections...")
+            # Execute handler
+            logger.info(f"[Pass2Worker] Executing phase {config.display_name} ({phase_index + 1}/{len(effective_phases)})")
+            result = handler(state, job_id, manager, service)
 
-            try:
-                result = asyncio.run(service.run_structural_topics(state.document_id))
-                phase_results["structural_topics"] = {
-                    "success": result.success,
-                    "items_processed": result.items_processed,
-                    "items_created": result.items_created,
-                    "execution_time_ms": result.execution_time_ms,
-                    "details": result.details
-                }
-                manager.set_phase_result(job_id, "structural_topics", phase_results["structural_topics"])
-                manager.update_progress(job_id,
-                    message=f"Topics: {result.details.get('topics_created', 0)} sections, {result.details.get('covers_created', 0)} couvertures")
-            except Exception as e:
-                logger.warning(f"[Pass2Worker] STRUCTURAL_TOPICS failed: {e}")
-                phase_results["structural_topics"] = {
-                    "success": False,
-                    "error": str(e)
-                }
-            phase_index += 1
+            # Store result
+            phase_results[phase_name] = result
+            manager.set_phase_result(job_id, phase_name, result)
 
-        # Phase 1: CLASSIFY_FINE - Skip si aucun concept à classifier
-        if not state.skip_classify and total_concepts > 0 and not manager.is_cancelled(job_id):
-            # Compter les concepts à classifier pour cette phase
-            classify_count_query = """
-            MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
-            WHERE c.type_fine IS NULL OR c.type_fine = ''
-                  OR c.type_fine_justification = 'Fallback to heuristic type'
-            RETURN count(c) AS count
-            """
-            classify_result = service._execute_query(classify_count_query, {"tenant_id": state.tenant_id})
-            concepts_to_classify = classify_result[0]["count"] if classify_result else 0
-            total_classify_batches = max(1, (concepts_to_classify + state.batch_size - 1) // state.batch_size)
-
-            manager.update_progress(job_id, current_phase="CLASSIFY_FINE",
-                                   phase_index=phase_index,
-                                   items_total=concepts_to_classify,
-                                   items_processed=0,
-                                   iteration=0,
-                                   total_iterations=total_classify_batches,
-                                   message=f"Starting classification of {concepts_to_classify} concepts...")
-
-            result = asyncio.run(_run_classify_with_progress(
-                service, job_id, manager, state
-            ))
-
-            phase_results["classify_fine"] = {
-                "success": result.success,
-                "items_processed": result.items_processed,
-                "items_updated": result.items_updated,
-                "execution_time_ms": result.execution_time_ms,
-                "details": result.details
-            }
-            manager.set_phase_result(job_id, "classify_fine", phase_results["classify_fine"])
-
-            # Si le job a été suspendu (vLLM down), arrêter ici sans marquer comme complet
-            if result.details.get("suspended"):
+            # Check for suspension (vLLM down) - only CLASSIFY_FINE supports this
+            if result.get("suspended"):
                 logger.warning(
-                    f"[Pass2Worker] Job {job_id} SUSPENDED during CLASSIFY_FINE. "
+                    f"[Pass2Worker] Job {job_id} SUSPENDED during {config.display_name}. "
                     f"Will resume when vLLM is available."
                 )
-                return  # Ne pas continuer, le job est en état SUSPENDED
+                return  # Don't continue, job is in SUSPENDED state
 
-            phase_index += 1
-        elif not state.skip_classify and total_concepts == 0:
-            # Tous les concepts déjà classifiés - skip intelligent
-            phase_results["classify_fine"] = {
-                "success": True,
-                "items_processed": 0,
-                "items_updated": 0,
-                "execution_time_ms": 0,
-                "details": {"skipped": True, "reason": "All concepts already classified"}
-            }
-            manager.update_progress(job_id, message="Classification skipped: all concepts already have type_fine")
-            logger.info(f"[Pass2Worker] CLASSIFY_FINE skipped for job {job_id}: all concepts already classified")
-            phase_index += 1
-
-        # Phase 2: ENRICH_RELATIONS
-        # Check feature flag enabled_phases
-        pass2_config = get_hybrid_anchor_config("pass2_config", state.tenant_id) or {}
-        enabled_phases = pass2_config.get("enabled_phases", [])
-        enrich_enabled = "enrich_relations" in enabled_phases
-
-        if not state.skip_enrich and enrich_enabled and not manager.is_cancelled(job_id):
-            manager.update_progress(job_id, current_phase="ENRICH_RELATIONS",
-                                   phase_index=phase_index, message="Detecting relations...")
-
-            result = asyncio.run(service.run_enrich_relations(state.document_id))
-            phase_results["enrich_relations"] = {
-                "success": result.success,
-                "items_processed": result.items_processed,
-                "items_created": result.items_created,
-                "execution_time_ms": result.execution_time_ms
-            }
-            manager.set_phase_result(job_id, "enrich_relations", phase_results["enrich_relations"])
-            phase_index += 1
-        elif not enrich_enabled:
-            # Phase disabled via feature flag
-            phase_results["enrich_relations"] = {
-                "success": True,
-                "items_processed": 0,
-                "items_created": 0,
-                "execution_time_ms": 0,
-                "details": {"skipped": True, "reason": "Disabled in feature_flags.yaml (ADR violation)"}
-            }
-            manager.update_progress(job_id, message="ENRICH_RELATIONS skipped: disabled in config")
-            logger.info(f"[Pass2Worker] ENRICH_RELATIONS skipped for job {job_id}: disabled in feature_flags.yaml")
-            phase_index += 1
-
-        # Phase 3 & 4: CONSOLIDATION
-        if not state.skip_consolidate and not manager.is_cancelled(job_id):
-            manager.update_progress(job_id, current_phase="CONSOLIDATE_CLAIMS",
-                                   phase_index=phase_index, message="Consolidating claims...")
-            result = service.run_consolidate_claims()
-            phase_results["consolidate_claims"] = {
-                "success": result.success,
-                "items_processed": result.items_processed,
-                "items_created": result.items_created
-            }
-            manager.set_phase_result(job_id, "consolidate_claims", phase_results["consolidate_claims"])
-            phase_index += 1
-
-            manager.update_progress(job_id, current_phase="CONSOLIDATE_RELATIONS",
-                                   phase_index=phase_index, message="Consolidating relations...")
-            result = service.run_consolidate_relations()
-            phase_results["consolidate_relations"] = {
-                "success": result.success,
-                "items_processed": result.items_processed,
-                "items_created": result.items_created
-            }
-            manager.set_phase_result(job_id, "consolidate_relations", phase_results["consolidate_relations"])
-            phase_index += 1
-
-        # Phase 5: CORPUS_ER - Entity Resolution corpus-level
-        if not state.skip_corpus_er and not manager.is_cancelled(job_id):
-            manager.update_progress(job_id, current_phase="CORPUS_ER",
-                                   phase_index=phase_index, message="Running Entity Resolution...")
-            result = service.run_corpus_er(dry_run=False)
-            phase_results["corpus_er"] = {
-                "success": result.success,
-                "items_processed": result.items_processed,
-                "items_created": result.items_created,
-                "items_updated": result.items_updated,
-                "execution_time_ms": result.execution_time_ms,
-                "details": result.details
-            }
-            manager.set_phase_result(job_id, "corpus_er", phase_results["corpus_er"])
-
-            if result.details:
-                manager.update_progress(
-                    job_id,
-                    message=f"ER: {result.details.get('auto_merges', 0)} auto-merges, "
-                           f"{result.details.get('proposals_created', 0)} proposals"
-                )
-
+        # Final cancellation check
         if manager.is_cancelled(job_id):
             return
 
         manager.complete_job(job_id, phase_results)
+        logger.info(f"[Pass2Worker] Job {job_id} completed with {len(phase_results)} phases")
 
     except Exception as e:
         logger.exception(f"[Pass2Worker] Job {job_id} failed")
