@@ -72,6 +72,7 @@ class StructuralRoute:
     covered_concept_ids: List[str]
     document_ids: List[str]
     context_ids: List[str]
+    route_kind: str = "COVERS"  # "COVERS" ou "IS_TOPIC" pour audit
 
 
 @dataclass
@@ -325,12 +326,22 @@ class GraphFirstSearchService:
 
             if routes:
                 all_context_ids = set()
+                is_topic_count = 0
+                covers_count = 0
                 for route in routes:
                     all_context_ids.update(route.context_ids)
+                    if route.route_kind == "IS_TOPIC":
+                        is_topic_count += 1
+                    else:
+                        covers_count += 1
 
+                # KPIs observabilité (Priority 3 ChatGPT)
+                anchored_hit_rate = len(routes) / len(seed_concept_ids) if seed_concept_ids else 0
                 logger.info(
                     f"[GRAPH-FIRST] ANCHORED mode: {len(routes)} routes, "
-                    f"{len(all_context_ids)} structural contexts"
+                    f"{len(all_context_ids)} contexts "
+                    f"(IS_TOPIC={is_topic_count}, COVERS={covers_count}, "
+                    f"hit_rate={anchored_hit_rate:.1%})"
                 )
 
                 escalation.final_mode = "ANCHORED"
@@ -728,31 +739,66 @@ class GraphFirstSearchService:
 
         Mode ANCHORED: pas de chemin sémantique, mais on peut router
         via la structure documentaire (Topics).
+
+        DEUX patterns supportés (fix 2026-01-22):
+        - Cas A (COVERS): Topic couvre le concept seed → route via ce Topic
+        - Cas B (IS_TOPIC): Seed EST un Topic → route directe via ce Topic
+
+        Cela évite le fallback TEXT_ONLY quand le meilleur seed est un Topic.
         """
         if not concept_ids:
             return []
 
-        # Trouver les Topics qui COVERS les concepts seeds
+        # Requête UNION pour les deux cas :
+        # Cas A: Concepts couverts par des Topics
+        # Cas B: Concepts qui SONT des Topics (Topic-as-seed)
         query = """
         UNWIND $concept_ids AS cid
-        MATCH (c:CanonicalConcept {canonical_id: cid, tenant_id: $tenant_id})
-        MATCH (topic:CanonicalConcept {concept_type: 'TOPIC', tenant_id: $tenant_id})-[:COVERS]->(c)
-        WITH topic, collect(DISTINCT cid) AS covered_ids
+        MATCH (seed:CanonicalConcept {canonical_id: cid, tenant_id: $tenant_id})
 
-        // Récupérer les documents ayant ce topic
-        MATCH (doc:Document {tenant_id: $tenant_id})-[:HAS_TOPIC]->(topic)
+        CALL {
+            WITH seed
+            // Cas A: seed = concept normal => trouver topics qui le couvrent
+            MATCH (t:CanonicalConcept {concept_type: 'TOPIC', tenant_id: $tenant_id})-[:COVERS]->(seed)
+            RETURN t AS topic, seed.canonical_id AS matched_id, 'COVERS' AS route_kind
 
-        // Récupérer les context_ids via MENTIONED_IN
-        OPTIONAL MATCH (topic)-[:MENTIONED_IN]->(ctx:SectionContext {tenant_id: $tenant_id})
+            UNION ALL
+
+            WITH seed
+            // Cas B: seed est déjà un topic => route directe
+            // Note: re-MATCH pour éviter l'erreur "WITH ... WHERE" dans CALL/UNION
+            MATCH (seed) WHERE seed.concept_type = 'TOPIC'
+            RETURN seed AS topic, seed.canonical_id AS matched_id, 'IS_TOPIC' AS route_kind
+        }
+
+        WITH topic, route_kind, collect(DISTINCT matched_id) AS matched_ids
+
+        // Utiliser directement topic.document_ids (propriété array stockée sur le Topic)
+        // Plus fiable que HAS_TOPIC dont les Documents peuvent avoir document_id=NULL
+        WITH topic, route_kind, matched_ids,
+             coalesce(topic.document_ids, []) AS document_ids
+
+        // Récupérer les context_ids via section_path matching
+        // (MENTIONED_IN n'est pas toujours présent)
+        OPTIONAL MATCH (ctx:SectionContext {tenant_id: $tenant_id})
+        WHERE ctx.normalized_title = topic.section_path
+           OR ctx.context_id CONTAINS topic.section_path
+
+        WITH topic, route_kind, matched_ids, document_ids,
+             collect(DISTINCT ctx.context_id) AS context_ids
 
         RETURN
             topic.canonical_name AS topic_name,
             topic.canonical_id AS topic_id,
-            covered_ids,
-            collect(DISTINCT doc.document_id) AS document_ids,
-            collect(DISTINCT ctx.context_id) AS context_ids
-        ORDER BY size(covered_ids) DESC
-        LIMIT 5
+            route_kind,
+            matched_ids AS covered_ids,
+            document_ids,
+            context_ids
+        ORDER BY
+            // Prioriser IS_TOPIC (route directe) puis COVERS avec plus de matches
+            CASE route_kind WHEN 'IS_TOPIC' THEN 0 ELSE 1 END,
+            size(matched_ids) DESC
+        LIMIT 10
         """
 
         try:
@@ -762,16 +808,35 @@ class GraphFirstSearchService:
             })
 
             routes = []
+            route_stats = {"COVERS": 0, "IS_TOPIC": 0}
+
             for record in result:
+                route_kind = record.get("route_kind", "COVERS")
+                context_ids = [cid for cid in record.get("context_ids", []) if cid]
+
                 route = StructuralRoute(
                     topic_name=record.get("topic_name", ""),
                     topic_id=record.get("topic_id", ""),
                     covered_concept_ids=record.get("covered_ids", []),
-                    document_ids=record.get("document_ids", []),
-                    context_ids=[cid for cid in record.get("context_ids", []) if cid],
+                    document_ids=[d for d in record.get("document_ids", []) if d],
+                    context_ids=context_ids,
+                    route_kind=route_kind,
                 )
-                if route.context_ids:  # Ne garder que les routes avec context
+
+                if route.context_ids or route.document_ids:
                     routes.append(route)
+                    route_stats[route_kind] = route_stats.get(route_kind, 0) + 1
+
+            # Logging observabilité
+            if routes:
+                logger.info(
+                    f"[GRAPH-FIRST:ANCHORED] Found {len(routes)} routes "
+                    f"(IS_TOPIC={route_stats.get('IS_TOPIC', 0)}, COVERS={route_stats.get('COVERS', 0)})"
+                )
+            else:
+                logger.info(
+                    f"[GRAPH-FIRST:ANCHORED] No routes found for {len(concept_ids)} seeds"
+                )
 
             return routes
 

@@ -435,12 +435,13 @@ class GraphGuidedSearchService:
         fulltext_query = " OR ".join(tokens)
 
         # Recherche full-text Neo4j
+        # Note: canonical_id est l'identifiant unique (concept_id est deprecated/None)
         cypher = """
         CALL db.index.fulltext.queryNodes('concept_search', $query)
         YIELD node, score
         WHERE node.tenant_id = $tenant_id
         RETURN
-            node.concept_id AS id,
+            node.canonical_id AS id,
             node.canonical_name AS name,
             node.concept_type AS type,
             coalesce(node.quality_score, 0.5) AS quality,
@@ -492,6 +493,79 @@ class GraphGuidedSearchService:
 
         except Exception as e:
             logger.warning(f"[OSMOSE] Lexical search failed: {e}")
+            return []
+
+    async def _search_topics_lexical(
+        self,
+        query: str,
+        tenant_id: str = "default",
+        top_k: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Phase 2.13b - Recherche lexicale spécifique aux Topics.
+
+        Utilisé pour le "seed mixing" : garantir que les Topics pertinents
+        sont inclus dans les seeds même si leur score fulltext est inférieur
+        aux concepts génériques.
+
+        Fix 2026-01-22: Implémentation Priority 2 ChatGPT analysis.
+        """
+        tokens = tokenize_query(query, min_length=2)
+
+        if not tokens:
+            return []
+
+        fulltext_query = " OR ".join(tokens)
+
+        # Recherche full-text filtrée sur concept_type='TOPIC'
+        # Note: canonical_id est l'identifiant unique (concept_id est deprecated/None)
+        cypher = """
+        CALL db.index.fulltext.queryNodes('concept_search', $query)
+        YIELD node, score
+        WHERE node.tenant_id = $tenant_id AND node.concept_type = 'TOPIC'
+        RETURN
+            node.canonical_id AS id,
+            node.canonical_name AS name,
+            node.concept_type AS type,
+            coalesce(node.quality_score, 0.5) AS quality,
+            coalesce(size(node.chunk_ids), 0) AS popularity,
+            score AS lex_score
+        ORDER BY score DESC
+        LIMIT $limit
+        """
+
+        try:
+            results = self.neo4j_client.execute_query(cypher, {
+                "query": fulltext_query,
+                "tenant_id": tenant_id,
+                "limit": top_k
+            })
+
+            if not results:
+                return []
+
+            candidates = []
+            for record in results:
+                name = record.get("name", "")
+                if not name:
+                    continue
+
+                candidates.append({
+                    "id": record.get("id"),
+                    "name": name,
+                    "type": "TOPIC",
+                    "quality": record.get("quality", 0.5),
+                    "popularity": record.get("popularity", 0),
+                    "lex_score": record.get("lex_score", 0.0),
+                })
+
+            logger.debug(
+                f"[OSMOSE:SeedMix] Found {len(candidates)} Topics for query: {query[:50]}..."
+            )
+            return candidates
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:SeedMix] Topic search failed: {e}")
             return []
 
     async def extract_concepts_from_query(
@@ -656,6 +730,57 @@ class GraphGuidedSearchService:
             concept_scores[concept_id]["sem_rank"] = rank
             concept_scores[concept_id]["has_sem"] = True
             concept_scores[concept_id]["rrf_score"] += 1.0 / (RRF_K + rank)
+
+        # =====================================================================
+        # Étape 2b: Seed Mixing - Garantir l'inclusion de Topics (fix 2026-01-22)
+        # Priority 2 ChatGPT analysis: top-N tous types + top-M Topics
+        # =====================================================================
+        MIN_TOPICS_IN_SEEDS = 3  # Garantir au moins 3 Topics dans les seeds
+        TOPIC_SEARCH_K = 10  # Nombre de Topics à chercher si besoin
+        TOPIC_INJECT_BONUS = 0.012  # Bonus RRF pour Topics injectés (équivalent rank ~25)
+
+        # Compter les Topics déjà présents
+        existing_topics = [
+            cid for cid, c in concept_scores.items()
+            if c.get("type") == "TOPIC"
+        ]
+        topics_needed = MIN_TOPICS_IN_SEEDS - len(existing_topics)
+
+        if topics_needed > 0:
+            # Recherche spécifique Topics
+            topic_results = await self._search_topics_lexical(
+                query, tenant_id, top_k=TOPIC_SEARCH_K
+            )
+
+            topics_injected = 0
+            for t in topic_results:
+                topic_id = t.get("id") or t["name"]
+
+                if topic_id not in concept_scores:
+                    # Nouveau Topic à injecter
+                    concept_scores[topic_id] = {
+                        "id": topic_id,
+                        "name": t["name"],
+                        "type": "TOPIC",
+                        "quality": t.get("quality", 0.5),
+                        "popularity": t.get("popularity", 0),
+                        "lex_rank": None,
+                        "sem_rank": None,
+                        "rrf_score": TOPIC_INJECT_BONUS,  # Bonus pour visibilité
+                        "has_lex": True,
+                        "has_sem": False,
+                        "topic_injected": True,  # Flag pour observabilité
+                    }
+                    topics_injected += 1
+
+                    if topics_injected >= topics_needed:
+                        break
+
+            if topics_injected > 0:
+                logger.info(
+                    f"[OSMOSE:SeedMix] Injected {topics_injected} Topics into seeds "
+                    f"(had {len(existing_topics)}, now {len(existing_topics) + topics_injected})"
+                )
 
         # =====================================================================
         # Étape 3: Appliquer le boost sémantique si assez de hits
