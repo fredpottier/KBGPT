@@ -861,10 +861,11 @@ class CoversBuilder:
         # ChatGPT spec: top-K(15) + min_threshold(0.25) + scoring déterministe
         query = """
         // Calculer max mentions pour normalisation (une seule fois)
+        // coalesce pour gérer count=NULL (défaut: 1)
         MATCH (any_c:CanonicalConcept {tenant_id: $tenant_id})
               -[any_m:MENTIONED_IN]->
               (any_ctx:SectionContext {doc_id: $document_id, tenant_id: $tenant_id})
-        WITH max(any_m.count) AS max_count
+        WITH coalesce(max(coalesce(any_m.count, 1)), 1) AS max_count
 
         // Trouver tous les concepts mentionnés dans les sections du document
         MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
@@ -873,11 +874,12 @@ class CoversBuilder:
         WHERE ctx.doc_id = $document_id
 
         // Calculer salience (scoring déterministe: count / max_count)
+        // coalesce pour gérer m.count=NULL (défaut: 1)
         WITH c,
              ctx,
-             m.count AS mention_count,
+             coalesce(m.count, 1) AS mention_count,
              max_count,
-             toFloat(m.count) / max_count AS salience
+             toFloat(coalesce(m.count, 1)) / max_count AS salience
         WHERE salience >= $salience_threshold
 
         RETURN c.canonical_id AS concept_id,
