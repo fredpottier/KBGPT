@@ -148,7 +148,11 @@ def search_documents(
     graph_first_chunks = None
     graph_first_succeeded = False
 
-    if use_graph_first:
+    # Lier use_graph_first à use_graph_context pour cohérence UX (fix 2026-01-23)
+    # Si l'utilisateur désactive "Knowledge Graph", on désactive aussi le routage structurel
+    effective_graph_first = use_graph_first and use_graph_context
+
+    if effective_graph_first:
         try:
             from .graph_first_search import get_graph_first_service, SearchMode as GFSearchMode
 
