@@ -75,14 +75,6 @@ PHASE_REGISTRY: Dict[str, PhaseConfig] = {
         "semantic_consolidation", "SEMANTIC_CONSOLIDATION",
         "_execute_semantic_consolidation", None
     ),
-    "consolidate_claims": PhaseConfig(
-        "consolidate_claims", "CONSOLIDATE_CLAIMS",
-        "_execute_consolidate_claims", "skip_consolidate"
-    ),
-    "consolidate_relations": PhaseConfig(
-        "consolidate_relations", "CONSOLIDATE_RELATIONS",
-        "_execute_consolidate_relations", "skip_consolidate"
-    ),
     "cross_doc": PhaseConfig(
         "cross_doc", "CORPUS_ER",
         "_execute_corpus_er", "skip_corpus_er"
@@ -784,44 +776,6 @@ def _execute_semantic_consolidation(
         return {"success": False, "error": str(e), "errors": [str(e)]}
 
 
-def _execute_consolidate_claims(
-    state: Pass2JobState,
-    job_id: str,
-    manager: Pass2JobManager,
-    service: Any
-) -> Dict[str, Any]:
-    """Execute CONSOLIDATE_CLAIMS phase."""
-    try:
-        result = service.run_consolidate_claims()
-        return {
-            "success": result.success,
-            "items_processed": result.items_processed,
-            "items_created": result.items_created
-        }
-    except Exception as e:
-        logger.error(f"[Pass2Worker] CONSOLIDATE_CLAIMS failed: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
-
-
-def _execute_consolidate_relations(
-    state: Pass2JobState,
-    job_id: str,
-    manager: Pass2JobManager,
-    service: Any
-) -> Dict[str, Any]:
-    """Execute CONSOLIDATE_RELATIONS phase."""
-    try:
-        result = service.run_consolidate_relations()
-        return {
-            "success": result.success,
-            "items_processed": result.items_processed,
-            "items_created": result.items_created
-        }
-    except Exception as e:
-        logger.error(f"[Pass2Worker] CONSOLIDATE_RELATIONS failed: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
-
-
 def _execute_corpus_er(
     state: Pass2JobState,
     job_id: str,
@@ -860,8 +814,6 @@ _PHASE_HANDLERS: Dict[str, Any] = {
     "_execute_enrich_relations": _execute_enrich_relations,
     "_execute_normative_extraction": _execute_normative_extraction,
     "_execute_semantic_consolidation": _execute_semantic_consolidation,
-    "_execute_consolidate_claims": _execute_consolidate_claims,
-    "_execute_consolidate_relations": _execute_consolidate_relations,
     "_execute_corpus_er": _execute_corpus_er,
 }
 
@@ -939,9 +891,6 @@ def execute_pass2_full_job(job_id: str):
             f"[Pass2Worker] Job {job_id} executing {len(effective_phases)} phases: "
             f"{effective_phases}"
         )
-
-        # Update total phases for progress tracking
-        manager.update_progress(job_id, total_phases=len(effective_phases))
 
         phase_results = {}
 

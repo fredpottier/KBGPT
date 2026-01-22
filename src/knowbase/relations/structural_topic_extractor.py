@@ -390,6 +390,150 @@ class StructuralTopicExtractor:
             parent_topic_id=None
         )
 
+    def extract_topics_from_section_contexts(
+        self,
+        document_id: str,
+        neo4j_driver,
+        tenant_id: str = "default",
+        max_topics: int = 30,
+        max_level: int = 2
+    ) -> TopicExtractionResult:
+        """
+        Extrait les topics depuis les SectionContext existants dans Neo4j.
+
+        Cette méthode est préférée à extract_topics() car elle utilise
+        la structure documentaire déjà extraite lors de l'ingestion,
+        plutôt que de parser le texte brut.
+
+        ADR_GRAPH_FIRST_ARCHITECTURE - Pass 2a (refactored)
+
+        Args:
+            document_id: ID du document
+            neo4j_driver: Driver Neo4j connecté
+            tenant_id: Tenant ID
+            max_topics: Gating anti-explosion (défaut: 30)
+            max_level: Niveau max de section à inclure (1=H1, 2=H2)
+
+        Returns:
+            TopicExtractionResult avec topics dédupliqués et normalisés
+        """
+        start_time = datetime.now()
+
+        logger.info(
+            f"[OSMOSE:Pass2a] Extracting topics from SectionContext for {document_id}"
+        )
+
+        # 1. Récupérer SectionContext depuis Neo4j
+        query = """
+        MATCH (sc:SectionContext {tenant_id: $tenant_id, doc_id: $document_id})
+        WHERE sc.section_level IS NOT NULL
+          AND sc.section_level <= $max_level
+          AND sc.section_level > 0
+          AND sc.section_path IS NOT NULL
+          AND sc.section_path <> 'root'
+        RETURN DISTINCT
+            sc.context_id AS context_id,
+            sc.section_path AS section_path,
+            sc.section_level AS level
+        ORDER BY sc.section_level, sc.section_path
+        """
+
+        sections = []
+        with neo4j_driver.session(database="neo4j") as session:
+            result = session.run(
+                query,
+                tenant_id=tenant_id,
+                document_id=document_id,
+                max_level=max_level
+            )
+            sections = [dict(r) for r in result]
+
+        if not sections:
+            logger.info(
+                f"[OSMOSE:Pass2a] No SectionContext found for {document_id}, "
+                "creating document-level topic"
+            )
+            default_topic = self._create_document_level_topic(document_id)
+            elapsed_ms = (datetime.now() - start_time).total_seconds() * 1000
+            return TopicExtractionResult(
+                document_id=document_id,
+                topics=[default_topic],
+                has_topic_relations=[(document_id, default_topic.topic_id)],
+                topic_hierarchy={},
+                extraction_time_ms=elapsed_ms
+            )
+
+        # 2. Dédupliquer par topic_key normalisé
+        seen_keys = {}  # {normalized_key: StructuralTopic}
+        hierarchy = {}
+
+        for sec in sections:
+            # Extraire le titre depuis section_path
+            # Format: "Parent / Child" ou "Title"
+            path_parts = sec["section_path"].split(" / ")
+            title = path_parts[-1].strip()
+
+            # Ignorer les sections génériques
+            if title.lower() in {"note", "caution", "recommendation", "tip", "warning"}:
+                continue
+
+            # Normaliser pour déduplication
+            topic_key = self._normalize_title(title)
+
+            if not topic_key:
+                continue
+
+            # Skip si déjà vu avec même topic_key
+            if topic_key in seen_keys:
+                continue
+
+            # Créer le topic
+            level = sec["level"]
+            topic_id = self._generate_topic_id(document_id, topic_key, level)
+
+            topic = StructuralTopic(
+                topic_id=topic_id,
+                title=title,
+                normalized_title=topic_key,
+                level=level,
+                document_id=document_id,
+                section_path=sec["section_path"],
+                char_start=0,  # Non disponible depuis SectionContext
+                char_end=-1,
+                parent_topic_id=None  # Pourrait être enrichi avec parent H1
+            )
+
+            seen_keys[topic_key] = topic
+
+            # Gating: arrêter si on atteint le max
+            if len(seen_keys) >= max_topics:
+                logger.warning(
+                    f"[OSMOSE:Pass2a] Gating: max {max_topics} topics reached for {document_id}"
+                )
+                break
+
+        topics = list(seen_keys.values())
+
+        # 3. Préparer relations HAS_TOPIC
+        has_topic_relations = [(document_id, t.topic_id) for t in topics]
+
+        elapsed_ms = (datetime.now() - start_time).total_seconds() * 1000
+
+        logger.info(
+            f"[OSMOSE:Pass2a] Extracted {len(topics)} topics from SectionContext "
+            f"(L1: {len([t for t in topics if t.level == 1])}, "
+            f"L2: {len([t for t in topics if t.level == 2])}) "
+            f"in {elapsed_ms:.1f}ms"
+        )
+
+        return TopicExtractionResult(
+            document_id=document_id,
+            topics=topics,
+            has_topic_relations=has_topic_relations,
+            topic_hierarchy=hierarchy,
+            extraction_time_ms=elapsed_ms
+        )
+
 
 class TopicNeo4jWriter:
     """
@@ -609,12 +753,22 @@ class CoversBuilder:
     1. Concept MENTIONED_IN une section rattachée au Topic
     2. ET salience suffisante (TF-IDF doc-level, spread)
     3. ET pas un concept générique (stop-concept)
+    4. TOP-K(15) concepts par topic (anti-explosion)
 
     COVERS = périmètre documentaire, JAMAIS lien conceptuel.
+
+    Scoring déterministe: salience = mention_count / max_count_in_doc
     """
 
-    # Seuil de salience minimum pour COVERS
-    DEFAULT_SALIENCE_THRESHOLD = 0.3
+    # Seuil de salience minimum pour COVERS (ChatGPT spec: 0.25)
+    DEFAULT_SALIENCE_THRESHOLD = 0.25
+
+    # Top-K: max concepts par topic (ChatGPT spec: 15)
+    DEFAULT_TOP_K = 15
+
+    # Version pour traçabilité
+    VERSION = "2.0.0"
+    METHOD = "mention_count_normalized"
 
     # Concepts génériques à exclure (stop-concepts)
     STOP_CONCEPTS = {
@@ -627,7 +781,8 @@ class CoversBuilder:
         self,
         neo4j_client,
         tenant_id: str = "default",
-        salience_threshold: float = None
+        salience_threshold: float = None,
+        top_k: int = None
     ):
         """
         Initialise le builder.
@@ -635,17 +790,20 @@ class CoversBuilder:
         Args:
             neo4j_client: Client Neo4j connecté
             tenant_id: ID du tenant
-            salience_threshold: Seuil de salience pour COVERS
+            salience_threshold: Seuil de salience pour COVERS (défaut: 0.25)
+            top_k: Max concepts par topic (défaut: 15)
         """
         self.neo4j = neo4j_client
         self.tenant_id = tenant_id
         self.salience_threshold = salience_threshold or self.DEFAULT_SALIENCE_THRESHOLD
+        self.top_k = top_k or self.DEFAULT_TOP_K
 
         self._stats = {
             "covers_created": 0,
             "concepts_evaluated": 0,
             "concepts_excluded_salience": 0,
-            "concepts_excluded_stop": 0
+            "concepts_excluded_stop": 0,
+            "concepts_excluded_topk": 0
         }
 
     def build_covers_for_document(
@@ -700,24 +858,25 @@ class CoversBuilder:
         """
         # Requête pour trouver concepts avec leur salience dans le scope du topic
         # NOTE: SectionContext utilise 'doc_id' (pas 'document_id')
+        # ChatGPT spec: top-K(15) + min_threshold(0.25) + scoring déterministe
         query = """
+        // Calculer max mentions pour normalisation (une seule fois)
+        MATCH (any_c:CanonicalConcept {tenant_id: $tenant_id})
+              -[any_m:MENTIONED_IN]->
+              (any_ctx:SectionContext {doc_id: $document_id, tenant_id: $tenant_id})
+        WITH max(any_m.count) AS max_count
+
         // Trouver tous les concepts mentionnés dans les sections du document
         MATCH (c:CanonicalConcept {tenant_id: $tenant_id})
               -[m:MENTIONED_IN]->
               (ctx:SectionContext {tenant_id: $tenant_id})
         WHERE ctx.doc_id = $document_id
 
-        // Calculer le max de mentions pour normalisation
-        WITH c, m, ctx
-        MATCH (c2:CanonicalConcept {tenant_id: $tenant_id})
-              -[m2:MENTIONED_IN]->
-              (ctx2:SectionContext {doc_id: $document_id, tenant_id: $tenant_id})
-        WITH c, m, ctx, max(m2.count) AS max_count
-
-        // Calculer salience
+        // Calculer salience (scoring déterministe: count / max_count)
         WITH c,
              ctx,
              m.count AS mention_count,
+             max_count,
              toFloat(m.count) / max_count AS salience
         WHERE salience >= $salience_threshold
 
@@ -727,6 +886,7 @@ class CoversBuilder:
                salience,
                mention_count
         ORDER BY salience DESC
+        LIMIT $top_k
         """
 
         try:
@@ -739,7 +899,7 @@ class CoversBuilder:
                 f"[OSMOSE:Pass2a] CoversBuilder query params: "
                 f"document_id={document_id}, tenant_id={self.tenant_id}, "
                 f"salience_threshold={self.salience_threshold}, "
-                f"neo4j_database={self.neo4j.database}"
+                f"top_k={self.top_k}, neo4j_database={self.neo4j.database}"
             )
 
             with self.neo4j.driver.session(database=self.neo4j.database) as session:
@@ -747,7 +907,8 @@ class CoversBuilder:
                     query,
                     document_id=document_id,
                     tenant_id=self.tenant_id,
-                    salience_threshold=self.salience_threshold
+                    salience_threshold=self.salience_threshold,
+                    top_k=self.top_k
                 )
 
                 candidates = list(result)
@@ -797,6 +958,7 @@ class CoversBuilder:
 
         COVERS signifie "ce topic couvre ce concept" = périmètre documentaire.
         """
+        # ChatGPT spec: method/version pour traçabilité
         query = """
         MATCH (t:CanonicalConcept {canonical_id: $topic_id, tenant_id: $tenant_id})
         WHERE t.concept_type = 'TOPIC'
@@ -806,10 +968,14 @@ class CoversBuilder:
         ON CREATE SET
             r.salience = $salience,
             r.mention_count = $mention_count,
+            r.method = $method,
+            r.version = $version,
             r.created_at = datetime()
         ON MATCH SET
             r.salience = CASE WHEN $salience > r.salience THEN $salience ELSE r.salience END,
             r.mention_count = r.mention_count + $mention_count,
+            r.method = $method,
+            r.version = $version,
             r.updated_at = datetime()
 
         RETURN type(r) AS rel_type
@@ -823,7 +989,9 @@ class CoversBuilder:
                     concept_id=concept_id,
                     tenant_id=self.tenant_id,
                     salience=salience,
-                    mention_count=mention_count
+                    mention_count=mention_count,
+                    method=self.METHOD,
+                    version=self.VERSION
                 )
                 return result.single() is not None
 

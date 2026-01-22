@@ -551,32 +551,7 @@ class Pass2Orchestrator:
         )
 
         try:
-            # Récupérer le texte du document
-            document_text = await self._get_document_text(job.document_id)
-
-            if not document_text:
-                logger.info(
-                    f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] No document text for {job.document_id}, skipping"
-                )
-                return
-
-            # 1. Extraire les topics structurels
-            extractor = StructuralTopicExtractor()
-            extraction_result = extractor.extract_topics(
-                document_id=job.document_id,
-                text=document_text,
-                metadata={"tenant_id": job.tenant_id}
-            )
-
-            stats.structural_topics_count = len(extraction_result.topics)
-
-            if not extraction_result.topics:
-                logger.info(
-                    f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] No topics extracted for {job.document_id}"
-                )
-                return
-
-            # 2. Écrire dans Neo4j (Topics + HAS_TOPIC)
+            # 1. Connecter à Neo4j
             settings = get_settings()
             neo4j_client = get_neo4j_client(
                 uri=settings.neo4j_uri,
@@ -587,14 +562,35 @@ class Pass2Orchestrator:
 
             if not neo4j_client.is_connected():
                 logger.warning(
-                    f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] Neo4j not connected, skipping persistence"
+                    f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] Neo4j not connected, skipping"
                 )
                 return
 
+            # 2. Extraire topics depuis SectionContext (refactored)
+            # Utilise les sections déjà extraites lors de l'ingestion
+            # plutôt que de parser le texte brut
+            extractor = StructuralTopicExtractor()
+            extraction_result = extractor.extract_topics_from_section_contexts(
+                document_id=job.document_id,
+                neo4j_driver=neo4j_client.driver,
+                tenant_id=job.tenant_id,
+                max_topics=30,  # Gating anti-explosion
+                max_level=2     # H1 + H2
+            )
+
+            stats.structural_topics_count = len(extraction_result.topics)
+
+            if not extraction_result.topics:
+                logger.info(
+                    f"[OSMOSE:Pass2a:STRUCTURAL_TOPICS] No topics extracted for {job.document_id}"
+                )
+                return
+
+            # 3. Écrire dans Neo4j (Topics + HAS_TOPIC)
             writer = TopicNeo4jWriter(neo4j_client, tenant_id=job.tenant_id)
             write_stats = writer.write_topics(job.document_id, extraction_result.topics)
 
-            # 3. Construire COVERS (déterministe, basé sur MENTIONED_IN + salience)
+            # 4. Construire COVERS (déterministe, basé sur MENTIONED_IN + salience)
             covers_builder = CoversBuilder(neo4j_client, tenant_id=job.tenant_id)
             covers_stats = covers_builder.build_covers_for_document(
                 document_id=job.document_id,
@@ -1148,6 +1144,63 @@ class Pass2Orchestrator:
             logger.warning(f"[OSMOSE:Pass2] Failed to get concept anchors: {e}")
             return {}
 
+    async def _get_document_docitems(
+        self,
+        document_id: str,
+        neo4j_client
+    ) -> List[Dict[str, Any]]:
+        """
+        Récupère les DocItem d'un document depuis Neo4j.
+
+        DocItem est le modèle principal d'extraction (10K+ par corpus typique).
+        Utilisé par NORMATIVE_EXTRACTION au lieu des Segments.
+
+        Returns:
+            Liste de dicts avec item_id, text, section_id, item_type, page_no
+        """
+        if not neo4j_client.is_connected():
+            return []
+
+        try:
+            query = """
+            MATCH (di:DocItem {doc_id: $document_id, tenant_id: $tenant_id})
+            WHERE di.text IS NOT NULL
+              AND size(di.text) >= 20
+            RETURN di.item_id AS item_id,
+                   di.text AS text,
+                   di.section_id AS section_id,
+                   di.item_type AS item_type,
+                   di.page_no AS page_no,
+                   di.charspan_start AS char_start,
+                   di.charspan_end AS char_end
+            ORDER BY di.reading_order_index
+            """
+
+            with neo4j_client.driver.session(database="neo4j") as session:
+                result = session.run(
+                    query,
+                    document_id=document_id,
+                    tenant_id=self.tenant_id
+                )
+
+                docitems = []
+                for record in result:
+                    docitems.append({
+                        "item_id": record["item_id"],
+                        "text": record["text"] or "",
+                        "section_id": record["section_id"],
+                        "item_type": record["item_type"],
+                        "page_no": record["page_no"],
+                        "char_start": record["char_start"],
+                        "char_end": record["char_end"],
+                    })
+
+                return docitems
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Pass2c] Failed to get DocItems: {e}")
+            return []
+
     # =========================================================================
     # Pass 2c: NORMATIVE_EXTRACTION (ADR_NORMATIVE_RULES_SPEC_FACTS)
     # =========================================================================
@@ -1196,14 +1249,18 @@ class Pass2Orchestrator:
                 )
                 return
 
-            # Récupérer les segments du document
-            segments = await self._get_document_segments(job.document_id)
+            # Récupérer les DocItem du document (refactored: utilise DocItem pas Segment)
+            docitems = await self._get_document_docitems(job.document_id, neo4j_client)
 
-            if not segments:
+            if not docitems:
                 logger.info(
-                    f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] No segments found for {job.document_id}"
+                    f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] No DocItem found for {job.document_id}"
                 )
                 return
+
+            logger.info(
+                f"[OSMOSE:Pass2c:NORMATIVE_EXTRACTION] Found {len(docitems)} DocItems"
+            )
 
             # Initialiser les extracteurs
             normative_extractor = NormativePatternExtractor(min_confidence=0.6)
@@ -1212,21 +1269,21 @@ class Pass2Orchestrator:
             all_rules = []
             all_facts = []
 
-            # Traiter chaque segment
-            for segment in segments:
-                segment_id = segment.get("segment_id", "")
-                segment_text = segment.get("text", "")
-                section_id = segment.get("section_id")
+            # Traiter chaque DocItem
+            for docitem in docitems:
+                item_id = docitem.get("item_id", "")
+                item_text = docitem.get("text", "")
+                section_id = docitem.get("section_id")
 
-                if not segment_text or len(segment_text) < 20:
+                if not item_text or len(item_text) < 20:
                     continue
 
                 # 1. Extraire les règles normatives
                 rules = normative_extractor.extract_from_text(
-                    text=segment_text,
+                    text=item_text,
                     source_doc_id=job.document_id,
-                    source_chunk_id=segment_id,
-                    source_segment_id=segment_id,
+                    source_chunk_id=item_id,
+                    source_segment_id=item_id,
                     evidence_section=section_id,
                     tenant_id=job.tenant_id,
                 )
@@ -1234,10 +1291,10 @@ class Pass2Orchestrator:
 
                 # 2. Extraire les SpecFacts depuis les structures
                 facts = structure_parser.extract_from_text(
-                    text=segment_text,
+                    text=item_text,
                     source_doc_id=job.document_id,
-                    source_chunk_id=segment_id,
-                    source_segment_id=segment_id,
+                    source_chunk_id=item_id,
+                    source_segment_id=item_id,
                     evidence_section=section_id,
                     tenant_id=job.tenant_id,
                 )

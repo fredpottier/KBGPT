@@ -43,6 +43,17 @@ from knowbase.relations.assertion_validation import (
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# ADR Predicate Validation (Safety Net)
+# =============================================================================
+# 12 prédicats fermés (ADR Hybrid Anchor Model)
+# Ref: doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md
+ADR_VALID_PREDICATES = {
+    "defines", "requires", "enables", "prevents", "causes", "applies_to",
+    "part_of", "depends_on", "mitigates", "conflicts_with", "example_of", "governed_by"
+}
+
+
 def normalize_predicate(raw: str) -> str:
     """
     Normalize predicate for grouping (R3 from spec).
@@ -286,6 +297,17 @@ class RawAssertionWriter:
             logger.debug(f"[RawAssertionWriter] Skipped duplicate: {fingerprint[:16]}")
             return None
 
+        # Safety net: Validate predicate is in ADR closed set
+        # Ref: ADR Hybrid Anchor Model - 12 predicates only
+        predicate_norm_check = normalize_predicate(predicate_raw)
+        if not predicate_raw or predicate_norm_check not in ADR_VALID_PREDICATES:
+            self._stats["skipped_invalid_predicate"] = self._stats.get("skipped_invalid_predicate", 0) + 1
+            logger.warning(
+                f"[RawAssertionWriter] Invalid predicate '{predicate_raw}' (norm: '{predicate_norm_check}'). "
+                f"Must be one of: {ADR_VALID_PREDICATES}"
+            )
+            return None
+
         # Verify concepts exist
         if not self._concept_exists(subject_concept_id) or not self._concept_exists(object_concept_id):
             self._stats["skipped_no_concept"] += 1
@@ -431,6 +453,7 @@ class RawAssertionWriter:
             "written": 0,
             "skipped_duplicate": 0,
             "skipped_no_concept": 0,
+            "skipped_invalid_predicate": 0,
             "errors": 0
         }
 

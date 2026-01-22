@@ -209,8 +209,6 @@ phase_2_hybrid_anchor:
       - "enrich_relations"       # Pass 2b-2: ADR-compliant implementation
       - "normative_extraction"   # Pass 2c: NormativeRule + SpecFact (ADR_NORMATIVE_RULES_SPEC_FACTS)
       - "semantic_consolidation" # Pass 3: Semantic Consolidation (proven relations)
-      - "consolidate_claims"     # Consolidation claims
-      - "consolidate_relations"  # Consolidation relations
       - "cross_doc"              # Cross-document linking (Entity Resolution)
     # Priorité jobs background
     default_priority: 0
