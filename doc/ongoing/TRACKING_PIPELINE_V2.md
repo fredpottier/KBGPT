@@ -12,7 +12,7 @@
 | Phase | Nom | Statut | Progression |
 |-------|-----|--------|-------------|
 | 0 | Fondations | 🟢 TERMINÉ | 100% |
-| 1 | Pass 0 - Structural Graph | ⚪ À FAIRE | 0% |
+| 1 | Pass 0 - Structural Graph | 🟢 TERMINÉ | 100% |
 | 2 | Pass 1 - Lecture Stratifiée | ⚪ À FAIRE | 0% |
 | 3 | Pass 2 - Enrichissement | ⚪ À FAIRE | 0% |
 | 4 | Pass 3 - Consolidation | ⚪ À FAIRE | 0% |
@@ -54,17 +54,37 @@
 
 **Dépendances**: Phase 0 complète
 
+### 🎯 DÉCOUVERTE MAJEURE (Session #3)
+
+Le code structural existe déjà dans `src/knowbase/structural/` :
+- `StructuralGraphBuilder` - orchestrateur complet
+- `DocItemBuilder` - extraction DocItems depuis Docling
+- `SectionProfiler` - assignment sections
+- `TypeAwareChunker` - création chunks
+- `neo4j_schema.py` - contraintes et indexes (schéma existant)
+- Feature flag: `USE_STRUCTURAL_GRAPH=true`
+
+**Analyse de compatibilité V2** :
+| Aspect | Existant | V2 | Action |
+|--------|----------|-----|--------|
+| Document node | `DocumentContext` + `DocumentVersion` | `Document` | Adapter labels |
+| DocItem constraint | `(tenant_id, doc_id, doc_version_id, item_id)` | `(tenant_id, docitem_id)` | Générer `docitem_id` composite |
+| Section node | `SectionContext` | `Section` | Adapter labels |
+| TypeAwareChunk | Présent | Optionnel | Garder pour Qdrant retrieval |
+
+**Stratégie**: Créer un **adapter V2** qui wrap le code existant plutôt que recréer.
+
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| P0-001 | Analyser pipeline extraction existant | ⚪ | - | Comprendre sortie Docling |
-| P0-002 | Créer `structural_graph_builder.py` | ⚪ | - | Document, Section, DocItem |
-| P0-003 | Mapper items Docling → DocItem | ⚪ | - | paragraph, table, list, heading |
-| P0-004 | Extraire hiérarchie sections | ⚪ | - | Depuis headings Docling |
-| P0-005 | Persister dans Neo4j | ⚪ | - | HAS_SECTION, CONTAINS_ITEM |
-| P0-006 | Créer mapping chunk→DocItem | ⚪ | - | Pour Anchor Resolution |
-| P0-007 | Projection TypeAwareChunk → Qdrant | ⚪ | - | Avec docitem_id |
-| P0-008 | Tests unitaires Pass 0 | ⚪ | - | |
-| P0-009 | Test intégration document réel | ⚪ | - | 1 PDF de référence |
+| P0-001 | Analyser pipeline extraction existant | 🟢 | Claude | StructuralGraphBuilder découvert |
+| P0-002 | Analyser compatibilité schéma V2 | 🟢 | Claude | Voir tableau ci-dessus |
+| P0-003 | Créer `pass0_adapter.py` | 🟢 | Claude | `stratified/pass0/adapter.py` |
+| P0-004 | Générer `docitem_id` composite | 🟢 | Claude | `get_docitem_id_v2()` + `parse_docitem_id_v2()` |
+| P0-005 | Mapper labels Neo4j V2 | 🟢 | Claude | `_create_document_v2_tx`, `_create_sections_v2_tx` |
+| P0-006 | Créer mapping chunk→DocItem | 🟢 | Claude | `ChunkToDocItemMapping`, index inversé |
+| P0-007 | Activer feature flag `USE_STRUCTURAL_GRAPH` | 🟢 | Claude | Déjà activé dans .env |
+| P0-008 | Tests unitaires adapter | 🟢 | Claude | 15 tests passent |
+| P0-009 | Test intégration document réel | 🟢 | Claude | `test_pass0_integration.py` créé |
 
 **Critères de validation Phase 1**:
 - [ ] Document PDF → nodes Document + Section + DocItem en Neo4j
@@ -323,7 +343,7 @@
 
 ```
 Phase 0: ████████████████████ 100% ✅
-Phase 1: ░░░░░░░░░░░░░░░░░░░░ 0%
+Phase 1: ████████████████████ 100% ✅
 Phase 2: ░░░░░░░░░░░░░░░░░░░░ 0%
 Phase 3: ░░░░░░░░░░░░░░░░░░░░ 0%
 Phase 4: ░░░░░░░░░░░░░░░░░░░░ 0%
@@ -333,7 +353,7 @@ Phase 7: ░░░░░░░░░░░░░░░░░░░░ 0%
 Phase 8: ░░░░░░░░░░░░░░░░░░░░ 0%
 Phase 9: ░░░░░░░░░░░░░░░░░░░░ 0%
 ─────────────────────────────
-TOTAL:   ██░░░░░░░░░░░░░░░░░░ 9%
+TOTAL:   ████░░░░░░░░░░░░░░░░ 19%
 ```
 
 ### Compteurs
@@ -341,7 +361,7 @@ TOTAL:   ██░░░░░░░░░░░░░░░░░░ 9%
 | Métrique | Valeur |
 |----------|--------|
 | Tâches totales | 89 |
-| Tâches terminées | 8 |
+| Tâches terminées | 17 |
 | Tâches en cours | 0 |
 | Tâches bloquées | 0 |
 
@@ -353,6 +373,8 @@ TOTAL:   ██░░░░░░░░░░░░░░░░░░ 9%
 |------|---------|--------------|
 | 2026-01-23 | #1 | POC validé, ADR créé et publié |
 | 2026-01-23 | #2 | Architecture V2, reviews ChatGPT, structure code, livrables |
+| 2026-01-23 | #3 | Phase 0 terminée, début Phase 1 - **Découverte: StructuralGraphBuilder existe** |
+| 2026-01-23 | #4 | **Phase 1 TERMINÉE**: Pass0Adapter V2, mappings chunk→DocItem, 15 tests unitaires, test intégration |
 
 ---
 

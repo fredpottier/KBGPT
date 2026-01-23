@@ -13,3 +13,65 @@ Passes:
 """
 
 __version__ = "2.0.0"
+
+# Pass 0 - Structural Graph
+from knowbase.stratified.pass0 import (
+    Pass0Adapter,
+    Pass0Result,
+    build_structural_graph_v2,
+)
+
+# Models
+from knowbase.stratified.models import (
+    # Enums
+    DocumentStructure,
+    ConceptRole,
+    AssertionType,
+    AssertionStatus,
+    AssertionLogReason,
+    DocItemType,
+    # Structures
+    DocumentMeta,
+    Section,
+    DocItem,
+    Subject,
+    Theme,
+    Concept,
+    Anchor,
+    Information,
+    AssertionLogEntry,
+    # Results
+    Pass1Stats,
+    Pass1Result,
+    CanonicalConcept,
+    CanonicalTheme,
+)
+
+__all__ = [
+    # Pass 0
+    "Pass0Adapter",
+    "Pass0Result",
+    "build_structural_graph_v2",
+    # Enums
+    "DocumentStructure",
+    "ConceptRole",
+    "AssertionType",
+    "AssertionStatus",
+    "AssertionLogReason",
+    "DocItemType",
+    # Structures
+    "DocumentMeta",
+    "Section",
+    "DocItem",
+    "Subject",
+    "Theme",
+    "Concept",
+    "Anchor",
+    "Information",
+    "AssertionLogEntry",
+    # Results
+    "Pass1Stats",
+    "Pass1Result",
+    "CanonicalConcept",
+    "CanonicalTheme",
+]
