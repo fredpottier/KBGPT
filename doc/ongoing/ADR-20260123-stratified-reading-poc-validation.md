@@ -13,17 +13,19 @@ Le POC Lecture Stratifiée a été conçu pour valider l'ADR_STRATIFIED_READING_
 
 ## Décisions Validées
 
-### 1. Le modèle de lecture stratifiée est validé
+### 1. Le modèle de lecture stratifiée est validé (pour la connaissance défendable)
 
-Le pipeline top-down fonctionne correctement :
+Le pipeline top-down fonctionne correctement **pour l'identification et la structuration de connaissances normatives et défendables** :
 - **Phase 1.1** : Détection de structure (CENTRAL/TRANSVERSAL/CONTEXTUAL) ✅
 - **Phase 1.2** : Identification frugale des concepts (5-15 par doc) ✅
 - **Phase 1.3** : Extraction sémantique des assertions ✅
 - **Garde-fous** : Rejet correct des documents HOSTILE ✅
 
-### 2. La Promotion Policy est adoptée
+### 2. La Promotion Policy est adoptée (comme politique par défaut)
 
-Les assertions sont filtrées avant linking selon leur type :
+Les assertions sont filtrées avant linking selon leur type.
+
+> **Note** : Cette Policy est adoptée comme **politique par défaut pour la connaissance défendable**. D'autres policies pourront être définies pour d'autres usages (connaissance descriptive, specs techniques, etc.).
 
 | Type | Tier | Comportement |
 |------|------|-------------|
@@ -90,7 +92,9 @@ Ce signal est précieux pour :
 
 *Variation selon LLM (vLLM vs GPT-4o) et mode (avec/sans Policy)
 
-### Métriques atteintes
+> **Métriques de référence** : Les résultats finaux validés sont dans `poc/output_v2_gpt4o_policy/`. Les variations ci-dessus reflètent l'exploration pendant le POC.
+
+### Métriques atteintes (GPT-4o + Policy)
 
 | Métrique | Cible | Résultat |
 |----------|-------|----------|
@@ -168,6 +172,37 @@ poc/output_v2_gpt4o_policy/  # Résultats finaux validés
 - Architecture duale Neo4j + Qdrant
 - Modèle Information = overlay (pointeur, pas copie)
 - Hiérarchie Subject → Theme → Concept → Information
+
+---
+
+## Scope de Validation
+
+### ✅ Ce qui est validé
+
+- Pipeline top-down (Subject → Themes → Concepts → Information)
+- Détection de structure documentaire (CENTRAL/TRANSVERSAL/CONTEXTUAL)
+- Extraction sémantique d'assertions défendables
+- Promotion Policy pour filtrage pré-linking
+- Rejet des documents HOSTILE
+
+### ⚠️ Ce qui est explicitement hors scope
+
+- Connaissance purement descriptive (features produit, specs techniques)
+- Corpus scientifiques ou empiriques
+- Documents multi-structure complexes
+- Validation à grande échelle (>100 documents)
+
+### 🔮 Ce qui est laissé à des policies futures
+
+- Policies alternatives pour connaissance descriptive
+- Seuils de confiance ajustables par domaine
+- Gestion des assertions PROCEDURAL (tutoriels, guides)
+
+### 🎯 Ce qui relève désormais du produit / UX
+
+- Exposition du signal "CENTRAL sans info" dans l'interface
+- Distinction visuelle Knowledge-bearing vs Alignment documents
+- Dashboard de qualité documentaire basé sur les ratios
 
 ---
 
