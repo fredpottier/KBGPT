@@ -1,6 +1,6 @@
 # ADR: Validation du Modèle de Lecture Stratifiée - POC Clos
 
-**Statut**: VALIDÉ ET CLOS
+**Statut**: VALIDÉ ET CLOS (périmètre POC – connaissance défendable)
 **Date**: 2026-01-23
 **Auteurs**: Fred, Claude, ChatGPT (collaboration)
 **Réf**: ADR_STRATIFIED_READING_MODEL (doc/ongoing/)
@@ -41,6 +41,8 @@ Les assertions sont filtrées avant linking selon leur type.
 **Justification** : La Policy transforme le ratio info/concept en "signature de document" :
 - Documents normatifs → ratio élevé (≥2)
 - Documents marketing → ratio bas (<1)
+
+> **Important** : Le ratio info/concept est un **indicateur de nature documentaire**, et non une métrique de performance globale du système.
 
 ### 3. Définition formelle d'une Information OSMOSIS
 
@@ -85,12 +87,12 @@ Ce signal est précieux pour :
 
 | Document | Type | Structure | Concepts | Info | Ratio | Status |
 |----------|------|-----------|----------|------|-------|--------|
-| Euro NCAP Safe Driving | Normatif | CENTRAL | 9 | 4-26* | 0.4-5.2* | ✅ |
+| Euro NCAP Safe Driving | Normatif | CENTRAL | 9 | 26 | 2.9 | ✅ |
 | CNIL GDPR Processors | Réglementaire | TRANSVERSAL | 15 | 19 | 1.3 | ✅ |
 | SAP GDPR Industry Guide | Marketing | CENTRAL | 15 | 10 | 0.7 | ✅ |
 | Euro NCAP VRU | HOSTILE | - | ≥10 | - | - | FAIL ✅ |
 
-*Variation selon LLM (vLLM vs GPT-4o) et mode (avec/sans Policy)
+*Résultats finaux (GPT-4o + Policy). Les explorations intermédiaires (vLLM, sans Policy) sont archivées dans `poc/output_v2_vllm/`.
 
 > **Métriques de référence** : Les résultats finaux validés sont dans `poc/output_v2_gpt4o_policy/`. Les variations ci-dessus reflètent l'exploration pendant le POC.
 
