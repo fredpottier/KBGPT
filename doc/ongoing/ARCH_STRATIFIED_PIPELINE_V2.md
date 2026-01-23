@@ -14,8 +14,8 @@
 
 | Métrique | Legacy | Cible V2 |
 |----------|--------|----------|
-| Nodes/document | ~4700 | < 100 |
-| Types de nodes | ~15+ | ~6 |
+| Nodes/document | ~4700 | < 250 |
+| Types de nodes | ~15+ | ~8 |
 | Passes d'enrichissement | 4 (complexes) | 2-3 (ciblés) |
 | Temps traitement | 35+ min | < 10 min |
 
@@ -189,6 +189,10 @@ Le pipeline d'extraction Docling + Vision Gating **crée maintenant le graphe st
 | Section | 5-20 | `title`, `level`, `path`, `doc_id`, `order` |
 | DocItem | 50-200 | `type` (paragraph/table/list/heading), `text`, `page`, `char_start`, `char_end`, `section_id` |
 
+**Invariant DocItem Atomique** :
+> DocItem = item Docling natif (paragraph, table-row, list-item, heading, figure-caption).
+> **PAS de fusion agressive** de DocItems. La fusion est réservée aux TypeAwareChunks côté Qdrant.
+
 **Relations créées**:
 - `(Document)-[:HAS_SECTION]->(Section)`
 - `(Section)-[:CONTAINS_ITEM]->(DocItem)`
@@ -252,8 +256,8 @@ Le pipeline d'extraction Docling + Vision Gating **crée maintenant le graphe st
 
 **Objectif**: Extraire les assertions du document avec leur type.
 
-**Input**: Chunks
-**Output**:
+**Input**: Chunks (pour commodité LLM)
+**Output** (transitoire, pas persisté):
 ```python
 {
   "assertions": [
@@ -264,12 +268,45 @@ Le pipeline d'extraction Docling + Vision Gating **crée maintenant le graphe st
               "FACTUAL" | "CONDITIONAL" | "PERMISSIVE" |
               "COMPARATIVE" | "PROCEDURAL",
       "confidence": float,
-      "chunk_id": str,
-      "span": {"start": int, "end": int}
+      "chunk_id": str,           # Temporaire - sera converti
+      "span": {"start": int, "end": int}  # Relatif au chunk
     }
   ]
 }
 ```
+
+#### 1.3b Anchor Resolution (CRITIQUE)
+
+**Objectif**: Convertir les ancres chunk → DocItem. **Sans cette étape, pas de persistance.**
+
+**Input**:
+- Assertions avec `chunk_id + span`
+- Mapping `chunk_id → DocItem(s)` (créé en Pass 0)
+
+**Output**:
+```python
+{
+  "resolved_assertions": [
+    {
+      "id": uuid,
+      "text": str,
+      "type": str,
+      "confidence": float,
+      "docitem_id": str,         # ANCRE RÉSOLUE
+      "span_start": int,         # Relatif au DocItem
+      "span_end": int
+    }
+  ],
+  "unresolved": [
+    {
+      "id": uuid,
+      "reason": "NO_DOCITEM_MATCH" | "AMBIGUOUS_SPAN" | "CROSS_DOCITEM"
+    }
+  ]
+}
+```
+
+**Règle** : Si une assertion ne peut pas être ancrée sur un DocItem précis → AssertionLog avec `status=ABSTAINED`, `reason=NO_DOCITEM_ANCHOR`.
 
 #### 1.4 Semantic Linking + Promotion + Journal
 
@@ -325,7 +362,32 @@ Le pipeline d'extraction Docling + Vision Gating **crée maintenant le graphe st
 | Theme | 3-7 | name, subject_id |
 | Concept | 5-15 | name, role, theme_id, variants |
 | Information | 5-30 | text, type, concept_id |
-| AssertionLog | ~50 | text, type, status, reason, concept_id, docitem_id |
+| AssertionLog | ~50 | text, type, status, reason (enum), concept_id, docitem_id |
+
+**AssertionLog Reasons (enum standardisé)** :
+```python
+class AssertionLogReason(Enum):
+    # Promotion Policy
+    PROMOTED = "promoted"                    # Succès
+    LOW_CONFIDENCE = "low_confidence"        # Confiance < seuil
+    POLICY_REJECTED = "policy_rejected"      # Type PROCEDURAL/NEVER
+
+    # Concept Linking
+    NO_CONCEPT_MATCH = "no_concept_match"    # Aucun concept lié
+    AMBIGUOUS_LINKING = "ambiguous_linking"  # Multiple concepts possibles
+
+    # Anchor Resolution
+    NO_DOCITEM_ANCHOR = "no_docitem_anchor"  # Impossible d'ancrer sur DocItem
+    AMBIGUOUS_SPAN = "ambiguous_span"        # Span ambigu
+    CROSS_DOCITEM = "cross_docitem"          # Assertion couvre plusieurs DocItems
+
+    # Qualité
+    GENERIC_TERM = "generic_term"            # Terme trop générique
+    SINGLE_MENTION = "single_mention"        # Mention unique
+
+    # Cross-doc (Pass 3)
+    CONTRADICTS_EXISTING = "contradicts_existing"  # Contradiction détectée
+```
 
 **Relations créées**:
 - `(Document)-[:HAS_SUBJECT]->(Subject)`
@@ -334,6 +396,10 @@ Le pipeline d'extraction Docling + Vision Gating **crée maintenant le graphe st
 - `(Concept)-[:HAS_INFORMATION]->(Information)`
 - `(Information)-[:ANCHORED_IN]->(DocItem)` avec span_start/span_end
 - `(AssertionLog)-[:LOGGED_FOR]->(Document)` (audit trail)
+
+**Pont Theme → Structure Documentaire (optionnel mais recommandé)** :
+- `(Theme)-[:SCOPED_TO]->(Section)` : localise où le thème apparaît dans le document
+- Permet de répondre à "ce thème vient d'où ?" dans l'UI et l'audit
 
 ---
 
@@ -661,4 +727,5 @@ Migration : une fois V2 validé, `/v2/*` devient `/` et legacy supprimé.
 | 2026-01-23 | POC Lecture Stratifiée validé (ADR) |
 | 2026-01-23 | Review ChatGPT : corrections intégrées (DocItem, AssertionLog, Section) |
 | 2026-01-23 | Décisions tranchées : Qdrant dual, Pass 3 manuel+batch, API /v2/* |
+| 2026-01-23 | Review ChatGPT #2 : Anchor Resolution, DocItem atomique, AssertionLog enum, Theme→Section |
 
