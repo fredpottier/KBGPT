@@ -11,7 +11,7 @@
 
 | Phase | Nom | Statut | Progression |
 |-------|-----|--------|-------------|
-| 0 | Fondations | 🟡 EN COURS | 40% |
+| 0 | Fondations | 🟢 TERMINÉ | 100% |
 | 1 | Pass 0 - Structural Graph | ⚪ À FAIRE | 0% |
 | 2 | Pass 1 - Lecture Stratifiée | ⚪ À FAIRE | 0% |
 | 3 | Pass 2 - Enrichissement | ⚪ À FAIRE | 0% |
@@ -38,12 +38,12 @@
 | F-004 | Schéma Neo4j V2 (cypher) | 🟢 | Claude | 8 contraintes, 12 indexes |
 | F-005 | Modèles Pydantic (schemas.py) | 🟢 | Claude | Pass1Result, enums, structures |
 | F-006 | Tests invariants V2-00x | 🟢 | Claude | 10 tests + metrics sanity |
-| F-007 | Exécuter schema Neo4j sur instance | ⚪ | - | Dépend de Neo4j up |
-| F-008 | Valider imports Pydantic | ⚪ | - | Test unitaire basique |
+| F-007 | Exécuter schema Neo4j sur instance | 🟢 | Claude | 8 contraintes + 12 indexes |
+| F-008 | Valider imports Pydantic | 🟢 | Claude | Tous imports OK |
 
 **Critères de validation Phase 0**:
-- [ ] Schema Neo4j exécuté sans erreur
-- [ ] `from knowbase.stratified.models import Pass1Result` fonctionne
+- [x] Schema Neo4j exécuté sans erreur
+- [x] `from knowbase.stratified.models import Pass1Result` fonctionne
 - [ ] Tests invariants découverts par pytest
 
 ---
@@ -322,7 +322,7 @@
 ### Progression Globale
 
 ```
-Phase 0: ████████░░░░░░░░░░░░ 40%
+Phase 0: ████████████████████ 100% ✅
 Phase 1: ░░░░░░░░░░░░░░░░░░░░ 0%
 Phase 2: ░░░░░░░░░░░░░░░░░░░░ 0%
 Phase 3: ░░░░░░░░░░░░░░░░░░░░ 0%
@@ -333,7 +333,7 @@ Phase 7: ░░░░░░░░░░░░░░░░░░░░ 0%
 Phase 8: ░░░░░░░░░░░░░░░░░░░░ 0%
 Phase 9: ░░░░░░░░░░░░░░░░░░░░ 0%
 ─────────────────────────────
-TOTAL:   ████░░░░░░░░░░░░░░░░ 4%
+TOTAL:   ██░░░░░░░░░░░░░░░░░░ 9%
 ```
 
 ### Compteurs
@@ -341,7 +341,7 @@ TOTAL:   ████░░░░░░░░░░░░░░░░ 4%
 | Métrique | Valeur |
 |----------|--------|
 | Tâches totales | 89 |
-| Tâches terminées | 6 |
+| Tâches terminées | 8 |
 | Tâches en cours | 0 |
 | Tâches bloquées | 0 |
 
