@@ -153,7 +153,7 @@ async def _run_extraction_v2(
         vision_budget=vision_config.get("budget"),
         tenant_id=tenant_id,
         use_cache=v2_config.get("cache", {}).get("enabled", True),
-        cache_version=v2_config.get("cache", {}).get("version", "v2"),
+        cache_version=v2_config.get("cache", {}).get("version", "v4"),
         vision_model=vision_config.get("model", "gpt-4o"),
         vision_temperature=vision_config.get("temperature", 0.0),
         include_recommended_in_vision=vision_config.get("include_recommended", True),
