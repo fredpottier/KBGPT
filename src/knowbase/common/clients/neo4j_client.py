@@ -1168,9 +1168,9 @@ _neo4j_client: Optional[Neo4jClient] = None
 
 
 def get_neo4j_client(
-    uri: str = "bolt://localhost:7687",
-    user: str = "neo4j",
-    password: str = "password",
+    uri: str = None,
+    user: str = None,
+    password: str = None,
     database: str = "neo4j"
 ) -> Neo4jClient:
     """

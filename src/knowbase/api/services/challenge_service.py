@@ -151,12 +151,13 @@ class TextChallenger:
         Segmente le texte en claims individuels.
 
         Stratégie:
-        1. Split par phrase (., !, ?)
+        1. Split par phrase (., !, ?) en évitant les décimales (99.9)
         2. Split par conjonctions (and, or, but) si phrase contient plusieurs claims
         3. Filtrer les segments vides ou trop courts
         """
-        # Split par phrase
-        sentences = re.split(r'[.!?]+', text)
+        # Split par phrase - évite de couper les nombres décimaux
+        # Pattern: point suivi d'espace ou fin de chaîne, pas de chiffre après
+        sentences = re.split(r'(?<!\d)[.!?]+(?:\s|$)|(?<=\d)[.!?]+(?=\s+[A-Z]|$)', text)
 
         claims = []
         for sentence in sentences:
