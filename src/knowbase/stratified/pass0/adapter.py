@@ -534,3 +534,66 @@ def parse_docitem_id_v2(docitem_id: str) -> tuple[str, str, str]:
     if len(parts) != 3:
         raise ValueError(f"Invalid docitem_id format: {docitem_id}")
     return parts[0], parts[1], parts[2]
+
+
+def persist_pass0_to_neo4j_sync(
+    pass0_result: Pass0Result,
+    neo4j_driver,
+    batch_size: int = 500
+) -> dict:
+    """
+    Persiste les données Pass 0 dans Neo4j de manière synchrone.
+
+    Crée: Document, Sections, DocItems avec le schéma V2.
+
+    Args:
+        pass0_result: Résultat Pass 0 à persister
+        neo4j_driver: Driver Neo4j (sync, pas async)
+        batch_size: Taille des batches pour DocItems
+
+    Returns:
+        Dict avec compteurs de création
+    """
+    stats = {
+        "document": 0,
+        "sections": 0,
+        "docitems": 0,
+    }
+
+    if not neo4j_driver:
+        logger.warning("[OSMOSE:Pass0:Persist] No Neo4j driver configured")
+        return stats
+
+    with neo4j_driver.session() as session:
+        # 1. Créer Document
+        session.execute_write(
+            Pass0Adapter._create_document_v2_tx,
+            pass0_result,
+        )
+        stats["document"] = 1
+        logger.info(f"[OSMOSE:Pass0:Persist] Document créé: {pass0_result.doc_id}")
+
+        # 2. Créer Sections
+        session.execute_write(
+            Pass0Adapter._create_sections_v2_tx,
+            pass0_result.sections,
+            pass0_result.tenant_id,
+            pass0_result.doc_id,
+        )
+        stats["sections"] = len(pass0_result.sections)
+        logger.info(f"[OSMOSE:Pass0:Persist] {stats['sections']} sections créées")
+
+        # 3. Créer DocItems (batch)
+        for i in range(0, len(pass0_result.doc_items), batch_size):
+            batch = pass0_result.doc_items[i:i + batch_size]
+            session.execute_write(
+                Pass0Adapter._create_docitems_v2_tx,
+                batch,
+                pass0_result.tenant_id,
+                pass0_result.doc_id,
+            )
+            stats["docitems"] += len(batch)
+
+        logger.info(f"[OSMOSE:Pass0:Persist] {stats['docitems']} docitems créés")
+
+    return stats

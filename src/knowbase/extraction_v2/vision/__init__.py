@@ -1,13 +1,19 @@
 """
 Vision Path pour Extraction V2.
 
-VisionAnalyzer: Analyse d'images via GPT-4o Vision.
+VisionAnalyzer: Analyse d'images via GPT-4o Vision (éléments géométriques).
+VisionSemanticReader: Lecture sémantique pour Pipeline V2 (texte exploitable).
 Prompts: Prompt Vision canonique avec Domain Context injectable.
 TextGenerator: Génération de vision_text descriptif pour OSMOSE.
 DiagramInterpreter: QW-3 - Extraction structurée avec routing adaptatif LITE/FULL.
 """
 
 from knowbase.extraction_v2.vision.analyzer import VisionAnalyzer
+from knowbase.extraction_v2.vision.semantic_reader import (
+    VisionSemanticReader,
+    VisionSemanticResult,
+    PROMPT_VERSION as VISION_SEMANTIC_PROMPT_VERSION,
+)
 from knowbase.extraction_v2.vision.prompts import (
     build_vision_prompt,
     VISION_SYSTEM_PROMPT,
@@ -26,7 +32,13 @@ from knowbase.extraction_v2.vision.diagram_interpreter import (
 )
 
 __all__ = [
+    # Legacy geometric extraction
     "VisionAnalyzer",
+    # Pipeline V2: Semantic text extraction
+    "VisionSemanticReader",
+    "VisionSemanticResult",
+    "VISION_SEMANTIC_PROMPT_VERSION",
+    # Prompts
     "build_vision_prompt",
     "VISION_SYSTEM_PROMPT",
     "VISION_JSON_SCHEMA",

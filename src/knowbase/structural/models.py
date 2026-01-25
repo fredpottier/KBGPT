@@ -51,6 +51,9 @@ class DocItemType(str, Enum):
     # Contextual
     LIST_ITEM = "LIST_ITEM"  # Relation-bearing dépend du contexte (D3.3)
 
+    # Vision Semantic (Pipeline V2)
+    VISION_PAGE = "VISION_PAGE"  # Page interprétée par Vision Semantic Reader
+
     # Fallback
     OTHER = "OTHER"
 
@@ -68,6 +71,35 @@ class ChunkKind(str, Enum):
     TABLE_TEXT = "TABLE_TEXT"
     FIGURE_TEXT = "FIGURE_TEXT"
     CODE_TEXT = "CODE_TEXT"
+
+
+class TextOrigin(str, Enum):
+    """
+    Origine du texte dans un DocItem/Chunk.
+
+    Spec: SPEC_VISION_SEMANTIC_INTEGRATION.md
+    Invariant I4: Traçabilité obligatoire.
+    """
+    DOCLING = "docling"              # Extraction Docling native
+    VISION_SEMANTIC = "vision_semantic"  # GPT-4o Vision interpretation
+    OCR = "ocr"                      # Fallback OCR basique
+    PLACEHOLDER = "placeholder"      # Échec total, placeholder non vide
+
+
+class VisionFailureReason(str, Enum):
+    """
+    Raisons d'échec du Vision Semantic Reader.
+
+    Spec: SPEC_VISION_SEMANTIC_INTEGRATION.md
+    Utilisé pour traçabilité et debug.
+    """
+    VISION_TIMEOUT = "vision_timeout"
+    VISION_RATE_LIMIT = "vision_rate_limit"
+    VISION_PARSE_ERROR = "vision_parse_error"
+    VISION_API_ERROR = "vision_api_error"
+    OCR_FAILED = "ocr_failed"
+    IMAGE_UNREADABLE = "image_unreadable"
+    IMAGE_NOT_FOUND = "image_not_found"
 
 
 # ===================================
@@ -524,10 +556,10 @@ class TypeAwareChunk(BaseModel):
     """
     chunk_id: str = Field(default_factory=lambda: f"chunk_{uuid4().hex[:12]}")
 
-    # Identifiants
-    tenant_id: str
-    doc_id: str
-    doc_version_id: str
+    # Identifiants (defaults pour rétrocompatibilité cache v4)
+    tenant_id: str = Field(default="default")
+    doc_id: str = Field(default="")
+    doc_version_id: str = Field(default="")
     section_id: Optional[str] = None
 
     # Type
@@ -546,6 +578,9 @@ class TypeAwareChunk(BaseModel):
     is_relation_bearing: bool = False  # Peut être utilisé pour relation extraction
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+    # Pipeline V2: Traçabilité origine du texte (Spec Vision Semantic Integration)
+    text_origin: Optional[TextOrigin] = None
+
     def to_neo4j_properties(self) -> Dict[str, Any]:
         """Convertit en properties Neo4j."""
         return {
@@ -562,6 +597,7 @@ class TypeAwareChunk(BaseModel):
             "page_span_max": self.page_span_max,
             "is_relation_bearing": self.is_relation_bearing,
             "created_at": self.created_at.isoformat(),
+            "text_origin": self.text_origin.value if self.text_origin else None,
         }
 
 

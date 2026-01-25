@@ -131,9 +131,13 @@ class OsmoseAgentiqueService:
         # Check if Hybrid Anchor Model is enabled
         self.use_hybrid_anchor = is_feature_enabled("phase_2_hybrid_anchor")
 
+        # Check if Stratified Pipeline V2 is enabled
+        # Si V2 activé: Skip ProtoConcepts et autres nodes legacy (ADR ARCH_STRATIFIED_PIPELINE_V2)
+        self.use_stratified_v2 = is_feature_enabled("stratified_pipeline_v2")
+
         logger.info(
             f"[OSMOSE AGENTIQUE] Service initialized - OSMOSE enabled: {self.config.enable_osmose}, "
-            f"Hybrid Anchor Model: {self.use_hybrid_anchor}"
+            f"Hybrid Anchor Model: {self.use_hybrid_anchor}, Stratified V2: {self.use_stratified_v2}"
         )
 
     def _get_supervisor(self) -> SupervisorAgent:
@@ -522,6 +526,23 @@ class OsmoseAgentiqueService:
             )
             result.osmose_success = False
             result.osmose_error = skip_reason
+            result.total_duration_seconds = asyncio.get_event_loop().time() - start_time
+            return result
+
+        # ===== Pipeline V2: Skip ProtoConcepts et autres nodes legacy =====
+        # ADR ARCH_STRATIFIED_PIPELINE_V2: Si V2 activé, le traitement sémantique
+        # (ProtoConcepts, MentionSpan, etc.) est fait par Pass 1 stratifié, pas ici.
+        # L'import ne fait que le structural graph (DocItem, TypeAwareChunk).
+        if self.use_stratified_v2:
+            logger.info(
+                f"[OSMOSE:V2] 🌊 Stratified Pipeline V2 active - skipping legacy node creation "
+                f"for {document_id}. Semantic processing delegated to Pass 1 stratifié."
+            )
+            # Retourner un résultat minimal - le vrai travail est fait par Pass 1
+            result.osmose_success = True
+            result.osmose_error = None
+            result.concepts_extracted = 0
+            result.canonical_concepts = 0
             result.total_duration_seconds = asyncio.get_event_loop().time() - start_time
             return result
 

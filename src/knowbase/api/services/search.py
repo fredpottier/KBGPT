@@ -115,19 +115,12 @@ def search_documents(
                     session_context_lines.append(f"**{role_label}**: {content}\n")
                 session_context_text = "\n".join(session_context_lines)
 
-                # 🔑 Enrichir la requête vectorielle avec le contexte
-                # Récupérer le dernier message assistant pour contexte thématique
-                last_assistant_msg = None
-                for msg in reversed(recent_messages):
-                    if msg.role == "assistant":
-                        last_assistant_msg = msg.content
-                        break
-
-                if last_assistant_msg:
-                    # Extraire les premiers 200 caractères du contexte pour enrichir la recherche
-                    context_snippet = last_assistant_msg[:200].replace("\n", " ")
-                    enriched_query = f"{query} {context_snippet}"
-                    logger.info(f"[MEMORY] Query enriched with session context")
+                # 🔑 NOTE: On n'enrichit PAS la requête vectorielle avec le contexte précédent
+                # Le contexte de session (session_context_text) est passé au LLM pour la synthèse,
+                # ce qui lui permet de gérer les références contextuelles (follow-up questions).
+                # Enrichir la requête vectorielle causait des bugs où une nouvelle question
+                # sur un sujet différent retournait les résultats de la question précédente.
+                # Fix 2026-01-23: enriched_query reste égal à query (pas de pollution)
 
                 logger.info(
                     f"[MEMORY] Session context loaded: {len(recent_messages)} messages from {session_id[:8]}..."

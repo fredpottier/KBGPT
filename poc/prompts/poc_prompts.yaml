@@ -1,0 +1,279 @@
+# POC Lecture Stratifiee - Prompts pour Qwen 14B
+# ================================================
+# Ces prompts sont optimises pour Qwen 14B (local EC2)
+# Ils suivent l'ADR_STRATIFIED_READING_MODEL
+
+version: "1.0"
+llm_model: "qwen-14b"
+
+# ============================================================================
+# PHASE 1.1 : ANALYSE STRUCTURELLE DU DOCUMENT
+# ============================================================================
+
+document_analysis:
+  system: |
+    Tu es un expert en analyse documentaire. Tu dois identifier:
+    1. Le SUJET principal du document (1 phrase)
+    2. La STRUCTURE DE DEPENDANCE du document
+    3. Les THEMES majeurs (hierarchie)
+
+    STRUCTURES DE DEPENDANCE (choisis UNE seule):
+    - CENTRAL: Le document decrit UN artefact central (produit, norme, systeme).
+      Toutes les assertions DEPENDENT de cet artefact.
+      Exemple: "Guide SAP GDPR" → tout depend de SAP
+
+    - TRANSVERSAL: Le document presente des connaissances INDEPENDANTES.
+      Les assertions sont autonomes et applicables hors contexte.
+      Exemple: "Guide GDPR pour sous-traitants" → principes generaux
+
+    - CONTEXTUAL: Les assertions sont CONDITIONNELLES.
+      Elles dependent d'un contexte ou d'options specifiques.
+      Exemple: "Guide securite vehicule selon conditions" → assertions conditionnelles
+
+    IMPORTANT: Tu DOIS justifier ton choix ET expliquer pourquoi tu rejettes les 2 autres.
+
+  user: |
+    Analyse ce document et reponds en JSON:
+
+    TITRE: {doc_title}
+
+    CONTENU (premiers {char_limit} caracteres):
+    {content_preview}
+
+    TABLE DES MATIERES (si disponible):
+    {toc}
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "subject": "Sujet en 1 phrase",
+      "structure": {{
+        "chosen": "CENTRAL|TRANSVERSAL|CONTEXTUAL",
+        "justification": "Pourquoi cette structure (min 20 chars)",
+        "rejected": {{
+          "STRUCTURE1": "Pourquoi pas celle-ci",
+          "STRUCTURE2": "Pourquoi pas celle-la"
+        }}
+      }},
+      "themes": [
+        {{
+          "name": "Theme 1",
+          "sub_themes": ["Sous-theme 1.1", "Sous-theme 1.2"]
+        }},
+        {{
+          "name": "Theme 2",
+          "sub_themes": []
+        }}
+      ]
+    }}
+    ```
+
+
+# ============================================================================
+# PHASE 1.2 : IDENTIFICATION DES CONCEPTS SITUES
+# ============================================================================
+
+concept_identification:
+  system: |
+    Tu es un expert en extraction de concepts. Tu dois identifier les CONCEPTS SITUES
+    d'un document, en respectant des regles STRICTES de frugalite.
+
+    REGLES DE FRUGALITE (NON NEGOCIABLES):
+    - MAXIMUM 60 concepts par document (coupe-circuit dur)
+    - Un concept doit avoir >= 3 Information pour etre valide
+    - Un concept doit etre mentionne dans >= 2 sections
+
+    TYPES DE ROLES:
+    - CENTRAL: L'artefact dont tout depend (ex: "SAP S/4HANA" dans un guide SAP)
+    - CONTEXTUAL: Une condition/option recurrente (ex: "mode cloud" vs "on-premise")
+    - STANDARD: Concept normal du domaine
+
+    IMPORTANT - ANTI-BRUIT:
+    - NE PAS creer de concept pour un terme mentionne 1-2 fois seulement
+    - NE PAS creer de concept pour des termes generiques (ex: "document", "section")
+    - REFUSE explicitement les termes non pertinents avec une justification
+
+    Si le document est HOSTILE (trop procedural, peu de concepts), retourne MOINS de 10 concepts.
+
+  user: |
+    Identifie les concepts situes de ce document.
+
+    SUJET: {subject}
+    STRUCTURE: {structure}
+    THEMES: {themes}
+
+    CONTENU:
+    {content}
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "concepts": [
+        {{
+          "name": "Nom du concept",
+          "role": "CENTRAL|CONTEXTUAL|STANDARD",
+          "theme": "Nom du theme parent",
+          "occurrences_estimate": 5,
+          "rationale": "Pourquoi ce concept est pertinent"
+        }}
+      ],
+      "refused_terms": [
+        {{
+          "term": "Terme refuse",
+          "reason": "Trop generique / Mention unique / Hors scope"
+        }}
+      ],
+      "frugality_check": {{
+        "total_concepts": 15,
+        "is_valid": true,
+        "message": "OK: 15 concepts dans la plage [5-60]"
+      }}
+    }}
+    ```
+
+
+# ============================================================================
+# PHASE 1.3 : EXTRACTION DES INFORMATION
+# ============================================================================
+
+information_extraction:
+  system: |
+    Tu es un expert en extraction d'Information. Pour chaque concept, tu dois
+    extraire les INFORMATION (unites atomiques de sens) avec leurs ANCHORS.
+
+    TYPES D'INFORMATION:
+    - DEFINITION: Definit ce qu'est le concept
+    - FACT: Enonce un fait verifie
+    - CAPABILITY: Ce que le concept permet de faire
+    - CONSTRAINT: Limitation ou regle obligatoire
+    - OPTION: Possibilite ou variante
+    - LIMITATION: Ce que le concept NE peut PAS faire
+    - CONDITION: Prerequis ou condition
+    - CONSEQUENCE: Resultat ou impact
+
+    REGLE ANCHOR (CRITIQUE):
+    L'anchor est un POINTEUR vers le texte source. Tu dois fournir:
+    - chunk_id: identifiant du chunk
+    - start_char: position de debut dans le chunk
+    - end_char: position de fin dans le chunk
+
+    Le texte extrait doit faire MINIMUM 10 caracteres.
+
+  user: |
+    Extrait les Information pour ce concept.
+
+    CONCEPT: {concept_name}
+    ROLE: {concept_role}
+    THEME: {theme_name}
+
+    CHUNKS CONTENANT CE CONCEPT:
+    {chunks_content}
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "concept_id": "{concept_id}",
+      "informations": [
+        {{
+          "info_type": "DEFINITION|FACT|CAPABILITY|...",
+          "anchor": {{
+            "chunk_id": "chunk_001",
+            "start_char": 145,
+            "end_char": 287
+          }},
+          "theme_ref": "Nom du theme"
+        }}
+      ]
+    }}
+    ```
+
+
+# ============================================================================
+# PHASE 1.4 : DETECTION DES RELATIONS
+# ============================================================================
+
+relation_detection:
+  system: |
+    Tu es un expert en relations conceptuelles. Tu dois detecter les RELATIONS
+    entre concepts, UNIQUEMENT si elles sont MEDIEES par une Information.
+
+    TYPES DE RELATIONS AUTORISES (8 seulement):
+    - PRECEDES: A doit etre fait avant B
+    - REQUIRES: A necessite B pour fonctionner
+    - CONFIGURES: A configure/parametrise B
+    - ENABLES: A active/permet B
+    - CONSTRAINS: A limite/contraint B
+    - EXCLUDES: A est incompatible avec B
+    - IMPLEMENTS: A implemente/realise B
+    - PART_OF: A est une partie de B
+
+    REGLE ANTI-CO-OCCURRENCE (CRITIQUE):
+    Une relation n'est valide QUE si elle est justifiee par au moins UNE Information
+    qui mentionne explicitement les deux concepts dans un lien semantique.
+
+    NE PAS CREER de relation juste parce que 2 concepts apparaissent dans le meme chunk.
+
+  user: |
+    Detecte les relations entre ces concepts.
+
+    CONCEPTS:
+    {concepts_list}
+
+    INFORMATIONS EXTRAITES:
+    {informations}
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "relations": [
+        {{
+          "source_concept": "Concept A",
+          "target_concept": "Concept B",
+          "relation_type": "REQUIRES|ENABLES|...",
+          "mediating_info_id": "info_xyz",
+          "justification": "L'Information dit que A necessite B pour..."
+        }}
+      ],
+      "rejected_co_occurrences": [
+        {{
+          "concepts": ["A", "B"],
+          "reason": "Mentionnes ensemble mais pas de lien semantique"
+        }}
+      ]
+    }}
+    ```
+
+
+# ============================================================================
+# VALIDATION FINALE
+# ============================================================================
+
+validation:
+  system: |
+    Tu es un validateur de qualite. Verifie que l'extraction respecte les criteres.
+
+  user: |
+    Valide cette extraction:
+
+    DOCUMENT: {doc_title}
+    STRUCTURE: {structure}
+    CONCEPTS: {concept_count}
+    INFORMATIONS: {info_count}
+    RELATIONS: {relation_count}
+
+    CRITERES:
+    - Frugalite: 5-60 concepts (FAIL si >60)
+    - Anchor success rate: >= 95% (acceptable >= 85%)
+    - Info par concept: >= 3 en moyenne
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "is_valid": true,
+      "frugality_status": "OK|WARN|FAIL",
+      "anchor_success_rate": 0.97,
+      "avg_info_per_concept": 4.2,
+      "issues": ["Liste des problemes si any"],
+      "recommendations": ["Suggestions d'amelioration"]
+    }}
+    ```

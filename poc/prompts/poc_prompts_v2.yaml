@@ -1,0 +1,382 @@
+# POC Lecture Stratifiee - Prompts V2 (Semantic Assertion Model)
+# ================================================================
+# Ces prompts implementent l'approche "raisonnement d'assertions"
+# au lieu du "rattachement lexical" de la V1.
+#
+# Changement majeur Phase 1.3:
+# - V1: Cherche des textes qui "matchent" le nom du concept
+# - V2: Extrait des ASSERTIONS puis les lie SEMANTIQUEMENT aux concepts
+
+version: "2.0"
+model_agnostic: true  # Fonctionne avec Qwen et GPT-4o
+
+# ============================================================================
+# PHASE 1.1 : ANALYSE STRUCTURELLE (inchange)
+# ============================================================================
+
+document_analysis:
+  system: |
+    Tu es un expert en analyse documentaire. Tu dois identifier:
+    1. Le SUJET principal du document (1 phrase)
+    2. La STRUCTURE DE DEPENDANCE du document
+    3. Les THEMES majeurs (hierarchie)
+    4. La LANGUE principale du document
+
+    STRUCTURES DE DEPENDANCE (choisis UNE seule):
+    - CENTRAL: Le document decrit UN artefact central (produit, norme, systeme).
+      Toutes les assertions DEPENDENT de cet artefact.
+      Exemple: "Guide SAP GDPR" -> tout depend de SAP
+
+    - TRANSVERSAL: Le document presente des connaissances INDEPENDANTES.
+      Les assertions sont autonomes et applicables hors contexte.
+      Exemple: "Guide GDPR pour sous-traitants" -> principes generaux
+
+    - CONTEXTUAL: Les assertions sont CONDITIONNELLES.
+      Elles dependent d'un contexte ou d'options specifiques.
+      Exemple: "Guide securite vehicule selon conditions" -> assertions conditionnelles
+
+    IMPORTANT: Tu DOIS justifier ton choix ET expliquer pourquoi tu rejettes les 2 autres.
+    IMPORTANT: Reponds dans la MEME LANGUE que le document analyse.
+
+  user: |
+    Analyse ce document et reponds en JSON.
+    REPONDS DANS LA LANGUE DU DOCUMENT.
+
+    TITRE: {doc_title}
+
+    CONTENU (premiers {char_limit} caracteres):
+    {content_preview}
+
+    TABLE DES MATIERES (si disponible):
+    {toc}
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "language": "en|fr|de|...",
+      "subject": "Sujet en 1 phrase (DANS LA LANGUE DU DOC)",
+      "structure": {{
+        "chosen": "CENTRAL|TRANSVERSAL|CONTEXTUAL",
+        "justification": "Pourquoi cette structure (min 20 chars)",
+        "rejected": {{
+          "STRUCTURE1": "Pourquoi pas celle-ci",
+          "STRUCTURE2": "Pourquoi pas celle-la"
+        }}
+      }},
+      "themes": [
+        {{
+          "name": "Theme 1",
+          "sub_themes": ["Sous-theme 1.1", "Sous-theme 1.2"]
+        }}
+      ]
+    }}
+    ```
+
+
+# ============================================================================
+# PHASE 1.2 : IDENTIFICATION DES CONCEPTS (adapte pour multilingue)
+# ============================================================================
+
+concept_identification:
+  system: |
+    Tu es un expert en extraction de concepts. Tu dois identifier les CONCEPTS SITUES
+    d'un document, en respectant des regles STRICTES de frugalite.
+
+    REGLES DE FRUGALITE (NON NEGOCIABLES):
+    - MAXIMUM 60 concepts par document (coupe-circuit dur)
+    - Un concept doit avoir >= 3 Information pour etre valide
+    - Un concept doit etre mentionne dans >= 2 sections
+
+    TYPES DE ROLES:
+    - CENTRAL: L'artefact dont tout depend (ex: "SAP S/4HANA" dans un guide SAP)
+    - CONTEXTUAL: Une condition/option recurrente (ex: "mode cloud" vs "on-premise")
+    - STANDARD: Concept normal du domaine
+
+    IMPORTANT - MULTILINGUE:
+    - Le nom du concept doit etre dans la LANGUE DU DOCUMENT
+    - Si le document est en anglais, concepts en anglais
+    - Si le document est en francais, concepts en francais
+    - NE PAS traduire les concepts dans une autre langue
+
+    IMPORTANT - ANTI-BRUIT:
+    - NE PAS creer de concept pour un terme mentionne 1-2 fois seulement
+    - NE PAS creer de concept pour des termes generiques (ex: "document", "section")
+    - REFUSE explicitement les termes non pertinents avec une justification
+
+    Si le document est HOSTILE (trop procedural, peu de concepts), retourne MOINS de 10 concepts.
+
+  user: |
+    Identifie les concepts situes de ce document.
+    IMPORTANT: Les noms de concepts doivent etre dans la langue du document ({language}).
+
+    LANGUE DU DOCUMENT: {language}
+    SUJET: {subject}
+    STRUCTURE: {structure}
+    THEMES: {themes}
+
+    CONTENU:
+    {content}
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "concepts": [
+        {{
+          "name": "Nom du concept (DANS LA LANGUE DU DOC)",
+          "role": "CENTRAL|CONTEXTUAL|STANDARD",
+          "theme": "Nom du theme parent",
+          "occurrences_estimate": 5,
+          "rationale": "Pourquoi ce concept est pertinent"
+        }}
+      ],
+      "refused_terms": [
+        {{
+          "term": "Terme refuse",
+          "reason": "Trop generique / Mention unique / Hors scope"
+        }}
+      ],
+      "frugality_check": {{
+        "total_concepts": 15,
+        "is_valid": true,
+        "message": "OK: 15 concepts dans la plage [5-60]"
+      }}
+    }}
+    ```
+
+
+# ============================================================================
+# PHASE 1.3a : EXTRACTION DES ASSERTIONS (NOUVEAU)
+# ============================================================================
+# Etape 1 du nouveau pipeline: identifier les ASSERTIONS dans le texte
+# Une assertion = une phrase/segment qui porte une connaissance
+
+assertion_extraction:
+  system: |
+    Tu es un expert en extraction d'assertions.
+
+    Une ASSERTION est une phrase ou segment de texte qui porte une CONNAISSANCE:
+    - definitional: Definit ce qu'est quelque chose ("X is defined as...", "X refers to...")
+    - factual: Enonce un fait verifiable ("X has property Y", "X contains Z")
+    - prescriptive: Impose une obligation ("must", "shall", "required", "mandatory")
+    - permissive: Indique une possibilite ("may", "can", "optional", "allowed")
+    - conditional: Specifie une condition ("if", "when", "unless", "provided that")
+    - causal: Decrit une cause/effet ("because", "therefore", "leads to", "results in")
+    - procedural: Decrit une etape/processus ("first", "then", "step", "procedure")
+
+    REGLES:
+    1. Extraire UNIQUEMENT les phrases qui portent une connaissance substantive
+    2. Ignorer les phrases de transition ("In this section...", "As mentioned above...")
+    3. Ignorer les phrases purement procedurales sans contenu informatif
+    4. Les positions (start_char, end_char) doivent etre EXACTES dans le texte fourni
+    5. Detecter la LANGUE de chaque assertion (peut differer du document global)
+
+    QUALITE > QUANTITE: Mieux vaut 5 assertions pertinentes que 20 mediocres.
+
+  user: |
+    Extrait les assertions de ce chunk de texte.
+
+    CHUNK_ID: {chunk_id}
+    LANGUE ATTENDUE: {language_hint}
+
+    TEXTE:
+    ---
+    {text}
+    ---
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "assertions": [
+        {{
+          "text": "Le texte EXACT de l'assertion (copie du texte source)",
+          "type": "definitional|factual|prescriptive|permissive|conditional|causal|procedural",
+          "start_char": 145,
+          "end_char": 287,
+          "confidence": 0.9,
+          "language": "en|fr|de|..."
+        }}
+      ],
+      "skipped_sentences": [
+        {{
+          "text": "Phrase ignoree",
+          "reason": "Transition / Pas de contenu informatif / Trop vague"
+        }}
+      ]
+    }}
+    ```
+
+
+# ============================================================================
+# PHASE 1.3b : LIAISON SEMANTIQUE ASSERTIONS <-> CONCEPTS (NOUVEAU)
+# ============================================================================
+# Etape 2 du nouveau pipeline: lier SEMANTIQUEMENT les assertions aux concepts
+# Ce n'est PAS un matching lexical - c'est un RAISONNEMENT sur le sens
+
+semantic_linking:
+  system: |
+    Tu es un expert en raisonnement semantique.
+
+    Ta tache: determiner quelles ASSERTIONS apportent de la connaissance sur quels CONCEPTS.
+
+    IMPORTANT - CE N'EST PAS UN MATCHING LEXICAL:
+    - Une assertion peut concerner un concept SANS LE MENTIONNER explicitement
+    - Le concept et l'assertion peuvent etre dans des LANGUES DIFFERENTES
+    - Le lien doit etre SEMANTIQUE (le sens), pas lexical (les mots)
+
+    Exemples de liens valides:
+    - Assertion: "The data subject has the right to obtain erasure of personal data"
+      Concept: "Droit a l'oubli" (FR)
+      -> Lien VALIDE car semantiquement equivalent malgre langues differentes
+
+    - Assertion: "Controllers must implement appropriate technical measures"
+      Concept: "Privacy by Design"
+      -> Lien VALIDE car "technical measures" est une implementation de Privacy by Design
+
+    - Assertion: "The GDPR applies to processing of personal data"
+      Concept: "Customer Consent"
+      -> Lien INVALIDE car l'assertion parle du scope, pas du consentement
+
+    Types de liens:
+    - defines: L'assertion DEFINIT le concept (rare, tres specifique)
+    - describes: L'assertion DECRIT une propriete/aspect du concept
+    - constrains: L'assertion IMPOSE une contrainte sur le concept
+    - enables: L'assertion dit ce que le concept PERMET
+    - conditions: L'assertion specifie une CONDITION pour le concept
+    - exemplifies: L'assertion donne un EXEMPLE du concept
+
+    REGLES:
+    1. Un lien doit etre JUSTIFIE semantiquement (pas juste "ils sont dans le meme domaine")
+    2. Confiance haute (>0.8) seulement si le lien est evident et direct
+    3. Si tu n'es pas sur, ne cree pas le lien (abstention > erreur)
+    4. Une assertion peut etre liee a PLUSIEURS concepts (mais pas tous)
+
+  user: |
+    Etablis les liens semantiques entre ces assertions et ces concepts.
+
+    ASSERTIONS EXTRAITES:
+    {assertions}
+
+    CONCEPTS IDENTIFIES:
+    {concepts}
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "links": [
+        {{
+          "assertion_idx": 0,
+          "concept_id": "abc123-xyz",
+          "link_type": "defines|describes|constrains|enables|conditions|exemplifies",
+          "confidence": 0.85,
+          "justification": "Explication SEMANTIQUE du lien (pas juste 'meme domaine')"
+        }}
+      ],
+      "unlinked_assertions": [
+        {{
+          "idx": 5,
+          "reason": "Cette assertion parle de X mais aucun concept ne couvre X"
+        }}
+      ],
+      "weak_links_rejected": [
+        {{
+          "assertion_idx": 3,
+          "concept_id": "def456",
+          "reason": "Co-occurrence mais pas de lien semantique direct"
+        }}
+      ]
+    }}
+    ```
+
+
+# ============================================================================
+# PHASE 1.4 : DETECTION DES RELATIONS (inchange)
+# ============================================================================
+
+relation_detection:
+  system: |
+    Tu es un expert en relations conceptuelles. Tu dois detecter les RELATIONS
+    entre concepts, UNIQUEMENT si elles sont MEDIEES par une Information.
+
+    TYPES DE RELATIONS AUTORISES (8 seulement):
+    - PRECEDES: A doit etre fait avant B
+    - REQUIRES: A necessite B pour fonctionner
+    - CONFIGURES: A configure/parametrise B
+    - ENABLES: A active/permet B
+    - CONSTRAINS: A limite/contraint B
+    - EXCLUDES: A est incompatible avec B
+    - IMPLEMENTS: A implemente/realise B
+    - PART_OF: A est une partie de B
+
+    REGLE ANTI-CO-OCCURRENCE (CRITIQUE):
+    Une relation n'est valide QUE si elle est justifiee par au moins UNE Information
+    qui mentionne explicitement les deux concepts dans un lien semantique.
+
+    NE PAS CREER de relation juste parce que 2 concepts apparaissent dans le meme chunk.
+
+  user: |
+    Detecte les relations entre ces concepts.
+
+    CONCEPTS:
+    {concepts_list}
+
+    INFORMATIONS EXTRAITES:
+    {informations}
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "relations": [
+        {{
+          "source_concept": "Concept A",
+          "target_concept": "Concept B",
+          "relation_type": "REQUIRES|ENABLES|...",
+          "mediating_info_id": "info_xyz",
+          "justification": "L'Information dit que A necessite B pour..."
+        }}
+      ],
+      "rejected_co_occurrences": [
+        {{
+          "concepts": ["A", "B"],
+          "reason": "Mentionnes ensemble mais pas de lien semantique"
+        }}
+      ]
+    }}
+    ```
+
+
+# ============================================================================
+# VALIDATION FINALE
+# ============================================================================
+
+validation:
+  system: |
+    Tu es un validateur de qualite. Verifie que l'extraction respecte les criteres.
+
+  user: |
+    Valide cette extraction:
+
+    DOCUMENT: {doc_title}
+    LANGUE: {language}
+    STRUCTURE: {structure}
+    CONCEPTS: {concept_count}
+    INFORMATIONS: {info_count}
+    RELATIONS: {relation_count}
+
+    CRITERES:
+    - Frugalite: 5-60 concepts (FAIL si >60)
+    - Anchor success rate: >= 95% (acceptable >= 85%)
+    - Info par concept: >= 2 en moyenne (cible >= 3)
+    - Coherence linguistique: concepts et assertions dans la langue du doc
+
+    Reponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "is_valid": true,
+      "frugality_status": "OK|WARN|FAIL",
+      "anchor_success_rate": 0.97,
+      "avg_info_per_concept": 4.2,
+      "language_coherence": true,
+      "issues": ["Liste des problemes si any"],
+      "recommendations": ["Suggestions d'amelioration"]
+    }}
+    ```

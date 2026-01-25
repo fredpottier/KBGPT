@@ -42,6 +42,7 @@ from knowbase.structural.models import (
     TypeAwareChunk,
     ChunkKind,
 )
+from knowbase.config.feature_flags import is_feature_enabled
 
 if TYPE_CHECKING:
     from neo4j import AsyncDriver, Driver
@@ -361,14 +362,22 @@ class StructuralGraphBuilder:
         - (DocItem)-[:ON_PAGE]->(PageContext)
         - (TypeAwareChunk)-[:DERIVED_FROM]->(DocItem)
         """
+        # ADR ARCH_STRATIFIED_PIPELINE_V2: Skip PageContext si V2 activé
+        # PageContext est fusionné dans Document pour V2
+        skip_page_context = is_feature_enabled("stratified_pipeline_v2")
+        if skip_page_context:
+            logger.info("[StructuralGraphBuilder] Stratified V2: Skipping PageContext creation")
+
         logger.info(f"[StructuralGraphBuilder] Persisting to Neo4j...")
 
         async with driver.session(database=database) as session:
             # Batch les opérations pour performance
+            # Si V2: passer liste vide pour pages (skip PageContext)
+            pages_to_create = [] if skip_page_context else result.page_contexts
             await session.execute_write(
                 self._create_version_and_pages_tx,
                 result.doc_version,
-                result.page_contexts,
+                pages_to_create,
             )
 
             await session.execute_write(
@@ -435,15 +444,21 @@ class StructuralGraphBuilder:
             logger.warning("[StructuralGraphBuilder] Neo4j not connected, skipping persistence")
             return
 
+        # ADR ARCH_STRATIFIED_PIPELINE_V2: Skip PageContext si V2 activé
+        skip_page_context = is_feature_enabled("stratified_pipeline_v2")
+        if skip_page_context:
+            logger.info("[StructuralGraphBuilder] Stratified V2: Skipping PageContext creation")
+
         logger.info(f"[StructuralGraphBuilder] Persisting to Neo4j (sync)...")
 
         try:
             with neo4j_client.driver.session(database="neo4j") as session:
-                # Créer DocumentVersion et Pages
+                # Créer DocumentVersion et Pages (si V2: liste vide pour skip PageContext)
+                pages_to_create = [] if skip_page_context else result.page_contexts
                 session.execute_write(
                     self._create_version_and_pages_tx,
                     result.doc_version,
-                    result.page_contexts,
+                    pages_to_create,
                 )
 
                 # Créer Sections
@@ -483,23 +498,49 @@ class StructuralGraphBuilder:
     @staticmethod
     def _create_version_and_pages_tx(tx, doc_version: DocumentVersion, pages: List[PageContext]):
         """Transaction pour créer DocumentVersion et PageContext."""
-        # Créer/mettre à jour DocumentVersion
-        tx.run("""
-            MERGE (v:DocumentVersion {
-                tenant_id: $tenant_id,
-                doc_id: $doc_id,
-                doc_version_id: $doc_version_id
+        # ADR ARCH_STRATIFIED_PIPELINE_V2: Créer node Document si V2 activé
+        # Le node Document est requis pour Pass 1 (Subject, Concepts, etc.)
+        use_stratified_v2 = is_feature_enabled("stratified_pipeline_v2")
+
+        if use_stratified_v2:
+            # V2: Créer Document + DocumentVersion
+            tx.run("""
+                MERGE (d:Document {
+                    tenant_id: $tenant_id,
+                    doc_id: $doc_id
+                })
+                SET d.created_at = datetime()
+                MERGE (v:DocumentVersion {
+                    tenant_id: $tenant_id,
+                    doc_id: $doc_id,
+                    doc_version_id: $doc_version_id
+                })
+                SET v += $props
+                MERGE (d)-[:HAS_VERSION]->(v)
+            """, {
+                "tenant_id": doc_version.tenant_id,
+                "doc_id": doc_version.doc_id,
+                "doc_version_id": doc_version.doc_version_id,
+                "props": doc_version.to_neo4j_properties(),
             })
-            SET v += $props
-            WITH v
-            MATCH (d:DocumentContext {tenant_id: $tenant_id, doc_id: $doc_id})
-            MERGE (d)-[:HAS_VERSION]->(v)
-        """, {
-            "tenant_id": doc_version.tenant_id,
-            "doc_id": doc_version.doc_id,
-            "doc_version_id": doc_version.doc_version_id,
-            "props": doc_version.to_neo4j_properties(),
-        })
+        else:
+            # Legacy: Créer DocumentVersion et lier à DocumentContext existant
+            tx.run("""
+                MERGE (v:DocumentVersion {
+                    tenant_id: $tenant_id,
+                    doc_id: $doc_id,
+                    doc_version_id: $doc_version_id
+                })
+                SET v += $props
+                WITH v
+                MATCH (d:DocumentContext {tenant_id: $tenant_id, doc_id: $doc_id})
+                MERGE (d)-[:HAS_VERSION]->(v)
+            """, {
+                "tenant_id": doc_version.tenant_id,
+                "doc_id": doc_version.doc_id,
+                "doc_version_id": doc_version.doc_version_id,
+                "props": doc_version.to_neo4j_properties(),
+            })
 
         # Créer les PageContext
         for page in pages:

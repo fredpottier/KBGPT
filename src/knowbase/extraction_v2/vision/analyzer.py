@@ -484,6 +484,43 @@ class VisionAnalyzer:
             logger.error(f"[VisionAnalyzer] PPTX render error: {e}")
             return None
 
+    async def render_page_image(
+        self,
+        file_path: str,
+        page_index: int,
+        resolution: int = 150,
+    ) -> Optional[bytes]:
+        """
+        Rend une page/slide en image PNG.
+
+        Méthode publique pour usage externe (VisionSemanticReader).
+
+        Args:
+            file_path: Chemin vers le document (PDF, PPTX, ou image)
+            page_index: Index de la page/slide
+            resolution: Resolution en DPI
+
+        Returns:
+            Image en bytes (PNG/JPEG) ou None si erreur
+        """
+        ext = Path(file_path).suffix.lower()
+
+        if ext == ".pdf":
+            return await self._render_pdf_page(file_path, page_index, resolution)
+        elif ext == ".pptx":
+            return await self._render_pptx_slide(file_path, page_index, resolution)
+        elif ext in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+            # L'image est le fichier lui-même
+            try:
+                with open(file_path, "rb") as f:
+                    return f.read()
+            except Exception as e:
+                logger.error(f"[VisionAnalyzer] Image read error: {e}")
+                return None
+        else:
+            logger.warning(f"[VisionAnalyzer] Unsupported format for rendering: {ext}")
+            return None
+
     async def analyze_unit(
         self,
         unit,

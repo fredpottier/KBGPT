@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 # Version actuelle du cache
-CURRENT_CACHE_VERSION = "v4"  # v4: Inférence heading_level depuis patterns numérotation
+CURRENT_CACHE_VERSION = "v5"  # v5: DocItems sérialisés pour Pipeline V2 Pass 1 Anchor Resolution
 
 
 class VersionedCache:

@@ -46,6 +46,7 @@ from knowbase.structural import (
     StructuralGraphBuildResult,
     is_structural_graph_enabled,
 )
+from knowbase.config.feature_flags import is_feature_enabled
 from knowbase.ingestion.pipelines.pass05_coref import (
     Pass05CoreferencePipeline,
     Pass05Config,
@@ -53,6 +54,8 @@ from knowbase.ingestion.pipelines.pass05_coref import (
 )
 from knowbase.extraction_v2.gating.weights import DEFAULT_GATING_WEIGHTS, GATING_THRESHOLDS
 from knowbase.extraction_v2.vision.analyzer import VisionAnalyzer
+from knowbase.extraction_v2.vision.semantic_reader import VisionSemanticReader, VisionSemanticResult
+from knowbase.structural.models import TextOrigin
 from knowbase.extraction_v2.merge.merger import StructuredMerger, MergedPageOutput
 from knowbase.extraction_v2.merge.linearizer import Linearizer
 from knowbase.extraction_v2.cache.versioned_cache import VersionedCache
@@ -72,6 +75,7 @@ class PipelineConfig:
     enable_table_summaries: bool = True  # QW-1: Résumé LLM des tables pour améliorer RAG
     enable_structural_graph: bool = True  # Option C: Structural Graph depuis DoclingDocument (requis pour Pass 0.5)
     enable_linguistic_coref: bool = True  # Pass 0.5: Résolution de coréférence linguistique (actif par défaut)
+    enable_vision_semantic: bool = True  # Pipeline V2: Vision Semantic Reader pour FIGURE_TEXT chunks
 
     # Seuils de gating
     vision_required_threshold: float = 0.60
@@ -85,7 +89,7 @@ class PipelineConfig:
 
     # Options de cache
     use_cache: bool = True
-    cache_version: str = "v3"  # v3: Ajout structural_graph + Pass 0.5 coref
+    cache_version: str = "v5"  # v5: DocItems sérialisés pour Pipeline V2 Pass 1
 
     # Options Vision
     vision_model: str = "gpt-4o"
@@ -134,6 +138,7 @@ class PipelineConfig:
             "linguistic_coref_confidence_threshold": self.linguistic_coref_confidence_threshold,
             "linguistic_coref_max_sentence_distance": self.linguistic_coref_max_sentence_distance,
             "linguistic_coref_skip_if_exists": self.linguistic_coref_skip_if_exists,
+            "enable_vision_semantic": self.enable_vision_semantic,
         }
 
 
@@ -158,6 +163,12 @@ class PipelineMetrics:
     linguistic_coref_mentions: int = 0  # Nombre de MentionSpan créés
     linguistic_coref_chains: int = 0  # Nombre de chaînes de coréférence
     linguistic_coref_resolution_rate: float = 0.0  # Taux de résolution
+    # Pipeline V2: Vision Semantic
+    vision_semantic_time_ms: float = 0  # Temps lecture sémantique
+    vision_semantic_pages: int = 0  # Pages traitées par Vision Semantic
+    vision_semantic_success: int = 0  # Pages avec texte sémantique
+    vision_semantic_fallback_ocr: int = 0  # Pages avec fallback OCR
+    vision_semantic_fallback_placeholder: int = 0  # Pages avec placeholder
     total_time_ms: float = 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -179,6 +190,11 @@ class PipelineMetrics:
             "linguistic_coref_mentions": self.linguistic_coref_mentions,
             "linguistic_coref_chains": self.linguistic_coref_chains,
             "linguistic_coref_resolution_rate": round(self.linguistic_coref_resolution_rate, 4),
+            "vision_semantic_time_ms": round(self.vision_semantic_time_ms, 2),
+            "vision_semantic_pages": self.vision_semantic_pages,
+            "vision_semantic_success": self.vision_semantic_success,
+            "vision_semantic_fallback_ocr": self.vision_semantic_fallback_ocr,
+            "vision_semantic_fallback_placeholder": self.vision_semantic_fallback_placeholder,
             "total_time_ms": round(self.total_time_ms, 2),
         }
 
@@ -214,6 +230,7 @@ class ExtractionPipelineV2:
         self._extractor: Optional[DoclingExtractor] = None
         self._gating_engine: Optional[GatingEngine] = None
         self._vision_analyzer: Optional[VisionAnalyzer] = None
+        self._vision_semantic_reader: Optional[VisionSemanticReader] = None  # Pipeline V2
         self._merger: Optional[StructuredMerger] = None
         self._linearizer: Optional[Linearizer] = None
         self._doc_context_extractor: Optional[DocContextExtractor] = None
@@ -272,6 +289,15 @@ class ExtractionPipelineV2:
             )
             await self._vision_analyzer.initialize()
 
+        # 3.5 Initialiser VisionSemanticReader (Pipeline V2)
+        if self.config.enable_vision_semantic:
+            self._vision_semantic_reader = VisionSemanticReader(
+                model=self.config.vision_model,
+                temperature=self.config.vision_temperature,
+            )
+            await self._vision_semantic_reader.initialize()
+            logger.info("[ExtractionPipelineV2] VisionSemanticReader enabled")
+
         # 4. Initialiser Merger et Linearizer
         self._merger = StructuredMerger(
             vision_model=self.config.vision_model,
@@ -303,7 +329,10 @@ class ExtractionPipelineV2:
             logger.info("[ExtractionPipelineV2] StructuralGraphBuilder enabled")
 
         # 8. Initialiser Pass05CoreferencePipeline (Pass 0.5 - Linguistic Layer)
-        if self.config.enable_linguistic_coref:
+        # ADR ARCH_STRATIFIED_PIPELINE_V2: Désactiver coréférence si V2 activé
+        # Les MentionSpan/CoreferenceChain ne font pas partie de l'architecture V2
+        use_stratified_v2 = is_feature_enabled("stratified_pipeline_v2")
+        if self.config.enable_linguistic_coref and not use_stratified_v2:
             coref_config = Pass05Config(
                 confidence_threshold=self.config.linguistic_coref_confidence_threshold,
                 max_sentence_distance=self.config.linguistic_coref_max_sentence_distance,
@@ -316,6 +345,11 @@ class ExtractionPipelineV2:
             logger.info(
                 f"[ExtractionPipelineV2] Pass05CoreferencePipeline enabled "
                 f"(threshold={coref_config.confidence_threshold})"
+            )
+        elif use_stratified_v2:
+            logger.info(
+                "[ExtractionPipelineV2] Stratified V2: Skipping Pass05CoreferencePipeline "
+                "(MentionSpan/CoreferenceChain not in V2 architecture)"
             )
 
         self._initialized = True
@@ -547,6 +581,80 @@ class ExtractionPipelineV2:
                 f"{metrics.vision_processed_pages}/{len(vision_indices)} pages processed (parallel)"
             )
 
+        # === ETAPE 3.5: Vision Semantic Reader (Pipeline V2) ===
+        # Produit du TEXTE sémantique pour enrichir les chunks FIGURE_TEXT
+        vision_semantic_results: Dict[int, VisionSemanticResult] = {}
+
+        if self.config.enable_vision_semantic and self._vision_semantic_reader:
+            vision_semantic_start = time.time()
+
+            # Utiliser les mêmes pages que Vision Path
+            vision_indices_for_semantic = list(vision_extractions.keys())
+
+            if vision_indices_for_semantic:
+                logger.info(
+                    f"[ExtractionPipelineV2] Starting Vision Semantic reading: "
+                    f"{len(vision_indices_for_semantic)} pages"
+                )
+
+                # Traiter en parallèle avec limite de concurrence
+                max_concurrent = self.config.max_concurrent_vision or int(os.getenv("MAX_WORKERS", "30"))
+                semaphore = asyncio.Semaphore(max_concurrent)
+
+                async def read_page_semantic(page_idx: int) -> tuple:
+                    """Lit sémantiquement une page."""
+                    async with semaphore:
+                        try:
+                            # Obtenir l'image de la page via VisionAnalyzer
+                            image_bytes = await self._vision_analyzer.render_page_image(
+                                file_path, page_idx
+                            )
+                            if not image_bytes:
+                                return (page_idx, None, "No image available")
+
+                            result = await self._vision_semantic_reader.read_page(
+                                image_bytes=image_bytes,
+                                page_no=page_idx,
+                            )
+                            return (page_idx, result, None)
+                        except Exception as e:
+                            logger.warning(
+                                f"[ExtractionPipelineV2] Vision Semantic failed for page {page_idx}: {e}"
+                            )
+                            return (page_idx, None, str(e))
+
+                # Lancer tous les appels en parallèle
+                tasks = [read_page_semantic(idx) for idx in vision_indices_for_semantic]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Collecter les résultats
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[ExtractionPipelineV2] Vision Semantic task exception: {result}")
+                        continue
+
+                    page_idx, semantic_result, error = result
+                    if semantic_result is not None:
+                        vision_semantic_results[page_idx] = semantic_result
+                        metrics.vision_semantic_pages += 1
+
+                        # Compter par origin
+                        if semantic_result.text_origin == TextOrigin.VISION_SEMANTIC:
+                            metrics.vision_semantic_success += 1
+                        elif semantic_result.text_origin == TextOrigin.OCR:
+                            metrics.vision_semantic_fallback_ocr += 1
+                        else:
+                            metrics.vision_semantic_fallback_placeholder += 1
+
+                metrics.vision_semantic_time_ms = (time.time() - vision_semantic_start) * 1000
+
+                logger.info(
+                    f"[ExtractionPipelineV2] Vision Semantic complete in {metrics.vision_semantic_time_ms:.0f}ms: "
+                    f"{metrics.vision_semantic_success} success, "
+                    f"{metrics.vision_semantic_fallback_ocr} OCR fallback, "
+                    f"{metrics.vision_semantic_fallback_placeholder} placeholder"
+                )
+
         # === ETAPE 4: Merge ===
         merged_pages = self._merger.merge_document(
             units=units,
@@ -708,6 +816,29 @@ class ExtractionPipelineV2:
                     f"continuing without structural graph"
                 )
 
+        # === ETAPE 7.25: Enrichir chunks FIGURE_TEXT avec Vision Semantic ===
+        # Applique le texte sémantique aux chunks FIGURE_TEXT (Invariant I1: jamais vide)
+        if structural_graph_result and vision_semantic_results:
+            from knowbase.structural.models import ChunkKind
+
+            enriched_count = 0
+            for chunk in structural_graph_result.chunks:
+                if chunk.kind == ChunkKind.FIGURE_TEXT and not chunk.text.strip():
+                    # Chercher le VisionSemanticResult pour cette page
+                    semantic_result = vision_semantic_results.get(chunk.page_no)
+                    if semantic_result and semantic_result.semantic_text:
+                        chunk.text = semantic_result.semantic_text
+                        # Ajouter la traçabilité (text_origin)
+                        if hasattr(chunk, 'text_origin'):
+                            chunk.text_origin = semantic_result.text_origin
+                        enriched_count += 1
+
+            if enriched_count > 0:
+                logger.info(
+                    f"[ExtractionPipelineV2] Enriched {enriched_count} FIGURE_TEXT chunks "
+                    f"with Vision Semantic text"
+                )
+
         # === ETAPE 7.5: Pass 0.5 - Linguistic Coreference Resolution ===
         coref_result: Optional[Pass05Result] = None
 
@@ -778,8 +909,25 @@ class ExtractionPipelineV2:
                     "item_ids": c.item_ids,
                     "is_relation_bearing": c.is_relation_bearing,
                     "doc_version_id": c.doc_version_id,
+                    "text_origin": c.text_origin.value if c.text_origin else None,
                 }
                 for c in structural_graph_result.chunks
+            ]
+
+            # Sérialiser les DocItems pour usage par Pipeline V2 (Pass 1 Anchor Resolution)
+            serialized_items = [
+                {
+                    "item_id": item.item_id,
+                    "item_type": item.item_type,
+                    "text": item.text,
+                    "page_no": item.page_no,
+                    "section_id": item.section_id,
+                    "charspan_start": item.charspan_start,
+                    "charspan_end": item.charspan_end,
+                    "reading_order_index": item.reading_order_index,
+                    "doc_version_id": item.doc_version_id,
+                }
+                for item in structural_graph_result.doc_items
             ]
 
             result_stats["structural_graph"] = {
@@ -792,6 +940,8 @@ class ExtractionPipelineV2:
                 "chunk_analysis": structural_graph_result.chunk_analysis,
                 # Chunks sérialisés pour usage par osmose_agentique
                 "chunks": serialized_chunks,
+                # DocItems sérialisés pour Pipeline V2 Pass 1 Anchor Resolution
+                "items": serialized_items,
             }
 
         # Ajouter les résultats Pass 0.5 (Linguistic Coreference) si disponibles
@@ -805,6 +955,22 @@ class ExtractionPipelineV2:
                 "engine_used": coref_result.engine_used,
                 "processing_time_ms": coref_result.processing_time_ms,
                 "skipped": coref_result.skipped,
+            }
+
+        # Ajouter les résultats Vision Semantic (Pipeline V2)
+        if vision_semantic_results:
+            result_stats["vision_semantic"] = {
+                "pages_processed": len(vision_semantic_results),
+                "pages": {
+                    page_no: {
+                        "text_origin": res.text_origin.value,
+                        "diagram_type": res.diagram_type,
+                        "confidence": res.confidence,
+                        "key_entities": res.key_entities,
+                        "semantic_text_preview": res.semantic_text[:200] if res.semantic_text else "",
+                    }
+                    for page_no, res in vision_semantic_results.items()
+                },
             }
 
         result = ExtractionResult(

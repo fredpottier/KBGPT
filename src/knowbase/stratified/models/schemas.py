@@ -129,6 +129,7 @@ class DocItem(BaseModel):
 class Subject(BaseModel):
     """Sujet sémantique du document (1 par doc)."""
     subject_id: str
+    name: Optional[str] = None  # Nom court du sujet (ex: "SAP S/4HANA Upgrade Guide")
     text: str  # Résumé 1 phrase
     structure: DocumentStructure
     language: str
@@ -147,6 +148,7 @@ class Concept(BaseModel):
     concept_id: str
     theme_id: str
     name: str
+    definition: Optional[str] = None  # Définition courte du concept
     role: ConceptRole = ConceptRole.STANDARD
     variants: list[str] = Field(default_factory=list)
     lex_key: Optional[str] = None  # Clé lexicale normalisée

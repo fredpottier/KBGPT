@@ -3,13 +3,13 @@
 /**
  * Affichage complet d'une reponse instrumentee - OSMOSE Assertion-Centric.
  *
- * Assemble tous les composants:
+ * Mode simplifie (2026-01):
  * - InstrumentedToggle pour switcher entre mode simple et instrumented
  * - TruthContractBadge pour le resume de verite
- * - AssertionRenderer pour chaque assertion
- * - ProofTicketList pour les preuves cles
+ * - AssertionRenderer pour chaque assertion (coloration texte uniquement)
+ * - Open Points visibles en mode instrumented
  *
- * Gere la transition animee entre les deux modes.
+ * Supprime: ProofTicketList (trop verbeux)
  */
 
 import { useState, useCallback } from 'react'
@@ -25,7 +25,6 @@ import type { InstrumentedAnswer, InstrumentationMode, SearchChunk } from '@/typ
 import InstrumentedToggle from './InstrumentedToggle'
 import TruthContractBadge from './TruthContractBadge'
 import AssertionRenderer from './AssertionRenderer'
-import { ProofTicketList } from './ProofTicketCard'
 import CopyButton from '@/components/ui/CopyButton'
 
 interface InstrumentedAnswerDisplayProps {
@@ -115,7 +114,7 @@ export default function InstrumentedAnswerDisplay({
             className="assertions-container"
             transition="all 0.3s ease-in-out"
           >
-            {answer.assertions.map((assertion, index) => (
+            {answer.assertions.map((assertion) => (
               <AssertionRenderer
                 key={assertion.id}
                 assertion={assertion}
@@ -152,16 +151,6 @@ export default function InstrumentedAnswerDisplay({
           )}
         </Box>
 
-        {/* Proof Tickets (mode instrumented uniquement) */}
-        <Collapse in={isInstrumented} animateOpacity>
-          <Box>
-            <ProofTicketList
-              tickets={answer.proof_tickets}
-              sources={answer.sources}
-              onSourceClick={handleSourceClick}
-            />
-          </Box>
-        </Collapse>
       </VStack>
     </Box>
   )

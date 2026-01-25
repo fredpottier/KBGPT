@@ -21,6 +21,21 @@ from knowbase.stratified.pass0 import (
     build_structural_graph_v2,
 )
 
+# Pass 1 - Lecture Stratifiée
+from knowbase.stratified.pass1 import (
+    Pass1OrchestratorV2,
+    run_pass1,
+    DocumentAnalyzerV2,
+    ConceptIdentifierV2,
+    AssertionExtractorV2,
+    AnchorResolverV2,
+    RawAssertion,
+    ConceptLink,
+    PromotionResult,
+    PROMOTION_POLICY,
+    build_chunk_to_docitem_mapping,
+)
+
 # Models
 from knowbase.stratified.models import (
     # Enums
@@ -52,6 +67,18 @@ __all__ = [
     "Pass0Adapter",
     "Pass0Result",
     "build_structural_graph_v2",
+    # Pass 1
+    "Pass1OrchestratorV2",
+    "run_pass1",
+    "DocumentAnalyzerV2",
+    "ConceptIdentifierV2",
+    "AssertionExtractorV2",
+    "AnchorResolverV2",
+    "RawAssertion",
+    "ConceptLink",
+    "PromotionResult",
+    "PROMOTION_POLICY",
+    "build_chunk_to_docitem_mapping",
     # Enums
     "DocumentStructure",
     "ConceptRole",

@@ -1,0 +1,225 @@
+# OSMOSE Pipeline V2 - Prompts Pass 1
+# =====================================
+# Ref: doc/ongoing/ARCH_STRATIFIED_PIPELINE_V2.md
+# Date: 2026-01-24
+
+# ============================================================================
+# PHASE 1.1: Document Analysis
+# ============================================================================
+
+document_analysis:
+  system: |
+    Tu es un expert en analyse documentaire pour OSMOSE.
+    Tu dois analyser le document et déterminer:
+
+    1. Son SUJET principal (résumé en 1 phrase concise)
+    2. Sa STRUCTURE de dépendance:
+       - CENTRAL: Le document dépend d'un contexte central (ex: guide produit SAP, documentation technique spécifique)
+       - TRANSVERSAL: Le document est une référence indépendante applicable dans plusieurs contextes (ex: réglementation GDPR, norme ISO)
+       - CONTEXTUAL: Le document combine plusieurs contextes ou est de nature mixte
+    3. Ses THEMES majeurs (5-10 maximum, pas plus)
+    4. La LANGUE du document (fr, en, de)
+
+    RÈGLES IMPORTANTES:
+    - Sois FRUGAL: maximum 10 thèmes
+    - Le sujet doit être en 1 phrase, pas un paragraphe
+    - La justification de la structure doit être brève mais précise
+
+  user: |
+    Analyse ce document:
+
+    TITRE: {doc_title}
+
+    TABLE DES MATIÈRES:
+    {toc}
+
+    CONTENU (premiers {char_limit} caractères):
+    {content_preview}
+
+    Réponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "subject_name": "Nom court du sujet (5-10 mots max)",
+      "subject": "Résumé du sujet en 1 phrase",
+      "structure": {{
+        "chosen": "CENTRAL|TRANSVERSAL|CONTEXTUAL",
+        "justification": "Pourquoi cette structure (1-2 phrases)"
+      }},
+      "themes": [
+        "Thème 1",
+        "Thème 2",
+        "Thème 3"
+      ],
+      "language": "fr|en|de"
+    }}
+    ```
+
+# ============================================================================
+# PHASE 1.2: Concept Identification
+# ============================================================================
+
+concept_identification:
+  system: |
+    Tu es un expert en extraction de concepts pour OSMOSE.
+    Tu dois identifier les CONCEPTS CLÉS d'un document de manière FRUGALE.
+
+    RÈGLES DE FRUGALITÉ (STRICTES):
+    - Maximum {max_concepts} concepts par document (invariant V2-007)
+    - Chaque concept doit être SIGNIFICATIF et DISTINCT
+    - Un concept doit avoir plusieurs mentions ou une importance structurelle
+
+    TERMES À REFUSER (avec raison explicite):
+    - Termes génériques: "système", "méthode", "processus", "solution", "approche"
+    - Termes trop locaux: mentionnés une seule fois, sans importance structurelle
+    - Acronymes non définis dans le document
+    - Termes ambigus ayant plusieurs sens dans le document
+
+    RÔLES des concepts:
+    - CENTRAL: Concept au cœur du document, tout tourne autour de lui
+    - STANDARD: Concept important mais pas central, contribue au sujet
+    - CONTEXTUAL: Concept de contexte, mentionné mais pas le focus principal
+
+    Tu dois aussi identifier les VARIANTES de chaque concept:
+    - Synonymes (ex: "GDPR" = "RGPD" = "General Data Protection Regulation")
+    - Traductions (ex: "consentement" = "consent")
+    - Abréviations (ex: "DPO" = "Data Protection Officer")
+
+  user: |
+    Identifie les concepts de ce document.
+
+    SUJET: {subject}
+    STRUCTURE: {structure}
+    LANGUE: {language}
+
+    THÈMES IDENTIFIÉS:
+    {themes}
+
+    CONTENU (extrait):
+    {content}
+
+    ATTENTION: Maximum {max_concepts} concepts! Sois très sélectif.
+
+    Réponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "concepts": [
+        {{
+          "name": "Nom du concept",
+          "definition": "Définition courte (1-2 phrases) expliquant ce qu'est ce concept dans le contexte du document",
+          "role": "CENTRAL|STANDARD|CONTEXTUAL",
+          "theme": "Nom du thème rattaché (doit correspondre à un thème ci-dessus)",
+          "variants": ["Variante 1", "Variante EN"]
+        }}
+      ],
+      "refused_terms": [
+        {{
+          "term": "Terme refusé",
+          "reason": "Raison précise du refus"
+        }}
+      ]
+    }}
+    ```
+
+# ============================================================================
+# PHASE 1.3: Assertion Extraction
+# ============================================================================
+
+assertion_extraction:
+  system: |
+    Tu es un expert en extraction d'assertions pour OSMOSE.
+    Une ASSERTION est une phrase ou segment de texte qui porte une CONNAISSANCE:
+
+    TYPES D'ASSERTIONS:
+    - definitional: Définit ce qu'est quelque chose ("X est défini comme...")
+    - prescriptive: Obligation, règle ("X doit...", "X shall...")
+    - factual: Information vérifiable ("X contient...", "X a été créé en...")
+    - permissive: Possibilité, option ("X peut...", "X may...")
+    - conditional: Condition ("Si X alors Y", "When X...")
+    - causal: Cause/conséquence ("X entraîne Y", "X leads to Y")
+    - procedural: Étapes, processus ("Étape 1: ...", "First, ...")
+    - comparative: Comparaison ("X est meilleur que Y")
+
+    RÈGLES:
+    - Retourne les positions EXACTES dans le texte (start_char, end_char)
+    - Détecte la LANGUE de chaque assertion
+    - La confiance doit refléter la clarté de l'assertion
+    - Ignore les assertions triviales ou répétitives
+
+  user: |
+    Extrait les assertions de ce texte.
+
+    CHUNK_ID: {chunk_id}
+    LANGUE ATTENDUE: {language_hint}
+
+    TEXTE:
+    {text}
+
+    Réponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "assertions": [
+        {{
+          "text": "Le texte EXACT de l'assertion (copié du texte)",
+          "type": "definitional|factual|prescriptive|permissive|conditional|causal|procedural|comparative",
+          "start_char": 145,
+          "end_char": 287,
+          "confidence": 0.9,
+          "language": "fr|en|de"
+        }}
+      ]
+    }}
+    ```
+
+# ============================================================================
+# PHASE 1.3: Semantic Linking
+# ============================================================================
+
+semantic_linking:
+  system: |
+    Tu es un expert en raisonnement sémantique pour OSMOSE.
+    Tu dois déterminer quelles ASSERTIONS apportent de la connaissance sur quels CONCEPTS.
+
+    IMPORTANT - Ce n'est PAS un matching lexical:
+    - Une assertion peut concerner un concept SANS le mentionner explicitement
+    - Un concept en français peut être lié à une assertion en anglais (et vice versa)
+    - Le lien doit être SÉMANTIQUE (basé sur le sens), pas lexical (basé sur les mots)
+
+    TYPES DE LIENS:
+    - defines: L'assertion DÉFINIT le concept (définition explicite)
+    - describes: L'assertion DÉCRIT une propriété ou caractéristique du concept
+    - constrains: L'assertion IMPOSE une contrainte ou limitation sur le concept
+    - enables: L'assertion dit ce que le concept PERMET ou rend possible
+    - conditions: L'assertion spécifie une CONDITION liée au concept
+    - causes: L'assertion décrit un EFFET ou conséquence du concept
+
+    Tu DOIS justifier chaque lien de manière concise mais précise.
+
+  user: |
+    Établis les liens sémantiques entre ces assertions et ces concepts.
+
+    ASSERTIONS (à lier):
+    {assertions}
+
+    CONCEPTS (cibles):
+    {concepts}
+
+    Réponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "links": [
+        {{
+          "assertion_id": "assert_abc123",
+          "concept_id": "concept_xyz",
+          "link_type": "defines|describes|constrains|enables|conditions|causes",
+          "justification": "Pourquoi cette assertion concerne ce concept (1 phrase)",
+          "confidence": 0.85
+        }}
+      ],
+      "unlinked_assertions": [
+        {{
+          "assertion_id": "assert_def456",
+          "reason": "Cette assertion ne concerne aucun des concepts identifiés car..."
+        }}
+      ]
+    }}
+    ```

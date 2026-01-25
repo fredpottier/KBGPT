@@ -320,7 +320,7 @@ extraction_v2:
   # Cache
   cache:
     enabled: true
-    version: "v4"  # v4: Vision Semantic Integration
+    version: "v5"  # v5: DocItems sérialisés pour Pipeline V2
 
 
 # ===============================================================================

@@ -35,6 +35,7 @@ import {
   FiGitBranch,
   FiTag,
   FiShield,
+  FiZap,
 } from 'react-icons/fi'
 
 // Configuration des menus
@@ -69,6 +70,7 @@ const navigationConfig = {
       { label: 'Domain Context', href: '/admin/domain-context', icon: FiGlobe },
       { label: 'Profil Visibilite', href: '/admin/visibility-profile', icon: FiSliders },
       { label: 'Enrichissement KG', href: '/admin/enrichment', icon: FiActivity },
+      { label: 'Pipeline V2', href: '/admin/enrichment-v2', icon: FiZap },
       { label: 'Governance / Tensions', href: '/admin/governance', icon: FiShield },
       { label: 'Markers', href: '/admin/markers', icon: FiTag },
       { label: 'Mode Burst (Spot)', href: '/admin/burst', icon: FiCloud },

@@ -1,0 +1,335 @@
+"""
+OSMOSE Pipeline V2 - Phase 1.1 Document Analyzer
+=================================================
+Ref: doc/ongoing/ARCH_STRATIFIED_PIPELINE_V2.md
+
+Analyse structurelle du document:
+- Détecte le SUJET (résumé 1 phrase)
+- Détermine la STRUCTURE (CENTRAL, TRANSVERSAL, CONTEXTUAL)
+- Identifie les THEMES majeurs
+
+Adapté du POC: poc/extractors/document_analyzer.py
+"""
+
+import json
+import re
+import logging
+from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+import yaml
+
+from knowbase.stratified.models import (
+    DocumentStructure,
+    Subject,
+    Theme,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class DocumentAnalyzerV2:
+    """
+    Analyseur de document pour Pipeline V2.
+
+    Détecte:
+    - Sujet principal (résumé 1 phrase)
+    - Structure de dépendance (CENTRAL/TRANSVERSAL/CONTEXTUAL)
+    - Thèmes majeurs (hiérarchie)
+
+    IMPORTANT: Pas de fallback silencieux - erreur explicite si LLM absent.
+    """
+
+    # Seuil pour détecter un document HOSTILE (trop de sujets)
+    HOSTILE_SUBJECT_THRESHOLD = 10
+
+    def __init__(
+        self,
+        llm_client=None,
+        prompts_path: Optional[Path] = None,
+        allow_fallback: bool = False
+    ):
+        """
+        Args:
+            llm_client: Client LLM compatible (generate method)
+            prompts_path: Chemin vers prompts YAML
+            allow_fallback: Si True, autorise le fallback heuristique (test only)
+        """
+        self.llm_client = llm_client
+        self.prompts = self._load_prompts(prompts_path)
+        self.allow_fallback = allow_fallback
+
+    def _load_prompts(self, prompts_path: Optional[Path]) -> Dict:
+        """Charge les prompts depuis le fichier YAML."""
+        if prompts_path is None:
+            prompts_path = Path(__file__).parent.parent / "prompts" / "pass1_prompts.yaml"
+
+        if not prompts_path.exists():
+            logger.warning(f"Prompts file not found: {prompts_path}")
+            return self._default_prompts()
+
+        with open(prompts_path, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f) or {}
+
+    def _default_prompts(self) -> Dict:
+        """Prompts par défaut si fichier absent."""
+        return {
+            "document_analysis": {
+                "system": self._default_system_prompt(),
+                "user": self._default_user_prompt()
+            }
+        }
+
+    def analyze(
+        self,
+        doc_id: str,
+        doc_title: str,
+        content: str,
+        toc: Optional[str] = None,
+        char_limit: int = 4000
+    ) -> Tuple[Subject, List[Theme], bool]:
+        """
+        Analyse un document et retourne sa structure sémantique.
+
+        Args:
+            doc_id: Identifiant du document
+            doc_title: Titre du document
+            content: Contenu textuel complet
+            toc: Table des matières (si disponible)
+            char_limit: Limite de caractères pour le preview
+
+        Returns:
+            Tuple[Subject, List[Theme], is_hostile]
+            - Subject: sujet avec structure de dépendance
+            - List[Theme]: thèmes identifiés
+            - is_hostile: True si document détecté comme HOSTILE
+        """
+        # Préparer le preview
+        content_preview = content[:char_limit]
+        toc_text = toc if toc else "Non disponible"
+
+        # Construire le prompt
+        prompt_config = self.prompts.get("document_analysis", {})
+        system_prompt = prompt_config.get("system", self._default_system_prompt())
+        user_template = prompt_config.get("user", self._default_user_prompt())
+
+        user_prompt = user_template.format(
+            doc_title=doc_title,
+            char_limit=char_limit,
+            content_preview=content_preview,
+            toc=toc_text
+        )
+
+        # Appeler le LLM
+        if self.llm_client:
+            response = self.llm_client.generate(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=1500
+            )
+            result = self._parse_response(response, doc_id)
+        elif self.allow_fallback:
+            logger.warning("[OSMOSE:Pass1:1.1] Mode fallback activé - résultats non fiables")
+            result = self._fallback_analysis(doc_id, doc_title, content)
+        else:
+            raise RuntimeError(
+                "LLM non disponible et fallback non autorisé. "
+                "Utilisez allow_fallback=True uniquement pour les tests."
+            )
+
+        subject, themes = result
+
+        # Détection HOSTILE: trop de thèmes = document mixte
+        is_hostile = len(themes) > self.HOSTILE_SUBJECT_THRESHOLD
+        if is_hostile:
+            logger.warning(
+                f"[OSMOSE:Pass1:1.1] Document HOSTILE détecté: "
+                f"{len(themes)} thèmes (seuil: {self.HOSTILE_SUBJECT_THRESHOLD})"
+            )
+
+        return subject, themes, is_hostile
+
+    def _parse_response(self, response: str, doc_id: str) -> Tuple[Subject, List[Theme]]:
+        """Parse la réponse JSON du LLM."""
+        # Extraire le JSON du bloc de code
+        json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            json_str = response
+
+        try:
+            data = json.loads(json_str)
+            return self._validate_and_convert(data, doc_id)
+        except json.JSONDecodeError as e:
+            logger.error(f"Réponse LLM invalide: {e}")
+            raise ValueError(f"Réponse LLM invalide: {e}\nRéponse: {response[:500]}")
+
+    def _validate_and_convert(self, data: Dict, doc_id: str) -> Tuple[Subject, List[Theme]]:
+        """Valide et convertit la réponse en objets Pydantic V2."""
+        # Structure du document
+        structure_data = data.get("structure", {})
+        chosen = structure_data.get("chosen", "TRANSVERSAL")
+
+        try:
+            structure = DocumentStructure(chosen)
+        except ValueError:
+            structure = DocumentStructure.TRANSVERSAL
+
+        # Créer le Subject
+        # Extraire le nom court (si fourni) ou le dériver du subject text
+        subject_text = data.get("subject", "Sujet non identifié")
+        subject_name = data.get("subject_name") or data.get("name")
+        if not subject_name and subject_text:
+            # Dériver un nom court du texte (premiers mots significatifs)
+            subject_name = subject_text.split(",")[0].split(".")[0][:80]
+
+        subject = Subject(
+            subject_id=f"subj_{doc_id}",
+            name=subject_name,
+            text=subject_text,
+            structure=structure,
+            language=data.get("language", "fr"),
+            justification=structure_data.get("justification")
+        )
+
+        # Créer les Themes
+        themes = []
+        for idx, theme_data in enumerate(data.get("themes", [])):
+            theme_name = theme_data if isinstance(theme_data, str) else theme_data.get("name", f"Theme_{idx}")
+            theme = Theme(
+                theme_id=f"theme_{doc_id}_{idx}",
+                name=theme_name,
+                scoped_to_sections=[]  # Sera rempli après Pass 0
+            )
+            themes.append(theme)
+
+        return subject, themes
+
+    def _fallback_analysis(
+        self,
+        doc_id: str,
+        doc_title: str,
+        content: str
+    ) -> Tuple[Subject, List[Theme]]:
+        """Analyse de secours sans LLM (heuristiques simples)."""
+        title_lower = doc_title.lower()
+
+        # Détecter structure par mots-clés
+        if any(kw in title_lower for kw in ["guide", "product", "solution", "sap"]):
+            structure = DocumentStructure.CENTRAL
+            justification = "Document centré sur un produit/solution spécifique"
+        elif any(kw in title_lower for kw in ["regulation", "gdpr", "cnil", "standard", "norme"]):
+            structure = DocumentStructure.TRANSVERSAL
+            justification = "Document de référence applicable indépendamment"
+        else:
+            structure = DocumentStructure.CONTEXTUAL
+            justification = "Structure par défaut pour document mixte"
+
+        # Détecter la langue
+        language = self._detect_language(content)
+
+        subject = Subject(
+            subject_id=f"subj_{doc_id}",
+            name=doc_title,  # Utiliser le titre comme nom en fallback
+            text=f"Analyse de {doc_title}",
+            structure=structure,
+            language=language,
+            justification=justification
+        )
+
+        # Thèmes par défaut
+        themes = [
+            Theme(theme_id=f"theme_{doc_id}_0", name="Introduction"),
+            Theme(theme_id=f"theme_{doc_id}_1", name="Contenu Principal"),
+            Theme(theme_id=f"theme_{doc_id}_2", name="Conclusion"),
+        ]
+
+        return subject, themes
+
+    def _detect_language(self, text: str) -> str:
+        """Détecte la langue par heuristique."""
+        sample = text[:5000].lower()
+
+        fr_words = ['le', 'la', 'les', 'de', 'du', 'des', 'est', 'sont', 'pour', 'avec', 'dans']
+        en_words = ['the', 'is', 'are', 'for', 'with', 'in', 'to', 'of', 'and', 'that']
+        de_words = ['der', 'die', 'das', 'und', 'ist', 'sind', 'mit', 'von', 'fur', 'auf']
+
+        words = sample.split()
+        fr_count = sum(1 for w in words if w in fr_words)
+        en_count = sum(1 for w in words if w in en_words)
+        de_count = sum(1 for w in words if w in de_words)
+
+        if fr_count > en_count and fr_count > de_count:
+            return "fr"
+        elif de_count > en_count:
+            return "de"
+        return "en"
+
+    def extract_toc_from_content(self, content: str) -> Optional[str]:
+        """Extrait une table des matières du contenu."""
+        toc_patterns = [
+            r'(?:table\s+of\s+contents?|sommaire|table\s+des\s+mati[eè]res)',
+            r'^\d+\.\s+.+(?:\.\.\.|\.{3,}|\s+\d+)$',
+        ]
+
+        lines = content.split('\n')
+        toc_lines = []
+        in_toc = False
+
+        for line in lines:
+            line_stripped = line.strip()
+            if not line_stripped:
+                if in_toc and len(toc_lines) > 3:
+                    break
+                continue
+
+            if re.search(toc_patterns[0], line_stripped, re.IGNORECASE):
+                in_toc = True
+                continue
+
+            if in_toc or re.match(r'^\d+\.', line_stripped):
+                if re.match(r'^[\d\.]+\s+\w', line_stripped):
+                    toc_lines.append(line_stripped)
+                    in_toc = True
+
+        return '\n'.join(toc_lines) if toc_lines else None
+
+    def _default_system_prompt(self) -> str:
+        return """Tu es un expert en analyse documentaire pour OSMOSE.
+Tu dois analyser le document et déterminer:
+1. Son SUJET principal (résumé en 1 phrase)
+2. Sa STRUCTURE de dépendance:
+   - CENTRAL: Le document dépend d'un contexte central (ex: guide produit SAP)
+   - TRANSVERSAL: Le document est une référence indépendante (ex: réglementation GDPR)
+   - CONTEXTUAL: Le document combine plusieurs contextes
+3. Ses THEMES majeurs (5-10 maximum)
+4. La LANGUE du document (fr, en, de)
+
+IMPORTANT: Sois FRUGAL. Maximum 10 thèmes."""
+
+    def _default_user_prompt(self) -> str:
+        return """Analyse ce document:
+
+TITRE: {doc_title}
+
+TABLE DES MATIÈRES:
+{toc}
+
+CONTENU (premiers {char_limit} caractères):
+{content_preview}
+
+Réponds UNIQUEMENT avec ce JSON:
+```json
+{{
+  "subject": "Résumé du sujet en 1 phrase",
+  "structure": {{
+    "chosen": "CENTRAL|TRANSVERSAL|CONTEXTUAL",
+    "justification": "Pourquoi cette structure"
+  }},
+  "themes": [
+    "Thème 1",
+    "Thème 2"
+  ],
+  "language": "fr|en|de"
+}}
+```"""

@@ -64,6 +64,7 @@ services:
       - ./src:/app/src
       - ./config:/app/config
       - ./tests:/app/tests
+      - ./poc:/app/poc
     networks:
       - knowbase_net
     working_dir: /app
@@ -126,6 +127,7 @@ services:
       - ./src:/app/src
       - ./config:/app/config
       - ./tests:/app/tests
+      - ./poc:/app/poc
     networks:
       - knowbase_net
     working_dir: /app
