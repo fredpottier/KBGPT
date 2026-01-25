@@ -51,6 +51,10 @@ assertion_synthesis:
 
     Generate an **instrumented answer** as a JSON object with ordered assertions.
 
+    **IMPORTANT**: Only include assertions that DIRECTLY answer the question above.
+    Evidence about the same product/topic but unrelated to the question should be IGNORED.
+    For example, if asked about "monitoring options", don't include info about firewalls, HA, or security unless they relate to monitoring.
+
     ### Output Format (JSON only)
 
     ```json
@@ -81,6 +85,12 @@ assertion_synthesis:
 
     ### Rules
 
+    0. **CRITICAL - Relevance Filter**:
+       - ONLY generate assertions that DIRECTLY answer the question
+       - IGNORE evidence that is off-topic or tangentially related
+       - If a source mentions the same product/topic but doesn't address the question, skip it
+       - Better to have 3 relevant assertions than 10 irrelevant ones
+
     1. **FACT**: A claim explicitly supported by at least one excerpt from the evidence.
        - MUST include `evidence_used` with source IDs (S1, S2, etc.)
        - `derived_from` is empty
@@ -91,15 +101,18 @@ assertion_synthesis:
        - `evidence_used` is empty
        - `notes` explains the inference in one sentence
 
-    3. **Assertion count**: Generate between 6 and 14 assertions total.
-       - Each assertion = ONE logical claim (not a grammatical sentence)
-       - A paragraph may become 1-3 assertions max
+    3. **Assertion count**: Generate between 3 and 10 assertions total.
+       - Each assertion = ONE logical claim that answers the question
+       - Quality over quantity: fewer relevant assertions > many off-topic ones
+       - If evidence doesn't answer the question well, generate only 2-3 assertions + open_points
 
     4. **Markdown in text_md**:
        - Allowed: **bold**, *italic*, simple lists, links
        - Forbidden: headings (#), code blocks (```), tables
 
     5. **Open points**: List questions or information gaps that evidence could not answer.
+       - If most evidence is off-topic, add: "Limited relevant information found for this specific question."
+       - Be honest about what the sources don't cover
 
     6. **Language**: Respond in the same language as the question ({{ language | default('fr') }}).
 
@@ -475,3 +488,63 @@ families:
         ```
 
         Return **only the JSON object**, no extra text.
+
+# =============================================================================
+# MVP V1 - PASS 1.3 INFORMATION-FIRST EXTRACTION
+# =============================================================================
+#
+# Prompt pour extraction d'assertions avec exact_quote obligatoire.
+# Utilisé par: src/knowbase/stratified/pass1/assertion_extractor.py
+# Reference: SPEC_TECHNIQUE_MVP_V1_USAGE_B.md
+# =============================================================================
+
+pass1_3_mvp_v1:
+  id: "pass1_3_mvp_v1"
+  system: |
+    Tu es un extracteur de faits documentaires. Tu extrais TOUTES les assertions
+    factuelles explicites du texte, sans interprétation ni inférence.
+
+    RÈGLES ABSOLUES:
+    1. Citation exacte OBLIGATOIRE (exact_quote = verbatim du texte)
+    2. Position OBLIGATOIRE (page, paragraphe si visible)
+    3. Ne JAMAIS rejeter une assertion pour "pas de concept"
+    4. Ne JAMAIS inférer ce qui n'est pas explicitement écrit
+
+    TYPES:
+    - PRESCRIPTIVE: Obligations ("must", "shall", "required")
+    - DEFINITIONAL: Définitions ("is", "uses", "provides")
+    - CAUSAL: Cause-effet ("because", "therefore")
+    - COMPARATIVE: Comparaisons ("more than", "unlike")
+
+    RHETORICAL ROLES:
+    - fact: Assertion factuelle
+    - example: Illustration (PAS de ClaimKey)
+    - definition: Définition de terme
+    - instruction: Procédure
+    - claim: Affirmation non vérifiée
+    - caution: Avertissement
+
+  user: |
+    Document: {{ document_title }}
+    Page: {{ page_number }}
+    Context: {{ doc_context_frame }}
+
+    Texte:
+    """
+    {{ chunk_text }}
+    """
+
+    Extrais TOUTES les assertions factuelles. JSON:
+    {
+      "assertions": [
+        {
+          "text": "assertion claire",
+          "exact_quote": "verbatim exact",
+          "type": "PRESCRIPTIVE|DEFINITIONAL|CAUSAL|COMPARATIVE",
+          "rhetorical_role": "fact|example|definition|instruction|claim|caution",
+          "span": {"page": int, "paragraph": int},
+          "context_override": {"edition": "", "region": ""},
+          "confidence": 0.0-1.0
+        }
+      ]
+    }

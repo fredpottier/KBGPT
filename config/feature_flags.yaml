@@ -99,6 +99,35 @@ phase_1_8:
 
 
 # ===============================================================================
+# Stratified Pipeline V2 - Lecture Stratifiée
+# ===============================================================================
+# ADR: doc/ongoing/ARCH_STRATIFIED_PIPELINE_V2.md
+# Objectif: Réduire nodes de ~4700/doc à ~195/doc via lecture stratifiée
+
+stratified_pipeline_v2:
+  # Global toggle - Active le nouveau pipeline
+  enabled: true  # ACTIVÉ - Pipeline V2 prêt pour re-processing
+
+  # API Version
+  # - false: Endpoints legacy actifs
+  # - true: Endpoints V2 deviennent principaux
+  use_v2_endpoints: false
+
+  # Frugality Guards
+  max_concepts_per_document: 15
+  max_concepts_hostile: 5
+  max_relations_per_concept: 3
+
+  # Promotion Policy
+  promotion_threshold: 0.7  # Confidence minimum pour promotion
+  abstention_log: true      # Loguer les assertions abstenues
+
+  # Pass 3 Configuration
+  consolidation_similarity_threshold: 0.85
+  enable_llm_validation: true
+
+
+# ===============================================================================
 # Phase 2 - Hybrid Anchor Model Architecture
 # ===============================================================================
 # ADR: doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md
@@ -291,7 +320,7 @@ extraction_v2:
   # Cache
   cache:
     enabled: true
-    version: "v2"
+    version: "v4"  # v4: Vision Semantic Integration
 
 
 # ===============================================================================
