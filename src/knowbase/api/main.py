@@ -14,6 +14,10 @@ from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
 from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers
+# Pipeline V2 - Stratified Reading Model
+from knowbase.stratified.api import router as stratified_v2_router
+# MVP V1 - Challenge de Texte (Usage B)
+from knowbase.api.routers import challenge as challenge_router
 # living_ontology désactivé - génère trop de bruit en mode domain-agnostic (voir OSMOSE_STATUS_ACTUEL.md)
 
 
@@ -247,6 +251,12 @@ def create_app() -> FastAPI:
     app.include_router(navigation.router, prefix="/api")  # 🧭 Navigation Layer - Exploration corpus-level (ADR)
     app.include_router(analytics.router, prefix="/api")  # 📊 Import Analytics - Dashboard analyse imports V2
     app.include_router(markers.router, prefix="/api")  # 🏷️ Markers API - Liste markers pour diff queries (PR3)
+
+    # 🌊 OSMOSE Pipeline V2 - Stratified Reading Model (Phase 2)
+    app.include_router(stratified_v2_router, prefix="/api")  # Endpoints: /api/v2/ingest, /api/v2/enrich, etc.
+
+    # 🌊 OSMOSE MVP V1 - Challenge de Texte (Usage B)
+    app.include_router(challenge_router.router)  # Endpoint: /api/v2/challenge
 
     return app
 

@@ -1,4 +1,4 @@
-"""OSMOSE Pipeline V2 - Modèles Pydantic."""
+"""OSMOSE Pipeline V2 - Modèles Pydantic et Dataclasses."""
 
 from .schemas import (
     # Enums
@@ -28,7 +28,33 @@ from .schemas import (
     CanonicalTheme,
 )
 
+# MVP V1 - Nouveaux modèles pour Usage B (Challenge de Texte)
+from .information import (
+    InformationMVP,
+    InformationType,
+    RhetoricalRole,
+    PromotionStatus,
+    ValueKind,
+    ValueComparable,
+    InheritanceMode,
+    ValueInfo,
+    SpanInfo,
+    ContextInfo,
+)
+
+from .claimkey import (
+    ClaimKey,
+    ClaimKeyStatus,
+)
+
+from .contradiction import (
+    Contradiction,
+    ContradictionNature,
+    TensionLevel,
+)
+
 __all__ = [
+    # Existants (schemas.py)
     "DocumentStructure",
     "ConceptRole",
     "AssertionType",
@@ -48,4 +74,20 @@ __all__ = [
     "Pass1Result",
     "CanonicalConcept",
     "CanonicalTheme",
+    # MVP V1 - Nouveaux modèles
+    "InformationMVP",
+    "InformationType",
+    "RhetoricalRole",
+    "PromotionStatus",
+    "ValueKind",
+    "ValueComparable",
+    "InheritanceMode",
+    "ValueInfo",
+    "SpanInfo",
+    "ContextInfo",
+    "ClaimKey",
+    "ClaimKeyStatus",
+    "Contradiction",
+    "ContradictionNature",
+    "TensionLevel",
 ]
