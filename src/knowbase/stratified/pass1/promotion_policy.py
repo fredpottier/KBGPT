@@ -72,7 +72,8 @@ class PromotionPolicy:
         Returns:
             (PromotionStatus, reason)
         """
-        text = assertion.get("text", "").strip()
+        text = assertion.get("text") or ""
+        text = text.strip()
         text_lower = text.lower()
         assertion_type = assertion.get("type")
         rhetorical_role = assertion.get("rhetorical_role")

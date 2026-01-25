@@ -51,16 +51,30 @@ class ClaimKeyPatterns:
             "value_kind": "version"
         },
         {
-            "pattern": r"(encryption|encrypted)\s*(at\s*rest|in\s*transit)",
-            "key_template": "encryption_{match}",
+            "pattern": r"(?:encryption|encrypted)\s*(at\s*rest)",
+            "key_template": "encryption_at_rest",
             "domain": "security.encryption",
-            "question": "Is encryption {match} enabled?",
+            "question": "Is encryption at rest enabled?",
+            "value_kind": "boolean"
+        },
+        {
+            "pattern": r"(?:encryption|encrypted)\s*(in\s*transit)",
+            "key_template": "encryption_in_transit",
+            "domain": "security.encryption",
+            "question": "Is encryption in transit enabled?",
             "value_kind": "boolean"
         },
 
         # Backup / Retention
         {
-            "pattern": r"backup[s]?\s*(daily|weekly|hourly|\d+\s*(hours?|days?))",
+            "pattern": r"backup[s]?\s*(?:are\s*)?(?:performed\s*)?(daily|weekly|hourly|every\s*\d+\s*hours?)",
+            "key_template": "backup_frequency",
+            "domain": "operations.backup",
+            "question": "How often are backups performed?",
+            "value_kind": "enum"
+        },
+        {
+            "pattern": r"(daily|weekly|hourly)\s*backup[s]?",
             "key_template": "backup_frequency",
             "domain": "operations.backup",
             "question": "How often are backups performed?",
@@ -112,7 +126,14 @@ class ClaimKeyPatterns:
 
         # Patch / Update
         {
-            "pattern": r"(?:patch|update)[s]?\s*(?:applied|installed)?\s*(daily|weekly|monthly|quarterly)",
+            "pattern": r"(?:patch(?:es)?|update[s]?)\s*(?:are\s*)?(?:applied|installed)?\s*(daily|weekly|monthly|quarterly)",
+            "key_template": "patch_frequency",
+            "domain": "operations.patching",
+            "question": "How often are patches applied?",
+            "value_kind": "enum"
+        },
+        {
+            "pattern": r"(daily|weekly|monthly|quarterly)\s*(?:patch(?:es)?|update[s]?)",
             "key_template": "patch_frequency",
             "domain": "operations.patching",
             "question": "How often are patches applied?",

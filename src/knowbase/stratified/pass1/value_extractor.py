@@ -139,33 +139,40 @@ class ValueExtractor:
 
     def _extract_boolean(self, text_lower: str, text_raw: str) -> Optional[ValueInfo]:
         """Extrait un booléen."""
+        # IMPORTANT: Vérifier les patterns négatifs EN PREMIER
+        # pour éviter que "not required" matche "required" avant "not required"
+        false_patterns = [
+            r"\bnot\s+required\b",
+            r"\bnot\s+supported\b",
+            r"\bnot\s+enabled\b",
+            r"\bnot\s+mandatory\b",
+            r"\b(disabled|optional|unavailable)\b",
+        ]
         true_patterns = [
             r"\b(enabled|required|mandatory|enforced|supported|available)\b",
             r"\b(must|shall)\b",
             r"\bis\s+(enabled|required|mandatory)\b",
         ]
-        false_patterns = [
-            r"\b(disabled|not required|optional|not supported|unavailable)\b",
-            r"\bnot\s+(enabled|required|mandatory)\b",
-        ]
 
-        for pattern in true_patterns:
-            if re.search(pattern, text_lower):
-                return ValueInfo(
-                    kind=ValueKind.BOOLEAN,
-                    raw="true",
-                    normalized=True,
-                    unit=None,
-                    operator="=",
-                    comparable=ValueComparable.STRICT
-                )
-
+        # Vérifier d'abord les patterns faux (négations)
         for pattern in false_patterns:
             if re.search(pattern, text_lower):
                 return ValueInfo(
                     kind=ValueKind.BOOLEAN,
                     raw="false",
                     normalized=False,
+                    unit=None,
+                    operator="=",
+                    comparable=ValueComparable.STRICT
+                )
+
+        # Puis les patterns vrais
+        for pattern in true_patterns:
+            if re.search(pattern, text_lower):
+                return ValueInfo(
+                    kind=ValueKind.BOOLEAN,
+                    raw="true",
+                    normalized=True,
                     unit=None,
                     operator="=",
                     comparable=ValueComparable.STRICT
