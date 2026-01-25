@@ -46,6 +46,15 @@ from knowbase.stratified.pass1.anchor_resolver import (
     AnchorResolverV2,
     build_chunk_to_docitem_mapping,
 )
+from knowbase.stratified.models.information import (
+    InformationMVP,
+    InformationType,
+    RhetoricalRole,
+    SpanInfo,
+    ValueInfo,
+    ContextInfo,
+    PromotionStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +296,62 @@ class Pass1OrchestratorV2:
             ))
 
         # =====================================================================
+        # PHASE 1.5: Enrichissement MVP V1 (Usage B - Challenge)
+        # =====================================================================
+        logger.info("[OSMOSE:Pass1:1.5] Enrichissement MVP V1...")
+
+        mvp_enrichment_result = self.assertion_extractor.enrich_with_mvp_v1(
+            assertions=promotion_result.promotable,
+            context={"product": doc_title}
+        )
+
+        # Convertir les assertions enrichies en InformationMVP
+        informations_mvp = []
+        for enriched in mvp_enrichment_result.enriched:
+            # Uniquement les assertions PROMOTED_LINKED ou PROMOTED_UNLINKED
+            if enriched.promotion_status in [PromotionStatus.PROMOTED_LINKED, PromotionStatus.PROMOTED_UNLINKED]:
+                # Trouver l'ancre pour cette assertion
+                anchor_docitem_ids = []
+                span_page = 0
+                for assertion, anchor, _ in resolved:
+                    if assertion.assertion_id == enriched.assertion.assertion_id:
+                        anchor_docitem_ids = [anchor.docitem_id]
+                        # Extraire la page depuis docitem si disponible
+                        docitem = docitems.get(anchor.docitem_id.split(":")[-1])
+                        if docitem and hasattr(docitem, 'page'):
+                            span_page = docitem.page or 0
+                        break
+
+                # Mapper le type d'assertion
+                info_type = self._map_to_information_type(enriched.assertion.assertion_type)
+                rhetorical_role = self._map_to_rhetorical_role(enriched.assertion.assertion_type)
+
+                info_mvp = InformationMVP(
+                    information_id=f"info_mvp_{enriched.assertion.assertion_id}",
+                    tenant_id=self.tenant_id,
+                    document_id=doc_id,
+                    text=enriched.assertion.text,
+                    exact_quote=enriched.assertion.text,  # Utilise le texte comme quote
+                    type=info_type,
+                    rhetorical_role=rhetorical_role,
+                    span=SpanInfo(page=span_page),
+                    value=enriched.value if enriched.value else ValueInfo(),
+                    context=ContextInfo(product=doc_title),
+                    promotion_status=enriched.promotion_status,
+                    promotion_reason=enriched.promotion_reason,
+                    claimkey_id=enriched.claimkey_match.claimkey_id if enriched.claimkey_match else None,
+                    confidence=enriched.assertion.confidence,
+                    language=subject.language,
+                    anchor_docitem_ids=anchor_docitem_ids
+                )
+                informations_mvp.append(info_mvp)
+
+        logger.info(
+            f"[OSMOSE:Pass1:1.5] {len(informations_mvp)} InformationMVP créées "
+            f"({mvp_enrichment_result.stats.get('promoted_linked', 0)} LINKED)"
+        )
+
+        # =====================================================================
         # CONSTRUIRE LE RÉSULTAT
         # =====================================================================
         logger.info("[OSMOSE:Pass1] Construction Pass1Result...")
@@ -315,6 +380,7 @@ class Pass1OrchestratorV2:
             themes=themes,
             concepts=concepts,
             informations=informations,
+            informations_mvp=informations_mvp,
             assertion_log=assertion_log,
             stats=stats
         )
@@ -329,6 +395,34 @@ class Pass1OrchestratorV2:
         )
 
         return result
+
+    def _map_to_information_type(self, assertion_type: AssertionType) -> InformationType:
+        """Mappe AssertionType vers InformationType pour MVP V1."""
+        mapping = {
+            AssertionType.DEFINITIONAL: InformationType.DEFINITIONAL,
+            AssertionType.PRESCRIPTIVE: InformationType.PRESCRIPTIVE,
+            AssertionType.CAUSAL: InformationType.CAUSAL,
+            AssertionType.COMPARATIVE: InformationType.COMPARATIVE,
+            AssertionType.FACTUAL: InformationType.DEFINITIONAL,
+            AssertionType.CONDITIONAL: InformationType.PRESCRIPTIVE,
+            AssertionType.PERMISSIVE: InformationType.PRESCRIPTIVE,
+            AssertionType.PROCEDURAL: InformationType.DEFINITIONAL,
+        }
+        return mapping.get(assertion_type, InformationType.DEFINITIONAL)
+
+    def _map_to_rhetorical_role(self, assertion_type: AssertionType) -> RhetoricalRole:
+        """Mappe AssertionType vers RhetoricalRole pour MVP V1."""
+        mapping = {
+            AssertionType.DEFINITIONAL: RhetoricalRole.DEFINITION,
+            AssertionType.PRESCRIPTIVE: RhetoricalRole.INSTRUCTION,
+            AssertionType.CAUSAL: RhetoricalRole.FACT,
+            AssertionType.COMPARATIVE: RhetoricalRole.FACT,
+            AssertionType.FACTUAL: RhetoricalRole.FACT,
+            AssertionType.CONDITIONAL: RhetoricalRole.CLAIM,
+            AssertionType.PERMISSIVE: RhetoricalRole.CLAIM,
+            AssertionType.PROCEDURAL: RhetoricalRole.EXAMPLE,
+        }
+        return mapping.get(assertion_type, RhetoricalRole.FACT)
 
 
 # ============================================================================

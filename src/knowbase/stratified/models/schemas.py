@@ -9,7 +9,7 @@ Contrat JSON canonique pour Pass 1 et structures associées.
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, Any
 from pydantic import BaseModel, Field
 
 
@@ -224,6 +224,12 @@ class Pass1Result(BaseModel):
 
     # Journal d'audit
     assertion_log: list[AssertionLogEntry] = Field(default_factory=list)
+
+    # MVP V1: Informations enrichies avec valeurs et ClaimKeys
+    informations_mvp: list[Any] = Field(
+        default_factory=list,
+        description="InformationMVP enrichies pour Usage B (Challenge)"
+    )
 
     # Statistiques
     stats: Pass1Stats = Field(default_factory=Pass1Stats)

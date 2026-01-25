@@ -26,6 +26,7 @@ from knowbase.stratified.models import (
     AssertionLogEntry,
     AssertionStatus,
 )
+from knowbase.stratified.models.information import InformationMVP, PromotionStatus
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,8 @@ class Pass1PersisterV2:
             "themes": 0,
             "concepts": 0,
             "informations": 0,
+            "informations_mvp": 0,
+            "claimkeys": 0,
             "assertion_logs": 0,
             "relations": 0,
         }
@@ -119,6 +122,35 @@ class Pass1PersisterV2:
                     stats["informations"] += 1
                     stats["relations"] += 2  # HAS_INFORMATION + ANCHORED_IN
                 logger.info(f"[OSMOSE:Pass1:Persist] {stats['informations']} informations créées")
+
+                # 4b. Créer les InformationMVP + ClaimKey (MVP V1)
+                claimkeys_created = set()
+                for info_mvp in result.informations_mvp:
+                    # Créer le ClaimKey si nécessaire (MERGE évite duplicata)
+                    if info_mvp.claimkey_id and info_mvp.claimkey_id not in claimkeys_created:
+                        session.execute_write(
+                            self._create_claimkey_tx,
+                            info_mvp.claimkey_id,
+                            self.tenant_id
+                        )
+                        claimkeys_created.add(info_mvp.claimkey_id)
+                        stats["claimkeys"] += 1
+
+                    # Créer InformationMVP + relation ANSWERS
+                    session.execute_write(
+                        self._create_information_mvp_tx,
+                        info_mvp,
+                        result.doc.doc_id,
+                        self.tenant_id
+                    )
+                    stats["informations_mvp"] += 1
+                    if info_mvp.claimkey_id:
+                        stats["relations"] += 1  # ANSWERS
+
+                logger.info(
+                    f"[OSMOSE:Pass1:Persist] {stats['informations_mvp']} InformationMVP créées, "
+                    f"{stats['claimkeys']} ClaimKeys"
+                )
 
                 # 5. Créer les AssertionLog
                 for log_entry in result.assertion_log:
@@ -281,6 +313,118 @@ class Pass1PersisterV2:
             "status": entry.status.value,
             "reason": entry.reason.value,
             "concept_id": entry.concept_id,
+        })
+
+    @staticmethod
+    def _create_claimkey_tx(tx, claimkey_id: str, tenant_id: str):
+        """Transaction: créer ClaimKey (MERGE pour éviter duplicata)."""
+        # Extraire la clé depuis l'ID (ck_xxx → xxx)
+        key = claimkey_id.replace("ck_", "") if claimkey_id.startswith("ck_") else claimkey_id
+
+        query = """
+        MERGE (ck:ClaimKey {claimkey_id: $claimkey_id, tenant_id: $tenant_id})
+        ON CREATE SET
+            ck.key = $key,
+            ck.created_at = datetime()
+        """
+        tx.run(query, {
+            "claimkey_id": claimkey_id,
+            "tenant_id": tenant_id,
+            "key": key,
+        })
+
+    @staticmethod
+    def _create_information_mvp_tx(tx, info_mvp: InformationMVP, doc_id: str, tenant_id: str):
+        """Transaction: créer InformationMVP avec relation ANSWERS vers ClaimKey."""
+        # Utiliser to_neo4j_properties() pour obtenir toutes les propriétés
+        props = info_mvp.to_neo4j_properties()
+
+        # Requête de base pour créer InformationMVP
+        if info_mvp.claimkey_id:
+            # Avec lien vers ClaimKey
+            query = """
+            MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
+            MATCH (ck:ClaimKey {claimkey_id: $claimkey_id, tenant_id: $tenant_id})
+            CREATE (i:InformationMVP {
+                information_id: $information_id,
+                tenant_id: $tenant_id,
+                document_id: $document_id,
+                text: $text,
+                exact_quote: $exact_quote,
+                type: $type,
+                rhetorical_role: $rhetorical_role,
+                span_page: $span_page,
+                value_kind: $value_kind,
+                value_raw: $value_raw,
+                value_normalized: $value_normalized,
+                value_unit: $value_unit,
+                value_operator: $value_operator,
+                context_edition: $context_edition,
+                context_region: $context_region,
+                context_product: $context_product,
+                promotion_status: $promotion_status,
+                claimkey_id: $claimkey_id,
+                fingerprint: $fingerprint,
+                confidence: $confidence,
+                language: $language,
+                created_at: datetime()
+            })
+            CREATE (i)-[:EXTRACTED_FROM]->(d)
+            CREATE (i)-[:ANSWERS]->(ck)
+            """
+        else:
+            # Sans lien vers ClaimKey (PROMOTED_UNLINKED)
+            query = """
+            MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
+            CREATE (i:InformationMVP {
+                information_id: $information_id,
+                tenant_id: $tenant_id,
+                document_id: $document_id,
+                text: $text,
+                exact_quote: $exact_quote,
+                type: $type,
+                rhetorical_role: $rhetorical_role,
+                span_page: $span_page,
+                value_kind: $value_kind,
+                value_raw: $value_raw,
+                value_normalized: $value_normalized,
+                value_unit: $value_unit,
+                value_operator: $value_operator,
+                context_edition: $context_edition,
+                context_region: $context_region,
+                context_product: $context_product,
+                promotion_status: $promotion_status,
+                fingerprint: $fingerprint,
+                confidence: $confidence,
+                language: $language,
+                created_at: datetime()
+            })
+            CREATE (i)-[:EXTRACTED_FROM]->(d)
+            """
+
+        tx.run(query, {
+            "doc_id": doc_id,
+            "tenant_id": tenant_id,
+            "information_id": props["information_id"],
+            "document_id": props["document_id"],
+            "text": props["text"],
+            "exact_quote": props["exact_quote"],
+            "type": props["type"],
+            "rhetorical_role": props["rhetorical_role"],
+            "span_page": props["span_page"],
+            "value_kind": props["value_kind"],
+            "value_raw": props["value_raw"],
+            "value_normalized": props["value_normalized"],
+            "value_unit": props["value_unit"],
+            "value_operator": props["value_operator"],
+            "context_edition": props["context_edition"],
+            "context_region": props["context_region"],
+            "context_product": props["context_product"],
+            "promotion_status": props["promotion_status"],
+            "claimkey_id": props["claimkey_id"],
+            "fingerprint": props["fingerprint"],
+            "confidence": props["confidence"],
+            "language": props["language"],
         })
 
     def delete_pass1_data(self, doc_id: str) -> int:
