@@ -46,17 +46,23 @@ def _get_redis_client():
 def _save_reprocess_state(state: dict) -> bool:
     """Sauvegarde l'état du reprocess dans Redis."""
     client = _get_redis_client()
-    if client and client.is_connected():
-        try:
-            client.client.setex(
-                REPROCESS_STATE_KEY,
-                REPROCESS_STATE_TTL,
-                json.dumps(state)
-            )
-            return True
-        except Exception as e:
-            logger.error(f"[OSMOSE:V2] Failed to save state to Redis: {e}")
-    return False
+    if not client:
+        logger.warning("[OSMOSE:V2] Cannot save state: Redis client is None")
+        return False
+    if not client.is_connected():
+        logger.warning("[OSMOSE:V2] Cannot save state: Redis not connected")
+        return False
+    try:
+        client.client.setex(
+            REPROCESS_STATE_KEY,
+            REPROCESS_STATE_TTL,
+            json.dumps(state)
+        )
+        logger.debug(f"[OSMOSE:V2] State saved to Redis: status={state.get('status')}")
+        return True
+    except Exception as e:
+        logger.error(f"[OSMOSE:V2] Failed to save state to Redis: {e}")
+        return False
 
 
 def _load_reprocess_state() -> Optional[dict]:
@@ -692,7 +698,11 @@ async def start_reprocess(
             "started_at": datetime.utcnow().isoformat(),
             "errors": []
         }
-        _save_reprocess_state(initial_state)
+        if not _save_reprocess_state(initial_state):
+            logger.error("[OSMOSE:V2] CRITICAL: Failed to save initial state to Redis!")
+            # Continue anyway, but warn that progress tracking won't work
+        else:
+            logger.info(f"[OSMOSE:V2] Reprocess started: {len(documents)} documents")
 
         # Lancer en background
         background_tasks.add_task(
@@ -895,7 +905,7 @@ async def _run_reprocess_batch(
     try:
         from knowbase.stratified.pass0.cache_loader import load_pass0_from_cache
         from knowbase.stratified.pass1.orchestrator import Pass1OrchestratorV2
-        from knowbase.stratified.pass1.persister import Pass1PersisterV2
+        from knowbase.stratified.pass1.persister import Pass1PersisterV2, persist_vision_observations
         from knowbase.common.clients.neo4j_client import get_neo4j_client
         from knowbase.config.settings import get_settings
 
@@ -950,6 +960,19 @@ async def _run_reprocess_batch(
                     f"{pass0_stats['docitems']} docitems"
                 )
 
+                # 1c. Persister VisionObservations (ADR-20260126: séparées du Knowledge Path)
+                if cache_result.vision_observations:
+                    vision_stats = persist_vision_observations(
+                        observations=cache_result.vision_observations,
+                        doc_id=doc_id,
+                        neo4j_driver=neo4j_client.driver,
+                        tenant_id=request.tenant_id
+                    )
+                    logger.info(
+                        f"[OSMOSE:V2:Reprocess] VisionObservations persisted: "
+                        f"{vision_stats.get('vision_observations', 0)} observations"
+                    )
+
                 # 2. Pass 1: Lecture Stratifiée
                 if request.run_pass1:
                     _update_reprocess_state(current_phase="PASS_1")
@@ -986,9 +1009,32 @@ async def _run_reprocess_batch(
                     chunk_to_docitem_map = _convert_chunk_to_docitem_map(
                         pass0_result.chunk_to_docitem_map
                     )
+
+                    # Préparer les sections pour Pass 0.9 (Global View Construction)
+                    sections_for_pass09 = []
+                    for section in (pass0_result.sections or []):
+                        sections_for_pass09.append({
+                            "id": section.section_id,
+                            "section_id": section.section_id,
+                            "title": section.title,
+                            "level": section.section_level,
+                            # Collecter les chunk_ids qui appartiennent à cette section
+                            "chunk_ids": [
+                                chunk.chunk_id
+                                for chunk in (pass0_result.chunks or [])
+                                if any(
+                                    item.section_id == section.section_id
+                                    for item_id in chunk.item_ids
+                                    for item in (pass0_result.doc_items or [])
+                                    if item.item_id == item_id
+                                )
+                            ]
+                        })
+
                     logger.info(
                         f"[OSMOSE:V2:Reprocess] Prepared: {len(docitems)} DocItems from cache, "
-                        f"{len(chunks_dict)} chunks, {len(chunk_to_docitem_map)} mappings"
+                        f"{len(chunks_dict)} chunks, {len(chunk_to_docitem_map)} mappings, "
+                        f"{len(sections_for_pass09)} sections for Pass 0.9"
                     )
 
                     # Créer l'orchestrateur avec LLM
@@ -998,20 +1044,30 @@ async def _run_reprocess_batch(
                     else:
                         logger.warning(f"[OSMOSE:V2:Reprocess] LLM unavailable, using fallback")
 
+                    # Lire la configuration strict_promotion depuis feature_flags
+                    # ADR: North Star "Documentary Truth" - strict_promotion=False par défaut
+                    from knowbase.config.feature_flags import get_stratified_v2_config
+                    strict_promotion = get_stratified_v2_config("strict_promotion", request.tenant_id)
+                    if strict_promotion is None:
+                        strict_promotion = False  # Default North Star compliant
+                    logger.info(f"[OSMOSE:V2:Reprocess] strict_promotion={strict_promotion}")
+
                     orchestrator = Pass1OrchestratorV2(
                         llm_client=llm_client,
                         allow_fallback=(llm_client is None),  # Fallback seulement si pas de LLM
+                        strict_promotion=strict_promotion,
                         tenant_id=request.tenant_id
                     )
 
-                    # Exécuter Pass 1 avec le mapping pré-calculé
+                    # Exécuter Pass 1 avec le mapping pré-calculé et les sections pour Pass 0.9
                     pass1_result = orchestrator.process(
                         doc_id=doc_id,
                         doc_title=cache_result.doc_title or doc_id,
                         content=content,
                         docitems=docitems,
                         chunks=chunks_dict,
-                        chunk_to_docitem_map=chunk_to_docitem_map
+                        chunk_to_docitem_map=chunk_to_docitem_map,
+                        sections=sections_for_pass09,  # NOUVEAU: Pass 0.9 Global View
                     )
 
                     # Persister les résultats dans Neo4j

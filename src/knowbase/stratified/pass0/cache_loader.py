@@ -31,6 +31,8 @@ from knowbase.structural.models import (
     SectionInfo,
     TypeAwareChunk,
     ChunkKind,
+    VisionObservation,
+    TextOrigin,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,8 +47,167 @@ class CacheLoadResult:
     document_id: Optional[str] = None
     full_text: Optional[str] = None  # Contenu textuel complet (avec VISUAL_ENRICHMENT)
     doc_title: Optional[str] = None  # Titre du document
-    vision_merged_count: int = 0     # Nombre de chunks FIGURE_TEXT enrichis
+    vision_merged_count: int = 0     # DEPRECATED: Nombre de chunks FIGURE_TEXT enrichis
+    # ADR-20260126: Vision Observations (séparées du graphe de connaissance)
+    vision_observations: List[VisionObservation] = field(default_factory=list)
     error: Optional[str] = None
+
+
+def _load_legacy_v1_cache(
+    cache_data: Dict,
+    cache_path: str,
+    tenant_id: str,
+) -> CacheLoadResult:
+    """
+    Charge un cache legacy v1.0 en créant sections/chunks depuis les pages.
+
+    Le format v1.0 a:
+    - extracted_text.pages[]: liste de {slide_index, text}
+    - extracted_text.full_text: texte complet
+    - document_metadata.title: titre du document
+    """
+    try:
+        # Extraire les métadonnées
+        metadata = cache_data.get("metadata", {})
+        doc_metadata = cache_data.get("document_metadata", {})
+        extracted_text = cache_data.get("extracted_text", {})
+
+        source_file = metadata.get("source_file", "unknown")
+        # Générer un document_id depuis le nom du fichier
+        document_id = Path(source_file).stem if source_file else Path(cache_path).stem
+
+        doc_title = doc_metadata.get("title", document_id)
+        full_text = extracted_text.get("full_text", "")
+        pages = extracted_text.get("pages", [])
+
+        if not pages:
+            return CacheLoadResult(
+                success=False,
+                cache_version="v1_legacy",
+                document_id=document_id,
+                error="No pages found in legacy cache"
+            )
+
+        logger.info(f"[OSMOSE:CacheLoader:Legacy] Loading {len(pages)} pages from v1.0 cache")
+
+        # Créer des chunks depuis les pages (1 chunk par page)
+        chunks = []
+        doc_items = []
+        sections = []
+
+        for page in pages:
+            page_idx = page.get("slide_index", 0)
+            page_text = page.get("text", "")
+
+            if not page_text.strip():
+                continue
+
+            # Créer un chunk pour cette page
+            chunk_id = f"chunk_p{page_idx:03d}"
+            item_id = f"item_p{page_idx:03d}"
+
+            chunk = TypeAwareChunk(
+                chunk_id=chunk_id,
+                tenant_id=tenant_id,
+                doc_id=document_id,
+                text=page_text,
+                kind=ChunkKind.NARRATIVE_TEXT,
+                page_no=page_idx,
+                section_id=f"section_p{page_idx:03d}",
+                item_ids=[item_id],
+                is_relation_bearing=True,
+                doc_version_id=f"{document_id}_v1",
+            )
+            chunks.append(chunk)
+
+            # Créer un DocItem pour cette page
+            doc_item = DocItem(
+                tenant_id=tenant_id,
+                doc_id=document_id,
+                doc_version_id=f"{document_id}_v1",
+                item_id=item_id,
+                item_type="VISION_PAGE",  # Type pour slides/pages Vision
+                text=page_text,
+                page_no=page_idx,
+                section_id=f"section_p{page_idx:03d}",
+                charspan_start=0,
+                charspan_end=len(page_text),
+                reading_order_index=page_idx,
+            )
+            doc_items.append(doc_item)
+
+            # Créer une section pour cette page
+            section = SectionInfo(
+                tenant_id=tenant_id,
+                doc_id=document_id,
+                doc_version_id=f"{document_id}_v1",
+                section_id=f"section_p{page_idx:03d}",
+                title=f"Page {page_idx}",
+                section_path=f"/page_{page_idx}",
+                section_level=1,
+                parent_section_id=None,
+            )
+            sections.append(section)
+
+        # Construire les mappings
+        chunk_to_docitem_map: Dict[str, ChunkToDocItemMapping] = {}
+        docitem_to_chunks_map: Dict[str, List[str]] = {}
+
+        char_offset = 0
+        for chunk in chunks:
+            docitem_ids = [f"{tenant_id}:{document_id}:{item_id}" for item_id in chunk.item_ids]
+
+            for docitem_id in docitem_ids:
+                if docitem_id not in docitem_to_chunks_map:
+                    docitem_to_chunks_map[docitem_id] = []
+                docitem_to_chunks_map[docitem_id].append(chunk.chunk_id)
+
+            mapping = ChunkToDocItemMapping(
+                chunk_id=chunk.chunk_id,
+                docitem_ids=docitem_ids,
+                text=chunk.text,
+                char_start=char_offset,
+                char_end=char_offset + len(chunk.text),
+            )
+            chunk_to_docitem_map[chunk.chunk_id] = mapping
+            char_offset += len(chunk.text) + 1
+
+        # Construire Pass0Result
+        pass0_result = Pass0Result(
+            tenant_id=tenant_id,
+            doc_id=document_id,
+            doc_version_id=f"{document_id}_v1",
+            doc_items=doc_items,
+            sections=sections,
+            chunks=chunks,
+            chunk_to_docitem_map=chunk_to_docitem_map,
+            docitem_to_chunks_map=docitem_to_chunks_map,
+            doc_title=doc_title,
+            page_count=len(pages),
+        )
+
+        logger.info(
+            f"[OSMOSE:CacheLoader:Legacy] Created {len(chunks)} chunks, "
+            f"{len(doc_items)} doc_items, {len(sections)} sections from {len(pages)} pages"
+        )
+
+        return CacheLoadResult(
+            success=True,
+            pass0_result=pass0_result,
+            cache_version="v1_legacy",
+            document_id=document_id,
+            full_text=full_text,
+            doc_title=doc_title,
+            vision_merged_count=0,
+        )
+
+    except Exception as e:
+        logger.error(f"[OSMOSE:CacheLoader:Legacy] Error loading legacy cache: {e}")
+        return CacheLoadResult(
+            success=False,
+            cache_version="v1_legacy",
+            error=str(e)
+        )
 
 
 def _build_vision_lookup(vision_results: List[Dict]) -> Dict[int, str]:
@@ -91,26 +252,99 @@ def _build_vision_lookup(vision_results: List[Dict]) -> Dict[int, str]:
     return lookup
 
 
+def _build_vision_observations(
+    vision_results: List[Dict],
+    tenant_id: str,
+    doc_id: str,
+) -> List[VisionObservation]:
+    """
+    Construit des VisionObservation depuis les résultats Vision.
+
+    ADR-20260126: Vision est sorti du chemin de connaissance.
+    Les observations sont stockées séparément pour navigation/UX.
+    """
+    import uuid
+    observations = []
+
+    for vr in vision_results:
+        page_no = vr.get("page_index", vr.get("page_no"))
+        if page_no is None:
+            continue
+
+        # Synthétiser la description
+        lines = []
+        diagram_type = vr.get("diagram_type", "visual_content")
+
+        # Ajouter les éléments visibles
+        elements = vr.get("elements", [])
+        for elem in elements:
+            elem_text = elem.get("text", "")
+            if elem_text:
+                lines.append(elem_text)
+
+        # Ajouter les relations si présentes
+        relations = vr.get("relations", [])
+        for rel in relations:
+            src = rel.get("source", "")
+            tgt = rel.get("target", "")
+            rel_type = rel.get("type", "related_to")
+            if src and tgt:
+                lines.append(f"{src} → {rel_type} → {tgt}")
+
+        # Extraire les entités clés
+        key_entities = []
+        for elem in elements:
+            elem_text = elem.get("text", "")
+            if elem_text and len(elem_text) < 100:  # Probablement une entité
+                key_entities.append(elem_text)
+
+        description = "\n".join(lines) if lines else ""
+
+        if description:  # Ne créer que si du contenu existe
+            observation = VisionObservation(
+                observation_id=f"vobs_{doc_id}_{page_no}_{uuid.uuid4().hex[:8]}",
+                tenant_id=tenant_id,
+                doc_id=doc_id,
+                page_no=page_no,
+                diagram_type=diagram_type,
+                description=description,
+                key_entities=key_entities[:10],  # Max 10 entités
+                confidence=vr.get("confidence", 0.8),
+                model=vr.get("model", "gpt-4o"),
+                prompt_version=vr.get("prompt_version", ""),
+                image_hash=vr.get("image_hash", ""),
+                text_origin=TextOrigin.VISION_SEMANTIC,
+            )
+            observations.append(observation)
+
+    return observations
+
+
 def load_pass0_from_cache(
     cache_path: str,
     tenant_id: str = "default",
-    merge_vision: bool = True,
+    merge_vision: bool = False,  # ADR-20260126: False par défaut (Vision hors Knowledge Path)
 ) -> CacheLoadResult:
     """
-    Charge un Pass0Result depuis un fichier cache V2/V4.
+    Charge un Pass0Result depuis un fichier cache V2/V4/V5 ou legacy V1.
 
     Le cache contient:
-    - extraction.stats.structural_graph.chunks[]
-    - extraction.vision_results[] (pour enrichir FIGURE_TEXT)
+    - extraction.stats.structural_graph.chunks[] (v2-v5)
+    - extraction.vision_results[] (retournés comme VisionObservation, pas mergés)
     - extraction.full_text (avec [VISUAL_ENRICHMENT...])
+    - extracted_text.pages[] (legacy v1.0)
+
+    ADR-20260126: Vision est sorti du chemin de connaissance.
+    Les vision_results sont retournés comme VisionObservation séparées,
+    pas mergées dans les chunks FIGURE_TEXT.
 
     Args:
         cache_path: Chemin vers le fichier cache JSON
         tenant_id: ID du tenant
-        merge_vision: Si True, merge le contenu Vision dans les chunks FIGURE_TEXT
+        merge_vision: DEPRECATED - Si True, merge le contenu Vision dans les chunks FIGURE_TEXT
 
     Returns:
-        CacheLoadResult avec pass0_result si succès
+        CacheLoadResult avec pass0_result et vision_observations si succès
     """
     try:
         cache_file = Path(cache_path)
@@ -123,8 +357,17 @@ def load_pass0_from_cache(
         with open(cache_file, "r", encoding="utf-8") as f:
             cache_data = json.load(f)
 
-        # Vérifier la version (accepte v2, v3, v4, v5)
+        # Vérifier la version
         cache_version = cache_data.get("cache_version", "unknown")
+
+        # Détecter le format legacy v1.0 (metadata.version au lieu de cache_version)
+        if cache_version == "unknown":
+            metadata_version = cache_data.get("metadata", {}).get("version")
+            if metadata_version == "1.0":
+                cache_version = "v1_legacy"
+                logger.info(f"[OSMOSE:CacheLoader] Detected legacy v1.0 format, using page-based extraction")
+                return _load_legacy_v1_cache(cache_data, cache_path, tenant_id)
+
         if cache_version not in ["v2", "v3", "v4", "v5"]:
             return CacheLoadResult(
                 success=False,
@@ -146,15 +389,25 @@ def load_pass0_from_cache(
                 error="Cache missing structural_graph.chunks"
             )
 
-        # Construire le lookup Vision par page
+        # ADR-20260126: Charger les vision_results pour créer VisionObservation
+        vision_results = extraction.get("vision_results", [])
+        vision_observations = _build_vision_observations(
+            vision_results, tenant_id, document_id or ""
+        )
+        if vision_observations:
+            logger.info(
+                f"[OSMOSE:CacheLoader] Created {len(vision_observations)} VisionObservations "
+                f"(pages: {sorted(set(vo.page_no for vo in vision_observations))})"
+            )
+
+        # DEPRECATED: Construire le lookup Vision pour merge (si demandé)
         vision_lookup = {}
         if merge_vision:
-            vision_results = extraction.get("vision_results", [])
             vision_lookup = _build_vision_lookup(vision_results)
             if vision_lookup:
-                logger.info(
-                    f"[OSMOSE:CacheLoader] Vision content available for pages: "
-                    f"{sorted(vision_lookup.keys())}"
+                logger.warning(
+                    f"[OSMOSE:CacheLoader] DEPRECATED: merge_vision=True, "
+                    f"Vision content merged into chunks (pages: {sorted(vision_lookup.keys())})"
                 )
 
         # Reconstruire les chunks avec merge Vision
@@ -275,8 +528,9 @@ def load_pass0_from_cache(
         )
 
         logger.info(
-            f"[OSMOSE:CacheLoader] Loaded {len(chunks)} chunks from cache "
-            f"for {document_id} (vision merged: {vision_merged_count})"
+            f"[OSMOSE:CacheLoader] Loaded {len(chunks)} chunks, "
+            f"{len(vision_observations)} VisionObservations from cache "
+            f"for {document_id}"
         )
 
         return CacheLoadResult(
@@ -287,6 +541,7 @@ def load_pass0_from_cache(
             full_text=full_text,
             doc_title=doc_title,
             vision_merged_count=vision_merged_count,
+            vision_observations=vision_observations,
         )
 
     except Exception as e:

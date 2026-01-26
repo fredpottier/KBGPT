@@ -75,6 +75,14 @@ CONSTRAINT_QUERIES = [
         FOR (c:TypeAwareChunk) REQUIRE (c.tenant_id, c.chunk_id) IS UNIQUE
         """
     ),
+    # VisionObservation unique (ADR-20260126)
+    (
+        "vision_observation_unique",
+        """
+        CREATE CONSTRAINT vision_observation_unique IF NOT EXISTS
+        FOR (vo:VisionObservation) REQUIRE (vo.tenant_id, vo.observation_id) IS UNIQUE
+        """
+    ),
 ]
 
 # Indexes de performance (D9.5-D9.7)
@@ -133,6 +141,14 @@ INDEX_QUERIES = [
         """
         CREATE INDEX docitem_section IF NOT EXISTS
         FOR (i:DocItem) ON (i.tenant_id, i.section_id)
+        """
+    ),
+    # VisionObservation par document (ADR-20260126)
+    (
+        "vision_observation_doc",
+        """
+        CREATE INDEX vision_observation_doc IF NOT EXISTS
+        FOR (vo:VisionObservation) ON (vo.tenant_id, vo.doc_id)
         """
     ),
 ]

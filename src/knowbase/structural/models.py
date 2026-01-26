@@ -602,6 +602,64 @@ class TypeAwareChunk(BaseModel):
 
 
 # ===================================
+# VISION OBSERVATION (ADR-20260126)
+# ===================================
+
+class VisionObservation(BaseModel):
+    """
+    Observation Vision (hors graphe de connaissance).
+
+    ADR: ADR-20260126-vision-out-of-knowledge-path.md
+
+    Les VisionObservation:
+    - NE participent PAS aux mécanismes de raisonnement, justification ou décision
+    - Sont strictement informatives et non normatives
+    - NE peuvent PAS être reliées à Concept ou Information
+
+    Usage: navigation/exploration/UX uniquement.
+    """
+    observation_id: str
+    tenant_id: str
+    doc_id: str
+    page_no: int
+
+    # Contenu descriptif (généré par Vision)
+    diagram_type: Optional[str] = None  # "slide" | "table" | "diagram" | "form" | "other"
+    description: str = ""               # Texte descriptif généré par Vision
+    key_entities: List[str] = Field(default_factory=list)  # Entités détectées visuellement
+
+    # Métadonnées extraction
+    confidence: float = 0.0
+    model: str = "gpt-4o"
+    prompt_version: str = ""
+    image_hash: str = ""
+
+    # Traçabilité
+    text_origin: TextOrigin = TextOrigin.VISION_SEMANTIC
+    failure_reason: Optional[VisionFailureReason] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    def to_neo4j_properties(self) -> Dict[str, Any]:
+        """Convertit en properties Neo4j."""
+        return {
+            "observation_id": self.observation_id,
+            "tenant_id": self.tenant_id,
+            "doc_id": self.doc_id,
+            "page_no": self.page_no,
+            "diagram_type": self.diagram_type,
+            "description": self.description,
+            "key_entities": self.key_entities,
+            "confidence": self.confidence,
+            "model": self.model,
+            "prompt_version": self.prompt_version,
+            "image_hash": self.image_hash,
+            "text_origin": self.text_origin.value,
+            "failure_reason": self.failure_reason.value if self.failure_reason else None,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+# ===================================
 # DOC_HASH COMPUTATION (D6)
 # ===================================
 

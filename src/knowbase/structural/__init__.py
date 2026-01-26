@@ -21,6 +21,8 @@ from knowbase.structural.models import (
     BboxUnit,
     ChunkKind,
     DocItemType,
+    TextOrigin,
+    VisionFailureReason,
     # Constantes
     DOCLING_LABEL_MAPPING,
     RELATION_BEARING_TYPES,
@@ -32,6 +34,7 @@ from knowbase.structural.models import (
     SectionInfo,
     StructuralProfile,
     TypeAwareChunk,
+    VisionObservation,  # ADR-20260126
     # Fonctions
     compute_doc_hash,
     map_docling_label,
@@ -86,6 +89,8 @@ __all__ = [
     "BboxUnit",
     "ChunkKind",
     "DocItemType",
+    "TextOrigin",
+    "VisionFailureReason",
     # Constantes
     "DOCLING_LABEL_MAPPING",
     "RELATION_BEARING_TYPES",
@@ -97,6 +102,7 @@ __all__ = [
     "SectionInfo",
     "StructuralProfile",
     "TypeAwareChunk",
+    "VisionObservation",  # ADR-20260126
     # Fonctions modèles
     "compute_doc_hash",
     "map_docling_label",

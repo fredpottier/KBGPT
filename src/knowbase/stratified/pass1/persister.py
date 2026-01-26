@@ -27,6 +27,7 @@ from knowbase.stratified.models import (
     AssertionStatus,
 )
 from knowbase.stratified.models.information import InformationMVP, PromotionStatus
+from knowbase.structural.models import VisionObservation
 
 logger = logging.getLogger(__name__)
 
@@ -253,16 +254,29 @@ class Pass1PersisterV2:
 
     @staticmethod
     def _create_information_tx(tx, info: Information, tenant_id: str):
-        """Transaction: créer Information avec ANCHORED_IN → DocItem."""
+        """
+        Transaction: créer Information avec ANCHORED_IN → DocItem.
+
+        LAZY DOCITEM CREATION (ADR: Lazy DocItem Persistence):
+        Le DocItem est créé ici à la demande (MERGE), pas en Pass 0.
+        Seuls les DocItems réellement référencés par des Informations existent.
+        Résultat: 50-200 DocItems/doc au lieu de 6700+.
+        """
         # Extraire l'item_id de la partie finale du docitem_id composé
         # Format: "tenant:doc_id:item_id" → on veut la partie après le 2e ":"
         docitem_id = info.anchor.docitem_id
         parts = docitem_id.split(":", 2)  # Max 2 splits (tenant:doc_id:item_id)
         item_id = parts[2] if len(parts) >= 3 else docitem_id
+        doc_id = parts[1] if len(parts) >= 2 else ""
 
+        # LAZY CREATION: MERGE crée le DocItem s'il n'existe pas
         query = """
         MATCH (c:Concept {concept_id: $concept_id, tenant_id: $tenant_id})
-        MATCH (di:DocItem {item_id: $item_id, tenant_id: $tenant_id})
+        MERGE (di:DocItem {item_id: $item_id, tenant_id: $tenant_id})
+        ON CREATE SET
+            di.doc_id = $doc_id,
+            di.created_at = datetime(),
+            di.lazy_created = true
         MERGE (i:Information {info_id: $info_id, tenant_id: $tenant_id})
         SET i.text = $text,
             i.type = $type,
@@ -276,6 +290,7 @@ class Pass1PersisterV2:
             "concept_id": info.concept_id,
             "tenant_id": tenant_id,
             "item_id": item_id,
+            "doc_id": doc_id,
             "docitem_id": docitem_id,  # Garder le full ID comme propriété
             "info_id": info.info_id,
             "text": info.text,
@@ -503,3 +518,102 @@ def persist_pass1_result(
     """
     persister = Pass1PersisterV2(neo4j_driver=neo4j_driver, tenant_id=tenant_id)
     return persister.persist(result)
+
+
+# ============================================================================
+# VISION OBSERVATION PERSISTENCE (ADR-20260126)
+# ============================================================================
+
+def persist_vision_observations(
+    observations: List[VisionObservation],
+    doc_id: str,
+    neo4j_driver=None,
+    tenant_id: str = "default"
+) -> Dict[str, int]:
+    """
+    Persiste les VisionObservations dans Neo4j.
+
+    ADR-20260126: Les VisionObservations sont stockées séparément du graphe
+    de connaissance, uniquement pour navigation/UX.
+
+    Args:
+        observations: Liste de VisionObservation à persister
+        doc_id: ID du document
+        neo4j_driver: Driver Neo4j
+        tenant_id: Identifiant du tenant
+
+    Returns:
+        Dict avec compteurs
+    """
+    if not neo4j_driver:
+        logger.warning("[OSMOSE:Vision:Persist] No Neo4j driver configured")
+        return {"vision_observations": 0, "error": "no_driver"}
+
+    if not observations:
+        return {"vision_observations": 0}
+
+    stats = {"vision_observations": 0}
+
+    with neo4j_driver.session() as session:
+        try:
+            for obs in observations:
+                session.execute_write(
+                    _create_vision_observation_tx,
+                    doc_id,
+                    obs,
+                    tenant_id
+                )
+                stats["vision_observations"] += 1
+
+            logger.info(
+                f"[OSMOSE:Vision:Persist] {stats['vision_observations']} VisionObservations "
+                f"créées pour {doc_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"[OSMOSE:Vision:Persist] Erreur: {e}")
+            raise
+
+    return stats
+
+
+def _create_vision_observation_tx(tx, doc_id: str, obs: VisionObservation, tenant_id: str):
+    """
+    Transaction: créer VisionObservation et lier au Document.
+
+    ADR-20260126: Les VisionObservations ne sont PAS liées aux Concepts ou Information.
+    Elles sont liées uniquement au Document et à la page.
+    """
+    query = """
+    MATCH (d:Document {doc_id: $doc_id, tenant_id: $tenant_id})
+    MERGE (vo:VisionObservation {observation_id: $observation_id, tenant_id: $tenant_id})
+    SET vo.doc_id = $doc_id,
+        vo.page_no = $page_no,
+        vo.diagram_type = $diagram_type,
+        vo.description = $description,
+        vo.key_entities = $key_entities,
+        vo.confidence = $confidence,
+        vo.model = $model,
+        vo.prompt_version = $prompt_version,
+        vo.image_hash = $image_hash,
+        vo.text_origin = $text_origin,
+        vo.failure_reason = $failure_reason,
+        vo.created_at = $created_at
+    MERGE (d)-[:HAS_VISION_OBSERVATION]->(vo)
+    """
+    tx.run(query, {
+        "doc_id": doc_id,
+        "tenant_id": tenant_id,
+        "observation_id": obs.observation_id,
+        "page_no": obs.page_no,
+        "diagram_type": obs.diagram_type,
+        "description": obs.description,
+        "key_entities": obs.key_entities,
+        "confidence": obs.confidence,
+        "model": obs.model,
+        "prompt_version": obs.prompt_version,
+        "image_hash": obs.image_hash,
+        "text_origin": obs.text_origin.value if obs.text_origin else None,
+        "failure_reason": obs.failure_reason.value if obs.failure_reason else None,
+        "created_at": obs.created_at.isoformat() if obs.created_at else None,
+    })
