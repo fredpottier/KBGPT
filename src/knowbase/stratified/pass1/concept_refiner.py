@@ -281,12 +281,44 @@ class ConceptRefinerV2:
             else:
                 refused.append(f"{concept.get('name')}: pas d'assertion PRESCRIPTIVE ou value")
 
+        # === DÉDUPLICATION (2026-01-27) ===
+        # 1. Éliminer doublons internes
+        # 2. Éliminer concepts déjà existants
+        existing_names = {c.get('name', '').lower().strip() for c in existing_concepts}
+        seen_names: set = set()
+        unique_concepts = []
+        duplicates_internal = 0
+        duplicates_existing = 0
+
+        for concept in validated_concepts:
+            name = concept.get('name', '')
+            normalized = name.lower().strip()
+
+            if normalized in existing_names:
+                duplicates_existing += 1
+                refused.append(f"{name}: doublon d'un concept existant")
+                logger.debug(f"[OSMOSE:DEDUP:1.2b] '{name}' existe déjà")
+            elif normalized in seen_names:
+                duplicates_internal += 1
+                refused.append(f"{name}: doublon interne")
+                logger.debug(f"[OSMOSE:DEDUP:1.2b] '{name}' doublon interne")
+            else:
+                seen_names.add(normalized)
+                unique_concepts.append(concept)
+
+        if duplicates_internal + duplicates_existing > 0:
+            logger.warning(
+                f"[OSMOSE:DEDUP:1.2b] {duplicates_internal} doublons internes, "
+                f"{duplicates_existing} doublons existants éliminés"
+            )
+        # === FIN DÉDUPLICATION ===
+
         logger.info(
-            f"[OSMOSE:Pass1.2b] {len(validated_concepts)} nouveaux concepts validés, "
+            f"[OSMOSE:Pass1.2b] {len(unique_concepts)} nouveaux concepts validés, "
             f"{len(refused)} refusés"
         )
 
-        return validated_concepts, refused
+        return unique_concepts, refused
 
     def _is_quality_assertion(self, assertion: Dict) -> bool:
         """

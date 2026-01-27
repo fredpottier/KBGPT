@@ -363,6 +363,33 @@ class ConceptIdentifierV2:
             concepts.append(concept)
             valid_idx += 1
 
+        # === DÉDUPLICATION PAR NOM (2026-01-27) ===
+        # Le LLM (Qwen notamment) peut renvoyer le même concept plusieurs fois
+        # On garde uniquement la première occurrence par nom normalisé
+        seen_names: Set[str] = set()
+        unique_concepts = []
+        duplicates_removed = 0
+
+        for concept in concepts:
+            normalized_name = concept.name.lower().strip()
+            if normalized_name not in seen_names:
+                seen_names.add(normalized_name)
+                unique_concepts.append(concept)
+            else:
+                duplicates_removed += 1
+                logger.debug(f"[OSMOSE:DEDUP] Doublon éliminé: '{concept.name}'")
+
+        if duplicates_removed > 0:
+            logger.warning(
+                f"[OSMOSE:DEDUP] {duplicates_removed} concepts dupliqués éliminés "
+                f"({len(concepts)} → {len(unique_concepts)})"
+            )
+            # Réindexer les concept_id après déduplication
+            for idx, concept in enumerate(unique_concepts):
+                concept.concept_id = f"concept_{doc_id}_{idx}"
+            concepts = unique_concepts
+        # === FIN DÉDUPLICATION ===
+
         # Ajouter les termes refusés par le LLM
         for r in data.get("refused_terms", []):
             refused.append({
