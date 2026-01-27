@@ -144,7 +144,11 @@ class Theme(BaseModel):
 
 
 class Concept(BaseModel):
-    """Concept clé du document (frugal: 5-15 max)."""
+    """Concept clé du document (frugal: 5-30 max).
+
+    V2.1: Ajout lexical_triggers obligatoires (C1) pour garantir
+    que chaque concept est ancré dans le texte du document.
+    """
     concept_id: str
     theme_id: str
     name: str
@@ -152,6 +156,11 @@ class Concept(BaseModel):
     role: ConceptRole = ConceptRole.STANDARD
     variants: list[str] = Field(default_factory=list)
     lex_key: Optional[str] = None  # Clé lexicale normalisée
+    # V2.1: Lexical triggers (C1) - tokens observables dans le document
+    lexical_triggers: list[str] = Field(
+        default_factory=list,
+        description="2-4 tokens/expressions qui APPARAISSENT RÉELLEMENT dans le document"
+    )
 
 
 class Anchor(BaseModel):

@@ -55,30 +55,44 @@ document_analysis:
     ```
 
 # ============================================================================
-# PHASE 1.2: Concept Identification
+# PHASE 1.2: Concept Identification (V2.1 - Surface Élargie + Lexical Triggers)
 # ============================================================================
 
 concept_identification:
-  # COMPACT OUTPUT (ADR: LLM Contract - éviter troncature JSON)
-  # Les définitions et variantes seront enrichies en Pass 2 si nécessaire
+  # V2.1: Surface conceptuelle élargie (20-30 concepts) avec lexical_triggers obligatoires
   system: |
     Expert extraction concepts OSMOSE.
 
-    FRUGALITÉ STRICTE:
-    - Max 10 concepts
-    - Noms courts (2-4 mots)
-    - PAS de définitions (seront ajoutées en Pass 2)
-    - PAS de variantes (seront ajoutées en Pass 2)
+    COUVERTURE PRIORITAIRE:
+    - Identifier 20-30 concepts pour couvrir la richesse documentaire
+    - Concepts SPÉCIFIQUES (2-5 mots descriptifs)
+    - Éviter les concepts génériques ("security", "system", "data")
 
-    RÔLES:
-    - CENTRAL: Cœur du document
-    - STANDARD: Important secondaire
-    - CONTEXTUAL: Contexte
+    ⚠️ RÈGLE CRITIQUE - LEXICAL TRIGGERS (C1):
+    Chaque concept DOIT avoir 2-4 "lexical_triggers":
+    - Tokens ou expressions qui APPARAISSENT RÉELLEMENT dans le document
+    - Pas de paraphrases ou synonymes inventés
+    - Ces triggers servent à retrouver le concept dans le texte
 
-    TERMES À REFUSER:
-    - Génériques: "système", "méthode", "processus", "solution"
-    - Mentionnés une seule fois
-    - Acronymes non définis
+    ⚠️ INDÉPENDANCE DOMAINE:
+    Ne suppose aucun domaine. Les triggers doivent venir du texte.
+
+    EXEMPLES:
+    ❌ {{"name": "compliance", "lexical_triggers": []}} → REJETÉ
+    ✅ {{"name": "délai conservation données", "lexical_triggers": ["conservation", "5 ans", "RGPD"]}}
+    ✅ {{"name": "TLS version minimale", "lexical_triggers": ["TLS", "1.2", "connexion"]}}
+    ✅ {{"name": "uptime SLA", "lexical_triggers": ["uptime", "99.9%", "SLA"]}}
+
+    RÔLES (utiliser les 3):
+    - CENTRAL: Cœur du document (5-8 concepts)
+    - STANDARD: Important mais secondaire (10-15 concepts)
+    - CONTEXTUAL: Contexte technique (5-7 concepts)
+
+    TERMES À REFUSER (tous domaines):
+    - Génériques sans triggers observables ("data", "system", "process", "compliance", "management")
+    - Mentionnés une seule fois sans définition
+    - Acronymes non définis dans le texte
+    - Termes vagues applicable à tout ("requirement", "standard", "solution")
 
     FORMAT: JSON compact uniquement, PAS de texte explicatif.
 
@@ -95,17 +109,22 @@ concept_identification:
     CONTENU (extrait):
     {content}
 
-    RÈGLES STRICTES:
-    - Maximum {max_concepts} concepts
-    - Chaque concept DOIT être rattaché à un thème existant
-    - Noms courts (2-4 mots max)
+    RÈGLES:
+    - Minimum 15, maximum {max_concepts} concepts
+    - Chaque concept DOIT avoir 2-4 lexical_triggers (tokens présents dans le texte)
+    - Concepts SPÉCIFIQUES (pas génériques)
+    - Utiliser les 3 niveaux de rôle
 
-    Réponds UNIQUEMENT avec ce JSON COMPACT:
+    Réponds UNIQUEMENT avec ce JSON:
     ```json
     {{
       "concepts": [
-        {{"name": "Nom", "role": "CENTRAL", "theme": "Thème"}},
-        {{"name": "Nom2", "role": "STANDARD", "theme": "Thème2"}}
+        {{
+          "name": "Nom spécifique (2-5 mots)",
+          "role": "CENTRAL|STANDARD|CONTEXTUAL",
+          "theme": "Thème",
+          "lexical_triggers": ["token1", "token2", "token3"]
+        }}
       ],
       "refused_terms": [
         {{"term": "Terme", "reason": "Raison"}}
@@ -168,11 +187,17 @@ assertion_extraction:
 # ============================================================================
 
 semantic_linking:
+  # V2.1: Multi-Concept Linking - une assertion peut informer 1-5 concepts
   system: |
     Tu es un expert en raisonnement sémantique pour OSMOSE.
     Tu dois déterminer quelles ASSERTIONS apportent de la connaissance sur quels CONCEPTS.
 
-    IMPORTANT - Ce n'est PAS un matching lexical:
+    ⚠️ IMPORTANT: Une assertion peut concerner PLUSIEURS concepts (1-5)!
+
+    Exemple: "S/4HANA Migration requires ABAP and JavaScript skills"
+    → Concepts: ["S/4HANA Migration", "ABAP skills", "JavaScript skills"]
+
+    Ce n'est PAS un matching lexical:
     - Une assertion peut concerner un concept SANS le mentionner explicitement
     - Un concept en français peut être lié à une assertion en anglais (et vice versa)
     - Le lien doit être SÉMANTIQUE (basé sur le sens), pas lexical (basé sur les mots)
@@ -185,7 +210,10 @@ semantic_linking:
     - conditions: L'assertion spécifie une CONDITION liée au concept
     - causes: L'assertion décrit un EFFET ou conséquence du concept
 
-    Tu DOIS justifier chaque lien de manière concise mais précise.
+    RÈGLE C3 - Éviter le "spray & pray":
+    - Maximum 5 concepts par assertion
+    - Ne lier que si confiance >= 0.70
+    - Justifier chaque lien de manière précise
 
   user: |
     Établis les liens sémantiques entre ces assertions et ces concepts.
@@ -196,16 +224,28 @@ semantic_linking:
     CONCEPTS (cibles):
     {concepts}
 
+    ⚠️ MULTI-CONCEPT: Une assertion peut être liée à PLUSIEURS concepts (1-5 max).
+
     Réponds UNIQUEMENT avec ce JSON:
     ```json
     {{
       "links": [
         {{
           "assertion_id": "assert_abc123",
-          "concept_id": "concept_xyz",
-          "link_type": "defines|describes|constrains|enables|conditions|causes",
-          "justification": "Pourquoi cette assertion concerne ce concept (1 phrase)",
-          "confidence": 0.85
+          "concept_links": [
+            {{
+              "concept_id": "concept_xyz1",
+              "link_type": "defines",
+              "justification": "Cette assertion définit le concept car...",
+              "confidence": 0.85
+            }},
+            {{
+              "concept_id": "concept_xyz2",
+              "link_type": "describes",
+              "justification": "Cette assertion décrit aussi ce concept car...",
+              "confidence": 0.75
+            }}
+          ]
         }}
       ],
       "unlinked_assertions": [
@@ -224,6 +264,7 @@ semantic_linking:
 # Le LLM POINTE vers une unité (U1, U2...) au lieu de COPIER le texte.
 
 pointer_concept_extraction:
+  # FIX 2026-01-27: Labels doivent utiliser les mots du texte + supprimer value_kind
   system: |
     Tu es un expert en extraction de concepts pour OSMOSE.
 
@@ -241,8 +282,9 @@ pointer_concept_extraction:
     1. Retourne UNIQUEMENT le numéro d'unité (U1, U2...), JAMAIS le texte
     2. NE PROPOSE UN CONCEPT QUE SI TU PEUX POINTER UNE UNITÉ
     3. SI AUCUNE UNITÉ NE CORRESPOND, NE RETOURNE PAS LE CONCEPT
-    4. La confidence reflète ta certitude sur le type (pas sur l'existence)
-    5. value_kind si applicable: "version", "percentage", "size", "number", "duration"
+    4. ⚠️ Le LABEL doit contenir AU MOINS 2 MOTS présents dans le texte de l'unité
+    5. ❌ NE PAS inventer de labels abstraits comme "security requirement" ou "data protection"
+    6. ✅ UTILISER les mots exacts du texte pour construire le label
 
     FORMAT JSON STRICT - pas de texte hors JSON.
 
@@ -255,21 +297,27 @@ pointer_concept_extraction:
     TEXTE AVEC UNITÉS:
     {units_text}
 
-    INSTRUCTIONS:
+    INSTRUCTIONS CRITIQUES:
     - Indique UNIQUEMENT le numéro d'unité (U1, U2...).
-    - NE RECOPIE PAS le texte.
-    - Si aucune unité ne correspond à un concept, n'inclus pas ce concept.
+    - NE RECOPIE PAS le texte complet.
+    - ⚠️ Le LABEL doit utiliser des MOTS PRÉSENTS dans l'unité pointée.
+    - ❌ INTERDIT: labels abstraits ("security requirement", "compliance standard")
+    - ✅ CORRECT: labels avec mots du texte ("TLS version", "data encryption", "audit trail")
+
+    EXEMPLES:
+    - Unité: "TLS 1.2 is required" → label: "TLS version" ✅ (mots présents)
+    - Unité: "All data must be encrypted" → label: "data encryption" ✅ (mots présents)
+    - Unité: "All data must be encrypted" → label: "security requirement" ❌ (mots absents)
 
     Réponds UNIQUEMENT avec ce JSON:
     ```json
     {{
       "concepts": [
         {{
-          "label": "Nom court du concept (2-5 mots)",
+          "label": "Nom avec MOTS DU TEXTE (2-5 mots)",
           "type": "PRESCRIPTIVE|DEFINITIONAL|FACTUAL|PERMISSIVE",
           "unit_id": "U1",
-          "confidence": 0.9,
-          "value_kind": "version|percentage|size|number|duration|null"
+          "confidence": 0.9
         }}
       ]
     }}
@@ -280,6 +328,7 @@ pointer_concept_extraction:
 # ============================================================================
 
 pointer_batch_extraction:
+  # FIX 2026-01-27: Labels doivent utiliser les mots du texte
   system: |
     Expert extraction concepts OSMOSE - MODE BATCH POINTER.
 
@@ -290,10 +339,12 @@ pointer_batch_extraction:
 
     TYPES: PRESCRIPTIVE | DEFINITIONAL | FACTUAL | PERMISSIVE
 
-    RÈGLES:
+    RÈGLES CRITIQUES:
     1. UNIQUEMENT le numéro d'unité, JAMAIS le texte
     2. Pas de concept si aucune unité ne correspond
-    3. value_kind si applicable: version, percentage, size, number, duration
+    3. ⚠️ Le LABEL doit contenir AU MOINS 2 MOTS de l'unité pointée
+    4. ❌ INTERDIT: labels abstraits (security requirement, data protection, compliance)
+    5. ✅ UTILISER les mots exacts du texte
 
     FORMAT JSON COMPACT.
 
@@ -304,17 +355,95 @@ pointer_batch_extraction:
 
     {docitems_with_units}
 
+    ⚠️ RÈGLE LABEL: Utilise des MOTS PRÉSENTS dans l'unité, pas des termes abstraits.
+
     Réponds avec ce JSON:
     ```json
     {{
       "concepts": [
         {{
           "docitem_id": "default:doc_abc:#/texts/5",
-          "label": "Nom concept",
+          "label": "Nom avec MOTS DU TEXTE",
           "type": "PRESCRIPTIVE",
           "unit_id": "U1",
-          "confidence": 0.9,
-          "value_kind": null
+          "confidence": 0.9
+        }}
+      ]
+    }}
+    ```
+
+# ============================================================================
+# PHASE 1.2b: Concept Refinement (Itératif - V2.1)
+# ============================================================================
+# Déclenché quand trop d'assertions sont en NO_CONCEPT_MATCH
+# Analyse les assertions non-liées pour identifier les concepts manquants
+
+concept_refinement:
+  system: |
+    Tu es un expert en identification de concepts MANQUANTS pour OSMOSE.
+
+    CONTEXTE:
+    On te donne des assertions qui N'ONT PAS PU être liées aux concepts existants.
+    Ta tâche: identifier les concepts MANQUANTS qui permettraient de les capturer.
+
+    RÈGLES CRITIQUES:
+    - Concepts SPÉCIFIQUES et ACTIONNABLES (pas génériques)
+    - Ne pas répéter les concepts existants
+    - Maximum {max_concepts} nouveaux concepts par itération
+    - Chaque concept doit correspondre à AU MOINS 2 assertions fournies
+
+    ⚠️ CRITÈRE C2 - Assertions de qualité:
+    Un nouveau concept doit couvrir au moins 1 assertion de qualité:
+    - PRESCRIPTIVE (must, shall, required, obligatoire)
+    - Value-bearing (contient une valeur: %, version, durée, taille)
+    - Obligation implicite (is required to, no later than, within X days)
+
+    ⚠️ LEXICAL TRIGGERS (C1):
+    Chaque nouveau concept DOIT avoir 2-4 lexical_triggers:
+    - Tokens qui APPARAISSENT dans les assertions fournies
+    - Pas de paraphrases ou synonymes inventés
+
+    EXEMPLES:
+    Assertions non-liées:
+    - "Data retention period is 5 years"
+    - "Personal data must be deleted after retention"
+    → Nouveau concept: {{"name": "période rétention données", "lexical_triggers": ["retention", "5 years", "deleted"]}}
+
+  user: |
+    Identifie les concepts MANQUANTS depuis ces assertions non-liées.
+
+    ASSERTIONS NON LIÉES (extraits):
+    {assertions}
+
+    CONCEPTS EXISTANTS (à ne pas répéter):
+    {existing_concepts}
+
+    THÈMES DISPONIBLES:
+    {themes}
+
+    LANGUE: {language}
+
+    RÈGLES:
+    - Maximum {max_concepts} nouveaux concepts
+    - Chaque concept doit couvrir ≥2 assertions dont ≥1 PRESCRIPTIVE ou value-bearing
+    - Inclure 2-4 lexical_triggers par concept
+
+    Réponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "new_concepts": [
+        {{
+          "name": "Nom spécifique (2-5 mots)",
+          "role": "CENTRAL|STANDARD|CONTEXTUAL",
+          "theme": "Thème existant",
+          "lexical_triggers": ["token1", "token2", "token3"],
+          "covers_assertions_count": 3,
+          "has_prescriptive_or_value": true
+        }}
+      ],
+      "uncapturable": [
+        {{
+          "reason": "Ces assertions sont trop génériques/fragmentaires pour justifier un concept"
         }}
       ]
     }}

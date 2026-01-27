@@ -3,10 +3,11 @@ OSMOSE Pipeline V2 - Phase 1.2 Concept Identifier
 ==================================================
 Ref: doc/ongoing/ARCH_STRATIFIED_PIPELINE_V2.md
 
-Identification des concepts FRUGAUX:
-- Maximum 15 concepts par document (garde-fou strict)
+Identification des concepts avec surface conceptuelle élargie:
+- Maximum 30 concepts par document (V2.1 - augmenté depuis 15)
 - Rôle: CENTRAL, STANDARD, CONTEXTUAL
 - Rattachement aux thèmes
+- Lexical triggers obligatoires (C1)
 
 Adapté du POC: poc/extractors/concept_identifier.py
 """
@@ -14,7 +15,8 @@ Adapté du POC: poc/extractors/concept_identifier.py
 import json
 import re
 import logging
-from typing import Dict, List, Optional, Tuple
+from collections import Counter
+from typing import Dict, List, Optional, Set, Tuple
 from pathlib import Path
 import yaml
 
@@ -26,21 +28,26 @@ from knowbase.stratified.models import (
 
 logger = logging.getLogger(__name__)
 
+# Patterns valeur (autorisés même si < 3 chars) - C1b
+VALUE_PATTERN = re.compile(r'^\d+(\.\d+)*[%°]?[CFc]?$|^\d+[:\-]\d+$')
+
 
 class ConceptIdentifierV2:
     """
     Identificateur de concepts pour Pipeline V2.
 
-    FRUGALITÉ STRICTE:
-    - Maximum 15 concepts par document (invariant V2-007)
+    SURFACE CONCEPTUELLE ÉLARGIE (V2.1):
+    - Maximum 30 concepts par document (augmenté depuis 15)
+    - Lexical triggers obligatoires (C1)
+    - Validation anti-triggers triviaux (C1b)
     - Minimum pertinence requis pour être retenu
 
     IMPORTANT: Pas de fallback silencieux - erreur explicite si LLM absent.
     """
 
-    # Garde-fou frugalité (invariant V2-007)
-    MAX_CONCEPTS = 15
-    MAX_CONCEPTS_HOSTILE = 5  # Pour documents HOSTILE
+    # Garde-fou frugalité (V2.1 - élargi pour meilleure couverture)
+    MAX_CONCEPTS = 30               # Documents normaux (augmenté depuis 15)
+    MAX_CONCEPTS_HOSTILE = 10       # Pour documents HOSTILE (augmenté depuis 5)
 
     def __init__(
         self,
@@ -129,9 +136,10 @@ class ConceptIdentifierV2:
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                max_tokens=2500
+                max_tokens=4000  # Augmenté pour éviter troncature JSON
             )
-            concepts, refused = self._parse_response(response, doc_id, themes)
+            # V2.1: Passer le contenu pour validation des lexical_triggers
+            concepts, refused = self._parse_response(response, doc_id, themes, content)
         elif self.allow_fallback:
             logger.warning("[OSMOSE:Pass1:1.2] Mode fallback activé - résultats non fiables")
             concepts, refused = self._fallback_identification(doc_id, subject_text, themes, content)
@@ -160,37 +168,115 @@ class ConceptIdentifierV2:
         """Formate les thèmes pour le prompt."""
         return '\n'.join(f"- {theme.name}" for theme in themes)
 
+    def _clean_json_string(self, json_str: str) -> str:
+        """
+        Nettoie le JSON généré par LLM (trailing commas, comments, etc.).
+
+        Les modèles locaux (Qwen, etc.) génèrent parfois du JSON invalide.
+        """
+        # Supprimer les commentaires // et /* */
+        json_str = re.sub(r'//.*?$', '', json_str, flags=re.MULTILINE)
+        json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+
+        # Supprimer les trailing commas avant } ou ]
+        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+
+        # Remplacer les single quotes par double quotes (si pas dans une string)
+        # Attention: simplification, peut ne pas gérer tous les cas
+        json_str = re.sub(r"'([^']*)'(\s*:)", r'"\1"\2', json_str)
+
+        return json_str.strip()
+
     def _parse_response(
         self,
         response: str,
         doc_id: str,
-        themes: List[Theme]
+        themes: List[Theme],
+        doc_content: str = ""
     ) -> Tuple[List[Concept], List[Dict]]:
-        """Parse la réponse JSON du LLM."""
+        """
+        Parse la réponse JSON du LLM avec détection de troncature et nettoyage.
+
+        V2.1: Valide également les lexical_triggers si doc_content est fourni.
+        """
         json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
         if json_match:
             json_str = json_match.group(1)
         else:
             json_str = response
 
+        # GUARDRAIL: Détection troncature JSON (ADR: LLM Contract)
+        json_str_stripped = json_str.strip()
+        if json_str_stripped and not json_str_stripped.endswith(('}', ']')):
+            logger.error(
+                f"[OSMOSE:Pass1:1.2] TRONCATURE DÉTECTÉE - JSON incomplet. "
+                f"Fin: ...{json_str_stripped[-100:]}"
+            )
+            raise ValueError(
+                f"LLM Contract Violation: JSON tronqué détecté. "
+                f"Le modèle a probablement atteint sa limite de tokens. "
+                f"Fin de réponse: ...{json_str_stripped[-50:]}"
+            )
+
+        # Nettoyage JSON pour modèles locaux (trailing commas, etc.)
+        json_str_clean = self._clean_json_string(json_str_stripped)
+
         try:
-            data = json.loads(json_str)
-            return self._validate_and_convert(data, doc_id, themes)
+            data = json.loads(json_str_clean)
+            # V2.1: Passer doc_content pour validation C1
+            return self._validate_and_convert(data, doc_id, themes, doc_content)
         except json.JSONDecodeError as e:
             logger.error(f"Réponse LLM invalide: {e}")
+            logger.debug(f"JSON brut: {json_str_stripped[:500]}")
+            logger.debug(f"JSON nettoyé: {json_str_clean[:500]}")
             raise ValueError(f"Réponse LLM invalide: {e}\nRéponse: {response[:500]}")
 
     def _validate_and_convert(
         self,
         data: Dict,
         doc_id: str,
-        themes: List[Theme]
+        themes: List[Theme],
+        doc_content: str = "",
+        unit_texts: Optional[List[str]] = None
     ) -> Tuple[List[Concept], List[Dict]]:
-        """Valide et convertit la réponse en objets Pydantic V2."""
+        """
+        Valide et convertit la réponse en objets Pydantic V2.
+
+        V2.1: Valide également les lexical_triggers (C1, C1b, C1c).
+        """
         concepts = []
+        refused = []
         theme_map = {t.name.lower(): t.theme_id for t in themes}
 
-        for idx, c_data in enumerate(data.get("concepts", [])):
+        # Calculer les top 50 tokens fréquents pour C1b (anti-trivial)
+        top_50_tokens = self._get_top_frequent_tokens(doc_content, n=50) if doc_content else set()
+
+        # Préparer unit_texts si non fourni (utiliser le contenu découpé)
+        if unit_texts is None and doc_content:
+            # Découper en pseudo-unités (paragraphes/phrases)
+            unit_texts = [p.strip() for p in re.split(r'\n\n+|\. ', doc_content) if p.strip()]
+
+        valid_idx = 0
+        for c_data in data.get("concepts", []):
+            name = c_data.get("name", f"Concept_{valid_idx}")
+            triggers = c_data.get("lexical_triggers", [])
+
+            # Valider les lexical_triggers (C1, C1b, C1c)
+            if doc_content and triggers:
+                is_valid, audit = self._validate_lexical_triggers(
+                    c_data, doc_content, unit_texts or [], top_50_tokens
+                )
+                if not is_valid:
+                    refused.append({
+                        "term": name,
+                        "reason": f"Triggers invalides: {audit.get('rejected', [])}"
+                    })
+                    logger.debug(f"[OSMOSE:C1] Concept rejeté '{name}': {audit}")
+                    continue
+            elif not triggers:
+                # Pas de triggers fournis - accepter avec warning (rétrocompatibilité)
+                logger.warning(f"[OSMOSE:C1] Concept '{name}' sans triggers (LLM n'a pas respecté le format)")
+
             # Mapper le rôle
             role_str = c_data.get("role", "STANDARD").upper()
             try:
@@ -203,27 +289,152 @@ class ConceptIdentifierV2:
             theme_id = theme_map.get(theme_ref.lower(), themes[0].theme_id if themes else "")
 
             # Générer lex_key (clé lexicale normalisée)
-            name = c_data.get("name", f"Concept_{idx}")
             lex_key = self._generate_lex_key(name)
 
             concept = Concept(
-                concept_id=f"concept_{doc_id}_{idx}",
+                concept_id=f"concept_{doc_id}_{valid_idx}",
                 theme_id=theme_id,
                 name=name,
-                definition=c_data.get("definition"),  # Définition courte du concept
+                definition=c_data.get("definition"),
                 role=role,
                 variants=c_data.get("variants", []),
-                lex_key=lex_key
+                lex_key=lex_key,
+                lexical_triggers=triggers[:4]  # Max 4 triggers
             )
             concepts.append(concept)
+            valid_idx += 1
 
-        # Termes refusés
-        refused = [
-            {"term": r.get("term", ""), "reason": r.get("reason", "Non spécifié")}
-            for r in data.get("refused_terms", [])
-        ]
+        # Ajouter les termes refusés par le LLM
+        for r in data.get("refused_terms", []):
+            refused.append({
+                "term": r.get("term", ""),
+                "reason": r.get("reason", "Non spécifié")
+            })
 
         return concepts, refused
+
+    def _get_top_frequent_tokens(self, content: str, n: int = 50) -> Set[str]:
+        """
+        Calcule les n tokens les plus fréquents du document.
+
+        Utilisé pour C1b: rejeter les triggers trop fréquents.
+        """
+        # Tokeniser simplement (mots alphanumériques)
+        tokens = re.findall(r'\b\w+\b', content.lower())
+        # Filtrer les tokens trop courts
+        tokens = [t for t in tokens if len(t) >= 3]
+        # Compter les fréquences
+        freq = Counter(tokens)
+        # Retourner les n plus fréquents
+        return {t for t, _ in freq.most_common(n)}
+
+    def _validate_lexical_triggers(
+        self,
+        concept: Dict,
+        doc_content: str,
+        unit_texts: List[str],
+        top_50_tokens: Set[str]
+    ) -> Tuple[bool, Dict]:
+        """
+        Valide les lexical_triggers avec C1, C1b, C1c.
+
+        Args:
+            concept: Dict avec 'name' et 'lexical_triggers'
+            doc_content: Contenu complet du document
+            unit_texts: Liste des textes des unités (pour calcul fréquence)
+            top_50_tokens: Set des 50 tokens les plus fréquents
+
+        Returns:
+            (is_valid, audit_info)
+        """
+        triggers = concept.get('lexical_triggers', [])
+        audit = {'concept': concept.get('name'), 'triggers': {}, 'rejected': []}
+
+        if len(triggers) < 2:
+            audit['rejected'].append('< 2 triggers')
+            return False, audit
+
+        valid_triggers = []
+        rare_trigger_found = False
+        doc_lower = doc_content.lower()
+        total_units = len(unit_texts) if unit_texts else 1
+
+        for t in triggers:
+            t_lower = t.lower()
+            trigger_info = {'trigger': t, 'found': False, 'frequency': 0, 'examples': []}
+
+            # C1b: Refuser < 3 chars sauf patterns valeur
+            if len(t) < 3 and not VALUE_PATTERN.match(t):
+                audit['rejected'].append(f"'{t}' trop court (<3 chars)")
+                continue
+
+            # C1b: Refuser si dans top 50 fréquents
+            if t_lower in top_50_tokens:
+                audit['rejected'].append(f"'{t}' trop fréquent (top 50)")
+                continue
+
+            # C1c: Matching avec word boundary pour alphanum, substring pour valeurs
+            is_value = VALUE_PATTERN.match(t)
+            if is_value:
+                # Substring pour valeurs (8%, 1.2, 2-8°C)
+                found_in_content = t_lower in doc_lower
+            else:
+                # Word boundary pour éviter matchs absurdes ("cat" dans "category")
+                pattern = rf'\b{re.escape(t_lower)}\b'
+                found_in_content = bool(re.search(pattern, doc_lower))
+
+            if not found_in_content:
+                audit['rejected'].append(f"'{t}' absent du document")
+                continue
+
+            # Calculer fréquence (nombre d'unités contenant ce trigger)
+            if is_value:
+                matching_units = [u for u in unit_texts if t_lower in u.lower()]
+            else:
+                pattern = rf'\b{re.escape(t_lower)}\b'
+                matching_units = [u for u in unit_texts if re.search(pattern, u.lower())]
+
+            freq = len(matching_units)
+            freq_rate = freq / total_units if total_units > 0 else 0
+            trigger_info['found'] = True
+            trigger_info['frequency'] = f"{freq}/{total_units} ({freq_rate:.1%})"
+            trigger_info['examples'] = [u[:80] for u in matching_units][:2]
+            trigger_info['is_value'] = is_value
+
+            # C1b: Au moins 1 trigger rare (< 1% des unités) OU trigger valeur
+            if freq_rate < 0.01:
+                rare_trigger_found = True
+                trigger_info['rare'] = True
+            elif freq_rate < 0.02:
+                # Fallback semi-rare
+                trigger_info['rare'] = 'semi-rare'
+            elif is_value:
+                # Fallback: triggers valeur considérés comme discriminants
+                rare_trigger_found = True
+                trigger_info['rare'] = 'fallback_value'
+
+            valid_triggers.append(t)
+            audit['triggers'][t] = trigger_info
+
+        # Validation finale
+        audit['valid_count'] = len(valid_triggers)
+        audit['rare_found'] = rare_trigger_found
+
+        # Vérifier si au moins un trigger semi-rare si pas de rare strict
+        has_semi_rare = any(
+            info.get('rare') == 'semi-rare'
+            for info in audit['triggers'].values()
+        )
+
+        is_valid = len(valid_triggers) >= 2 and (rare_trigger_found or has_semi_rare)
+        if not rare_trigger_found and not has_semi_rare and valid_triggers:
+            audit['rejected'].append("Aucun trigger rare (<1%) ni semi-rare (<2%) ni valeur")
+
+        logger.info(
+            f"[OSMOSE:C1] {concept.get('name')}: "
+            f"{len(valid_triggers)} triggers valides, rare={rare_trigger_found}"
+        )
+        return is_valid, audit
 
     def _generate_lex_key(self, name: str) -> str:
         """Génère une clé lexicale normalisée."""
@@ -286,54 +497,54 @@ class ConceptIdentifierV2:
         return concepts, refused
 
     def _default_system_prompt(self) -> str:
-        return """Tu es un expert en extraction de concepts pour OSMOSE.
-Tu dois identifier les CONCEPTS CLÉS d'un document de manière FRUGALE.
+        # COMPACT OUTPUT (ADR: LLM Contract)
+        # System prompt minimaliste pour éviter génération verbose
+        return """Expert extraction concepts OSMOSE.
 
-RÈGLES DE FRUGALITÉ:
-- Maximum {max_concepts} concepts par document
-- Chaque concept doit être SIGNIFICATIF et DISTINCT
-- Éviter les termes génériques (ex: "système", "méthode", "processus")
-- Éviter les termes trop spécifiques/locaux
+FRUGALITÉ STRICTE:
+- Max 10 concepts
+- Noms courts (2-4 mots)
+- Pas de définitions
+- Pas de variantes
 
-RÔLES des concepts:
-- CENTRAL: Concept au cœur du document, tout tourne autour
-- STANDARD: Concept important mais pas central
-- CONTEXTUAL: Concept de contexte, mentionné mais pas le focus
+RÔLES:
+- CENTRAL: Cœur du document
+- STANDARD: Important secondaire
+- CONTEXTUAL: Contexte
 
-Tu dois aussi identifier les VARIANTES de chaque concept (synonymes, traductions).
+FORMAT: JSON compact uniquement, PAS de texte explicatif.
 """
 
     def _default_user_prompt(self) -> str:
-        return """Identifie les concepts de ce document.
+        # COMPACT OUTPUT (ADR: LLM Contract)
+        # Sortie minimaliste pour éviter troncature JSON
+        # variants/definition seront enrichis en Pass 2 si nécessaire
+        return """Identifie les concepts CLÉS de ce document.
 
 SUJET: {subject}
 STRUCTURE: {structure}
 LANGUE: {language}
 
-THÈMES:
+THÈMES DISPONIBLES:
 {themes}
 
-CONTENU:
+CONTENU (extrait):
 {content}
 
-ATTENTION: Maximum {max_concepts} concepts!
+RÈGLES STRICTES:
+- Maximum {max_concepts} concepts
+- Chaque concept DOIT être rattaché à un thème existant
+- Éviter les termes génériques (système, méthode, processus)
 
-Réponds UNIQUEMENT avec ce JSON:
+Réponds UNIQUEMENT avec ce JSON COMPACT:
 ```json
 {{
   "concepts": [
-    {{
-      "name": "Nom du concept",
-      "role": "CENTRAL|STANDARD|CONTEXTUAL",
-      "theme": "Nom du thème rattaché",
-      "variants": ["Variante 1", "Variante 2"]
-    }}
+    {{"name": "Nom", "role": "CENTRAL", "theme": "Thème"}},
+    {{"name": "Nom2", "role": "STANDARD", "theme": "Thème2"}}
   ],
   "refused_terms": [
-    {{
-      "term": "Terme refusé",
-      "reason": "Raison du refus"
-    }}
+    {{"term": "Terme", "reason": "Raison"}}
   ]
 }}
 ```"""

@@ -44,6 +44,9 @@ from knowbase.stratified.models.information import PromotionStatus
 
 logger = logging.getLogger(__name__)
 
+# V2.1: Pattern valeur pour validation triggers (C1c)
+VALUE_PATTERN = re.compile(r'^\d+(\.\d+)*[%°]?[CFc]?$|^\d+[:\-]\d+$')
+
 
 # ============================================================================
 # PROMOTION POLICY
@@ -93,12 +96,57 @@ class RawAssertion:
 
 @dataclass
 class ConceptLink:
-    """Lien sémantique entre une assertion et un concept."""
+    """
+    Lien sémantique entre une assertion et UN concept (format legacy).
+
+    Note: Pour le multi-concept linking V2.1, voir MultiConceptLink.
+    """
     assertion_id: str
     concept_id: str
     link_type: str  # defines, describes, constrains, enables, conditions, causes
     justification: str
     confidence: float
+
+
+@dataclass
+class MultiConceptLink:
+    """
+    Lien sémantique entre une assertion et PLUSIEURS concepts (V2.1).
+
+    Une assertion peut informer 1-5 concepts avec des types de liens différents.
+    """
+    assertion_id: str
+    concept_ids: List[str]  # PLUSIEURS concepts (1-5)
+    link_types: Dict[str, str]  # {concept_id → link_type}
+    justifications: Dict[str, str]  # {concept_id → justification}
+    confidences: Dict[str, float]  # {concept_id → confidence}
+
+    @property
+    def primary_concept_id(self) -> str:
+        """Concept principal (plus haute confiance)."""
+        if not self.concept_ids:
+            return ""
+        return max(self.concept_ids, key=lambda c: self.confidences.get(c, 0))
+
+    def to_legacy_links(self) -> List[ConceptLink]:
+        """Convertit en liste de ConceptLink legacy pour rétrocompatibilité."""
+        return [
+            ConceptLink(
+                assertion_id=self.assertion_id,
+                concept_id=cid,
+                link_type=self.link_types.get(cid, "relates_to"),
+                justification=self.justifications.get(cid, ""),
+                confidence=self.confidences.get(cid, 0.8)
+            )
+            for cid in self.concept_ids
+        ]
+
+
+# Seuils de contrôle multi-linking (C3: Anti "Spray & Pray")
+MIN_LINK_CONFIDENCE = 0.70
+MAX_LINKS_PER_ASSERTION = 5
+TOP_K_IF_CLOSE = 2
+CLOSE_THRESHOLD = 0.10  # Écart max entre top-1 et top-k
 
 
 @dataclass
@@ -764,7 +812,11 @@ class AssertionExtractorV2:
         assertions: List[RawAssertion],
         concepts: List[Concept]
     ) -> List[ConceptLink]:
-        """Parse la réponse JSON des liens."""
+        """
+        Parse la réponse JSON des liens.
+
+        V2.1: Supporte le format multi-concept (concept_links array).
+        """
         json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
         if json_match:
             json_str = json_match.group(1)
@@ -777,29 +829,122 @@ class AssertionExtractorV2:
 
             assertion_map = {a.assertion_id: a for a in assertions}
             concept_ids = {c.concept_id for c in concepts}
+            concept_triggers = {c.concept_id: c.lexical_triggers for c in concepts}
 
             for l_data in data.get("links", []):
                 assertion_id = l_data.get("assertion_id", "")
-                concept_id = l_data.get("concept_id", "")
 
                 if assertion_id not in assertion_map:
                     continue
-                if concept_id not in concept_ids:
-                    continue
 
-                links.append(ConceptLink(
-                    assertion_id=assertion_id,
-                    concept_id=concept_id,
-                    link_type=l_data.get("link_type", "relates_to"),
-                    justification=l_data.get("justification", ""),
-                    confidence=l_data.get("confidence", 0.8)
-                ))
+                assertion_text = assertion_map[assertion_id].text
+
+                # V2.1: Format multi-concept (concept_links array)
+                if "concept_links" in l_data:
+                    concept_links_raw = l_data.get("concept_links", [])
+                    # Filtrer et valider avec C3
+                    filtered_links = self._filter_multi_links(
+                        concept_links_raw, assertion_text, concept_ids, concept_triggers
+                    )
+                    for cl in filtered_links:
+                        links.append(ConceptLink(
+                            assertion_id=assertion_id,
+                            concept_id=cl["concept_id"],
+                            link_type=cl.get("link_type", "relates_to"),
+                            justification=cl.get("justification", ""),
+                            confidence=cl.get("confidence", 0.8)
+                        ))
+                else:
+                    # Format legacy (un seul concept_id)
+                    concept_id = l_data.get("concept_id", "")
+                    if concept_id not in concept_ids:
+                        continue
+
+                    links.append(ConceptLink(
+                        assertion_id=assertion_id,
+                        concept_id=concept_id,
+                        link_type=l_data.get("link_type", "relates_to"),
+                        justification=l_data.get("justification", ""),
+                        confidence=l_data.get("confidence", 0.8)
+                    ))
 
             return links
 
         except json.JSONDecodeError as e:
             logger.warning(f"Parse links JSON échoué: {e}")
             return self._link_heuristic(assertions, concepts)
+
+    def _filter_multi_links(
+        self,
+        raw_links: List[Dict],
+        unit_text: str,
+        valid_concept_ids: set,
+        concept_triggers: Dict[str, List[str]]
+    ) -> List[Dict]:
+        """
+        C3: Filtre les liens multiples pour éviter le "spray & pray".
+
+        Règles:
+        1. Max 5 liens par assertion
+        2. Garder seulement confidence >= 0.70 OU top-2 si écart faible
+        3. Chaque lien doit avoir au moins 1 lexical_trigger présent dans l'unité
+        """
+        if not raw_links:
+            return []
+
+        # Filtrer les concept_ids valides
+        raw_links = [l for l in raw_links if l.get("concept_id") in valid_concept_ids]
+
+        if not raw_links:
+            return []
+
+        # Trier par confiance décroissante
+        sorted_links = sorted(raw_links, key=lambda l: l.get('confidence', 0), reverse=True)
+
+        validated_links = []
+        top_confidence = sorted_links[0].get('confidence', 0) if sorted_links else 0
+
+        for i, link in enumerate(sorted_links[:MAX_LINKS_PER_ASSERTION]):
+            concept_id = link.get('concept_id', '')
+            confidence = link.get('confidence', 0)
+
+            # Règle 1: Seuil de confiance ou top-k proche
+            is_high_confidence = confidence >= MIN_LINK_CONFIDENCE
+            is_top_k_close = i < TOP_K_IF_CLOSE and (top_confidence - confidence) <= CLOSE_THRESHOLD
+
+            if not (is_high_confidence or is_top_k_close):
+                continue
+
+            # Règle 2: Validation par trigger (C3)
+            triggers = concept_triggers.get(concept_id, [])
+            if triggers and not self._has_trigger_match(unit_text, triggers):
+                logger.debug(f"[OSMOSE:MultiLink] Rejeté {concept_id}: pas de trigger dans l'unité")
+                continue
+
+            validated_links.append(link)
+
+        return validated_links
+
+    def _has_trigger_match(self, text: str, triggers: List[str]) -> bool:
+        """C3 + C1c: Vérifie qu'au moins 1 trigger est présent (word boundary)."""
+        if not triggers:
+            return True  # Pas de triggers définis = accepter (rétrocompatibilité)
+
+        text_lower = text.lower()
+
+        for t in triggers:
+            t_lower = t.lower()
+            # C1c: Utiliser word boundary pour alphanum, substring pour valeurs
+            if VALUE_PATTERN.match(t):
+                # Substring pour valeurs (8%, 1.2, 2-8°C)
+                if t_lower in text_lower:
+                    return True
+            else:
+                # Word boundary pour éviter matchs absurdes ("cat" dans "category")
+                if re.search(rf'\b{re.escape(t_lower)}\b', text_lower):
+                    return True
+
+        return False
 
     # =========================================================================
     # PROMPTS PAR DÉFAUT

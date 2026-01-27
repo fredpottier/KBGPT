@@ -46,6 +46,10 @@ from knowbase.stratified.pass1.anchor_resolver import (
     AnchorResolverV2,
     build_chunk_to_docitem_mapping,
 )
+from knowbase.stratified.pass1.concept_refiner import (
+    ConceptRefinerV2,
+    SaturationMetrics,
+)
 from knowbase.stratified.pass09 import GlobalViewBuilder, GlobalView, Pass09Config
 from knowbase.stratified.models.information import (
     InformationMVP,
@@ -87,6 +91,7 @@ class Pass1OrchestratorV2:
         enable_pass09: bool = True,
         pass09_config: Optional[Pass09Config] = None,
         enable_pointer_mode: bool = False,
+        enable_pass12b: bool = True,
     ):
         """
         Args:
@@ -97,11 +102,13 @@ class Pass1OrchestratorV2:
             enable_pass09: Active Pass 0.9 Global View Construction
             pass09_config: Configuration Pass 0.9 (optionnel)
             enable_pointer_mode: Active le mode Pointer-Based Extraction (anti-reformulation)
+            enable_pass12b: Active Pass 1.2b - Raffinement itératif des concepts (V2.1)
         """
         self.llm_client = llm_client
         self.allow_fallback = allow_fallback
         self.strict_promotion = strict_promotion
         self.tenant_id = tenant_id
+        self.enable_pass12b = enable_pass12b
         self.enable_pass09 = enable_pass09
         self.enable_pointer_mode = enable_pointer_mode
 
@@ -126,6 +133,11 @@ class Pass1OrchestratorV2:
             strict_promotion=strict_promotion
         )
         self.anchor_resolver = AnchorResolverV2()
+
+        # V2.1: Pass 1.2b - Raffinement itératif des concepts
+        self.concept_refiner = ConceptRefinerV2(
+            llm_client=llm_client
+        ) if enable_pass12b else None
 
     def process(
         self,
@@ -381,6 +393,148 @@ class Pass1OrchestratorV2:
             ))
 
         # =====================================================================
+        # PHASE 1.4b: Saturation Check + Pass 1.2b Itératif (V2.1)
+        # =====================================================================
+        if self.enable_pass12b and self.concept_refiner:
+            logger.info("[OSMOSE:Pass1:1.4b] Vérification saturation conceptuelle...")
+
+            # Convertir assertion_log en format dict pour le refiner
+            assertion_log_dicts = [
+                {
+                    'assertion_id': a.assertion_id,
+                    'text': a.text,
+                    'type': a.type.value if a.type else None,
+                    'status': a.status.value if a.status else None,
+                    'reason': a.reason.value if a.reason else None,
+                    'concept_id': a.concept_id,
+                }
+                for a in assertion_log
+            ]
+
+            iteration = 0
+            prev_saturation = None
+
+            while True:
+                # Calculer métriques de saturation
+                saturation = self.concept_refiner.calculate_saturation(assertion_log_dicts)
+
+                logger.info(
+                    f"[OSMOSE:Pass1:Saturation] Iteration {iteration}: "
+                    f"promoted={saturation.promoted}, no_concept_match={saturation.no_concept_match} "
+                    f"({saturation.no_concept_match_rate:.1%} of total), "
+                    f"coverage={saturation.coverage_rate:.1%}"
+                )
+
+                # C4: Vérifier si itération nécessaire (rate > 10% ET count > 20)
+                if not saturation.should_iterate:
+                    logger.info(
+                        f"[OSMOSE:Pass1:Saturation] Arrêt: "
+                        f"rate={saturation.no_concept_match_rate:.1%} ou count={saturation.no_concept_match}"
+                    )
+                    break
+
+                if iteration > 0 and prev_saturation:
+                    # Vérifier rendement marginal
+                    if not self.concept_refiner.should_continue_iteration(
+                        prev_saturation, saturation, iteration, len(concepts)
+                    ):
+                        break
+
+                # Pass 1.2b: Identifier concepts manquants
+                logger.info(
+                    f"[OSMOSE:Pass1:1.2b] Iteration {iteration + 1}: "
+                    f"{saturation.no_concept_match} non-liées "
+                    f"({saturation.quality_unlinked_count} de qualité)"
+                )
+
+                unlinked = [
+                    a for a in assertion_log_dicts
+                    if a.get('status') == 'ABSTAINED' and a.get('reason') == 'no_concept_match'
+                ]
+
+                new_concepts, refused = self.concept_refiner.refine_concepts(
+                    unlinked_assertions=unlinked,
+                    existing_concepts=[c.model_dump() for c in concepts],
+                    themes=[t.model_dump() for t in themes],
+                    language=subject.language
+                )
+
+                if not new_concepts:
+                    logger.info(f"[OSMOSE:Pass1:1.2b] Aucun nouveau concept valide, arrêt")
+                    break
+
+                # Ajouter les nouveaux concepts
+                for nc in new_concepts:
+                    from knowbase.stratified.models import ConceptRole
+                    concept = Concept(
+                        concept_id=f"concept_{doc_id}_{len(concepts)}",
+                        theme_id=nc.get('theme_id', themes[0].theme_id if themes else ""),
+                        name=nc['name'],
+                        role=ConceptRole(nc.get('role', 'STANDARD')),
+                        lexical_triggers=nc.get('lexical_triggers', [])
+                    )
+                    concepts.append(concept)
+
+                logger.info(f"[OSMOSE:Pass1:1.2b] +{len(new_concepts)} concepts → total {len(concepts)}")
+
+                # Re-run linking uniquement sur les assertions non-liées
+                unlinked_assertions = [
+                    a for a in promotion_result.promotable
+                    if any(
+                        log.get('assertion_id') == a.assertion_id
+                        and log.get('reason') == 'no_concept_match'
+                        for log in assertion_log_dicts
+                    )
+                ]
+
+                if unlinked_assertions:
+                    new_links = self.assertion_extractor.link_to_concepts(
+                        assertions=unlinked_assertions,
+                        concepts=concepts
+                    )
+
+                    # Re-resolve les assertions nouvellement liées
+                    new_resolved, new_failed = self.anchor_resolver.resolve_all(
+                        assertions=unlinked_assertions,
+                        links=new_links
+                    )
+
+                    # Mettre à jour les structures
+                    for assertion, anchor, concept_id in new_resolved:
+                        info = Information(
+                            info_id=f"info_{uuid.uuid4().hex[:8]}",
+                            concept_id=concept_id,
+                            text=assertion.text,
+                            type=assertion.assertion_type,
+                            confidence=assertion.confidence,
+                            anchor=anchor
+                        )
+                        informations.append(info)
+                        resolved.append((assertion, anchor, concept_id))
+
+                        # Mettre à jour assertion_log_dicts
+                        for log in assertion_log_dicts:
+                            if log.get('assertion_id') == assertion.assertion_id:
+                                log['status'] = 'PROMOTED'
+                                log['reason'] = 'promoted'
+                                log['concept_id'] = concept_id
+                                break
+
+                prev_saturation = saturation
+                iteration += 1
+
+            logger.info(
+                f"[OSMOSE:Pass1:Saturation] Final: {len(concepts)} concepts, "
+                f"{saturation.coverage_rate:.1%} coverage après {iteration} itération(s)"
+            )
+
+            # Reconstruire assertion_log depuis assertion_log_dicts si modifié
+            if iteration > 0:
+                # Mettre à jour les entrées existantes dans assertion_log
+                # (les nouveaux concepts sont déjà dans la liste concepts)
+                pass  # Les mises à jour ont été faites in-place via assertion_log_dicts
+
+        # =====================================================================
         # PHASE 1.5: Enrichissement MVP V1 (Usage B - Challenge)
         # =====================================================================
         logger.info("[OSMOSE:Pass1:1.5] Enrichissement MVP V1...")
@@ -601,32 +755,58 @@ class Pass1OrchestratorV2:
             logger.warning("[OSMOSE:Pass1:POINTER] Aucune unité indexée, skip pointer mode")
             return None
 
-        # 2. Extraire les concepts via LLM avec pointage
+        # 2. Extraire les concepts via LLM avec pointage EN PARALLÈLE
+        # Fix 2026-01-27: Parallélisation comme assertion_extractor.py
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import os
+
+        max_workers = int(os.environ.get("OSMOSE_LLM_WORKERS", 8))
         all_pointer_concepts = []
         total_units = 0
 
+        # Préparer les tâches
+        tasks = []
         for docitem_id, unit_result in unit_index.items():
             units = unit_result.units if hasattr(unit_result, 'units') else []
             if not units:
                 continue
-
             total_units += len(units)
-
-            # Formater pour le LLM
             units_text = format_units_for_llm(units)
+            tasks.append((docitem_id, units_text))
 
-            # Appeler le LLM
-            pointer_concepts = self._call_llm_pointer_extraction(
-                docitem_id=docitem_id,
-                units_text=units_text,
-                language=doc_language,
-            )
+        logger.info(
+            f"[OSMOSE:Pass1:POINTER] Extraction parallèle: {len(tasks)} DocItems, "
+            f"{max_workers} workers, {total_units} unités"
+        )
 
-            if pointer_concepts:
-                # Ajouter le docitem_id à chaque concept
-                for pc in pointer_concepts:
-                    pc['docitem_id'] = docitem_id
-                all_pointer_concepts.extend(pointer_concepts)
+        errors_count = 0
+
+        # Extraction parallèle avec ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_docitem = {
+                executor.submit(
+                    self._call_llm_pointer_extraction,
+                    docitem_id,
+                    units_text,
+                    doc_language,
+                ): docitem_id
+                for docitem_id, units_text in tasks
+            }
+
+            for future in as_completed(future_to_docitem):
+                docitem_id = future_to_docitem[future]
+                try:
+                    pointer_concepts = future.result()
+                    if pointer_concepts:
+                        for pc in pointer_concepts:
+                            pc['docitem_id'] = docitem_id
+                        all_pointer_concepts.extend(pointer_concepts)
+                except Exception as e:
+                    errors_count += 1
+                    logger.warning(f"[OSMOSE:Pass1:POINTER] Erreur {docitem_id}: {e}")
+
+        if errors_count > 0:
+            logger.warning(f"[OSMOSE:Pass1:POINTER] {errors_count} DocItems en erreur sur {len(tasks)}")
 
         logger.info(
             f"[OSMOSE:Pass1:POINTER] LLM extraction: {len(all_pointer_concepts)} concepts "
@@ -769,7 +949,8 @@ class Pass1OrchestratorV2:
                         "type": c.get("type", "FACTUAL"),
                         "unit_id": unit_id,
                         "confidence": c.get("confidence", 0.8),
-                        "value_kind": c.get("value_kind"),
+                        # FIX 2026-01-27: value_kind sera détecté automatiquement par le validator
+                        # "value_kind": c.get("value_kind"),  # SUPPRIMÉ
                     })
                 else:
                     logger.debug(f"[OSMOSE:Pass1:POINTER] Invalid unit_id: {unit_id}")
@@ -782,6 +963,7 @@ class Pass1OrchestratorV2:
 
     def _default_pointer_system(self) -> str:
         """Prompt système par défaut pour extraction pointer."""
+        # FIX 2026-01-27: Labels doivent utiliser mots du texte, pas de value_kind
         return """Tu es un expert en extraction de concepts pour OSMOSE.
 
 MÉTHODE POINTER-BASED:
@@ -794,13 +976,17 @@ TYPES DE CONCEPTS:
 - FACTUAL: Information vérifiable
 - PERMISSIVE: Option, possibilité
 
-RÈGLES:
+RÈGLES CRITIQUES:
 1. Retourne UNIQUEMENT le numéro d'unité (U1, U2...)
 2. NE PROPOSE UN CONCEPT QUE SI TU PEUX POINTER UNE UNITÉ
-3. SI AUCUNE UNITÉ NE CORRESPOND, NE RETOURNE PAS LE CONCEPT"""
+3. SI AUCUNE UNITÉ NE CORRESPOND, NE RETOURNE PAS LE CONCEPT
+4. ⚠️ Le LABEL doit contenir AU MOINS 2 MOTS présents dans le texte de l'unité
+5. ❌ INTERDIT: labels abstraits ("security requirement", "data protection")
+6. ✅ UTILISER les mots exacts du texte pour construire le label"""
 
     def _default_pointer_user(self) -> str:
         """Prompt utilisateur par défaut pour extraction pointer."""
+        # FIX 2026-01-27: Labels doivent utiliser mots du texte, suppression value_kind
         return """Extrais les concepts de ce texte avec unités numérotées.
 
 DOCITEM_ID: {docitem_id}
@@ -809,11 +995,15 @@ LANGUE: {language}
 TEXTE AVEC UNITÉS:
 {units_text}
 
+⚠️ RÈGLE LABEL: Le label DOIT utiliser des MOTS PRÉSENTS dans l'unité pointée.
+❌ INTERDIT: labels abstraits ("security requirement", "compliance standard")
+✅ CORRECT: labels avec mots du texte ("TLS version", "data encryption", "audit trail")
+
 Réponds avec ce JSON:
 ```json
 {{
   "concepts": [
-    {{"label": "Nom concept", "type": "PRESCRIPTIVE", "unit_id": "U1", "confidence": 0.9, "value_kind": null}}
+    {{"label": "Nom avec MOTS DU TEXTE", "type": "PRESCRIPTIVE", "unit_id": "U1", "confidence": 0.9}}
   ]
 }}
 ```"""

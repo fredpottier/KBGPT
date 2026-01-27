@@ -5,7 +5,8 @@ Ref: doc/ongoing/ARCH_STRATIFIED_PIPELINE_V2.md
 
 Pass 1 transforme un document structuré (depuis Pass 0) en structure sémantique:
 - Phase 1.1: Document Analysis → Subject + Structure + Themes
-- Phase 1.2: Concept Identification → Concepts (max 15, frugalité)
+- Phase 1.2: Concept Identification → Concepts (max 30, V2.1)
+- Phase 1.2b: Concept Refinement → Itération jusqu'à saturation (V2.1)
 - Phase 1.3: Assertion Extraction → RawAssertions
 - Phase 1.3b: Anchor Resolution → chunk_id → docitem_id (CRITIQUE)
 - Phase 1.4: Semantic Linking + Promotion → Information + AssertionLog
@@ -36,9 +37,14 @@ from knowbase.stratified.pass1.assertion_extractor import (
     AssertionExtractorV2,
     RawAssertion,
     ConceptLink,
+    MultiConceptLink,
     PromotionResult,
     PromotionTier,
     PROMOTION_POLICY,
+)
+from knowbase.stratified.pass1.concept_refiner import (
+    ConceptRefinerV2,
+    SaturationMetrics,
 )
 from knowbase.stratified.pass1.anchor_resolver import (
     AnchorResolverV2,
@@ -59,12 +65,15 @@ __all__ = [
     # Components
     "DocumentAnalyzerV2",
     "ConceptIdentifierV2",
+    "ConceptRefinerV2",
     "AssertionExtractorV2",
     "AnchorResolverV2",
     # Data classes
     "RawAssertion",
     "ConceptLink",
+    "MultiConceptLink",
     "PromotionResult",
+    "SaturationMetrics",
     "AnchorResolutionResult",
     "ChunkToDocItemMapping",
     "AnchorResolverStats",
