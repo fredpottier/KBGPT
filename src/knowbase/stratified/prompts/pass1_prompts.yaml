@@ -59,63 +59,56 @@ document_analysis:
 # ============================================================================
 
 concept_identification:
+  # COMPACT OUTPUT (ADR: LLM Contract - éviter troncature JSON)
+  # Les définitions et variantes seront enrichies en Pass 2 si nécessaire
   system: |
-    Tu es un expert en extraction de concepts pour OSMOSE.
-    Tu dois identifier les CONCEPTS CLÉS d'un document de manière FRUGALE.
+    Expert extraction concepts OSMOSE.
 
-    RÈGLES DE FRUGALITÉ (STRICTES):
-    - Maximum {max_concepts} concepts par document (invariant V2-007)
-    - Chaque concept doit être SIGNIFICATIF et DISTINCT
-    - Un concept doit avoir plusieurs mentions ou une importance structurelle
+    FRUGALITÉ STRICTE:
+    - Max 10 concepts
+    - Noms courts (2-4 mots)
+    - PAS de définitions (seront ajoutées en Pass 2)
+    - PAS de variantes (seront ajoutées en Pass 2)
 
-    TERMES À REFUSER (avec raison explicite):
-    - Termes génériques: "système", "méthode", "processus", "solution", "approche"
-    - Termes trop locaux: mentionnés une seule fois, sans importance structurelle
-    - Acronymes non définis dans le document
-    - Termes ambigus ayant plusieurs sens dans le document
+    RÔLES:
+    - CENTRAL: Cœur du document
+    - STANDARD: Important secondaire
+    - CONTEXTUAL: Contexte
 
-    RÔLES des concepts:
-    - CENTRAL: Concept au cœur du document, tout tourne autour de lui
-    - STANDARD: Concept important mais pas central, contribue au sujet
-    - CONTEXTUAL: Concept de contexte, mentionné mais pas le focus principal
+    TERMES À REFUSER:
+    - Génériques: "système", "méthode", "processus", "solution"
+    - Mentionnés une seule fois
+    - Acronymes non définis
 
-    Tu dois aussi identifier les VARIANTES de chaque concept:
-    - Synonymes (ex: "GDPR" = "RGPD" = "General Data Protection Regulation")
-    - Traductions (ex: "consentement" = "consent")
-    - Abréviations (ex: "DPO" = "Data Protection Officer")
+    FORMAT: JSON compact uniquement, PAS de texte explicatif.
 
   user: |
-    Identifie les concepts de ce document.
+    Identifie les concepts CLÉS de ce document.
 
     SUJET: {subject}
     STRUCTURE: {structure}
     LANGUE: {language}
 
-    THÈMES IDENTIFIÉS:
+    THÈMES DISPONIBLES:
     {themes}
 
     CONTENU (extrait):
     {content}
 
-    ATTENTION: Maximum {max_concepts} concepts! Sois très sélectif.
+    RÈGLES STRICTES:
+    - Maximum {max_concepts} concepts
+    - Chaque concept DOIT être rattaché à un thème existant
+    - Noms courts (2-4 mots max)
 
-    Réponds UNIQUEMENT avec ce JSON:
+    Réponds UNIQUEMENT avec ce JSON COMPACT:
     ```json
     {{
       "concepts": [
-        {{
-          "name": "Nom du concept",
-          "definition": "Définition courte (1-2 phrases) expliquant ce qu'est ce concept dans le contexte du document",
-          "role": "CENTRAL|STANDARD|CONTEXTUAL",
-          "theme": "Nom du thème rattaché (doit correspondre à un thème ci-dessus)",
-          "variants": ["Variante 1", "Variante EN"]
-        }}
+        {{"name": "Nom", "role": "CENTRAL", "theme": "Thème"}},
+        {{"name": "Nom2", "role": "STANDARD", "theme": "Thème2"}}
       ],
       "refused_terms": [
-        {{
-          "term": "Terme refusé",
-          "reason": "Raison précise du refus"
-        }}
+        {{"term": "Terme", "reason": "Raison"}}
       ]
     }}
     ```
@@ -219,6 +212,109 @@ semantic_linking:
         {{
           "assertion_id": "assert_def456",
           "reason": "Cette assertion ne concerne aucun des concepts identifiés car..."
+        }}
+      ]
+    }}
+    ```
+
+# ============================================================================
+# PHASE 1.3 POINTER: Extraction Pointer-Based (Anti-Reformulation)
+# ============================================================================
+# Ce prompt utilise des unités numérotées pour éviter la reformulation LLM.
+# Le LLM POINTE vers une unité (U1, U2...) au lieu de COPIER le texte.
+
+pointer_concept_extraction:
+  system: |
+    Tu es un expert en extraction de concepts pour OSMOSE.
+
+    MÉTHODE POINTER-BASED:
+    Le texte est découpé en unités numérotées (U1, U2, U3...).
+    Tu dois POINTER vers l'unité qui contient le concept, PAS copier le texte.
+
+    TYPES DE CONCEPTS:
+    - PRESCRIPTIVE: Obligation, règle ("must", "shall", "required", "doit", "obligatoire")
+    - DEFINITIONAL: Définition, explication ("is defined as", "refers to", "est défini")
+    - FACTUAL: Information vérifiable, fait technique
+    - PERMISSIVE: Option, possibilité ("may", "can", "peut", "optionnel")
+
+    RÈGLES CRITIQUES:
+    1. Retourne UNIQUEMENT le numéro d'unité (U1, U2...), JAMAIS le texte
+    2. NE PROPOSE UN CONCEPT QUE SI TU PEUX POINTER UNE UNITÉ
+    3. SI AUCUNE UNITÉ NE CORRESPOND, NE RETOURNE PAS LE CONCEPT
+    4. La confidence reflète ta certitude sur le type (pas sur l'existence)
+    5. value_kind si applicable: "version", "percentage", "size", "number", "duration"
+
+    FORMAT JSON STRICT - pas de texte hors JSON.
+
+  user: |
+    Extrais les concepts de ce texte avec unités numérotées.
+
+    DOCITEM_ID: {docitem_id}
+    LANGUE: {language}
+
+    TEXTE AVEC UNITÉS:
+    {units_text}
+
+    INSTRUCTIONS:
+    - Indique UNIQUEMENT le numéro d'unité (U1, U2...).
+    - NE RECOPIE PAS le texte.
+    - Si aucune unité ne correspond à un concept, n'inclus pas ce concept.
+
+    Réponds UNIQUEMENT avec ce JSON:
+    ```json
+    {{
+      "concepts": [
+        {{
+          "label": "Nom court du concept (2-5 mots)",
+          "type": "PRESCRIPTIVE|DEFINITIONAL|FACTUAL|PERMISSIVE",
+          "unit_id": "U1",
+          "confidence": 0.9,
+          "value_kind": "version|percentage|size|number|duration|null"
+        }}
+      ]
+    }}
+    ```
+
+# ============================================================================
+# PHASE 1.3 POINTER: Extraction par batch (plusieurs DocItems)
+# ============================================================================
+
+pointer_batch_extraction:
+  system: |
+    Expert extraction concepts OSMOSE - MODE BATCH POINTER.
+
+    MÉTHODE:
+    - Chaque bloc [DOCITEM: xxx] contient des unités numérotées
+    - Tu dois POINTER vers les unités (U1, U2...) sans copier le texte
+    - Inclure le docitem_id dans chaque concept extrait
+
+    TYPES: PRESCRIPTIVE | DEFINITIONAL | FACTUAL | PERMISSIVE
+
+    RÈGLES:
+    1. UNIQUEMENT le numéro d'unité, JAMAIS le texte
+    2. Pas de concept si aucune unité ne correspond
+    3. value_kind si applicable: version, percentage, size, number, duration
+
+    FORMAT JSON COMPACT.
+
+  user: |
+    Extrais les concepts de ces DocItems.
+
+    LANGUE: {language}
+
+    {docitems_with_units}
+
+    Réponds avec ce JSON:
+    ```json
+    {{
+      "concepts": [
+        {{
+          "docitem_id": "default:doc_abc:#/texts/5",
+          "label": "Nom concept",
+          "type": "PRESCRIPTIVE",
+          "unit_id": "U1",
+          "confidence": 0.9,
+          "value_kind": null
         }}
       ]
     }}

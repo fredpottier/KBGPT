@@ -73,6 +73,7 @@ class Pass0Result:
     - Les Sections
     - Les Chunks (pour retrieval)
     - Le mapping chunk→DocItem (pour Anchor Resolution)
+    - L'index des unités (pour Pointer-Based Extraction)
     """
     tenant_id: str
     doc_id: str
@@ -88,6 +89,10 @@ class Pass0Result:
 
     # Index inversé: docitem_id → liste de chunks qui le contiennent
     docitem_to_chunks_map: Dict[str, List[str]] = field(default_factory=dict)
+
+    # Index des unités pour Pointer-Based Extraction (Pass 1.3 Pointer)
+    # Créé par AssertionUnitIndexer, stocke docitem_id → UnitIndexResult
+    unit_index: Dict[str, Any] = field(default_factory=dict)
 
     # Metadata
     doc_title: Optional[str] = None
@@ -133,12 +138,24 @@ class Pass0Result:
         """Génère le docitem_id composite V2."""
         return f"{item.tenant_id}:{item.doc_id}:{item.item_id}"
 
+    @property
+    def unit_count(self) -> int:
+        """Nombre total d'unités indexées."""
+        total = 0
+        for result in self.unit_index.values():
+            if hasattr(result, 'units'):
+                total += len(result.units)
+            elif isinstance(result, dict) and 'units' in result:
+                total += len(result['units'])
+        return total
+
     def summary(self) -> str:
         return (
             f"Pass0Result: {self.item_count} items, "
             f"{self.section_count} sections, "
             f"{self.chunk_count} chunks, "
-            f"{len(self.chunk_to_docitem_map)} mappings"
+            f"{len(self.chunk_to_docitem_map)} mappings, "
+            f"{self.unit_count} units"
         )
 
 
@@ -215,7 +232,14 @@ class Pass0Adapter:
             doc_id=doc_id,
         )
 
-        # 3. Construire le résultat V2
+        # 3. Créer l'index des unités pour Pointer-Based Extraction
+        unit_index = self._build_unit_index(
+            doc_items=build_result.doc_items,
+            tenant_id=tenant_id,
+            doc_id=doc_id,
+        )
+
+        # 4. Construire le résultat V2
         result = Pass0Result(
             tenant_id=tenant_id,
             doc_id=doc_id,
@@ -225,6 +249,7 @@ class Pass0Adapter:
             chunks=build_result.chunks,
             chunk_to_docitem_map=chunk_to_docitem_map,
             docitem_to_chunks_map=docitem_to_chunks_map,
+            unit_index=unit_index,
             doc_title=build_result.doc_version.title,
             page_count=build_result.doc_version.page_count,
         )
@@ -286,6 +311,64 @@ class Pass0Adapter:
         )
 
         return chunk_to_docitem, docitem_to_chunks
+
+    def _build_unit_index(
+        self,
+        doc_items: List[DocItem],
+        tenant_id: str,
+        doc_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Construit l'index des unités pour Pointer-Based Extraction.
+
+        Segmente chaque DocItem en unités d'assertion pour permettre
+        au LLM de pointer vers une unité au lieu de copier le texte.
+
+        Args:
+            doc_items: Liste des DocItems
+            tenant_id: ID du tenant
+            doc_id: ID du document
+
+        Returns:
+            Dict docitem_id → UnitIndexResult
+        """
+        try:
+            from knowbase.stratified.pass1.assertion_unit_indexer import AssertionUnitIndexer
+        except ImportError:
+            logger.warning("[OSMOSE:Pass0:V2] AssertionUnitIndexer not available, skipping unit indexing")
+            return {}
+
+        indexer = AssertionUnitIndexer()
+        unit_index = {}
+        total_units = 0
+
+        for item in doc_items:
+            # Générer docitem_id composite V2
+            docitem_id = f"{tenant_id}:{doc_id}:{item.item_id}"
+
+            # Extraire le texte et le type
+            text = item.text or ""
+            item_type = item.item_type.value if hasattr(item.item_type, 'value') else str(item.item_type)
+
+            if not text or len(text.strip()) < 30:
+                continue
+
+            # Indexer le DocItem
+            result = indexer.index_docitem(
+                docitem_id=docitem_id,
+                text=text,
+                item_type=item_type,
+            )
+
+            if result.units:
+                unit_index[docitem_id] = result
+                total_units += len(result.units)
+
+        logger.info(
+            f"[OSMOSE:Pass0:V2] Unit indexing: {len(unit_index)} DocItems → {total_units} units"
+        )
+
+        return unit_index
 
     async def process_and_persist_v2(
         self,
@@ -583,17 +666,15 @@ def persist_pass0_to_neo4j_sync(
         stats["sections"] = len(pass0_result.sections)
         logger.info(f"[OSMOSE:Pass0:Persist] {stats['sections']} sections créées")
 
-        # 3. Créer DocItems (batch)
-        for i in range(0, len(pass0_result.doc_items), batch_size):
-            batch = pass0_result.doc_items[i:i + batch_size]
-            session.execute_write(
-                Pass0Adapter._create_docitems_v2_tx,
-                batch,
-                pass0_result.tenant_id,
-                pass0_result.doc_id,
-            )
-            stats["docitems"] += len(batch)
-
-        logger.info(f"[OSMOSE:Pass0:Persist] {stats['docitems']} docitems créés")
+        # 3. DocItems - LAZY CREATION (ADR: Lazy DocItem Persistence)
+        # Les DocItems ne sont PAS créés ici.
+        # Ils seront créés à la demande lors de Pass 1.3 (Anchor Resolution)
+        # quand une Information est PROMOTED et nécessite un ANCHORED_IN.
+        # Raison: 6700+ DocItems/doc → 50-200 DocItems/doc (evidence-first)
+        stats["docitems"] = 0  # Lazy - créés en Pass 1.3
+        logger.info(
+            f"[OSMOSE:Pass0:Persist] DocItems: LAZY MODE "
+            f"({len(pass0_result.doc_items)} disponibles pour anchor resolution)"
+        )
 
     return stats

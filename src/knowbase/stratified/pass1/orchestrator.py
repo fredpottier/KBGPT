@@ -46,6 +46,7 @@ from knowbase.stratified.pass1.anchor_resolver import (
     AnchorResolverV2,
     build_chunk_to_docitem_mapping,
 )
+from knowbase.stratified.pass09 import GlobalViewBuilder, GlobalView, Pass09Config
 from knowbase.stratified.models.information import (
     InformationMVP,
     InformationType,
@@ -82,7 +83,10 @@ class Pass1OrchestratorV2:
         llm_client=None,
         allow_fallback: bool = False,
         strict_promotion: bool = True,
-        tenant_id: str = "default"
+        tenant_id: str = "default",
+        enable_pass09: bool = True,
+        pass09_config: Optional[Pass09Config] = None,
+        enable_pointer_mode: bool = False,
     ):
         """
         Args:
@@ -90,13 +94,24 @@ class Pass1OrchestratorV2:
             allow_fallback: Autorise les heuristiques fallback (tests only)
             strict_promotion: Mode strict pour Promotion Policy (ALWAYS only)
             tenant_id: Identifiant du tenant
+            enable_pass09: Active Pass 0.9 Global View Construction
+            pass09_config: Configuration Pass 0.9 (optionnel)
+            enable_pointer_mode: Active le mode Pointer-Based Extraction (anti-reformulation)
         """
         self.llm_client = llm_client
         self.allow_fallback = allow_fallback
         self.strict_promotion = strict_promotion
         self.tenant_id = tenant_id
+        self.enable_pass09 = enable_pass09
+        self.enable_pointer_mode = enable_pointer_mode
 
-        # Initialiser les composants
+        # Initialiser Pass 0.9 Global View Builder
+        self.global_view_builder = GlobalViewBuilder(
+            llm_client=llm_client,
+            config=pass09_config,
+        ) if enable_pass09 else None
+
+        # Initialiser les composants Pass 1
         self.document_analyzer = DocumentAnalyzerV2(
             llm_client=llm_client,
             allow_fallback=allow_fallback
@@ -121,7 +136,9 @@ class Pass1OrchestratorV2:
         chunks: Dict[str, str],
         source_url: Optional[str] = None,
         toc: Optional[str] = None,
-        chunk_to_docitem_map: Optional[Dict[str, List[str]]] = None
+        chunk_to_docitem_map: Optional[Dict[str, List[str]]] = None,
+        sections: Optional[List[Dict]] = None,
+        unit_index: Optional[Dict] = None,
     ) -> Pass1Result:
         """
         Exécute Pass 1 complet sur un document.
@@ -136,14 +153,63 @@ class Pass1OrchestratorV2:
             toc: Table des matières
             chunk_to_docitem_map: Mapping pré-calculé chunk_id → [docitem_ids]
                                   Si None, sera reconstruit automatiquement
+            sections: Liste des sections depuis Pass 0 (pour Pass 0.9)
+            unit_index: Index des unités depuis Pass 0 (pour Pointer-Based Extraction)
+                       Si None et enable_pointer_mode=True, sera construit automatiquement
 
         Returns:
             Pass1Result avec toutes les structures sémantiques
         """
+        import asyncio
+
         logger.info(f"[OSMOSE:Pass1] Début traitement: {doc_title[:50]}")
 
         # Calculer le hash du contenu
         content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+
+        # =====================================================================
+        # PHASE 0.9: Global View Construction (NOUVEAU)
+        # =====================================================================
+        global_view: Optional[GlobalView] = None
+        analysis_content = content  # Par défaut, utiliser le contenu brut
+
+        if self.enable_pass09 and self.global_view_builder:
+            logger.info("[OSMOSE:Pass0.9] Construction vue globale...")
+
+            # Préparer les sections si non fournies ou vides
+            if not sections:  # None ou liste vide
+                # Créer des sections artificielles depuis les chunks
+                sections = self._create_sections_from_chunks(chunks)
+                logger.info(f"[OSMOSE:Pass0.9] Sections créées depuis chunks: {len(sections)}")
+
+            try:
+                # Utiliser build_sync pour éviter les problèmes avec asyncio.run()
+                # dans un contexte FastAPI déjà async
+                global_view = self.global_view_builder.build_sync(
+                    doc_id=doc_id,
+                    tenant_id=self.tenant_id,
+                    sections=sections,
+                    chunks=chunks,
+                    doc_title=doc_title,
+                    full_text=content,
+                )
+
+                # Utiliser le meta-document pour l'analyse
+                if global_view and global_view.meta_document:
+                    analysis_content = global_view.meta_document
+                    logger.info(
+                        f"[OSMOSE:Pass0.9] GlobalView construite: "
+                        f"{len(analysis_content)} chars, "
+                        f"{global_view.coverage.coverage_ratio:.1%} coverage"
+                    )
+                else:
+                    logger.warning("[OSMOSE:Pass0.9] GlobalView vide, fallback sur content brut")
+
+            except Exception as e:
+                logger.error(f"[OSMOSE:Pass0.9] Erreur construction GlobalView: {e}")
+                logger.info("[OSMOSE:Pass0.9] Fallback sur content brut")
+        else:
+            logger.info("[OSMOSE:Pass0.9] Pass 0.9 désactivé, utilisation content brut")
 
         # =====================================================================
         # PHASE 1.1: Document Analysis
@@ -151,11 +217,18 @@ class Pass1OrchestratorV2:
         logger.info("[OSMOSE:Pass1:1.1] Analyse structurelle...")
 
         toc_extracted = toc or self.document_analyzer.extract_toc_from_content(content)
+
+        # Utiliser le TOC enrichi de GlobalView si disponible
+        toc_for_analysis = toc_extracted
+        if global_view and global_view.toc_enhanced:
+            toc_for_analysis = global_view.toc_enhanced
+            logger.info("[OSMOSE:Pass1:1.1] Utilisation TOC enrichie depuis GlobalView")
+
         subject, themes, is_hostile = self.document_analyzer.analyze(
             doc_id=doc_id,
             doc_title=doc_title,
-            content=content,
-            toc=toc_extracted
+            content=analysis_content,  # ← CHANGEMENT CLÉ: meta-document
+            toc=toc_for_analysis
         )
 
         logger.info(
@@ -175,7 +248,7 @@ class Pass1OrchestratorV2:
             subject_text=subject.text,
             structure=subject.structure.value,
             themes=themes,
-            content=content,
+            content=analysis_content,  # ← CHANGEMENT CLÉ: meta-document
             is_hostile=is_hostile,
             language=subject.language
         )
@@ -190,6 +263,18 @@ class Pass1OrchestratorV2:
         # =====================================================================
         logger.info("[OSMOSE:Pass1:1.3] Extraction assertions...")
 
+        # Mode Pointer-Based: extraction anti-reformulation
+        pointer_results = None
+        if self.enable_pointer_mode:
+            logger.info("[OSMOSE:Pass1:1.3:POINTER] Mode Pointer-Based activé")
+            pointer_results = self._extract_pointer_based(
+                docitems=docitems,
+                unit_index=unit_index,
+                concepts=concepts,
+                doc_language=subject.language,
+            )
+
+        # Extraction classique (utilisée si pointer non activé ou en complément)
         raw_assertions = self.assertion_extractor.extract_assertions(
             chunks=chunks,
             doc_language=subject.language
@@ -396,6 +481,30 @@ class Pass1OrchestratorV2:
 
         return result
 
+    def _create_sections_from_chunks(self, chunks: Dict[str, str]) -> List[Dict]:
+        """
+        Crée des sections artificielles depuis les chunks.
+
+        Utilisé quand les sections Pass 0 ne sont pas fournies.
+        Regroupe les chunks par blocs de ~5 pour simuler des sections.
+        """
+        chunk_ids = list(chunks.keys())
+        sections = []
+        chunk_per_section = 5  # Environ 5 chunks par section virtuelle
+
+        for i in range(0, len(chunk_ids), chunk_per_section):
+            section_chunk_ids = chunk_ids[i : i + chunk_per_section]
+            section_id = f"section_{i // chunk_per_section + 1}"
+            sections.append({
+                "id": section_id,
+                "section_id": section_id,
+                "title": f"Section {i // chunk_per_section + 1}",
+                "level": 1,
+                "chunk_ids": section_chunk_ids,
+            })
+
+        return sections
+
     def _map_to_information_type(self, assertion_type: AssertionType) -> InformationType:
         """Mappe AssertionType vers InformationType pour MVP V1."""
         mapping = {
@@ -424,6 +533,291 @@ class Pass1OrchestratorV2:
         }
         return mapping.get(assertion_type, RhetoricalRole.FACT)
 
+    # =========================================================================
+    # POINTER-BASED EXTRACTION (Anti-Reformulation)
+    # =========================================================================
+
+    def _extract_pointer_based(
+        self,
+        docitems: Dict[str, DocItem],
+        unit_index: Optional[Dict],
+        concepts: List[Concept],
+        doc_language: str,
+    ) -> Optional[Dict]:
+        """
+        Extraction Pointer-Based: le LLM pointe vers des unités au lieu de copier.
+
+        Cette méthode:
+        1. Construit l'index des unités si non fourni
+        2. Formate les unités pour le LLM (U1: text, U2: text, ...)
+        3. Appelle le LLM pour extraire les concepts avec unit_id
+        4. Valide les concepts pointés (3 niveaux)
+        5. Reconstruit le texte verbatim depuis l'index
+
+        Args:
+            docitems: Dict docitem_id → DocItem
+            unit_index: Index des unités (depuis Pass 0)
+            concepts: Concepts déjà identifiés
+            doc_language: Langue du document
+
+        Returns:
+            Dict avec 'anchored' (concepts validés), 'rejected', 'stats'
+            ou None si erreur
+        """
+        try:
+            from knowbase.stratified.pass1.assertion_unit_indexer import (
+                AssertionUnitIndexer,
+                format_units_for_llm,
+            )
+            from knowbase.stratified.pass1.pointer_validator import PointerValidator
+            from knowbase.stratified.pass1.pointer_schemas import (
+                parse_pointer_response,
+                ConceptAnchored,
+                Anchor,
+            )
+        except ImportError as e:
+            logger.error(f"[OSMOSE:Pass1:POINTER] Import error: {e}")
+            return None
+
+        # 1. Construire l'index si non fourni
+        if not unit_index:
+            logger.info("[OSMOSE:Pass1:POINTER] Construction index unités...")
+            indexer = AssertionUnitIndexer()
+            unit_index = {}
+            for docitem_id, docitem in docitems.items():
+                text = getattr(docitem, 'text', '') or getattr(docitem, 'content', '') or ''
+                item_type = getattr(docitem, 'item_type', None)
+                if hasattr(item_type, 'value'):
+                    item_type = item_type.value
+
+                if text and len(text.strip()) >= 30:
+                    result = indexer.index_docitem(docitem_id, text, item_type)
+                    if result.units:
+                        unit_index[docitem_id] = result
+
+            logger.info(f"[OSMOSE:Pass1:POINTER] Index construit: {len(unit_index)} DocItems")
+
+        if not unit_index:
+            logger.warning("[OSMOSE:Pass1:POINTER] Aucune unité indexée, skip pointer mode")
+            return None
+
+        # 2. Extraire les concepts via LLM avec pointage
+        all_pointer_concepts = []
+        total_units = 0
+
+        for docitem_id, unit_result in unit_index.items():
+            units = unit_result.units if hasattr(unit_result, 'units') else []
+            if not units:
+                continue
+
+            total_units += len(units)
+
+            # Formater pour le LLM
+            units_text = format_units_for_llm(units)
+
+            # Appeler le LLM
+            pointer_concepts = self._call_llm_pointer_extraction(
+                docitem_id=docitem_id,
+                units_text=units_text,
+                language=doc_language,
+            )
+
+            if pointer_concepts:
+                # Ajouter le docitem_id à chaque concept
+                for pc in pointer_concepts:
+                    pc['docitem_id'] = docitem_id
+                all_pointer_concepts.extend(pointer_concepts)
+
+        logger.info(
+            f"[OSMOSE:Pass1:POINTER] LLM extraction: {len(all_pointer_concepts)} concepts "
+            f"depuis {total_units} unités"
+        )
+
+        if not all_pointer_concepts:
+            return {'anchored': [], 'rejected': [], 'stats': {'total': 0}}
+
+        # 3. Valider les concepts pointés
+        validator = PointerValidator()
+        valid, abstained, stats = validator.validate_batch(all_pointer_concepts, unit_index)
+
+        # 4. Convertir en ConceptAnchored
+        anchored_concepts = []
+        for concept_dict in valid:
+            # Trouver l'unité
+            docitem_id = concept_dict.get('docitem_id', '')
+            unit_id = concept_dict.get('unit_id', '')
+            unit_result = unit_index.get(docitem_id)
+
+            if unit_result:
+                unit = unit_result.get_unit_by_local_id(unit_id) if hasattr(unit_result, 'get_unit_by_local_id') else None
+                if unit:
+                    anchor = Anchor(
+                        docitem_id=docitem_id,
+                        unit_id=unit_id,
+                        char_start=unit.char_start,
+                        char_end=unit.char_end,
+                        unit_type=unit.unit_type,
+                    )
+
+                    anchored = ConceptAnchored(
+                        label=concept_dict.get('label', ''),
+                        concept_type=concept_dict.get('type', 'FACTUAL'),
+                        exact_quote=concept_dict.get('exact_quote', unit.text),
+                        anchor=anchor,
+                        validation_status="VALID" if not concept_dict.get('_downgraded_from') else "DOWNGRADED",
+                        validation_score=0.0,  # À enrichir
+                        value_kind=concept_dict.get('value_kind'),
+                        downgraded_from=concept_dict.get('_downgraded_from'),
+                    )
+                    anchored_concepts.append(anchored)
+
+        logger.info(
+            f"[OSMOSE:Pass1:POINTER] Résultat: {len(anchored_concepts)} concepts ancrés, "
+            f"{len(abstained)} rejetés ({stats.abstain_rate:.1%} ABSTAIN rate)"
+        )
+
+        return {
+            'anchored': anchored_concepts,
+            'rejected': abstained,
+            'stats': {
+                'total': stats.total,
+                'valid': stats.valid,
+                'downgraded': stats.downgraded,
+                'abstained': stats.abstained,
+                'valid_rate': stats.valid_rate,
+            },
+        }
+
+    def _call_llm_pointer_extraction(
+        self,
+        docitem_id: str,
+        units_text: str,
+        language: str,
+    ) -> List[Dict]:
+        """
+        Appelle le LLM pour extraire les concepts en mode pointer.
+
+        Args:
+            docitem_id: ID du DocItem
+            units_text: Texte formaté avec unités (U1: ..., U2: ...)
+            language: Langue du document
+
+        Returns:
+            Liste de dicts avec keys: label, type, unit_id, confidence, value_kind
+        """
+        if not self.llm_client:
+            logger.warning("[OSMOSE:Pass1:POINTER] Pas de client LLM, skip extraction")
+            return []
+
+        # Charger le prompt
+        from pathlib import Path
+        import yaml
+
+        prompts_path = Path(__file__).parent.parent / "prompts" / "pass1_prompts.yaml"
+        prompts = {}
+        if prompts_path.exists():
+            with open(prompts_path, 'r', encoding='utf-8') as f:
+                prompts = yaml.safe_load(f) or {}
+
+        prompt_config = prompts.get("pointer_concept_extraction", {})
+        system_prompt = prompt_config.get("system", self._default_pointer_system())
+        user_template = prompt_config.get("user", self._default_pointer_user())
+
+        user_prompt = user_template.format(
+            docitem_id=docitem_id,
+            language=language,
+            units_text=units_text[:3000],  # Limite pour éviter troncature
+        )
+
+        try:
+            response = self.llm_client.generate(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=2000
+            )
+
+            # Parser la réponse
+            return self._parse_pointer_response(response)
+
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Pass1:POINTER] Erreur LLM pour {docitem_id}: {e}")
+            return []
+
+    def _parse_pointer_response(self, response: str) -> List[Dict]:
+        """Parse la réponse JSON du LLM pointer extraction."""
+        import json
+        import re
+
+        # Extraire le JSON
+        json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            json_str = response
+
+        try:
+            data = json.loads(json_str)
+            concepts = data.get("concepts", [])
+
+            # Valider le format de chaque concept
+            valid_concepts = []
+            for c in concepts:
+                unit_id = c.get("unit_id", "")
+                if unit_id and unit_id.startswith("U") and unit_id[1:].isdigit():
+                    valid_concepts.append({
+                        "label": c.get("label", ""),
+                        "type": c.get("type", "FACTUAL"),
+                        "unit_id": unit_id,
+                        "confidence": c.get("confidence", 0.8),
+                        "value_kind": c.get("value_kind"),
+                    })
+                else:
+                    logger.debug(f"[OSMOSE:Pass1:POINTER] Invalid unit_id: {unit_id}")
+
+            return valid_concepts
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"[OSMOSE:Pass1:POINTER] JSON parse error: {e}")
+            return []
+
+    def _default_pointer_system(self) -> str:
+        """Prompt système par défaut pour extraction pointer."""
+        return """Tu es un expert en extraction de concepts pour OSMOSE.
+
+MÉTHODE POINTER-BASED:
+Le texte est découpé en unités numérotées (U1, U2, U3...).
+Tu dois POINTER vers l'unité qui contient le concept, PAS copier le texte.
+
+TYPES DE CONCEPTS:
+- PRESCRIPTIVE: Obligation, règle ("must", "shall", "required")
+- DEFINITIONAL: Définition, explication
+- FACTUAL: Information vérifiable
+- PERMISSIVE: Option, possibilité
+
+RÈGLES:
+1. Retourne UNIQUEMENT le numéro d'unité (U1, U2...)
+2. NE PROPOSE UN CONCEPT QUE SI TU PEUX POINTER UNE UNITÉ
+3. SI AUCUNE UNITÉ NE CORRESPOND, NE RETOURNE PAS LE CONCEPT"""
+
+    def _default_pointer_user(self) -> str:
+        """Prompt utilisateur par défaut pour extraction pointer."""
+        return """Extrais les concepts de ce texte avec unités numérotées.
+
+DOCITEM_ID: {docitem_id}
+LANGUE: {language}
+
+TEXTE AVEC UNITÉS:
+{units_text}
+
+Réponds avec ce JSON:
+```json
+{{
+  "concepts": [
+    {{"label": "Nom concept", "type": "PRESCRIPTIVE", "unit_id": "U1", "confidence": 0.9, "value_kind": null}}
+  ]
+}}
+```"""
+
 
 # ============================================================================
 # FONCTION UTILITAIRE
@@ -438,16 +832,28 @@ def run_pass1(
     llm_client=None,
     tenant_id: str = "default",
     chunk_to_docitem_map: Optional[Dict[str, List[str]]] = None,
+    sections: Optional[List[Dict]] = None,
+    unit_index: Optional[Dict] = None,
+    enable_pass09: bool = True,
+    enable_pointer_mode: bool = False,
     **kwargs
 ) -> Pass1Result:
     """
     Fonction utilitaire pour exécuter Pass 1.
 
     Wrapper simplifié autour de Pass1OrchestratorV2.
+
+    Args:
+        sections: Liste des sections depuis Pass 0 (pour Pass 0.9)
+        unit_index: Index des unités depuis Pass 0 (pour Pointer-Based Extraction)
+        enable_pass09: Active Pass 0.9 Global View Construction (défaut: True)
+        enable_pointer_mode: Active Pointer-Based Extraction (défaut: False)
     """
     orchestrator = Pass1OrchestratorV2(
         llm_client=llm_client,
         tenant_id=tenant_id,
+        enable_pass09=enable_pass09,
+        enable_pointer_mode=enable_pointer_mode,
         **kwargs
     )
     return orchestrator.process(
@@ -456,5 +862,7 @@ def run_pass1(
         content=content,
         docitems=docitems,
         chunks=chunks,
-        chunk_to_docitem_map=chunk_to_docitem_map
+        chunk_to_docitem_map=chunk_to_docitem_map,
+        sections=sections,
+        unit_index=unit_index,
     )

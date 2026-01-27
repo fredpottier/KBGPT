@@ -27,6 +27,12 @@ from knowbase.stratified.models import (
     Concept,
 )
 
+# Volet A: Validation Verbatim (anti-reformulation Qwen)
+from knowbase.stratified.pass1.verbatim_validator import (
+    validate_raw_assertions,
+    BatchValidationStats,
+)
+
 # MVP V1 imports for Information-First extraction
 from knowbase.stratified.pass1.value_extractor import get_value_extractor, ValueInfo
 from knowbase.stratified.claimkey.patterns import get_claimkey_patterns, PatternMatch
@@ -269,6 +275,45 @@ class AssertionExtractorV2:
         logger.info(f"[OSMOSE:Pass1:1.3] {len(all_assertions)} assertions extraites")
         return all_assertions
 
+    def extract_and_validate_assertions(
+        self,
+        chunks: Dict[str, str],
+        doc_language: Optional[str] = None
+    ) -> Tuple[List[RawAssertion], List[Tuple[RawAssertion, str]], BatchValidationStats]:
+        """
+        Extrait les assertions ET applique la validation verbatim (Volet A).
+
+        Cette méthode combine l'extraction et la validation pour:
+        1. Extraire les assertions via LLM
+        2. Valider que chaque assertion est une copie verbatim du texte source
+        3. Rejeter (ABSTAIN) les assertions reformulées par le LLM
+
+        Args:
+            chunks: Dict chunk_id -> texte source
+            doc_language: Langue du document
+
+        Returns:
+            (valid_assertions, abstained_with_reason, validation_stats)
+        """
+        # Étape 1: Extraction classique
+        all_assertions = self.extract_assertions(chunks, doc_language)
+
+        if not all_assertions:
+            return [], [], BatchValidationStats()
+
+        # Étape 2: Validation verbatim (Volet A)
+        valid, abstained, stats = validate_raw_assertions(all_assertions, chunks)
+
+        # Log si taux de reformulation élevé
+        if stats.total > 0 and stats.reformulation_rate > 0.10:
+            logger.warning(
+                f"[OSMOSE:Pass1:1.3:VERBATIM] Taux de reformulation: {stats.reformulation_rate:.1%} "
+                f"({stats.abstain_not_substring}/{stats.total} assertions). "
+                f"Le LLM ne respecte pas l'instruction 'texte EXACT'."
+            )
+
+        return valid, abstained, stats
+
     def _extract_from_chunk(
         self,
         chunk_id: str,
@@ -379,6 +424,33 @@ class AssertionExtractorV2:
     # ÉTAPE 2: FILTRAGE PAR PROMOTION POLICY
     # =========================================================================
 
+    def _is_meta_description(self, text: str) -> bool:
+        """
+        Détecte si le texte est une méta-description (décrit la page, pas l'info).
+
+        Utilise les patterns du promotion_engine (spec V1 complète EN+FR).
+
+        Ces assertions n'apportent pas d'information tangible et doivent être filtrées.
+        Exemples filtrés:
+        - "La page présente un modèle de déploiement"
+        - "This diagram shows the architecture"
+        """
+        from knowbase.stratified.pass1.promotion_engine import is_meta_pattern
+        return is_meta_pattern(text)
+
+    def _is_fragment(self, text: str) -> bool:
+        """
+        Détecte si le texte est un fragment (non-assertion).
+
+        ChatGPT Priority 2: Filtre "assertion minimale".
+        Exemples filtrés:
+        - "ISO 27001" (nom seul)
+        - "VPC Peering." (fragment)
+        - Texte sans verbe
+        """
+        from knowbase.stratified.pass1.promotion_engine import is_fragment
+        return is_fragment(text)
+
     def filter_by_promotion_policy(
         self,
         assertions: List[RawAssertion]
@@ -388,6 +460,9 @@ class AssertionExtractorV2:
 
         Seules les assertions de type ALWAYS (ou CONDITIONAL si non-strict)
         peuvent devenir des Information.
+
+        Filtre également les méta-descriptions (ex: "La page présente...")
+        qui n'apportent pas d'information tangible.
         """
         result = PromotionResult()
         result.stats = {
@@ -396,10 +471,24 @@ class AssertionExtractorV2:
             "conditional": 0,
             "rarely": 0,
             "never": 0,
-            "promoted": 0
+            "promoted": 0,
+            "meta_filtered": 0,
+            "fragment_filtered": 0  # ChatGPT Priority 2
         }
 
         for assertion in assertions:
+            # FILTRE 1: Méta-descriptions (ex: "La page présente...")
+            if self._is_meta_description(assertion.text):
+                result.stats["meta_filtered"] += 1
+                result.abstained.append((assertion, "meta_description"))
+                continue
+
+            # FILTRE 2: Fragments (ChatGPT Priority 2 - assertion minimale)
+            if self._is_fragment(assertion.text):
+                result.stats["fragment_filtered"] += 1
+                result.abstained.append((assertion, "fragment"))
+                continue
+
             tier = PROMOTION_POLICY.get(assertion.assertion_type, PromotionTier.RARELY)
 
             if tier == PromotionTier.ALWAYS:
@@ -431,7 +520,9 @@ class AssertionExtractorV2:
             f"[OSMOSE:Pass1:1.3] Promotion Policy: "
             f"{result.stats['always']} ALWAYS, "
             f"{result.stats['conditional']} CONDITIONAL, "
-            f"{result.stats['never']} PROCEDURAL (exclues) → "
+            f"{result.stats['never']} PROCEDURAL (exclues), "
+            f"{result.stats['meta_filtered']} meta filtrées, "
+            f"{result.stats['fragment_filtered']} fragments filtrés → "
             f"{result.stats['promoted']} promues"
         )
 
@@ -905,3 +996,140 @@ Réponds avec ce JSON:
             AssertionType.PROCEDURAL: "example",
         }
         return mapping.get(assertion_type, "claim")
+
+    # =========================================================================
+    # MODE POINTER: EXTRACTION ANTI-REFORMULATION
+    # =========================================================================
+
+    def extract_assertions_pointer_mode(
+        self,
+        docitem_id: str,
+        units_text: str,
+        doc_language: Optional[str] = None,
+    ) -> List[Dict]:
+        """
+        Extrait les assertions en mode pointer (anti-reformulation).
+
+        Le LLM pointe vers des unités (U1, U2...) au lieu de copier le texte.
+        La reconstruction du texte verbatim est faite côté code depuis l'index.
+
+        Args:
+            docitem_id: ID du DocItem
+            units_text: Texte formaté avec unités numérotées (U1: text, U2: text...)
+            doc_language: Langue du document
+
+        Returns:
+            Liste de dicts avec keys: label, type, unit_id, confidence, value_kind
+        """
+        if not self.llm_client and not self.allow_fallback:
+            raise RuntimeError(
+                "LLM non disponible et fallback non autorisé pour mode pointer."
+            )
+
+        prompt_config = self.prompts.get("pointer_concept_extraction", {})
+        system_prompt = prompt_config.get("system", self._default_pointer_system())
+        user_template = prompt_config.get("user", self._default_pointer_user())
+
+        user_prompt = user_template.format(
+            docitem_id=docitem_id,
+            language=doc_language or "auto-detect",
+            units_text=units_text[:3000],  # Limite pour éviter troncature
+        )
+
+        try:
+            response = self.llm_client.generate(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=2000
+            )
+            return self._parse_pointer_response(response)
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Pass1:POINTER] Extraction LLM échouée pour {docitem_id}: {e}")
+            return []
+
+    def _parse_pointer_response(self, response: str) -> List[Dict]:
+        """Parse la réponse JSON de l'extraction pointer."""
+        json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            json_str = response
+
+        try:
+            data = json.loads(json_str)
+            concepts = data.get("concepts", [])
+
+            # Valider et filtrer
+            valid_concepts = []
+            for c in concepts:
+                unit_id = c.get("unit_id", "")
+                # Valider format unit_id (U1, U2, etc.)
+                if unit_id and unit_id.startswith("U") and unit_id[1:].isdigit():
+                    valid_concepts.append({
+                        "label": c.get("label", ""),
+                        "type": c.get("type", "FACTUAL").upper(),
+                        "unit_id": unit_id,
+                        "confidence": float(c.get("confidence", 0.8)),
+                        "value_kind": c.get("value_kind"),
+                    })
+                else:
+                    logger.debug(f"[OSMOSE:Pass1:POINTER] Invalid unit_id ignoré: {unit_id}")
+
+            return valid_concepts
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"[OSMOSE:Pass1:POINTER] JSON parse error: {e}")
+            return []
+
+    def _default_pointer_system(self) -> str:
+        """Prompt système par défaut pour extraction pointer."""
+        return """Tu es un expert en extraction de concepts pour OSMOSE.
+
+MÉTHODE POINTER-BASED:
+Le texte est découpé en unités numérotées (U1, U2, U3...).
+Tu dois POINTER vers l'unité qui contient le concept, PAS copier le texte.
+
+TYPES DE CONCEPTS:
+- PRESCRIPTIVE: Obligation, règle ("must", "shall", "required", "doit", "obligatoire")
+- DEFINITIONAL: Définition, explication ("is defined as", "refers to")
+- FACTUAL: Information vérifiable, fait technique
+- PERMISSIVE: Option, possibilité ("may", "can", "peut")
+
+RÈGLES CRITIQUES:
+1. Retourne UNIQUEMENT le numéro d'unité (U1, U2...), JAMAIS le texte
+2. NE PROPOSE UN CONCEPT QUE SI TU PEUX POINTER UNE UNITÉ
+3. SI AUCUNE UNITÉ NE CORRESPOND, NE RETOURNE PAS LE CONCEPT
+4. La confidence reflète ta certitude sur le type
+5. value_kind si applicable: "version", "percentage", "size", "number", "duration"
+
+FORMAT JSON STRICT."""
+
+    def _default_pointer_user(self) -> str:
+        """Prompt utilisateur par défaut pour extraction pointer."""
+        return """Extrais les concepts de ce texte avec unités numérotées.
+
+DOCITEM_ID: {docitem_id}
+LANGUE: {language}
+
+TEXTE AVEC UNITÉS:
+{units_text}
+
+INSTRUCTIONS:
+- Indique UNIQUEMENT le numéro d'unité (U1, U2...).
+- NE RECOPIE PAS le texte.
+- Si aucune unité ne correspond à un concept, n'inclus pas ce concept.
+
+Réponds UNIQUEMENT avec ce JSON:
+```json
+{{
+  "concepts": [
+    {{
+      "label": "Nom court du concept (2-5 mots)",
+      "type": "PRESCRIPTIVE|DEFINITIONAL|FACTUAL|PERMISSIVE",
+      "unit_id": "U1",
+      "confidence": 0.9,
+      "value_kind": "version|percentage|size|number|duration|null"
+    }}
+  ]
+}}
+```"""
