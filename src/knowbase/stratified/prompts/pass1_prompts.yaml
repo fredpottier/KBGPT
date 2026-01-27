@@ -160,7 +160,6 @@ assertion_extraction:
     - comparative: Comparison ("X is better than Y")
 
     RULES:
-    - Return EXACT positions in text (start_char, end_char)
     - Detect the LANGUAGE of each assertion
     - Confidence should reflect assertion clarity
     - Ignore trivial or repetitive assertions
