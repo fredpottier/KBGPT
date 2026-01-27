@@ -228,7 +228,7 @@ class Pass1Result(BaseModel):
     # Structure sémantique
     subject: Subject
     themes: list[Theme] = Field(default_factory=list)
-    concepts: list[Concept] = Field(default_factory=list, max_length=50)  # V2.1: augmenté de 15 à 50
+    concepts: list[Concept] = Field(default_factory=list, max_length=100)  # V2.2: adaptatif jusqu'à 80
     informations: list[Information] = Field(default_factory=list)
 
     # Journal d'audit

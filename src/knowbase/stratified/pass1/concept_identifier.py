@@ -15,6 +15,7 @@ Adapté du POC: poc/extractors/concept_identifier.py
 import json
 import re
 import logging
+import math
 from collections import Counter
 from typing import Dict, List, Optional, Set, Tuple
 from pathlib import Path
@@ -32,22 +33,69 @@ logger = logging.getLogger(__name__)
 VALUE_PATTERN = re.compile(r'^\d+(\.\d+)*[%°]?[CFc]?$|^\d+[:\-]\d+$')
 
 
+# ============================================================================
+# BUDGET ADAPTATIF (2026-01-27)
+# ============================================================================
+# Formule: MAX_CONCEPTS = clamp(MIN, MAX, 15 + sqrt(sections) * 3)
+# - Croissance sub-linéaire: 4x sections → ~2x concepts
+# - Plancher 25: assez pour petits documents
+# - Plafond 80: évite explosion combinatoire au linking
+
+CONCEPT_BUDGET_MIN = 25      # Minimum concepts (petits documents)
+CONCEPT_BUDGET_MAX = 80      # Maximum concepts (évite O(n²) au linking)
+CONCEPT_BUDGET_BASE = 15     # Base fixe
+CONCEPT_BUDGET_FACTOR = 3    # Facteur multiplicateur de sqrt(sections)
+
+
+def compute_concept_budget(n_sections: int, is_hostile: bool = False) -> int:
+    """
+    Calcule le budget de concepts adaptatif basé sur la structure du document.
+
+    Formule: clamp(25, 80, 15 + sqrt(sections) * 3)
+
+    Args:
+        n_sections: Nombre de sections dans le document
+        is_hostile: Si True, réduit le budget de moitié
+
+    Returns:
+        Nombre maximum de concepts à identifier
+
+    Examples:
+        - 20 sections → 28 concepts
+        - 50 sections → 36 concepts
+        - 200 sections → 57 concepts
+        - 500 sections → 80 concepts (cap)
+    """
+    if n_sections <= 0:
+        # Fallback si pas de sections disponibles
+        return CONCEPT_BUDGET_MIN if not is_hostile else 10
+
+    raw_budget = CONCEPT_BUDGET_BASE + math.sqrt(n_sections) * CONCEPT_BUDGET_FACTOR
+    budget = max(CONCEPT_BUDGET_MIN, min(CONCEPT_BUDGET_MAX, round(raw_budget)))
+
+    if is_hostile:
+        # Documents hostiles: budget réduit de moitié
+        budget = max(10, budget // 2)
+
+    return budget
+
+
 class ConceptIdentifierV2:
     """
     Identificateur de concepts pour Pipeline V2.
 
-    SURFACE CONCEPTUELLE ÉLARGIE (V2.1):
-    - Maximum 30 concepts par document (augmenté depuis 15)
+    BUDGET ADAPTATIF (V2.2 - 2026-01-27):
+    - Budget calculé selon: clamp(25, 80, 15 + sqrt(sections) * 3)
+    - Croissance sub-linéaire: 4x sections → ~2x concepts
     - Lexical triggers obligatoires (C1)
     - Validation anti-triggers triviaux (C1b)
-    - Minimum pertinence requis pour être retenu
 
     IMPORTANT: Pas de fallback silencieux - erreur explicite si LLM absent.
     """
 
-    # Garde-fou frugalité (V2.1 - élargi pour meilleure couverture)
-    MAX_CONCEPTS = 30               # Documents normaux (augmenté depuis 15)
-    MAX_CONCEPTS_HOSTILE = 10       # Pour documents HOSTILE (augmenté depuis 5)
+    # Fallback si nombre de sections non fourni (legacy)
+    MAX_CONCEPTS_FALLBACK = 30      # Documents normaux sans info sections
+    MAX_CONCEPTS_HOSTILE = 10       # Pour documents HOSTILE (garde-fou minimum)
 
     def __init__(
         self,
@@ -94,7 +142,8 @@ class ConceptIdentifierV2:
         themes: List[Theme],
         content: str,
         is_hostile: bool = False,
-        language: str = "fr"
+        language: str = "fr",
+        n_sections: Optional[int] = None
     ) -> Tuple[List[Concept], List[Dict]]:
         """
         Identifie les concepts situés du document.
@@ -105,15 +154,27 @@ class ConceptIdentifierV2:
             structure: Structure (CENTRAL, TRANSVERSAL, CONTEXTUAL)
             themes: Thèmes identifiés (de Phase 1.1)
             content: Contenu textuel complet
-            is_hostile: True si document HOSTILE (limite 5 concepts)
+            is_hostile: True si document HOSTILE (réduit budget de moitié)
             language: Langue du document
+            n_sections: Nombre de sections (pour budget adaptatif)
+                        Si None, utilise le fallback fixe
 
         Returns:
             Tuple[List[Concept], List[Dict]]
             - concepts: Liste des concepts identifiés
             - refused_terms: Termes refusés avec raisons
         """
-        max_concepts = self.MAX_CONCEPTS_HOSTILE if is_hostile else self.MAX_CONCEPTS
+        # Budget adaptatif basé sur la structure du document
+        if n_sections is not None and n_sections > 0:
+            max_concepts = compute_concept_budget(n_sections, is_hostile)
+            logger.info(
+                f"[OSMOSE:Pass1:1.2] Budget adaptatif: {n_sections} sections → "
+                f"{max_concepts} concepts max"
+            )
+        else:
+            # Fallback si pas d'info sections
+            max_concepts = self.MAX_CONCEPTS_HOSTILE if is_hostile else self.MAX_CONCEPTS_FALLBACK
+            logger.debug(f"[OSMOSE:Pass1:1.2] Budget fallback: {max_concepts} concepts max")
 
         # Construire le prompt
         prompt_config = self.prompts.get("concept_identification", {})
@@ -262,27 +323,25 @@ class ConceptIdentifierV2:
             triggers = c_data.get("lexical_triggers", [])
 
             # Valider les lexical_triggers (C1, C1b, C1c)
+            triggers_audit = {}  # Audit pour validation rôle C1b
             if doc_content and triggers:
-                is_valid, audit = self._validate_lexical_triggers(
+                is_valid, triggers_audit = self._validate_lexical_triggers(
                     c_data, doc_content, unit_texts or [], top_50_tokens
                 )
                 if not is_valid:
                     refused.append({
                         "term": name,
-                        "reason": f"Triggers invalides: {audit.get('rejected', [])}"
+                        "reason": f"Triggers invalides: {triggers_audit.get('rejected', [])}"
                     })
-                    logger.debug(f"[OSMOSE:C1] Concept rejeté '{name}': {audit}")
+                    logger.debug(f"[OSMOSE:C1] Concept rejeté '{name}': {triggers_audit}")
                     continue
             elif not triggers:
                 # Pas de triggers fournis - accepter avec warning (rétrocompatibilité)
                 logger.warning(f"[OSMOSE:C1] Concept '{name}' sans triggers (LLM n'a pas respecté le format)")
 
-            # Mapper le rôle
-            role_str = c_data.get("role", "STANDARD").upper()
-            try:
-                role = ConceptRole(role_str)
-            except ValueError:
-                role = ConceptRole.STANDARD
+            # Valider et potentiellement dégrader le rôle selon C1b (2026-01-27)
+            # Empêche les concepts "aspirateur" avec triggers génériques d'être CENTRAL
+            role = self._validate_role_requirements(c_data, triggers_audit)
 
             # Trouver le theme_id correspondant
             theme_ref = c_data.get("theme", "")
@@ -327,6 +386,69 @@ class ConceptIdentifierV2:
         freq = Counter(tokens)
         # Retourner les n plus fréquents
         return {t for t, _ in freq.most_common(n)}
+
+    def _validate_role_requirements(
+        self,
+        concept: Dict,
+        triggers_audit: Dict
+    ) -> ConceptRole:
+        """
+        Valide et ajuste le rôle selon les triggers discriminants.
+
+        Règle C1b renforcée (2026-01-27 - Phase 1 Nettoyage):
+        - CENTRAL requiert au moins 1 trigger rare (<1%) ou valeur
+        - STANDARD requiert au moins 1 trigger semi-rare (<2%) ou valeur
+        - Sinon → CONTEXTUAL
+
+        Ceci empêche les concepts "aspirateur" (ex: "infrastructure SAP")
+        avec triggers trop génériques de devenir CENTRAL.
+
+        Args:
+            concept: Dict avec 'name' et 'role'
+            triggers_audit: Dict retourné par _validate_lexical_triggers
+
+        Returns:
+            ConceptRole ajusté
+        """
+        name = concept.get('name', 'Unknown')
+        requested_role = concept.get('role', 'STANDARD').upper()
+
+        # Vérifier si au moins 1 trigger est discriminant
+        has_rare = triggers_audit.get('rare_found', False)
+        has_semi_rare = any(
+            t_info.get('rare') in [True, 'semi-rare', 'fallback_value']
+            for t_info in triggers_audit.get('triggers', {}).values()
+        )
+
+        # Appliquer les règles de dégradation
+        if requested_role == 'CENTRAL':
+            if not has_rare:
+                if has_semi_rare:
+                    logger.info(
+                        f"[OSMOSE:C1b] '{name}' dégradé "
+                        f"CENTRAL → STANDARD (pas de trigger rare)"
+                    )
+                    return ConceptRole.STANDARD
+                else:
+                    logger.info(
+                        f"[OSMOSE:C1b] '{name}' dégradé "
+                        f"CENTRAL → CONTEXTUAL (pas de trigger discriminant)"
+                    )
+                    return ConceptRole.CONTEXTUAL
+
+        if requested_role == 'STANDARD':
+            if not has_semi_rare and not has_rare:
+                logger.info(
+                    f"[OSMOSE:C1b] '{name}' dégradé "
+                    f"STANDARD → CONTEXTUAL (pas de trigger discriminant)"
+                )
+                return ConceptRole.CONTEXTUAL
+
+        # Rôle valide - retourner tel quel
+        try:
+            return ConceptRole(requested_role)
+        except ValueError:
+            return ConceptRole.STANDARD
 
     def _validate_lexical_triggers(
         self,

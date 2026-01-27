@@ -102,8 +102,8 @@ class RefusedTerm(BaseModel):
 
 class ConceptIdentificationResponse(BaseModel):
     """Réponse pour l'identification de concepts (Phase 1.2)."""
-    concepts: List[ConceptCompact] = Field(..., max_length=30)  # V2.1: augmenté de 15 à 30
-    refused_terms: List[RefusedTerm] = Field(default_factory=list, max_length=10)
+    concepts: List[ConceptCompact] = Field(..., max_length=100)  # V2.2: adaptatif jusqu'à 80
+    refused_terms: List[RefusedTerm] = Field(default_factory=list, max_length=20)
 
 
 # ============================================================================

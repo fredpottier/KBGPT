@@ -255,6 +255,9 @@ class Pass1OrchestratorV2:
         # =====================================================================
         logger.info("[OSMOSE:Pass1:1.2] Identification concepts...")
 
+        # Budget adaptatif basé sur le nombre de sections
+        n_sections = len(sections) if sections else None
+
         concepts, refused_terms = self.concept_identifier.identify(
             doc_id=doc_id,
             subject_text=subject.text,
@@ -262,7 +265,8 @@ class Pass1OrchestratorV2:
             themes=themes,
             content=analysis_content,  # ← CHANGEMENT CLÉ: meta-document
             is_hostile=is_hostile,
-            language=subject.language
+            language=subject.language,
+            n_sections=n_sections  # Budget adaptatif (2026-01-27)
         )
 
         logger.info(
