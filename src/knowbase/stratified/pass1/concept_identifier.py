@@ -197,7 +197,7 @@ class ConceptIdentifierV2:
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                max_tokens=4000  # Augmenté pour éviter troncature JSON
+                max_tokens=6000  # Augmenté pour budget adaptatif (58 concepts max)
             )
             # V2.1: Passer le contenu pour validation des lexical_triggers
             concepts, refused = self._parse_response(response, doc_id, themes, content)
