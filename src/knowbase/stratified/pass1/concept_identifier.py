@@ -38,11 +38,11 @@ VALUE_PATTERN = re.compile(r'^\d+(\.\d+)*[%°]?[CFc]?$|^\d+[:\-]\d+$')
 # ============================================================================
 # Formule: MAX_CONCEPTS = clamp(MIN, MAX, 15 + sqrt(sections) * 3)
 # - Croissance sub-linéaire: 4x sections → ~2x concepts
-# - Plancher 25: assez pour petits documents
-# - Plafond 80: évite explosion combinatoire au linking
+# - Plancher 20: assez pour petits documents
+# - Plafond 40: limité par contexte vLLM (8192 tokens input+output)
 
-CONCEPT_BUDGET_MIN = 25      # Minimum concepts (petits documents)
-CONCEPT_BUDGET_MAX = 80      # Maximum concepts (évite O(n²) au linking)
+CONCEPT_BUDGET_MIN = 20      # Minimum concepts (petits documents)
+CONCEPT_BUDGET_MAX = 40      # Maximum concepts (limité par vLLM context)
 CONCEPT_BUDGET_BASE = 15     # Base fixe
 CONCEPT_BUDGET_FACTOR = 3    # Facteur multiplicateur de sqrt(sections)
 
@@ -51,7 +51,7 @@ def compute_concept_budget(n_sections: int, is_hostile: bool = False) -> int:
     """
     Calcule le budget de concepts adaptatif basé sur la structure du document.
 
-    Formule: clamp(25, 80, 15 + sqrt(sections) * 3)
+    Formule: clamp(20, 40, 15 + sqrt(sections) * 3)
 
     Args:
         n_sections: Nombre de sections dans le document
@@ -197,7 +197,7 @@ class ConceptIdentifierV2:
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                max_tokens=6000  # Augmenté pour budget adaptatif (58 concepts max)
+                max_tokens=4000  # Limité car vLLM context=8192 (input+output)
             )
             # V2.1: Passer le contenu pour validation des lexical_triggers
             concepts, refused = self._parse_response(response, doc_id, themes, content)
