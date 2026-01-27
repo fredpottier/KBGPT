@@ -830,6 +830,7 @@ class AssertionExtractorV2:
             assertion_map = {a.assertion_id: a for a in assertions}
             concept_ids = {c.concept_id for c in concepts}
             concept_triggers = {c.concept_id: c.lexical_triggers for c in concepts}
+            concept_names = {c.concept_id: c.name for c in concepts}  # C3 v2
 
             for l_data in data.get("links", []):
                 assertion_id = l_data.get("assertion_id", "")
@@ -842,9 +843,10 @@ class AssertionExtractorV2:
                 # V2.1: Format multi-concept (concept_links array)
                 if "concept_links" in l_data:
                     concept_links_raw = l_data.get("concept_links", [])
-                    # Filtrer et valider avec C3
+                    # Filtrer et valider avec C3 v2 (soft gate + hard gate)
                     filtered_links = self._filter_multi_links(
-                        concept_links_raw, assertion_text, concept_ids, concept_triggers
+                        concept_links_raw, assertion_text, concept_ids,
+                        concept_triggers, concept_names
                     )
                     for cl in filtered_links:
                         links.append(ConceptLink(
@@ -879,15 +881,20 @@ class AssertionExtractorV2:
         raw_links: List[Dict],
         unit_text: str,
         valid_concept_ids: set,
-        concept_triggers: Dict[str, List[str]]
+        concept_triggers: Dict[str, List[str]],
+        concept_names: Optional[Dict[str, str]] = None
     ) -> List[Dict]:
         """
-        C3: Filtre les liens multiples pour éviter le "spray & pray".
+        C3 v2: Filtre les liens multiples avec soft gate + hard gate.
+
+        Évite le "spray & pray" tout en permettant les liens légitimes
+        où les triggers doc-level n'apparaissent pas dans l'assertion.
 
         Règles:
         1. Max 5 liens par assertion
-        2. Garder seulement confidence >= 0.70 OU top-2 si écart faible
-        3. Chaque lien doit avoir au moins 1 lexical_trigger présent dans l'unité
+        2. Soft gate: pas de trigger → confidence -= 0.20
+        3. Hard gate: rejeter si (pas de trigger ET pas de token du nom) ET conf_adj < 0.55
+        4. Garder si confidence_adj >= 0.70 OU top-2 si écart faible
         """
         if not raw_links:
             return []
@@ -898,32 +905,94 @@ class AssertionExtractorV2:
         if not raw_links:
             return []
 
-        # Trier par confiance décroissante
+        # Trier par confiance décroissante (originale)
         sorted_links = sorted(raw_links, key=lambda l: l.get('confidence', 0), reverse=True)
 
         validated_links = []
-        top_confidence = sorted_links[0].get('confidence', 0) if sorted_links else 0
+        adjusted_confidences = []
 
         for i, link in enumerate(sorted_links[:MAX_LINKS_PER_ASSERTION]):
             concept_id = link.get('concept_id', '')
             confidence = link.get('confidence', 0)
 
-            # Règle 1: Seuil de confiance ou top-k proche
-            is_high_confidence = confidence >= MIN_LINK_CONFIDENCE
-            is_top_k_close = i < TOP_K_IF_CLOSE and (top_confidence - confidence) <= CLOSE_THRESHOLD
+            # --- C3 v2: Soft Gate ---
+            triggers = concept_triggers.get(concept_id, [])
+            has_trigger = self._has_trigger_match(unit_text, triggers) if triggers else False
+
+            # Pénalité si pas de trigger
+            confidence_adj = confidence
+            if triggers and not has_trigger:
+                confidence_adj -= 0.20
+
+            # --- C3 v2: Hard Gate (ancrage minimal) ---
+            concept_name = concept_names.get(concept_id, "") if concept_names else ""
+            has_name_token = self._has_concept_name_token(unit_text, concept_name)
+
+            # Rejet si: pas de trigger ET pas de token du nom ET conf_adj < 0.55
+            if not has_trigger and not has_name_token and confidence_adj < 0.55:
+                logger.debug(
+                    f"[OSMOSE:C3v2] Rejeté {concept_id}: pas de signal lexical, "
+                    f"conf_adj={confidence_adj:.2f}"
+                )
+                continue
+
+            # --- Règles de sélection (sur confidence ajustée) ---
+            adjusted_confidences.append((i, link, confidence_adj, has_trigger))
+
+        if not adjusted_confidences:
+            return []
+
+        # Recalculer top_confidence sur les ajustées
+        top_confidence_adj = max(c[2] for c in adjusted_confidences)
+
+        for i, link, confidence_adj, has_trigger in adjusted_confidences:
+            # Règle: Seuil de confiance ajustée ou top-k proche
+            is_high_confidence = confidence_adj >= MIN_LINK_CONFIDENCE
+            is_top_k_close = i < TOP_K_IF_CLOSE and (top_confidence_adj - confidence_adj) <= CLOSE_THRESHOLD
 
             if not (is_high_confidence or is_top_k_close):
                 continue
 
-            # Règle 2: Validation par trigger (C3)
-            triggers = concept_triggers.get(concept_id, [])
-            if triggers and not self._has_trigger_match(unit_text, triggers):
-                logger.debug(f"[OSMOSE:MultiLink] Rejeté {concept_id}: pas de trigger dans l'unité")
-                continue
-
-            validated_links.append(link)
+            # Stocker avec confidence ajustée pour tracking
+            link_copy = link.copy()
+            link_copy['confidence_original'] = link.get('confidence', 0)
+            link_copy['confidence'] = confidence_adj
+            link_copy['has_trigger_match'] = has_trigger
+            validated_links.append(link_copy)
 
         return validated_links
+
+    def _has_concept_name_token(self, text: str, concept_name: str) -> bool:
+        """
+        C3 v2: Vérifie si au moins 1 token significatif du nom du concept
+        est présent dans le texte (word boundary).
+
+        Filtre les stopwords pour éviter les faux positifs.
+        """
+        if not concept_name:
+            return False
+
+        # Stopwords multilingues (les plus courants)
+        STOPWORDS = {
+            'the', 'a', 'an', 'of', 'in', 'to', 'for', 'and', 'or', 'is', 'are', 'be',
+            'le', 'la', 'les', 'de', 'du', 'des', 'et', 'ou', 'un', 'une', 'en', 'à',
+            'der', 'die', 'das', 'und', 'oder', 'in', 'von', 'für',
+            'with', 'on', 'at', 'by', 'as', 'from', 'que', 'qui', 'sur', 'par',
+            'data', 'system', 'management', 'service', 'process',  # Termes trop génériques
+        }
+
+        text_lower = text.lower()
+
+        # Extraire les tokens significatifs du nom du concept
+        tokens = re.findall(r'\b[a-zA-Z]{3,}\b', concept_name.lower())
+        significant_tokens = [t for t in tokens if t not in STOPWORDS]
+
+        # Vérifier si au moins 1 token significatif est présent
+        for token in significant_tokens:
+            if re.search(rf'\b{re.escape(token)}\b', text_lower):
+                return True
+
+        return False
 
     def _has_trigger_match(self, text: str, triggers: List[str]) -> bool:
         """C3 + C1c: Vérifie qu'au moins 1 trigger est présent (word boundary)."""

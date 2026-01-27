@@ -238,6 +238,7 @@ class Pass1PersisterV2:
             c.role = $role,
             c.variants = $variants,
             c.lex_key = $lex_key,
+            c.lexical_triggers = $lexical_triggers,
             c.created_at = datetime()
         MERGE (t)-[:HAS_CONCEPT]->(c)
         """
@@ -250,6 +251,7 @@ class Pass1PersisterV2:
             "role": concept.role.value,
             "variants": concept.variants,
             "lex_key": concept.lex_key,
+            "lexical_triggers": concept.lexical_triggers,
         })
 
     @staticmethod
