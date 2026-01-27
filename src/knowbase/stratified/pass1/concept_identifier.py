@@ -197,7 +197,7 @@ class ConceptIdentifierV2:
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                max_tokens=6000  # vLLM context=16384 depuis 2026-01-27
+                max_tokens=8000  # vLLM context=16384 (2026-01-27)
             )
             # V2.1: Passer le contenu pour validation des lexical_triggers
             concepts, refused = self._parse_response(response, doc_id, themes, content)
