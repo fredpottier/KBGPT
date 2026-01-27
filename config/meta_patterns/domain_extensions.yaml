@@ -1,0 +1,78 @@
+# Domain Extensions - Vocabulaire Spécifique
+# ==========================================
+# Ces patterns AJOUTENT du vocabulaire spécifique à un domaine.
+# Ils complètent (ne remplacent pas) les patterns structurels.
+#
+# UTILISATION: Activer un domaine pour filtrer du contenu spécifique.
+# Par défaut: aucun domaine actif = comportement agnostique.
+#
+# Date: 2026-01-27
+# Ref: Plan Externalisation Patterns META V3
+
+version: "1.0"
+
+# Domaine actif (null = agnostique, ou nom du domaine)
+# Pour activer: changer null en "sap_it", "medical", "legal", etc.
+active_domain: null
+
+# ============================================================================
+# DÉFINITIONS DES DOMAINES
+# ============================================================================
+
+domains:
+  # --- Exemple: SAP/IT ---
+  sap_it:
+    description: "Documents SAP, IT, cybersécurité"
+    additional_patterns:
+      en:
+        process_tools:
+          - "via\\s+(CISA|Cyber Legal|ServiceNow)"
+          - "escalation\\s+(to|via)\\s+\\w+"
+        legal_specific:
+          - "forward[- ]looking statements?"
+          - "not a commitment"
+      fr:
+        process_tools:
+          - "via\\s+(CISA|Cyber Legal|ServiceNow)"
+          - "escalade\\s+(vers|via)\\s+\\w+"
+
+  # --- Exemple: Médical ---
+  medical:
+    description: "Documents médicaux, pharma, santé"
+    additional_patterns:
+      en:
+        disclaimers:
+          - "not medical advice"
+          - "consult your (physician|doctor|healthcare provider)"
+          - "for educational purposes only"
+      fr:
+        disclaimers:
+          - "ne constitue pas un avis médical"
+          - "consultez votre médecin"
+
+  # --- Exemple: Légal ---
+  legal:
+    description: "Documents juridiques, contrats"
+    additional_patterns:
+      en:
+        disclaimers:
+          - "does not constitute legal advice"
+          - "consult your (attorney|lawyer|counsel)"
+      fr:
+        disclaimers:
+          - "ne constitue pas un conseil juridique"
+          - "consultez votre avocat"
+
+  # --- Exemple: Finance ---
+  finance:
+    description: "Documents financiers, bancaires, investissement"
+    additional_patterns:
+      en:
+        disclaimers:
+          - "not investment advice"
+          - "past performance.+future results"
+          - "consult your (financial advisor|broker)"
+      fr:
+        disclaimers:
+          - "ne constitue pas un conseil en investissement"
+          - "les performances passées.+résultats futurs"

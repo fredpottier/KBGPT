@@ -1,0 +1,170 @@
+# Meta Patterns - Structure Linguistique Pure
+# ============================================
+# Ces patterns détectent du contenu META basé sur la STRUCTURE,
+# pas sur le vocabulaire de domaine.
+#
+# RÈGLE: Aucun mot-clé métier (CISA, SAP, ServiceNow, etc.)
+# RÈGLE: Chaque pattern doit fonctionner pour tout domaine
+#
+# Date: 2026-01-27
+# Ref: Plan Externalisation Patterns META V3
+
+version: "1.0"
+
+# ============================================================================
+# PATTERNS PAR LANGUE
+# ============================================================================
+
+languages:
+  en:
+    # --- Descriptions de page/section ---
+    page_description:
+      - "^this\\s+(page|section|chapter|document)\\s+(describes|shows|presents|explains|covers)"
+      - "^the\\s+(page|section|chapter|document|diagram|figure|table)\\s+(describes|shows|presents|explains|covers)"
+      - "^see\\s+also\\b"
+      - "^refer\\s+to\\b"
+      - "^for\\s+more\\s+information"
+      - "^note\\s*:"
+      - "^disclaimer\\s*:"
+      - "^copyright\\b"
+      - "^table\\s+of\\s+contents"
+      - "^\\d+\\.\\s*$"
+      - "^(here|below|above)\\s+(is|are|we)\\s+(see|show|present)"
+      - "^as\\s+(illustrated|shown|presented|described)\\s+(in|by|above|below)"
+
+    # --- Descriptions visuelles (diagrammes, figures) ---
+    visual_description:
+      - "^(at\\s+the\\s+)?(top|bottom|left|right|center),?\\s+(there\\s+)?(is|are)\\b"
+      - "^(on\\s+the\\s+)?(left|right)(-hand)?\\s+(side)?,?\\s+(there\\s+)?(is|are)\\b"
+      - "^the\\s+(diagram|figure|image|slide|chart)\\s+(shows|illustrates|displays|depicts)"
+      - "^(two|three|four|several|multiple)\\s+(sections|columns|rows|parts)\\s+(are\\s+)?(visible|shown|displayed)"
+      - "^(arrows|lines|icons)\\s+(indicate|show|represent|connect)"
+      - "^it\\s+(shows|illustrates|depicts|displays)\\s+(a|an|the)\\s+(flow|diagram|architecture|structure)"
+      - "^the\\s+(main|primary)\\s+(components|elements|sections)\\s+(include|are)"
+      - "^each\\s+(column|row|section)\\s+(lists|contains|shows)"
+
+    # --- Questions (patterns interrogatifs) ---
+    questions:
+      - "^(is\\s+it|do\\s+we|can\\s+we|should\\s+we|will\\s+it|does\\s+it)\\s+"
+      - "^(is|are|do|does|can|could|should|will|would)\\s+\\w+.+\\?$"
+      - "^(how|what|when|where|why|which)\\s+.+\\?$"
+      - "^for\\s+how\\s+long\\b"
+
+    # --- Disclaimers (structure, pas vocabulaire juridique) ---
+    disclaimer_structural:
+      - "^(this|the|these)\\s+(information|content|document|statement)s?\\s+(is|are)\\s+(not|subject|provided)"
+      - "^(subject to|without)\\s+\\w+\\s+(change|notice|warranty|guarantee)"
+      - "^(for|to)\\s+(informational|general|reference)\\s+(purposes?|use)\\s+only"
+      - "^no\\s+(warranty|guarantee|representation)"
+      - "forward[- ]looking statements?"
+      - "not a commitment"
+      - "confidential and proprietary"
+      - "for informational purposes"
+      - "subject to change"
+      - "without (prior )?notice"
+      - "may not be disclosed"
+      - "(not )?legally binding"
+      - "all rights reserved"
+
+    # --- Workflow/Process (verbes d'action, pas outils) ---
+    workflow_structural:
+      - "^(please\\s+)?(contact|reach out to|escalate to|submit to|refer to)\\s+"
+      - "^(requires?|needs?|awaits?)\\s+(approval|review|sign-?off|validation)"
+      - "requires approval"
+      - "escalation (process|procedure)"
+      - "\\bR&R\\b|roles and responsibilities"
+      - "contact your .{0,20} representative"
+      - "reach out to"
+      - "^please (contact|refer to|see)"
+
+    # --- Navigation UI (actions utilisateur) ---
+    user_flow:
+      - "^(click|select|open|navigate|go to|access)\\s+(the|a|your)?\\s*"
+      - "^step\\s+\\d+\\s*[:\\-]"
+      - "^(first|then|next|finally)[,:]?\\s+(you\\s+)?(will\\s+)?(click|select|open)"
+      - "user\\s+(opens?|clicks?|navigates?|selects?)"
+      - "(open|click|navigate to|select)\\s+(the\\s+)?(URL|link|button|menu)"
+      - "in\\s+(your|the)\\s+browser"
+      - "login\\s+(to|into)"
+
+    # --- Fragments (non-assertions) ---
+    fragments:
+      - "^[A-Z]{2,6}\\s*=\\s*"
+      - "^[A-Z]{2,6}\\s*$"
+      - "^\\w+\\s+(logo|icon)s?\\s*(are|is)?\\s*(displayed|shown|visible)"
+
+  fr:
+    # --- Descriptions de page/section ---
+    page_description:
+      - "^(cette|la|le|ce)\\s+(page|section|chapitre|document)\\s+(d[eé]crit|pr[eé]sente|montre|explique|couvre)"
+      - "^(le|la|les)\\s+(sch[eé]ma|diagramme|figure|tableau|image)\\s+(ci-dessous|ci-dessus|suivant)?\\s*(d[eé]crit|pr[eé]sente|montre|illustre)"
+      - "^voir\\s+(aussi|[eé]galement)\\b"
+      - "^se\\s+r[eé]f[eé]rer\\s+[aà]\\b"
+      - "^pour\\s+plus\\s+d[''']informations?"
+      - "^note\\s*:"
+      - "^avertissement\\s*:"
+      - "^copyright\\b"
+      - "^table\\s+des\\s+mati[eè]res"
+      - "^\\d+\\.\\s*$"
+      - "^(voici|on\\s+voit|nous\\s+voyons)\\s+(ici|ci-dessous|ci-dessus)?"
+      - "^comme\\s+(illustr[eé]|montr[eé]|pr[eé]sent[eé]|d[eé]crit)\\s+(dans|par|ci-dessus|ci-dessous)"
+
+    # --- Descriptions visuelles ---
+    visual_description:
+      - "^(en\\s+)?(haut|bas|gauche|droite),?\\s+(il\\s+y\\s+a|on\\s+(trouve|voit))\\b"
+      - "^[àa]\\s+(gauche|droite),?\\s+(il\\s+y\\s+a|on\\s+(trouve|voit))\\b"
+      - "^(deux|trois|quatre|plusieurs)\\s+(sections|colonnes|lignes|parties)\\s+(sont\\s+)?(visibles|pr[eé]sent[eé]s|affich[eé]s)"
+      - "^(les\\s+)?fl[eè]ches\\s+(indiquent|montrent|repr[eé]sentent|relient)"
+      - "^il\\s+(montre|illustre|affiche|repr[eé]sente)\\s+(un|une|le|la|les|des)\\s+(flux|diagramme|architecture|structure)"
+      - "^(elle|il)\\s+est\\s+divis[eé](e)?\\s+en\\s+(deux|trois|plusieurs)\\s+(colonnes|sections|parties)"
+      - "^chaque\\s+(colonne|ligne|section)\\s+(liste|contient|montre|affiche)"
+      - "^(les\\s+)?(entit[eé]s|composants|[eé]l[eé]ments)\\s+(principaux|principales)\\s+(incluent|sont|comprennent)"
+      - "^des\\s+(ic[oô]nes?|logos?)\\s+(de\\s+)?\\w+\\s+(sont\\s+)?(affich[eé]s|pr[eé]sents|visibles)"
+
+    # --- Questions ---
+    questions:
+      - "^est-ce\\s+que\\b"
+      - "^(peut|doit|faut|pourrait)-on\\b"
+      - "^(comment|quand|o[uù]|pourquoi|quel(le)?s?)\\s+.+\\?$"
+      - "^pour\\s+combien\\s+de\\s+temps\\b"
+
+    # --- Disclaimers (structure) ---
+    disclaimer_structural:
+      - "^(cette|ces|le|les)\\s+(information|contenu|document)s?\\s+(est|sont)\\s+(fourni|sujet)"
+      - "^(sous r[eé]serve|sans)\\s+\\w+\\s+(modification|pr[eé]avis|garantie)"
+      - "^[àa]\\s+titre\\s+(indicatif|informatif|de r[eé]f[eé]rence)"
+      - "^aucune?\\s+(garantie|engagement)"
+      - "d[eé]clarations?\\s+prospectives?"
+      - "sans engagement"
+      - "confidentiel(le)? et propri[eé]taire"
+      - "[àa] titre (d[''])?informati(f|on)"
+      - "sous r[eé]serve de modifications?"
+      - "sans pr[eé]avis"
+      - "ne peut [eê]tre divulgu[eé]"
+      - "tous droits r[eé]serv[eé]s"
+
+    # --- Workflow/Process ---
+    workflow_structural:
+      - "^(veuillez\\s+)?(contacter|soumettre|escalader|transf[eé]rer)\\s+"
+      - "^(n[eé]cessite|requiert|attend)\\s+(une?\\s+)?(approbation|validation|r[eé]vision)"
+      - "n[eé]cessite (une )?approbation"
+      - "processus d['']escalade"
+      - "r[oô]les et responsabilit[eé]s"
+      - "contactez votre .{0,20} repr[eé]sentant"
+      - "^veuillez (contacter|vous r[eé]f[eé]rer|voir)"
+
+    # --- Navigation UI ---
+    user_flow:
+      - "^(cliquer|s[eé]lectionner|ouvrir|naviguer|acc[eé]der)\\s+"
+      - "^[eé]tape\\s+\\d+\\s*[:\\-]"
+      - "^(d[''']abord|ensuite|puis|enfin)[,:]?\\s+(vous\\s+)?(cliquez|s[eé]lectionnez|ouvrez)"
+      - "l[''']utilisateur\\s+(ouvre|clique|navigue|s[eé]lectionne)"
+      - "(ouvrir|cliquer|naviguer vers|s[eé]lectionner)\\s+(l[ea]\\s+)?(URL|lien|bouton|menu)"
+      - "dans\\s+(votre|le)\\s+navigateur"
+      - "connexion\\s+[àa]"
+
+    # --- Fragments ---
+    fragments:
+      - "^[A-Z]{2,6}\\s*=\\s*"
+
+  # Langues additionnelles à ajouter: de, es, it, etc.
