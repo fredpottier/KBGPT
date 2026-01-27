@@ -39,10 +39,10 @@ VALUE_PATTERN = re.compile(r'^\d+(\.\d+)*[%°]?[CFc]?$|^\d+[:\-]\d+$')
 # Formule: MAX_CONCEPTS = clamp(MIN, MAX, 15 + sqrt(sections) * 3)
 # - Croissance sub-linéaire: 4x sections → ~2x concepts
 # - Plancher 20: assez pour petits documents
-# - Plafond 40: limité par contexte vLLM (8192 tokens input+output)
+# - Plafond 60: contexte vLLM augmenté à 16384 tokens (2026-01-27)
 
 CONCEPT_BUDGET_MIN = 20      # Minimum concepts (petits documents)
-CONCEPT_BUDGET_MAX = 40      # Maximum concepts (limité par vLLM context)
+CONCEPT_BUDGET_MAX = 60      # Maximum concepts (contexte vLLM 16K)
 CONCEPT_BUDGET_BASE = 15     # Base fixe
 CONCEPT_BUDGET_FACTOR = 3    # Facteur multiplicateur de sqrt(sections)
 
@@ -187,7 +187,7 @@ class ConceptIdentifierV2:
             subject=subject_text,
             structure=structure,
             themes=themes_str,
-            content=content[:5000],  # Limite pour contexte LLM
+            content=content[:10000],  # Contexte augmenté (vLLM 16K)
             language=language,
             max_concepts=max_concepts
         )
@@ -197,7 +197,7 @@ class ConceptIdentifierV2:
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                max_tokens=4000  # Limité car vLLM context=8192 (input+output)
+                max_tokens=6000  # vLLM context=16384 depuis 2026-01-27
             )
             # V2.1: Passer le contenu pour validation des lexical_triggers
             concepts, refused = self._parse_response(response, doc_id, themes, content)

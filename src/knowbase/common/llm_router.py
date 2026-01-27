@@ -1125,27 +1125,45 @@ class LLMRouter:
         Appel vers vLLM en mode Burst (EC2 Spot).
 
         Utilise le client burst dédié et le modèle configuré pour le burst.
+
+        Supporte les structured outputs via:
+        - json_schema: Dict avec le JSON schema pour guided generation
+        - guided_json: Alias pour json_schema (legacy vLLM)
         """
         if not self._burst_vllm_client:
             raise RuntimeError("Burst mode client not initialized")
 
         # Limite de contexte pour Qwen2.5-14B-AWQ
-        # vLLM max context = 8192 tokens TOTAL (input + output)
+        # vLLM max context = 16384 tokens TOTAL (input + output) depuis 2026-01-27
         # On doit réserver max_tokens pour la completion + marge sécurité 30%
         # (l'estimation tokens est approximative, ~4 chars/token mais varie)
-        VLLM_MAX_CONTEXT = 8192
+        VLLM_MAX_CONTEXT = 16384
         SAFETY_MARGIN = 0.30  # 30% de marge car estimation tokens imprécise
         max_input_tokens = int((VLLM_MAX_CONTEXT - max_tokens) * (1 - SAFETY_MARGIN))
-        max_input_tokens = max(1000, min(max_input_tokens, 4000))  # Entre 1000 et 4000
+        max_input_tokens = max(1000, min(max_input_tokens, 8000))  # Entre 1000 et 8000
 
         # Tronquer les messages si trop longs
         messages = self._truncate_messages_for_context(messages, max_input_tokens)
 
         # Filtrer les paramètres internes
-        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference', 'json_schema', 'guided_json']}
 
-        # Retirer response_format si non supporté par le modèle
-        if 'response_format' in api_kwargs:
+        # === STRUCTURED OUTPUTS (Volet C) ===
+        # Support pour vLLM JSON schema enforcement
+        json_schema = kwargs.get('json_schema') or kwargs.get('guided_json')
+        if json_schema and any(x in self._burst_model.lower() for x in ['qwen', 'mistral']):
+            # Utiliser le nouveau format response_format avec json_schema
+            api_kwargs['response_format'] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": task_type.value,
+                    "strict": True,
+                    "schema": json_schema
+                }
+            }
+            logger.debug(f"[BURST:vLLM] Using structured output with JSON schema for {task_type.value}")
+        elif 'response_format' in api_kwargs:
+            # Retirer response_format si non supporté par le modèle
             if not any(x in self._burst_model.lower() for x in ['qwen', 'mistral']):
                 api_kwargs.pop('response_format', None)
                 logger.debug(f"[BURST:vLLM] Removed response_format for model {self._burst_model}")
@@ -1180,27 +1198,45 @@ class LLMRouter:
     ) -> str:
         """
         Appel async vers vLLM en mode Burst (EC2 Spot).
+
+        Supporte les structured outputs via:
+        - json_schema: Dict avec le JSON schema pour guided generation
+        - guided_json: Alias pour json_schema (legacy vLLM)
         """
         if not self._burst_async_vllm_client:
             raise RuntimeError("Burst mode async client not initialized")
 
         # Limite de contexte pour Qwen2.5-14B-AWQ
-        # vLLM max context = 8192 tokens TOTAL (input + output)
+        # vLLM max context = 16384 tokens TOTAL (input + output) depuis 2026-01-27
         # On doit réserver max_tokens pour la completion + marge sécurité 30%
         # (l'estimation tokens est approximative, ~4 chars/token mais varie)
-        VLLM_MAX_CONTEXT = 8192
+        VLLM_MAX_CONTEXT = 16384
         SAFETY_MARGIN = 0.30  # 30% de marge car estimation tokens imprécise
         max_input_tokens = int((VLLM_MAX_CONTEXT - max_tokens) * (1 - SAFETY_MARGIN))
-        max_input_tokens = max(1000, min(max_input_tokens, 4000))  # Entre 1000 et 4000
+        max_input_tokens = max(1000, min(max_input_tokens, 8000))  # Entre 1000 et 8000
 
         # Tronquer les messages si trop longs
         messages = self._truncate_messages_for_context(messages, max_input_tokens)
 
         # Filtrer les paramètres internes
-        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference']}
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference', 'json_schema', 'guided_json']}
 
-        # Retirer response_format si non supporté
-        if 'response_format' in api_kwargs:
+        # === STRUCTURED OUTPUTS (Volet C) ===
+        # Support pour vLLM JSON schema enforcement
+        json_schema = kwargs.get('json_schema') or kwargs.get('guided_json')
+        if json_schema and any(x in self._burst_model.lower() for x in ['qwen', 'mistral']):
+            # Utiliser le nouveau format response_format avec json_schema
+            api_kwargs['response_format'] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": task_type.value,
+                    "strict": True,
+                    "schema": json_schema
+                }
+            }
+            logger.debug(f"[BURST:vLLM:ASYNC] Using structured output with JSON schema for {task_type.value}")
+        elif 'response_format' in api_kwargs:
+            # Retirer response_format si non supporté
             if not any(x in self._burst_model.lower() for x in ['qwen', 'mistral']):
                 api_kwargs.pop('response_format', None)
 
@@ -1412,4 +1448,127 @@ def complete_canonicalization(
         temperature,
         max_tokens,
         response_format={"type": "json_object"}  # Force JSON mode OpenAI
+    )
+
+
+# ============================================================================
+# STRUCTURED OUTPUTS - Fonctions pour vLLM JSON Schema (Volet C)
+# ============================================================================
+
+def complete_knowledge_extraction(
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.2,
+    max_tokens: int = 2000,
+    json_schema: Optional[Dict[str, Any]] = None
+) -> str:
+    """
+    Effectue une extraction de connaissances avec support JSON schema.
+
+    Args:
+        messages: Messages pour le LLM
+        temperature: Température (défaut: 0.2)
+        max_tokens: Tokens max (défaut: 2000)
+        json_schema: Schema JSON pour structured output (optionnel)
+
+    Returns:
+        Réponse JSON du LLM
+    """
+    kwargs = {}
+    if json_schema:
+        kwargs['json_schema'] = json_schema
+    else:
+        kwargs['response_format'] = {"type": "json_object"}
+
+    return get_llm_router().complete(
+        TaskType.KNOWLEDGE_EXTRACTION,
+        messages,
+        temperature,
+        max_tokens,
+        **kwargs
+    )
+
+
+async def complete_knowledge_extraction_async(
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.2,
+    max_tokens: int = 2000,
+    json_schema: Optional[Dict[str, Any]] = None
+) -> str:
+    """
+    Version async de complete_knowledge_extraction.
+    """
+    kwargs = {}
+    if json_schema:
+        kwargs['json_schema'] = json_schema
+    else:
+        kwargs['response_format'] = {"type": "json_object"}
+
+    return await get_llm_router().complete_async(
+        TaskType.KNOWLEDGE_EXTRACTION,
+        messages,
+        temperature,
+        max_tokens,
+        **kwargs
+    )
+
+
+def complete_with_schema(
+    task_type: TaskType,
+    messages: List[Dict[str, Any]],
+    json_schema: Dict[str, Any],
+    temperature: float = 0.2,
+    max_tokens: int = 2000
+) -> str:
+    """
+    Effectue une completion avec JSON schema enforcement.
+
+    Cette fonction utilise les structured outputs de vLLM pour garantir
+    que la réponse est un JSON valide conforme au schema.
+
+    Args:
+        task_type: Type de tâche LLM
+        messages: Messages pour le LLM
+        json_schema: Schema JSON (format Pydantic model_json_schema())
+        temperature: Température
+        max_tokens: Tokens max
+
+    Returns:
+        Réponse JSON validée
+
+    Example:
+        from knowbase.stratified.pass1.llm_schemas import AssertionExtractionResponse
+
+        schema = AssertionExtractionResponse.model_json_schema()
+        result = complete_with_schema(
+            TaskType.KNOWLEDGE_EXTRACTION,
+            messages,
+            json_schema=schema,
+            max_tokens=2000
+        )
+    """
+    return get_llm_router().complete(
+        task_type,
+        messages,
+        temperature,
+        max_tokens,
+        json_schema=json_schema
+    )
+
+
+async def complete_with_schema_async(
+    task_type: TaskType,
+    messages: List[Dict[str, Any]],
+    json_schema: Dict[str, Any],
+    temperature: float = 0.2,
+    max_tokens: int = 2000
+) -> str:
+    """
+    Version async de complete_with_schema.
+    """
+    return await get_llm_router().complete_async(
+        task_type,
+        messages,
+        temperature,
+        max_tokens,
+        json_schema=json_schema
     )
