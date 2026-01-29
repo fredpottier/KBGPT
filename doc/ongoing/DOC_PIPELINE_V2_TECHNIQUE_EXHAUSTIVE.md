@@ -1976,13 +1976,381 @@ Ces sections sont passées via le paramètre `sections=sections_for_pass09` à l
 
 ## 9. Pass 1.1 — Analyse Documentaire
 
-<!-- À compléter : analyse détaillée de document_analyzer.py -->
+**Fichier principal :** `src/knowbase/stratified/pass1/document_analyzer.py` — classe `DocumentAnalyzerV2`
+**Orchestration :** `src/knowbase/stratified/pass1/orchestrator.py` — `Pass1OrchestratorV2.process()`, lignes 227-251
+**Schema Structured Output :** `src/knowbase/stratified/pass1/llm_schemas.py` — `DocumentAnalysisResponse`
+
+### 9.1 Entrants
+
+| Entrant | Type | Source | Description |
+|---------|------|--------|-------------|
+| `doc_id` | `str` | Pipeline | Identifiant unique du document |
+| `doc_title` | `str` | Pass 0 | Titre du document extrait |
+| `content` / `analysis_content` | `str` | Pass 0.9 ou Pass 0 | **Changement clé V2 :** si Pass 0.9 actif, le contenu analysé est le `meta-document` (vue globale comprimée 15-25K chars). Sinon, le contenu brut complet est utilisé. |
+| `toc` / `toc_for_analysis` | `Optional[str]` | Pass 0 / Pass 0.9 | Table des matières. Si `global_view.toc_enhanced` disponible (depuis Pass 0.9), elle remplace la TOC brute. Sinon, extraction heuristique via `extract_toc_from_content()`. |
+| `char_limit` | `int` | Config (défaut: 4000) | Limite de caractères pour le preview envoyé au LLM |
+
+### 9.2 Objectifs
+
+Pass 1.1 réalise l'analyse structurelle de haut niveau du document selon l'approche **top-down** (AV2-7). Les trois sorties principales sont :
+
+1. **Subject** — Résumé du sujet principal en 1 phrase, avec un nom court (5-10 mots) dérivé automatiquement si non fourni par le LLM.
+2. **DocumentStructure** — Classification de la structure de dépendance du document selon 3 types universels issus de l'ADR Modèle de Lecture Stratifiée :
+   - **CENTRAL** : assertions dépendantes d'un artefact unique (ex : guide produit SAP). Test : « sans X, ce document a-t-il un sens ? » → NON.
+   - **TRANSVERSAL** : assertions indépendantes du contexte (ex : réglementation GDPR). Test : remplacer le nom propre → assertion reste vraie.
+   - **CONTEXTUAL** : assertions conditionnelles, vraies uniquement sous certaines conditions.
+3. **Themes** — Liste des thèmes majeurs (5-10 maximum) identifiés dans le document.
+
+**Sortie annexe :** détection du flag `is_hostile` si le nombre de thèmes dépasse `HOSTILE_SUBJECT_THRESHOLD = 10`, indiquant un document multi-sujet problématique.
+
+### 9.3 Mécanismes
+
+#### 9.3.1 Appel LLM
+
+L'analyse est **entièrement déléguée au LLM** (pas d'algorithme heuristique en mode production) :
+
+1. **Préparation du preview** : `content[:char_limit]` (4000 chars par défaut)
+2. **Chargement des prompts** depuis `src/knowbase/stratified/prompts/pass1_prompts.yaml` (clé `document_analysis`), avec fallback sur prompts par défaut intégrés à la classe
+3. **Génération** : appel `llm_client.generate(system_prompt, user_prompt, max_tokens=1500)`
+4. **Parsing** : extraction du bloc JSON (````json ... ````) ou parsing direct de la réponse
+
+**Schema Structured Output (Volet B) :**
+
+```python
+class DocumentAnalysisResponse(BaseModel):
+    subject_name: str    # max 50 chars — Nom court (5-10 mots)
+    subject: str         # max 200 chars — Résumé 1 phrase
+    structure: StructureInfo  # chosen: CENTRAL|TRANSVERSAL|CONTEXTUAL + justification
+    themes: List[str]    # max 10 thèmes
+    language: LanguageEnum  # fr|en|de
+```
+
+Ce schema est utilisable avec vLLM Structured Outputs (`response_format={"type": "json_schema"}`) pour garantir la structure JSON.
+
+#### 9.3.2 Validation et conversion
+
+La méthode `_validate_and_convert()` transforme la réponse LLM en objets Pydantic V2 :
+
+- **Subject** : création avec `subject_id = f"subj_{doc_id}"`, structure de dépendance parsée, justification optionnelle, langue détectée
+- **Themes** : chaque thème reçoit un `theme_id = f"theme_{doc_id}_{idx}"`. Le champ `scoped_to_sections` est initialisé vide (sera rempli ultérieurement).
+- **Dérivation du nom court** : si le LLM ne fournit pas `subject_name`, il est dérivé du texte du sujet (premiers mots avant la première virgule ou le premier point, tronqué à 80 chars)
+
+#### 9.3.3 Détection de documents HOSTILE
+
+Après l'analyse LLM, un test post-hoc vérifie si le document est "hostile" :
+
+```python
+is_hostile = len(themes) > HOSTILE_SUBJECT_THRESHOLD  # seuil = 10
+```
+
+Un document hostile est un document multi-sujet qui rend l'identification de concepts difficile. Le flag `is_hostile` est propagé à Pass 1.2 où il **réduit le budget de concepts de moitié**.
+
+#### 9.3.4 Mode fallback (tests uniquement)
+
+Si `allow_fallback=True` et aucun LLM n'est disponible, un mode heuristique est activé :
+
+- **Structure** : détection par mots-clés dans le titre (`guide`, `product` → CENTRAL ; `regulation`, `gdpr` → TRANSVERSAL ; sinon → CONTEXTUAL)
+- **Langue** : détection par comptage de stop-words (fr/en/de) sur les 5000 premiers caractères
+- **Thèmes** : 3 thèmes génériques (Introduction, Contenu Principal, Conclusion)
+
+**⚠️ Ce mode est réservé aux tests unitaires** — en production, l'absence de LLM provoque une `RuntimeError` explicite.
+
+#### 9.3.5 Extraction de TOC heuristique
+
+La méthode `extract_toc_from_content()` tente d'extraire une table des matières du contenu brut :
+
+- Détection de l'en-tête TOC (regex multilingue : « table of contents », « sommaire », « table des matières »)
+- Extraction des lignes de format `N.N.N Titre` après l'en-tête
+- Arrêt à la première ligne vide après ≥3 entrées de TOC
+
+### 9.4 Outputs
+
+| Sortie | Type | Description | Consommateur |
+|--------|------|-------------|--------------|
+| `subject` | `Subject` | Sujet avec `subject_id`, `name`, `text`, `structure`, `language`, `justification` | Pass 1.2 (context pour concepts), Pass1Result |
+| `themes` | `List[Theme]` | Liste de thèmes avec `theme_id`, `name`, `scoped_to_sections=[]` | Pass 1.2 (rattachement concepts), Pass1Result |
+| `is_hostile` | `bool` | Flag document multi-sujet (>10 thèmes) | Pass 1.2 (réduction budget concepts) |
+
+### 9.5 Conformité ADR — Pass 1.1
+
+| Axe | Exigence | Statut | Implémentation | Commentaire |
+|-----|----------|--------|----------------|-------------|
+| AV2-7 | **Top-down** | ✅ | Pass 1.1 est la première phase sémantique, établissant Subject et Themes avant toute identification de concepts. | Conforme à l'inversion de flux V1 → V2 (bottom-up → top-down). |
+| AV2-1 | **Séparation structure/sémantique** | ✅ | Subject et Themes sont des entités purement sémantiques, sans lien direct avec la structure documentaire (Section, DocItem). | Les Themes ont un champ `scoped_to_sections` mais il est initialisé vide à ce stade. |
+| NS-2 | **LLM = Extracteur** | ✅ | Le LLM identifie sujet, structure et thèmes — il n'infère pas de relations causales ni ne résout de contradictions. | L'analyse est descriptive et observationnelle. |
+| P09-6 | **Intégration Pass 0.9** | ✅ | Si Pass 0.9 actif, `analysis_content = global_view.meta_document` et `toc_for_analysis = global_view.toc_enhanced`. | Fallback automatique sur contenu brut si GlobalView absente. |
+
+### 9.6 Risques — Pass 1.1
+
+| ID | Risque | Sévérité | Description | Mitigation |
+|----|--------|----------|-------------|------------|
+| R11-1 | **Preview tronqué à 4000 chars** | 🟡 | Seuls les 4000 premiers caractères du contenu (ou du meta-document) sont envoyés au LLM. Pour des documents longs, les thèmes en fin de document peuvent être manqués. | Compensé par l'utilisation du meta-document Pass 0.9 qui comprime tout le document en 15-25K chars. La TOC (brute ou enrichie) fournit une vue d'ensemble additionnelle. |
+| R11-2 | **Seuil HOSTILE fixe** | 🟢 | Le seuil de 10 thèmes est arbitraire et non adaptatif à la taille du document. Un document de 500 pages avec 11 thèmes est flaggé hostile comme un document de 10 pages. | Impact mineur : le flag hostile réduit le budget concepts (Pass 1.2) mais n'empêche pas le traitement. |
+| R11-3 | **Pas de validation croisée structure/contenu** | 🟡 | La classification CENTRAL/TRANSVERSAL/CONTEXTUAL repose uniquement sur le jugement LLM. Aucune vérification algorithmique n'est effectuée. | Le champ `justification` permet un audit humain. L'impact est limité car la structure influence principalement le budget de concepts. |
+| R11-4 | **Fallback analyse = données non fiables** | 🟢 | Le mode fallback produit 3 thèmes génériques et un sujet dérivé du titre. | Le fallback est strictement réservé aux tests (`allow_fallback=True`). En production, une `RuntimeError` est levée. |
+| R11-5 | **Pas de détection de langue robuste** | 🟡 | La détection heuristique (comptage de stop-words) est utilisée uniquement en fallback. En mode LLM, la langue est déclarée par le modèle sans validation. | Risque faible : les documents sont généralement dans une langue connue (fr/en/de). |
 
 ---
 
 ## 10. Pass 1.2 — Identification des Concepts
 
-<!-- À compléter : analyse détaillée de concept_identifier.py, concept_refiner.py, trigger_enricher.py -->
+**Fichier principal :** `src/knowbase/stratified/pass1/concept_identifier.py` — classe `ConceptIdentifierV2`
+**Raffinement itératif :** `src/knowbase/stratified/pass1/concept_refiner.py` — classe `ConceptRefinerV2` (Pass 1.2b)
+**Orchestration :** `src/knowbase/stratified/pass1/orchestrator.py` — `Pass1OrchestratorV2.process()`, lignes 253-275 (Pass 1.2) et 399-533 (Pass 1.2b)
+**Schema Structured Output :** `src/knowbase/stratified/pass1/llm_schemas.py` — `ConceptIdentificationResponse`
+**Note :** le fichier `trigger_enricher.py` mentionné dans la spec n'existe pas — la validation et l'enrichissement des triggers lexicaux sont intégrés directement dans `ConceptIdentifierV2` (méthodes `_validate_lexical_triggers`, `_validate_role_requirements`, `_get_top_frequent_tokens`).
+
+### 10.1 Entrants
+
+| Entrant | Type | Source | Description |
+|---------|------|--------|-------------|
+| `doc_id` | `str` | Pipeline | Identifiant unique du document |
+| `subject_text` | `str` | Pass 1.1 | Texte du sujet identifié |
+| `structure` | `str` | Pass 1.1 | Structure de dépendance (`CENTRAL`, `TRANSVERSAL`, `CONTEXTUAL`) |
+| `themes` | `List[Theme]` | Pass 1.1 | Thèmes identifiés pour rattachement des concepts |
+| `content` / `analysis_content` | `str` | Pass 0.9 ou Pass 0 | Contenu analysé (meta-document ou contenu brut) |
+| `is_hostile` | `bool` | Pass 1.1 | Flag document multi-sujet (réduit le budget de moitié) |
+| `language` | `str` | Pass 1.1 | Langue du document (`fr`, `en`, `de`) |
+| `n_sections` | `Optional[int]` | Pass 0 Structural | Nombre de sections pour le calcul du budget adaptatif |
+
+### 10.2 Objectifs
+
+Pass 1.2 identifie les **ConceptSitués** du document — des unités conceptuelles frugales, spécifiques et ancrées dans le texte. L'objectif est conforme aux principes ARCH V2 :
+
+1. **Frugalité (AV2-6)** — Initialement 5-15 concepts par document, étendu à un **budget adaptatif** (V2.2, 2026-01-27) calculé dynamiquement selon la taille du document.
+2. **Rattachement aux thèmes** — Chaque concept est obligatoirement lié à un thème identifié en Pass 1.1.
+3. **Rôle typé** — Chaque concept reçoit un rôle : `CENTRAL` (cœur du document), `STANDARD` (important secondaire), `CONTEXTUAL` (contexte).
+4. **Lexical triggers obligatoires (C1)** — Chaque concept doit posséder 2-4 tokens discriminants présents dans le texte, vérifiés par un algorithme de validation multi-critères.
+5. **Anti-aspirateurs (C1b)** — Validation que les triggers ne sont pas trop fréquents (top 50 tokens du document), empêchant les concepts "aspirateurs" qui captent trop d'assertions.
+
+### 10.3 Mécanismes
+
+#### 10.3.1 Budget adaptatif (V2.2)
+
+Le budget de concepts n'est plus fixe mais calculé dynamiquement :
+
+```python
+def compute_concept_budget(n_sections: int, is_hostile: bool = False) -> int:
+    # Formule: clamp(20, 40, 15 + sqrt(sections) * 3)
+    raw_budget = 15 + math.sqrt(n_sections) * 3
+    budget = max(20, min(40, round(raw_budget)))
+    if is_hostile:
+        budget = max(10, budget // 2)
+    return budget
+```
+
+**Propriétés clés :**
+- Croissance **sub-linéaire** : 4× sections → ~2× concepts
+- Plancher 20 concepts (petits documents)
+- Plafond 40 concepts (limité par le contexte vLLM à 8192 tokens input+output)
+- Documents hostiles : budget divisé par 2 (minimum 10)
+
+| Sections | Budget normal | Budget hostile |
+|----------|--------------|----------------|
+| 20 | 28 | 14 |
+| 50 | 36 | 18 |
+| 100 | 45 → 40 (cap) | 20 |
+| 200+ | 40 (cap) | 20 |
+
+**Fallback** si `n_sections` non fourni : 30 (normal) ou 10 (hostile).
+
+#### 10.3.2 Appel LLM — Identification initiale
+
+1. **Chargement des prompts** depuis `pass1_prompts.yaml` (clé `concept_identification`)
+2. **Formatage** : sujet, structure, thèmes formatés, contenu tronqué à 5000 chars
+3. **Génération** : `llm_client.generate(max_tokens=4000)` — limité car vLLM context = 8192 tokens (input + output)
+4. **Prompt système compact** (ADR: LLM Contract) : instructions minimalistes pour éviter la génération verbose et les troncatures JSON
+
+**Schema Structured Output (Volet B) :**
+
+```python
+class ConceptIdentificationResponse(BaseModel):
+    concepts: List[ConceptCompact]     # max 100 (V2.2: adaptatif jusqu'à 80)
+    refused_terms: List[RefusedTerm]   # max 20
+```
+
+Où chaque `ConceptCompact` contient : `name` (max 50 chars, 2-4 mots), `role` (CENTRAL|STANDARD|CONTEXTUAL), `theme` (rattachement).
+
+#### 10.3.3 Parsing et validation robuste
+
+La méthode `_parse_response()` intègre plusieurs garde-fous :
+
+1. **Détection de troncature JSON** : si le JSON ne se termine pas par `}` ou `]`, une `ValueError` explicite est levée avec le contexte (« LLM Contract Violation: JSON tronqué »)
+2. **Nettoyage JSON** (`_clean_json_string`) : suppression des trailing commas, commentaires `//` et `/* */`, remplacement des single quotes — nécessaire pour les modèles locaux (Qwen) qui génèrent parfois du JSON invalide
+3. **Déduplication par nom** : élimination des doublons (le LLM peut renvoyer le même concept plusieurs fois), avec réindexation des `concept_id` après déduplication
+
+#### 10.3.4 Validation des lexical triggers (C1, C1b, C1c)
+
+La méthode `_validate_lexical_triggers()` applique un pipeline de validation multi-critères pour chaque trigger :
+
+**Étape 1 — Calcul des tokens fréquents** (`_get_top_frequent_tokens`) :
+- Tokenisation simple (mots alphanumériques ≥ 3 chars)
+- Comptage par `Counter`, extraction du top 50
+
+**Étape 2 — Validation individuelle de chaque trigger** :
+
+| Critère | Code | Description | Action si échec |
+|---------|------|-------------|-----------------|
+| **C1b: Longueur minimale** | `len(t) < 3` | Trigger trop court (< 3 chars), sauf patterns valeur (`VALUE_PATTERN`) | Rejet du trigger |
+| **C1b: Anti-fréquent** | `t_lower in top_50_tokens` | Trigger dans le top 50 des tokens les plus fréquents du document | Rejet du trigger |
+| **C1c: Présence dans le texte** | `re.search(pattern, doc_lower)` | Pour alphanumérique : matching word-boundary (`\b`). Pour valeurs : matching substring. | Rejet du trigger |
+| **C1b: Rareté** | `freq_rate < 0.01` | Fréquence d'apparition dans les unités < 1% | Marqué `rare=True` |
+| **C1b: Semi-rareté** | `freq_rate < 0.02` | Fréquence < 2% | Marqué `rare='semi-rare'` |
+| **C1b: Valeur discriminante** | `VALUE_PATTERN.match(t)` | Patterns numériques (versions, %, °C, ratios) sont considérés discriminants | Marqué `rare='fallback_value'` |
+
+Le `VALUE_PATTERN` reconnaît : `^\d+(\.\d+)*[%°]?[CFc]?$` et `^\d+[:\-]\d+$`.
+
+**Étape 3 — Verdict final** :
+- **Concept accepté** si ≥ 2 triggers valides ET au moins 1 trigger rare OU semi-rare
+- Sinon → concept ajouté à la liste `refused_terms`
+
+**Étape 4 — Dégradation de rôle** (`_validate_role_requirements`) :
+
+La validation des triggers influence le rôle du concept via des règles de dégradation :
+
+```
+CENTRAL demandé + pas de trigger rare → dégradé à STANDARD
+CENTRAL demandé + pas de trigger rare ni semi-rare → dégradé à CONTEXTUAL
+STANDARD demandé + pas de trigger discriminant → dégradé à CONTEXTUAL
+```
+
+Cette mécanique empêche les concepts "aspirateurs" (ex : « infrastructure SAP ») avec des triggers trop génériques de recevoir un rôle CENTRAL.
+
+#### 10.3.5 Garde-fou frugalité
+
+Après la validation des triggers, un dernier garde-fou applique la limite du budget :
+
+```python
+if len(concepts) > max_concepts:
+    concepts = self._apply_frugality(concepts, max_concepts)
+```
+
+La méthode `_apply_frugality()` trie par rôle (`CENTRAL > STANDARD > CONTEXTUAL`) et tronque au budget.
+
+#### 10.3.6 Génération de clé lexicale
+
+Chaque concept reçoit une `lex_key` normalisée pour la déduplication future :
+
+```python
+def _generate_lex_key(name: str) -> str:
+    lex = name.lower().strip()
+    lex = re.sub(r'\s+', '_', lex)
+    lex = re.sub(r'[^a-z0-9_]', '', lex)
+    return lex
+```
+
+### 10.4 Pass 1.2b — Raffinement itératif des concepts (V2.1)
+
+**Fichier :** `src/knowbase/stratified/pass1/concept_refiner.py` — classe `ConceptRefinerV2`
+**Activation :** flag `enable_pass12b=True` dans `Pass1OrchestratorV2` (défaut : activé)
+**Déclenchement :** après Pass 1.3 (extraction assertions) et Pass 1.4 (promotion), quand le taux de `NO_CONCEPT_MATCH` est trop élevé
+
+#### 10.4.1 Principe
+
+Pass 1.2b est une **boucle de rétroaction** qui analyse les assertions non-liées à un concept (statut `ABSTAINED`, raison `no_concept_match`) pour identifier les concepts manquants. Il opère **sans relire le document**, uniquement à partir du journal d'assertions.
+
+#### 10.4.2 Métriques de saturation
+
+La classe `SaturationMetrics` (dataclass) calcule les indicateurs de décision :
+
+| Métrique | Formule | Description |
+|----------|---------|-------------|
+| `promotion_rate` | `promoted / total_assertions` | Taux de promotion global |
+| `no_concept_match_rate` | `no_concept_match / total_assertions` | **C4 : ratio stable** (vs /abstained dans V1) |
+| `coverage_rate` | `promoted / (promoted + no_concept_match)` | Couverture conceptuelle |
+| `quality_unlinked_count` | `prescriptive_unlinked + value_bearing_unlinked` | **C2 : assertions de qualité non-liées** |
+| `should_iterate` | `rate > 10% AND count > 20` | **C4 : déclencheur stable** |
+
+#### 10.4.3 Critères de qualité (C2, C2b)
+
+Seules les assertions "de qualité" sont considérées pour justifier de nouveaux concepts :
+
+- **C2 — Assertions PRESCRIPTIVE** : type PRESCRIPTIVE explicite
+- **C2 — Assertions value-bearing** : contiennent une valeur quantifiable (versions, pourcentages, tailles, températures, durées, montants, ratios) détectée par 7 patterns regex
+- **C2b — Obligations sans modal** : détection de 10 patterns d'obligations implicites (juridique/contrats) comme « is required to », « no later than », « within N days », « ne peut pas »
+
+#### 10.4.4 Boucle itérative
+
+L'orchestrateur exécute la boucle suivante (dans `process()`, lignes 399-533) :
+
+```
+TANT QUE saturation.should_iterate:
+  1. Calculer SaturationMetrics depuis assertion_log
+  2. Vérifier C4: rate > 10% ET count > 20
+  3. Si rendement décroissant (< 15% réduction) → ARRÊT
+  4. Filtrer assertions de qualité (C2, C2b)
+  5. Appeler ConceptRefinerV2.refine_concepts()
+     → LLM identifie concepts manquants depuis assertions non-liées
+  6. Valider C2: chaque concept doit couvrir ≥2 assertions dont ≥1 PRESCRIPTIVE/value
+  7. Déduplication vs concepts existants et doublons internes
+  8. Ajouter les nouveaux concepts à la liste
+  9. Re-linker les assertions non-liées avec tous les concepts (anciens + nouveaux)
+  10. Re-résoudre les ancrages (AnchorResolver)
+  11. Mettre à jour assertion_log (ABSTAINED → PROMOTED)
+```
+
+**Garde-fous de convergence :**
+
+| Paramètre | Valeur | Description |
+|-----------|--------|-------------|
+| `MAX_ITERATIONS` | 3 | Maximum d'itérations |
+| `MAX_NEW_CONCEPTS_PER_ITER` | 10 | Concepts ajoutés par itération |
+| `MAX_TOTAL_CONCEPTS` | 50 | Surface conceptuelle maximale |
+| `MIN_NO_CONCEPT_MATCH` | 20 | Minimum de trous pour déclencher |
+| `MIN_REDUCTION_RATE` | 0.15 | Gain minimum pour continuer (15%) |
+
+#### 10.4.5 Validation des concepts raffinés (C2)
+
+Chaque concept proposé par le LLM est validé par `_validate_concept_quality()` :
+
+1. Le concept doit avoir des `lexical_triggers` (≥ 2)
+2. Ces triggers doivent matcher ≥ 2 assertions non-liées
+3. Parmi ces assertions, ≥ 1 doit être de qualité (PRESCRIPTIVE ou value-bearing)
+
+### 10.5 Outputs
+
+| Sortie | Type | Description | Consommateur |
+|--------|------|-------------|--------------|
+| `concepts` | `List[Concept]` | Concepts avec `concept_id`, `theme_id`, `name`, `role`, `lex_key`, `lexical_triggers`, `definition`, `variants` | Pass 1.3 (linking assertions), Pass 1.2b (base pour raffinement), Pass1Result |
+| `refused_terms` | `List[Dict]` | Termes refusés avec raisons (triggers invalides, trop génériques, etc.) | Audit, Pass1Result |
+| `saturation` (via Pass 1.2b) | `SaturationMetrics` | Métriques de couverture conceptuelle finales | Logs, diagnostic |
+
+**Structure d'un Concept :**
+
+```python
+Concept(
+    concept_id="concept_doc123_0",   # ID unique
+    theme_id="theme_doc123_2",       # Rattachement thème
+    name="TLS Configuration",        # Nom court (2-4 mots)
+    role=ConceptRole.CENTRAL,        # CENTRAL | STANDARD | CONTEXTUAL
+    definition=None,                 # Optionnel (enrichi en Pass 2)
+    variants=[],                     # Optionnel (enrichi en Pass 2)
+    lex_key="tls_configuration",     # Clé normalisée pour dédup
+    lexical_triggers=["TLS", "1.3", "cipher suite"]  # 2-4 tokens discriminants
+)
+```
+
+### 10.6 Conformité ADR — Pass 1.2
+
+| Axe | Exigence | Statut | Implémentation | Commentaire |
+|-----|----------|--------|----------------|-------------|
+| AV2-6 | **Frugalité concepts (5-15 max)** | ⚠️ | Le budget adaptatif (V2.2) étend la fourchette à [20, 40] pour l'identification initiale, plus jusqu'à 50 via Pass 1.2b. | **Déviation documentée.** L'ADR initiale spécifiait 5-15. L'extension à 20-40 (+ 50 max avec 1.2b) est motivée par la nécessité de couvrir des documents volumineux (>100 sections). La croissance sub-linéaire (`sqrt`) maintient l'esprit de frugalité. |
+| AV2-7 | **Top-down** | ✅ | Les concepts sont identifiés APRÈS le sujet et les thèmes (Pass 1.1). Chaque concept est rattaché à un thème existant. | Conforme à l'approche top-down. |
+| NS-2 | **LLM = Extracteur** | ✅ | Le LLM identifie les concepts depuis le texte. La validation (C1, C1b, C1c) est algorithmique (post-LLM). | Le LLM extrait, les algorithmes valident. |
+| NS-7 | **Addressability-First** | ✅ | Chaque concept est rattaché à au moins un thème (`theme_id`). Les `lexical_triggers` garantissent l'ancrage textuel. | Les concepts sans triggers valides sont rejetés. |
+| P09-6 | **Intégration Pass 0.9** | ✅ | L'identification utilise `analysis_content` (meta-document si Pass 0.9 actif). Le budget adaptatif utilise `n_sections` depuis Pass 0 Structural. | Double intégration : contenu comprimé + budget basé sur la structure. |
+
+### 10.7 Risques — Pass 1.2
+
+| ID | Risque | Sévérité | Description | Mitigation |
+|----|--------|----------|-------------|------------|
+| R12-1 | **Budget étendu vs frugalité ADR** | 🟡 | Le budget adaptatif [20-40] + raffinement itératif (→50 max) dépasse significativement la fourchette ADR initiale de 5-15 concepts. | La croissance sub-linéaire (`sqrt`) et les garde-fous de convergence (max 3 itérations, min 15% réduction) limitent l'expansion. Le cap à 50 concepts reste bien en-deçà du legacy (~4700 nodes/doc). |
+| R12-2 | **Troncature JSON (LLM Contract)** | 🟡 | Le contexte vLLM de 8192 tokens (input+output) peut être insuffisant pour générer 40 concepts avec triggers. Le contenu est tronqué à 5000 chars, les tokens de sortie limités à 4000. | Détection explicite de troncature (`ValueError` levée). Le prompt système compact (ADR: LLM Contract) minimise la verbosité. Les Structured Outputs (Volet B) garantissent la structure JSON côté vLLM. |
+| R12-3 | **Triggers trop permissifs pour petits documents** | 🟡 | Pour les documents avec peu d'unités (< 100), le seuil de rareté < 1% devient très strict (< 1 unité). Cela peut rejeter des triggers légitimes. | Le fallback `semi-rare` (< 2%) et le fallback `value` (patterns numériques) assouplissent la validation pour les petits corpus. |
+| R12-4 | **Pass 1.2b : risque de concepts de faible valeur** | 🟡 | Le raffinement itératif peut introduire des concepts de faible discriminance, car les assertions restantes (NO_CONCEPT_MATCH) sont par définition les plus difficiles à rattacher. | Le critère C2 (≥2 assertions dont ≥1 PRESCRIPTIVE/value) et la validation de qualité limitent ce risque. Le cap à 50 concepts max et le rendement décroissant (min 15%) assurent la convergence. |
+| R12-5 | **Doublons entre LLM et raffinement** | 🟢 | Le LLM (Qwen notamment) peut reproposer des concepts déjà existants lors du raffinement. | Déduplication par nom normalisé implémentée à la fois dans `_validate_and_convert()` (Pass 1.2) et `refine_concepts()` (Pass 1.2b). |
+| R12-6 | **Pas de trigger_enricher.py séparé** | 🟢 | L'enrichissement des triggers (TF-IDF, embedding) mentionné dans certains documents de design n'est pas implémenté comme composant séparé. La validation est intégrée dans `ConceptIdentifierV2`. | L'implémentation actuelle (fréquence, rareté, word-boundary) est fonctionnelle. L'enrichissement par TF-IDF/embedding pourrait être ajouté en V3 comme composant séparé. |
+| R12-7 | **Nettoyage JSON fragile** | 🟢 | Le nettoyage des trailing commas et single quotes par regex peut échouer sur du JSON fortement malformé. | Le nettoyage couvre les cas les plus fréquents (Qwen). Les Structured Outputs (Volet B) éliminent ce risque quand activés. |
 
 ---
 
