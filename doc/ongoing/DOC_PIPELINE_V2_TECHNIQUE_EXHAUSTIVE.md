@@ -3389,7 +3389,265 @@ class AssertionLogEntry(BaseModel):
 
 ## 14. Pass 2 — Enrichissement Sémantique
 
-<!-- À compléter : analyse détaillée de pass2/ -->
+**Fichier principal :** `src/knowbase/stratified/pass2/relation_extractor.py` — classe `RelationExtractorV2`
+**Orchestration :** `src/knowbase/stratified/pass2/orchestrator.py` — classe `Pass2OrchestratorV2`
+**Persistence :** `src/knowbase/stratified/pass2/persister.py` — classe `Pass2PersisterV2`
+**Prompts :** `src/knowbase/stratified/prompts/pass2_prompts.yaml` (si présent)
+**ADR de référence :** `doc/ongoing/ADR_DISCURSIVE_RELATIONS.md`, `doc/ongoing/ADR_SCOPE_VS_ASSERTION_SEPARATION.md`
+
+### 14.1 Entrants
+
+| Entrant | Type | Source | Description |
+|---------|------|--------|-------------|
+| `pass1_result` | `Pass1Result` | Pass 1 | Résultat complet de Pass 1 contenant `doc`, `concepts`, `informations` |
+| `pass1_result.concepts` | `List[Concept]` | Pass 1.2 | Concepts identifiés avec `concept_id`, `name`, `role`, `variants`, `lex_key`, `theme_id` |
+| `pass1_result.informations` | `List[Information]` | Pass 1.4 | Informations promues avec `info_id`, `concept_id`, `text`, `type`, `confidence`, `anchor` |
+| `doc_id` | `str` | Pass 1 | Identifiant du document (extrait de `pass1_result.doc.doc_id`) |
+
+**Mode alternatif — chargement depuis Neo4j :** `Pass2OrchestratorV2.process_from_neo4j(doc_id)` charge les concepts et informations directement depuis le graphe Neo4j via des requêtes Cypher (utile pour retraiter un document déjà persisté en Pass 1).
+
+### 14.2 Objectifs
+
+Pass 2 enrichit le graphe sémantique créé par Pass 1 en ajoutant les **relations inter-concepts**. Il s'agit de la phase de densification du graphe :
+
+1. **Extraction de relations typées** — Identifier les liens sémantiques entre les concepts du document (ex: A REQUIRES B, A ENABLES B).
+2. **Evidence-based** — Chaque relation est justifiée par au moins une Information du Pass 1 (`evidence_info_ids`).
+3. **Frugalité relationnelle** — Garde-fou strict : maximum 3 relations par concept source pour éviter l'explosion combinatoire.
+4. **Persistence dans le graphe** — Créer les arêtes `CONCEPT_RELATION` dans Neo4j entre les nœuds `Concept` existants.
+
+### 14.3 Mécanismes
+
+#### 14.3.1 Orchestration (`Pass2OrchestratorV2`)
+
+L'orchestrateur enchaîne deux étapes principales :
+
+```
+Pass1Result → RelationExtractorV2.extract_relations() → Pass2Result
+                                                            ↓
+                                                   Pass2PersisterV2.persist()
+                                                            ↓
+                                                      Neo4j (arêtes)
+```
+
+**Deux points d'entrée :**
+
+| Méthode | Usage | Source des données |
+|---------|-------|--------------------|
+| `process(pass1_result)` | Pipeline inline | `Pass1Result` en mémoire |
+| `process_from_neo4j(doc_id)` | Retraitement | Chargement depuis Neo4j via Cypher |
+
+Le flag `persist: bool = True` contrôle la persistence dans Neo4j (désactivable pour tests ou dry-run).
+
+**Chargement depuis Neo4j (`_load_from_neo4j`) :**
+
+Les requêtes Cypher traversent le graphe structurel complet :
+
+```cypher
+-- Concepts
+MATCH (d:Document {doc_id, tenant_id})
+      -[:HAS_SUBJECT]->(:Subject)
+      -[:HAS_THEME]->(t:Theme)
+      -[:HAS_CONCEPT]->(c:Concept)
+RETURN c.concept_id, c.name, c.role, c.variants, c.lex_key, t.theme_id
+
+-- Informations
+MATCH (d:Document {doc_id, tenant_id})
+      -[:HAS_SUBJECT]->(:Subject)
+      -[:HAS_THEME]->(:Theme)
+      -[:HAS_CONCEPT]->(c:Concept)
+      -[:HAS_INFORMATION]->(i:Information)
+      -[a:ANCHORED_IN]->(di:DocItem)
+RETURN i.info_id, i.text, i.type, i.confidence, c.concept_id,
+       di.docitem_id, a.span_start, a.span_end
+```
+
+#### 14.3.2 Types de relations (`RelationType`)
+
+Pass 2 définit 8 types de relations entre concepts :
+
+| Type | Sémantique | Exemple |
+|------|-----------|---------|
+| `REQUIRES` | A nécessite B | "S/4HANA requires SAP BTP" |
+| `ENABLES` | A permet/rend possible B | "ABAP Cloud enables extension development" |
+| `CONSTRAINS` | A limite/contraint B | "License constrains module usage" |
+| `DEPENDS_ON` | A dépend de B | "Fiori depends on Gateway" |
+| `RELATED_TO` | Relation générique | Lien sémantique non classifiable |
+| `SPECIALIZES` | A est une spécialisation de B | "SAP BTP ABAP Environment specializes ABAP" |
+| `PART_OF` | A fait partie de B | "Module A is part of Suite B" |
+| `CONTRADICTS` | A contredit B | Assertions contradictoires entre concepts |
+
+La liste `VALID_RELATION_TYPES` est utilisée pour valider les réponses LLM. Tout type invalide est rétrogradé en `RELATED_TO`.
+
+#### 14.3.3 Extraction via LLM (`_extract_via_llm`)
+
+**Flux d'extraction LLM :**
+
+1. **Construction de l'index** `concept_id → List[Information]` via `_build_concept_info_index()` — rattache chaque information à son concept parent.
+2. **Formatage du prompt** — Chaque concept est présenté avec son ID, nom, rôle, variantes et les 3 premières informations associées (tronquées à 150 caractères).
+3. **Appel LLM** — `llm_client.generate()` avec `max_tokens=3000`.
+4. **Parsing JSON** — Extraction du bloc ````json ... ````, désérialisation et validation.
+
+**Prompts (configurables via YAML ou défauts intégrés) :**
+
+- **System prompt** : rôle d'expert en extraction de relations, liste des types valides, règles (justification obligatoire, seuils de confiance, maximum 3 relations/concept).
+- **User prompt** : template `{concepts}` + `{relation_types}`, réponse attendue en JSON structuré.
+
+**Seuils de confiance dans le prompt :**
+
+| Catégorie | Confiance |
+|-----------|-----------|
+| Relation explicite | ≥ 0.7 |
+| Relation implicite | 0.5 – 0.7 |
+
+**Validation de la réponse LLM (`_parse_relations_response`) :**
+
+- Validation que `source_concept_id` et `target_concept_id` existent dans la liste des concepts
+- Validation que `relation_type` est dans `VALID_RELATION_TYPES` (sinon fallback `RELATED_TO`)
+- Filtrage des `evidence_info_ids` : seuls les IDs d'informations existantes sont conservés
+
+**Fallback automatique :** si l'appel LLM échoue (exception), le système bascule sur l'extraction heuristique.
+
+#### 14.3.4 Extraction heuristique (`_extract_heuristic`)
+
+Mode dégradé activable via `allow_fallback=True` ou en cas d'échec LLM :
+
+1. **Pour chaque concept** → pour chaque information associée → pour chaque autre concept :
+   - Vérifier si l'autre concept est **mentionné dans le texte** de l'information (nom ou variantes, case-insensitive)
+   - Si oui, **inférer le type de relation** par pattern matching sur des mots-clés textuels
+
+2. **Patterns d'inférence de type (`_infer_relation_type`) :**
+
+| Type inféré | Mots-clés détectés |
+|-------------|-------------------|
+| `REQUIRES` | `requires`, `nécessite`, `need`, `must have` |
+| `ENABLES` | `enables`, `permet`, `allows`, `makes possible` |
+| `CONSTRAINS` | `constrains`, `limits`, `restricts`, `contraint` |
+| `DEPENDS_ON` | `depends on`, `relies on`, `dépend de` |
+| `PART_OF` | `part of`, `component of`, `partie de` |
+| `SPECIALIZES` | `type of`, `kind of`, `specialization`, `spécialisation` |
+| `CONTRADICTS` | `contradicts`, `conflicts with`, `contredit` |
+| `RELATED_TO` | Aucun pattern matché (défaut) |
+
+3. **Confiance fixe** : toutes les relations heuristiques reçoivent `confidence=0.6`.
+4. **Justification** : co-occurrence avec extrait de texte (100 premiers caractères).
+
+#### 14.3.5 Garde-fou frugalité — Limite de relations (`_apply_relation_limit`)
+
+Mécanisme anti-explosion combinatoire, constante de classe :
+
+```python
+MAX_RELATIONS_PER_CONCEPT = 3
+```
+
+**Algorithme :**
+1. Grouper les relations par `source_concept_id`
+2. Trier chaque groupe par `confidence` décroissante
+3. Conserver les 3 premières relations (plus haute confiance)
+4. Comptabiliser les relations rejetées dans `Pass2Stats.relations_filtered`
+
+Ce garde-fou s'applique uniformément sur les résultats LLM et heuristiques.
+
+#### 14.3.6 Persistence Neo4j (`Pass2PersisterV2`)
+
+**Modèle de relation Neo4j :**
+
+```cypher
+MATCH (source:Concept {concept_id: $source_id, tenant_id: $tenant_id})
+MATCH (target:Concept {concept_id: $target_id, tenant_id: $tenant_id})
+MERGE (source)-[r:CONCEPT_RELATION {relation_id: $relation_id}]->(target)
+SET r.type = $relation_type,
+    r.confidence = $confidence,
+    r.evidence_info_ids = $evidence,
+    r.justification = $justification,
+    r.created_at = datetime()
+```
+
+**Points notables :**
+
+- Le label de relation est **générique** (`CONCEPT_RELATION`) avec le type sémantique stocké en **propriété** (`r.type`). Pas de labels dynamiques (pas d'APOC requis).
+- `MERGE` sur `relation_id` : idempotent, re-exécuter Pass 2 met à jour sans dupliquer.
+- `evidence_info_ids` est stocké comme liste de strings — référence les `info_id` des informations-preuves.
+- Multi-tenant via `tenant_id` sur les nœuds source et cible.
+
+**Suppression des données Pass 2 (`delete_pass2_data`) :**
+
+Traverse le graphe `Document → Subject → Theme → Concept` puis supprime toutes les relations `CONCEPT_RELATION` sortantes. Utilisé pour retraitement.
+
+**Fonction utilitaire :** `persist_pass2_result(result, neo4j_driver, tenant_id)` — wrapper stateless pour usage ponctuel.
+
+### 14.4 Outputs
+
+**Dataclass principale :**
+
+```python
+@dataclass
+class Pass2Result:
+    doc_id: str
+    relations: List[ConceptRelation]  # Relations extraites et filtrées
+    stats: Pass2Stats                 # Métriques d'exécution
+```
+
+**Structure d'une relation (`ConceptRelation`) :**
+
+```python
+@dataclass
+class ConceptRelation:
+    relation_id: str           # Identifiant unique (format "rel_{uuid8}")
+    source_concept_id: str     # ID du concept source
+    target_concept_id: str     # ID du concept cible
+    relation_type: str         # Un des 8 types RelationType
+    confidence: float          # Score de confiance [0.0, 1.0]
+    evidence_info_ids: List[str]  # IDs des informations-preuves
+    justification: str         # Explication textuelle de la relation
+```
+
+**Statistiques (`Pass2Stats`) :**
+
+```python
+@dataclass
+class Pass2Stats:
+    concepts_processed: int        # Nombre de concepts analysés
+    relations_extracted: int       # Relations conservées après garde-fou
+    relations_filtered: int        # Relations rejetées par le garde-fou
+    avg_relations_per_concept: float  # Ratio relations / concepts
+```
+
+**Sortie Neo4j :**
+
+| Élément | Détail |
+|---------|--------|
+| Arêtes créées | `(Concept)-[:CONCEPT_RELATION]->(Concept)` |
+| Propriétés | `relation_id`, `type`, `confidence`, `evidence_info_ids`, `justification`, `created_at` |
+| Compteur retourné | `{"relations_created": N}` |
+
+### 14.5 Conformité ADR — Pass 2
+
+| # | Axe ADR | Statut | Détail |
+|---|---------|--------|--------|
+| AV2-1 | Séparation structure / sémantique | ✅ | Les relations sont entre nœuds `Concept` (couche sémantique), pas entre `DocItem` (couche structurelle) |
+| AV2-2 | 8 types de nodes maximum | ✅ | Pass 2 ne crée aucun nouveau type de nœud — uniquement des arêtes entre nœuds existants |
+| AV2-8 | Dual storage (Neo4j + Qdrant) | ⚠️ | Pass 2 ne persiste que dans Neo4j. Pas de mise à jour Qdrant (les relations ne sont pas vectorisées). Conforme à l'esprit (relations = graphe navigable) |
+| NS-2 | LLM = Extracteur evidence-locked | ✅ | Le LLM extrait des relations, il ne décide pas du type final (validation post-extraction). Chaque relation doit avoir `evidence_info_ids` |
+| NS-4 | Pas de synthèse cross-source | ✅ | Les relations sont intra-document : entre concepts d'un même document. Pas de relations cross-doc en Pass 2 |
+| NS-7 | Addressability-First | ✅ | Les relations sont navigables via les concepts, eux-mêmes rattachés aux thèmes et au sujet |
+| SCOPE | Scope vs Assertion separation | ⚠️ | L'implémentation actuelle ne distingue pas explicitement les relations de scope (dense) vs. les relations d'assertion (sparse). Toutes les relations sont traitées uniformément comme `CONCEPT_RELATION`. Voir § 14.6 R2-4 |
+| DR-C1 | Pas de nouvelle couche (ADR Discursive) | ✅ | Pass 2 ne crée pas de nouvelle couche — les relations sont des arêtes, pas des nœuds |
+| DR-C2 | Evidence-first (ADR Discursive) | ⚠️ | Les relations ont `evidence_info_ids` mais pas de `EvidenceBundle` formel. La justification est un texte libre, pas un span multi-source structuré |
+| DR-C3 | Pas de contamination par inférence | ⚠️ | Le mode heuristique infère des relations par co-occurrence de noms. C'est une heuristique lexicale, pas une inférence sémantique profonde, mais le risque de faux positifs existe |
+| DR-C3bis | ExtractionMethod autorisé | ❌ | L'implémentation ne trace pas la méthode d'extraction (`PATTERN`, `LLM`, `HYBRID`). Impossible de distinguer assertions EXPLICIT vs DISCURSIVE |
+| DR-C4 | Whitelist RelationType par AssertionKind | ❌ | Les 8 types de relations sont utilisés uniformément. Pas de distinction EXPLICIT/DISCURSIVE ni de whitelist restrictive pour les relations discursives |
+
+### 14.6 Risques — Pass 2
+
+| ID | Risque | Sévérité | Description | Mitigation |
+|----|--------|----------|-------------|------------|
+| R2-1 | **Label générique `CONCEPT_RELATION`** | 🟡 | Toutes les relations utilisent un label unique (`CONCEPT_RELATION`) avec le type en propriété. Cela empêche les traversées Cypher typées (ex: `MATCH -[:REQUIRES]->`) et oblige un filtre `WHERE r.type = ...` sur chaque requête. | Acceptable en MVP. Migration possible vers labels dynamiques via APOC si les performances de traversée deviennent un problème. Le commentaire dans le code mentionne cette évolution. |
+| R2-2 | **Garde-fou à 3 relations arbitraire** | 🟡 | La limite de 3 relations par concept source est un choix pragmatique. Pour des documents très denses, cela pourrait masquer des relations significatives. Le tri par confiance atténue le risque mais ne l'élimine pas. | Constante de classe `MAX_RELATIONS_PER_CONCEPT` facilement ajustable. Monitoring via `Pass2Stats.relations_filtered` pour détecter les cas de filtrage excessif. |
+| R2-3 | **Heuristique de fallback peu fiable** | 🟡 | Le mode heuristique repose sur la co-occurrence lexicale simple (présence du nom/variante dans le texte). Cela génère des faux positifs (deux concepts mentionnés dans la même phrase ne sont pas nécessairement en relation). Confiance fixe à 0.6 sans discrimination. | Le mode heuristique est explicitement marqué comme non fiable (`logger.warning`). Flag `allow_fallback` désactivé par défaut. |
+| R2-4 | **Pas de distinction Scope vs Assertion pour les relations** | 🟡 | L'ADR Scope vs Assertion Separation établit que le Scope Layer (ce que le document couvre) est distinct de l'Assertion Layer (ce que le document affirme). Les relations Pass 2 ne portent pas cette distinction — une relation `RELATED_TO` par co-occurrence est fondamentalement un lien de scope, pas d'assertion. | Évolution nécessaire pour taguer `assertion_kind` (EXPLICIT/DISCURSIVE) sur les relations. Non bloquant en MVP mais requis pour la conformité ADR Discursive Relations. |
+| R2-5 | **Absence de `DefensibilityTier` et `EvidenceBundle`** | 🟡 | L'ADR Relations Discursivement Déterminées prévoit un pipeline `RawAssertion → CanonicalRelation → SemanticRelation` avec `DefensibilityTier` (STRICT/EXTENDED). L'implémentation actuelle crée directement des `CONCEPT_RELATION` sans passer par ce pipeline à trois couches. | L'ADR est un objectif architectural. L'implémentation actuelle est un MVP fonctionnel. La migration vers le modèle ADR complet est une tâche dédiée. |
+| R2-6 | **Pas de déduplication des relations** | 🟢 | Le `MERGE` Neo4j sur `relation_id` prévient les doublons exacts. Cependant, si Pass 2 est exécuté plusieurs fois avec des UUID différents, des relations sémantiquement identiques mais avec des `relation_id` distincts pourraient coexister. | `delete_pass2_data()` permet de purger avant retraitement. L'idempotence est garantie au niveau du `relation_id`, pas au niveau sémantique. |
+| R2-7 | **Persistance relation par relation (pas de batch)** | 🟢 | Le persister itère sur les relations et exécute une transaction par relation. Pour des documents avec beaucoup de relations, cela pourrait être lent. | Optimisation possible via `UNWIND` Cypher pour batch insert. Non critique en MVP vu le garde-fou à 3 relations/concept (max ~45 relations pour 15 concepts). |
 
 ---
 
