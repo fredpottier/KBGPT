@@ -125,6 +125,12 @@ stratified_pipeline_v2:
   promotion_threshold: 0.7  # Confidence minimum pour CONDITIONAL tier
   abstention_log: true      # Loguer les assertions abstenues
 
+  # Pointer-Based Extraction Mode (Anti-Reformulation)
+  # ADR: Plan Pointer-Based Extraction (2026-01-27)
+  # Le LLM POINTE vers des unités numérotées au lieu de COPIER le texte
+  # Garantit l'ancrage verbatim et élimine structurellement la reformulation
+  enable_pointer_mode: true
+
   # Pass 3 Configuration
   consolidation_similarity_threshold: 0.85
   enable_llm_validation: true
@@ -267,6 +273,34 @@ phase_2_hybrid_anchor:
     default_mode: "hybrid"
 
   # -------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # Calibration LLM-agnostique des seuils rerank (Sprint 5)
+  # -------------------------------------------------------------------------
+  # Mode "auto" (défaut) : quantiles sur chaque batch
+  # Mode "profile_override" : valeurs explicites ci-dessous
+  llm_calibration:
+    mode: "auto"
+    auto_fallback:
+      min_sample_size: 5
+      min_score_spread: 0.03  # Baissé de 0.05 — active auto-calibration pour spreads serrés
+      band_separation_threshold: 0.08   # si spread < ce seuil, band3 = Q_mid au lieu de Q_high
+      conf_final_clamp_min: 0.15        # borne basse conf_threshold_final
+      conf_final_clamp_max: 0.45        # borne haute conf_threshold_final
+      # Percentiles sur provisional_scores (post-bonus, pré-pénalité)
+      # Q10 bas car les bonus remontent les bons candidats au-dessus
+      percentile_low: 10                # → band1_ceiling, conf_thresholds
+      percentile_mid: 50                # → fallback band3 si spread serré
+      percentile_high: 75               # → band3_floor
+    profile:
+      name: "qwen_14b"
+      conf_threshold_original: 0.45
+      conf_threshold_final: 0.35
+      sink_band1_ceiling: 0.42
+      sink_band3_floor: 0.52
+      sink_band2_gap_min: 0.04
+      margin_ambiguous: 0.05
+      sink_signal_fort_threshold: 1.15  # semi-structurel, overrideable
+
   # Navigation Layer Configuration
   # -------------------------------------------------------------------------
   # ADR: doc/ongoing/ADR_NAVIGATION_LAYER.md

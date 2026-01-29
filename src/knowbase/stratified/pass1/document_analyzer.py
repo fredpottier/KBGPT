@@ -40,7 +40,8 @@ class DocumentAnalyzerV2:
     """
 
     # Seuil pour détecter un document HOSTILE (trop de sujets)
-    HOSTILE_SUBJECT_THRESHOLD = 10
+    # Augmenté de 10 à 15: les thèmes adaptatifs (7-12) nécessitent plus de marge
+    HOSTILE_SUBJECT_THRESHOLD = 15
 
     def __init__(
         self,
@@ -85,7 +86,9 @@ class DocumentAnalyzerV2:
         doc_title: str,
         content: str,
         toc: Optional[str] = None,
-        char_limit: int = 4000
+        char_limit: int = 4000,
+        sections: Optional[List[Dict]] = None,
+        language_override: Optional[str] = None,
     ) -> Tuple[Subject, List[Theme], bool]:
         """
         Analyse un document et retourne sa structure sémantique.
@@ -96,6 +99,7 @@ class DocumentAnalyzerV2:
             content: Contenu textuel complet
             toc: Table des matières (si disponible)
             char_limit: Limite de caractères pour le preview
+            sections: Sections Docling (dicts avec title/level) pour coverage cascade
 
         Returns:
             Tuple[Subject, List[Theme], is_hostile]
@@ -138,6 +142,10 @@ class DocumentAnalyzerV2:
 
         subject, themes = result
 
+        # Appliquer language_override si fourni (Issue 3: langue détectée sur original)
+        if language_override:
+            subject.language = language_override
+
         # Détection HOSTILE: trop de thèmes = document mixte
         is_hostile = len(themes) > self.HOSTILE_SUBJECT_THRESHOLD
         if is_hostile:
@@ -145,6 +153,12 @@ class DocumentAnalyzerV2:
                 f"[OSMOSE:Pass1:1.1] Document HOSTILE détecté: "
                 f"{len(themes)} thèmes (seuil: {self.HOSTILE_SUBJECT_THRESHOLD})"
             )
+
+        # Garde-fou coverage: vérifier que les sections majeures du document
+        # sont couvertes par au moins un thème. Cascade de signaux :
+        # 1. TOC (si disponible) → 2. Headings Docling (H1/H2) → 3. rien
+        if not is_hostile:
+            themes = self._ensure_major_section_coverage(themes, toc, sections, doc_id)
 
         return subject, themes, is_hostile
 
@@ -245,6 +259,143 @@ class DocumentAnalyzerV2:
         ]
 
         return subject, themes
+
+    def _ensure_major_section_coverage(
+        self,
+        themes: List[Theme],
+        toc: Optional[str],
+        sections: Optional[List[Dict]],
+        doc_id: str
+    ) -> List[Theme]:
+        """
+        Vérifie que les sections majeures du document sont couvertes par un thème.
+
+        Cascade de signaux pour extraire les titres de sections majeures :
+        1. TOC textuelle (si disponible) → H1/H2
+        2. Headings Docling (sections avec title/level) → level 1-2
+        3. Aucun signal → retourne les thèmes tels quels
+
+        Si une section majeure n'a aucun thème correspondant (par similarité lexicale),
+        elle est promue en thème supplémentaire.
+
+        Args:
+            themes: Thèmes extraits par le LLM
+            toc: Table des matières (texte, peut être None)
+            sections: Sections Docling (dicts avec title/level, peut être None)
+            doc_id: ID du document
+
+        Returns:
+            Liste de thèmes enrichie si nécessaire
+        """
+        # Cascade : essayer TOC d'abord, puis headings Docling
+        major_sections = self._extract_major_sections_from_toc(toc)
+        source = "TOC"
+
+        if not major_sections and sections:
+            major_sections = self._extract_major_sections_from_headings(sections)
+            source = "headings"
+
+        if not major_sections:
+            return themes
+
+        # Vérifier la couverture : pour chaque section majeure, chercher un thème
+        # qui la couvre (par similarité lexicale simple — mots en commun)
+        orphan_sections = self._find_orphan_sections(major_sections, themes)
+
+        # Promouvoir les sections orphelines en thèmes
+        if orphan_sections:
+            next_idx = len(themes)
+            for section_title in orphan_sections:
+                new_theme = Theme(
+                    theme_id=f"theme_{doc_id}_{next_idx}",
+                    name=section_title,
+                    scoped_to_sections=[],
+                )
+                themes.append(new_theme)
+                next_idx += 1
+
+            logger.info(
+                f"[OSMOSE:Pass1:1.1:Coverage] {len(orphan_sections)} sections orphelines "
+                f"promues en thèmes (source: {source}): {orphan_sections}"
+            )
+
+        return themes
+
+    def _extract_major_sections_from_toc(self, toc: Optional[str]) -> List[str]:
+        """Extrait les titres de sections H1/H2 depuis une TOC textuelle."""
+        if not toc:
+            return []
+
+        toc_sections = []
+        for line in toc.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            # Patterns : "1. Title", "1.1 Title", "## Title"
+            if re.match(r'^\d+(\.\d+)?\s+\w', line):
+                level_match = re.match(r'^(\d+(?:\.\d+)?)', line)
+                if level_match:
+                    level_str = level_match.group(1)
+                    if level_str.count('.') <= 1:  # H1 ou H2
+                        section_title = re.sub(r'^[\d\.]+\s*', '', line).strip()
+                        if len(section_title) > 3:
+                            toc_sections.append(section_title)
+            elif re.match(r'^#{1,2}\s+', line):
+                section_title = re.sub(r'^#+\s*', '', line).strip()
+                if len(section_title) > 3:
+                    toc_sections.append(section_title)
+
+        return toc_sections
+
+    def _extract_major_sections_from_headings(self, sections: List[Dict]) -> List[str]:
+        """Extrait les titres de sections majeures depuis les headings Docling (level 1-2)."""
+        major_sections = []
+        for section in sections:
+            level = section.get("level", 99)
+            title = section.get("title") or section.get("name", "")
+            title = title.strip()
+            if level <= 2 and len(title) > 3:
+                major_sections.append(title)
+        return major_sections
+
+    def _find_orphan_sections(
+        self,
+        major_sections: List[str],
+        themes: List[Theme]
+    ) -> List[str]:
+        """Identifie les sections majeures non couvertes par un thème existant."""
+        theme_names_lower = [t.name.lower() for t in themes]
+        orphan_sections = []
+
+        generic_words = {
+            "the", "and", "for", "with", "from", "this", "that", "are",
+            "overview", "introduction", "conclusion", "appendix", "summary",
+            "agenda", "table", "contents",
+        }
+
+        for section_title in major_sections:
+            section_words = set(
+                w.lower() for w in re.findall(r'\w{3,}', section_title)
+            )
+            section_words -= generic_words
+
+            if not section_words:
+                continue
+
+            # Chercher un thème qui partage au moins 1 mot significatif
+            covered = False
+            for theme_name in theme_names_lower:
+                theme_words = set(
+                    w.lower() for w in re.findall(r'\w{3,}', theme_name)
+                )
+                if section_words & theme_words:
+                    covered = True
+                    break
+
+            if not covered:
+                orphan_sections.append(section_title)
+
+        return orphan_sections
 
     def _detect_language(self, text: str) -> str:
         """Détecte la langue par heuristique."""

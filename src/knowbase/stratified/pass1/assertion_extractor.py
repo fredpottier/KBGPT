@@ -22,6 +22,9 @@ import yaml
 import uuid
 import os
 
+import math
+from collections import Counter
+
 import numpy as np
 
 from knowbase.stratified.models import (
@@ -151,32 +154,51 @@ TOP_K_IF_CLOSE = 2
 CLOSE_THRESHOLD = 0.10  # Écart max entre top-1 et top-k
 
 # ============================================================================
-# RERANK "SPECIFICITY WINS" (Fix Concept Aspirateur - 2026-01-28)
+# SEUILS DE CONFIANCE RERANK — DEFAULTS (fallback CalibrationProfile)
 # ============================================================================
+# LLM-DÉPENDANTS (auto-calibrés par quantiles en mode "auto") :
+#   CONF_THRESHOLD_ORIGINAL, CONF_THRESHOLD_FINAL
+#   SINK_BAND1_CEILING, SINK_BAND3_FLOOR, SINK_BAND2_GAP_MIN
+#   MARGIN_AMBIGUOUS
+#   → Valeurs ci-dessous = defaults Qwen 14B, utilisés en fallback uniquement.
+#
+# STRUCTURELS (constantes fixes, indépendantes du LLM) :
+#   SINK_MALUS, SINK_SIGNAL_FORT_THRESHOLD
+#   Bonus lexicaux (1.05, 1.10, 1.20, 1.25)
+#   Bonus sémantiques z-score (relatifs, auto-normalisés)
+#   TOP_K_DEFAULT, TOP_K_STRONG_MATCH
 
-# Seuils de confiance pour rerank
-CONF_THRESHOLD_ORIGINAL = 0.45  # Minimum conf LLM pour être éligible (Qwen calibré ~0.60)
-CONF_THRESHOLD_FINAL = 0.35     # Minimum conf après rerank pour garder le lien
+# LLM-dépendants (defaults Qwen 14B)
+CONF_THRESHOLD_ORIGINAL = 0.45
+CONF_THRESHOLD_FINAL = 0.35
+MARGIN_AMBIGUOUS = 0.05
+SINK_BAND1_CEILING = 0.42
+SINK_BAND3_FLOOR = 0.52
+SINK_BAND2_GAP_MIN = 0.04
 
-# Règle de marge pour détection ambiguïté
-MARGIN_AMBIGUOUS = 0.05  # Si écart < margin, marquer AMBIGUOUS
+# Structurels (fixes)
+TOP_K_DEFAULT = 2
+TOP_K_STRONG_MATCH = 1
+SINK_MALUS = 0.90
+SINK_SIGNAL_FORT_THRESHOLD = 1.15
 
-# Top-K dynamique
-TOP_K_DEFAULT = 2           # Max concepts par assertion (défaut)
-TOP_K_STRONG_MATCH = 1      # Winner-takes-all si match trigger fort (bonus >= 1.25)
 
-# ============================================================================
-# SINK CONCEPT — Seuils adaptatifs (Sprint 4.2)
-# ============================================================================
-# Cible : 25-35% des assertions routées vers SINK (réaliste pour docs longs).
-# En dessous de 15% → le SINK ne sert à rien, les aspirateurs reviennent.
-# Au-dessus de 40% → le SINK aspire lui-même, la KB perd du signal.
-# Calibration Qwen : scores typiques 0.46–0.56, pic normal ~0.50.
-SINK_MALUS = 0.90                 # Malus inhérent SINK (-10%)
-SINK_BAND1_CEILING = 0.42        # Sous ce score → SINK inconditionnel (Sprint 4.3: 0.50→0.42)
-SINK_BAND3_FLOOR = 0.52          # Au-dessus → non-SINK (Sprint 4.3: 0.58→0.52)
-SINK_BAND2_GAP_MIN = 0.04        # Sprint 4.3: Bande 2 → SINK seulement si gap top1-top2 < ce seuil
-SINK_SIGNAL_FORT_THRESHOLD = 1.15 # Bonus lex/sem pour éliminer SINK de la sélection
+@dataclass
+class CalibrationProfile:
+    """Profil de calibration rerank — rend les seuils LLM-agnostiques (Sprint 5)."""
+    conf_threshold_original: float = CONF_THRESHOLD_ORIGINAL
+    conf_threshold_final: float = CONF_THRESHOLD_FINAL
+    sink_band1_ceiling: float = SINK_BAND1_CEILING
+    sink_band3_floor: float = SINK_BAND3_FLOOR
+    sink_band2_gap_min: float = SINK_BAND2_GAP_MIN
+    margin_ambiguous: float = MARGIN_AMBIGUOUS
+    sink_signal_fort_threshold: float = SINK_SIGNAL_FORT_THRESHOLD  # semi-structurel, overrideable
+    # Metadata
+    mode: str = "fallback"        # "auto", "profile_override", "fallback"
+    profile_name: str = "default"
+    q20: Optional[float] = None
+    q50: Optional[float] = None
+    q75: Optional[float] = None
 
 
 @dataclass
@@ -707,10 +729,10 @@ class AssertionExtractorV2:
         if len(assertions) <= self.LINKING_BATCH_SIZE:
             links = self._link_batch(assertions, concepts)
             if links:
-                links, lexical_bonuses, semantic_bonuses = self._rerank_links_specificity(
+                links, lexical_bonuses, semantic_bonuses, calibration = self._rerank_links_specificity(
                     links, concepts, assertions
                 )
-                links = self._apply_margin_and_topk(links, lexical_bonuses, semantic_bonuses)
+                links = self._apply_margin_and_topk(links, lexical_bonuses, semantic_bonuses, calibration)
                 logger.info(f"[OSMOSE:Pass1:1.4:Rerank] {len(links)} liens après rerank")
             return links
 
@@ -750,10 +772,10 @@ class AssertionExtractorV2:
 
         # RERANK "Specificity Wins": Post-traitement pour privilégier concepts spécifiques
         if all_links:
-            all_links, lexical_bonuses, semantic_bonuses = self._rerank_links_specificity(
+            all_links, lexical_bonuses, semantic_bonuses, calibration = self._rerank_links_specificity(
                 all_links, concepts, assertions
             )
-            all_links = self._apply_margin_and_topk(all_links, lexical_bonuses, semantic_bonuses)
+            all_links = self._apply_margin_and_topk(all_links, lexical_bonuses, semantic_bonuses, calibration)
             logger.info(f"[OSMOSE:Pass1:1.4:Rerank] {len(all_links)} liens après rerank")
 
         return all_links
@@ -1594,6 +1616,205 @@ class AssertionExtractorV2:
         return base_penalty
 
     # =========================================================================
+    # CALIBRATION LLM-AGNOSTIQUE (Sprint 5)
+    # =========================================================================
+
+    def _compute_calibration(
+        self,
+        provisional_scores: Dict[str, Dict[str, float]],
+        original_confs: Dict[str, Dict[str, float]],
+    ) -> CalibrationProfile:
+        """
+        Calcule un CalibrationProfile LLM-agnostique par quantiles.
+
+        Priorité :
+        1. Override YAML (mode="profile_override")
+        2. Auto-calibration par quantiles (mode="auto")
+        3. Fallback sur defaults (batch dégénéré)
+
+        IMPORTANT — Choix de la source de quantiles :
+        - Les seuils SINK (band1, band3) et conf s'appliquent sur les scores FINAUX
+          (post-bonus lex/sem/central/pénalité). Ils doivent donc être calibrés sur
+          les provisional_scores (= scores Pass 1 = conf_llm × bonus × sink_malus,
+          SANS pénalité saturante).
+        - Les confs brutes Qwen sont trop serrées (0.55-0.63) pour discriminer.
+        - Les percentiles utilisés sont bas (Q10/Q50) car les bonus remontent les
+          bons candidats ; les seuils doivent rester sous la masse boostée.
+        - Le multiplier offset (1.8) compense l'inflation provisionals→finaux.
+          Avec Qwen (Q10=0.60, spread=0.10): offset=0.18 → band1=0.42, band3=0.52
+          → convergence exacte avec les constantes Sprint 4.3 validées.
+
+        Args:
+            provisional_scores: {assertion_id: {concept_id: pass1_score}}
+                Scores Pass 1 (conf × bonus × central × sink_malus, SANS pénalité).
+            original_confs: {assertion_id: {concept_id: conf_llm_brute}}
+                Confiances LLM brutes (pour log/diagnostic).
+
+        Returns:
+            CalibrationProfile avec seuils adaptés au batch courant.
+        """
+        from knowbase.config.feature_flags import get_stratified_v2_config
+        from knowbase.stratified.models import ConceptRole
+
+        # ─── 1. Check YAML override ───
+        llm_cal_config = get_stratified_v2_config("llm_calibration") or {}
+        yaml_mode = llm_cal_config.get("mode", "auto")
+
+        if yaml_mode == "profile_override":
+            profile_cfg = llm_cal_config.get("profile", {})
+            cal = CalibrationProfile(
+                conf_threshold_original=profile_cfg.get("conf_threshold_original", CONF_THRESHOLD_ORIGINAL),
+                conf_threshold_final=profile_cfg.get("conf_threshold_final", CONF_THRESHOLD_FINAL),
+                sink_band1_ceiling=profile_cfg.get("sink_band1_ceiling", SINK_BAND1_CEILING),
+                sink_band3_floor=profile_cfg.get("sink_band3_floor", SINK_BAND3_FLOOR),
+                sink_band2_gap_min=profile_cfg.get("sink_band2_gap_min", SINK_BAND2_GAP_MIN),
+                margin_ambiguous=profile_cfg.get("margin_ambiguous", MARGIN_AMBIGUOUS),
+                sink_signal_fort_threshold=profile_cfg.get("sink_signal_fort_threshold", SINK_SIGNAL_FORT_THRESHOLD),
+                mode="profile_override",
+                profile_name=profile_cfg.get("name", "custom"),
+            )
+            logger.info(
+                f"[OSMOSE:Rerank:Calibration] mode=profile_override "
+                f"profile={cal.profile_name} "
+                f"band1={cal.sink_band1_ceiling:.2f} band3={cal.sink_band3_floor:.2f} "
+                f"conf_orig={cal.conf_threshold_original:.2f} conf_final={cal.conf_threshold_final:.2f}"
+            )
+            return cal
+
+        # ─── 2. Auto-calibration par quantiles ───
+        auto_cfg = llm_cal_config.get("auto_fallback", {})
+        min_sample_size = auto_cfg.get("min_sample_size", 5)
+        min_score_spread = auto_cfg.get("min_score_spread", 0.05)
+        band_sep_threshold = auto_cfg.get("band_separation_threshold", 0.08)
+        conf_final_clamp_min = auto_cfg.get("conf_final_clamp_min", 0.15)
+        conf_final_clamp_max = auto_cfg.get("conf_final_clamp_max", 0.45)
+        # Percentiles configurables (défauts calibrés pour scores post-bonus)
+        pct_low = auto_cfg.get("percentile_low", 10)    # Q10 → band1 (seuil bas SINK)
+        pct_mid = auto_cfg.get("percentile_mid", 50)     # Q50 → conf_threshold, fallback band3
+        pct_high = auto_cfg.get("percentile_high", 75)   # Q75 → band3 (seuil haut non-SINK)
+
+        # Extraire le meilleur score non-SINK par assertion (provisional = post-bonus)
+        best_scores: List[float] = []
+        for assertion_id, scores in provisional_scores.items():
+            non_sink = [
+                s for cid, s in scores.items() if not cid.endswith("_SINK")
+            ]
+            if non_sink:
+                best_scores.append(max(non_sink))
+
+        # Log diagnostic : aussi calculer stats sur confs brutes
+        raw_scores: List[float] = []
+        for assertion_id, confs in original_confs.items():
+            non_sink = [c for cid, c in confs.items() if not cid.endswith("_SINK")]
+            if non_sink:
+                raw_scores.append(max(non_sink))
+
+        # ─── 3. Fallback si batch dégénéré ───
+        if len(best_scores) < min_sample_size:
+            logger.info(
+                f"[OSMOSE:Rerank:Calibration] mode=fallback "
+                f"reason=too_few_assertions n={len(best_scores)}<{min_sample_size}"
+            )
+            return CalibrationProfile(mode="fallback", profile_name="default")
+
+        arr = np.array(best_scores)
+        q_low = float(np.percentile(arr, pct_low))
+        q_mid = float(np.percentile(arr, pct_mid))
+        q_high = float(np.percentile(arr, pct_high))
+        spread = q_high - q_low
+
+        # Diagnostic confs brutes
+        raw_arr = np.array(raw_scores) if raw_scores else arr
+        raw_q20 = float(np.percentile(raw_arr, 20))
+        raw_q50 = float(np.percentile(raw_arr, 50))
+
+        if spread < min_score_spread:
+            logger.info(
+                f"[OSMOSE:Rerank:Calibration] mode=fallback "
+                f"reason=degenerate_spread spread={spread:.6f} (repr={spread!r})<{min_score_spread} "
+                f"Q{pct_low}={q_low:.3f} Q{pct_mid}={q_mid:.3f} Q{pct_high}={q_high:.3f} "
+                f"n={len(best_scores)} raw_Q20={raw_q20:.3f} raw_Q50={raw_q50:.3f}"
+            )
+            return CalibrationProfile(
+                mode="fallback", profile_name="default",
+                q20=q_low, q50=q_mid, q75=q_high,
+            )
+
+        # Garde-fou: q_low > q_mid (impossible en théorie, défensif)
+        if q_low > q_mid:
+            logger.warning(
+                f"[OSMOSE:Rerank:Calibration] mode=fallback "
+                f"reason=quantile_inversion Q{pct_low}={q_low:.3f}>Q{pct_mid}={q_mid:.3f}"
+            )
+            return CalibrationProfile(mode="fallback", profile_name="default")
+
+        # ─── Dérivation quantiles → seuils ───
+        # Les seuils SINK s'appliquent APRÈS pénalité saturante (Pass 2), qui peut
+        # baisser les scores de 15-30%. Il faut donc que band1 soit SOUS le Q_low
+        # des provisional_scores (pré-pénalité) pour que les scores pénalisés
+        # tombent en dessous.
+        #
+        # Offset adaptatif : proportionnel au spread, borné.
+        # Multiplier 1.8 : compense l'inflation des provisional_scores (post-bonus)
+        # par rapport aux scores finaux (post-pénalité) sur lesquels les seuils agissent.
+        # Pour Qwen (spread~0.10) : offset ≈ 0.10*1.8 = 0.18 → band1 = 0.60-0.18 = 0.42 ✓
+        # Pour GPT-4 (spread~0.25) : offset ≈ 0.25 (clamp max)
+        # Borne min offset = 0.08 (minimum de marge sous q_low)
+        # Borne max offset = 0.25 (ne pas descendre trop bas)
+        offset = max(0.08, min(0.25, spread * 1.8))
+
+        sink_band1_ceiling = q_low - offset
+        # Band separation: si scores serrés, band3 plus prudent (Q50 au lieu de Q75)
+        # band3 reçoit le MÊME offset que band1 (full offset) car les provisionals
+        # sont uniformément gonflés — le half-offset laissait band3 trop haut (0.64 vs 0.52 cible)
+        tight_spread = spread < band_sep_threshold  # 0.03 ≤ spread < 0.08
+        raw_band3 = q_mid if tight_spread else q_high
+        if tight_spread:
+            logger.info(
+                f"[OSMOSE:Rerank:Calibration] tight_spread mode: "
+                f"band3=Q50={q_mid:.3f} (Q75={q_high:.3f} too close)"
+            )
+        sink_band3_floor = raw_band3 - offset
+        # conf_threshold_original : juste au-dessus de band1
+        conf_threshold_original = sink_band1_ceiling + 0.03
+        conf_threshold_final = max(conf_final_clamp_min, min(conf_final_clamp_max, sink_band1_ceiling - 0.07))
+        # gap_min ratio 0.40 : pour Qwen (spread=0.10) → 0.04, pour GPT-4 (spread=0.20) → 0.08
+        sink_band2_gap_min = max(0.02, spread * 0.40)
+        # margin ratio 0.50 : pour Qwen → 0.05, pour GPT-4 → 0.10
+        margin_ambiguous = max(0.02, spread * 0.50)
+
+        # sink_signal_fort_threshold: semi-structurel, overrideable via YAML profile uniquement
+        profile_cfg = llm_cal_config.get("profile", {})
+        sft = profile_cfg.get("sink_signal_fort_threshold", SINK_SIGNAL_FORT_THRESHOLD)
+
+        cal = CalibrationProfile(
+            conf_threshold_original=conf_threshold_original,
+            conf_threshold_final=conf_threshold_final,
+            sink_band1_ceiling=sink_band1_ceiling,
+            sink_band3_floor=sink_band3_floor,
+            sink_band2_gap_min=sink_band2_gap_min,
+            margin_ambiguous=margin_ambiguous,
+            sink_signal_fort_threshold=sft,
+            mode="auto",
+            profile_name="auto",
+            q20=q_low,
+            q50=q_mid,
+            q75=q_high,
+        )
+
+        logger.info(
+            f"[OSMOSE:Rerank:Calibration] mode=auto "
+            f"Q{pct_low}={q_low:.3f} Q{pct_mid}={q_mid:.3f} Q{pct_high}={q_high:.3f} "
+            f"band1={sink_band1_ceiling:.3f} band3={sink_band3_floor:.3f} "
+            f"spread={spread:.3f} offset={offset:.3f} n={len(best_scores)} "
+            f"conf_orig={conf_threshold_original:.3f} conf_final={conf_threshold_final:.3f} "
+            f"gap_min={sink_band2_gap_min:.3f} margin={margin_ambiguous:.3f} "
+            f"raw_Q20={raw_q20:.3f} raw_Q50={raw_q50:.3f}"
+        )
+
+        return cal
+
+    # =========================================================================
     # RERANK "SPECIFICITY WINS" - Module B: Rerank et Top-K
     # =========================================================================
 
@@ -1730,6 +1951,11 @@ class AssertionExtractorV2:
                 provisional_scores[link.assertion_id] = {}
             provisional_scores[link.assertion_id][link.concept_id] = pass1_score
 
+        # ─── Sprint 5: Auto-calibration LLM-agnostique ───
+        # Quantiles sur provisional_scores (post-bonus, pré-pénalité) avec percentiles bas (Q10/Q50/Q75)
+        # + original_confs passés pour diagnostic dans les logs
+        calibration = self._compute_calibration(provisional_scores, original_confs)
+
         # ─── Calcul provisional distribution ───
         provisional_counts: Dict[str, int] = {}
         for concept in concepts:
@@ -1798,7 +2024,7 @@ class AssertionExtractorV2:
                     f"sink_malus={sink_malus:.2f}, prov_count={prov_count})"
                 )
 
-        return links, lexical_bonuses, semantic_bonuses
+        return links, lexical_bonuses, semantic_bonuses, calibration
 
     def _should_route_to_sink(
         self,
@@ -1806,38 +2032,38 @@ class AssertionExtractorV2:
         non_sink_scored: List[Tuple],
         lex_bonuses: Dict[str, float],
         sem_bonuses: Dict[str, float],
+        calibration: Optional[CalibrationProfile] = None,
     ) -> Optional[str]:
         """
         Sprint 4.3: Seuil SINK adaptatif piloté par niveau + gap.
+        Sprint 5: Seuils issus du CalibrationProfile (LLM-agnostique).
 
-        Bande 1 (< 0.42)      : SINK inconditionnel (score trop faible)
-        Bande 2 (0.42 — 0.52) : SINK seulement si gap top1-top2 < 0.04 (hésitation réelle)
-        Bande 3 (>= 0.52)     : non-SINK (concept métier garde)
-
-        Le gap (top1 - top2) est plus fiable que "absence de bonus" car beaucoup
-        d'assertions n'ont pas de trigger match même quand le concept est correct.
-        Un top1=0.48 avec top2=0.35 = préférence claire → garder.
-        Un top1=0.48 avec top2=0.47 = hésitation → SINK.
+        Bande 1 (< band1_ceiling) : SINK inconditionnel (score trop faible)
+        Bande 2 (band1 — band3)   : SINK seulement si gap top1-top2 < gap_min
+        Bande 3 (>= band3_floor)  : non-SINK (concept métier garde)
 
         Args:
             best_non_sink_score: Score du meilleur concept non-SINK
             non_sink_scored: [(link, conf, lex_bonus), ...] triés par conf desc
             lex_bonuses: {concept_id: bonus} pour cette assertion
             sem_bonuses: {concept_id: bonus} pour cette assertion
+            calibration: Profil de calibration (Sprint 5)
 
         Returns:
             None si non-SINK doit gagner, sinon str raison du routing SINK
         """
+        if calibration is None:
+            calibration = CalibrationProfile()
+
         # Bande 1: score très faible → SINK inconditionnel
-        if best_non_sink_score < SINK_BAND1_CEILING:
+        if best_non_sink_score < calibration.sink_band1_ceiling:
             return "score_tres_faible"
 
         # Bande 3: score suffisant → non-SINK
-        if best_non_sink_score >= SINK_BAND3_FLOOR:
+        if best_non_sink_score >= calibration.sink_band3_floor:
             return None
 
-        # Bande 2 (SINK_BAND1_CEILING — SINK_BAND3_FLOOR): SINK piloté par gap
-        # Si le top concept a un signal lex/sem → garder (il a une raison d'être là)
+        # Bande 2: SINK piloté par gap
         if non_sink_scored:
             top_concept_id = non_sink_scored[0][0].concept_id
             top_lex = lex_bonuses.get(top_concept_id, 1.0)
@@ -1845,12 +2071,10 @@ class AssertionExtractorV2:
             if top_lex > 1.0 or top_sem > 1.0:
                 return None
 
-            # Gap top1 - top2 : si Qwen hésite → SINK, sinon garder
             if len(non_sink_scored) >= 2:
                 gap = best_non_sink_score - non_sink_scored[1][1]
-                if gap < SINK_BAND2_GAP_MIN:
+                if gap < calibration.sink_band2_gap_min:
                     return "zone_grise_ambigu"
-                # Gap suffisant → Qwen a une préférence → garder le concept métier
                 return None
 
         # Un seul candidat non-SINK en bande 2 sans bonus → SINK
@@ -1860,7 +2084,8 @@ class AssertionExtractorV2:
         self,
         links: List[ConceptLink],
         lexical_bonuses: Dict[str, Dict[str, float]],
-        semantic_bonuses: Optional[Dict[str, Dict[str, float]]] = None
+        semantic_bonuses: Optional[Dict[str, Dict[str, float]]] = None,
+        calibration: Optional[CalibrationProfile] = None,
     ) -> List[ConceptLink]:
         """
         Après rerank, re-trier et appliquer les règles de sélection finale.
@@ -1871,16 +2096,13 @@ class AssertionExtractorV2:
         4. Garder top-k (dynamique: =1 si match trigger fort OU semantic discriminant)
         5. Si écart best/second < margin → log AMBIGUOUS
 
-        Sprint 4.3 SINK adaptatif (piloté par niveau + gap):
-        - < 0.42 → SINK inconditionnel
-        - 0.42-0.52 → SINK seulement si gap top1-top2 < 0.04 (hésitation)
-        - >= 0.52 → non-SINK
-        - Signal fort (bonus ≥ 1.15) → éliminer SINK
+        Sprint 5: Seuils issus du CalibrationProfile (LLM-agnostique).
 
         Args:
             links: Liens après rerank
             lexical_bonuses: {assertion_id: {concept_id: bonus}} pour TOP_K dynamique
             semantic_bonuses: {assertion_id: {concept_id: bonus}} pour TOP_K semantic
+            calibration: Profil de calibration (Sprint 5)
 
         Returns:
             Liste filtrée des liens
@@ -1889,6 +2111,8 @@ class AssertionExtractorV2:
 
         if semantic_bonuses is None:
             semantic_bonuses = {}
+        if calibration is None:
+            calibration = CalibrationProfile()
 
         # Identifier le concept SINK
         sink_concept_ids = set()
@@ -1923,10 +2147,10 @@ class AssertionExtractorV2:
                 lex_bonus = assertion_bonuses.get(link.concept_id, 1.0)
                 sem_bonus = assertion_sem_bonuses.get(link.concept_id, 1.0)
 
-                # MICRO-AJUSTEMENT 3: Double seuil
-                if conf_original < CONF_THRESHOLD_ORIGINAL:
+                # MICRO-AJUSTEMENT 3: Double seuil (Sprint 5: calibré)
+                if conf_original < calibration.conf_threshold_original:
                     continue
-                if conf_final < CONF_THRESHOLD_FINAL:
+                if conf_final < calibration.conf_threshold_final:
                     # Sprint 4.1: Ce lien a été tué par la pénalité, pas par le LLM
                     dropped_by_penalty.append(link)
                     continue
@@ -1939,7 +2163,7 @@ class AssertionExtractorV2:
 
                 # Sprint 4: Signal fort (non-SINK) → permet d'éliminer SINK
                 is_sink = link.concept_id in sink_concept_ids
-                if not is_sink and (lex_bonus >= SINK_SIGNAL_FORT_THRESHOLD or sem_bonus >= SINK_SIGNAL_FORT_THRESHOLD):
+                if not is_sink and (lex_bonus >= calibration.sink_signal_fort_threshold or sem_bonus >= calibration.sink_signal_fort_threshold):
                     has_signal_fort = True
 
             if not scored:
@@ -1974,7 +2198,8 @@ class AssertionExtractorV2:
             if sink_scored and non_sink_scored:
                 best_non_sink_score = non_sink_scored[0][1]
                 route_to_sink = self._should_route_to_sink(
-                    best_non_sink_score, non_sink_scored, assertion_bonuses, assertion_sem_bonuses
+                    best_non_sink_score, non_sink_scored, assertion_bonuses, assertion_sem_bonuses,
+                    calibration=calibration,
                 )
 
                 if route_to_sink:
@@ -1985,7 +2210,7 @@ class AssertionExtractorV2:
                     )
                     continue
 
-                # Élimination SINK: si signal fort (bonus ≥ 1.15) → exclure SINK
+                # Élimination SINK: si signal fort → exclure SINK
                 if has_signal_fort:
                     scored = non_sink_scored
             elif sink_scored and not non_sink_scored:
@@ -1996,7 +2221,8 @@ class AssertionExtractorV2:
                 # Sprint 4.1: SINK pas proposé par le LLM mais non-SINK faibles
                 best_non_sink_score = non_sink_scored[0][1]
                 route_to_sink = self._should_route_to_sink(
-                    best_non_sink_score, non_sink_scored, assertion_bonuses, assertion_sem_bonuses
+                    best_non_sink_score, non_sink_scored, assertion_bonuses, assertion_sem_bonuses,
+                    calibration=calibration,
                 )
                 if route_to_sink and sink_concept_ids:
                     sink_id = next(iter(sink_concept_ids))
@@ -2017,7 +2243,7 @@ class AssertionExtractorV2:
             # Détection ambiguïté
             if len(scored) >= 2:
                 best_conf, second_conf = scored[0][1], scored[1][1]
-                if best_conf - second_conf < MARGIN_AMBIGUOUS:
+                if best_conf - second_conf < calibration.margin_ambiguous:
                     logger.info(
                         f"[OSMOSE:Rerank:AMBIGUOUS] {assertion_id}: "
                         f"{scored[0][0].concept_id} ({best_conf:.2f}) vs "
@@ -2069,7 +2295,120 @@ class AssertionExtractorV2:
                 f"neutre={neutral_count} ({neutral_count*100//max(metier_count,1)}%))"
             )
 
+        # Sprint 5: Sanity check auto-calibration
+        total_input = len(links_by_assertion)
+        if calibration.mode == "auto" and total_input > 0:
+            drop_rate = (total_input - total_promoted) / total_input if total_input > 0 else 0
+            sink_rate = is_sink_routed / total_promoted if total_promoted > 0 else 0
+            if drop_rate > 0.80 or sink_rate > 0.60:
+                logger.warning(
+                    f"[OSMOSE:Rerank:Calibration:Sanity] ALERTE "
+                    f"drop_rate={drop_rate:.0%} sink_rate={sink_rate:.0%} "
+                    f"— auto-calibration suspecte "
+                    f"(Q20={calibration.q20}, Q75={calibration.q75})"
+                )
+
         return filtered_links
+
+    # =========================================================================
+    # SINK RESCUE (Issue 5 — Post-traitement assertions orphelines)
+    # =========================================================================
+
+    def rescue_sink_assertions(
+        self,
+        links: List[ConceptLink],
+        concepts: List[Concept],
+        assertions: Optional[List[RawAssertion]] = None,
+    ) -> Tuple[List[ConceptLink], int]:
+        """
+        Post-traitement: tente de sauver les assertions SINK
+        par matching lexical pondéré IDF sur les triggers des concepts métier.
+
+        Args:
+            links: Liens concept après rerank
+            concepts: Liste complète des concepts
+            assertions: Assertions brutes (pour accéder au texte)
+
+        Returns:
+            (liens modifiés, nombre de rescued)
+        """
+        from knowbase.stratified.models import ConceptRole
+
+        RESCUE_STOPLIST = {
+            "security", "data", "system", "service", "management",
+            "access", "support", "cloud", "solution", "platform",
+        }
+
+        # Identifier les concept_ids SINK
+        sink_concept_ids = set()
+        for c in concepts:
+            if getattr(c, 'role', None) == ConceptRole.SINK:
+                sink_concept_ids.add(c.concept_id)
+
+        if not sink_concept_ids:
+            return links, 0
+
+        # Index assertion_id → texte
+        assertion_texts: Dict[str, str] = {}
+        if assertions:
+            for a in assertions:
+                assertion_texts[a.assertion_id] = a.text.lower()
+
+        # Construire triggers par concept (filtrer courts + stoplist)
+        concept_triggers: Dict[str, List[str]] = {}
+        trigger_concept_count: Counter = Counter()
+
+        for c in concepts:
+            if getattr(c, 'role', None) != ConceptRole.SINK:
+                triggers = [
+                    t.lower() for t in getattr(c, 'lexical_triggers', [])
+                    if len(t) >= 4 and t.lower() not in RESCUE_STOPLIST
+                ]
+                concept_triggers[c.concept_id] = triggers
+                for t in set(triggers):
+                    trigger_concept_count[t] += 1
+
+        total_concepts = len(concept_triggers)
+        if total_concepts == 0:
+            return links, 0
+
+        rescued = 0
+        for link in links:
+            if link.concept_id not in sink_concept_ids:
+                continue
+
+            # Texte de l'assertion (priorité) ou justification du lien (fallback)
+            text = assertion_texts.get(link.assertion_id, "")
+            if not text:
+                text = (link.justification or "").lower()
+            if not text:
+                continue
+
+            best_match = None
+            best_score = 0.0
+
+            for cid, triggers in concept_triggers.items():
+                score = 0.0
+                match_count = 0
+                for t in triggers:
+                    if t in text:
+                        match_count += 1
+                        idf = math.log(total_concepts / max(1, trigger_concept_count[t]))
+                        score += idf
+
+                if match_count >= 2 and score > best_score:
+                    best_match = cid
+                    best_score = score
+
+            if best_match:
+                link.concept_id = best_match
+                link.justification = f"[SINK_RESCUE score={best_score:.2f}] {link.justification or ''}"
+                rescued += 1
+
+        if rescued > 0:
+            logger.info(f"[OSMOSE:Rerank:SinkRescue] rescued={rescued} assertions from SINK")
+
+        return links, rescued
 
     # =========================================================================
     # PROMPTS PAR DÉFAUT
