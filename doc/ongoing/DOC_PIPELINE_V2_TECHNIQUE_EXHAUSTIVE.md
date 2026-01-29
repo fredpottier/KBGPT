@@ -2356,13 +2356,475 @@ Concept(
 
 ## 11. Pass 1.3 — Extraction d'Assertions
 
-<!-- À compléter : analyse détaillée de assertion_extractor.py, verbatim_validator.py -->
+**Fichier principal :** `src/knowbase/stratified/pass1/assertion_extractor.py` — classe `AssertionExtractorV2`
+**Validation verbatim :** `src/knowbase/stratified/pass1/verbatim_validator.py` — fonctions `validate_raw_assertions`, `BatchValidationStats`
+**Indexation unitaire (mode pointer) :** `src/knowbase/stratified/pass1/assertion_unit_indexer.py` — classe `AssertionUnitIndexer`
+**Schémas pointer :** `src/knowbase/stratified/pass1/pointer_schemas.py` — modèles Pydantic `PointerConcept`, `PointerExtractionResponse`
+**Validation pointer :** `src/knowbase/stratified/pass1/pointer_validator.py` — classe `PointerValidator`
+
+### 11.1 Entrants
+
+| Entrant | Type | Source | Description |
+|---------|------|--------|-------------|
+| `chunks` | `Dict[str, str]` | Pass 0 / Qdrant | Dictionnaire `chunk_id → texte`, segments issus de la segmentation documentaire |
+| `concepts` | `List[Concept]` | Pass 1.2 | Concepts identifiés pour le linking sémantique (avec `lexical_triggers`) |
+| `doc_language` | `Optional[str]` | Pass 1.1 | Langue du document (`fr`, `en`, etc.) |
+| `docitems` | `Dict[str, DocItem]` | Pass 0 Structural | DocItems pour le mode pointer (segmentation en unités) |
+| `global_view` (indirect) | `str` | Pass 0.9 | Le meta-document influence les concepts fournis en entrée |
+
+### 11.2 Objectifs
+
+Pass 1.3 extrait les **assertions sémantiques typées** du texte et les lie aux concepts identifiés en Pass 1.2. L'objectif est triple :
+
+1. **Extraction** — Identifier les assertions (phrases porteuses de connaissance) dans chaque chunk, les classifier par type (`DEFINITIONAL`, `PRESCRIPTIVE`, `FACTUAL`, `PERMISSIVE`, `CONDITIONAL`, `CAUSAL`, `COMPARATIVE`, `PROCEDURAL`).
+2. **Filtrage par Promotion Policy** — Appliquer une politique de promotion par type pour séparer les assertions promotionnables de celles qui seront ABSTAINED. Filtrer les méta-descriptions et fragments.
+3. **Liaison sémantique** — Relier chaque assertion aux concepts par raisonnement sémantique (pas matching lexical).
+
+**Sortie principale :** `List[RawAssertion]` — assertions brutes typées avec `chunk_id` (avant résolution d'ancrage en 1.3b).
+
+### 11.3 Mécanismes
+
+#### 11.3.1 Deux modes d'extraction
+
+L'extracteur supporte deux modes fondamentalement différents :
+
+**Mode classique** (`extract_assertions`) :
+- Le LLM extrait les assertions en **copiant** le texte source
+- Vulnérable à la reformulation (le LLM peut réécrire le texte au lieu de le citer)
+- Nécessite la validation verbatim (Volet A) en post-traitement
+
+**Mode pointer** (`extract_assertions_pointer_mode`) :
+- Les DocItems sont pré-segmentés en **unités numérotées** (U1, U2, U3...) par `AssertionUnitIndexer`
+- Le LLM **pointe** vers une unité au lieu de copier → élimine structurellement la reformulation
+- Le texte verbatim est reconstruit côté code depuis l'index des unités → **garanti exact**
+
+Le mode pointer est le mode cible pour la conformité North Star NS-3 (citation exacte obligatoire).
+
+#### 11.3.2 Extraction parallèle (mode classique)
+
+L'extraction opère en parallèle via `ThreadPoolExecutor` :
+
+```python
+# Configuration
+max_workers = int(os.environ.get("OSMOSE_LLM_WORKERS", 8))
+# Filtrage: chunks < 50 chars ignorés
+# Texte tronqué à 2000 chars par chunk pour le prompt LLM
+```
+
+**Pipeline par chunk :**
+1. Envoi du chunk au LLM avec prompt d'extraction (`pass1_prompts.yaml`, clé `assertion_extraction`)
+2. Parse de la réponse JSON → liste de `RawAssertion`
+3. Fallback heuristique si le LLM échoue (`_extract_heuristic`)
+
+**Structure de `RawAssertion` :**
+
+```python
+RawAssertion(
+    assertion_id="assert_a1b2c3d4",   # UUID tronqué
+    text="TLS 1.2 is required...",     # Texte extrait (copie ou verbatim)
+    assertion_type=AssertionType.PRESCRIPTIVE,
+    chunk_id="chunk_42",               # Référence chunk source (PAS docitem_id)
+    start_char=145,                    # Position dans le chunk
+    end_char=287,
+    confidence=0.9,                    # Confiance LLM (debug uniquement)
+    language="en"
+)
+```
+
+#### 11.3.3 Extraction heuristique (fallback)
+
+Si le LLM est indisponible et `allow_fallback=True` (tests uniquement) :
+
+1. Découpage par regex `(?<=[.!?])\s+` (fin de phrase)
+2. Phrases < 20 chars ignorées
+3. Détection du type par patterns lexicaux :
+   - `must/shall/required/doit/obligatoire` → PRESCRIPTIVE
+   - `is defined as/refers to/est défini` → DEFINITIONAL
+   - `may/can/possible/peut` → PERMISSIVE
+   - `if/when/unless/si/lorsque` → CONDITIONAL
+   - `because/therefore/car/donc` → CAUSAL
+   - `step/first/then/étape` → PROCEDURAL
+   - Par défaut → FACTUAL
+4. Détection de la langue par comptage de mots-clés FR vs EN
+
+#### 11.3.4 Validation verbatim (Volet A — mode classique)
+
+La méthode `extract_and_validate_assertions()` combine extraction + validation :
+
+1. Extraction classique des assertions via LLM
+2. Appel à `validate_raw_assertions()` (module `verbatim_validator`)
+3. Vérification que chaque assertion est une **copie exacte** du texte source (substring match dans le chunk)
+4. Les assertions reformulées par le LLM sont rejetées avec raison `ABSTAIN(reformulation)`
+5. **Alerte** si taux de reformulation > 10% : le LLM ne respecte pas l'instruction « texte EXACT »
+
+Cette validation est conforme à NS-2 (LLM = extracteur evidence-locked) et NS-3 (citation exacte).
+
+#### 11.3.5 Assertion Unit Indexer (mode pointer)
+
+**Fichier :** `assertion_unit_indexer.py` — classe `AssertionUnitIndexer`
+
+Segmente les DocItems en **unités d'assertion** atomiques pour le mode pointer :
+
+**Stratégie de segmentation :**
+
+| Cas | Entrée | Comportement |
+|-----|--------|--------------|
+| Type atomique | `list_item`, `bullet`, `table_cell` | → une seule unité U1 |
+| Paragraphe/autre | Texte libre | → segmentation intelligente (phrases + clauses) |
+| Segment trop long | > `max_unit_length` (500 chars) | → re-découpage sur virgules |
+| Segment trop court | < `min_unit_length` (30 chars) | → ignoré |
+
+**Segmentation intelligente :**
+
+1. **Découpage en phrases** (`_split_sentences`) avec protection des abréviations :
+   - Points précédés d'un mot court (1-3 lettres) → probablement abréviation (sauf si suivi de majuscule)
+   - Points internes à un token (i.e., e.g.) → abréviation
+   - Versions (1.2, 2.0.1) → pas de coupure
+   - Acronymes pointés (U.S.) → pas de coupure
+
+2. **Découpage en clauses** (`_split_clauses`) — conditionnel :
+   - Split sur `;` uniquement en contexte prescriptif (marqueurs : must, shall, doit, obligatoire...)
+   - Split sur `:` uniquement si suivi d'une liste (bullets ou ≥2 virgules), PAS si suivi d'une valeur courte (version, taille, protocole)
+
+3. **Re-découpage** des segments > 500 chars sur virgules
+
+**Structure de `AssertionUnit` :**
+
+```python
+AssertionUnit(
+    unit_local_id="U1",                    # ID local au DocItem
+    docitem_id="tenant:doc:item_42",       # Référence DocItem parent
+    text="TLS 1.2 is required...",         # Texte verbatim (readonly)
+    char_start=0,                          # Position dans DocItem.text
+    char_end=42,
+    unit_type="sentence"                   # sentence | clause | bullet | segment | table_row
+)
+# unit_global_id → "tenant:doc:item_42#U1" (calculé, jamais stocké)
+```
+
+**Indexation des tables** (`index_table_rows`) : chaque row devient une unité avec format canonique trié alphabétiquement : `"Header1: Cell1 | Header2: Cell2 | ..."`.
+
+**Helpers :**
+- `format_units_for_llm(units)` → formate en `"U1: text\nU2: text\n..."` pour le prompt LLM
+- `lookup_unit_text(index, docitem_id, unit_local_id)` → retrouve le texte verbatim depuis l'index
+
+#### 11.3.6 Schémas Pointer (Pydantic)
+
+**Fichier :** `pointer_schemas.py`
+
+Modèles Pydantic pour structurer l'output LLM en mode pointer :
+
+**`PointerConcept`** — Concept pointé par le LLM :
+
+```python
+class PointerConcept(BaseModel):
+    label: str       # max 100 chars, "2-5 mots"
+    type: Literal["PRESCRIPTIVE", "DEFINITIONAL", "FACTUAL", "PERMISSIVE"]
+    unit_id: str     # Validé par regex "^U\d+$"
+    confidence: float  # [0.0, 1.0] — IGNORÉE pour la promotion, debug uniquement
+    value_kind: Optional[str]  # version, percentage, size, number, duration, etc.
+```
+
+**`PointerExtractionResponse`** — Réponse complète : `{ "concepts": [PointerConcept, ...] }`
+
+**Progression du modèle de données :**
+
+```
+ConceptCandidate (top-down, sans preuve)
+    ↓ extraction pointer + validation 3 niveaux
+ConceptAnchored (avec preuve validée, exploitable dans le KG)
+    ├── exact_quote: str          # Texte verbatim GARANTI (depuis index)
+    ├── anchor: Anchor            # docitem_id + unit_id + char_start/end
+    ├── validation_status: str    # "VALID" ou "DOWNGRADED"
+    └── validation_score: float   # Score lexical
+```
+
+**Fonctions helpers :**
+- `get_pointer_extraction_schema()` → JSON Schema pour vLLM structured outputs
+- `parse_pointer_response(json_str)` → Validation Pydantic de la réponse
+- `pointer_to_anchored(pointer, unit_text, anchor, ...)` → Conversion PointerConcept → ConceptAnchored
+
+#### 11.3.7 Pointer Validator — Validation 3 niveaux
+
+**Fichier :** `pointer_validator.py` — classe `PointerValidator`
+
+Valide chaque concept pointé par le LLM avec 3 niveaux de vérification **déterministes** (la confidence LLM n'est JAMAIS utilisée pour la décision) :
+
+**Niveau 1 — Support Lexical (score pondéré ≥ 1.5) :**
+
+| Composante | Score | Condition |
+|------------|-------|-----------|
+| Token exact du label (word boundary) | +1.0 par token | Matching `\b{token}\b`, ignorer tokens < 3 chars, max 2 tokens scorés |
+| Motif valeur dans l'unité | +1.0 | Si `value_kind` spécifié : vérifier le pattern exact. Sinon : vérifier pattern générique (`\d+(\.\d+)*\s*(%|GB|...)?`) |
+
+→ Si score < 1.5 → **ABSTAIN** (raison : `no_lexical_support`)
+
+**Niveau 2 — Type Markers (cohérence type/contenu) :**
+
+- Si type = `PRESCRIPTIVE` mais absence de marqueurs prescriptifs (must, shall, required, doit, obligatoire...) → **DOWNGRADE** vers `DEFINITIONAL`
+- Configurable via `strict_type_markers` (défaut : activé)
+
+**Niveau 3 — Value Patterns (si kind spécifié) :**
+
+| Kind | Pattern regex | Exemples |
+|------|---------------|----------|
+| `version` | `\d+(\.\d+)+` | 1.2, 3.0.1 |
+| `percentage` | `\d+\s*%` | 99.9% |
+| `size` | `\d+\s*(GB\|TB\|MB\|TiB\|GiB\|KB\|KiB)` | 256 GB |
+| `number` | `\d+` | 42 |
+| `boolean` | `\b(true\|false\|yes\|no\|enabled\|disabled)\b` | enabled |
+| `duration` | `\d+\s*(ms\|s\|sec\|min\|hour\|h\|day\|d\|week\|month\|year)` | 30 min |
+
+→ Si kind spécifié mais pattern absent → **ABSTAIN** (raison : `value_pattern_mismatch`)
+
+**Résultat final :**
+
+| Statut | Signification |
+|--------|---------------|
+| `VALID` | Concept validé, peut être promu |
+| `DOWNGRADE` | Type modifié (ex: PRESCRIPTIVE → DEFINITIONAL), concept conservé |
+| `ABSTAIN` | Concept rejeté — ne sera pas promu |
+
+**Reconstruction du texte verbatim :**
+
+La fonction `reconstruct_exact_quote(unit_index, docitem_id, unit_id)` est LA garantie anti-reformulation : le texte vient TOUJOURS de l'index, JAMAIS du LLM. C'est le mécanisme central de conformité NS-3.
+
+#### 11.3.8 Filtrage par Promotion Policy
+
+La méthode `filter_by_promotion_policy()` filtre les assertions **avant** le linking :
+
+**Pré-filtres :**
+1. **Méta-descriptions** : détection via `promotion_engine.is_meta_pattern()` — filtre les assertions qui décrivent la page au lieu d'informer (ex: « La page présente un modèle de déploiement »)
+2. **Fragments** : détection via `promotion_engine.is_fragment()` — filtre les non-assertions (noms seuls, texte sans verbe)
+
+**Politique de promotion par type :**
+
+| Type d'assertion | Tier | Condition de promotion |
+|-----------------|------|----------------------|
+| `DEFINITIONAL` | ALWAYS | Toujours promu si lié à un concept |
+| `PRESCRIPTIVE` | ALWAYS | Toujours promu si lié à un concept |
+| `CAUSAL` | ALWAYS | Toujours promu si lié à un concept |
+| `FACTUAL` | CONDITIONAL | Promu si `strict_promotion=False` ET `confidence ≥ 0.7` |
+| `CONDITIONAL` | CONDITIONAL | Promu si `strict_promotion=False` ET `confidence ≥ 0.7` |
+| `PERMISSIVE` | CONDITIONAL | Promu si `strict_promotion=False` ET `confidence ≥ 0.7` |
+| `COMPARATIVE` | RARELY | Promu si `strict_promotion=False` ET `confidence ≥ 0.9` |
+| `PROCEDURAL` | NEVER | Jamais promu en Information |
+
+Cette politique est conforme à NS-9 (Promotion Policy par type).
+
+#### 11.3.9 Liaison sémantique assertions ↔ concepts
+
+La méthode `link_to_concepts()` établit les liens entre assertions et concepts :
+
+**Par LLM** (`_link_via_llm`) :
+- Batching parallèle : si > 30 assertions, découpage en batches de 30
+- Chaque batch traité en parallèle via `ThreadPoolExecutor`
+- Le LLM raisonne **sémantiquement** (pas matching lexical) — une assertion peut concerner un concept sans le mentionner, cross-langue FR/EN
+- Types de liens : `defines`, `describes`, `constrains`, `enables`, `conditions`, `causes`
+
+**Format multi-concept (V2.1)** :
+- Une assertion peut être liée à 1-5 concepts via `MultiConceptLink`
+- Filtrage C3 v2 anti "spray & pray" avec soft gate + hard gate :
+  - **Soft gate** : pas de trigger lexical dans l'assertion → `confidence -= 0.20`
+  - **Hard gate** : pas de trigger ET pas de token du nom du concept ET `confidence_adj < 0.55` → rejet
+  - Seuils : `MIN_LINK_CONFIDENCE = 0.70`, `MAX_LINKS_PER_ASSERTION = 5`
+  - Règle top-k : si écart entre top-1 et top-2 ≤ 0.10, garder les deux
+
+**Par heuristique** (fallback) :
+- Matching lexical des variantes du concept (nom, variants, acronyme) dans le texte de l'assertion
+- Génération d'acronymes à partir du nom multi-mots
+- Confiance fixée à 0.6
+
+#### 11.3.10 Enrichissement MVP V1 (Information-First)
+
+La méthode `enrich_with_mvp_v1()` enrichit les assertions avec les capacités Information-First :
+
+1. **Extraction de valeurs** via `ValueExtractor` : percent, version, number, boolean, enum
+2. **Inférence ClaimKey Level A** via `ClaimKeyPatterns` : patterns sans LLM
+3. **Évaluation promotion MVP V1** via `PromotionPolicy` : statuts `PROMOTED_LINKED`, `PROMOTED_UNLINKED`, rejet
+
+**Invariant 1 :** alerte si assertions UNLINKED > 10% du total (indicateur de patterns ClaimKey insuffisants).
+
+### 11.4 Outputs
+
+| Sortie | Type | Description | Consommateur |
+|--------|------|-------------|--------------|
+| `assertions` | `List[RawAssertion]` | Assertions brutes avec `chunk_id`, type, positions | Pass 1.3b (ancrage), Pass 1.4 (promotion) |
+| `links` | `List[ConceptLink]` | Liens assertion → concept avec type, justification, confiance | Pass 1.3b (ancrage), Pass 1.4 (promotion) |
+| `promotion_result` | `PromotionResult` | Assertions promotionnables + abstenues avec raisons | Pass 1.4 |
+| `verbatim_stats` | `BatchValidationStats` | Statistiques de validation verbatim (mode classique) | Diagnostic, logs |
+| `unit_index` (mode pointer) | `Dict[str, UnitIndexResult]` | Index des unités par DocItem | Pointer Validator, reconstruction verbatim |
+| `enriched` (MVP V1) | `List[EnrichedAssertion]` | Assertions avec valeurs, ClaimKey, statut promotion | Pass 1.4 (Value Contract) |
+
+### 11.5 Conformité ADR — Pass 1.3
+
+| Axe | Exigence | Statut | Implémentation | Commentaire |
+|-----|----------|--------|----------------|-------------|
+| NS-2 | **LLM = Extracteur evidence-locked** | ✅ | Le LLM extrait les assertions, la validation (verbatim, pointer, promotion policy) est algorithmique post-LLM. La confidence LLM est explicitement ignorée pour les décisions de promotion dans le mode pointer. | Conforme. La séparation extraction/validation est claire et implémentée. |
+| NS-3 | **Citation exacte obligatoire** | ✅ | Deux mécanismes complémentaires : (1) validation verbatim post-extraction (mode classique), (2) reconstruction depuis index (mode pointer). Le mode pointer **garantit structurellement** le verbatim. | Le mode pointer est la solution cible. Le mode classique reste vulnérable si la validation est contournée. |
+| NS-9 | **Promotion Policy par type** | ✅ | Politique `ALWAYS/CONDITIONAL/RARELY/NEVER` conforme à la spécification NS-9. Les types ALWAYS sont : DEFINITIONAL, PRESCRIPTIVE, CAUSAL. PROCEDURAL est NEVER. | Implémentation fidèle à l'ADR. |
+| AV2-7 | **Top-down** | ✅ | L'extraction d'assertions (1.3) arrive APRÈS l'identification des concepts (1.2). Le linking est guidé par les concepts existants. | Séquence top-down respectée. |
+| NS-7 | **Addressability-First** | ⚠️ | Les assertions sont liées aux concepts, mais le linking multi-concept V2.1 peut créer des liens de faible confiance. Le filtrage C3 v2 (soft/hard gate) mitigue ce risque mais n'est pas parfait. | Le hard gate à 0.55 pourrait laisser passer des liens faibles. |
+| NS-1 | **Information-First** | ⚠️ | L'enrichissement MVP V1 (`enrich_with_mvp_v1`) permet la promotion UNLINKED (sans concept). Cependant, la méthode `filter_by_promotion_policy()` rejette les assertions PROCEDURAL inconditionnellement. | La promotion UNLINKED adresse NS-1 mais n'est pas systématiquement activée (dépend du flag `strict_promotion`). |
+
+### 11.6 Risques — Pass 1.3
+
+| ID | Risque | Sévérité | Description | Mitigation |
+|----|--------|----------|-------------|------------|
+| R13-1 | **Reformulation LLM (mode classique)** | 🟡 | Le LLM (Qwen notamment) reformule au lieu de citer verbatim. La validation verbatim rejette ces assertions, ce qui réduit le yield. | Le mode pointer élimine structurellement ce risque. La validation verbatim détecte et rejette les reformulations avec alerte si taux > 10%. |
+| R13-2 | **Coexistence de deux modes d'extraction** | 🟡 | Le mode classique et le mode pointer coexistent, créant une dette architecturale. Les outputs ne sont pas strictement identiques (RawAssertion vs PointerConcept). | Convergence progressive vers le mode pointer uniquement. Les deux modes partagent la même Promotion Policy. |
+| R13-3 | **Seuil lexical du Pointer Validator** | 🟡 | Le seuil de 1.5 pour le score lexical peut être trop strict pour des concepts avec des labels courts (2 tokens significatifs = score max 2.0 + value pattern). Un concept pertinent mais avec un label peu discriminant pourrait être rejeté. | Le score value pattern (+1.0) compense pour les assertions avec des valeurs numériques. Les labels de 2-5 mots (contrainte PointerConcept) donnent généralement 2 tokens significatifs. |
+| R13-4 | **Spray & Pray malgré le filtre C3 v2** | 🟢 | Le LLM peut proposer des liens multiples de faible qualité pour une assertion. Le hard gate (pas de signal lexical + conf_adj < 0.55) peut laisser passer des faux positifs. | Le soft gate (-0.20 sans trigger) + le cap à 5 liens max + le seuil 0.70 sur confidence ajustée limitent l'inflation. Le filtrage est documenté et ajustable. |
+| R13-5 | **Troncature du texte à 2000 chars** | 🟢 | Les chunks > 2000 chars sont tronqués pour le prompt LLM, ce qui peut couper des assertions en fin de chunk. | La segmentation en chunks devrait produire des segments < 2000 chars en général. Les assertions tronquées seraient détectées par la validation verbatim (position incorrecte). |
+| R13-6 | **Fallback heuristique en production** | 🔴 | Si `allow_fallback=True` est activé en production, les assertions heuristiques (confiance fixe 0.5, types approximatifs) polluent le graphe. | Le flag `allow_fallback` est documenté comme « test only ». Un garde-fou `RuntimeError` bloque l'extraction sans LLM si fallback désactivé. |
+| R13-7 | **Pré-filtres méta-descriptions et fragments** | 🟢 | Les pré-filtres (`is_meta_pattern`, `is_fragment`) dépendent du module `promotion_engine` qui est importé dynamiquement. Si les patterns sont incomplets, des méta-descriptions passent le filtre. | Les patterns couvrent EN + FR. L'import dynamique permet de mettre à jour les patterns sans modifier l'extracteur. |
 
 ---
 
 ## 12. Pass 1.3b — Résolution d'Ancrage
 
-<!-- À compléter : analyse détaillée de anchor_resolver.py -->
+**Fichier principal :** `src/knowbase/stratified/pass1/anchor_resolver.py` — classe `AnchorResolverV2`
+**Utilitaire :** `anchor_resolver.py` — fonction `build_chunk_to_docitem_mapping()`
+**Modèles :** `src/knowbase/stratified/models/` — `Anchor`, `DocItem`, `AssertionLogReason`
+
+### 12.1 Entrants
+
+| Entrant | Type | Source | Description |
+|---------|------|--------|-------------|
+| `assertions` | `List[RawAssertion]` | Pass 1.3 | Assertions brutes avec `chunk_id` |
+| `links` | `List[ConceptLink]` | Pass 1.3 | Liens assertion → concept (seules les assertions liées sont ancrées) |
+| `chunk_to_docitem_map` | `Dict[str, List[str]]` | Construit dynamiquement | Mapping `chunk_id → [docitem_ids]` |
+| `docitems` | `Dict[str, DocItem]` | Pass 0 Structural | Dictionnaire des DocItems avec leur texte |
+| `chunks` | `Dict[str, str]` | Pass 0 | Dictionnaire `chunk_id → texte du chunk` |
+
+### 12.2 Objectifs
+
+Pass 1.3b est une **phase critique** qui convertit les ancrages `chunk_id → docitem_id`. Cette conversion est nécessaire car :
+
+1. **Les assertions sont extraites depuis des chunks** (segments Qdrant, compatibilité vectorielle)
+2. **Le graphe sémantique ancre sur des DocItems** (surface de preuve atomique, grain Docling natif)
+3. **L'invariant V2-001** impose : « Chaque Information DOIT avoir `ANCHORED_IN → DocItem` »
+4. **L'invariant V2-002** impose : « `ANCHORED_IN` ne doit JAMAIS viser autre chose que `DocItem` »
+
+**Sortie principale :** Pour chaque assertion liée à un concept, un `Anchor` contenant `docitem_id`, `span_start`, `span_end`, ou un échec typé (`NO_DOCITEM_ANCHOR`, `CROSS_DOCITEM`, `AMBIGUOUS_SPAN`).
+
+### 12.3 Mécanismes
+
+#### 12.3.1 Construction du mapping chunk → DocItem
+
+La fonction `build_chunk_to_docitem_mapping()` construit le mapping initial :
+
+**Stratégie 1 — Convention de nommage :**
+- Si `chunk_id` contient un `docitem_id` (ex: `"chunk_docitem_123_0"`) → mapping direct
+
+**Stratégie 2 — Matching par texte :**
+- Si le texte du chunk est contenu dans un DocItem (ou vice versa) → mapping par inclusion
+- Si le ratio de similarité (`SequenceMatcher`) > 0.8 → mapping par fuzzy
+
+Un chunk peut correspondre à **plusieurs** DocItems (cas de chunks agrégés).
+
+#### 12.3.2 Résolution par assertion
+
+La méthode `resolve_all()` traite toutes les assertions :
+
+1. **Filtrage** : seules les assertions **liées à un concept** (présentes dans `links`) sont traitées
+2. **Assertions non liées** → échec avec raison `NO_CONCEPT_MATCH` (utilisé par Pass 1.2b pour le raffinement itératif)
+3. Pour chaque assertion liée → `resolve_single()`
+
+#### 12.3.3 Stratégies de résolution (resolve_single)
+
+La résolution procède par escalade :
+
+```
+Stratégie 1: Mapping direct chunk → DocItem
+    → Si mapping existe ET 1 seul DocItem → résolution directe
+    → Si mapping existe ET plusieurs DocItems → resolve_in_multiple_docitems
+
+Stratégie 2: Si pas de mapping → recherche texte dans TOUS les DocItems
+    → resolve_by_text_search
+```
+
+**Résolution dans un DocItem unique** (`_resolve_in_single_docitem`) :
+
+1. Recherche **exacte** du texte de l'assertion dans le texte du DocItem (`str.find()`)
+2. Si échec → recherche avec **normalisation des espaces** (collapse whitespace)
+3. Si échec → vérification de l'**overlap** (similarité ≥ 0.5) avec positions approximatives
+4. Si échec → `AMBIGUOUS_SPAN`
+
+**Résolution dans plusieurs DocItems** (`_resolve_in_multiple_docitems`) :
+
+1. Pour chaque DocItem candidat → recherche exacte du span
+2. Si match exact trouvé → résolution immédiate
+3. Si aucun match exact → calcul de similarité fuzzy (`SequenceMatcher`) pour chaque candidat
+4. Si meilleur score ≥ `FUZZY_THRESHOLD` (0.85) → résolution avec span approximatif
+5. Si score > 0.3 mais < 0.85 → `CROSS_DOCITEM` (l'assertion chevauche plusieurs DocItems)
+6. Sinon → `NO_DOCITEM_ANCHOR`
+
+**Recherche globale** (`_resolve_by_text_search`) :
+
+- Parcours de TOUS les DocItems
+- Match exact prioritaire
+- Fallback fuzzy si seuil ≥ 0.85
+- Dernière option → `NO_DOCITEM_ANCHOR` avec détail du meilleur score
+
+#### 12.3.4 Mapping de position normalisée
+
+La méthode `_map_normalized_position()` convertit les positions du texte normalisé (espaces collapsés) vers le texte original par **ratio linéaire** :
+
+```python
+ratio_start = norm_start / len(normalized)
+orig_start = int(ratio_start * len(original))
+```
+
+⚠️ **Approximation** : cette heuristique est imprécise pour les textes avec des séquences d'espaces variables. Le span résultant est indicatif.
+
+### 12.4 Outputs
+
+| Sortie | Type | Description | Consommateur |
+|--------|------|-------------|--------------|
+| `resolved` | `List[Tuple[RawAssertion, Anchor, concept_id]]` | Assertions ancrées avec succès | Pass 1.4 (promotion → Information) |
+| `failed` | `List[Tuple[RawAssertion, AssertionLogReason, details]]` | Assertions en échec d'ancrage | AssertionLog (audit), Pass 1.2b (raffinement) |
+| `stats` | `AnchorResolverStats` | Statistiques : total, resolved, no_docitem, cross_docitem, ambiguous_span | Diagnostic, logs |
+
+**Structure de `Anchor` :**
+
+```python
+Anchor(
+    docitem_id="tenant:doc:item_42",  # ID composite du DocItem
+    span_start=145,                    # Position début dans DocItem.text
+    span_end=287                       # Position fin dans DocItem.text
+)
+```
+
+**Raisons d'échec :**
+
+| Raison | Description | Conséquence |
+|--------|-------------|-------------|
+| `NO_DOCITEM_ANCHOR` | Aucun DocItem correspondant trouvé | L'assertion ne peut pas devenir Information (pas de preuve) |
+| `CROSS_DOCITEM` | L'assertion chevauche plusieurs DocItems | Violation potentielle d'AV2-4 (DocItem atomique) |
+| `AMBIGUOUS_SPAN` | DocItem trouvé mais position exacte indéterminée | Span approximatif, preuve faible |
+| `NO_CONCEPT_MATCH` | Assertion non liée à aucun concept | Non traitée par l'ancrage (filtrée en amont) |
+
+### 12.5 Conformité ADR — Pass 1.3b
+
+| Axe | Exigence | Statut | Implémentation | Commentaire |
+|-----|----------|--------|----------------|-------------|
+| AV2-3 | **Ancrage Information sur DocItem** | ✅ | L'invariant V2-001 est le cœur de cette phase. Chaque assertion résolue obtient un `Anchor` avec `docitem_id`. Les échecs sont loggués mais jamais contournés (pas de fallback sur chunk). | Conforme. Aucune Information ne peut exister sans ancrage DocItem. |
+| AV2-4 | **DocItem atomique** | ⚠️ | Les cas `CROSS_DOCITEM` sont détectés et rejetés. Cependant, le fuzzy matching (seuil 0.85) peut créer des ancrages approximatifs sur un DocItem qui ne contient pas exactement l'assertion. | Le seuil fuzzy est un compromis pragmatique. Les assertions reformulées (qui ne matchent pas exactement) sont les plus vulnérables. |
+| NS-3 | **Citation exacte obligatoire** | ⚠️ | La recherche exacte (`str.find`) garantit la citation verbatim. Mais le fallback fuzzy (SequenceMatcher ≥ 0.85) et le mapping par ratio linéaire (`_map_normalized_position`) créent des spans approximatifs. | Le span exact n'est garanti que pour les matchs `str.find()`. Les résolutions fuzzy produisent un span indicatif. |
+| AV2-5 | **AssertionLog avec statut enum** | ✅ | Les échecs utilisent `AssertionLogReason` standardisé (`NO_DOCITEM_ANCHOR`, `CROSS_DOCITEM`, `NO_CONCEPT_MATCH`). | Conforme. Les raisons sont des enum typés avec description détaillée. |
+| NS-2 | **LLM = Extracteur, pas arbitre** | ✅ | La résolution d'ancrage est **100% algorithmique** — aucun appel LLM. Le LLM a extrait en 1.3, le code résout les ancrages en 1.3b. | Séparation parfaite extraction/résolution. |
+
+### 12.6 Risques — Pass 1.3b
+
+| ID | Risque | Sévérité | Description | Mitigation |
+|----|--------|----------|-------------|------------|
+| R13b-1 | **Mapping chunk → DocItem fragile** | 🟡 | Le mapping repose sur la convention de nommage (`docitem_id in chunk_id`) ou sur le matching texte. Si les chunks sont segmentés différemment des DocItems (ce qui est courant), le mapping est incomplet. | Le fuzzy matching (seuil 0.8 pour le mapping, 0.85 pour la résolution) couvre les cas approximatifs. Mais l'absence de mapping déterministe est une dette technique. |
+| R13b-2 | **Perte d'assertions au CROSS_DOCITEM** | 🟡 | Les assertions qui chevauchent plusieurs DocItems sont rejetées (`CROSS_DOCITEM`). Cela peut représenter une perte significative pour les chunks agrégés (plusieurs paragraphes dans un chunk). | Le grain DocItem (Docling natif = paragraph, table-row, list-item) devrait minimiser les cas de chevauchement. Pass 1.2b peut récupérer ces assertions via raffinement. |
+| R13b-3 | **Span approximatif via ratio linéaire** | 🟡 | La méthode `_map_normalized_position()` utilise un ratio linéaire pour mapper les positions, ce qui est imprécis pour les textes avec des distributions irrégulières d'espaces. | La recherche exacte (`str.find`) est prioritaire. Le ratio n'est utilisé qu'en fallback pour les matchs normalisés. |
+| R13b-4 | **Performance O(n×m) sur le text search** | 🟢 | La recherche globale (`_resolve_by_text_search`) parcourt TOUS les DocItems pour chaque assertion sans mapping. Avec des documents volumineux (>1000 DocItems), cela peut être lent. | Le mapping chunk → DocItem réduit le périmètre de recherche dans la majorité des cas. La recherche globale est un fallback de dernier recours. |
+| R13b-5 | **Assertions non liées exclues de l'ancrage** | 🟢 | Les assertions sans `ConceptLink` sont marquées `NO_CONCEPT_MATCH` et non ancrées. Cela est cohérent avec le flux top-down mais signifie que Pass 1.2b est nécessaire pour les récupérer. | Conforme au design : l'ancrage ne sert que pour la promotion en Information. Les assertions orphelines sont traitées par le raffinement itératif. |
+| R13b-6 | **Mode pointer rend 1.3b moins critique** | 🟢 | En mode pointer, l'ancrage est intégré à l'extraction (le LLM pointe directement vers un DocItem/unité). Pass 1.3b n'est alors nécessaire que pour le mode classique. | La convergence vers le mode pointer uniquement réduira progressivement le rôle de 1.3b. |
 
 ---
 
