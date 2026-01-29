@@ -3651,9 +3651,375 @@ class Pass2Stats:
 
 ---
 
-## 15. Pass 3 — Consolidation Corpus
+## 15. Pass 3 — Consolidation Corpus (Entity Resolution Cross-Document)
 
-<!-- À compléter : analyse détaillée de pass3/ -->
+**Fichier principal :** `src/knowbase/stratified/pass3/entity_resolver.py` — classe `EntityResolverV2`
+**Orchestration :** `src/knowbase/stratified/pass3/orchestrator.py` — classe `Pass3OrchestratorV2`
+**Persistence :** `src/knowbase/stratified/pass3/persister.py` — classe `Pass3PersisterV2`
+**Modèle transverse :** `src/knowbase/stratified/models/contradiction.py` — classe `Contradiction`
+**ADR de référence :** `doc/ongoing/ARCH_STRATIFIED_PIPELINE_V2.md` (AV2-9), `doc/ongoing/ADR_NORTH_STAR_VERITE_DOCUMENTAIRE.md` (NS-4, NS-5, NS-10)
+
+> **Positionnement dans le pipeline :** Pass 3 est la seule phase opérant au **niveau corpus** (multi-documents). Toutes les passes précédentes (0 → 2) traitent un document unique. Pass 3 consolide le graphe sémantique en résolvant les entités identiques provenant de documents différents.
+
+### 15.1 Entrants
+
+| Entrant | Type | Source | Description |
+|---------|------|--------|-------------|
+| Concepts du corpus | `List[Concept]` | Neo4j (mode batch) | Tous les concepts persistés dans le graphe, chargés via requête Cypher sur `tenant_id` |
+| Thèmes du corpus | `List[Theme]` | Neo4j (mode batch) | Tous les thèmes persistés dans le graphe |
+| Nouveaux concepts | `List[Concept]` | Pass 1 (mode incrémental) | Concepts d'un nouveau document à intégrer |
+| CanonicalConcept existants | `List[CanonicalConcept]` | Neo4j (mode incrémental) | Concepts canoniques déjà créés par des exécutions précédentes |
+
+**Chargement depuis Neo4j (`_load_all_from_neo4j`) :**
+
+```cypher
+-- Concepts
+MATCH (c:Concept {tenant_id: $tenant_id})
+OPTIONAL MATCH (t:Theme)-[:HAS_CONCEPT]->(c)
+RETURN c.concept_id, c.name, c.role, c.variants, c.lex_key,
+       t.theme_id
+
+-- Thèmes
+MATCH (t:Theme {tenant_id: $tenant_id})
+RETURN t.theme_id, t.name
+
+-- CanonicalConcept existants (mode incrémental)
+MATCH (cc:CanonicalConcept {tenant_id: $tenant_id})
+OPTIONAL MATCH (cc)-[:SAME_AS]->(c:Concept)
+RETURN cc.canonical_id, cc.name, collect(c.concept_id) AS merged_from
+```
+
+### 15.2 Objectifs
+
+Pass 3 réalise la **consolidation au niveau corpus** du graphe sémantique en :
+
+1. **Résolution d'entités cross-documents** — Identifier les concepts identiques provenant de documents différents et les fusionner en `CanonicalConcept`.
+2. **Alignement de thèmes cross-documents** — Regrouper les thèmes similaires provenant de documents différents en `CanonicalTheme`.
+3. **Création de la couche canonique** — Établir les relations `SAME_AS` (concepts) et `ALIGNED_TO` (thèmes) entre entités canoniques et entités sources.
+4. **Support dual mode** — Fonctionner en mode **batch** (traitement complet du corpus) ou **incrémental** (intégration d'un nouveau document).
+
+### 15.3 Mécanismes
+
+#### 15.3.1 Orchestration (`Pass3OrchestratorV2`)
+
+L'orchestrateur expose deux modes d'exécution définis par l'enum `Pass3Mode` :
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Mode BATCH                                               │
+│   Neo4j (all Concepts+Themes)                            │
+│     → EntityResolverV2.resolve()                         │
+│       → _cluster_concepts() → _create_canonical_concepts │
+│       → _cluster_themes()   → _create_canonical_themes   │
+│     → Pass3PersisterV2.persist()                         │
+│       → Neo4j (CanonicalConcept, CanonicalTheme)         │
+└──────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────┐
+│ Mode INCREMENTAL                                         │
+│   new_concepts (Pass 1) + existing_canonical (Neo4j)     │
+│     → EntityResolverV2.resolve_incremental()             │
+│       → Matching par nom/variantes                       │
+│       → Fusion ou création de nouveaux canoniques        │
+│     → Pass3PersisterV2.persist() (si nouveaux canoniques)│
+└──────────────────────────────────────────────────────────┘
+```
+
+**Points d'entrée :**
+
+| Méthode | Mode | Source des données | Usage |
+|---------|------|--------------------|-------|
+| `process_batch(persist=True)` | BATCH | Neo4j (tout le corpus) | Reconsolidation complète |
+| `process_incremental(new_concepts, persist=True)` | INCREMENTAL | `List[Concept]` en mémoire + Neo4j | Ajout d'un document |
+| `run_pass3_batch(neo4j_driver, ...)` | BATCH | Wrapper utilitaire stateless | Script / CLI |
+| `run_pass3_incremental(new_concepts, ...)` | INCREMENTAL | Wrapper utilitaire stateless | Script / CLI |
+
+**Préconditions :**
+
+- Mode batch : `neo4j_driver` obligatoire (sinon `RuntimeError`)
+- Mode incrémental : les CanonicalConcept existants sont chargés via `_load_canonical_concepts()`
+- Dépendances injectées : `llm_client`, `embedding_client`, `neo4j_driver` (tous optionnels sauf Neo4j en batch)
+
+#### 15.3.2 Clustering de concepts (`EntityResolverV2`)
+
+Le cœur de Pass 3 est le **clustering de concepts** similaires provenant de documents différents. L'algorithme utilise une stratégie en 3 niveaux de priorité décroissante :
+
+**Stratégie 1 — Matching exact par `lex_key` :**
+
+```python
+# Index par lex_key
+by_lex_key: Dict[str, List[Concept]] = {}
+for concept in concepts:
+    if concept.lex_key:
+        by_lex_key[concept.lex_key].append(concept)
+```
+
+Tous les concepts partageant la même `lex_key` (clé lexicale normalisée) sont regroupés dans un même `ConceptCluster`. Cette stratégie produit des clusters de haute confiance car la `lex_key` est une forme canonique calculée en Pass 1.2.
+
+**Stratégie 2 — Matching par variantes :**
+
+Pour les concepts non assignés par la stratégie 1, le système cherche une intersection entre les ensembles `{name, variants}` de chaque concept et ceux des concepts déjà clusterisés :
+
+```python
+concept_names = {concept.name.lower()} | {v.lower() for v in concept.variants}
+other_names = {other.name.lower()} | {v.lower() for v in other.variants}
+if concept_names & other_names:  # Intersection non vide
+    → merge dans le cluster existant
+```
+
+**Stratégie 3 — Similarité par embeddings (prévue, non implémentée) :**
+
+Le paramètre `embedding_client` est accepté par le constructeur mais la stratégie de clustering par similarité sémantique (cosine similarity sur embeddings) n'est **pas encore implémentée**. Le seuil `SIMILARITY_THRESHOLD = 0.85` est défini comme constante de classe mais non utilisé dans le code actuel.
+
+**Concepts orphelins :** Les concepts qui ne matchent aucun cluster existant sont placés dans des **clusters singletons** (un concept = un cluster). Ces singletons ne génèrent pas de `CanonicalConcept` (voir §15.3.3).
+
+#### 15.3.3 Création des CanonicalConcept
+
+Un `CanonicalConcept` est créé **uniquement si le cluster contient ≥ 2 concepts** (fusion effective) :
+
+```python
+for cluster in clusters:
+    if len(cluster.concept_ids) > 1:  # Seulement si fusion
+        cc = CanonicalConcept(
+            canonical_id=f"canonical_{cluster.cluster_id}",
+            name=cluster.representative_name,    # Nom du premier concept
+            merged_from=cluster.concept_ids       # IDs de tous les concepts fusionnés
+        )
+```
+
+Le nom représentatif est celui du **premier concept du cluster** (ordre d'insertion). Pas de sélection heuristique du meilleur nom.
+
+#### 15.3.4 Clustering de thèmes (`_cluster_themes`)
+
+Les thèmes sont clusterisés par **nom normalisé exact** (lowercase + strip) :
+
+```python
+norm_name = theme.name.lower().strip()
+by_name[norm_name].append(theme)
+```
+
+Création de `CanonicalTheme` uniquement si ≥ 2 thèmes partagent le même nom normalisé.
+
+**⚠️ Déviation notable :** Contrairement au clustering de concepts (qui utilise `lex_key` + variantes), le clustering de thèmes ne dispose d'aucun mécanisme de matching sémantique. Seule la correspondance exacte de noms (après normalisation) est utilisée.
+
+#### 15.3.5 Résolution incrémentale (`resolve_incremental`)
+
+Le mode incrémental traite un nouvel ensemble de concepts par rapport aux `CanonicalConcept` existants :
+
+1. **Construction d'un index** `nom_normalisé → CanonicalConcept` à partir des canoniques existants.
+2. **Pour chaque nouveau concept :**
+   - Match par nom exact (`concept.name.lower()` dans l'index)
+   - Match par variantes (`variant.lower()` dans l'index)
+   - Si match : fusion (`concept_id` ajouté à `merged_from` du canonique existant)
+   - Si pas de match : **aucune action** (pas de création de singleton en mode incrémental — attente du prochain batch)
+3. **Retour** : `(updated_canonical, mapping)` où `mapping` associe chaque `concept_id` au `canonical_id` correspondant.
+
+**Point notable :** Le mode incrémental est **conservateur** — il ne crée jamais de nouveau `CanonicalConcept`. Les concepts sans match restent isolés jusqu'au prochain batch. Cette stratégie évite la prolifération de canoniques singletons.
+
+#### 15.3.6 Persistence Neo4j (`Pass3PersisterV2`)
+
+**Modèle de persistance :**
+
+```
+CanonicalConcept -[:SAME_AS]-> Concept     (pour chaque concept fusionné)
+CanonicalTheme   -[:ALIGNED_TO]-> Theme    (pour chaque thème aligné)
+```
+
+**Transaction CanonicalConcept (`_create_canonical_concept_tx`) :**
+
+```cypher
+-- Créer/mettre à jour le nœud CanonicalConcept
+MERGE (cc:CanonicalConcept {canonical_id: $canonical_id, tenant_id: $tenant_id})
+SET cc.name = $name, cc.created_at = datetime()
+
+-- Pour chaque concept fusionné, créer la relation SAME_AS
+MATCH (cc:CanonicalConcept {canonical_id: $canonical_id, tenant_id: $tenant_id})
+MATCH (c:Concept {concept_id: $concept_id, tenant_id: $tenant_id})
+MERGE (cc)-[:SAME_AS]->(c)
+```
+
+**Transaction CanonicalTheme (`_create_canonical_theme_tx`) :**
+
+```cypher
+MERGE (ct:CanonicalTheme {canonical_id: $canonical_id, tenant_id: $tenant_id})
+SET ct.name = $name, ct.created_at = datetime()
+
+MATCH (ct:CanonicalTheme {canonical_id: $canonical_id, tenant_id: $tenant_id})
+MATCH (t:Theme {theme_id: $theme_id, tenant_id: $tenant_id})
+MERGE (ct)-[:ALIGNED_TO]->(t)
+```
+
+**Points notables :**
+
+- `MERGE` sur `canonical_id + tenant_id` : idempotent, re-exécuter Pass 3 met à jour sans dupliquer.
+- Multi-tenant intégré via `tenant_id` sur tous les nœuds et MATCH.
+- Les relations `SAME_AS` et `ALIGNED_TO` sont créées **une par une** (itération, pas de batch `UNWIND`).
+- Aucun mécanisme de suppression des données Pass 3 existantes avant retraitement (contrairement à Pass 2 qui dispose de `delete_pass2_data()`).
+
+**Fonction utilitaire :** `persist_pass3_result(result, neo4j_driver, tenant_id)` — wrapper stateless pour usage ponctuel.
+
+**Compteurs retournés (`persist`) :**
+
+```python
+stats = {
+    "canonical_concepts": int,      # Nombre de CanonicalConcept créés
+    "canonical_themes": int,        # Nombre de CanonicalTheme créés
+    "same_as_relations": int,       # Nombre de relations SAME_AS
+    "aligned_to_relations": int,    # Nombre de relations ALIGNED_TO
+}
+```
+
+### 15.4 Modèle de données transverse — Contradiction
+
+**Fichier :** `src/knowbase/stratified/models/contradiction.py`
+**Usage :** OSMOSE MVP V1 — Usage B (Challenge de Texte)
+**Référence :** `SPEC_IMPLEMENTATION_CLASSES_MVP_V1.md`
+
+Le modèle `Contradiction` représente une **tension détectée entre deux Informations** partageant le même `ClaimKey`. Il opère au niveau cross-document et constitue un des résultats attendus de la consolidation corpus.
+
+#### 15.4.1 Structure de données
+
+```python
+@dataclass
+class Contradiction:
+    # Identifiants
+    contradiction_id: str        # Identifiant unique
+    claimkey_id: str             # ClaimKey partagée (pivot de comparaison)
+
+    # Information A
+    info_a_id: str               # ID de la première Information
+    info_a_document: str         # Document source de A
+    info_a_value_raw: Optional[str]   # Valeur brute de A
+    info_a_context: dict         # Contexte de A
+
+    # Information B
+    info_b_id: str               # ID de la seconde Information
+    info_b_document: str         # Document source de B
+    info_b_value_raw: Optional[str]   # Valeur brute de B
+    info_b_context: dict         # Contexte de B
+
+    # Classification
+    nature: ContradictionNature  # Type de contradiction
+    tension_level: TensionLevel  # Niveau de tension
+    explanation: str             # Explication textuelle
+
+    # Métadonnées
+    detected_at: datetime        # Horodatage de détection (UTC)
+    detection_method: str        # Méthode de détection (défaut: "value_normalized_comparison")
+```
+
+#### 15.4.2 Taxonomie des contradictions (`ContradictionNature`)
+
+| Valeur | Sémantique | Type |
+|--------|-----------|------|
+| `VALUE_CONFLICT` | Conflit de valeurs (A affirme X, B affirme Y pour la même ClaimKey) | Hard |
+| `VALUE_EXCEEDS_MINIMUM` | Valeur au-dessus d'un minimum déclaré | Soft |
+| `VALUE_BELOW_MAXIMUM` | Valeur en dessous d'un maximum déclaré | Soft |
+| `SCOPE_CONFLICT` | Conflit de périmètre (applicable dans des contextes différents) | Variable |
+| `TEMPORAL_CONFLICT` | Conflit temporel (vrai à des moments différents) | Variable |
+| `MISSING_CLAIM` | Absence d'affirmation attendue (un document ne mentionne pas ce que l'autre affirme) | Soft |
+
+#### 15.4.3 Niveaux de tension (`TensionLevel`)
+
+| Niveau | Signification |
+|--------|---------------|
+| `NONE` | Pas de tension réelle (faux positif résolu) |
+| `SOFT` | Compatible mais différent — les deux valeurs peuvent coexister |
+| `HARD` | Incompatible — les deux valeurs sont mutuellement exclusives |
+| `UNKNOWN` | Tension non classifiable |
+
+#### 15.4.4 Sérialisation Neo4j
+
+La classe fournit deux méthodes de sérialisation/désérialisation Neo4j :
+
+- `to_neo4j_properties()` → `dict` : convertit toutes les propriétés en types Neo4j-compatibles (enums → `.value`, datetime → `.isoformat()`)
+- `from_neo4j_record(record)` → `Contradiction` : reconstruit depuis un record Cypher, avec gestion des champs optionnels et valeurs par défaut
+
+**⚠️ Statut d'implémentation :** Le modèle `Contradiction` est défini et prêt à l'emploi, mais le **détecteur de contradictions** (composant qui comparerait les Informations via ClaimKey + Value Contract pour créer des instances `Contradiction`) n'est **pas encore implémenté** dans le pipeline. La détection de contradictions est un objectif du MVP V1 Usage B.
+
+### 15.5 Outputs
+
+**Dataclass principale :**
+
+```python
+@dataclass
+class Pass3Result:
+    canonical_concepts: List[CanonicalConcept]   # Concepts canoniques créés
+    canonical_themes: List[CanonicalTheme]        # Thèmes canoniques créés
+    concept_clusters: List[ConceptCluster]        # Clusters de concepts
+    theme_clusters: List[ThemeCluster]            # Clusters de thèmes
+    stats: Pass3Stats                             # Métriques d'exécution
+```
+
+**Structure d'un cluster de concepts (`ConceptCluster`) :**
+
+```python
+@dataclass
+class ConceptCluster:
+    cluster_id: str                          # Identifiant unique (format "cluster_{uuid8}")
+    concept_ids: List[str]                   # IDs des concepts regroupés
+    representative_name: str                 # Nom représentatif du cluster
+    similarity_scores: Dict[str, float]      # Scores de similarité (non utilisé actuellement)
+```
+
+**Structure d'un cluster de thèmes (`ThemeCluster`) :**
+
+```python
+@dataclass
+class ThemeCluster:
+    cluster_id: str                          # Identifiant unique (format "theme_cluster_{uuid8}")
+    theme_ids: List[str]                     # IDs des thèmes regroupés
+    representative_name: str                 # Nom représentatif du cluster
+```
+
+**Statistiques (`Pass3Stats`) :**
+
+```python
+@dataclass
+class Pass3Stats:
+    concepts_processed: int            # Nombre de concepts analysés
+    themes_processed: int              # Nombre de thèmes analysés
+    concept_clusters: int              # Nombre de clusters de concepts formés
+    theme_clusters: int                # Nombre de clusters de thèmes formés
+    canonical_concepts_created: int    # Nombre de CanonicalConcept créés
+    canonical_themes_created: int      # Nombre de CanonicalTheme créés
+```
+
+**Sortie Neo4j :**
+
+| Élément | Détail |
+|---------|--------|
+| Nœuds créés | `CanonicalConcept` avec `canonical_id`, `name`, `tenant_id`, `created_at` |
+| Nœuds créés | `CanonicalTheme` avec `canonical_id`, `name`, `tenant_id`, `created_at` |
+| Relations créées | `(CanonicalConcept)-[:SAME_AS]->(Concept)` |
+| Relations créées | `(CanonicalTheme)-[:ALIGNED_TO]->(Theme)` |
+| Compteurs retournés | `canonical_concepts`, `canonical_themes`, `same_as_relations`, `aligned_to_relations` |
+
+### 15.6 Conformité ADR — Pass 3
+
+| # | Axe ADR | Statut | Détail |
+|---|---------|--------|--------|
+| AV2-2 | 8 types de nodes maximum | ⚠️ | Pass 3 crée deux nouveaux types de nœuds (`CanonicalConcept`, `CanonicalTheme`) qui s'ajoutent aux 8 types V2 de base. Cela porte le total à 10 types. Acceptable car ces nœuds sont des **superpositions** (couche canonique au-dessus de la couche document), mais dépasse la règle stricte des 8 types |
+| AV2-9 | Pass 3 mode manuel + batch | ✅ | L'implémentation supporte les deux modes prévus : **BATCH** (reconsolidation complète) et **INCREMENTAL** (ajout d'un document). Pas d'exécution automatique inline — Pass 3 est explicitement déclenché |
+| AV2-10 | < 250 nodes/document | ✅ | Pass 3 ne crée pas de nœuds par document — les `CanonicalConcept` et `CanonicalTheme` sont des nœuds corpus-level. Le budget node/document n'est pas impacté |
+| NS-4 | Pas de synthèse cross-source | ✅ | Les `CanonicalConcept` sont des **pointeurs de regroupement** (`SAME_AS`), pas des synthèses. Chaque Information conserve son document source unique. La fusion ne crée pas de nouvelle information |
+| NS-5 | ClaimKey comme pivot | ⚠️ | Le modèle `Contradiction` est conçu autour du `ClaimKey` comme pivot de comparaison cross-doc. Cependant, le détecteur de contradictions n'est pas encore implémenté |
+| NS-10 | Déduplication par fingerprint | ⚠️ | La résolution d'entités par `lex_key` + variantes est une forme de déduplication, mais ne suit pas le mécanisme de fingerprint `hash(claimkey + value.normalized + context_key + span_bucket)` prévu par NS-10. La déduplication actuelle opère au niveau concept, pas au niveau Information |
+| AV2-1 | Séparation structure / sémantique | ✅ | Les entités canoniques appartiennent à la couche sémantique. Aucune interaction avec la couche structurelle (Document, Section, DocItem) |
+| AV2-8 | Dual storage (Neo4j + Qdrant) | ⚠️ | Pass 3 persiste uniquement dans Neo4j. Pas de mise à jour des embeddings Qdrant pour refléter la fusion de concepts. Les recherches vectorielles retourneront les concepts individuels, pas les canoniques |
+
+### 15.7 Risques — Pass 3
+
+| ID | Risque | Sévérité | Description | Mitigation |
+|----|--------|----------|-------------|------------|
+| R3-1 | **Clustering par `lex_key` uniquement — pas d'embeddings** | 🟡 | Le paramètre `embedding_client` est accepté mais jamais utilisé. Le seuil `SIMILARITY_THRESHOLD = 0.85` est défini mais non exploité. Le clustering repose exclusivement sur le matching lexical (`lex_key` exact + variantes). Les concepts sémantiquement similaires mais lexicalement différents (ex: "SAP S/4HANA" vs "S4H") ne seront pas fusionnés si `lex_key` et variantes diffèrent. | Implémenter la stratégie 3 (cosine similarity sur embeddings) pour compléter les stratégies lexicales. Le paramétrage est déjà en place. |
+| R3-2 | **Nom représentatif = premier concept (arbitraire)** | 🟢 | Le nom du `CanonicalConcept` est celui du premier concept du cluster (ordre d'insertion dans la boucle). Pas de sélection heuristique (ex: nom le plus court, le plus fréquent, ou le plus canonique). | Acceptable en MVP. Évolution possible : sélection par fréquence d'apparition ou longueur optimale. |
+| R3-3 | **Pas de purge avant retraitement batch** | 🟡 | Contrairement à Pass 2 (`delete_pass2_data()`), Pass 3 n'a pas de mécanisme de suppression des `CanonicalConcept` et `CanonicalTheme` existants avant un retraitement batch. Le `MERGE` sur `canonical_id` prévient les doublons exacts, mais les clusters peuvent évoluer entre deux exécutions, laissant des canoniques obsolètes. | Ajouter une fonction `delete_pass3_data()` pour purger la couche canonique avant retraitement. Critique pour la fiabilité en production. |
+| R3-4 | **Clustering de thèmes trop strict (nom exact uniquement)** | 🟡 | Le clustering de thèmes ne repose que sur le matching exact de noms normalisés. Des thèmes sémantiquement identiques mais avec des formulations légèrement différentes (ex: "Architecture Cloud" vs "Cloud Architecture") ne seront pas alignés. | Aligner la stratégie de clustering thèmes sur celle des concepts (variantes + embeddings). |
+| R3-5 | **Mode incrémental ne crée jamais de nouveaux canoniques** | 🟡 | Le mode incrémental ne crée pas de `CanonicalConcept` pour les concepts sans match. Ces concepts restent isolés jusqu'au prochain batch. Si le batch n'est jamais exécuté, le graphe canonique sera incomplet. | Le mode batch doit être exécuté périodiquement (cron ou déclenchement après N documents). Documenter cette contrainte opérationnelle. |
+| R3-6 | **Persistance relation par relation (pas de batch)** | 🟢 | Le persister itère sur chaque `CanonicalConcept` et chaque `merged_from`, exécutant une transaction par relation `SAME_AS`. Pour un corpus avec beaucoup de concepts fusionnés, cela pourrait être lent. | Optimisation possible via `UNWIND` Cypher. Non critique si Pass 3 est exécuté en batch hors-ligne. |
+| R3-7 | **Détecteur de contradictions non implémenté** | 🔴 | Le modèle `Contradiction` est défini (6 natures, 4 niveaux de tension, sérialisation Neo4j) mais aucun composant du pipeline ne l'instancie. La détection de contradictions cross-documents via ClaimKey + Value Contract est un objectif clé du MVP V1 Usage B ("Challenge de Texte") mais n'est pas encore codé. | Implémenter un `ContradictionDetector` qui parcourt les Informations par ClaimKey, compare les Value Contracts normalisés et crée des nœuds `Contradiction` dans Neo4j. Priorité haute pour le MVP. |
+| R3-8 | **Pas de validation LLM des cas ambigus** | 🟡 | Le paramètre `llm_client` est injecté dans `EntityResolverV2` mais jamais utilisé pour valider les cas de clustering ambigus. L'ADR prévoit une validation LLM pour les fusions incertaines (confidence entre 0.7 et 0.85). | Implémenter la validation LLM pour les clusters dont la similarité est entre le seuil heuristique et le seuil d'acceptation automatique. |
 
 ---
 
