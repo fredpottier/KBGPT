@@ -2040,6 +2040,35 @@ class AssertionExtractorV2:
             for link, _, _ in kept:
                 filtered_links.append(link)
 
+        # Sprint 4.3: Log qualité — % de liens promus avec signal vs neutres
+        total_promoted = len(filtered_links)
+        has_lex_signal = 0
+        has_sem_signal = 0
+        has_any_signal = 0
+        is_sink_routed = 0
+        for link in filtered_links:
+            lex_b = lexical_bonuses.get(link.assertion_id, {}).get(link.concept_id, 1.0)
+            sem_b = (semantic_bonuses or {}).get(link.assertion_id, {}).get(link.concept_id, 1.0)
+            if link.concept_id.endswith("_SINK"):
+                is_sink_routed += 1
+                continue
+            if lex_b > 1.0:
+                has_lex_signal += 1
+            if sem_b > 1.0:
+                has_sem_signal += 1
+            if lex_b > 1.0 or sem_b > 1.0:
+                has_any_signal += 1
+        metier_count = total_promoted - is_sink_routed
+        neutral_count = metier_count - has_any_signal
+        if total_promoted > 0:
+            logger.info(
+                f"[OSMOSE:Rerank:Quality] {total_promoted} liens promus: "
+                f"SINK={is_sink_routed}, métier={metier_count} "
+                f"(lex_signal={has_lex_signal}, sem_signal={has_sem_signal}, "
+                f"any_signal={has_any_signal} ({has_any_signal*100//max(metier_count,1)}%), "
+                f"neutre={neutral_count} ({neutral_count*100//max(metier_count,1)}%))"
+            )
+
         return filtered_links
 
     # =========================================================================
