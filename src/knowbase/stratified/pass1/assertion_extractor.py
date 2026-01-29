@@ -842,10 +842,22 @@ class AssertionExtractorV2:
         return "\n".join(lines)
 
     def _format_concepts_for_prompt(self, concepts: List[Concept]) -> str:
-        """Formate les concepts pour le prompt."""
+        """Formate les concepts pour le prompt.
+
+        Sprint 4.1: SINK est inclus en dernier avec annotation spéciale.
+        """
+        from knowbase.stratified.models import ConceptRole
+
         lines = []
-        for c in concepts[:20]:
-            lines.append(f"- {c.concept_id}: {c.name} ({c.role.value})")
+        sink_line = None
+        for c in concepts[:30]:
+            if c.role == ConceptRole.SINK:
+                sink_line = f"- {c.concept_id}: {c.name} (SINK — utiliser si aucun concept métier ne convient)"
+            else:
+                lines.append(f"- {c.concept_id}: {c.name} ({c.role.value})")
+        # SINK en dernier pour ne pas polluer le raisonnement
+        if sink_line:
+            lines.append(sink_line)
         return "\n".join(lines)
 
     def _parse_extraction_response(
@@ -1477,13 +1489,13 @@ class AssertionExtractorV2:
         total_assertions: Optional[int] = None,
     ) -> float:
         """
-        Sprint 4: Pénalité 3 phases pour concepts aspirateurs.
+        Sprint 4+4.1: Pénalité 3 phases pour concepts aspirateurs.
 
-        Basée sur mean = total_assertions / num_real_concepts (sans SINK).
+        Basée sur mean = max(total_assertions / num_real_concepts, 8.0) (floor=8).
 
         Phase 1 (douce)     : 0 → 2×mean     → 1.0 → 0.8 (linéaire)
-        Phase 2 (agressive) : 2×mean → 3×mean → 0.8 → 0.5 (linéaire)
-        Phase 3 (near-block): > 3×mean        → 0.5 fixe
+        Phase 2 (agressive) : 2×mean → 3×mean → 0.8 → 0.6 (linéaire)
+        Phase 3 (near-block): > 3×mean        → 0.6 fixe
 
         Override lexical fort: si bonus_lexical ≥ 1.25, penalty = max(penalty, 0.80)
         SINK exempt: penalty = 1.0 toujours.
@@ -1496,7 +1508,7 @@ class AssertionExtractorV2:
             total_assertions: Total assertions. Si None, utilise le snapshot.
 
         Returns:
-            Pénalité multiplicative [0.5, 1.0]
+            Pénalité multiplicative [0.6, 1.0]
         """
         from knowbase.stratified.models import ConceptRole
 
@@ -1510,7 +1522,9 @@ class AssertionExtractorV2:
         if N == 0 or n_concepts == 0:
             return 1.0
 
-        mean = N / n_concepts
+        # Sprint 4.1 Fix 2: mean floor pour éviter des seuils absurdes quand N/concepts est petit
+        raw_mean = N / n_concepts
+        mean = max(raw_mean, 8.0)
 
         # Seuils 3 phases
         soft_end = 2.0 * mean   # Fin de la phase douce
@@ -1525,24 +1539,24 @@ class AssertionExtractorV2:
                 ratio = info_count / soft_end
                 base_penalty = 1.0 - 0.2 * ratio
         elif info_count <= hard_end:
-            # Phase 2 (agressive): 0.8 → 0.5
+            # Phase 2 (agressive): 0.8 → 0.60
             if hard_end <= soft_end:
-                base_penalty = 0.5
+                base_penalty = 0.60
             else:
                 ratio = (info_count - soft_end) / (hard_end - soft_end)
-                base_penalty = 0.8 - 0.3 * ratio
+                base_penalty = 0.8 - 0.2 * ratio  # 0.8 → 0.60 (au lieu de 0.5)
         else:
-            # Phase 3 (near-block): 0.5 fixe
-            base_penalty = 0.5
+            # Phase 3 (near-block): 0.60 fixe (au lieu de 0.50)
+            base_penalty = 0.60
 
         # Log phases agressive et near-block
-        if base_penalty < 0.8 and base_penalty >= 0.5:
+        if base_penalty < 0.8 and base_penalty > 0.60:
             logger.debug(
                 f"[OSMOSE:Rerank:Saturation:Phase2-agressive] "
                 f"{concept.concept_id}: count={info_count}, mean={mean:.1f}, "
                 f"penalty={base_penalty:.2f}"
             )
-        elif base_penalty <= 0.5:
+        elif base_penalty <= 0.60:
             logger.debug(
                 f"[OSMOSE:Rerank:Saturation:Phase3-near-block] "
                 f"{concept.concept_id}: count={info_count}, mean={mean:.1f}, "
@@ -1830,6 +1844,8 @@ class AssertionExtractorV2:
             scored = []
             has_strong_match = False
             has_signal_fort = False  # Sprint 4: bonus ≥ 1.15 sur un non-SINK
+            # Sprint 4.1: Garder trace des liens qui passent le seuil original mais pas le final
+            dropped_by_penalty = []
 
             for link in assertion_links:
                 conf_final = link.confidence
@@ -1841,6 +1857,8 @@ class AssertionExtractorV2:
                 if conf_original < CONF_THRESHOLD_ORIGINAL:
                     continue
                 if conf_final < CONF_THRESHOLD_FINAL:
+                    # Sprint 4.1: Ce lien a été tué par la pénalité, pas par le LLM
+                    dropped_by_penalty.append(link)
                     continue
 
                 scored.append((link, conf_final, lex_bonus))
@@ -1855,6 +1873,24 @@ class AssertionExtractorV2:
                     has_signal_fort = True
 
             if not scored:
+                # Sprint 4.1 Fix 1: Fallback SINK au lieu de drop
+                # Si des liens existaient mais ont été éjectés par la pénalité → SINK
+                if dropped_by_penalty and sink_concept_ids:
+                    sink_id = next(iter(sink_concept_ids))
+                    # Créer un lien SINK avec la conf du meilleur lien éjecté
+                    best_dropped = max(dropped_by_penalty, key=lambda l: l.confidence)
+                    sink_link = ConceptLink(
+                        assertion_id=assertion_id,
+                        concept_id=sink_id,
+                        link_type="describes",
+                        confidence=best_dropped.confidence,
+                        justification="Fallback SINK: pénalité saturante a éjecté tous les candidats"
+                    )
+                    filtered_links.append(sink_link)
+                    logger.debug(
+                        f"[OSMOSE:Rerank:SINK:Fallback] {assertion_id} → SINK "
+                        f"({len(dropped_by_penalty)} liens éjectés par pénalité)"
+                    )
                 continue
 
             # Tri par conf_final décroissante
@@ -1868,9 +1904,13 @@ class AssertionExtractorV2:
             if sink_scored and non_sink_scored:
                 best_non_sink_score = non_sink_scored[0][1]
 
-                # Règle seuil: si meilleur non-SINK < 0.55 → SINK gagne
-                if best_non_sink_score < 0.55:
+                # Sprint 4.1: Seuil relevé 0.55 → 0.60 (Qwen calibre ~0.55-0.65)
+                if best_non_sink_score < 0.60:
                     filtered_links.append(sink_scored[0][0])
+                    logger.debug(
+                        f"[OSMOSE:Rerank:SINK:Threshold] {assertion_id} → SINK "
+                        f"(best_non_sink={best_non_sink_score:.2f} < 0.60)"
+                    )
                     continue
 
                 # Élimination SINK: si signal fort (bonus ≥ 1.15) → exclure SINK
@@ -1880,6 +1920,24 @@ class AssertionExtractorV2:
                 # Seul SINK disponible
                 filtered_links.append(sink_scored[0][0])
                 continue
+            elif not sink_scored and non_sink_scored:
+                # Sprint 4.1: SINK pas proposé par le LLM mais non-SINK faibles
+                best_non_sink_score = non_sink_scored[0][1]
+                if best_non_sink_score < 0.60 and sink_concept_ids:
+                    sink_id = next(iter(sink_concept_ids))
+                    sink_link = ConceptLink(
+                        assertion_id=assertion_id,
+                        concept_id=sink_id,
+                        link_type="describes",
+                        confidence=best_non_sink_score,
+                        justification="Fallback SINK: aucun concept non-SINK assez fort"
+                    )
+                    filtered_links.append(sink_link)
+                    logger.debug(
+                        f"[OSMOSE:Rerank:SINK:WeakFallback] {assertion_id} → SINK "
+                        f"(best_non_sink={best_non_sink_score:.2f} < 0.60, SINK non proposé LLM)"
+                    )
+                    continue
 
             # Détection ambiguïté
             if len(scored) >= 2:
@@ -1966,7 +2024,12 @@ Types de liens:
 - constrains: L'assertion impose une contrainte
 - enables: L'assertion dit ce que le concept permet
 - conditions: L'assertion spécifie une condition
-- causes: L'assertion décrit un effet"""
+- causes: L'assertion décrit un effet
+
+CONCEPT SPÉCIAL "Assertions non classées" (SINK):
+- Si aucun concept n'est clairement applicable à une assertion, utilise le concept SINK
+- Préfère toujours un concept métier spécifique quand c'est possible
+- SINK est un dernier recours, pas un choix par défaut"""
 
     def _default_linking_user(self) -> str:
         return """Établis les liens sémantiques.

@@ -105,19 +105,40 @@ def enrich_triggers(
         - enrichment_log: {concept_id: [nouveaux_triggers_ajoutés]}
     """
     if not concepts or not chunks:
+        logger.info("[OSMOSE:TriggerEnricher] Skip: concepts=%d, chunks=%d", len(concepts or []), len(chunks or {}))
         return concepts, {}
+
+    logger.info(
+        f"[OSMOSE:TriggerEnricher] Entrée: {len(concepts)} concepts, "
+        f"{len(chunks)} chunks, seuil activation={activation_threshold:.2%}"
+    )
 
     # Sprint 4 (2d): Exclure SINK de l'enrichissement
     enrichable_concepts = [
         c for c in concepts
         if getattr(c, 'role', None) != ConceptRole.SINK
     ]
+    sink_excluded = len(concepts) - len(enrichable_concepts)
+    if sink_excluded:
+        logger.info(f"[OSMOSE:TriggerEnricher] {sink_excluded} concept(s) SINK exclus")
 
     # Identifier les concepts à enrichir
     concepts_to_enrich = _find_low_activation_concepts(enrichable_concepts, chunks, activation_threshold)
 
     if not concepts_to_enrich:
-        logger.info("[OSMOSE:TriggerEnricher] Aucun concept à enrichir (tous activés)")
+        # Sprint 4.1 Fix 4: Logger les activations pour comprendre le skip
+        activations = _compute_activations(enrichable_concepts, chunks)
+        if activations:
+            min_act = min(activations.values())
+            max_act = max(activations.values())
+            low_count = sum(1 for v in activations.values() if v < activation_threshold)
+            logger.info(
+                f"[OSMOSE:TriggerEnricher] Aucun concept à enrichir (tous activés). "
+                f"Activations: min={min_act:.3f}, max={max_act:.3f}, "
+                f"sous seuil={low_count}/{len(activations)}"
+            )
+        else:
+            logger.info("[OSMOSE:TriggerEnricher] Aucun concept à enrichir (pas d'activations calculées)")
         return concepts, {}
 
     logger.info(
@@ -398,6 +419,47 @@ def _mark_shared_triggers(concept: Concept, enriched_triggers: List[EnrichedTrig
         if not hasattr(concept, '_shared_triggers'):
             concept._shared_triggers = set()
         concept._shared_triggers.update(shared_set)
+
+
+def _compute_activations(
+    concepts: List[Concept],
+    chunks: Dict[str, str],
+) -> Dict[str, float]:
+    """
+    Sprint 4.1 Fix 4: Calcule les taux d'activation de tous les concepts.
+
+    Returns:
+        {concept_id: activation_rate} pour chaque concept
+    """
+    total_chunks = len(chunks)
+    if total_chunks == 0:
+        return {}
+
+    chunk_texts_lower = [text.lower() for text in chunks.values()]
+    activations = {}
+
+    for concept in concepts:
+        triggers = concept.lexical_triggers or []
+        if not triggers:
+            activations[concept.concept_id] = 0.0
+            continue
+
+        matching_chunks = 0
+        for text in chunk_texts_lower:
+            for trigger in triggers:
+                t_lower = trigger.lower()
+                if len(t_lower) >= 4:
+                    if re.search(rf'\b{re.escape(t_lower)}\b', text):
+                        matching_chunks += 1
+                        break
+                else:
+                    if re.search(rf'(?<![a-z]){re.escape(t_lower)}(?![a-z])', text):
+                        matching_chunks += 1
+                        break
+
+        activations[concept.concept_id] = matching_chunks / total_chunks
+
+    return activations
 
 
 def _find_low_activation_concepts(

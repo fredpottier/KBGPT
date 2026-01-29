@@ -287,7 +287,7 @@ class Pass1OrchestratorV2:
                     f"({sum(len(v) for v in enrichment_log.values())} triggers ajoutés)"
                 )
         except Exception as e:
-            logger.warning(f"[OSMOSE:Pass1:1.2c] Trigger enrichment échoué (non bloquant): {e}")
+            logger.warning(f"[OSMOSE:Pass1:1.2c] Trigger enrichment échoué (non bloquant): {e}", exc_info=True)
 
         # =====================================================================
         # PHASE 1.2d: Injection Concept SINK (Sprint 4 — Anti-Aspirateur)
