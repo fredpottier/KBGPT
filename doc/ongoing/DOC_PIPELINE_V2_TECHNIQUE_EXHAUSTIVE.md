@@ -1563,7 +1563,414 @@ Si `create_protoconcept_links=True`, le pipeline :
 
 ## 8. Pass 0.9 — Construction de la Vue Globale
 
-<!-- À compléter : analyse détaillée de stratified/pass09/ -->
+### 8.0 Vue d'ensemble Pass 0.9
+
+**Module :** `src/knowbase/stratified/pass09/` (5 fichiers)
+**Orchestrateur :** `global_view_builder.py` — classe `GlobalViewBuilder`
+**Modèles :** `models.py` — `GlobalView`, `SectionSummary`, `GlobalViewCoverage`, `Pass09Config`
+**Composants :** `SectionSummarizer` (résumé LLM par section), `HierarchicalCompressor` (assemblage meta-document)
+
+**Objectif :** Construire un **meta-document** synthétique (15-30K chars, cible 20K) représentant l'intégralité du document source sous forme compressée. Ce meta-document remplace le `full_text` brut comme entrée pour les passes analytiques (Pass 1.1, Pass 1.2), permettant au LLM de « voir » l'ensemble du document dans une seule fenêtre de contexte.
+
+**Entrants :**
+
+| Entrant | Type | Source | Description |
+|---------|------|--------|-------------|
+| `sections` | `List[Dict]` | Pass 0 Structural (graphe structurel) | Liste des sections avec `id`, `title`, `level`, `text` ou `chunk_ids` |
+| `chunks` | `Dict[str, str]` | Pass 0 Structural | Mapping `chunk_id → texte` pour résoudre les chunk_ids des sections |
+| `full_text` | `str` | Pass 0 Extraction | Texte linéarisé complet (fallback si sections sans texte direct) |
+| `doc_id` | `str` | Pipeline | Identifiant unique du document |
+| `tenant_id` | `str` | Pipeline | Identifiant du tenant (défaut : `"default"`) |
+| `doc_title` | `str` | Pass 0 Extraction | Titre du document (optionnel) |
+
+**Séquence d'exécution :**
+
+```
+Étape 1: Extraction des textes par section
+  → _extract_section_texts() : résolution text direct / chunk_ids / item_ids / positions
+  ↓
+Étape 2: Résumé de chaque section (SectionSummarizer)
+  → Parallèle async avec Semaphore(max_concurrent_summaries=10)
+  → Décision par section : skip / verbatim / LLM / truncated
+  ↓
+Étape 3: Compression en meta-document (HierarchicalCompressor)
+  → Assemblage hiérarchique (headings Markdown)
+  → Construction TOC enrichie
+  → Enforcement des limites de taille
+  ↓
+Étape 4: Construction GlobalView
+  → meta_document + section_summaries + toc_enhanced + coverage + métadonnées
+  ↓
+Étape 5: Validation
+  → coverage_ratio ≥ 95%, taille dans [5000, 30000] chars
+```
+
+**Sortie :**
+
+```
+GlobalView
+  ├── tenant_id: str
+  ├── doc_id: str
+  ├── meta_document: str  ← SORTIE PRINCIPALE (15-30K chars)
+  ├── section_summaries: Dict[str, SectionSummary]
+  ├── toc_enhanced: str  ← TOC enrichie avec concepts et types
+  ├── coverage: GlobalViewCoverage
+  │     ├── sections_total: int
+  │     ├── sections_summarized: int
+  │     ├── sections_verbatim: int
+  │     ├── sections_skipped: int
+  │     ├── chars_original: int
+  │     ├── chars_meta_document: int
+  │     ├── coverage_ratio: float  (propriété calculée)
+  │     └── compression_ratio: float  (propriété calculée)
+  ├── created_at: datetime
+  ├── llm_model_used: str  ("gpt-4o-mini" ou "")
+  ├── total_llm_calls: int
+  ├── total_tokens_used: int
+  ├── build_time_seconds: float
+  ├── is_fallback: bool  (True si construit sans LLM)
+  └── errors: List[str]
+```
+
+---
+
+### 8.1 SectionSummarizer
+
+**Fichier :** `src/knowbase/stratified/pass09/section_summarizer.py` — classe `SectionSummarizer`
+**Modèle LLM :** `gpt-4o-mini` (temperature=0.3, max_tokens=500)
+
+**Objectif :** Résumer chaque section du document en un résumé informatif fidèle (max 800 chars par défaut), tout en identifiant les concepts, types d'assertions et valeurs clés présents dans la section.
+
+#### 8.1.1 Stratégie de traitement par section
+
+Le SectionSummarizer applique une **stratégie adaptative** en fonction de la taille de chaque section :
+
+| Condition | Méthode (`method`) | Comportement |
+|-----------|-------------------|-------------|
+| `char_count < 200` (`section_min_chars_to_summarize`) | `"skipped"` | Copie verbatim du texte (ou `"(section vide)"`) — section trop courte pour mériter un résumé |
+| `200 ≤ char_count < 500` (`section_max_chars_for_verbatim`) | `"verbatim"` | Copie verbatim — section suffisamment courte pour être incluse telle quelle |
+| `char_count ≥ 500` | `"llm"` | Résumé via appel LLM — section nécessitant compression |
+| Erreur LLM | `"truncated"` | Fallback : premiers 1000 chars (`fallback_chars_per_section`) + `"..."` |
+
+#### 8.1.2 Parallélisation des résumés
+
+Les résumés sont exécutés en **parallèle asynchrone** via `asyncio.gather()` avec un `asyncio.Semaphore(max_concurrent_summaries)` (défaut : 10 appels simultanés). Les erreurs individuelles sont capturées via `return_exceptions=True` — un échec d'une section n'empêche pas le traitement des autres.
+
+#### 8.1.3 Prompt LLM
+
+**System prompt :** Directive d'expert en analyse documentaire. Règles :
+- Maximum `{max_chars}` caractères (configurable, défaut 800)
+- Identifier les **concepts clés** (termes techniques, entités)
+- Noter les **types d'assertions** (definitional, prescriptive, factual, procedural)
+- Préserver les **valeurs spécifiques** (versions, pourcentages, limites, durées)
+- Ne PAS interpréter, seulement résumer fidèlement
+- Style neutre et factuel
+
+**User prompt :** Fournit le titre de section, son niveau hiérarchique, et le contenu (tronqué à 8000 chars pour respecter la fenêtre LLM).
+
+**Format de réponse attendu :** JSON strict :
+```json
+{
+  "summary": "Résumé de la section (max {max_chars} chars)",
+  "concepts": ["concept1", "concept2", "concept3"],
+  "assertion_types": ["definitional", "prescriptive", "factual"],
+  "key_values": ["TLS 1.2", "99.95%", "30 days"]
+}
+```
+
+**Nettoyage de la réponse :** Le parser gère les réponses enveloppées dans des blocs markdown (\`\`\`json...\`\`\`) et, en cas d'échec de parsing JSON, extrait manuellement le résumé (premiers `max_chars` chars de la réponse brute).
+
+#### 8.1.4 Compatibilité multi-client LLM
+
+Le SectionSummarizer supporte trois interfaces LLM :
+
+| Interface | Méthode de détection | Appel |
+|-----------|---------------------|-------|
+| OpenAI-style | `hasattr(client, "chat")` | `client.chat.completions.create(model="gpt-4o-mini", ...)` |
+| vLLM-style | `hasattr(client, "generate")` | `client.generate(prompt=..., max_tokens=500)` |
+| Sync fallback | `hasattr(client, "complete")` | `client.complete(prompt=..., max_tokens=500)` |
+
+#### 8.1.5 Sortie `SectionSummary`
+
+```
+SectionSummary
+  ├── section_id: str
+  ├── section_title: str
+  ├── level: int  (1=H1, 2=H2, 3=H3...)
+  ├── summary: str  (500-1000 chars max)
+  ├── concepts_mentioned: List[str]  (termes techniques identifiés)
+  ├── assertion_types: List[str]  (definitional, prescriptive, factual, procedural)
+  ├── key_values: List[str]  (valeurs spécifiques préservées)
+  ├── char_count_original: int
+  ├── char_count_summary: int
+  ├── method: str  ("llm" | "verbatim" | "truncated" | "skipped")
+  └── compression_ratio: float  (propriété calculée : summary/original)
+```
+
+#### 8.1.6 Statistiques de traitement
+
+Le SectionSummarizer maintient un dictionnaire `_stats` accessible via la propriété `stats` :
+- `sections_processed` : nombre de sections résumées par LLM
+- `sections_skipped` : nombre de sections trop courtes
+- `sections_verbatim` : nombre de sections copiées verbatim
+- `total_tokens_in` / `total_tokens_out` : tokens consommés
+- `errors` : liste des erreurs rencontrées
+
+---
+
+### 8.2 HierarchicalCompressor
+
+**Fichier :** `src/knowbase/stratified/pass09/hierarchical_compressor.py` — classe `HierarchicalCompressor`
+
+**Objectif :** Assembler les `SectionSummary` individuels en un **meta-document unique** structuré hiérarchiquement, respectant les contraintes de taille (5K-30K chars) et produisant une TOC enrichie.
+
+#### 8.2.1 Mécanisme de compression
+
+La méthode `compress()` exécute 4 étapes séquentielles :
+
+```
+1. _calculate_coverage()     → GlobalViewCoverage (statistiques)
+2. _build_meta_document()    → str (meta-document structuré Markdown)
+3. _build_enhanced_toc()     → str (table des matières enrichie)
+4. _enforce_size_limits()    → str (meta-document ajusté si nécessaire)
+```
+
+#### 8.2.2 Calcul de couverture (`_calculate_coverage`)
+
+Itère sur tous les `SectionSummary` et classifie :
+
+| Méthode du résumé | Compteur incrémenté |
+|-------------------|---------------------|
+| `"llm"` | `sections_summarized` |
+| `"verbatim"` | `sections_verbatim` |
+| `"truncated"` | `sections_summarized` (troncature = fallback de résumé) |
+| `"skipped"` | `sections_skipped` |
+
+**coverage_ratio** = `(sections_summarized + sections_verbatim) / sections_total`
+
+> ⚠️ **Note :** Les sections `"skipped"` ne comptent PAS dans la couverture. Le seuil minimum configurable est `min_coverage_ratio = 0.95` (95%).
+
+#### 8.2.3 Construction du meta-document (`_build_meta_document`)
+
+Format Markdown structuré hiérarchiquement :
+
+```markdown
+# Document: [titre]
+
+## [Section niveau 1]
+[résumé]
+**Concepts:** concept1, concept2
+**Types:** definitional, prescriptive
+**Valeurs:** TLS 1.2, 99.95%
+
+### [Section niveau 2]
+[résumé]
+...
+```
+
+**Règles de formatage :**
+- Le niveau de heading Markdown = `min(level + 1, 4)` — maximum `####` pour éviter la pollution
+- Les concepts sont limités à 10 par section
+- Les valeurs clés sont limitées à 8 par section
+- Les métadonnées enrichies (Concepts, Types, Valeurs) sont ajoutées uniquement si présentes
+- Les sections sont assemblées dans l'**ordre original** du document (`sections_order`)
+
+#### 8.2.4 Table des matières enrichie (`_build_enhanced_toc`)
+
+Construit une TOC avec numérotation hiérarchique automatique et métadonnées inline :
+
+```
+# Table des Matières Enrichie
+
+1. Architecture Overview [5 concepts, definitional/prescriptive]
+  1.1 Components [3 concepts, factual]
+  1.2 Deployment Model [2 concepts, procedural]
+2. Security Framework [4 concepts, prescriptive]
+```
+
+**Mécanisme de numérotation :** Compteurs par niveau (5 niveaux max), reset des niveaux inférieurs à chaque incrémentation d'un niveau supérieur.
+
+#### 8.2.5 Enforcement des limites de taille (`_enforce_size_limits`)
+
+| Condition | Action |
+|-----------|--------|
+| `len(meta_document) > meta_document_max_chars` (30K) | Troncature intelligente via `_smart_truncate()` |
+| `len(meta_document) ≤ meta_document_max_chars` | Aucune action |
+
+**Troncature intelligente (`_smart_truncate`) :**
+1. Les **headings** (`#...`) sont **toujours préservés**
+2. Les lignes de contenu sont ajoutées tant que le budget le permet (marge de sécurité : 100 chars)
+3. Les métadonnées (`**Concepts:**...`) sont supprimées en dernier
+4. Un marqueur `[... document tronqué pour respecter limite tokens ...]` est ajouté en fin
+
+#### 8.2.6 Sortie
+
+```
+Tuple[str, str, GlobalViewCoverage]
+  ├── meta_document: str            ← Document compressé structuré (5K-30K chars)
+  ├── toc_enhanced: str             ← TOC enrichie avec concepts/types
+  └── coverage: GlobalViewCoverage  ← Statistiques de couverture
+```
+
+---
+
+### 8.3 GlobalViewBuilder — Orchestration
+
+**Fichier :** `src/knowbase/stratified/pass09/global_view_builder.py` — classe `GlobalViewBuilder`
+
+**Objectif :** Orchestrer la construction complète de la `GlobalView` en coordonnant `SectionSummarizer` et `HierarchicalCompressor`.
+
+#### 8.3.1 Extraction des textes par section (`_extract_section_texts`)
+
+Résout le texte de chaque section selon **5 stratégies** en cascade :
+
+| Priorité | Condition | Source du texte |
+|----------|-----------|----------------|
+| 1 | `section.text` existe | Texte direct de la section |
+| 2 | `section.chunk_ids` non vide | Concaténation des chunks référencés |
+| 3 | `section.item_ids` non vide | Concaténation des items (DocItems) depuis le mapping chunks |
+| 4 | `section.start_pos / end_pos` définis | Découpage du `full_text` par positions |
+| 5 | Aucune source | Chaîne vide `""` |
+
+#### 8.3.2 Mode LLM (`_build_with_llm`) — async
+
+1. **Résumé** : `SectionSummarizer.summarize_sections()` — parallèle async
+2. **Compression** : `HierarchicalCompressor.compress()` — synchrone
+3. **Assemblage** : `GlobalView` avec `is_fallback=False`, modèle `"gpt-4o-mini"`
+
+#### 8.3.3 Mode Fallback (`_build_fallback`) — synchrone
+
+Activé quand :
+- Aucun `llm_client` n'est fourni
+- Appel via `build_sync()` (compatibilité FastAPI synchrone)
+
+**Stratégie :** Pour chaque section, tronque le texte aux premiers `fallback_chars_per_section` (1000) caractères + `"..."`. Toutes les sections obtiennent `method="truncated"`. Pas d'extraction de concepts/types/valeurs.
+
+#### 8.3.4 Validation de la GlobalView
+
+La méthode `GlobalView.is_valid(config)` vérifie :
+1. `coverage.coverage_ratio ≥ config.min_coverage_ratio` (95%)
+2. `len(meta_document) ≥ config.meta_document_min_chars` (5000)
+3. `len(meta_document) ≤ config.meta_document_max_chars` (30000)
+
+Si la validation échoue, l'erreur est loggée et ajoutée à `errors`, mais la `GlobalView` est tout de même retournée.
+
+#### 8.3.5 Fonction utilitaire `build_global_view()`
+
+Fonction de convenance async au niveau module pour usage simplifié :
+
+```python
+from knowbase.stratified.pass09 import build_global_view
+
+global_view = await build_global_view(
+    doc_id="doc_123",
+    tenant_id="default",
+    sections=sections,
+    chunks=chunks,
+    llm_client=openai_client,
+)
+```
+
+---
+
+### 8.4 Intégration dans le Pipeline (Orchestrateur Pass 1)
+
+**Fichier :** `src/knowbase/stratified/pass1/orchestrator.py` — classe `Pass1OrchestratorV2`
+
+Pass 0.9 est intégré comme **première phase** de l'orchestrateur Pass 1, avant l'analyse documentaire (Pass 1.1).
+
+#### 8.4.1 Activation
+
+- Flag `enable_pass09` (défaut : `True`) dans le constructeur de `Pass1OrchestratorV2`
+- Configuration optionnelle via `pass09_config: Pass09Config`
+- Le `GlobalViewBuilder` est initialisé dans le constructeur si `enable_pass09=True`
+
+#### 8.4.2 Flux d'exécution dans `process()`
+
+```
+1. PHASE 0.9: GlobalView Construction
+   ├── Si sections vides : création depuis chunks (fallback)
+   ├── Appel build_sync() (mode synchrone FastAPI)
+   ├── Si GlobalView valide → analysis_content = global_view.meta_document
+   ├── Si GlobalView vide/erreur → analysis_content = content brut (fallback)
+   └── Si Pass 0.9 désactivé → analysis_content = content brut
+   ↓
+2. PHASE 1.1: Document Analysis
+   ├── Utilise analysis_content (= meta-document OU content brut)
+   ├── Si toc_enhanced disponible → utilise pour l'analyse au lieu de la TOC brute
+   └── Produit Subject, Themes, DocumentStructure
+   ↓
+3. PHASE 1.2: Concept Identification
+   ├── Utilise analysis_content (= meta-document OU content brut)
+   └── Produit List[Concept]
+```
+
+#### 8.4.3 Préparation des sections (router API)
+
+**Fichier :** `src/knowbase/stratified/api/router.py`
+
+Avant d'appeler l'orchestrateur Pass 1, le router API prépare les sections pour Pass 0.9 :
+
+```python
+sections_for_pass09 = []
+for section in structural_sections:
+    sections_for_pass09.append({
+        "id": section.id,
+        "title": section.title,
+        "level": section.level,
+        "text": section.text,          # Texte direct si disponible
+        "chunk_ids": section.chunk_ids  # IDs de chunks référencés
+    })
+```
+
+Ces sections sont passées via le paramètre `sections=sections_for_pass09` à l'orchestrateur.
+
+---
+
+### 8.5 Configuration Pass 0.9
+
+**Classe :** `Pass09Config` (dataclass)
+
+| Paramètre | Type | Défaut | Description |
+|-----------|------|--------|-------------|
+| `section_summary_max_chars` | `int` | `800` | Taille max d'un résumé de section |
+| `section_summary_min_chars` | `int` | `100` | Taille min d'un résumé |
+| `section_min_chars_to_summarize` | `int` | `200` | Seuil sous lequel une section est skip/verbatim |
+| `section_max_chars_for_verbatim` | `int` | `500` | Seuil sous lequel une section est copiée verbatim |
+| `meta_document_min_chars` | `int` | `5000` | Taille min du meta-document |
+| `meta_document_max_chars` | `int` | `30000` | Taille max du meta-document |
+| `meta_document_target_chars` | `int` | `20000` | Taille cible du meta-document |
+| `min_coverage_ratio` | `float` | `0.95` | Couverture minimum requise (95%) |
+| `max_concurrent_summaries` | `int` | `10` | Nombre max de résumés LLM en parallèle |
+| `enable_fallback` | `bool` | `True` | Active le mode fallback (troncature) |
+| `fallback_chars_per_section` | `int` | `1000` | Chars par section en mode fallback |
+
+---
+
+### 8.6 Conformité ADR — Pass 0.9
+
+| Axe | Exigence | Statut | Implémentation | Commentaire |
+|-----|----------|--------|----------------|-------------|
+| P09-1 | **Couverture 100% sections** | ⚠️ | Le meta-document itère sur toutes les sections dans `sections_order`, mais les sections `"skipped"` (< 200 chars) ne comptent pas dans le `coverage_ratio`. | Le coverage_ratio exige 95% (`min_coverage_ratio`), pas 100%. Les sections très courtes sont incluses en verbatim ou skip mais toujours présentes dans le meta-document. |
+| P09-2 | **Compression hiérarchique** | ✅ | `HierarchicalCompressor._build_meta_document()` préserve la hiérarchie H1 > H2 > H3 via le calcul `"#" * min(level + 1, 4)`. | Limitation à `####` (H4) pour éviter la pollution Markdown. La structure originale est fidèlement reproduite. |
+| P09-3 | **Meta-document 15-25K chars** | ⚠️ | Fourchette implémentée : [5000, 30000] chars (config), cible 20000. | La fourchette est plus large que l'ADR (15-25K). Le `_enforce_size_limits` tronque intelligemment si > 30K. Pas de mécanisme d'expansion si < 5K. |
+| P09-4 | **95% minimum sections résumées** | ✅ | `min_coverage_ratio = 0.95` dans `Pass09Config`, vérifié par `GlobalView.is_valid()`. | Les sections `"skipped"` ne comptent pas, mais les sections vides sont rares dans un document structuré. |
+| P09-5 | **Fallback mode (Option C)** | ✅ | `_build_fallback()` opérationnel : tronque chaque section aux premiers 1000 chars. Mode synchrone, sans appel LLM. Activé automatiquement si `llm_client=None` ou via `build_sync()`. | Le fallback est fonctionnel et produit une GlobalView valide avec `is_fallback=True`. |
+| P09-6 | **Intégration dans Pass 1.1 et 1.2** | ✅ | L'orchestrateur Pass 1 utilise `global_view.meta_document` comme `analysis_content` pour Pass 1.1 (DocumentAnalyzer) et Pass 1.2 (ConceptIdentifier). La `toc_enhanced` remplace la TOC brute pour l'analyse. | L'intégration est complète avec fallback automatique sur `content` brut si GlobalView absente ou invalide. |
+
+---
+
+### 8.7 Risques — Pass 0.9
+
+| ID | Risque | Sévérité | Description | Mitigation |
+|----|--------|----------|-------------|------------|
+| R09-1 | **Mode sync = toujours fallback** | 🟡 | `build_sync()` utilise systématiquement le mode fallback (troncature), même si un `llm_client` est disponible. Les résumés LLM ne sont accessibles qu'en mode async. | Le router API actuel utilise `build_sync()` dans le contexte FastAPI. Pour bénéficier des résumés LLM, il faudrait refactorer vers `build()` async. |
+| R09-2 | **Pas de gestion du budget tokens** | 🟡 | Le texte envoyé au LLM est tronqué à 8000 chars (`text[:8000]`), mais il n'y a pas de calcul de tokens réel (tiktoken). Pour les sections longues en encodage non-ASCII, 8000 chars peut dépasser la fenêtre du modèle. | Ajouter un compteur de tokens réel ou réduire la limite de chars pour les langues non-latines. |
+| R09-3 | **Perte d'information dans les sections skip** | 🟢 | Les sections < 200 chars sont `"skipped"` et incluses verbatim. Aucune extraction de concepts/types/valeurs n'est effectuée pour ces sections. | Impact mineur : les sections très courtes contiennent rarement des concepts distincts non couverts par les sections parentes. |
+| R09-4 | **Détection de format de réponse LLM fragile** | 🟡 | Le parser JSON nettoie les blocs markdown mais ne gère pas tous les cas de malformation (ex : JSON avec commentaires, trailing commas). | Le fallback vers extraction manuelle (`response[:max_chars]`) garantit qu'un résumé est toujours produit, même si les métadonnées (concepts, types) sont perdues. |
+| R09-5 | **Modèle LLM hardcodé** | 🟢 | Le modèle `"gpt-4o-mini"` est hardcodé dans `_call_openai_style()` et dans les métadonnées de `GlobalView`. Pas de routing via `llm_models.yaml`. | Acceptable pour V2 beta. À intégrer au `LLMRouter` pour la production. |
+| R09-6 | **Pas de cache des résumés** | 🟡 | Chaque exécution de Pass 0.9 recalcule tous les résumés de section, même pour un document déjà traité. Pas de persistance des `SectionSummary`. | Ajouter un cache basé sur `hash(section_text)` pour éviter les appels LLM redondants lors de re-traitements. |
+| R09-7 | **Fourchette de taille plus large que l'ADR** | 🟢 | L'ADR spécifie 15-25K chars, l'implémentation accepte 5K-30K. | La fourchette élargie est pragmatique pour gérer les documents très courts (< 15K) et très longs (> 25K). Le `meta_document_target_chars = 20000` reste dans la cible ADR. |
 
 ---
 
