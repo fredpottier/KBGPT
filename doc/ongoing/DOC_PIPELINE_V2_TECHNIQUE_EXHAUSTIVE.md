@@ -979,13 +979,525 @@ Les régions atomiques (TABLE, VISION) ne peuvent **JAMAIS** être coupées par 
 
 ## 6. Pass 0 Structural — Graphe Structurel
 
-<!-- À compléter : analyse détaillée de stratified/pass0/ et structural/ -->
+**Fichiers principaux :**
+- `src/knowbase/stratified/pass0/adapter.py` — classe `Pass0Adapter` (adapter V2)
+- `src/knowbase/stratified/pass0/cache_loader.py` — fonction `load_pass0_from_cache()` (chargement depuis cache)
+- `src/knowbase/structural/graph_builder.py` — classe `StructuralGraphBuilder` (constructeur du graphe)
+- `src/knowbase/structural/models.py` — modèles Pydantic (`DocItem`, `SectionInfo`, `TypeAwareChunk`, `DocumentVersion`, `PageContext`, `StructuralProfile`)
+- `src/knowbase/structural/docitem_builder.py` — classe `DocItemBuilder` (extraction des items Docling)
+- `src/knowbase/structural/section_profiler.py` — classe `SectionProfiler` (assignment sections + profils structurels)
+- `src/knowbase/structural/type_aware_chunker.py` — classe `TypeAwareChunker` (chunking par type)
+
+**Objectif :** Transformer le `DoclingDocument` (sortie de Docling) en un **graphe structurel Document → Section → DocItem** conforme au schéma V2, puis produire les `TypeAwareChunk` pour le retrieval vectoriel (Qdrant) et les mappings chunk↔DocItem nécessaires à l'Anchor Resolution (Pass 1.3b).
+
+### 6.0 Vue d'ensemble Pass 0 Structural
+
+**Entrant :**
+
+| Entrant | Type | Source |
+|---------|------|--------|
+| `DoclingDocument` | Objet Docling natif | Pass 0 Extraction (via `extract_to_units_with_docling()`) |
+| `tenant_id` | `str` | Contexte multi-tenant |
+| `doc_id` | `str` | ID unique du document |
+| Ou : fichier cache `.v4cache.json`/`.v5cache.json` | JSON sérialisé | `data/extraction_cache/` (bypass Docling) |
+
+**Séquence d'exécution (4+1 étapes) :**
+
+```
+Étape 1: DocItemBuilder — Extraction des DocItems depuis DoclingDocument
+  │  texts[], tables[], pictures[] → DocItem[] avec reading_order + charspan
+  ↓
+Étape 2: SectionProfiler — Assignment hiérarchique des sections
+  │  DocItem[] → SectionInfo[] avec structural_profile
+  ↓
+Étape 3: TypeAwareChunker — Création des chunks type-aware
+  │  DocItem[] + SectionInfo[] → TypeAwareChunk[]
+  ↓
+Étape 4: Pass0Adapter — Adaptation au schéma V2
+  │  StructuralGraphBuildResult → Pass0Result
+  │  + construction chunk↔DocItem mappings
+  │  + construction unit_index (AssertionUnitIndexer)
+  ↓
+Étape 4b (optionnel): Persistance Neo4j V2
+  │  Document, Section, DocItem nodes
+```
+
+**Chemin alternatif : CacheLoader** — Si un cache V2/V4/V5 existe, `load_pass0_from_cache()` reconstruit directement un `Pass0Result` depuis le JSON sérialisé, sans re-parser le DoclingDocument. Supporte aussi le format legacy v1.0 (page-based).
+
+---
+
+### 6.1 Adapter Docling → Schema V2
+
+**Fichier :** `src/knowbase/stratified/pass0/adapter.py` — classe `Pass0Adapter`
+
+**Objectif :** Wrapper le `StructuralGraphBuilder` existant et l'adapter au schéma V2 en générant les identifiants composites et les mappings inter-couches.
+
+#### 6.1.1 Architecture Adapter
+
+`Pass0Adapter` encapsule `StructuralGraphBuilder` (pattern Adapter) :
+
+```python
+class Pass0Adapter:
+    def __init__(self, max_chunk_size=3000, persist_artifacts=False):
+        self.builder = StructuralGraphBuilder(
+            max_chunk_size=max_chunk_size,
+            persist_artifacts=persist_artifacts,
+        )
+```
+
+Le builder sous-jacent orchestre les 3 composants internes : `DocItemBuilder` → `SectionProfiler` → `TypeAwareChunker`.
+
+#### 6.1.2 Identifiants composites V2 (docitem_id)
+
+Format : `{tenant_id}:{doc_id}:{item_id}`
+
+Exemple : `default:doc_abc123:item_0042`
+
+Ce format assure :
+- **Unicité globale** multi-tenant
+- **Lookup rapide** par tenant + doc_id
+- **Correspondance** avec l'`item_id` Docling original (= `self_ref`)
+
+Fonctions utilitaires :
+- `get_docitem_id_v2(tenant_id, doc_id, item_id) → str`
+- `parse_docitem_id_v2(docitem_id) → (tenant_id, doc_id, item_id)`
+
+#### 6.1.3 Méthode `process_document()`
+
+Séquence :
+1. Appel `self.builder.build_from_docling()` → `StructuralGraphBuildResult`
+2. Construction des mappings chunk↔DocItem via `_build_mappings()`
+3. Construction de l'index des unités via `_build_unit_index()` (appel `AssertionUnitIndexer`)
+4. Assemblage du `Pass0Result` V2
+
+#### 6.1.4 Construction des mappings chunk↔DocItem
+
+La méthode `_build_mappings()` produit deux structures inverses :
+
+| Structure | Type | Utilisation |
+|-----------|------|-------------|
+| `chunk_to_docitem_map` | `Dict[chunk_id → ChunkToDocItemMapping]` | Anchor Resolution (Pass 1.3b) — trouver le DocItem source d'un chunk |
+| `docitem_to_chunks_map` | `Dict[docitem_id → List[chunk_id]]` | Navigation — trouver tous les chunks contenant un DocItem |
+
+Chaque `ChunkToDocItemMapping` contient : `chunk_id`, `docitem_ids` (liste car un chunk peut couvrir plusieurs DocItems), `text`, `char_start`, `char_end`.
+
+Le `TypeAwareChunk` possède déjà `item_ids` (liste des `DocItem.item_id` sources). L'adapter convertit ces `item_id` en `docitem_id` composites V2.
+
+#### 6.1.5 Index des unités (AssertionUnitIndexer)
+
+La méthode `_build_unit_index()` segmente chaque DocItem en **unités d'assertion** pour permettre au LLM (Pass 1.3) de **pointer** vers une unité au lieu de copier le texte verbatim.
+
+- Import lazy : `from knowbase.stratified.pass1.assertion_unit_indexer import AssertionUnitIndexer`
+- Filtre : DocItems avec texte > 30 caractères uniquement
+- Produit : `Dict[docitem_id → UnitIndexResult]` stocké dans `Pass0Result.unit_index`
+
+---
+
+### 6.2 Construction du graphe (Document, Section, DocItem)
+
+**Fichier :** `src/knowbase/structural/graph_builder.py` — classe `StructuralGraphBuilder`
+
+**Objectif :** Orchestrer les 3 composants d'extraction structurelle (DocItemBuilder, SectionProfiler, TypeAwareChunker) depuis un DoclingDocument natif.
+
+#### 6.2.1 Étape 1 — DocItemBuilder
+
+**Fichier :** `src/knowbase/structural/docitem_builder.py`
+
+**Objectif :** Extraire les items documentaires atomiques depuis le DoclingDocument.
+
+**Sources d'extraction :**
+
+| Source Docling | Items extraits | Type DocItem résultant |
+|----------------|----------------|----------------------|
+| `doc.texts[]` | Paragraphes, headings, list-items, captions, footnotes | TEXT, HEADING, LIST_ITEM, CAPTION, FOOTNOTE |
+| `doc.tables[]` | Tables structurées (Markdown + JSON canonique) | TABLE |
+| `doc.pictures[]` | Figures avec captions | FIGURE |
+
+**Mapping DocItemLabel → DocItemType** (`DOCLING_LABEL_MAPPING` dans `models.py`) :
+
+| Label Docling | DocItemType | Catégorie |
+|---------------|-------------|-----------|
+| `text`, `paragraph`, `handwritten_text` | TEXT | Relation-bearing |
+| `title`, `section_header` | HEADING | Relation-bearing |
+| `caption` | CAPTION | Relation-bearing |
+| `footnote` | FOOTNOTE | Relation-bearing |
+| `list_item` | LIST_ITEM | Contextuel (D3.3) |
+| `table`, `chart` | TABLE | Structure-bearing |
+| `picture` | FIGURE | Structure-bearing |
+| `code` | CODE | Structure-bearing |
+| `formula` | FORMULA | Structure-bearing |
+| `page_header`, `page_footer` | FURNITURE | Structure-bearing |
+| `reference` | REFERENCE | Structure-bearing |
+| Autres (`form`, `checkbox_*`, etc.) | OTHER | Structure-bearing |
+
+**Distinction fondamentale (ADR D3) :**
+
+- **Relation-bearing** (TEXT, HEADING, CAPTION, FOOTNOTE) — portent des assertions, éligibles à l'extraction de relations
+- **Structure-bearing** (TABLE, FIGURE, CODE, FORMULA, etc.) — portent de la structure, traités séparément
+
+**Traitements par type :**
+- **HEADING** : Inférence du `heading_level` depuis le texte (patterns `1.`, `1.1.`, `1.1.1.` → levels 1, 2, 3) via `infer_heading_level_from_text()`
+- **TABLE** : Conversion en Markdown (`table_to_text()`) et JSON canonique (`table_to_json()`)
+- **FIGURE** : Extraction de la caption si disponible
+
+**Post-traitements globaux :**
+1. `compute_reading_order()` — Tri déterministe par (page, position_verticale, position_horizontale) → `reading_order_index`
+2. `compute_docwide_charspans()` — Calcul des positions de caractères à l'échelle du document entier (`charspan_start_docwide`, `charspan_end_docwide`) avec séparateur `\n`
+
+**Sortie :** `DocItemBuildResult` contenant `doc_items: List[DocItem]`, `doc_version: DocumentVersion`, `page_contexts: List[PageContext]`, `doc_dict: Dict`
+
+#### 6.2.2 Étape 2 — SectionProfiler
+
+**Fichier :** `src/knowbase/structural/section_profiler.py`
+
+**Objectif :** Grouper les DocItems en sections hiérarchiques et calculer le profil structurel de chaque section.
+
+**Deux stratégies :**
+
+| Stratégie | Condition d'activation | Mécanisme |
+|-----------|----------------------|-----------|
+| **Heading-based** | ≥1 DocItem de type HEADING détecté | Pile de sections (heading stack) — chaque HEADING crée/met à jour une section, les items suivants y sont assignés |
+| **Page-based** (fallback) | Aucun HEADING détecté | 1 section par page — `section_p{page_idx:03d}` |
+
+**Heading-based : détail**
+- Chaque HEADING crée une section avec `section_id` dérivé du texte (slugifié)
+- Le `section_path` est construit hiérarchiquement : `"1. Introduction / 1.1 Overview"`
+- Le `section_level` correspond au `heading_level` du DocItem
+- Les relations parent→enfant sont établies via `parent_section_id`
+
+**Profil structurel (`StructuralProfile`)** :
+Après l'assignment, chaque section est analysée via `StructuralProfile.from_items()` :
+- Calcul des ratios par type (text_ratio, table_ratio, figure_ratio, etc.)
+- Classification `is_relation_bearing` si ratio relation-types > 50%
+- Classification `is_structure_bearing` si ratio structure-types > 50%
+- `relation_likelihood` et `relation_likelihood_tier` (HIGH/MEDIUM/LOW/VERY_LOW) via `compute_features()` depuis le module `relation_likelihood`
+
+**Sortie :** `List[SectionInfo]` avec `section_id`, `title`, `section_path`, `section_level`, `parent_section_id`, `item_ids`, `structural_profile`
+
+#### 6.2.3 Étape 3 — TypeAwareChunker
+
+**Fichier :** `src/knowbase/structural/type_aware_chunker.py`
+
+**Objectif :** Créer des chunks séparés par type de contenu pour optimiser le retrieval vectoriel et l'extraction de relations.
+
+**Règles de chunking :**
+
+| Type DocItem | Traitement | ChunkKind | `is_relation_bearing` |
+|--------------|-----------|-----------|----------------------|
+| TEXT, HEADING, CAPTION, FOOTNOTE | Bufferisés et fusionnés consécutivement | `NARRATIVE_TEXT` | ✅ `True` |
+| TABLE | 1 chunk dédié par table | `TABLE_TEXT` | ❌ `False` |
+| FIGURE | 1 chunk dédié par figure | `FIGURE_TEXT` | ❌ `False` |
+| CODE | 1 chunk dédié par bloc code | `CODE_TEXT` | ❌ `False` |
+
+**Mécanisme de buffering narratif :**
+- Les items NARRATIVE sont accumulés dans un buffer
+- Quand la taille du buffer dépasse `max_chunk_size` (défaut : 3000 chars), le buffer est flushé → 1 `TypeAwareChunk(kind=NARRATIVE_TEXT)`
+- Chaque chunk narratif contient la liste des `item_ids` sources (traçabilité DocItem → Chunk)
+
+**Propriétés des chunks :**
+- `chunk_id` : UUID généré automatiquement (`chunk_{uuid4().hex[:12]}`)
+- `item_ids` : Liste des DocItem.item_id sources (1-N)
+- `section_id` : Section d'appartenance
+- `page_no` : Page de début
+- `text_origin` : Traçabilité de l'origine du texte (DOCLING, VISION_SEMANTIC, OCR, PLACEHOLDER)
+
+**Sortie :** `List[TypeAwareChunk]` — seuls les chunks `NARRATIVE_TEXT` sont marqués `is_relation_bearing=True`
+
+#### 6.2.4 Résultat global — StructuralGraphBuildResult
+
+```
+StructuralGraphBuildResult
+  ├── doc_items: List[DocItem]           ← items atomiques
+  ├── sections: List[SectionInfo]        ← hiérarchie de sections
+  ├── chunks: List[TypeAwareChunk]       ← chunks pour retrieval
+  ├── doc_version: DocumentVersion       ← version avec doc_hash
+  ├── page_contexts: List[PageContext]   ← contextes de pages
+  └── doc_dict: Dict                     ← DoclingDocument sérialisé (D7)
+```
+
+#### 6.2.5 Résultat V2 — Pass0Result
+
+```
+Pass0Result (produit par Pass0Adapter)
+  ├── doc_items: List[DocItem]
+  ├── sections: List[SectionInfo]
+  ├── chunks: List[TypeAwareChunk]
+  ├── chunk_to_docitem_map: Dict[str, ChunkToDocItemMapping]   ← pour Pass 1.3b
+  ├── docitem_to_chunks_map: Dict[str, List[str]]              ← index inversé
+  ├── unit_index: Dict[str, UnitIndexResult]                   ← pour Pass 1.3 Pointer
+  ├── doc_title: Optional[str]
+  ├── page_count: int
+  └── doc_version_id: str                                      ← hash stable v1:{sha256}
+```
+
+#### 6.2.6 Cache Loader — Reconstruction depuis le cache
+
+**Fichier :** `src/knowbase/stratified/pass0/cache_loader.py`
+
+**Objectif :** Reconstruire un `Pass0Result` depuis un fichier cache JSON, évitant de re-parser le DoclingDocument.
+
+**Formats supportés :**
+
+| Format cache | Données disponibles | Limites |
+|-------------|---------------------|---------|
+| `v2`, `v3`, `v4` | Chunks sérialisés dans `stats.structural_graph.chunks[]` | DocItems non sérialisés |
+| `v5` | Chunks + DocItems sérialisés dans `stats.structural_graph.items[]` | Sections non sérialisées |
+| `v1_legacy` | Pages brutes dans `extracted_text.pages[]` | 1 chunk/DocItem/section par page (dégradé) |
+
+**Vision Observations (ADR-20260126)** :
+Le CacheLoader extrait les `vision_results[]` du cache et les convertit en `VisionObservation` (hors graphe de connaissance). Le paramètre `merge_vision` est **DEPRECATED** — par défaut, les résultats Vision ne sont **PAS** mergés dans les chunks FIGURE_TEXT mais retournés comme observations séparées.
+
+#### 6.2.7 Persistance Neo4j V2
+
+**Mode V2 (via `Pass0Adapter.process_and_persist_v2()`)** :
+- Labels : `Document`, `Section`, `DocItem` (labels V2 simplifiés)
+- Relations : `(Document)-[:HAS_SECTION]->(Section)`, `(Section)-[:SUBSECTION_OF]->(Section)`, `(Section)-[:CONTAINS_ITEM]->(DocItem)`
+- IDs composites V2 pour `section_id` et `docitem_id`
+
+**Mode legacy (via `StructuralGraphBuilder._persist_to_neo4j()`)** :
+- Labels : `DocumentVersion`, `SectionContext`, `DocItem`, `PageContext`, `TypeAwareChunk`
+- Relations : `(DocumentContext)-[:HAS_VERSION]->(DocumentVersion)`, `(DocumentVersion)-[:HAS_SECTION]->(SectionContext)`, `(SectionContext)-[:CONTAINS]->(DocItem)`, `(DocItem)-[:ON_PAGE]->(PageContext)`, `(TypeAwareChunk)-[:DERIVED_FROM]->(DocItem)`
+- Feature flag `stratified_pipeline_v2` : si activé, skip la création de `PageContext` (fusionné dans Document)
+
+**Lazy DocItem Persistence (ADR)** :
+La fonction `persist_pass0_to_neo4j_sync()` implémente une stratégie de **persistance lazy** pour les DocItems :
+- Seuls `Document` et `Section` sont créés immédiatement
+- Les `DocItem` sont créés **à la demande** lors de Pass 1.3 (Anchor Resolution) quand une Information est PROMOTED et nécessite un lien `ANCHORED_IN`
+- Raison : ~6700 DocItems/doc → ~50-200 DocItems/doc effectivement ancrés (evidence-first)
+
+#### 6.2.8 Modèle de données — DocItem
+
+**Fichier :** `src/knowbase/structural/models.py` — classe `DocItem` (Pydantic BaseModel)
+
+Champs principaux :
+
+| Catégorie | Champs | Description |
+|-----------|--------|-------------|
+| **Identifiants (D1)** | `tenant_id`, `doc_id`, `doc_version_id`, `item_id` | Identification multi-tenant + version |
+| **Type et contenu (D3)** | `item_type: DocItemType`, `heading_level`, `text`, `table_json` | Type canonique + contenu |
+| **Hiérarchie Docling (D4.6)** | `parent_item_id`, `group_id` | Conservés comme metadata (non utilisés pour le graphe V2) |
+| **Provenance (D5)** | `page_no`, `bbox_*`, `charspan_start/end`, `charspan_start_docwide/end_docwide` | Position spatiale + textuelle |
+| **Ordre (D2)** | `reading_order_index` | Position dans l'ordre de lecture du document |
+| **Scope Layer** | `mentioned_concepts: List[str]` | Concepts mentionnés (peuplé par Pass 2) — navigation, pas assertions |
+| **Section** | `section_id` | Assigné par SectionProfiler |
+
+**Hash stable du document (D6)** :
+- Algorithme : `compute_doc_hash()` dans `models.py`
+- Format : `v1:{sha256}`
+- Exclut les champs volatiles (`mtime`, `path`, `created_at`, `pipeline_version`, etc.)
+- Arrondit les floats (D6.3, précision 2 décimales)
+- Trie les listes par `self_ref` pour le déterminisme (D6.4)
+- JSON canonique (clés triées, pas d'espaces)
+
+---
+
+### 6.3 Conformité ADR — Pass 0 Structural
+
+| # | Axe ADR | Statut | Analyse |
+|---|---------|--------|---------|
+| AV2-1 | Séparation structure / sémantique | ✅ | Pass 0 Structural produit **uniquement** la structure documentaire (Document, Section, DocItem). Aucune entité sémantique (Concept, Information, Subject, Theme) n'est créée. La séparation est stricte. |
+| AV2-2 | 8 types de nodes maximum | ✅ | Pass 0 Structural crée 3 des 8 types autorisés : Document, Section, DocItem. Pas de prolifération de types intermédiaires. |
+| AV2-3 | Ancrage Information sur DocItem | ✅ | Les mappings `chunk_to_docitem_map` et `docitem_to_chunks_map` sont construits pour permettre l'Anchor Resolution en Pass 1.3b. L'ancrage sera `Information -[:ANCHORED_IN]-> DocItem`, pas sur chunk Qdrant. |
+| AV2-4 | DocItem atomique | ✅ | Chaque DocItem correspond à un item Docling natif (`paragraph`, `table`, `picture`, `list_item`, `heading`, `caption`, `footnote`). Pas de fusion agressive — les items TEXT consécutifs restent séparés en tant que DocItems, et ne sont fusionnés que dans les chunks (TypeAwareChunker). |
+| AV2-8 | Dual Storage | ✅ | Les `TypeAwareChunk` alimentent Qdrant (retrieval vectoriel). Les `DocItem`/`SectionInfo` alimentent Neo4j (graphe structurel navigable). La séparation des responsabilités est respectée. |
+| AV2-10 | < 250 nodes/document | ⚠️ | Pass 0 Structural crée potentiellement beaucoup de DocItems (~centaines à ~milliers par document). Cependant, la stratégie Lazy DocItem Persistence réduit les nodes **effectivement créés** en Neo4j à ~50-200 (ceux ancrés par des Informations PROMOTED). Le reste existe uniquement en mémoire dans le `Pass0Result`. |
+| NS-3 | Citation exacte obligatoire | ✅ | Chaque DocItem a `charspan_start/end` (per-page) et `charspan_start_docwide/end_docwide` (document-wide), permettant la traçabilité exacte vers le texte source. `reading_order_index` assure l'ordonnancement. |
+| NS-4 | Pas de synthèse cross-source | ✅ | Pass 0 Structural traite un seul document à la fois. Le `doc_version_id` (hash stable) identifie la version exacte. |
+
+---
+
+### 6.4 Risques — Pass 0 Structural
+
+| # | Risque | Niveau | Description | Mitigation |
+|---|--------|--------|-------------|------------|
+| R0S-1 | **Heading level mal inféré** | 🟡 | `infer_heading_level_from_text()` utilise des patterns regex pour déduire le niveau de heading (`1.` → level 1, `1.1.` → level 2). Ces patterns peuvent échouer sur des numérotations non standard ou des headings sans numérotation. Un heading mal classifié impacte la hiérarchie des sections. | Fallback vers page-based si aucun heading détecté. Le profil structurel de chaque section compense partiellement (les sections mal découpées auront un profil atypique). |
+| R0S-2 | **DocItems très nombreux** | 🟡 | Un document de 100+ pages peut produire des milliers de DocItems (>6700 observés). En mémoire, ceci est gérable, mais la persistance Neo4j naïve serait coûteuse. | Lazy DocItem Persistence : seuls les DocItems ancrés par des Informations PROMOTED sont créés en Neo4j (~50-200/doc). Le batch de 500 items par transaction Neo4j évite les timeouts. |
+| R0S-3 | **Chunks NARRATIVE trop longs** | 🟢 | Le `max_chunk_size` de 3000 chars est un garde-fou. Les items narratifs consécutifs sont fusionnés jusqu'à cette limite. Un paragraphe unique > 3000 chars sera un chunk solo. | Le seuil de 3000 chars est configurable. Les chunks trop longs sont moins performants pour l'embedding mais restent fonctionnels. |
+| R0S-4 | **Cache v5 — Sections non sérialisées** | 🟡 | Le CacheLoader reconstruit les chunks et DocItems depuis le cache, mais les `SectionInfo` ne sont **pas** sérialisées. Le `Pass0Result` chargé depuis le cache a `sections=[]`. | Les sections sont recalculées si nécessaire par les passes suivantes (Pass 0.9 Global View utilise le full_text). Pour les cas où les sections sont critiques, un re-build complet via `Pass0Adapter.process_document()` est requis. |
+| R0S-5 | **AssertionUnitIndexer import lazy** | 🟢 | L'import de `AssertionUnitIndexer` est fait en lazy (`try/except ImportError`). Si le module n'est pas disponible, l'indexation est silencieusement ignorée et `unit_index` reste vide. | Log warning émis. Le pipeline continue sans unit_index — Pass 1.3 utilisera un mode fallback (copie verbatim au lieu de pointage). |
+| R0S-6 | **Deux schémas Neo4j coexistants** | 🟡 | Le code maintient deux chemins de persistance : legacy (`SectionContext`, `DocumentVersion`, `PageContext`) et V2 (`Document`, `Section`, `DocItem`). Le choix dépend du feature flag `stratified_pipeline_v2`. | Le feature flag assure un basculement propre. Le code legacy sera retiré après validation complète du pipeline V2. |
+| R0S-7 | **Hash de document non déterministe** | 🟢 | Le `compute_doc_hash()` utilise des mesures de déterminisme (exclusion champs volatiles, tri par self_ref, arrondi floats, JSON canonique). Mais si Docling change la structure de sortie entre versions, le hash changera. | Le préfixe `v1:` du hash permet de versionner l'algorithme. Le `docling_version` est tracé dans `DocumentVersion`. |
 
 ---
 
 ## 7. Pass 0.5 — Résolution de Coréférence Linguistique
 
-<!-- À compléter : analyse détaillée de pass05_coref.py -->
+**Fichiers principaux :**
+- `src/knowbase/ingestion/pipelines/pass05_coref.py` — classe `Pass05CoreferencePipeline` (orchestrateur)
+- `src/knowbase/linguistic/coref_engine.py` — interface `ICorefEngine` + implémentations (spaCy, FastCoref, RuleBased, Coreferee)
+- `src/knowbase/linguistic/coref_models.py` — modèles (`MentionSpan`, `CoreferenceChain`, `CorefDecision`, `CorefLink`)
+- `src/knowbase/linguistic/coref_gating.py` — classe `CorefGatingPolicy` (politique conservative)
+- `src/knowbase/linguistic/coref_named_gating.py` — classe `NamedNamedGatingPolicy` (filtrage Named↔Named)
+- `src/knowbase/linguistic/coref_llm_arbiter.py` — classe `CorefLLMArbiter` (arbitrage LLM pour cas ambigus)
+- `src/knowbase/linguistic/coref_cache.py` — classe `CorefCache` (cache des décisions)
+- `src/knowbase/linguistic/coref_persist.py` — classe `CorefPersistence` (persistance Neo4j)
+
+**Objectif :** Résoudre les coréférences linguistiques (pronoms → antécédents, groupes nominaux → entités nommées) dans le texte du document. La résolution produit une `CorefGraph` (MentionSpan, CoreferenceChain, CorefDecision) persistée en Neo4j.
+
+**⚠️ Statut V2 :** Pass 0.5 est **désactivée** quand le feature flag `stratified_pipeline_v2` est activé (cf. risque R0-8 dans section 5.10). Les modèles `MentionSpan`/`CoreferenceChain` ne font pas partie de l'architecture V2 (8 types de nodes max). La coréférence en V2 sera gérée différemment (à définir).
+
+### 7.1 Mécanismes de résolution
+
+#### 7.1.1 Architecture en pipeline
+
+```
+Étape 1: Idempotence — Vérifier si déjà traité
+  ↓
+Étape 2: Charger DocItems + Chunks depuis Neo4j
+  ↓
+Étape 3: Détecter la langue du document
+  ↓
+Étape 4: Sélectionner l'engine de coréférence
+  ↓
+Étape 5: Résoudre les coréférences (engine + batching OOM)
+  ↓
+Étape 5b: Filtrer les faux positifs Named↔Named (gating + LLM)
+  ↓
+Étape 6: Appliquer la politique de gating (pronoms)
+  ↓
+Étape 7: Persister la CorefGraph dans Neo4j
+  ↓
+Étape 8: Créer les liens MATCHES_PROTOCONCEPT (optionnel)
+```
+
+#### 7.1.2 Engines de coréférence (multilingue)
+
+| Engine | Langues | Disponibilité | Caractéristiques |
+|--------|---------|---------------|-----------------|
+| **FastCoref** (spaCy + F-Coref) | EN | `FASTCOREF_AVAILABLE` | Meilleur pour l'anglais, ~800MB mémoire, singleton pour éviter double-chargement |
+| **SpaCy CoreferenceResolver** | EN | `SPACY_COREF_AVAILABLE` | Alternative spaCy native |
+| **Coreferee** | FR, EN, DE | `COREFEREE_AVAILABLE` | Expérimental, dernier release 2022 — marqué swappable |
+| **RuleBasedEngine** | Toutes | Toujours | Fallback universel — heuristiques regex simples |
+
+Sélection automatique via `get_engine_for_language(lang)` — EN préfère FastCoref, FR/DE préfère Coreferee, fallback vers RuleBasedEngine.
+
+#### 7.1.3 Section batching (OOM Fix)
+
+Pour les documents > `fastcoref_batch_size` chars (défaut : 50 000 chars, ~12 pages), le pipeline :
+1. Groupe les DocItems par sections jusqu'à `batch_size` chars
+2. Ajoute un overlap de `fastcoref_batch_overlap` chars (défaut : 3000) entre batches pour le contexte coréférentiel
+3. Résout chaque batch indépendamment via l'engine
+4. Ajuste les offsets des clusters au document complet
+5. Déduplique les clusters de l'overlap (par signature `(start, end)`)
+
+#### 7.1.4 Politique de gating conservative (pronoms)
+
+**Classe :** `CorefGatingPolicy`
+
+**Invariants :**
+- **L3** : Closed-world disambiguation — candidats locaux uniquement
+- **L4** : Abstention-first — ambiguïté → ABSTAIN
+
+| Critère | Seuil | Effet |
+|---------|-------|-------|
+| Confiance engine | ≥ 0.85 | En-dessous → ABSTAIN (LOW_CONFIDENCE) |
+| Distance sentences | ≤ 2 | Au-delà → ABSTAIN (LONG_DISTANCE) |
+| Distance chars | ≤ 500 | Au-delà → ABSTAIN (LONG_DISTANCE) |
+| Candidats multiples | >1 valide | → ABSTAIN (AMBIGUOUS) |
+| Pronom non référentiel | Détecté | → NON_REFERENTIAL (IMPERSONAL, EXPLETIVE, GENERIC) |
+
+**Décision types :** `RESOLVED` | `ABSTAIN` | `NON_REFERENTIAL`
+
+#### 7.1.5 Gating Named↔Named (ADR_COREF_NAMED_NAMED_VALIDATION)
+
+**Classe :** `NamedNamedGatingPolicy`
+
+**Objectif :** Filtrer les faux positifs quand l'engine regroupe deux noms propres différents dans un même cluster (ex: "SAP S/4HANA" ↔ "SAP BTP").
+
+**Stratégie 3-tier :**
+
+| Condition | Décision | Seuils |
+|-----------|----------|--------|
+| Jaro-Winkler < 0.55 | `REJECT` | STRING_SIMILARITY_LOW |
+| Jaro-Winkler ≥ 0.95 OU Token Jaccard ≥ 0.8 | `ACCEPT` | HIGH_SIMILARITY |
+| Zone intermédiaire | `REVIEW` | Envoyé au LLM Arbiter |
+
+**LLM Arbiter** (`CorefLLMArbiter`) : Arbitrage batch pour les paires en REVIEW. Décisions : `same_entity=True/False` ou `abstain=True`.
+
+**Cache** (`CorefCache`) : Cache des décisions Named↔Named (paire → même entité ou non) pour éviter les appels LLM répétés.
+
+#### 7.1.6 Types de mentions
+
+| Type | Exemples | Traitement |
+|------|----------|-----------|
+| `PRONOUN` | it, they, il, elle | Gating conservative (L4) |
+| `PROPER` | SAP S/4HANA, iPhone 15 | Named↔Named gating |
+| `NP` | le système, the device | Named↔Named gating |
+| `OTHER` | — | Exclu de la résolution |
+
+#### 7.1.7 Modèles de données CorefGraph
+
+```
+MentionSpan (fait linguistique, pas assertion)
+  ├── tenant_id, doc_id, doc_version_id
+  ├── docitem_id (ancrage principal → DocItem)
+  ├── chunk_id (ancrage secondaire → TypeAwareChunk)
+  ├── span_start, span_end (offsets exacts — L1)
+  ├── surface (texte verbatim)
+  ├── mention_type: MentionType (PRONOUN | NP | PROPER | OTHER)
+  └── lang, sentence_index
+
+CoreferenceChain
+  ├── chain_id, tenant_id, doc_id, doc_version_id
+  ├── method (engine utilisé)
+  ├── confidence
+  ├── mention_ids: List[str]
+  └── representative_mention_id
+
+CorefLink
+  ├── source_mention_id → target_mention_id
+  ├── method, confidence
+  ├── scope: CorefScope (SAME_SENTENCE | PREV_SENTENCE | PREV_CHUNK | WINDOW_K)
+  └── window_chars
+
+CorefDecision (audit trail)
+  ├── decision_type: RESOLVED | ABSTAIN | NON_REFERENTIAL
+  ├── reason_code: ReasonCode (UNAMBIGUOUS, AMBIGUOUS, LOW_CONFIDENCE, etc.)
+  └── reason_detail
+```
+
+#### 7.1.8 Liens MATCHES_PROTOCONCEPT
+
+Si `create_protoconcept_links=True`, le pipeline :
+1. Charge les `ProtoConcept` du document depuis Neo4j
+2. Pour chaque `MentionSpan` de type PROPER ou NP, cherche une correspondance lexicale avec un ProtoConcept
+3. Crée un lien `MATCHES_PROTOCONCEPT` (confidence=0.9, method="lexical_match")
+
+**NOTE GOUVERNANCE** : Ces liens sont des **alignements lexicaux/ancrés**, PAS des identités ontologiques.
+
+---
+
+### 7.2 Conformité ADR — Pass 0.5
+
+| # | Axe ADR | Statut | Analyse |
+|---|---------|--------|---------|
+| AV2-1 | Séparation structure / sémantique | ⚠️ | Pass 0.5 opère sur la couche **linguistique**, distincte de la structure documentaire ET de la sémantique. Cependant, les `MentionSpan` et `CoreferenceChain` ne font pas partie des 8 types de nodes V2, ce qui crée un conflit avec AV2-2. |
+| AV2-2 | 8 types de nodes maximum | ❌ | Pass 0.5 crée des types de nodes supplémentaires (`MentionSpan`, `CoreferenceChain`, `CorefDecision`) qui ne font pas partie du schéma V2 (Document, Section, DocItem, Subject, Theme, Concept, Information, AssertionLog). C'est la raison de la désactivation en mode V2. |
+| NS-2 | LLM = Extracteur evidence-locked | ✅ | Le LLM Arbiter est strictement un **arbitre** (même entité ou non ?), pas un extracteur. Il n'invente pas de coréférences — il valide/rejette celles proposées par l'engine. |
+| NS-3 | Citation exacte obligatoire | ✅ | Les `MentionSpan` conservent les offsets exacts (`span_start`, `span_end`) et le texte verbatim (`surface`). Invariant L1 (Evidence-preserving) respecté. |
+
+**Invariants linguistiques :**
+
+| Invariant | Description | Statut |
+|-----------|-------------|--------|
+| L1 | Evidence-preserving (spans exacts) | ✅ Offsets conservés |
+| L2 | No generated evidence (pas de texte modifié persisté) | ✅ Le texte original n'est jamais altéré |
+| L3 | Closed-world disambiguation | ✅ Candidats locaux (fenêtre courte) uniquement |
+| L4 | Abstention-first | ✅ Politique conservative, seuil 0.85, ABSTAIN sur ambiguïté |
+| L5 | Linguistic-only | ✅ Pas de relation conceptuelle — fait linguistique pur |
+
+---
+
+### 7.3 Risques — Pass 0.5
+
+| # | Risque | Niveau | Description | Mitigation |
+|---|--------|--------|-------------|------------|
+| R05-1 | **Désactivée en V2** | 🟡 | Pass 0.5 est entièrement désactivée quand `stratified_pipeline_v2=True`. Les coréférences ne sont pas résolues dans le pipeline V2, ce qui peut dégrader la qualité de l'extraction d'assertions (pronoms non résolus dans le texte source). | Décision architecturale consciente. La coréférence V2 nécessite une refonte pour s'intégrer dans le schéma 8-nodes (potentiellement comme metadata sur DocItem plutôt que nodes séparés). |
+| R05-2 | **OOM FastCoref sur gros documents** | 🟡 | FastCoref charge ~800MB (spaCy + modèle). Les documents > 50K chars nécessitent un section batching. Le seuil a été réduit de 100K à 50K après un OOM sur un document de 106K chars. | Section batching avec overlap de 3K chars. Singleton FastCoref pour éviter double chargement. |
+| R05-3 | **Coreferee obsolète** | 🟡 | Le moteur Coreferee (utilisé pour FR/DE) a son dernier release en 2022. Il est marqué "swappable sans douleur" mais aucune alternative n'est identifiée. | Fallback vers RuleBasedEngine si Coreferee indisponible. L'interface `ICorefEngine` permet le swap transparent. |
+| R05-4 | **Offset lookup simpliste** | 🟡 | `_find_docitem_for_offset()` et `_find_chunk_for_offset()` retournent actuellement le **premier** DocItem/chunk (TODO dans le code). L'ancrage MentionSpan → DocItem est potentiellement incorrect pour les mentions en milieu/fin de document. | Marqué TODO dans le code. En mode V2 désactivé, ce bug n'a pas d'impact. |
+| R05-5 | **Named↔Named gating — faux rejets** | 🟢 | Le seuil Jaro-Winkler de 0.55 pour REJECT est agressif. Des variantes légitimes (ex: "SAP S/4HANA 2023" vs "S/4HANA") pourraient être rejetées à tort. | Le LLM Arbiter traite les cas en zone grise (REVIEW). Le cache évite les appels LLM répétés. |
+| R05-6 | **Pas d'intégration avec Pass 1.x** | 🟡 | Les résultats de coréférence (CorefGraph) ne sont pas exploités par les passes sémantiques (Pass 1.1-1.4). Le module `coref_assertion_bridge.py` existe mais l'intégration n'est pas documentée. | Le pipeline V2 contournera ce problème en intégrant la coréférence différemment (à concevoir). |
 
 ---
 
