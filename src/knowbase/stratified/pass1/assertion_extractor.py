@@ -168,12 +168,14 @@ TOP_K_STRONG_MATCH = 1      # Winner-takes-all si match trigger fort (bonus >= 1
 # ============================================================================
 # SINK CONCEPT — Seuils adaptatifs (Sprint 4.2)
 # ============================================================================
-# Cible : 15-30% des assertions routées vers SINK.
+# Cible : 25-35% des assertions routées vers SINK (réaliste pour docs longs).
 # En dessous de 15% → le SINK ne sert à rien, les aspirateurs reviennent.
-# Au-dessus de 30% → le SINK aspire lui-même, la KB perd du signal.
+# Au-dessus de 40% → le SINK aspire lui-même, la KB perd du signal.
+# Calibration Qwen : scores typiques 0.46–0.56, pic normal ~0.50.
 SINK_MALUS = 0.90                 # Malus inhérent SINK (-10%)
-SINK_BAND1_CEILING = 0.50        # Sous ce score → SINK inconditionnel
-SINK_BAND3_FLOOR = 0.58          # Au-dessus → non-SINK (concept métier garde)
+SINK_BAND1_CEILING = 0.42        # Sous ce score → SINK inconditionnel (Sprint 4.3: 0.50→0.42)
+SINK_BAND3_FLOOR = 0.52          # Au-dessus → non-SINK (Sprint 4.3: 0.58→0.52)
+SINK_BAND2_GAP_MIN = 0.04        # Sprint 4.3: Bande 2 → SINK seulement si gap top1-top2 < ce seuil
 SINK_SIGNAL_FORT_THRESHOLD = 1.15 # Bonus lex/sem pour éliminer SINK de la sélection
 
 
@@ -1806,11 +1808,16 @@ class AssertionExtractorV2:
         sem_bonuses: Dict[str, float],
     ) -> Optional[str]:
         """
-        Sprint 4.2: Seuil SINK adaptatif 3 bandes.
+        Sprint 4.3: Seuil SINK adaptatif piloté par niveau + gap.
 
-        Bande 1 (< 0.50)  : SINK inconditionnel
-        Bande 2 (0.50-0.58): SINK si ambigu OU neutre (pas de bonus lex/sem)
-        Bande 3 (>= 0.58) : non-SINK (garder le concept métier)
+        Bande 1 (< 0.42)      : SINK inconditionnel (score trop faible)
+        Bande 2 (0.42 — 0.52) : SINK seulement si gap top1-top2 < 0.04 (hésitation réelle)
+        Bande 3 (>= 0.52)     : non-SINK (concept métier garde)
+
+        Le gap (top1 - top2) est plus fiable que "absence de bonus" car beaucoup
+        d'assertions n'ont pas de trigger match même quand le concept est correct.
+        Un top1=0.48 avec top2=0.35 = préférence claire → garder.
+        Un top1=0.48 avec top2=0.47 = hésitation → SINK.
 
         Args:
             best_non_sink_score: Score du meilleur concept non-SINK
@@ -1829,24 +1836,24 @@ class AssertionExtractorV2:
         if best_non_sink_score >= SINK_BAND3_FLOOR:
             return None
 
-        # Bande 2 (SINK_BAND1_CEILING — SINK_BAND3_FLOOR): SINK conditionnel
-        # Vérifier si un bonus lex ou sem aide le top concept
+        # Bande 2 (SINK_BAND1_CEILING — SINK_BAND3_FLOOR): SINK piloté par gap
+        # Si le top concept a un signal lex/sem → garder (il a une raison d'être là)
         if non_sink_scored:
             top_concept_id = non_sink_scored[0][0].concept_id
             top_lex = lex_bonuses.get(top_concept_id, 1.0)
             top_sem = sem_bonuses.get(top_concept_id, 1.0)
-
-            # Si le top concept a un signal (lex > 1.0 ou sem > 1.0) → garder
             if top_lex > 1.0 or top_sem > 1.0:
                 return None
 
-            # Si ambiguïté (top1 - top2 < margin) → SINK
+            # Gap top1 - top2 : si Qwen hésite → SINK, sinon garder
             if len(non_sink_scored) >= 2:
-                second_score = non_sink_scored[1][1]
-                if best_non_sink_score - second_score < MARGIN_AMBIGUOUS:
+                gap = best_non_sink_score - non_sink_scored[1][1]
+                if gap < SINK_BAND2_GAP_MIN:
                     return "zone_grise_ambigu"
+                # Gap suffisant → Qwen a une préférence → garder le concept métier
+                return None
 
-        # Zone grise sans signal → SINK
+        # Un seul candidat non-SINK en bande 2 sans bonus → SINK
         return "zone_grise_neutre"
 
     def _apply_margin_and_topk(
@@ -1864,10 +1871,10 @@ class AssertionExtractorV2:
         4. Garder top-k (dynamique: =1 si match trigger fort OU semantic discriminant)
         5. Si écart best/second < margin → log AMBIGUOUS
 
-        Sprint 4.2 SINK adaptatif:
-        - < 0.50 → SINK inconditionnel
-        - 0.50-0.58 → SINK si ambigu ou neutre (pas de bonus)
-        - >= 0.58 → non-SINK
+        Sprint 4.3 SINK adaptatif (piloté par niveau + gap):
+        - < 0.42 → SINK inconditionnel
+        - 0.42-0.52 → SINK seulement si gap top1-top2 < 0.04 (hésitation)
+        - >= 0.52 → non-SINK
         - Signal fort (bonus ≥ 1.15) → éliminer SINK
 
         Args:
