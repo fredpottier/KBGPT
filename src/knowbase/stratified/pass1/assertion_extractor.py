@@ -22,6 +22,8 @@ import yaml
 import uuid
 import os
 
+import numpy as np
+
 from knowbase.stratified.models import (
     AssertionType,
     Concept,
@@ -148,6 +150,21 @@ MAX_LINKS_PER_ASSERTION = 5
 TOP_K_IF_CLOSE = 2
 CLOSE_THRESHOLD = 0.10  # Écart max entre top-1 et top-k
 
+# ============================================================================
+# RERANK "SPECIFICITY WINS" (Fix Concept Aspirateur - 2026-01-28)
+# ============================================================================
+
+# Seuils de confiance pour rerank
+CONF_THRESHOLD_ORIGINAL = 0.45  # Minimum conf LLM pour être éligible (Qwen calibré ~0.60)
+CONF_THRESHOLD_FINAL = 0.35     # Minimum conf après rerank pour garder le lien
+
+# Règle de marge pour détection ambiguïté
+MARGIN_AMBIGUOUS = 0.05  # Si écart < margin, marquer AMBIGUOUS
+
+# Top-K dynamique
+TOP_K_DEFAULT = 2           # Max concepts par assertion (défaut)
+TOP_K_STRONG_MATCH = 1      # Winner-takes-all si match trigger fort (bonus >= 1.25)
+
 
 @dataclass
 class PromotionResult:
@@ -243,6 +260,18 @@ class AssertionExtractorV2:
         self.strict_promotion = strict_promotion
         self.max_workers = max_workers or int(os.environ.get("OSMOSE_LLM_WORKERS", self.DEFAULT_MAX_WORKERS))
 
+        # RERANK "Specificity Wins" - Snapshot gelé au début du linking
+        self._concept_info_snapshot: Dict[str, int] = {}  # {concept_id: info_count} gelé
+        self._total_assertions_count: int = 0              # Pour seuils relatifs
+
+        # Fix H2: Toxicité des triggers et activation des concepts
+        self._trigger_toxicity: Dict[str, float] = {}     # {trigger_lower: freq_ratio}
+        self._concept_activation: Dict[str, float] = {}   # {concept_id: activation_rate}
+
+        # Sprint 2: Semantic Tie-Breaker (embeddings locaux)
+        self._concept_embeddings: Dict[str, np.ndarray] = {}  # {concept_id: embedding 1024D}
+        self._assertion_embedding_cache: Dict[str, np.ndarray] = {}  # {assertion_id: embedding}
+
     def _load_prompts(self, prompts_path: Optional[Path]) -> Dict:
         """Charge les prompts depuis le fichier YAML."""
         if prompts_path is None:
@@ -253,6 +282,39 @@ class AssertionExtractorV2:
 
         with open(prompts_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f) or {}
+
+    # =========================================================================
+    # RERANK "SPECIFICITY WINS" - Module A: Snapshot (Frozen during batch)
+    # =========================================================================
+
+    def _freeze_concept_counts(self, concepts: List[Concept], total_assertions: int) -> None:
+        """
+        Gèle les counts au début du linking (appelé 1x avant tous les batches).
+
+        Args:
+            concepts: Liste des concepts disponibles
+            total_assertions: Nombre total d'assertions à linker (pour seuils relatifs)
+
+        Note:
+            Pour un doc neuf, tous les counts seront 0.
+            Pour un re-import avec données existantes, on pourrait charger depuis Neo4j.
+            Ici on utilise 0 pour simplicité et déterminisme.
+        """
+        # Initialiser tous les counts à 0 (doc neuf, simple et déterministe)
+        self._concept_info_snapshot = {c.concept_id: 0 for c in concepts}
+        self._total_assertions_count = total_assertions
+
+        # Calcul des seuils relatifs pour audit
+        start = max(10, int(0.20 * total_assertions))
+        end = max(start + 10, int(0.50 * total_assertions))
+        logger.info(
+            f"[OSMOSE:Rerank] Snapshot gelé: {len(concepts)} concepts, "
+            f"N={total_assertions}, seuils relatifs: start={start}, end={end}"
+        )
+
+    def _get_concept_info_count(self, concept_id: str) -> int:
+        """Retourne le count GELÉ (pas d'incrément pendant le batch)."""
+        return self._concept_info_snapshot.get(concept_id, 0)
 
     # =========================================================================
     # ÉTAPE 1: EXTRACTION DES ASSERTIONS
@@ -595,9 +657,22 @@ class AssertionExtractorV2:
         Le LLM raisonne sur le sens pour déterminer les liens.
 
         Si plus de LINKING_BATCH_SIZE assertions, les traite par batch en parallèle.
+
+        RERANK "Specificity Wins" (2026-01-28):
+        Après le linking LLM, applique un rerank pour privilégier les concepts
+        spécifiques et pénaliser les "concepts aspirateurs".
         """
         if not assertions or not concepts:
             return []
+
+        # RERANK: Geler le snapshot des counts au début (avant tous les batches)
+        self._freeze_concept_counts(concepts, len(assertions))
+
+        # Fix H2: Pré-calculer la toxicité des triggers
+        self._precompute_trigger_toxicity(assertions, concepts)
+
+        # Sprint 2: Pré-calculer les embeddings des concepts pour le semantic tie-breaker
+        self._precompute_concept_embeddings(concepts)
 
         if self.llm_client:
             return self._link_via_llm(assertions, concepts)
@@ -615,9 +690,16 @@ class AssertionExtractorV2:
         Si plus de LINKING_BATCH_SIZE assertions, les découpe en batches
         et les traite en parallèle.
         """
-        # Si peu d'assertions, traitement direct
+        # Si peu d'assertions, traitement direct (avec rerank aussi)
         if len(assertions) <= self.LINKING_BATCH_SIZE:
-            return self._link_batch(assertions, concepts)
+            links = self._link_batch(assertions, concepts)
+            if links:
+                links, lexical_bonuses, semantic_bonuses = self._rerank_links_specificity(
+                    links, concepts, assertions
+                )
+                links = self._apply_margin_and_topk(links, lexical_bonuses, semantic_bonuses)
+                logger.info(f"[OSMOSE:Pass1:1.4:Rerank] {len(links)} liens après rerank")
+            return links
 
         # Sinon, batching parallèle
         batches = [
@@ -651,7 +733,16 @@ class AssertionExtractorV2:
         if errors_count > 0:
             logger.warning(f"[OSMOSE:Pass1:1.4] {errors_count} batches en erreur sur {len(batches)}")
 
-        logger.info(f"[OSMOSE:Pass1:1.4] {len(all_links)} liens sémantiques établis")
+        logger.info(f"[OSMOSE:Pass1:1.4] {len(all_links)} liens LLM bruts établis")
+
+        # RERANK "Specificity Wins": Post-traitement pour privilégier concepts spécifiques
+        if all_links:
+            all_links, lexical_bonuses, semantic_bonuses = self._rerank_links_specificity(
+                all_links, concepts, assertions
+            )
+            all_links = self._apply_margin_and_topk(all_links, lexical_bonuses, semantic_bonuses)
+            logger.info(f"[OSMOSE:Pass1:1.4:Rerank] {len(all_links)} liens après rerank")
+
         return all_links
 
     def _link_batch(
@@ -1014,6 +1105,809 @@ class AssertionExtractorV2:
                     return True
 
         return False
+
+    # =========================================================================
+    # Fix H2: TOXICITÉ DES TRIGGERS + GARDE-FOU ACTIVATION
+    # =========================================================================
+
+    def _match_trigger_in_text(self, trigger: str, text: str) -> bool:
+        """
+        Helper unique de matching trigger → texte.
+        Utilisé par _precompute_trigger_toxicity() et _compute_lexical_bonus().
+        Normalise: lowercase + word-boundary (courts: no-letter boundary).
+        """
+        t = trigger.lower()
+        text_lower = text.lower()
+        if len(t) >= 4:
+            return bool(re.search(rf'\b{re.escape(t)}\b', text_lower))
+        else:
+            return bool(re.search(rf'(?<![a-z]){re.escape(t)}(?![a-z])', text_lower))
+
+    def _precompute_trigger_toxicity(
+        self,
+        assertions: List[RawAssertion],
+        concepts: List[Concept]
+    ) -> None:
+        """
+        Pré-calcule le taux de match de chaque trigger sur les assertions.
+
+        Un trigger est "toxique" s'il matche > 8% des assertions (bruit).
+        Stocke dans self._trigger_toxicity: {trigger_lower: frequency_ratio}
+        Calcule aussi self._concept_activation: {concept_id: activation_rate}
+        """
+        total = len(assertions)
+        if total == 0:
+            self._trigger_toxicity = {}
+            self._concept_activation = {}
+            return
+
+        # Collecter tous les triggers uniques
+        all_triggers: Dict[str, List[str]] = {}  # {trigger_lower: [concept_ids]}
+        for concept in concepts:
+            triggers = getattr(concept, 'lexical_triggers', None) or []
+            for t in triggers:
+                t_lower = t.lower()
+                if t_lower not in all_triggers:
+                    all_triggers[t_lower] = []
+                all_triggers[t_lower].append(concept.concept_id)
+
+        # Compter les matches par trigger sur toutes les assertions
+        trigger_match_counts: Dict[str, int] = {}
+        for t_lower in all_triggers:
+            count = sum(
+                1 for a in assertions
+                if self._match_trigger_in_text(t_lower, a.text)
+            )
+            trigger_match_counts[t_lower] = count
+
+        # Calculer les ratios de toxicité
+        self._trigger_toxicity = {
+            t_lower: count / total
+            for t_lower, count in trigger_match_counts.items()
+        }
+
+        # Log triggers toxiques
+        toxic_triggers = {
+            t: freq for t, freq in self._trigger_toxicity.items()
+            if freq > 0.08
+        }
+        if toxic_triggers:
+            logger.info(
+                f"[OSMOSE:Rerank:Toxicity] {len(toxic_triggers)} triggers toxiques (>8%): "
+                f"{dict(list(toxic_triggers.items())[:5])}"
+            )
+
+        # GF-A: Calculer activation_rate par concept
+        self._concept_activation = {}
+        for concept in concepts:
+            triggers = getattr(concept, 'lexical_triggers', None) or []
+            if not triggers:
+                self._concept_activation[concept.concept_id] = 0.0
+                continue
+
+            # Triggers non-toxiques de ce concept
+            non_toxic_triggers = [
+                t for t in triggers
+                if self._trigger_toxicity.get(t.lower(), 0.0) <= 0.08
+            ]
+
+            if not non_toxic_triggers:
+                self._concept_activation[concept.concept_id] = 0.0
+                logger.info(
+                    f"[OSMOSE:Rerank:GF-A] {concept.concept_id} ({concept.name}): "
+                    f"activation_rate=0, tous les triggers sont toxiques, "
+                    f"bonus lexical désactivé"
+                )
+                continue
+
+            # Compter les assertions matchant au moins 1 trigger non-toxique
+            matching_assertions = sum(
+                1 for a in assertions
+                if any(
+                    self._match_trigger_in_text(t, a.text)
+                    for t in non_toxic_triggers
+                )
+            )
+            activation_rate = matching_assertions / total
+            self._concept_activation[concept.concept_id] = activation_rate
+
+            if activation_rate < 0.01:
+                logger.info(
+                    f"[OSMOSE:Rerank:GF-A] {concept.concept_id} ({concept.name}): "
+                    f"activation_rate={activation_rate:.1%}, bonus lexical réduit"
+                )
+
+    # =========================================================================
+    # SPRINT 2: SEMANTIC TIE-BREAKER (embeddings locaux)
+    # =========================================================================
+
+    def _precompute_concept_embeddings(self, concepts: List[Concept]) -> None:
+        """
+        Encode les concepts une seule fois pour le semantic tie-breaker.
+        Stocke dans self._concept_embeddings: {concept_id: np.array(1024D)}
+
+        Sprint 4 (4b): Représentation enrichie:
+        - Nom du concept
+        - Définition (si disponible, tronquée à 80 chars)
+        - Triggers cross-filtrés non-toxiques multi-mots (<=5, au lieu de 3)
+        - Triggers shared inclus (pertinents sémantiquement)
+        - Triggers rejetés par cross-filter exclus
+        - SINK exclu de l'encodage
+        """
+        from knowbase.stratified.models import ConceptRole
+
+        try:
+            from knowbase.common.clients.embeddings import get_embedding_manager
+        except ImportError:
+            logger.warning("[OSMOSE:Rerank:Semantic] embeddings non disponibles, semantic désactivé")
+            self._concept_embeddings = {}
+            return
+
+        texts = []
+        ids = []
+        for c in concepts:
+            # Sprint 4 (2e): Exclure SINK de l'encodage sémantique
+            if c.role == ConceptRole.SINK:
+                continue
+
+            triggers = getattr(c, 'lexical_triggers', None) or []
+            # Filtrer: uniquement non-toxiques (<=8%) ET multi-mots (>=2 tokens)
+            # Sprint 4: Les triggers shared sont inclus (pertinents sémantiquement)
+            clean_triggers = [
+                t for t in triggers
+                if self._trigger_toxicity.get(t.lower(), 0.0) <= 0.08
+                and len(t.split()) >= 2
+            ]
+
+            repr_text = c.name
+            # Sprint 4 (4b): Inclure la définition si disponible
+            if c.definition:
+                repr_text += " " + c.definition[:80]
+            # Sprint 4 (4b): Augmenter de 3 à 5 triggers dans la représentation
+            if clean_triggers:
+                repr_text += " " + " ".join(clean_triggers[:5])
+            texts.append(repr_text)
+            ids.append(c.concept_id)
+
+        if not texts:
+            self._concept_embeddings = {}
+            return
+
+        try:
+            manager = get_embedding_manager()
+            embeddings = manager.encode(texts)  # Batch encode
+
+            self._concept_embeddings = {
+                cid: emb for cid, emb in zip(ids, embeddings)
+            }
+            logger.info(
+                f"[OSMOSE:Rerank:Semantic] {len(ids)} concepts encodés "
+                f"(embeddings {embeddings.shape[1]}D, SINK exclu)"
+            )
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Rerank:Semantic] Encodage concepts échoué: {e}")
+            self._concept_embeddings = {}
+
+    def _get_assertion_embedding(self, assertion_id: str, assertion_text: str) -> np.ndarray:
+        """
+        Lazy-encode une assertion (avec cache pour éviter re-calculs).
+        Cache key = assertion_id (stable, unique).
+        """
+        if assertion_id not in self._assertion_embedding_cache:
+            from knowbase.common.clients.embeddings import get_embedding_manager
+            manager = get_embedding_manager()
+            self._assertion_embedding_cache[assertion_id] = manager.encode([assertion_text])[0]
+
+        return self._assertion_embedding_cache[assertion_id]
+
+    def _compute_semantic_bonuses_for_assertion(
+        self,
+        assertion_id: str,
+        assertion_text: str,
+        candidate_concept_ids: List[str]
+    ) -> Dict[str, float]:
+        """
+        Calcule le bonus sémantique pour une assertion vs ses concepts candidats.
+        Utilise un z-score relatif (pas de seuil absolu).
+
+        Returns: {concept_id: bonus} avec bonus in [1.0, 1.15]
+        """
+        if not self._concept_embeddings or not candidate_concept_ids:
+            return {cid: 1.0 for cid in candidate_concept_ids}
+
+        assertion_emb = self._get_assertion_embedding(assertion_id, assertion_text)
+
+        # Calculer la similarité cosine avec tous les concepts candidats
+        sims = {}
+        for cid in candidate_concept_ids:
+            concept_emb = self._concept_embeddings.get(cid)
+            if concept_emb is None:
+                sims[cid] = 0.0
+                continue
+            sim = float(np.dot(assertion_emb, concept_emb) / (
+                np.linalg.norm(assertion_emb) * np.linalg.norm(concept_emb) + 1e-8
+            ))
+            sims[cid] = sim
+
+        # Z-score relatif: (sim - mean) / std
+        values = list(sims.values())
+        if len(values) < 2:
+            return {cid: 1.0 for cid in candidate_concept_ids}
+
+        mean_sim = float(np.mean(values))
+        std_sim = float(np.std(values))
+        if std_sim < 0.001:
+            # Tous les concepts ont la même similarité → pas de signal
+            return {cid: 1.0 for cid in candidate_concept_ids}
+
+        bonuses = {}
+        for cid, sim in sims.items():
+            z = (sim - mean_sim) / std_sim
+            # Sprint 4: Mapper z-score → bonus (plafond 1.20):
+            # z < 0.5 → 1.0 (pas au-dessus de la moyenne)
+            # z 0.5-1.5 → 1.0-1.15 (linéaire)
+            # z 1.5-2.0 → 1.15-1.20 (linéaire, nouveau Sprint 4)
+            # z > 2.0 → 1.20 (plafonné, nouveau Sprint 4)
+            if z < 0.5:
+                bonuses[cid] = 1.0
+            elif z < 1.5:
+                bonuses[cid] = 1.0 + (z - 0.5) * 0.15  # 1.0 → 1.15
+            elif z < 2.0:
+                bonuses[cid] = 1.15 + (z - 1.5) * 0.10  # 1.15 → 1.20
+            else:
+                bonuses[cid] = 1.20  # Plafond Sprint 4
+
+        return bonuses
+
+    # =========================================================================
+    # RERANK "SPECIFICITY WINS" - Module B: Bonus Lexical et Pénalité
+    # =========================================================================
+
+    def _tokenize(self, text: str, min_length: int = 3) -> set:
+        """
+        Tokenize en mots lowercase, filtre les stop words.
+
+        Args:
+            text: Texte à tokenizer
+            min_length: longueur minimum des tokens (défaut 3, recommandé 4 pour éviter surmatches)
+
+        Returns:
+            Set de tokens lowercase filtrés
+        """
+        pattern = rf'\b[a-zA-Z]{{{min_length},}}\b'
+        tokens = re.findall(pattern, text.lower())
+
+        # Filtrer stop words communs (EN + FR)
+        stop_words = {
+            'the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was',
+            'not', 'can', 'will', 'have', 'has', 'been', 'being', 'other',
+            'les', 'des', 'une', 'par', 'pour', 'dans', 'sur', 'avec', 'qui', 'que',
+            'est', 'sont', 'aux', 'ces', 'ont', 'mais', 'comme', 'tout',
+            # Termes trop génériques pour le domaine
+            'data', 'system', 'management', 'service', 'process', 'security',
+        }
+        return set(t for t in tokens if t not in stop_words)
+
+    def _compute_lexical_bonus(self, assertion_text: str, concept: Concept) -> float:
+        """
+        Bonus si tokens spécifiques du concept sont dans l'assertion.
+
+        Utilise word boundaries (\\b) pour éviter surmatches.
+        Ex: "patch" ne match pas "dispatch", "ha" ne match pas "have".
+
+        Fix H2: Modulé par toxicité des triggers et activation du concept.
+        - Trigger toxique (>8% assertions): ignoré (pas de bonus)
+        - Trigger faible (3-8%): bonus réduit à 1.10
+        - Trigger discriminant (<3%): bonus complet 1.25
+
+        Sprint 4: Triggers shared (cross-filter) → bonus plafonné à 1.05
+        Sprint 4: SINK ne reçoit jamais de bonus (1.0 toujours)
+
+        GF-A: Si concept sans activation → neutre (1.0)
+              Si concept à faible activation (<1%) → plafonné à 1.10
+
+        Args:
+            assertion_text: Texte de l'assertion
+            concept: Concept à évaluer
+
+        Returns:
+            Bonus multiplicatif: 1.0 (pas de match), 1.05 (shared), 1.10-1.20 (match nom), 1.25 (match trigger)
+        """
+        from knowbase.stratified.models import ConceptRole
+
+        if not assertion_text:
+            return 1.0
+
+        # Sprint 4 (2d): SINK ne reçoit jamais de bonus
+        if concept.role == ConceptRole.SINK:
+            return 1.0
+
+        # GF-A: Vérifier activation du concept
+        activation = self._concept_activation.get(concept.concept_id, -1.0)
+        if activation == 0.0:
+            # Concept sans trigger utile → neutre, laisser le LLM décider
+            return 1.0
+
+        # Plafond de bonus pour concepts à faible activation
+        max_bonus = 1.25
+        if 0.0 < activation < 0.01:
+            max_bonus = 1.10  # GF-A: plafonné
+
+        # Sprint 4: Récupérer les triggers shared du concept
+        shared_triggers = getattr(concept, '_shared_triggers', set())
+
+        # Utiliser les triggers si disponibles (plus fiables)
+        triggers = getattr(concept, 'lexical_triggers', None) or []
+        if triggers:
+            for trigger in triggers:
+                if self._match_trigger_in_text(trigger, assertion_text):
+                    # Fix H2: Moduler par toxicité
+                    tox = self._trigger_toxicity.get(trigger.lower(), 0.0)
+                    if tox > 0.08:
+                        continue  # Trigger toxique, ignorer
+
+                    # Sprint 4: Trigger partagé → bonus plafonné 1.05
+                    if trigger.lower() in shared_triggers:
+                        return min(1.05, max_bonus)
+
+                    if tox > 0.03:
+                        return min(1.10, max_bonus)  # Bonus réduit
+                    else:
+                        return min(1.25, max_bonus)  # Bonus complet
+
+        # Fallback: tokens du nom du concept (seulement mots longs >= 4 chars)
+        concept_tokens = self._tokenize(concept.name, min_length=4)
+        assertion_tokens = self._tokenize(assertion_text, min_length=4)
+
+        overlap = concept_tokens & assertion_tokens
+        if not overlap:
+            return 1.0
+
+        # Bonus plus fort si token long (= plus spécifique)
+        has_long_token = any(len(t) >= 6 for t in overlap)
+        bonus = 1.20 if has_long_token else 1.10
+        return min(bonus, max_bonus)
+
+    def _saturating_penalty(
+        self,
+        info_count: int,
+        concept: Concept,
+        lexical_bonus: float,
+        num_real_concepts: Optional[int] = None,
+        total_assertions: Optional[int] = None,
+    ) -> float:
+        """
+        Sprint 4: Pénalité 3 phases pour concepts aspirateurs.
+
+        Basée sur mean = total_assertions / num_real_concepts (sans SINK).
+
+        Phase 1 (douce)     : 0 → 2×mean     → 1.0 → 0.8 (linéaire)
+        Phase 2 (agressive) : 2×mean → 3×mean → 0.8 → 0.5 (linéaire)
+        Phase 3 (near-block): > 3×mean        → 0.5 fixe
+
+        Override lexical fort: si bonus_lexical ≥ 1.25, penalty = max(penalty, 0.80)
+        SINK exempt: penalty = 1.0 toujours.
+
+        Args:
+            info_count: Nombre d'infos assignées au concept (provisional ou snapshot)
+            concept: Concept évalué
+            lexical_bonus: Bonus lexical calculé
+            num_real_concepts: Nombre de concepts réels (sans SINK). Si None, utilise le snapshot.
+            total_assertions: Total assertions. Si None, utilise le snapshot.
+
+        Returns:
+            Pénalité multiplicative [0.5, 1.0]
+        """
+        from knowbase.stratified.models import ConceptRole
+
+        # Sprint 4 (2d): SINK n'a pas de pénalité (conçu pour absorber)
+        if concept.role == ConceptRole.SINK:
+            return 1.0
+
+        N = total_assertions if total_assertions is not None else self._total_assertions_count
+        n_concepts = num_real_concepts if num_real_concepts is not None else max(1, len(self._concept_info_snapshot))
+
+        if N == 0 or n_concepts == 0:
+            return 1.0
+
+        mean = N / n_concepts
+
+        # Seuils 3 phases
+        soft_end = 2.0 * mean   # Fin de la phase douce
+        hard_end = 3.0 * mean   # Fin de la phase agressive
+
+        # Calcul de la pénalité 3 phases
+        if info_count <= soft_end:
+            # Phase 1 (douce): 1.0 → 0.8
+            if soft_end <= 0:
+                base_penalty = 1.0
+            else:
+                ratio = info_count / soft_end
+                base_penalty = 1.0 - 0.2 * ratio
+        elif info_count <= hard_end:
+            # Phase 2 (agressive): 0.8 → 0.5
+            if hard_end <= soft_end:
+                base_penalty = 0.5
+            else:
+                ratio = (info_count - soft_end) / (hard_end - soft_end)
+                base_penalty = 0.8 - 0.3 * ratio
+        else:
+            # Phase 3 (near-block): 0.5 fixe
+            base_penalty = 0.5
+
+        # Log phases agressive et near-block
+        if base_penalty < 0.8 and base_penalty >= 0.5:
+            logger.debug(
+                f"[OSMOSE:Rerank:Saturation:Phase2-agressive] "
+                f"{concept.concept_id}: count={info_count}, mean={mean:.1f}, "
+                f"penalty={base_penalty:.2f}"
+            )
+        elif base_penalty <= 0.5:
+            logger.debug(
+                f"[OSMOSE:Rerank:Saturation:Phase3-near-block] "
+                f"{concept.concept_id}: count={info_count}, mean={mean:.1f}, "
+                f"penalty={base_penalty:.2f}"
+            )
+
+        # Sprint 4: Override lexical fort — perce le near-block
+        if lexical_bonus >= 1.25:
+            if base_penalty < 0.80:
+                logger.debug(
+                    f"[OSMOSE:Rerank:Saturation:LexicalOverride] "
+                    f"{concept.concept_id}: penalty {base_penalty:.2f} → 0.80 "
+                    f"(lexical_bonus={lexical_bonus:.2f})"
+                )
+            base_penalty = max(base_penalty, 0.80)
+
+        # MICRO-AJUSTEMENT 1: Pénalité légère si count=0 ET pas de signal lexical
+        if info_count == 0 and lexical_bonus == 1.0:
+            if concept.role in (ConceptRole.CONTEXTUAL,):
+                base_penalty *= 0.95
+
+        return base_penalty
+
+    # =========================================================================
+    # RERANK "SPECIFICITY WINS" - Module B: Rerank et Top-K
+    # =========================================================================
+
+    def _rerank_links_specificity(
+        self,
+        links: List[ConceptLink],
+        concepts: List[Concept],
+        assertions: List[RawAssertion]
+    ) -> Tuple[List[ConceptLink], Dict[str, Dict[str, float]], Dict[str, Dict[str, float]]]:
+        """
+        Rerank les liens pour privilégier les concepts spécifiques.
+
+        Sprint 4: Approche 2-pass avec pénalité 3 phases.
+        Pass 1: Score sans pénalité → provisional distribution
+        Pass 2: Re-score avec pénalité basée sur provisional_counts
+
+        Score = conf_llm × combined_bonus × bonus_central × penalty_saturante
+        où combined_bonus = bonus_lexical si lex > 1.0, sinon bonus_semantic
+
+        Sprint 4 SINK: Malus inhérent -10%, seuil < 0.55, pas de bonus.
+
+        Args:
+            links: Liens LLM originaux
+            concepts: Liste des concepts
+            assertions: Liste des assertions
+
+        Returns:
+            - links: Liste des liens avec confidences ajustées
+            - lexical_bonuses: {assertion_id: {concept_id: bonus}} pour TOP_K dynamique
+            - semantic_bonuses: {assertion_id: {concept_id: bonus}} pour TOP_K semantic
+        """
+        from knowbase.stratified.models import ConceptRole
+
+        concept_map = {c.concept_id: c for c in concepts}
+        assertion_map = {a.assertion_id: a for a in assertions}
+        lexical_bonuses: Dict[str, Dict[str, float]] = {}
+
+        # Sprint 4: Compter les concepts réels (sans SINK)
+        num_real_concepts = sum(
+            1 for c in concepts if c.role != ConceptRole.SINK
+        )
+
+        # ─── PHASE 1: Pré-calculer les bonus lexicaux ───
+        for link in links:
+            assertion = assertion_map.get(link.assertion_id)
+            assertion_text = assertion.text if assertion else ""
+
+            if link.assertion_id not in lexical_bonuses:
+                lexical_bonuses[link.assertion_id] = {}
+
+            concept = concept_map.get(link.concept_id)
+            if not concept:
+                continue
+
+            bonus_lexical = self._compute_lexical_bonus(assertion_text, concept)
+            lexical_bonuses[link.assertion_id][link.concept_id] = bonus_lexical
+
+        # ─── PHASE 2: Pré-calculer les bonus sémantiques (si lexical neutre) ───
+        semantic_bonuses: Dict[str, Dict[str, float]] = {}
+
+        for assertion_id, concept_bonuses in lexical_bonuses.items():
+            # Semantic UNIQUEMENT si TOUS les bonus lexicaux = 1.0
+            all_lexical_neutral = all(b == 1.0 for b in concept_bonuses.values())
+            if all_lexical_neutral and self._concept_embeddings:
+                assertion = assertion_map.get(assertion_id)
+                if not assertion:
+                    continue
+                candidate_ids = list(concept_bonuses.keys())
+                sem_b = self._compute_semantic_bonuses_for_assertion(
+                    assertion_id, assertion.text, candidate_ids
+                )
+                semantic_bonuses[assertion_id] = sem_b
+
+        # Calibration logging (premier document seulement)
+        if semantic_bonuses and not hasattr(self, '_semantic_calibration_logged'):
+            all_sem_values = [
+                v for sb in semantic_bonuses.values()
+                for v in sb.values()
+                if v > 1.0
+            ]
+            if all_sem_values:
+                logger.info(
+                    f"[OSMOSE:Rerank:Semantic:Calibration] "
+                    f"assertions_avec_semantic={len(semantic_bonuses)}, "
+                    f"bonuses>1.0: n={len(all_sem_values)}, "
+                    f"min={min(all_sem_values):.3f}, "
+                    f"mean={np.mean(all_sem_values):.3f}, "
+                    f"max={max(all_sem_values):.3f}"
+                )
+            else:
+                logger.info(
+                    f"[OSMOSE:Rerank:Semantic:Calibration] "
+                    f"assertions_avec_semantic={len(semantic_bonuses)}, "
+                    f"aucun bonus>1.0 (pas de discrimination sémantique)"
+                )
+            self._semantic_calibration_logged = True
+
+        # ─── PASS 1: Score SANS pénalité saturante → provisional winners ───
+        provisional_scores: Dict[str, Dict[str, float]] = {}  # {assertion_id: {concept_id: score}}
+        original_confs: Dict[str, Dict[str, float]] = {}      # {assertion_id: {concept_id: original_conf}}
+
+        for link in links:
+            concept = concept_map.get(link.concept_id)
+            if not concept:
+                continue
+
+            original_conf = link.confidence
+
+            # Stocker la confidence originale
+            if link.assertion_id not in original_confs:
+                original_confs[link.assertion_id] = {}
+            original_confs[link.assertion_id][link.concept_id] = original_conf
+
+            # 1. Bonus lexical
+            bonus_lexical = lexical_bonuses.get(link.assertion_id, {}).get(link.concept_id, 1.0)
+
+            # 2. Semantic tie-breaker (seulement si lexical neutre)
+            bonus_semantic = semantic_bonuses.get(link.assertion_id, {}).get(link.concept_id, 1.0)
+
+            # Combined: lexical si lex > 1.0, sinon semantic
+            combined_bonus = bonus_lexical if bonus_lexical > 1.0 else bonus_semantic
+
+            # 3. S2-A: CENTRAL conditionnel (seulement si preuve locale)
+            has_local_evidence = (bonus_lexical > 1.0) or (bonus_semantic > 1.0)
+            bonus_central = 1.10 if (concept.role == ConceptRole.CENTRAL and has_local_evidence) else 1.0
+
+            # Sprint 4 SINK: Malus inhérent -10%
+            sink_malus = 0.90 if concept.role == ConceptRole.SINK else 1.0
+
+            # Pass 1: Score SANS pénalité saturante
+            pass1_score = min(1.0, original_conf * combined_bonus * bonus_central * sink_malus)
+
+            if link.assertion_id not in provisional_scores:
+                provisional_scores[link.assertion_id] = {}
+            provisional_scores[link.assertion_id][link.concept_id] = pass1_score
+
+        # ─── Calcul provisional distribution ───
+        provisional_counts: Dict[str, int] = {}
+        for concept in concepts:
+            provisional_counts[concept.concept_id] = 0
+
+        for assertion_id, scores in provisional_scores.items():
+            if scores:
+                winner_id = max(scores, key=scores.get)
+                provisional_counts[winner_id] = provisional_counts.get(winner_id, 0) + 1
+
+        # Log la distribution provisoire
+        total_assertions = len(provisional_scores)
+        non_zero = {k: v for k, v in provisional_counts.items() if v > 0}
+        logger.info(
+            f"[OSMOSE:Rerank:2Pass] Pass 1: provisional distribution "
+            f"({total_assertions} assertions, {len(non_zero)} concepts actifs). "
+            f"Top: {sorted(non_zero.items(), key=lambda x: -x[1])[:5]}"
+        )
+
+        # ─── PASS 2: Re-score avec pénalité 3 phases basée sur provisional_counts ───
+        for link in links:
+            concept = concept_map.get(link.concept_id)
+            if not concept:
+                continue
+
+            original_conf = original_confs.get(link.assertion_id, {}).get(link.concept_id, link.confidence)
+
+            # 1. Bonus lexical
+            bonus_lexical = lexical_bonuses.get(link.assertion_id, {}).get(link.concept_id, 1.0)
+
+            # 2. Semantic tie-breaker
+            bonus_semantic = semantic_bonuses.get(link.assertion_id, {}).get(link.concept_id, 1.0)
+            combined_bonus = bonus_lexical if bonus_lexical > 1.0 else bonus_semantic
+
+            # 3. CENTRAL conditionnel
+            has_local_evidence = (bonus_lexical > 1.0) or (bonus_semantic > 1.0)
+            bonus_central = 1.10 if (concept.role == ConceptRole.CENTRAL and has_local_evidence) else 1.0
+
+            # Sprint 4 SINK: Malus inhérent -10%
+            sink_malus = 0.90 if concept.role == ConceptRole.SINK else 1.0
+
+            # 4. Pénalité saturante 3 phases (basée sur provisional_counts)
+            prov_count = provisional_counts.get(link.concept_id, 0)
+            penalty = self._saturating_penalty(
+                prov_count, concept, bonus_lexical,
+                num_real_concepts=num_real_concepts,
+                total_assertions=total_assertions,
+            )
+
+            # Score final
+            new_conf = min(1.0, original_conf * combined_bonus * bonus_central * penalty * sink_malus)
+
+            # Stocker la confidence originale pour le double seuil
+            if not hasattr(link, 'original_confidence'):
+                link.original_confidence = original_conf
+
+            link.confidence = new_conf
+
+            # Log traçabilité enrichi
+            if abs(new_conf - original_conf) > 0.01:
+                logger.debug(
+                    f"[OSMOSE:Rerank] {link.assertion_id} → {link.concept_id}: "
+                    f"conf {original_conf:.2f} → {new_conf:.2f} "
+                    f"(lex={bonus_lexical:.2f}, sem={bonus_semantic:.2f}, "
+                    f"central={bonus_central:.2f}, penalty={penalty:.2f}, "
+                    f"sink_malus={sink_malus:.2f}, prov_count={prov_count})"
+                )
+
+        return links, lexical_bonuses, semantic_bonuses
+
+    def _apply_margin_and_topk(
+        self,
+        links: List[ConceptLink],
+        lexical_bonuses: Dict[str, Dict[str, float]],
+        semantic_bonuses: Optional[Dict[str, Dict[str, float]]] = None
+    ) -> List[ConceptLink]:
+        """
+        Après rerank, re-trier et appliquer les règles de sélection finale.
+
+        1. Filtrer concepts sous le seuil (double seuil: original + final)
+        2. Grouper par assertion
+        3. Trier par confidence décroissante
+        4. Garder top-k (dynamique: =1 si match trigger fort OU semantic discriminant)
+        5. Si écart best/second < margin → log AMBIGUOUS
+
+        Sprint 4 SINK:
+        - Si best_non_sink_score < 0.55 → SINK gagne automatiquement
+        - Si un concept non-SINK a bonus ≥ 1.15 (signal fort) → éliminer SINK
+        - Trigger shared (1.05) ne suffit PAS à éliminer SINK
+
+        Args:
+            links: Liens après rerank
+            lexical_bonuses: {assertion_id: {concept_id: bonus}} pour TOP_K dynamique
+            semantic_bonuses: {assertion_id: {concept_id: bonus}} pour TOP_K semantic
+
+        Returns:
+            Liste filtrée des liens
+        """
+        from knowbase.stratified.models import ConceptRole
+
+        if semantic_bonuses is None:
+            semantic_bonuses = {}
+
+        # Identifier le concept SINK
+        sink_concept_ids = set()
+        for link in links:
+            # Vérifier via le concept_map si possible (les concept_ids contenant "_SINK" suffisent)
+            if link.concept_id.endswith("_SINK"):
+                sink_concept_ids.add(link.concept_id)
+
+        # Grouper les liens par assertion_id
+        links_by_assertion: Dict[str, List[ConceptLink]] = {}
+        for link in links:
+            if link.assertion_id not in links_by_assertion:
+                links_by_assertion[link.assertion_id] = []
+            links_by_assertion[link.assertion_id].append(link)
+
+        filtered_links = []
+
+        for assertion_id, assertion_links in links_by_assertion.items():
+            assertion_bonuses = lexical_bonuses.get(assertion_id, {})
+            assertion_sem_bonuses = semantic_bonuses.get(assertion_id, {})
+
+            # Filtrer et scorer
+            scored = []
+            has_strong_match = False
+            has_signal_fort = False  # Sprint 4: bonus ≥ 1.15 sur un non-SINK
+
+            for link in assertion_links:
+                conf_final = link.confidence
+                conf_original = getattr(link, 'original_confidence', conf_final)
+                lex_bonus = assertion_bonuses.get(link.concept_id, 1.0)
+                sem_bonus = assertion_sem_bonuses.get(link.concept_id, 1.0)
+
+                # MICRO-AJUSTEMENT 3: Double seuil
+                if conf_original < CONF_THRESHOLD_ORIGINAL:
+                    continue
+                if conf_final < CONF_THRESHOLD_FINAL:
+                    continue
+
+                scored.append((link, conf_final, lex_bonus))
+
+                # MICRO-AJUSTEMENT 2: Détection match trigger fort (lexical seul)
+                if lex_bonus >= 1.25:
+                    has_strong_match = True
+
+                # Sprint 4: Signal fort (non-SINK) → permet d'éliminer SINK
+                is_sink = link.concept_id in sink_concept_ids
+                if not is_sink and (lex_bonus >= 1.15 or sem_bonus >= 1.15):
+                    has_signal_fort = True
+
+            if not scored:
+                continue
+
+            # Tri par conf_final décroissante
+            scored.sort(key=lambda x: -x[1])
+
+            # ─── Sprint 4: Logique SINK ───
+            # Séparer SINK et non-SINK
+            non_sink_scored = [(l, c, b) for l, c, b in scored if l.concept_id not in sink_concept_ids]
+            sink_scored = [(l, c, b) for l, c, b in scored if l.concept_id in sink_concept_ids]
+
+            if sink_scored and non_sink_scored:
+                best_non_sink_score = non_sink_scored[0][1]
+
+                # Règle seuil: si meilleur non-SINK < 0.55 → SINK gagne
+                if best_non_sink_score < 0.55:
+                    filtered_links.append(sink_scored[0][0])
+                    continue
+
+                # Élimination SINK: si signal fort (bonus ≥ 1.15) → exclure SINK
+                if has_signal_fort:
+                    scored = non_sink_scored
+            elif sink_scored and not non_sink_scored:
+                # Seul SINK disponible
+                filtered_links.append(sink_scored[0][0])
+                continue
+
+            # Détection ambiguïté
+            if len(scored) >= 2:
+                best_conf, second_conf = scored[0][1], scored[1][1]
+                if best_conf - second_conf < MARGIN_AMBIGUOUS:
+                    logger.info(
+                        f"[OSMOSE:Rerank:AMBIGUOUS] {assertion_id}: "
+                        f"{scored[0][0].concept_id} ({best_conf:.2f}) vs "
+                        f"{scored[1][0].concept_id} ({second_conf:.2f})"
+                    )
+
+            # S2-C: Semantic margin → top_k=1 si nettement discriminant
+            if not has_strong_match and assertion_id in semantic_bonuses:
+                sem_vals = sorted(
+                    semantic_bonuses[assertion_id].values(), reverse=True
+                )
+                if len(sem_vals) >= 2 and sem_vals[0] - sem_vals[1] > 0.05:
+                    has_strong_match = True  # Semantic clairement discriminant
+
+            # TOP_K dynamique
+            top_k = TOP_K_STRONG_MATCH if has_strong_match else TOP_K_DEFAULT
+            kept = scored[:top_k]
+
+            # Ajouter les liens retenus
+            for link, _, _ in kept:
+                filtered_links.append(link)
+
+        return filtered_links
 
     # =========================================================================
     # PROMPTS PAR DÉFAUT

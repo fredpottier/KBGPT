@@ -60,6 +60,7 @@ from knowbase.stratified.models.information import (
     ContextInfo,
     PromotionStatus,
 )
+from knowbase.stratified.governance import ThemeLintChecker
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +273,37 @@ class Pass1OrchestratorV2:
         logger.info(
             f"[OSMOSE:Pass1:1.2] {len(concepts)} concepts identifiés, "
             f"{len(refused_terms)} termes refusés"
+        )
+
+        # =====================================================================
+        # PHASE 1.2c: Trigger Enrichment (Sprint 3 — TF-IDF + Embedding)
+        # =====================================================================
+        try:
+            from knowbase.stratified.pass1.trigger_enricher import enrich_triggers
+            concepts, enrichment_log = enrich_triggers(concepts, chunks)
+            if enrichment_log:
+                logger.info(
+                    f"[OSMOSE:Pass1:1.2c] {len(enrichment_log)} concepts enrichis "
+                    f"({sum(len(v) for v in enrichment_log.values())} triggers ajoutés)"
+                )
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Pass1:1.2c] Trigger enrichment échoué (non bloquant): {e}")
+
+        # =====================================================================
+        # PHASE 1.2d: Injection Concept SINK (Sprint 4 — Anti-Aspirateur)
+        # =====================================================================
+        from knowbase.stratified.models import ConceptRole
+        sink_concept = Concept(
+            concept_id=f"concept_{doc_id}_SINK",
+            theme_id=themes[0].theme_id if themes else "",
+            name="Assertions non classées",
+            role=ConceptRole.SINK,
+            lexical_triggers=[],  # Aucun trigger → jamais de match lexical
+        )
+        concepts.append(sink_concept)
+        logger.info(
+            f"[OSMOSE:Pass1:1.2d] Concept SINK injecté: {sink_concept.concept_id} "
+            f"(total concepts: {len(concepts)})"
         )
 
         # =====================================================================
@@ -595,6 +627,31 @@ class Pass1OrchestratorV2:
         )
 
         # =====================================================================
+        # PHASE 1.6: Theme Lint Check (Governance)
+        # =====================================================================
+        logger.info("[OSMOSE:Pass1:1.6] Vérification gouvernance ThemeLint...")
+
+        theme_lint_checker = ThemeLintChecker()  # Mode in-memory (pas de Neo4j)
+        theme_lint_issues = theme_lint_checker.check_theme_coverage(
+            tenant_id=self.tenant_id,
+            themes=[t.model_dump() for t in themes],
+            concepts=[c.model_dump() for c in concepts],
+            informations=[i.model_dump() for i in informations],
+        )
+
+        if theme_lint_issues:
+            for issue in theme_lint_issues:
+                logger.warning(
+                    f"[OSMOSE:Pass1:ThemeLint] {issue.status}: '{issue.theme_name}' "
+                    f"({issue.infos_elsewhere} infos ailleurs avec keywords {issue.keywords_matched[:3]})"
+                )
+            logger.warning(
+                f"[OSMOSE:Pass1:ThemeLint] {len(theme_lint_issues)} thèmes suspects détectés"
+            )
+        else:
+            logger.info("[OSMOSE:Pass1:ThemeLint] OK - Aucun thème suspect")
+
+        # =====================================================================
         # CONSTRUIRE LE RÉSULTAT
         # =====================================================================
         logger.info("[OSMOSE:Pass1] Construction Pass1Result...")
@@ -607,9 +664,13 @@ class Pass1OrchestratorV2:
             source_url=source_url
         )
 
+        # Sprint 4: Compter les concepts réels (sans SINK)
+        real_concepts_count = sum(
+            1 for c in concepts if getattr(c, 'role', None) != ConceptRole.SINK
+        )
         stats = Pass1Stats(
             themes_count=len(themes),
-            concepts_count=len(concepts),
+            concepts_count=real_concepts_count,
             assertions_total=len(assertion_log),
             assertions_promoted=len(informations),
             assertions_abstained=sum(1 for a in assertion_log if a.status == AssertionStatus.ABSTAINED),

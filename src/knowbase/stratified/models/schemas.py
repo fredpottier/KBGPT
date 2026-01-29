@@ -29,6 +29,7 @@ class ConceptRole(str, Enum):
     CENTRAL = "CENTRAL"
     STANDARD = "STANDARD"
     CONTEXTUAL = "CONTEXTUAL"
+    SINK = "SINK"  # Sprint 4: Concept poubelle pour assertions orphelines
 
 
 class AssertionType(str, Enum):
