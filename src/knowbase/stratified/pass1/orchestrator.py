@@ -698,6 +698,30 @@ class Pass1OrchestratorV2:
             f"({stats.assertions_abstained} abstained, {stats.assertions_rejected} rejected)"
         )
 
+        # Sprint 4.2: Log distribution SINK vs concepts métier
+        sink_count = 0
+        max_concept_name = ""
+        max_concept_count = 0
+        concept_info_counts: dict[str, int] = {}
+        for info in informations:
+            cid = info.concept_id
+            concept_info_counts[cid] = concept_info_counts.get(cid, 0) + 1
+        for c in concepts:
+            count = concept_info_counts.get(c.concept_id, 0)
+            if getattr(c, 'role', None) == ConceptRole.SINK:
+                sink_count = count
+            elif count > max_concept_count:
+                max_concept_count = count
+                max_concept_name = c.name
+        total_infos = len(informations)
+        sink_pct = (sink_count / total_infos * 100) if total_infos > 0 else 0
+        max_pct = (max_concept_count / total_infos * 100) if total_infos > 0 else 0
+        logger.info(
+            f"[OSMOSE:Pass1:Distribution] "
+            f"SINK={sink_count}/{total_infos} ({sink_pct:.0f}%, cible 15-30%), "
+            f"Max métier=\"{max_concept_name}\"={max_concept_count} ({max_pct:.0f}%, cible <20%)"
+        )
+
         return result
 
     def _create_sections_from_chunks(self, chunks: Dict[str, str]) -> List[Dict]:

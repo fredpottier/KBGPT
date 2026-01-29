@@ -165,6 +165,17 @@ MARGIN_AMBIGUOUS = 0.05  # Si écart < margin, marquer AMBIGUOUS
 TOP_K_DEFAULT = 2           # Max concepts par assertion (défaut)
 TOP_K_STRONG_MATCH = 1      # Winner-takes-all si match trigger fort (bonus >= 1.25)
 
+# ============================================================================
+# SINK CONCEPT — Seuils adaptatifs (Sprint 4.2)
+# ============================================================================
+# Cible : 15-30% des assertions routées vers SINK.
+# En dessous de 15% → le SINK ne sert à rien, les aspirateurs reviennent.
+# Au-dessus de 30% → le SINK aspire lui-même, la KB perd du signal.
+SINK_MALUS = 0.90                 # Malus inhérent SINK (-10%)
+SINK_BAND1_CEILING = 0.50        # Sous ce score → SINK inconditionnel
+SINK_BAND3_FLOOR = 0.58          # Au-dessus → non-SINK (concept métier garde)
+SINK_SIGNAL_FORT_THRESHOLD = 1.15 # Bonus lex/sem pour éliminer SINK de la sélection
+
 
 @dataclass
 class PromotionResult:
@@ -1708,7 +1719,7 @@ class AssertionExtractorV2:
             bonus_central = 1.10 if (concept.role == ConceptRole.CENTRAL and has_local_evidence) else 1.0
 
             # Sprint 4 SINK: Malus inhérent -10%
-            sink_malus = 0.90 if concept.role == ConceptRole.SINK else 1.0
+            sink_malus = SINK_MALUS if concept.role == ConceptRole.SINK else 1.0
 
             # Pass 1: Score SANS pénalité saturante
             pass1_score = min(1.0, original_conf * combined_bonus * bonus_central * sink_malus)
@@ -1756,7 +1767,7 @@ class AssertionExtractorV2:
             bonus_central = 1.10 if (concept.role == ConceptRole.CENTRAL and has_local_evidence) else 1.0
 
             # Sprint 4 SINK: Malus inhérent -10%
-            sink_malus = 0.90 if concept.role == ConceptRole.SINK else 1.0
+            sink_malus = SINK_MALUS if concept.role == ConceptRole.SINK else 1.0
 
             # 4. Pénalité saturante 3 phases (basée sur provisional_counts)
             prov_count = provisional_counts.get(link.concept_id, 0)
@@ -1787,6 +1798,57 @@ class AssertionExtractorV2:
 
         return links, lexical_bonuses, semantic_bonuses
 
+    def _should_route_to_sink(
+        self,
+        best_non_sink_score: float,
+        non_sink_scored: List[Tuple],
+        lex_bonuses: Dict[str, float],
+        sem_bonuses: Dict[str, float],
+    ) -> Optional[str]:
+        """
+        Sprint 4.2: Seuil SINK adaptatif 3 bandes.
+
+        Bande 1 (< 0.50)  : SINK inconditionnel
+        Bande 2 (0.50-0.58): SINK si ambigu OU neutre (pas de bonus lex/sem)
+        Bande 3 (>= 0.58) : non-SINK (garder le concept métier)
+
+        Args:
+            best_non_sink_score: Score du meilleur concept non-SINK
+            non_sink_scored: [(link, conf, lex_bonus), ...] triés par conf desc
+            lex_bonuses: {concept_id: bonus} pour cette assertion
+            sem_bonuses: {concept_id: bonus} pour cette assertion
+
+        Returns:
+            None si non-SINK doit gagner, sinon str raison du routing SINK
+        """
+        # Bande 1: score très faible → SINK inconditionnel
+        if best_non_sink_score < SINK_BAND1_CEILING:
+            return "score_tres_faible"
+
+        # Bande 3: score suffisant → non-SINK
+        if best_non_sink_score >= SINK_BAND3_FLOOR:
+            return None
+
+        # Bande 2 (SINK_BAND1_CEILING — SINK_BAND3_FLOOR): SINK conditionnel
+        # Vérifier si un bonus lex ou sem aide le top concept
+        if non_sink_scored:
+            top_concept_id = non_sink_scored[0][0].concept_id
+            top_lex = lex_bonuses.get(top_concept_id, 1.0)
+            top_sem = sem_bonuses.get(top_concept_id, 1.0)
+
+            # Si le top concept a un signal (lex > 1.0 ou sem > 1.0) → garder
+            if top_lex > 1.0 or top_sem > 1.0:
+                return None
+
+            # Si ambiguïté (top1 - top2 < margin) → SINK
+            if len(non_sink_scored) >= 2:
+                second_score = non_sink_scored[1][1]
+                if best_non_sink_score - second_score < MARGIN_AMBIGUOUS:
+                    return "zone_grise_ambigu"
+
+        # Zone grise sans signal → SINK
+        return "zone_grise_neutre"
+
     def _apply_margin_and_topk(
         self,
         links: List[ConceptLink],
@@ -1802,10 +1864,11 @@ class AssertionExtractorV2:
         4. Garder top-k (dynamique: =1 si match trigger fort OU semantic discriminant)
         5. Si écart best/second < margin → log AMBIGUOUS
 
-        Sprint 4 SINK:
-        - Si best_non_sink_score < 0.55 → SINK gagne automatiquement
-        - Si un concept non-SINK a bonus ≥ 1.15 (signal fort) → éliminer SINK
-        - Trigger shared (1.05) ne suffit PAS à éliminer SINK
+        Sprint 4.2 SINK adaptatif:
+        - < 0.50 → SINK inconditionnel
+        - 0.50-0.58 → SINK si ambigu ou neutre (pas de bonus)
+        - >= 0.58 → non-SINK
+        - Signal fort (bonus ≥ 1.15) → éliminer SINK
 
         Args:
             links: Liens après rerank
@@ -1869,7 +1932,7 @@ class AssertionExtractorV2:
 
                 # Sprint 4: Signal fort (non-SINK) → permet d'éliminer SINK
                 is_sink = link.concept_id in sink_concept_ids
-                if not is_sink and (lex_bonus >= 1.15 or sem_bonus >= 1.15):
+                if not is_sink and (lex_bonus >= SINK_SIGNAL_FORT_THRESHOLD or sem_bonus >= SINK_SIGNAL_FORT_THRESHOLD):
                     has_signal_fort = True
 
             if not scored:
@@ -1903,13 +1966,15 @@ class AssertionExtractorV2:
 
             if sink_scored and non_sink_scored:
                 best_non_sink_score = non_sink_scored[0][1]
+                route_to_sink = self._should_route_to_sink(
+                    best_non_sink_score, non_sink_scored, assertion_bonuses, assertion_sem_bonuses
+                )
 
-                # Sprint 4.1: Seuil relevé 0.55 → 0.60 (Qwen calibre ~0.55-0.65)
-                if best_non_sink_score < 0.60:
+                if route_to_sink:
                     filtered_links.append(sink_scored[0][0])
                     logger.debug(
                         f"[OSMOSE:Rerank:SINK:Threshold] {assertion_id} → SINK "
-                        f"(best_non_sink={best_non_sink_score:.2f} < 0.60)"
+                        f"(best_non_sink={best_non_sink_score:.2f}, reason={route_to_sink})"
                     )
                     continue
 
@@ -1923,19 +1988,22 @@ class AssertionExtractorV2:
             elif not sink_scored and non_sink_scored:
                 # Sprint 4.1: SINK pas proposé par le LLM mais non-SINK faibles
                 best_non_sink_score = non_sink_scored[0][1]
-                if best_non_sink_score < 0.60 and sink_concept_ids:
+                route_to_sink = self._should_route_to_sink(
+                    best_non_sink_score, non_sink_scored, assertion_bonuses, assertion_sem_bonuses
+                )
+                if route_to_sink and sink_concept_ids:
                     sink_id = next(iter(sink_concept_ids))
                     sink_link = ConceptLink(
                         assertion_id=assertion_id,
                         concept_id=sink_id,
                         link_type="describes",
                         confidence=best_non_sink_score,
-                        justification="Fallback SINK: aucun concept non-SINK assez fort"
+                        justification=f"Fallback SINK: {route_to_sink}"
                     )
                     filtered_links.append(sink_link)
                     logger.debug(
                         f"[OSMOSE:Rerank:SINK:WeakFallback] {assertion_id} → SINK "
-                        f"(best_non_sink={best_non_sink_score:.2f} < 0.60, SINK non proposé LLM)"
+                        f"(best_non_sink={best_non_sink_score:.2f}, reason={route_to_sink})"
                     )
                     continue
 
