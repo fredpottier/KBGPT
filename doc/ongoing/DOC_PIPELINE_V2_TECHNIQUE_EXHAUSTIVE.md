@@ -2830,7 +2830,560 @@ Anchor(
 
 ## 13. Pass 1.4 — Promotion et Value Contract
 
-<!-- À compléter : analyse détaillée de promotion_engine.py, value_extractor.py, claimkey/ -->
+### 13.0 Vue d'ensemble Pass 1.4
+
+**Fichiers source :**
+
+| Fichier | Rôle |
+|---------|------|
+| `src/knowbase/stratified/pass1/promotion_engine.py` | Moteur de décision PROMOTE / ABSTAIN / REJECT |
+| `src/knowbase/stratified/pass1/promotion_policy.py` | Politique Information-First MVP V1 (PromotionPolicy) |
+| `src/knowbase/stratified/pass1/value_extractor.py` | Extracteur de valeurs bornées (Value Contract) |
+| `src/knowbase/stratified/claimkey/patterns.py` | Patterns ClaimKey Niveau A (inférence déterministe) |
+| `src/knowbase/stratified/claimkey/status_manager.py` | Gestion du cycle de vie ClaimKey dans Neo4j |
+| `src/knowbase/stratified/models/information.py` | Modèle `InformationMVP` (assertion promue) |
+| `src/knowbase/stratified/models/claimkey.py` | Modèle `ClaimKey` (question factuelle canonique) |
+| `src/knowbase/stratified/models/schemas.py` | Schémas Pydantic V2 (`Information`, `AssertionLogEntry`) |
+| `config/meta_patterns/structural_patterns.yaml` | Patterns META structurels externalisés (2026-01-27) |
+| `config/meta_patterns/domain_extensions.yaml` | Extensions domaine optionnelles |
+
+**Référence spec :** ChatGPT "Two-pass Vision Evidence Contract" (2026-01-26)
+
+**Fonction dans le pipeline :**
+
+Pass 1.4 est la **phase de promotion** : elle transforme les `ResolvedAssertionV1` (assertions ancrées sur DocItem, issues de Pass 1.3b) en `Information[]` navigables dans le graphe sémantique. C'est le **garde-fou central** du pipeline — elle décide ce qui mérite d'être stocké comme connaissance structurée et ce qui est rejeté ou abstenu.
+
+```
+Pass 1.3b (ResolvedAssertionV1[])
+         │
+         ▼
+┌──────────────────────────────────────────────────────────┐
+│               PASS 1.4 — PROMOTION ENGINE                │
+│                                                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
+│  │ Meta-Pattern  │  │  Fragment    │  │  Promotion    │  │
+│  │   Filter      │→│  Detector    │→│  Policy       │  │
+│  │ (YAML+regex)  │  │ (verbs,len) │  │ (Tier-based)  │  │
+│  └──────────────┘  └──────────────┘  └───────┬───────┘  │
+│                                               │          │
+│         ┌─────────────────────────────────────┘          │
+│         ▼                                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
+│  │   Value       │  │  ClaimKey    │  │  ClaimKey     │  │
+│  │  Extractor    │  │  Patterns   │  │  Status Mgr   │  │
+│  │ (%, ver, nb)  │  │ (Level A)   │  │ (Neo4j CRUD)  │  │
+│  └──────────────┘  └──────────────┘  └───────────────┘  │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐    │
+│  │   InformationMVP + AssertionLogEntry (audit)     │    │
+│  └──────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────┘
+         │
+         ▼
+    Information[] + AssertionLog[] (Neo4j)
+```
+
+### 13.1 Entrants
+
+| Entrant | Type | Source | Description |
+|---------|------|--------|-------------|
+| `AssertionBatchV1` | Batch | Pass 1.3b | Lot d'assertions résolues avec ancrage DocItem |
+| `ResolvedAssertionV1[]` | Liste | Pass 1.3b | Assertions typées avec `PromotionDecision`, `AnchorV1`, `PivotsV1` |
+| `chunk_to_docitem_map` | Dict | Pass 1.3b | Mapping chunk_id → docitem_id pour résolution d'ancrage |
+| `concept_ids` | List[str] | Pass 1.2 | IDs des concepts identifiés (pour vérification addressability) |
+| `theme_ids` | List[str] | Pass 1.1 | IDs des thèmes identifiés (pour vérification addressability) |
+| Meta-patterns YAML | Config | `config/meta_patterns/` | Patterns structurels et domaine pour le filtrage META |
+
+**Structure des entrants clés :**
+
+```python
+# ResolvedAssertionV1 (issue de Pass 1.3b)
+@dataclass
+class ResolvedAssertionV1:
+    assertion_id: str
+    text: str
+    type: AssertionTypeV1           # DEFINITIONAL, PRESCRIPTIVE, CAUSAL, etc.
+    confidence: float               # 0.0 → 1.0
+    support_tier: SupportTier       # ALWAYS, CONDITIONAL, RARELY, NEVER
+    chunk_id: str
+    span: dict                      # {page, paragraph, line}
+    anchor: Optional[AnchorV1]      # Ancrage DocItem résolu
+    pivots: PivotsV1                # concept_ids, theme_ids, section_path
+    promotion: PromotionDecision    # statut, raison, rule_used
+```
+
+### 13.2 Objectifs
+
+1. **Filtrer les assertions non-exploitables** — Rejeter les patterns META (navigation, copyright, TOC), les fragments sans prédicat, les textes trop courts
+2. **Appliquer la Promotion Policy par tier** — Décider PROMOTE / ABSTAIN / REJECT selon le type d'assertion et le seuil de confiance
+3. **Vérifier l'addressability** — Garantir que toute assertion promue a ≥1 pivot navigable (Concept, Theme, ClaimKey, SectionPath)
+4. **Extraire les valeurs bornées (Value Contract)** — Identifier et normaliser les valeurs (`raw`, `normalized`, `unit`, `operator`, `comparable`) pour comparaison machine
+5. **Inférer les ClaimKeys (Niveau A)** — Générer des questions factuelles canoniques par patterns déterministes (sans LLM)
+6. **Gérer le cycle de vie ClaimKey** — Créer/mettre à jour les ClaimKeys dans Neo4j avec statuts (EMERGENT → COMPARABLE)
+7. **Produire le journal d'audit** — Générer un `AssertionLogEntry` pour chaque assertion (PROMOTED / ABSTAINED / REJECTED) avec la raison standardisée
+8. **Calculer le fingerprint de déduplication** — `SHA256(claimkey_id + value.normalized + context_key + span_bucket)` pour éviter les doublons
+
+### 13.3 Mécanismes
+
+#### 13.3.1 Promotion Engine — Moteur de décision principal
+
+**Classe :** `PromotionEngine` (`promotion_engine.py`)
+
+**Initialisation :**
+
+```python
+class PromotionEngine:
+    def __init__(self, strict_promotion: bool = True, tenant_id: str = "default"):
+        self.strict_promotion = strict_promotion  # Mode strict ou permissif
+        self.tenant_id = tenant_id
+```
+
+**Workflow principal — `process_batch()`:**
+
+Le moteur traite chaque assertion en séquence selon un pipeline de 5 étapes :
+
+```
+Pour chaque AssertionV0 dans le batch :
+│
+├─ Étape 1 : Filtre META-PATTERN
+│   ├─ _is_meta_pattern(text) → regex compilés depuis YAML
+│   └─ Si match → REJECTED (rule: "meta_pattern")
+│
+├─ Étape 1b : Détection FRAGMENT
+│   ├─ is_fragment(text) → vérifie longueur, présence de verbes
+│   └─ Si fragment → REJECTED (rule: "fragment_no_predicate")
+│
+├─ Étape 2 : Vérification longueur minimale
+│   ├─ len(text) < MIN_TEXT_LENGTH (15 chars)
+│   └─ Si trop court → REJECTED (rule: "text_too_short")
+│
+├─ Étape 3 : Résolution d'ancrage DocItem
+│   ├─ _resolve_anchor(chunk_id, span, chunk_to_docitem_map)
+│   └─ Si échec ancrage → ABSTAINED (rule: "no_docitem_anchor")
+│
+├─ Étape 4 : Application Promotion Policy (par tier)
+│   ├─ TYPE_TO_TIER[assertion_type] → SupportTier
+│   ├─ ALWAYS → PROMOTED (confiance quelconque)
+│   ├─ CONDITIONAL → PROMOTED si confidence ≥ 0.7
+│   ├─ RARELY → PROMOTED si confidence ≥ 0.9
+│   └─ NEVER → REJECTED
+│
+├─ Étape 5 : Vérification Addressability
+│   ├─ Au moins 1 pivot parmi : concept_id, theme_id, section_path
+│   └─ Si aucun pivot → statut PROMOTED_UNLINKED (pas de rejet)
+│
+├─ Génération ResolvedAssertionV1 avec PromotionDecision
+└─ Génération AssertionLogEntry (journal d'audit)
+```
+
+**Point clé — Philosophie « Information-First » :** Le système ne rejette JAMAIS silencieusement une assertion. Chaque décision est auditée dans l'`AssertionLog` avec une raison standardisée (`AssertionLogReason` enum : 10+ raisons possibles).
+
+#### 13.3.2 Meta-Pattern Filter — Chargement YAML externalisé
+
+**Architecture patterns META (2026-01-27) :**
+
+Les patterns de rejet sont externalisés dans des fichiers YAML pour être agnostiques au domaine :
+
+```
+config/meta_patterns/
+├── structural_patterns.yaml   # Patterns structurels par langue (toujours chargés)
+└── domain_extensions.yaml     # Extensions domaine (optionnelles, désactivées par défaut)
+```
+
+**Chargement au démarrage du module (`_load_meta_patterns()`) :**
+
+1. **Charger `structural_patterns.yaml`** (obligatoire) — Patterns organisés par langue et catégorie
+2. **Charger `domain_extensions.yaml`** (optionnel) — Si `active_domain` est défini, ajouter les patterns du domaine
+3. **Compiler en regex** — Chaque pattern est compilé avec `re.IGNORECASE`, les patterns invalides sont comptés et ignorés
+
+**Fallback si YAML absent :**
+
+```python
+META_REJECT_PATTERNS_FALLBACK = [
+    r"^this\s+(page|section)\s+(describes|shows)",
+    r"^see\s+also\b",
+    r"^refer\s+to\b",
+    r"^copyright\b",
+    r"^disclaimer\s*:",
+    r"^note\s*:",
+    r"^\d+\.\s*$",
+]
+```
+
+Les patterns sont compilés une seule fois au chargement du module (`_COMPILED_META_PATTERNS`), ce qui évite la recompilation à chaque assertion.
+
+#### 13.3.3 Détection de fragments (non-assertions)
+
+**Fonction :** `is_fragment(text)` dans `promotion_engine.py`
+
+Un fragment est un texte qui ne constitue pas une assertion factuelle exploitable :
+
+| Critère | Patterns | Exemples rejetés |
+|---------|----------|------------------|
+| Acronyme seul | `^[A-Z]{2,6}$` | "VPC", "ISO" |
+| Nom propre seul | `^[A-Z][A-Za-z0-9\s\-]{0,20}$` | "ISO 27001" |
+| Glossaire/définition | `^[A-Z]...{0,30}\.$` | "VPC Peering." |
+| Titre/header | `^(section|chapter)...` | "Section 3" |
+| Numérotation seule | `^\d+(\.\d+)*\s*$` | "3.2.1" |
+| Puce incomplète | `^[-•]\s*\w+$` | "- Item" |
+
+**Vérification de présence de verbe :** Si aucun pattern fragment ne matche, le système vérifie que le texte contient au moins un verbe (EN ou FR) parmi une liste de ~40 patterns verbaux (`ASSERTION_VERB_PATTERNS`). Un texte sans verbe détecté et de moins de 3 mots est un fragment.
+
+#### 13.3.4 Promotion Policy — Politique par tier
+
+**Deux implémentations coexistent :**
+
+| Classe | Fichier | Usage |
+|--------|---------|-------|
+| `PromotionEngine._apply_promotion_policy()` | `promotion_engine.py` | Pipeline V2 principal (tier-based) |
+| `PromotionPolicy.evaluate()` | `promotion_policy.py` | MVP V1 autonome (role-based, Information-First) |
+
+**Promotion Engine — Mapping TYPE_TO_TIER :**
+
+| Tier | Types d'assertion | Seuil confiance | Décision |
+|------|-------------------|-----------------|----------|
+| **ALWAYS** | DEFINITIONAL, PRESCRIPTIVE | Aucun | Toujours PROMOTED |
+| **CONDITIONAL** | FACTUAL, CONDITIONAL, PERMISSIVE | ≥ 0.7 | PROMOTED si seuil atteint |
+| **RARELY** | COMPARATIVE | ≥ 0.9 | PROMOTED si seuil élevé |
+| **NEVER** | PROCEDURAL | N/A | Toujours REJECTED |
+
+**PromotionPolicy MVP V1 — Logique en 6 étapes :**
+
+L'évaluateur MVP V1 suit une logique Information-First avec priorité au rôle rhétorique :
+
+1. **Rejet par meta-pattern** — Patterns internes (navigation, copyright, TOC)
+2. **Rejet si texte < 15 chars** — `REJECTED` / `"text_too_short"`
+3. **Promotion par type** — `PRESCRIPTIVE` ou `DEFINITIONAL` → `PROMOTED_LINKED`
+4. **Promotion par rôle rhétorique** :
+   - `FACT`, `DEFINITION`, `INSTRUCTION` → `PROMOTED_LINKED` (avec ClaimKey)
+   - `EXAMPLE`, `CAUTION` → `PROMOTED_UNLINKED` (sans ClaimKey)
+5. **Promotion si valeur présente** — `has_value = True` → `PROMOTED_LINKED`
+6. **Défaut** — `PROMOTED_UNLINKED` / `"no_clear_category"` (jamais de rejet silencieux)
+
+**Point clé :** La PromotionPolicy MVP V1 est plus permissive que le Promotion Engine V2 — elle ne rejette quasiment jamais (sauf meta-patterns et texte trop court). Cela reflète la philosophie Information-First de l'ADR North Star (NS-1).
+
+#### 13.3.5 Value Extractor — Value Contract
+
+**Classe :** `ValueExtractor` (`value_extractor.py`)
+
+**Objectif :** Extraire et normaliser les valeurs bornées depuis le texte des assertions, conformément au Value Contract de l'ADR North Star (NS-6).
+
+**Chaîne d'extraction (ordre de spécificité décroissante) :**
+
+| # | Extracteur | Types détectés | Exemples | Normalisation |
+|---|-----------|---------------|----------|---------------|
+| 1 | `_extract_percent()` | `PERCENT` | "99.95%", "95 percent" | `float / 100.0` → `0.9995` |
+| 2 | `_extract_version()` | `VERSION` | "TLS 1.2", "v3.14.1" | Tronqué à 3 niveaux max |
+| 3 | `_extract_number_with_unit()` | `NUMBER` | "30 days", "100 GB", "5 TiB" | `float × multiplier` |
+| 4 | `_extract_boolean()` | `BOOLEAN` | "enabled", "not required" | `True` / `False` |
+| 5 | `_extract_enum()` | `ENUM` | "daily", "customer", "critical" | `str.lower()` |
+
+**Structure de sortie — `ValueInfo` :**
+
+```python
+@dataclass
+class ValueInfo:
+    kind: Optional[ValueKind]          # NUMBER, PERCENT, VERSION, ENUM, BOOLEAN, STRING
+    raw: Optional[str]                 # Texte source : "99.95%"
+    normalized: Optional[float|str|bool]  # Valeur normalisée : 0.9995
+    unit: Optional[str]                # Unité : "%", "days", "GB", "version"
+    operator: str = "="               # Opérateur : =, >=, <=, >, <, approx, in
+    comparable: ValueComparable = NON_COMPARABLE  # STRICT, LOOSE, NON_COMPARABLE
+```
+
+**Détection d'opérateur (`_detect_operator()`) :**
+
+| Pattern | Opérateur résultant |
+|---------|--------------------|
+| `at least`, `minimum`, `≥` | `>=` |
+| `at most`, `maximum`, `≤` | `<=` |
+| `more than`, `above`, `>` | `>` |
+| `less than`, `below`, `<` | `<` |
+| `approximately`, `around`, `~` | `approx` |
+| (défaut) | `=` |
+
+**Point important — Ordre des booléens :** Les patterns négatifs (`not required`, `not supported`, `disabled`) sont vérifiés EN PREMIER pour éviter que "not required" ne matche d'abord "required" avec `True`.
+
+**Familles d'enum supportées :**
+
+| Famille | Valeurs |
+|---------|---------|
+| `frequency` | daily, weekly, monthly, hourly, yearly, continuous, quarterly |
+| `responsibility` | customer, sap, vendor, shared, third-party |
+| `severity` | critical, high, medium, low |
+| `edition` | private, public, enterprise, standard |
+| `environment` | production, development, staging, test |
+
+**Singleton :** `get_value_extractor()` retourne une instance unique réutilisable.
+
+#### 13.3.6 ClaimKey — Patterns Niveau A (inférence déterministe)
+
+**Classe :** `ClaimKeyPatterns` (`claimkey/patterns.py`)
+
+**Objectif :** Inférer un ClaimKey (question factuelle canonique) depuis le texte d'une assertion, sans LLM, par patterns regex déterministes. Conforme à l'ADR North Star (NS-5) — Niveau A d'inférence.
+
+**Couverture des 15+ patterns :**
+
+| Domaine | Pattern | ClaimKey généré | Type valeur |
+|---------|---------|-----------------|-------------|
+| SLA / Availability | `(\d+\.?\d*)%\s*(sla\|availability\|uptime)` | `sla_{context}_availability` | percent |
+| Security / TLS | `tls\s*(\d+\.?\d*)` | `tls_min_version` | version |
+| Security / Encryption | `(encryption\|encrypted)\s*(at\s*rest)` | `encryption_at_rest` | boolean |
+| Security / Encryption | `(encryption\|encrypted)\s*(in\s*transit)` | `encryption_in_transit` | boolean |
+| Backup | `backup.*?(daily\|weekly\|hourly)` | `backup_frequency` | enum |
+| Retention | `retention.*?(\d+)\s*(days?\|months?)` | `data_retention_period` | number |
+| Data Residency | `data.*?(remain\|stay\|stored?).*?(\w+)` | `data_residency_{country}` | boolean |
+| Sizing | `(above\|over\|exceeds?).*?(\d+)\s*(tib\|tb\|gb)` | `{context}_size_threshold` | number |
+| Responsibility | `(customer\|sap\|vendor).*?(responsible)` | `{topic}_responsibility` | enum |
+| Compatibility | `(minimum\|required).*?version.*?(\d+\.?\d*)` | `{product}_min_version` | version |
+| Patching | `(patch\|update).*?(daily\|weekly\|monthly)` | `patch_frequency` | enum |
+| Recovery / RTO | `rto.*?(\d+)\s*(hours?\|minutes?)` | `rto_target` | number |
+| Recovery / RPO | `rpo.*?(\d+)\s*(hours?\|minutes?)` | `rpo_target` | number |
+
+**Résolution de templates :**
+
+Les clés de ClaimKey utilisent des templates avec placeholders :
+- `{context}` → contexte documentaire (product, topic)
+- `{country}` → pays détecté dans le texte
+- `{topic}` → sujet du document
+- `{product}` → produit mentionné
+
+**Structure de sortie — `PatternMatch` :**
+
+```python
+@dataclass
+class PatternMatch:
+    claimkey_id: str             # "ck_tls_min_version"
+    key: str                     # "tls_min_version"
+    domain: str                  # "security.encryption"
+    canonical_question: str      # "What is the minimum TLS version required?"
+    value_kind: str              # "version"
+    match_text: str              # Texte matché
+    inference_method: str = "pattern_level_a"
+```
+
+**Questions canoniques prédéfinies :** Le système maintient un dictionnaire `CANONICAL_QUESTIONS` de 10+ questions factuelles prédéfinies pour les ClaimKeys les plus courants (TLS, SLA, backup, retention, RTO/RPO, encryption).
+
+**Singleton :** `get_claimkey_patterns()` retourne une instance unique.
+
+#### 13.3.7 ClaimKey Status Manager — Gestion du cycle de vie
+
+**Classe :** `ClaimKeyStatusManager` (`claimkey/status_manager.py`)
+
+**Objectif :** Gérer la persistance et le cycle de vie des ClaimKeys dans Neo4j.
+
+**Opérations CRUD :**
+
+| Méthode | Opération Neo4j | Description |
+|---------|-----------------|-------------|
+| `get_or_create()` | `MATCH` ou `CREATE` | Récupère un ClaimKey existant ou en crée un nouveau |
+| `link_information()` | `MERGE (i)-[:ANSWERS]->(ck)` | Crée la relation ANSWERS entre Information et ClaimKey |
+| `update_metrics()` | `MATCH + COUNT + SET` | Recalcule info_count, doc_count et statut |
+| `get_claimkey()` | `MATCH` | Récupère par ID |
+| `find_by_key()` | `MATCH` | Recherche par clé machine |
+
+**Cycle de vie ClaimKey — Statuts :**
+
+```
+Création → EMERGENT (< 2 docs)
+                │
+         (≥ 2 docs avec valeurs)
+                │
+                ▼
+          COMPARABLE (comparaison cross-doc possible)
+                │
+         (remplacement)
+                │
+                ▼
+          DEPRECATED
+
+         (aucune info récente)
+                │
+                ▼
+            ORPHAN
+```
+
+| Statut | Condition | Signification |
+|--------|-----------|---------------|
+| `EMERGENT` | `doc_count < 2` | Pas encore assez de sources pour comparaison |
+| `COMPARABLE` | `doc_count ≥ 2` | Comparaison cross-document activée |
+| `DEPRECATED` | Manuellement marqué | Remplacé par un autre ClaimKey |
+| `ORPHAN` | `info_count = 0` | Aucune Information liée |
+
+**Logique `update_metrics()` :**
+
+```cypher
+MATCH (ck:ClaimKey {claimkey_id: $ck_id})
+OPTIONAL MATCH (i:InformationMVP)-[:ANSWERS]->(ck)
+  WHERE i.promotion_status = 'PROMOTED_LINKED'
+OPTIONAL MATCH (i)-[:EXTRACTED_FROM]->(d:Document)
+WITH ck, count(DISTINCT i) as info_count, count(DISTINCT d) as doc_count
+-- Recalcul statut: ORPHAN si 0, EMERGENT si < 2 docs, COMPARABLE sinon
+```
+
+**Multi-tenancy :** Toutes les opérations sont filtrées par `tenant_id` pour garantir l'isolation des données.
+
+#### 13.3.8 Modèle Information MVP — Assertion promue
+
+**Classe :** `InformationMVP` (`models/information.py`)
+
+**Objectif :** Représenter une assertion factuelle promue, stockée dans Neo4j comme noeud `InformationMVP`.
+
+**Champs obligatoires :**
+
+| Champ | Type | Conformité NS | Description |
+|-------|------|---------------|-------------|
+| `information_id` | str | — | Identifiant unique |
+| `tenant_id` | str | — | Multi-tenancy |
+| `document_id` | str | NS-4 | Source unique (pas de fusion cross-doc) |
+| `text` | str | — | Texte normalisé de l'assertion |
+| `exact_quote` | str | NS-3 | **OBLIGATOIRE** — Verbatim du texte source |
+| `type` | InformationType | NS-9 | PRESCRIPTIVE, DEFINITIONAL, CAUSAL, COMPARATIVE |
+| `rhetorical_role` | RhetoricalRole | NS-8 | FACT, EXAMPLE, DEFINITION, INSTRUCTION, CLAIM, CAUTION |
+| `span` | SpanInfo | NS-3 | Position : page, paragraphe, ligne |
+
+**Champs de promotion et liaison :**
+
+| Champ | Type | Conformité NS | Description |
+|-------|------|---------------|-------------|
+| `promotion_status` | PromotionStatus | NS-9 | PROMOTED_LINKED, PROMOTED_UNLINKED, REJECTED |
+| `promotion_reason` | str | — | Raison textuelle de la décision |
+| `claimkey_id` | Optional[str] | NS-5 | Lien vers ClaimKey (si inféré) |
+| `theme_id` | Optional[str] | NS-7 | Lien vers Theme (addressability) |
+| `value` | ValueInfo | NS-6 | Valeur extraite (Value Contract) |
+| `context` | ContextInfo | — | Contexte documentaire (edition, region, version, product) |
+| `confidence` | float | — | Score de confiance 0.0 → 1.0 |
+| `fingerprint` | str | NS-10 | Hash de déduplication |
+
+**Fingerprint de déduplication (NS-10) :**
+
+```python
+def compute_fingerprint(self) -> str:
+    """SHA256(claimkey_id:value_normalized:context_key:span_bucket)"""
+    ck = self.claimkey_id or "no_claimkey"
+    val = str(self.value.normalized) if self.value.normalized is not None else "no_value"
+    ctx = self.context.to_context_key()  # "edition:version:region"
+    page = str(self.span.page)  # Page, pas ligne exacte
+    raw = f"{ck}:{val}:{ctx}:{page}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+```
+
+**Point clé :** Le fingerprint utilise la PAGE et non la ligne exacte comme granularité de déduplication, ce qui permet de fusionner les reformulations d'un même fait sur la même page.
+
+**Aplatissement Neo4j (`to_neo4j_properties()`) :**
+
+Les objets imbriqués sont aplatis avec des préfixes pour le stockage Neo4j :
+- `span.page` → `span_page`, `span_paragraph`, `span_line`
+- `value.kind` → `value_kind`, `value_raw`, `value_normalized`, `value_unit`, `value_operator`, `value_comparable`
+- `context.edition` → `context_edition`, `context_region`, `context_version`, `context_product`, `context_deployment`, `context_inheritance_mode`
+
+**Héritage de contexte (`InheritanceMode`) :**
+
+| Mode | Signification |
+|------|---------------|
+| `INHERITED` | Contexte hérité du titre/section parent |
+| `ASSERTED` | Contexte explicitement mentionné dans le texte |
+| `MIXED` | Partiellement hérité, partiellement asserté |
+| `UNKNOWN` | Contexte non déterminé |
+
+#### 13.3.9 Journal d'audit — AssertionLog
+
+Chaque assertion traitée par le Promotion Engine génère un `AssertionLogEntry` dans le journal d'audit :
+
+**Schéma V2 (`schemas.py`) :**
+
+```python
+class AssertionLogEntry(BaseModel):
+    assertion_id: str
+    text: str
+    type: AssertionType
+    confidence: Optional[float]
+    status: AssertionStatus           # PROMOTED | ABSTAINED | REJECTED
+    reason: AssertionLogReason        # 10+ raisons standardisées
+    concept_id: Optional[str]
+    anchor: Optional[Anchor]
+    created_at: datetime
+```
+
+**Raisons standardisées (`AssertionLogReason`) :**
+
+| Raison | Catégorie | Description |
+|--------|-----------|-------------|
+| `PROMOTED` | Promotion réussie | Assertion transformée en Information |
+| `LOW_CONFIDENCE` | Promotion Policy | Confiance en dessous du seuil du tier |
+| `POLICY_REJECTED` | Promotion Policy | Rejeté par la politique (tier NEVER, meta-pattern) |
+| `NO_CONCEPT_MATCH` | Concept Linking | Aucun concept ne correspond |
+| `AMBIGUOUS_LINKING` | Concept Linking | Lien concept ambigu |
+| `NO_DOCITEM_ANCHOR` | Anchor Resolution | Ancrage DocItem impossible |
+| `AMBIGUOUS_SPAN` | Anchor Resolution | Span ambigu (multiples DocItems candidats) |
+| `CROSS_DOCITEM` | Anchor Resolution | Assertion chevauche plusieurs DocItems |
+| `GENERIC_TERM` | Qualité | Terme trop générique |
+| `SINGLE_MENTION` | Qualité | Mention unique dans le document |
+| `CONTRADICTS_EXISTING` | Cross-doc (Pass 3) | Contradiction avec assertion existante |
+
+#### 13.3.10 Theme Lint — Gouvernance thématique
+
+**Statut :** ❌ **NON IMPLÉMENTÉ** — Le fichier `governance/theme_lint.py` est référencé dans la spec mais n'existe pas encore dans le code source.
+
+**Objectif prévu :** Vérifier la cohérence entre les thèmes inférés par Pass 1.1 et les thèmes référencés dans les assertions promues. Détecter les thèmes orphelins (aucune Information liée) et les assertions avec des thèmes non reconnus.
+
+### 13.4 Outputs
+
+| Output | Type | Destination | Description |
+|--------|------|-------------|-------------|
+| `Information[]` | Liste de nœuds | Neo4j (`:InformationMVP`) | Assertions promues avec valeur, contexte, span, fingerprint |
+| `AssertionLogEntry[]` | Liste d'entrées | Neo4j (`:AssertionLog`) | Journal d'audit de chaque décision |
+| `ClaimKey[]` | Nœuds créés/mis à jour | Neo4j (`:ClaimKey`) | Questions factuelles canoniques |
+| Relations `[:ANSWERS]` | Relations | Neo4j | Information → ClaimKey |
+| Relations `[:EXTRACTED_FROM]` | Relations | Neo4j | Information → Document |
+
+**Relations Neo4j générées :**
+
+```
+(:InformationMVP)-[:ANSWERS]->(:ClaimKey)          # Si ClaimKey inféré
+(:InformationMVP)-[:EXTRACTED_FROM]->(:Document)    # Toujours
+(:InformationMVP)-[:ANCHORED_IN]->(:DocItem)        # Via anchor_docitem_ids
+(:InformationMVP)-[:BELONGS_TO]->(:Theme)           # Si theme_id disponible
+```
+
+**Métriques de sortie attendues :**
+
+| Métrique | Cible |
+|----------|-------|
+| Taux de promotion LINKED | > 40% des assertions |
+| Taux de promotion UNLINKED | 20-40% des assertions |
+| Taux de rejet META + fragment | 10-30% des assertions |
+| Taux d'abstention (confidence) | 5-15% des assertions |
+| ClaimKeys inférés Niveau A | ~10-30% des assertions promues |
+
+### 13.5 Conformité ADR — Pass 1.4
+
+| Axe | Statut | Détail |
+|-----|--------|--------|
+| **NS-1 Information-First** | ✅ | L'Information est l'entité primaire. Zéro rejet pour `no_concept_match` — les assertions sans concept restent `PROMOTED_UNLINKED`. La PromotionPolicy MVP V1 ne rejette quasiment jamais. |
+| **NS-3 Citation exacte obligatoire** | ✅ | `exact_quote` est un champ OBLIGATOIRE de `InformationMVP`. `SpanInfo` capture page/paragraphe/ligne. |
+| **NS-4 Pas de synthèse cross-source** | ✅ | Chaque `InformationMVP` est liée à un seul `document_id`. Pas de fusion multi-documents. |
+| **NS-5 ClaimKey comme pivot** | ⚠️ | ClaimKey Niveau A (patterns) implémenté. **Niveau B (LLM assisté) non implémenté** — seule l'inférence déterministe est opérationnelle. |
+| **NS-6 Value Contract** | ✅ | `ValueExtractor` produit `ValueInfo` avec `raw`, `normalized`, `unit`, `operator`, `comparable`. 5 types supportés (NUMBER, PERCENT, VERSION, ENUM, BOOLEAN). |
+| **NS-7 Addressability-First** | ⚠️ | Le système vérifie la présence de pivots mais **ne force pas le rejet** des orphelins totaux. Les assertions sans aucun pivot sont marquées `PROMOTED_UNLINKED` plutôt que rejetées. |
+| **NS-8 Rhetorical Role** | ✅ | `RhetoricalRole` enum avec 6 rôles (FACT, EXAMPLE, DEFINITION, INSTRUCTION, CLAIM, CAUTION). La PromotionPolicy différencie : EXAMPLE/CAUTION → pas de ClaimKey. |
+| **NS-9 Promotion Policy par type** | ✅ | `TYPE_TO_TIER` mapping implémenté : ALWAYS (DEFINITIONAL, PRESCRIPTIVE), CONDITIONAL (FACTUAL, CONDITIONAL, PERMISSIVE), RARELY (COMPARATIVE), NEVER (PROCEDURAL). |
+| **NS-10 Déduplication fingerprint** | ✅ | `compute_fingerprint()` = `SHA256(claimkey_id:value_normalized:context_key:page)`. Granularité page pour fusionner les reformulations. |
+| **AV2-3 Ancrage sur DocItem** | ✅ | `anchor_docitem_ids` stocke les IDs DocItem. Pas d'ancrage sur chunk Qdrant. |
+| **AV2-5 AssertionLog** | ✅ | `AssertionLogEntry` avec `AssertionStatus` (PROMOTED/ABSTAINED/REJECTED) et `AssertionLogReason` (10+ raisons standardisées). |
+
+### 13.6 Risques — Pass 1.4
+
+| ID | Risque | Sévérité | Description | Mitigation |
+|----|--------|----------|-------------|------------|
+| R14-1 | **ClaimKey Niveau B (LLM) absent** | 🟡 | L'inférence ClaimKey est limitée aux 15 patterns regex déterministes. Les assertions sans pattern reconnu n'ont pas de ClaimKey, ce qui réduit la comparabilité cross-doc. Le Niveau B (LLM assisté, NS-5) n'est pas implémenté. | Les patterns couvrent les domaines les plus fréquents (SLA, sécurité, backup, compliance). L'ajout de nouveaux patterns est simple (YAML). Le Niveau B est prévu dans une itération future. |
+| R14-2 | **Coexistence PromotionEngine V2 / PromotionPolicy MVP V1** | 🟡 | Deux systèmes de promotion coexistent avec des logiques différentes. Le Pipeline V2 utilise `PromotionEngine` (tier-based), le MVP V1 utilise `PromotionPolicy` (role-based). Les résultats peuvent diverger pour les mêmes assertions. | La `PromotionPolicy` est un singleton stateless utilisé par le MVP V1 uniquement. La convergence vers le `PromotionEngine` V2 est planifiée à la fin du MVP. |
+| R14-3 | **Addressability non stricte** | 🟡 | L'ADR NS-7 prescrit "orphelin total interdit" mais l'implémentation ne rejette pas les assertions sans pivot. Elles sont marquées `PROMOTED_UNLINKED`. Cela peut créer des nœuds Information inaccessibles dans le graphe. | La philosophie Information-First (NS-1) prime : mieux vaut une Information sans pivot qu'une perte. Pass 1.2b (raffinement itératif des concepts) peut récupérer ces orphelins a posteriori. |
+| R14-4 | **Theme Lint non implémenté** | 🟢 | Le fichier `governance/theme_lint.py` n'existe pas. Aucune vérification de cohérence thématique entre les assertions promues et les thèmes identifiés en Pass 1.1. | La gouvernance thématique est une fonctionnalité de qualité, pas critique pour le fonctionnement du pipeline. Elle est planifiée comme amélioration post-MVP. |
+| R14-5 | **Fingerprint sensible au claimkey_id** | 🟡 | Le fingerprint de déduplication inclut `claimkey_id`. Si le même fait est formulé différemment et matche un pattern différent (ou aucun pattern), il produira un fingerprint différent. Risque de doublons non détectés. | Le fingerprint est un mécanisme de déduplication de premier niveau. La résolution d'entités cross-doc (Pass 3) est le mécanisme de déduplication de second niveau. |
+| R14-6 | **Détection de fragments limité aux verbes connus** | 🟢 | La détection de fragments repose sur ~40 patterns verbaux EN/FR. Les assertions dans d'autres langues ou avec des verbes rares peuvent être faussement rejetées comme fragments. | Le `language` du document est disponible dans le contexte. Une extension multilingue des patterns verbaux est possible. |
+| R14-7 | **Value Extractor limité à 5 types** | 🟢 | MVP V1 supporte NUMBER, PERCENT, VERSION, ENUM, BOOLEAN. Les valeurs complexes (plages, listes, expressions temporelles composites) ne sont pas extraites. | Les 5 types couvrent les cas les plus fréquents en documentation technique. Le type `STRING` est défini dans l'enum mais pas extrait automatiquement. Extension prévue post-MVP. |
+| R14-8 | **Patterns META externalisés en YAML — risque de désynchronisation** | 🟢 | Si les fichiers YAML de patterns sont absents ou corrompus, le système tombe sur un fallback minimal de 7 patterns. Le déploiement doit garantir la présence des fichiers de configuration. | Le système log un warning explicite si le fallback est utilisé. Les patterns invalides sont comptés et ignorés individuellement sans crash. |
 
 ---
 
