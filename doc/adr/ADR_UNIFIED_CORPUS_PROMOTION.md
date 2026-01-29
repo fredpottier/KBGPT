@@ -4,7 +4,7 @@
 **Statut**: Accepted
 **Auteurs**: Claude + ChatGPT + Fred
 **Contexte**: Amélioration du taux de promotion des concepts cross-document
-**Dépendances**: ADR_DUAL_CHUNKING_ARCHITECTURE, ADR_HYBRID_ANCHOR_MODEL, ADR_MARKER_NORMALIZATION_LAYER, ADR_DOCUMENT_STRUCTURAL_AWARENESS
+**Dépendances**: ADR_DUAL_CHUNKING_ARCHITECTURE (archivé → superseded par ADR_COVERAGE_PROPERTY_NOT_NODE + ADR_STRUCTURAL_GRAPH_FROM_DOCLING), ADR_HYBRID_ANCHOR_MODEL, ADR_MARKER_NORMALIZATION_LAYER, ADR_DOCUMENT_STRUCTURAL_AWARENESS
 **Revue**: Évaluation ChatGPT 2026-01-09 - Approuvé avec amendements intégrés
 
 ---
@@ -519,7 +519,7 @@ RETURN cc.label, cc.concept_id
 
 ## 11. Références
 
-- ADR_DUAL_CHUNKING_ARCHITECTURE.md (prérequis pour ANCHORED_IN)
+- ADR_DUAL_CHUNKING_ARCHITECTURE.md (archivé → voir ADR_COVERAGE_PROPERTY_NOT_NODE + ADR_STRUCTURAL_GRAPH_FROM_DOCLING)
 - ADR_HYBRID_ANCHOR_MODEL.md (architecture anchor)
 - Discussion ChatGPT 2026-01-09 (recommandation Pass 2.0 vs Pass 4.5)
 - Analyse Claude 2026-01-09 (comptage 46 concepts cross-doc)
