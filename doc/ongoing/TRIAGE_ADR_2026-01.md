@@ -120,6 +120,85 @@
 
 ---
 
+## Résultats Finaux - Fichiers par catégorie
+
+### GARDER dans doc/adr/ (18 fichiers inchangés)
+
+1. `README.md` — Index des ADRs (mis à jour post-triage)
+2. `CONSOLIDATED_ADR_OSMOSE.md` — Document de consolidation (annoté post-triage)
+3. `ADR-20241229-hybrid-anchor-model.md` — Hybrid Anchor Model (ACCEPTED)
+4. `ADR-20241230-option-a-prime-chunk-aligned-relations.md` — Chunk-Aligned Relations (ACCEPTED)
+5. `ADR-20241230-reducto-parsing-primitives.md` — Reducto Parsing Primitives (IMPLEMENTED)
+6. `ADR-20250105-marker-normalization-layer.md` — Marker Normalization Layer (IMPLEMENTED)
+7. `ADR-20260101-document-structural-awareness.md` — Document Structural Awareness (IMPLEMENTED)
+8. `ADR-20260101-navigation-layer.md` — Navigation Layer (IMPLEMENTED)
+9. `ADR-20260104-assertion-aware-kg.md` — Assertion-Aware KG (IMPLEMENTED)
+10. `ADR-20260106-graph-first-architecture.md` — Graph-First Architecture (DRAFT futur)
+11. `ADR_CHARSPAN_CONTRACT_V1.md` — CharSpan Contract V1 (DRAFT)
+12. `ADR_COREF_NAMED_NAMED_VALIDATION.md` — Coref Named Validation (VALIDÉ)
+13. `ADR_CORPUS_AWARE_LEX_KEY_NORMALIZATION.md` — Lex Key Normalization (ACCEPTED)
+14. `ADR_COVERAGE_PROPERTY_NOT_NODE.md` — Coverage Property Not Node (ACCEPTED)
+15. `ADR_MULTI_SPAN_EVIDENCE_BUNDLES.md` — Multi-Span Evidence Bundles (ACCEPTED futur)
+16. `ADR_STRUCTURAL_CONTEXT_ALIGNMENT.md` — Structural Context Alignment (ACCEPTED)
+17. `ADR_STRUCTURAL_GRAPH_FROM_DOCLING.md` — Structural Graph from Docling (READY)
+18. `ADR_UNIFIED_CORPUS_PROMOTION.md` — Unified Corpus Promotion (ACCEPTED)
+
+### PROMOUVOIR de doc/ongoing/ → doc/adr/ (3 fichiers)
+
+1. `ADR_SCOPE_VS_ASSERTION_SEPARATION.md` — Scope vs Assertion Separation (APPROVED BLOCKING)
+2. `ADR_STRATIFIED_READING_MODEL.md` — Stratified Reading Model (REVIEW FINAL)
+3. `ADR_NORTH_STAR_VERITE_DOCUMENTAIRE.md` — North Star Vérité Documentaire (VALIDÉ)
+
+### GARDER dans doc/ongoing/ (11 fichiers actifs)
+
+1. `ADR_DECISION_DEFENSE_ARCHITECTURE.md` — Decision Defense Architecture (ACCEPTED)
+2. `ADR_DISCURSIVE_RELATIONS.md` — Discursive Relations (ACCEPTED)
+3. `ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md` — Scope Discursive Candidate Mining (ACCEPTED)
+4. `ADR_NORMATIVE_RULES_SPEC_FACTS.md` — Normative Rules Spec Facts (APPROVED V1)
+5. `ADR_EXPLOITATION_LAYER.md` — Exploitation Layer (DRAFT futur)
+6. `ADR-20260126-vision-out-of-knowledge-path.md` — Vision Out-of-Knowledge Path (ACCEPTED)
+7. `ARCH_STRATIFIED_PIPELINE_V2.md` — Architecture pipeline stratifié v2
+8. `SPEC_IMPLEMENTATION_CLASSES_MVP_V1.md` — Spec implémentation classes MVP
+9. `SPEC_TECHNIQUE_MVP_V1_USAGE_B.md` — Spec technique MVP usage B
+10. `SPEC_VISION_SEMANTIC_INTEGRATION.md` — Spec vision intégration sémantique
+11. `TRACKING_PIPELINE_V2.md` — Tracking pipeline v2
+
+*Note : `TRIAGE_ADR_2026-01.md` (ce fichier) est le 12e fichier dans ongoing/.*
+
+### ARCHIVER de doc/adr/ → doc/archive/adr/ (2 fichiers)
+
+1. `ADR_DUAL_CHUNKING_ARCHITECTURE.md` — SUPERSEDED par ADR_COVERAGE_PROPERTY_NOT_NODE + ADR_STRUCTURAL_GRAPH_FROM_DOCLING
+2. `ADR_PROPERTY_NAMING_NORMALIZATION.md` — Tracking abandonné, conventions établies
+
+### ARCHIVER de doc/ongoing/ → doc/archive/ (5 fichiers effectifs sur 19 planifiés)
+
+Fichiers effectivement déplacés (présents dans le worktree) :
+
+1. `ADR_POC_DISCURSIVE_RELATION_DISCRIMINATION.md` — POC exploratoire terminé
+2. `ADR_DISCURSIVE_RELATIONS_BACKLOG.md` — Backlog terminé (phases A-E COMPLETE)
+3. `ADR-20260123-stratified-reading-poc-validation.md` — POC validé et clos
+4. `DECISION_DEFENSE_IMPLEMENTATION_BACKLOG.md` — Backlog terminé
+5. `IMPL_POC_STRATIFIED_READING.md` — POC implémenté et clos
+
+Fichiers planifiés pour archivage mais absents du worktree (14 fichiers — déjà archivés ou sur main uniquement) :
+
+- `EXTRACT_RISE_SAP_CLOUD_ERP_PRIVATE_SECURITY.md`
+- `EXTRACT_RISE_SAP_CLOUD_ERP_PRIVATE_SECURITY_V2.md`
+- `NEO4J_RECAP_2026-01-26_RUN5.md`
+- `DIAGNOSTIC_TESTS_PLAN_2026-01-26.md`
+- `DIAGNOSTIC_ROOT_CAUSE_FOUND.md`
+- `SPEC_VISION_ANCHOR_FIX_2026-01-26.md`
+- `ANALYSE_QWEN14B_PROBLEMES_2026-01-27.md`
+- `PLAN_QWEN_STRUCTURED_OUTPUTS_2026-01-27.md`
+- `ANALYSE_QUALITE_EXTRACTION_2026-01-27.md`
+- `IDEA_ADAPTIVE_CONCEPT_BUDGET.md`
+- `AMÉLIORATIONS_PASS1_LINKING_2026-01.md`
+- `EXTRACTION_ANALYSIS_RISE_SAP_CLOUD_ERP_PRIVATE.md`
+- `ANALYSE_EXTRACTION_2026-01-28.md`
+- `RESUME_CHATGPT_OSMOSE_PIPELINE_2026-01-28.md`
+
+---
+
 ## Vérification d'intégrité (Phase 6)
 
 **Date:** 2026-01-29
