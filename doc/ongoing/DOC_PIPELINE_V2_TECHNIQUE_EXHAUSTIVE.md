@@ -201,6 +201,7 @@ Extraction pattern-first, preuve locale obligatoire, non-traversable, scope-only
   - [6.3 Conformité ADR — Pass 0 Structural](#63-conformité-adr--pass-0-structural)
   - [6.4 Risques — Pass 0 Structural](#64-risques--pass-0-structural)
 - [7. Pass 0.5 — Résolution de Coréférence Linguistique](#7-pass-05--résolution-de-coréférence-linguistique)
+  - [7.0 Vue d'ensemble Pass 0.5](#70-vue-densemble-pass-05)
   - [7.1 Mécanismes de résolution](#71-mécanismes-de-résolution)
   - [7.2 Conformité ADR — Pass 0.5](#72-conformité-adr--pass-05)
   - [7.3 Risques — Pass 0.5](#73-risques--pass-05)
@@ -1335,6 +1336,65 @@ Champs principaux :
 **Objectif :** Résoudre les coréférences linguistiques (pronoms → antécédents, groupes nominaux → entités nommées) dans le texte du document. La résolution produit une `CorefGraph` (MentionSpan, CoreferenceChain, CorefDecision) persistée en Neo4j.
 
 **⚠️ Statut V2 :** Pass 0.5 est **désactivée** quand le feature flag `stratified_pipeline_v2` est activé (cf. risque R0-8 dans section 5.10). Les modèles `MentionSpan`/`CoreferenceChain` ne font pas partie de l'architecture V2 (8 types de nodes max). La coréférence en V2 sera gérée différemment (à définir).
+
+### 7.0 Vue d'ensemble Pass 0.5
+
+**Entrants :**
+
+| Entrant | Type | Source |
+|---------|------|--------|
+| DocItems de type narratif | Nodes Neo4j (`NARRATIVE_TEXT`, `PARAGRAPH`, `TEXT`) | Pass 0 Structural (graphe Document → Section → DocItem) |
+| TypeAwareChunks | Nodes Neo4j | Pass 0 Structural (chunking type-aware) |
+| Langue du document | `str` (propriété `DocumentVersion.language`) | Pass 0 Structural (détection ou défaut `"en"`) |
+| `doc_id` | `str` | ID unique du document |
+| `doc_version_id` | `str` | ID de version du document |
+| `tenant_id` | `str` | Contexte multi-tenant (défaut : `"default"`) |
+
+**Texte reconstitué :** Le pipeline charge les DocItems de type narratif depuis Neo4j, les trie par `reading_order_index`, et les concatène (séparateur `\n`) pour obtenir le `full_text` soumis à l'engine de coréférence. Les chunks sont utilisés pour l'ancrage secondaire des MentionSpan.
+
+**Sorties :**
+
+| Sortie | Type | Destination |
+|--------|------|-------------|
+| `MentionSpan` | Nodes Neo4j (fait linguistique) | Graphe linguistique — ancrage sur DocItem + chunk |
+| `CoreferenceChain` | Nodes Neo4j (groupement) | Graphe linguistique — relie N MentionSpan coréférents |
+| `CorefLink` | Relations Neo4j (`COREFERS_TO`) | Graphe linguistique — liens résolus pronom → antécédent |
+| `CorefDecision` | Nodes Neo4j (audit) | Trail d'audit — décisions RESOLVED / ABSTAIN / NON_REFERENTIAL |
+| `MATCHES_PROTOCONCEPT` | Relations Neo4j (optionnel) | Alignements lexicaux MentionSpan → ProtoConcept |
+| `Pass05Result` | Dataclass Python | Métriques retournées à l'orchestrateur (spans, chaînes, liens, taux, timing) |
+
+**Métriques clés (Pass05Result) :**
+
+| Métrique | Description |
+|----------|-------------|
+| `mention_spans_created` | Nombre total de MentionSpan créés |
+| `chains_created` | Nombre de CoreferenceChain (clusters) |
+| `links_created` | Nombre de CorefLink (`COREFERS_TO`) résolus |
+| `decisions_created` | Nombre de CorefDecision (audit trail) |
+| `resolution_rate` | % de pronoms résolus / total pronoms détectés |
+| `abstention_rate` | % de pronoms abstention / total pronoms détectés |
+| `engine_used` | Nom de l'engine utilisé (FastCoref, Coreferee, RuleBased) |
+| `processing_time_ms` | Durée totale du traitement |
+
+**Configuration (Pass05Config) :**
+
+| Paramètre | Défaut | Description |
+|-----------|--------|-------------|
+| `confidence_threshold` | 0.85 | Seuil de confiance engine pour accepter un lien pronom |
+| `max_sentence_distance` | 2 | Distance max en phrases entre pronom et antécédent |
+| `max_char_distance` | 500 | Distance max en caractères |
+| `enable_named_gating` | `True` | Activer le filtrage Named↔Named (Jaro-Winkler + LLM) |
+| `named_jaro_reject` | 0.55 | Seuil Jaro-Winkler pour REJECT immédiat |
+| `named_jaro_accept` | 0.95 | Seuil Jaro-Winkler pour ACCEPT immédiat |
+| `named_jaccard_accept` | 0.8 | Seuil Token Jaccard pour ACCEPT |
+| `enable_llm_arbitration` | `True` | Activer l'arbitrage LLM pour les paires en REVIEW |
+| `skip_if_exists` | `True` | Idempotence — ne pas retraiter si CorefGraph existe |
+| `create_protoconcept_links` | `True` | Créer les liens MATCHES_PROTOCONCEPT |
+| `persist_decisions` | `True` | Persister les CorefDecision (audit) |
+| `fastcoref_batch_size` | 50 000 | Taille max d'un batch (chars) pour éviter OOM |
+| `fastcoref_batch_overlap` | 3 000 | Overlap entre batches (chars) pour contexte coréférentiel |
+
+---
 
 ### 7.1 Mécanismes de résolution
 
