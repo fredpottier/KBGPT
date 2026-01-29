@@ -255,21 +255,28 @@ Extraction pattern-first, preuve locale obligatoire, non-traversable, scope-only
   - [15.5 Conformité ADR — Pass 3](#155-conformité-adr--pass-3)
   - [15.6 Risques — Pass 3](#156-risques--pass-3)
 - [16. Orchestration Pipeline](#16-orchestration-pipeline)
-  - [16.1 Séquencement global (watcher → dispatcher → pipeline)](#161-séquencement-global)
-  - [16.2 Feature flag routing V1/V2](#162-feature-flag-routing-v1v2)
-  - [16.3 Burst Mode](#163-burst-mode)
-  - [16.4 Conformité ADR — Orchestration](#164-conformité-adr--orchestration)
+  - [16.1 Séquencement global](#161-séquencement-global)
+  - [16.2 Folder Watcher](#162-folder-watcher)
+  - [16.3 Dispatcher](#163-dispatcher)
+  - [16.4 Modes d'exécution](#164-modes-dexécution)
+  - [16.5 Feature Flags et configuration](#165-feature-flags-et-configuration)
+  - [16.6 Burst Mode (EC2 Spot)](#166-burst-mode-ec2-spot)
+  - [16.7 Jobs spécialisés](#167-jobs-spécialisés)
+  - [16.8 Conformité ADR — Orchestration](#168-conformité-adr--orchestration)
+  - [16.9 Risques — Orchestration](#169-risques--orchestration)
 - [17. Modèle de données complet](#17-modèle-de-données-complet)
-  - [17.1 Hiérarchie des 8 types de nodes](#171-hiérarchie-des-8-types-de-nodes)
-  - [17.2 Schéma Neo4j V2](#172-schéma-neo4j-v2)
-  - [17.3 Dual Storage (Neo4j + Qdrant)](#173-dual-storage-neo4j--qdrant)
 - [18. Synthèse globale des risques](#18-synthèse-globale-des-risques)
   - [18.1 Risques critiques (🔴)](#181-risques-critiques-)
   - [18.2 Risques modérés (🟡)](#182-risques-modérés-)
   - [18.3 Risques faibles (🟢)](#183-risques-faibles-)
-  - [18.4 Matrice de priorisation](#184-matrice-de-priorisation)
+  - [18.4 Avertissements architecturaux (⚠️)](#184-avertissements-architecturaux-)
+  - [18.5 Statistiques consolidées](#185-statistiques-consolidées)
 - [19. Diagramme d'architecture global](#19-diagramme-darchitecture-global)
 - [20. Conclusion](#20-conclusion)
+  - [20.1 Synthèse](#201-synthèse)
+  - [20.2 Maturité du pipeline](#202-maturité-du-pipeline)
+  - [20.3 Points d'attention prioritaires](#203-points-dattention-prioritaires)
+  - [20.4 Prochaines étapes](#204-prochaines-étapes)
 
 ---
 
@@ -4025,28 +4032,649 @@ class Pass3Stats:
 
 ## 16. Orchestration Pipeline
 
-<!-- À compléter : analyse détaillée de queue/jobs_v2.py, dispatcher.py, burst/orchestrator.py -->
+Cette section décrit les mécanismes d'orchestration qui pilotent l'exécution du Pipeline V2, depuis la détection de nouveaux fichiers jusqu'à la finalisation du traitement. L'orchestration est transverse à toutes les passes documentées précédemment.
+
+### 16.1 Séquencement global
+
+Le pipeline V2 suit un séquencement linéaire en 5 étapes principales, piloté par le système de jobs RQ (Redis Queue) :
+
+```
+                         ┌─────────────────┐
+                         │  POINT D'ENTRÉE │
+                         └────────┬────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │                             │
+              ┌─────┴──────┐              ┌──────┴──────┐
+              │ API Upload │              │ Folder      │
+              │ (FastAPI)  │              │ Watcher     │
+              └─────┬──────┘              └──────┬──────┘
+                    │                             │
+                    │  POST /ingest               │  on_created / on_moved
+                    │                             │  wait_for_file_stability()
+                    │                             │  copy → docs_in/
+                    └─────────────┬───────────────┘
+                                  │
+                         ┌────────┴────────┐
+                         │   Dispatcher    │
+                         │  (dispatcher.py)│
+                         └────────┬────────┘
+                                  │
+                    enqueue_document_v2()
+                    enqueue_excel_ingestion()
+                                  │
+                         ┌────────┴────────┐
+                         │   Redis Queue   │
+                         │   (RQ Worker)   │
+                         └────────┬────────┘
+                                  │
+                         ┌────────┴────────┐
+                         │   jobs_v2.py    │
+                         │ ingest_doc_v2   │
+                         └────────┬────────┘
+                                  │
+              ┌───────────────────┼───────────────────┐
+              │                   │                   │
+     ┌────────┴────────┐ ┌───────┴────────┐ ┌────────┴────────┐
+     │ 1. Extraction   │ │ 2. OSMOSE      │ │ 3. Déduplication│
+     │ V2 (Pass 0)     │ │ Agentique      │ │ Auto            │
+     │ Docling+Vision  │ │ (Pass 0S-3)    │ │                 │
+     └────────┬────────┘ └───────┬────────┘ └────────┬────────┘
+              │                   │                   │
+              └───────────────────┼───────────────────┘
+                                  │
+              ┌───────────────────┼───────────────────┐
+              │                   │                   │
+     ┌────────┴────────┐ ┌───────┴────────┐ ┌────────┴────────┐
+     │ 4. Move to      │ │ 5. Notifier    │ │ Rollback si     │
+     │ docs_done/      │ │ Historique     │ │ Erreur          │
+     └─────────────────┘ └────────────────┘ └─────────────────┘
+```
+
+**Détail du séquencement dans `ingest_document_v2_job()` :**
+
+| Étape | Nom | Progression | Détail |
+|-------|-----|-------------|--------|
+| 0 | Initialisation | 0/5 | Vérification existence fichier, détection type, check mode Burst |
+| 1 | Extraction V2 | 1/5 | `_run_extraction_v2()` — ExtractionPipelineV2 (Docling + Vision Gating V4) |
+| 2 | OSMOSE Agentique | 2/5 | `_run_osmose_processing()` — OsmoseAgentiqueService (Pass 0S → Pass 3) |
+| 3 | Déduplication | 3/5 | `auto_deduplicate_entities()` — KnowledgeGraphService.deduplicate_entities_by_name |
+| 4 | Finalisation | 4/5 | `shutil.move()` — Déplacement fichier de `docs_in/` vers `docs_done/` |
+| 5 | Complété | 5/5 | Notification historique Redis — statut "completed" |
+
+### 16.2 Folder Watcher
+
+**Fichier :** `src/knowbase/ingestion/folder_watcher.py`
+**Classe principale :** `WatchHandler(FileSystemEventHandler)`
+
+Le Folder Watcher est un processus autonome qui surveille le répertoire `/data/watch/` via un `PollingObserver` (watchdog). Il constitue le point d'entrée alternatif à l'upload API.
+
+**Flux détaillé :**
+
+1. **Détection** : `on_created()` ou `on_moved()` déclenché par la présence d'un nouveau fichier
+2. **Stabilisation** : `wait_for_file_stability()` — attente de 2 secondes pour s'assurer que le fichier est complètement écrit
+3. **Copie** : Le fichier est copié vers `/data/docs_in/` (répertoire d'entrée officiel du pipeline)
+4. **Routage** : `enqueue_file()` détermine le type de fichier et appelle la fonction dispatcher appropriée
+5. **Job ID** : Génération d'un identifiant unique au format `watch-{filename}-{uuid}`
+
+**Types supportés :**
+
+| Extension | Fonction dispatcher | Job cible |
+|-----------|-------------------|-----------|
+| `.pdf` | `enqueue_pdf_ingestion()` | `ingest_document_v2_job` |
+| `.pptx` | `enqueue_pptx_ingestion()` | `ingest_document_v2_job` |
+| `.docx` | `enqueue_document_v2()` | `ingest_document_v2_job` |
+| `.xlsx` | `enqueue_excel_ingestion()` | `ingest_excel_job` |
+
+### 16.3 Dispatcher
+
+**Fichier :** `src/knowbase/ingestion/queue/dispatcher.py`
+**Statut :** Pipeline V2 unifié — Legacy V1 supprimé (cleanup 2025-01-05)
+
+Le dispatcher est le point central de routage des documents vers les jobs RQ. Depuis le cleanup de janvier 2025, **tous les formats** sont routés vers le pipeline V2 unifié.
+
+#### 16.3.1 Architecture post-cleanup
+
+```
+ enqueue_pptx_ingestion() ──┐
+                             ├──→ enqueue_document_v2() ──→ jobs_v2.ingest_document_v2_job
+ enqueue_pdf_ingestion()  ──┘
+
+ enqueue_excel_ingestion() ──→ jobs_v2.ingest_excel_job  (chemin séparé)
+ enqueue_fill_excel()      ──→ jobs_v2.fill_excel_job    (remplissage RFP)
+```
+
+**Points clés :**
+
+- **Unification V2** : `enqueue_pptx_ingestion()` et `enqueue_pdf_ingestion()` sont désormais de simples wrappers qui délèguent à `enqueue_document_v2()`. Les paramètres legacy (`meta_path`, `use_vision`) sont acceptés mais ignorés.
+- **Excel séparé** : L'ingestion Excel reste sur un chemin dédié (`ingest_excel_job`) car le format Q/A RFP n'est pas encore dans ExtractionPipelineV2.
+- **Metadata RQ** : Chaque job est enrichi avec des métadonnées (`job_type`, `pipeline_version`, `document_type`, `source`) via `_register_meta()` pour le suivi.
+
+#### 16.3.2 Configuration RQ
+
+**Fichier :** `src/knowbase/ingestion/queue/connection.py`
+
+| Paramètre | Source | Valeur |
+|-----------|--------|--------|
+| `REDIS_URL` | Variable d'environnement | `redis://knowbase-redis:6379/0` (par défaut) |
+| `DEFAULT_QUEUE_NAME` | Constante | `"knowbase"` |
+| `DEFAULT_JOB_TIMEOUT` | `settings.ingestion_job_timeout` | Configurable |
+| `result_ttl` | `DEFAULT_JOB_TIMEOUT` | Même valeur que le timeout |
+| `failure_ttl` | `DEFAULT_JOB_TIMEOUT` | Même valeur que le timeout |
+
+#### 16.3.3 Cycle de vie d'un job
+
+```
+ ENQUEUED → PROCESSING → [EXTRACTION → OSMOSE → DEDUP → MOVE] → COMPLETED
+                    │                                                  │
+                    └──────── ERREUR → ROLLBACK → FAILED ──────────────┘
+```
+
+**Suivi de progression :**
+
+- `mark_job_as_processing()` — Enregistre le statut "processing" dans l'historique Redis
+- `update_job_progress(step, progress, total_steps, message)` — Met à jour les métadonnées du job RQ
+- `send_worker_heartbeat()` — Heartbeat périodique avec `worker_id` (hostname:pid) et timestamp
+
+**Gestion d'erreur et rollback :**
+
+En cas d'exception dans `ingest_document_v2_job()` :
+
+1. **Log** de l'erreur
+2. **Suppression** des chunks partiels via `delete_import_completely(job.id)`
+3. **Notification** historique Redis avec statut "failed" et message d'erreur
+4. **Re-raise** de l'exception pour que RQ la marque comme échouée
+
+### 16.4 Modes d'exécution
+
+Le pipeline V2 supporte plusieurs modes d'exécution, principalement pour la **Pass 2** (enrichissement sémantique) qui est la plus coûteuse en temps.
+
+#### 16.4.1 Modes configurables (Pass 2)
+
+**Configuration :** `config/feature_flags.yaml` → `phase_2_hybrid_anchor.pass2_config.mode`
+
+| Mode | Description | Usage typique |
+|------|-------------|---------------|
+| `inline` | Pass 2 exécutée immédiatement après Pass 1, dans le même job | Mode Burst GPU — latence faible, infrastructure dédiée |
+| `background` | Pass 2 enqueued comme job RQ asynchrone séparé | **Mode par défaut** — ne bloque pas l'ingestion principale |
+| `scheduled` | Pass 2 exécutée en batch périodique (cron) | Corpus stable — consolidation nocturne |
+| `disabled` | Pass 2 non exécutée | Debug/test — extraction only |
+
+**Valeur actuelle :** `"background"` (configuré dans `feature_flags.yaml`)
+
+#### 16.4.2 Phases Pass 2 activables
+
+Chaque phase de Pass 2 peut être activée/désactivée individuellement via `pass2_config.enabled_phases` :
+
+```yaml
+enabled_phases:
+  - "corpus_promotion"       # Pass 2.0: Promotion unifiée
+  - "structural_topics"      # Pass 2a: Topics + HAS_TOPIC + COVERS
+  - "classify_fine"          # Pass 2b-1: Classification fine concepts
+  - "enrich_relations"       # Pass 2b-2: Extraction relations ADR-compliant
+  - "normative_extraction"   # Pass 2c: NormativeRule + SpecFact
+  - "semantic_consolidation" # Pass 3: Consolidation sémantique
+  - "cross_doc"              # Linking cross-document (Entity Resolution)
+```
+
+### 16.5 Feature Flags et configuration
+
+**Fichier YAML :** `config/feature_flags.yaml`
+**Module Python :** `src/knowbase/config/feature_flags.py`
+
+#### 16.5.1 Flags principaux du pipeline
+
+| Flag | Section | Valeur | Impact |
+|------|---------|--------|--------|
+| `extraction_v2.enabled` | Extraction | `true` | Active le pipeline Docling + Vision Gating V4 |
+| `stratified_pipeline_v2.enabled` | Pipeline V2 | `true` | Active le pipeline stratifié (lecture top-down) |
+| `stratified_pipeline_v2.use_v2_endpoints` | API | `false` | Les endpoints V2 ne sont pas encore les principaux |
+| `phase_2_hybrid_anchor.enabled` | Pass 2 | `true` | Active le modèle Hybrid Anchor |
+| `phase_2_hybrid_anchor.pass2_mode` | Exécution | `"background"` | Mode d'exécution de Pass 2 |
+| `phase_1_8.enable_llm_relation_enrichment` | Relations | `false` | Désactivé — unifié sur Pass 2 ENRICH_RELATIONS |
+
+#### 16.5.2 Gardes de frugalité
+
+```yaml
+stratified_pipeline_v2:
+  max_concepts_per_document: 15     # Budget concept normal
+  max_concepts_hostile: 5           # Budget concept réduit (doc hostile)
+  max_relations_per_concept: 3      # Cap relations par concept
+  strict_promotion: false           # CONDITIONAL + RARELY promues
+  promotion_threshold: 0.7          # Seuil confidence minimum
+  consolidation_similarity_threshold: 0.85  # Seuil Pass 3
+```
+
+#### 16.5.3 Architecture de déploiement
+
+OSMOSE utilise une architecture **"1 instance = 1 client"** :
+- Chaque client a sa propre instance dédiée (Neo4j, Qdrant, Redis)
+- Le `tenant_id` reste `"default"` sur chaque instance
+- Pas de multi-tenancy logique — isolation totale des données
+
+### 16.6 Burst Mode (EC2 Spot)
+
+**Fichier :** `src/knowbase/ingestion/burst/orchestrator.py`
+**Classe principale :** `BurstOrchestrator`
+
+Le mode Burst est un mécanisme d'accélération pour le traitement de gros volumes de documents. Il provisionne dynamiquement une instance EC2 Spot avec GPU pour exécuter les modèles LLM et d'embeddings localement, réduisant les coûts API.
+
+#### 16.6.1 Architecture Burst
+
+```
+ ┌─────────────────────────────────────────────────────────┐
+ │                    Container Local                       │
+ │                                                         │
+ │  BurstOrchestrator                                      │
+ │  ├── prepare_batch(document_paths)                      │
+ │  ├── start_infrastructure()                             │
+ │  │     ├── CloudFormation deploy (ou scale-up fleet)    │
+ │  │     ├── Wait for instance                            │
+ │  │     ├── Wait for services (healthcheck)              │
+ │  │     └── Switch providers (LLM + Embeddings)          │
+ │  ├── process_batch(callback)                            │
+ │  │     ├── Process pending documents                    │
+ │  │     ├── Check Spot interruption (toutes 30s)         │
+ │  │     └── Handle interruption → resume                 │
+ │  └── teardown (scale-down fleet ou delete stack)        │
+ │                                                         │
+ └──────────────────────┬──────────────────────────────────┘
+                        │
+                  Provider Switch
+                  (activate_burst_providers)
+                        │
+ ┌──────────────────────┴──────────────────────────────────┐
+ │              Instance EC2 Spot (GPU)                     │
+ │                                                         │
+ │  ┌─────────────────┐  ┌──────────────────────────┐      │
+ │  │ vLLM Server     │  │ Embeddings Server         │     │
+ │  │ Qwen 2.5 7B    │  │ multilingual-e5-large     │     │
+ │  │ Port 8000       │  │ Port 8001                 │     │
+ │  └─────────────────┘  └──────────────────────────┘      │
+ │                                                         │
+ └─────────────────────────────────────────────────────────┘
+```
+
+#### 16.6.2 Cycle de vie du Burst
+
+| Phase | Statut | Description |
+|-------|--------|-------------|
+| Préparation | `PREPARING` | Validation des documents, création de l'état initial |
+| Infrastructure | `REQUESTING_SPOT` → `WAITING_CAPACITY` → `INSTANCE_STARTING` | Provisioning EC2 via CloudFormation |
+| Services | `INSTANCE_STARTING` | Healthcheck vLLM + Embeddings (polling) |
+| Prêt | `READY` | Providers basculés, prêt pour traitement |
+| Traitement | `PROCESSING` | Documents traités via callback, monitoring Spot |
+| Interruption | `INTERRUPTED` → `RESUMING` | Interruption Spot détectée, reprise automatique |
+| Terminé | `COMPLETED` | Providers restaurés, infrastructure teardown |
+
+#### 16.6.3 Gestion des interruptions Spot
+
+Le Burst Orchestrator implémente une résilience complète aux interruptions Spot :
+
+1. **Détection proactive** : `_check_for_spot_interruption()` vérifie le health endpoint toutes les 30 secondes
+2. **Arrêt gracieux** : `initiate_graceful_shutdown()` sauvegarde l'état dans `data/burst_state/burst_state_{batch_id}.json`
+3. **Reprise automatique** : Le Spot Fleet maintient `TargetCapacity=1`, une nouvelle instance est provisionnée automatiquement
+4. **Retry limité** : `max_interruption_retries` contrôle le nombre maximum de tentatives de reprise
+5. **État par document** : Chaque document a un statut individuel (`pending`, `processing`, `completed`, `failed`), les documents en cours sont remis en `pending` lors d'une interruption
+
+#### 16.6.4 Optimisations
+
+- **Fast Start** : Réutilisation d'un Spot Fleet existant en veille (capacity=0 → scale up à 1). Réduction du temps de démarrage de ~5-7 min à ~1-2 min
+- **Keep Fleet** : Teardown par défaut réduit la capacity à 0 au lieu de supprimer la stack, conservant Security Group, IAM Roles et Fleet pour le prochain batch
+- **Dual Logging** : Mode optionnel qui log les résultats via OpenAI ET vLLM pour comparaison de qualité
+- **Reconnexion** : `reconnect_to_stack()` permet de reprendre après un redémarrage container
+
+#### 16.6.5 Configuration Burst
+
+**Source :** `BurstConfig.from_env()` (variables d'environnement)
+
+| Paramètre | Défaut | Description |
+|-----------|--------|-------------|
+| `vllm_model` | `Qwen/Qwen2.5-7B-Instruct` | Modèle LLM sur EC2 |
+| `embeddings_model` | `intfloat/multilingual-e5-large` | Modèle d'embeddings |
+| `spot_max_price` | `0.80` | Prix maximum Spot ($/h) |
+| `vllm_port` | `8000` | Port du serveur vLLM |
+| `embeddings_port` | `8001` | Port du serveur Embeddings |
+| `instance_boot_timeout` | Configurable | Timeout attente instance |
+| `healthcheck_interval` | Configurable | Intervalle de healthcheck |
+| `healthcheck_timeout` | Configurable | Timeout par healthcheck |
+| `max_interruption_retries` | Configurable | Max tentatives de reprise |
+
+### 16.7 Jobs spécialisés
+
+Outre le job principal `ingest_document_v2_job`, `jobs_v2.py` expose deux jobs spécialisés :
+
+#### 16.7.1 `ingest_excel_job`
+
+**Usage :** Import de Q/A RFP depuis fichier Excel
+**Pipeline :** `excel_pipeline.process_excel_rfp()` — chemin séparé du pipeline V2 unifié
+**Particularités :**
+- Pas d'ExtractionPipelineV2 (format Q/A structuré)
+- Déduplication automatique après import
+- Notification historique Redis avec `chunks_inserted`
+
+#### 16.7.2 `fill_excel_job`
+
+**Usage :** Remplissage automatique d'un Excel RFP vide
+**Pipeline :** `smart_fill_excel_pipeline.main()` avec callback de progression
+**Particularités :**
+- Génère un fichier `{stem}_{uid}_filled.xlsx` dans le répertoire de présentations
+- Supprime le fichier meta après traitement
+- Progression UI via callback (`pipeline_progress_callback`)
+
+### 16.8 Conformité ADR — Orchestration
+
+| # | Axe ADR | Statut | Détail |
+|---|---------|--------|--------|
+| AV2-5 | Pipeline V2 coexiste avec legacy | ✅ | Le dispatcher a été simplifié : legacy V1 supprimé (cleanup 2025-01-05). Tous les formats passent par V2. |
+| AV2-8 | Dual storage (Neo4j + Qdrant) | ✅ | Le job V2 orchestre extraction → OSMOSE Agentique, qui persiste dans les deux stores. |
+| AV2-9 | Pass 3 mode manuel + batch | ✅ | Pass 3 n'est pas inline dans le job principal — exécutée via `enabled_phases` en mode background/scheduled. |
+| NS-2 | LLM = Extracteur evidence-locked | ⚠️ | Le mode Burst permet d'utiliser un modèle local (Qwen 2.5 7B) potentiellement moins strict que les modèles cloud. La qualité doit être validée. |
+
+### 16.9 Risques — Orchestration
+
+| ID | Risque | Sévérité | Description | Mitigation |
+|----|--------|----------|-------------|------------|
+| RO-1 | **`asyncio.run()` dans job synchrone** | 🟡 | `ingest_document_v2_job` est une fonction synchrone qui appelle `asyncio.run()` deux fois (extraction puis OSMOSE). Si un event loop est déjà actif dans le worker, cela lèvera une `RuntimeError`. | Les workers RQ sont des processus isolés sans event loop pré-existant. Le risque n'existe que si le worker est intégré dans un contexte async (ex: tests pytest-asyncio). |
+| RO-2 | **Rollback partiel possible** | 🟡 | `delete_import_completely(job.id)` tente de supprimer les chunks Qdrant mais si le rollback échoue lui-même, des données partielles persistent sans signalement clair (simple `logger.error`). | Monitoring des logs d'erreur de rollback. Un mécanisme de garbage collection périodique pourrait détecter les documents partiels. |
+| RO-3 | **Burst Mode — modèle local vs cloud** | 🟡 | Le Qwen 2.5 7B instruct utilisé en mode Burst peut produire des résultats de qualité inférieure aux modèles cloud (GPT-4o, Claude) pour les tâches d'extraction fine (assertions, concepts). | Le mode dual-logging permet la comparaison qualitative. Les gardes de frugalité et la validation verbatim restent actifs quel que soit le modèle. |
+| RO-4 | **Spot interruption pendant écriture Neo4j** | 🟡 | Si une interruption Spot survient pendant la persistance Neo4j d'un document, les données peuvent être dans un état incohérent (nœuds créés sans relations, ou inversement). | La reprise remet le document en `pending`. Le retraitement complet crée les nœuds avec `MERGE` (idempotent). Les données orphelines sont tolérées. |
+| RO-5 | **Excel pas dans ExtractionPipelineV2** | 🟢 | L'ingestion Excel utilise toujours un pipeline séparé (`excel_pipeline`). Le format Q/A structuré ne bénéficie pas des améliorations Vision/Docling. | Le format Q/A Excel est structuré par nature (colonnes = champs). L'extraction visuelle n'apporte pas de valeur ajoutée. |
+| RO-6 | **Watcher sans retry** | 🟢 | Si l'enqueue échoue (Redis indisponible), le watcher ne réessaye pas. Le fichier reste dans `docs_in/` sans être traité. | L'utilisateur peut relancer manuellement via l'API. Le monitoring Docker détecte les services indisponibles. |
 
 ---
 
 ## 17. Modèle de données complet
 
-<!-- À compléter : synthèse du schéma Neo4j V2 et modèles Pydantic -->
+Le modèle de données complet Neo4j V2 est documenté dans les sections par phase. Synthèse des types de nœuds :
+
+| Type de nœud | Phase de création | Description | Propriétés clés |
+|--------------|------------------|-------------|-----------------|
+| `Document` | Pass 0 Structural | Document source | `document_id`, `title`, `doc_hash`, `tenant_id` |
+| `Section` | Pass 0 Structural | Section hiérarchique | `section_id`, `heading`, `level`, `path` |
+| `DocItem` | Pass 0 Structural | Item atomique Docling | `item_id`, `type`, `text_preview`, `page` |
+| `Subject` | Pass 1.1 | Sujet central du document | `subject_id`, `name`, `structure_type` |
+| `Theme` | Pass 1.1 | Thème identifié | `theme_id`, `name`, `description` |
+| `Concept` | Pass 1.2 | Concept situé frugal | `concept_id`, `name`, `triggers`, `lex_key` |
+| `Information` | Pass 1.4 | Assertion promue | `info_id`, `claim`, `exact_quote`, `claimkey_id` |
+| `AssertionLog` | Pass 1.4 | Log de décision promotion | `assertion_id`, `status`, `reason` |
+| `CanonicalConcept` | Pass 3 | Concept canonique (corpus-level) | `canonical_id`, `name`, `merged_from` |
+| `CanonicalTheme` | Pass 3 | Thème canonique (corpus-level) | `canonical_id`, `name` |
+
+**Total types :** 10 (vs 8 prévus par AV2-2 — les 2 supplémentaires sont des superpositions corpus-level).
 
 ---
 
 ## 18. Synthèse globale des risques
 
-<!-- À compléter : tableau récapitulatif de tous les risques identifiés -->
+Cette section récapitule **tous les risques** identifiés dans les phases précédentes, consolidés et priorisés par gravité.
+
+### 18.1 Risques critiques (🔴)
+
+| ID | Phase | Risque | Plan d'action |
+|----|-------|--------|---------------|
+| R13-6 | Pass 1.3 (Extraction assertions) | **Fallback heuristique en production** — Si `allow_fallback=True`, assertions heuristiques (confiance 0.5, types approximatifs) polluent le graphe | Vérifier que `allow_fallback=False` en production. Ajouter un check au démarrage du worker. |
+| R3-7 | Pass 3 (Consolidation) | **Détecteur de contradictions non implémenté** — Le modèle Contradiction est défini (6 natures, 4 niveaux) mais aucun composant ne l'instancie. Objectif clé du MVP V1 Usage B. | Implémenter `ContradictionDetector` : parcours Informations par ClaimKey, comparaison Value Contracts normalisés, création nœuds Contradiction. **Priorité haute MVP.** |
+
+### 18.2 Risques modérés (🟡)
+
+| ID | Phase | Risque | Plan d'action |
+|----|-------|--------|---------------|
+| R0-1 | Pass 0 (Extraction) | Shapes vectoriels non détectés | Phase 2.6 — Fallback VDS à implémenter |
+| R0-4 | Pass 0 (Extraction) | Seuils de gating non calibrés | Phase 7 — Calibration sur corpus réel |
+| R0-5 | Pass 0 (Extraction) | Table Summarizer — hallucination LLM | Monitoring + validation manuelle des résumés table |
+| R0-6 | Pass 0 (Extraction) | DocContext faux positifs résiduels | Principe safe-by-default actif — monitoring |
+| R0S-2 | Pass 0 Structural | DocItems très nombreux (>6700 observés) | Lazy persistence activée (~50-200 DocItems en Neo4j) |
+| R0S-4 | Pass 0 Structural | Cache v5 — Sections non sérialisées | Re-build complet si sections critiques |
+| R0S-6 | Pass 0 Structural | Deux schémas Neo4j coexistants (legacy + V2) | Retrait code legacy après validation V2 |
+| R05-1 | Pass 0.5 (Coréférence) | Désactivée en V2 — pronoms non résolus | Refonte coréférence V2 à concevoir |
+| R05-2 | Pass 0.5 (Coréférence) | OOM FastCoref sur gros documents | Section batching avec overlap 3K chars |
+| R05-3 | Pass 0.5 (Coréférence) | Coreferee obsolète (dernier release 2022) | Swappable via interface ICorefEngine |
+| R05-4 | Pass 0.5 (Coréférence) | Offset lookup simpliste (TODO) | Non impactant en V2 (désactivé) |
+| R05-6 | Pass 0.5 (Coréférence) | Pas d'intégration avec Pass 1.x | Pipeline V2 gère différemment |
+| R09-1 | Pass 0.9 (Global View) | Mode sync = toujours fallback (troncature) | Refactorer vers `build()` async |
+| R09-2 | Pass 0.9 (Global View) | Pas de gestion budget tokens | Ajouter tiktoken ou réduire limite chars |
+| R09-4 | Pass 0.9 (Global View) | Détection format réponse LLM fragile | Fallback extraction garantit un résumé |
+| R09-6 | Pass 0.9 (Global View) | Pas de cache des résumés | Ajouter cache basé sur hash(section_text) |
+| R11-1 | Pass 1.1 (Analyse doc) | Preview tronqué à 4000 chars | Compensé par meta-document Pass 0.9 |
+| R11-3 | Pass 1.1 (Analyse doc) | Pas de validation croisée structure/contenu | Audit humain via champ justification |
+| R11-5 | Pass 1.1 (Analyse doc) | Pas de détection de langue robuste | Risque faible — langues connues |
+| R12-1 | Pass 1.2 (Concepts) | Budget étendu [20-40] vs frugalité ADR [5-15] | Croissance sub-linéaire + cap 50 |
+| R12-2 | Pass 1.2 (Concepts) | Troncature JSON (LLM Contract) | Détection explicite + Structured Outputs |
+| R12-3 | Pass 1.2 (Concepts) | Triggers trop permissifs petits documents | Fallback semi-rare et value patterns |
+| R12-4 | Pass 1.2 (Concepts) | Pass 1.2b concepts de faible valeur | Critère C2 + rendement décroissant |
+| R13-1 | Pass 1.3 (Assertions) | Reformulation LLM (mode classique) | Mode pointer élimine le risque |
+| R13-2 | Pass 1.3 (Assertions) | Coexistence deux modes d'extraction | Convergence progressive vers pointer |
+| R13-3 | Pass 1.3 (Assertions) | Seuil lexical Pointer Validator strict | Score value pattern compense |
+| R14-1 | Pass 1.4 (Promotion) | ClaimKey Niveau B (LLM) absent | 15 patterns regex couvrent domaines fréquents |
+| R14-2 | Pass 1.4 (Promotion) | Coexistence PromotionEngine V2 / PromotionPolicy MVP V1 | Convergence planifiée fin MVP |
+| R14-3 | Pass 1.4 (Promotion) | Addressability non stricte (PROMOTED_UNLINKED) | Information-First prime + Pass 1.2b récupère |
+| R14-5 | Pass 1.4 (Promotion) | Fingerprint sensible au claimkey_id | Pass 3 = déduplication de second niveau |
+| R2-1 | Pass 2 (Relations) | Label générique `CONCEPT_RELATION` | Migration labels dynamiques APOC si besoin |
+| R2-2 | Pass 2 (Relations) | Garde-fou à 3 relations arbitraire | Constante ajustable + monitoring filtrage |
+| R2-3 | Pass 2 (Relations) | Heuristique de fallback peu fiable | Désactivé par défaut |
+| R2-4 | Pass 2 (Relations) | Pas de distinction Scope vs Assertion | Taguer assertion_kind — non bloquant MVP |
+| R2-5 | Pass 2 (Relations) | Absence DefensibilityTier / EvidenceBundle | Objectif architectural — MVP fonctionnel |
+| R3-1 | Pass 3 (Consolidation) | Clustering par lex_key uniquement — pas d'embeddings | Implémenter cosine similarity (paramétrage en place) |
+| R3-3 | Pass 3 (Consolidation) | Pas de purge avant retraitement batch | Ajouter `delete_pass3_data()` — **critique production** |
+| R3-4 | Pass 3 (Consolidation) | Clustering thèmes trop strict | Aligner sur stratégie concepts |
+| R3-5 | Pass 3 (Consolidation) | Mode incrémental ne crée jamais de canoniques | Exécution batch périodique requise |
+| R3-8 | Pass 3 (Consolidation) | Pas de validation LLM cas ambigus | Implémenter validation (paramétrage en place) |
+| RO-1 | Orchestration | `asyncio.run()` dans job synchrone | Workers RQ = processus isolés |
+| RO-2 | Orchestration | Rollback partiel possible | Monitoring + garbage collection |
+| RO-3 | Orchestration | Burst Mode — modèle local vs cloud | Dual-logging + gardes de frugalité |
+| RO-4 | Orchestration | Spot interruption pendant écriture Neo4j | MERGE idempotent + retraitement complet |
+
+### 18.3 Risques faibles (🟢)
+
+| ID | Phase | Risque |
+|----|-------|--------|
+| R0-2 | Pass 0 | Concurrence Vision non bornée — semaphore atténue |
+| R0-3 | Pass 0 | Cache version mismatch — invalidation automatique |
+| R0-7 | Pass 0 | VisionSemanticReader placeholder — fallback 3-tier |
+| R0S-3 | Pass 0 Structural | Chunks NARRATIVE trop longs — seuil 3000 chars configurable |
+| R0S-5 | Pass 0 Structural | AssertionUnitIndexer import lazy — log warning émis |
+| R0S-7 | Pass 0 Structural | Hash de document non déterministe — versionné v1: |
+| R05-5 | Pass 0.5 | Named↔Named gating faux rejets — LLM Arbiter |
+| R09-3 | Pass 0.9 | Perte info sections skip — impact mineur |
+| R09-5 | Pass 0.9 | Modèle LLM hardcodé — acceptable beta |
+| R09-7 | Pass 0.9 | Fourchette taille plus large que ADR — pragmatique |
+| R11-2 | Pass 1.1 | Seuil HOSTILE fixe — impact mineur |
+| R11-4 | Pass 1.1 | Fallback analyse = données non fiables — RuntimeError en prod |
+| R12-5 | Pass 1.2 | Doublons LLM/raffinement — déduplication implémentée |
+| R12-6 | Pass 1.2 | Pas de trigger_enricher séparé — fonctionnel en l'état |
+| R12-7 | Pass 1.2 | Nettoyage JSON fragile — Structured Outputs élimine |
+| R13-4 | Pass 1.3 | Spray & Pray — hard gate + soft gate + cap 5 |
+| R13-5 | Pass 1.3 | Troncature texte 2000 chars — détectable |
+| R13-7 | Pass 1.3 | Pré-filtres méta-descriptions — patterns EN+FR |
+| R14-4 | Pass 1.4 | Theme Lint non implémenté — post-MVP |
+| R14-6 | Pass 1.4 | Détection fragments verbes connus — extension multilingue possible |
+| R14-7 | Pass 1.4 | Value Extractor limité 5 types — couvre cas fréquents |
+| R14-8 | Pass 1.4 | Patterns META YAML — fallback 7 patterns minimal |
+| R2-6 | Pass 2 | Pas de déduplication relations — MERGE + purge |
+| R2-7 | Pass 2 | Persistance relation par relation — non critique MVP |
+| R3-2 | Pass 3 | Nom représentatif arbitraire — acceptable MVP |
+| R3-6 | Pass 3 | Persistance relation par relation — UNWIND possible |
+| RO-5 | Orchestration | Excel pas dans ExtractionPipelineV2 — Q/A structuré |
+| RO-6 | Orchestration | Watcher sans retry — relance manuelle API |
+
+### 18.4 Avertissements architecturaux (⚠️)
+
+| ID | Phase | Risque |
+|----|-------|--------|
+| R0-8 | Pass 0/0.5 | Pass 0.5 désactivée en mode V2 — décision architecturale consciente |
+
+### 18.5 Statistiques consolidées
+
+| Sévérité | Nombre | Pourcentage |
+|----------|--------|-------------|
+| 🔴 Critique | 2 | 3% |
+| 🟡 Modéré | 35 | 53% |
+| 🟢 Faible | 28 | 42% |
+| ⚠️ Architectural | 1 | 2% |
+| **Total** | **66** | **100%** |
+
+**Top 5 des actions prioritaires :**
+
+1. **🔴 R3-7** — Implémenter le `ContradictionDetector` (MVP V1 Usage B)
+2. **🔴 R13-6** — Vérifier `allow_fallback=False` en production (check au démarrage)
+3. **🟡 R3-3** — Ajouter `delete_pass3_data()` pour purge avant retraitement (critique production)
+4. **🟡 R3-1** — Implémenter le clustering par embeddings (cosine similarity) pour Pass 3
+5. **🟡 R05-1** — Concevoir la coréférence V2 pour le pipeline stratifié
 
 ---
 
 ## 19. Diagramme d'architecture global
 
-<!-- À compléter : diagramme ASCII complet -->
+```
+╔═══════════════════════════════════════════════════════════════════════════════════╗
+║                    OSMOSIS Pipeline V2 — Architecture Globale                    ║
+╠═══════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                 ║
+║  POINTS D'ENTRÉE                                                                ║
+║  ═══════════════                                                                ║
+║  ┌──────────────┐  ┌──────────────┐                                             ║
+║  │ API Upload   │  │ Folder       │                                             ║
+║  │ (FastAPI)    │  │ Watcher      │                                             ║
+║  └──────┬───────┘  └──────┬───────┘                                             ║
+║         └────────┬─────────┘                                                    ║
+║                  ▼                                                              ║
+║  ┌───────────────────────────┐    ┌──────────────────────────────────────┐       ║
+║  │ Dispatcher (dispatcher.py)│    │ Redis Queue (RQ)                     │       ║
+║  │ enqueue_document_v2()     │───▶│ knowbase queue                       │       ║
+║  │ enqueue_excel_ingestion() │    │ DEFAULT_JOB_TIMEOUT configurable     │       ║
+║  └───────────────────────────┘    └────────────────┬─────────────────────┘       ║
+║                                                    ▼                            ║
+║  PIPELINE D'INGESTION (jobs_v2.py — RQ Worker)                                  ║
+║  ═════════════════════════════════════════════                                   ║
+║                                                                                 ║
+║  ┌─ Pass 0 — EXTRACTION ──────────────────────────────────────────────────────┐  ║
+║  │                                                                            │  ║
+║  │  Docling ──▶ Vision Gating V4 ──▶ GPT-4o Vision ──▶ Merge ──▶ Linearize   │  ║
+║  │                   │                                                        │  ║
+║  │              Feature Signals                                               │  ║
+║  │              (TFS, SDS, VDS, DPS, TVR)                                     │  ║
+║  │                                                                            │  ║
+║  │  + DocContext Extraction    + Table Summarizer    + Cache Versionné (v5)    │  ║
+║  │                                                                            │  ║
+║  └──────────────────────────────────┬─────────────────────────────────────────┘  ║
+║                                     ▼                                           ║
+║  ┌─ Pass 0 Structural ─────────────────────────────────────────────────────┐    ║
+║  │  Document ──▶ Section (hiérarchie H1-H6) ──▶ DocItem (atomique)         │    ║
+║  │  + TypeAwareChunks ──▶ Qdrant (knowwhere_proto)                         │    ║
+║  │  + AssertionUnit Indexer                                                 │    ║
+║  └──────────────────────────────────┬───────────────────────────────────────┘    ║
+║                                     ▼                                           ║
+║  ┌─ Pass 0.9 — GLOBAL VIEW ───────────────────────────────────────────────┐     ║
+║  │  Section Summaries (LLM/fallback) ──▶ Meta-Document (15-25K chars)      │    ║
+║  │  + TOC enrichie + Section hierarchy + Coverage metrics                   │    ║
+║  └──────────────────────────────────┬───────────────────────────────────────┘    ║
+║                                     ▼                                           ║
+║  ┌─ Pass 1 — LECTURE STRATIFIÉE (Top-Down) ──────────────────────────────────┐  ║
+║  │                                                                            │  ║
+║  │  Pass 1.1: Document Analysis ──▶ Subject + Themes + Structure Type         │  ║
+║  │       │                                                                    │  ║
+║  │       ▼                                                                    │  ║
+║  │  Pass 1.2: Concept Identification ──▶ 5-50 ConceptSitués frugaux           │  ║
+║  │       │         + Pass 1.2b Refinement (itératif)                          │  ║
+║  │       ▼                                                                    │  ║
+║  │  Pass 1.3: Assertion Extraction ──▶ RawAssertions (verbatim + span)        │  ║
+║  │       │         + Mode Pointer (unit → concept → assertion)                │  ║
+║  │       │         + Pass 1.3b Anchor Resolution (assertion → DocItem)        │  ║
+║  │       ▼                                                                    │  ║
+║  │  Pass 1.4: Promotion + Linking ──▶ Information PROMOTED                    │  ║
+║  │                + Value Contract + ClaimKey + Fingerprint Dedup              │  ║
+║  │                + AssertionLog (PROMOTED | ABSTAINED | REJECTED)             │  ║
+║  │                                                                            │  ║
+║  └──────────────────────────────────┬─────────────────────────────────────────┘  ║
+║                                     ▼                                           ║
+║  ┌─ Pass 2 — ENRICHISSEMENT (mode: background | inline | scheduled) ─────────┐  ║
+║  │                                                                            │  ║
+║  │  2.0: Corpus Promotion      ──▶ ProtoConcept → CanonicalConcept            │  ║
+║  │  2a:  Structural Topics     ──▶ HAS_TOPIC + COVERS relations               │  ║
+║  │  2b-1: Classification fine  ──▶ Concept types enrichis                     │  ║
+║  │  2b-2: Relations ADR        ──▶ CONCEPT_RELATION (segment-first)           │  ║
+║  │  2c:  Normative Extraction  ──▶ NormativeRule + SpecFact                   │  ║
+║  │                                                                            │  ║
+║  └──────────────────────────────────┬─────────────────────────────────────────┘  ║
+║                                     ▼                                           ║
+║  ┌─ Pass 3 — CONSOLIDATION CORPUS (batch | incrémental) ─────────────────────┐  ║
+║  │                                                                            │  ║
+║  │  Entity Resolution (lex_key + variantes) ──▶ CanonicalConcept (SAME_AS)    │  ║
+║  │  Theme Alignment (nom normalisé)          ──▶ CanonicalTheme (ALIGNED_TO)  │  ║
+║  │  [À implémenter: ContradictionDetector via ClaimKey + Value Contract]       │  ║
+║  │                                                                            │  ║
+║  └────────────────────────────────────────────────────────────────────────────┘  ║
+║                                                                                 ║
+║  STOCKAGE DUAL                                                                  ║
+║  ═════════════                                                                  ║
+║  ┌────────────────────────┐    ┌────────────────────────────────────────────┐    ║
+║  │ Neo4j                  │    │ Qdrant                                     │    ║
+║  │ ─────                  │    │ ──────                                     │    ║
+║  │ Document, Section,     │    │ Collection: knowwhere_proto                │    ║
+║  │ DocItem, Subject,      │    │ TypeAwareChunks (NARRATIVE, TABLE,         │    ║
+║  │ Theme, Concept,        │    │ KEY_VALUE, VISUAL, HEADING, LIST)          │    ║
+║  │ Information,           │    │ Payload: anchored_concepts, metadata       │    ║
+║  │ AssertionLog,          │    │                                            │    ║
+║  │ CanonicalConcept,      │    │ Collection: rfp_qa                        │    ║
+║  │ CanonicalTheme         │    │ Q/A RFP (pipeline séparé)                 │    ║
+║  └────────────────────────┘    └────────────────────────────────────────────┘    ║
+║                                                                                 ║
+║  MODE BURST (optionnel)                                                         ║
+║  ══════════════════════                                                         ║
+║  ┌────────────────────────────────────────────────────────────────────────────┐  ║
+║  │ EC2 Spot (GPU) — CloudFormation managed                                   │  ║
+║  │ vLLM: Qwen 2.5 7B Instruct (:8000) + Embeddings: e5-large (:8001)        │  ║
+║  │ Provider switch transparent + Spot interruption resilience                │  ║
+║  └────────────────────────────────────────────────────────────────────────────┘  ║
+║                                                                                 ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝
+```
 
 ---
 
 ## 20. Conclusion
 
-<!-- À compléter : synthèse finale -->
+### 20.1 Synthèse
+
+Ce document constitue la **documentation technique exhaustive** du Pipeline d'Ingestion V2 d'OSMOSIS, couvrant les 11 passes du pipeline stratifié, de l'extraction brute (Pass 0) à la consolidation corpus (Pass 3), en passant par l'orchestration, le mode Burst et la gestion des jobs.
+
+**Chiffres clés :**
+
+| Métrique | Valeur |
+|----------|--------|
+| Passes documentées | 11 (Pass 0 → Pass 3, incluant sous-passes) |
+| Fichiers source analysés | ~30 modules Python |
+| Types de nœuds Neo4j | 10 (vs 8 prévus par ADR — 2 corpus-level ajoutés) |
+| Nodes estimés par document | ~195 (vs ~4700 legacy — réduction 96%) |
+| Risques identifiés | 66 (2 critiques, 35 modérés, 28 faibles, 1 architectural) |
+| ADR de référence | 8 documents normatifs |
+| Axes de vérification appliqués | 28+ axes systématiquement vérifiés |
+
+### 20.2 Maturité du pipeline
+
+Le Pipeline V2 est **fonctionnel et opérationnel** pour l'ingestion de documents (PDF, PPTX, DOCX). Les principales réalisations :
+
+- ✅ **Extraction V2** unifiée (Docling + Vision Gating V4) avec cache versionné
+- ✅ **Lecture stratifiée** top-down (Document Analysis → Concepts → Assertions → Promotion)
+- ✅ **Dual storage** Neo4j + Qdrant opérationnel
+- ✅ **Frugalité** : ~195 nodes/doc vs ~4700 legacy
+- ✅ **Promotion Policy** avec AssertionLog traçable
+- ✅ **Mode Burst** EC2 Spot avec résilience aux interruptions
+- ✅ **Pass 2 en mode background** avec phases activables individuellement
+
+### 20.3 Points d'attention prioritaires
+
+1. **Détection de contradictions** (R3-7) — Composant clé du MVP V1 Usage B non implémenté
+2. **Coréférence V2** (R05-1) — Pronoms non résolus dans le pipeline V2
+3. **Purge Pass 3** (R3-3) — Risque de données obsolètes en production
+4. **Clustering sémantique** (R3-1) — Embeddings non utilisés dans la résolution d'entités
+5. **ClaimKey Niveau B** (R14-1) — LLM assisté pour couverture ClaimKey étendue
+
+### 20.4 Prochaines étapes
+
+- **MVP V1 Usage B** : Implémenter ContradictionDetector, valider le flux Challenge de Texte
+- **Calibration** : Valider les seuils de gating (Phase 7) sur corpus réel client
+- **Convergence** : Retirer le code legacy (schéma Neo4j V1, PromotionPolicy V1)
+- **Performance** : Batch UNWIND pour persistance Neo4j, cache résumés Pass 0.9
+- **Qualité** : Validation LLM pour clustering ambigus (Pass 3), coréférence V2
