@@ -10,6 +10,9 @@
 
 | ADR | Date | Statut | Tags | Titre |
 | --- | --- | --- | --- | --- |
+| [ADR_NORTH_STAR_VERITE_DOCUMENTAIRE.md](./ADR_NORTH_STAR_VERITE_DOCUMENTAIRE.md) | 2026-01-25 | ACCEPTED | vision | North Star - Vérité Documentaire Contextualisée |
+| [ADR_STRATIFIED_READING_MODEL.md](./ADR_STRATIFIED_READING_MODEL.md) | 2025-01-23 | ACCEPTED | architecture, extraction | Modèle de Lecture Stratifiée v2 |
+| [ADR_SCOPE_VS_ASSERTION_SEPARATION.md](./ADR_SCOPE_VS_ASSERTION_SEPARATION.md) | 2026-01-21 | ACCEPTED | architecture, graph | Scope vs Assertion - Separation of Concerns |
 | [ADR-20260106-graph-first-architecture.md](./ADR-20260106-graph-first-architecture.md) | 2026-01-06 | DRAFT | graph, rag | Architecture Graph-First |
 | [ADR-20260104-assertion-aware-kg.md](./ADR-20260104-assertion-aware-kg.md) | 2026-01-04 | IMPLEMENTED | graph | Assertion-aware Knowledge Graph |
 | [ADR-20260101-document-structural-awareness.md](./ADR-20260101-document-structural-awareness.md) | 2026-01-01 | IMPLEMENTED | extraction | Document Structural Awareness |
