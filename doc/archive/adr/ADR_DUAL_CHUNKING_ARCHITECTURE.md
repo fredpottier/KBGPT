@@ -1,7 +1,9 @@
+> ⚠️ ARCHIVED - Superseded par ADR_COVERAGE_PROPERTY_NOT_NODE + ADR_STRUCTURAL_GRAPH_FROM_DOCLING
+
 # ADR: Dual Chunking Architecture (Coverage vs Retrieval)
 
 **Date**: 2026-01-09
-**Statut**: Accepted
+**Statut**: ARCHIVED
 **Auteurs**: Claude + ChatGPT + Fred
 **Contexte**: Résolution du problème ANCHORED_IN manquants
 **Revue**: Évaluation ChatGPT 2026-01-09 - Approuvé avec micro-ajustements

@@ -437,7 +437,7 @@ Cette séparation est notre **différenciation vs Copilot/Gemini** qui mélangen
 
 ## Références
 
-- [ADR_DISCURSIVE_RELATIONS.md](./ADR_DISCURSIVE_RELATIONS.md) - Relations discursivement déterminées
-- [ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md](./ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md) - SCOPE mining et bridge detection
-- [ADR_DISCURSIVE_RELATIONS_BACKLOG.md](./ADR_DISCURSIVE_RELATIONS_BACKLOG.md) - Backlog implémentation
+- [ADR_DISCURSIVE_RELATIONS.md](../ongoing/ADR_DISCURSIVE_RELATIONS.md) - Relations discursivement déterminées
+- [ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md](../ongoing/ADR_SCOPE_DISCURSIVE_CANDIDATE_MINING.md) - SCOPE mining et bridge detection
+- [ADR_DISCURSIVE_RELATIONS_BACKLOG.md](../archive/ADR_DISCURSIVE_RELATIONS_BACKLOG.md) - Backlog implémentation (archivé)
 - Discussion avec ChatGPT - Analyse du paradoxe densité/exactitude

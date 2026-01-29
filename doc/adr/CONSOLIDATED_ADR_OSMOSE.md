@@ -1,7 +1,7 @@
 # OSMOSE ADR Consolidated - Decisions Architecturales
 
-**Date**: 2026-01-17
-**Version**: 1.0
+**Date**: 2026-01-29
+**Version**: 2.0
 **Objectif**: Document consolidé des ADRs OSMOSE pour partage ChatGPT
 
 Ce document résume toutes les décisions architecturales (ADRs) du projet OSMOSE,
@@ -14,7 +14,7 @@ organisées par thème. Chaque section contient les points essentiels à retenir
 1. [Architecture Structurelle](#1-architecture-structurelle)
    - 1.1 Option C - Structural Graph from DoclingDocument
    - 1.2 Coverage is a Property, Not a Node Type
-   - 1.3 Dual Chunking Architecture
+   - 1.3 ~~Dual Chunking Architecture~~ *(ARCHIVÉ — superseded par 1.1 + 1.2)*
 
 2. [Promotion et Normalisation](#2-promotion-et-normalisation)
    - 2.1 Unified Corpus Promotion (Pass 2.0)
@@ -28,6 +28,18 @@ organisées par thème. Chaque section contient les points essentiels à retenir
    - 4.1 Multi-Span Evidence Bundles
 
 5. [Schema Neo4j Consolidé](#5-schema-neo4j-consolide)
+
+6. [Modèle de Lecture Stratifiée (v2)](#6-modèle-de-lecture-stratifiée-v2)
+   - 6.1 Principe : Lire comme un humain
+   - 6.2 Stratification de l'Information
+
+7. [North Star - Vérité Documentaire Contextualisée](#7-north-star---vérité-documentaire-contextualisée)
+   - 7.1 Positionnement épistémique
+   - 7.2 ClaimKey et Compare/Challenge
+
+8. [Séparation Scope vs Assertion](#8-séparation-scope-vs-assertion)
+   - 8.1 Scope Layer vs Assertion Layer
+   - 8.2 Invariants de séparation
 
 ---
 
@@ -149,23 +161,14 @@ ProtoConcept ──ANCHORED_IN──> DocItem
 
 ---
 
-### 1.3 Dual Chunking Architecture
+### 1.3 ~~Dual Chunking Architecture~~ *(ARCHIVÉ)*
 
-**Status**: Accepted | **Date**: 2026-01-10
-**Note**: Partiellement superseded par 1.2 (Coverage devient DocItem)
+> ⚠️ **ARCHIVÉ** — Superseded par [ADR_COVERAGE_PROPERTY_NOT_NODE](ADR_COVERAGE_PROPERTY_NOT_NODE.md) (§1.2) + [ADR_STRUCTURAL_GRAPH_FROM_DOCLING](ADR_STRUCTURAL_GRAPH_FROM_DOCLING.md) (§1.1).
+> Les types CoverageChunk/DocumentChunk ont été remplacés par DocItem + TypeAwareChunk (Option C).
+> Le **principe** dual (coverage vs retrieval) persiste dans l'architecture actuelle, seuls les node types ont changé.
+> ADR source archivé dans `doc/archive/adr/ADR_DUAL_CHUNKING_ARCHITECTURE.md`.
 
-#### Concept Original
-
-Séparer deux besoins distincts:
-1. **Coverage** (preuve): 100% du texte, positions exactes
-2. **Retrieval** (recherche): Optimisé sémantiquement, vectorisé
-
-#### Évolution
-
-- **Initialement**: CoverageChunk + RetrievalChunk séparés
-- **Actuellement**: DocItem (coverage) + TypeAwareChunk (retrieval)
-
-Le principe dual persiste, seuls les types de nœuds changent.
+**Status**: ~~Accepted~~ → **Superseded** | **Date**: 2026-01-10
 
 ---
 
@@ -608,6 +611,157 @@ REQUIRE (c.tenant_id, c.lex_key, c.type_bucket) IS UNIQUE;
 
 ---
 
+## 6. Modèle de Lecture Stratifiée (v2)
+
+### 6.1 Principe : Lire comme un humain
+
+**Status**: Review Final | **Date**: 2025-01-23
+**Source**: [ADR_STRATIFIED_READING_MODEL.md](ADR_STRATIFIED_READING_MODEL.md)
+
+#### Problème
+
+OSMOSIS v1 extrait des concepts **chunk par chunk** (bottom-up), puis tente de valider des relations.
+Résultat : 90k+ nodes pour 19 documents, très peu de relations validées, graphe "pur" mais **fonctionnellement inutile**.
+
+> **Diagnostic** : OSMOSIS scanne, il ne lit pas. On utilise les LLM pour valider des liens entre artefacts fragmentés, au lieu de les utiliser pour comprendre et structurer.
+
+#### Solution : Inversion du flux (top-down)
+
+| OSMOSIS v1 (bottom-up) | OSMOSIS v2 (top-down) |
+|------------------------|----------------------|
+| Chunk → Concepts → Relations (échoue) | Document → Structure → Concepts → Information |
+| Extraction locale puis consolidation | Compréhension globale puis extraction ciblée |
+| Beaucoup de concepts, peu de liens | Peu de concepts, beaucoup d'information rattachée |
+| LLM = validateur oui/non | LLM = lecteur qui comprend |
+
+#### Flux en 4 étapes
+
+1. **Comprendre le document** : Identifier Subject, Themes, Structure (arbre hiérarchique récursif)
+2. **Identifier les concepts structurants** (20-50 par document) : Frugal, uniquement ceux qui portent plusieurs informations
+3. **Extraire l'information rattachée** : Exhaustif, typé (DEFINITION, CAPABILITY, CONSTRAINT, etc.)
+4. **Relations médiées** : Jamais par co-occurrence, toujours par Information qui lie deux concepts
+
+#### Structures de dépendance des assertions (agnostique domaine)
+
+| Structure | Définition | Rôle ConceptSitué |
+|-----------|------------|-------------------|
+| **CENTRAL** | Assertions dépendantes d'un artefact unique | `role = CENTRAL` |
+| **TRANSVERSAL** | Assertions indépendantes | Concepts autonomes |
+| **CONTEXTUAL** | Assertions conditionnelles | `role = CONTEXTUAL` |
+
+### 6.2 Stratification de l'Information
+
+| Niveau | Nom | Description | Volumétrie |
+|--------|-----|-------------|------------|
+| **N0** | Information | Unité atomique de sens, typée et ancrée | 200-500 / doc |
+| **N1** | ConceptSitué | Objet mental stable, doc-level, frugal | 20-50 / doc |
+| **N2** | Projection contextuelle | Fermeture informationnelle query-time | Calculé |
+| **N3** | ConceptCanonique | Stabilisation cross-document, tardive | 50-150 / 20 docs |
+
+> **Règle clé** : L'information est cheap, les concepts sont chers. Privilégier l'information.
+
+---
+
+## 7. North Star - Vérité Documentaire Contextualisée
+
+### 7.1 Positionnement épistémique
+
+**Status**: ✅ VALIDÉ COMME NORTH STAR | **Date**: 2026-01-25
+**Source**: [ADR_NORTH_STAR_VERITE_DOCUMENTAIRE.md](ADR_NORTH_STAR_VERITE_DOCUMENTAIRE.md)
+
+#### Formulation North Star
+
+> **OSMOSIS est le Knowledge Graph documentaire de l'entreprise et l'arbitre de sa vérité documentaire :
+> il capture, structure et expose la connaissance telle qu'elle est exprimée dans le corpus documentaire,
+> sans jamais extrapoler au-delà de ce corpus.**
+
+Version opérationnelle :
+> **Dans le périmètre du corpus documentaire, OSMOSIS est la source de vérité. En dehors de ce périmètre, il n'a pas d'opinion.**
+
+#### Ce qu'OSMOSIS arbitre
+
+| Domaine | Exemple |
+|---------|---------|
+| Ce qui est **affirmé** | "TLS 1.2 est obligatoire" (doc A) → vrai dans le corpus |
+| Ce qui est **contredit** | Doc A dit X, Doc B dit Y → la contradiction est vraie |
+| Ce qui est **absent** | Aucun doc ne parle de Z → l'absence est vraie |
+
+#### Principes fondamentaux
+
+- **Information-First** : L'Information est l'entité primaire, le Concept est optionnel
+- **Addressability-First** : Toute Information promue doit avoir au moins un pivot (Theme, ClaimKey, Concept, Facet)
+- **LLM = Extracteur, pas Arbitre** : Citation exacte obligatoire, pas d'interprétation
+- **Concept-Frugal** : LLM propose, Système dispose (Gates G1-G4)
+
+### 7.2 ClaimKey et Compare/Challenge
+
+Un **ClaimKey** est un identifiant stable représentant une question factuelle, indépendant du vocabulaire.
+
+```yaml
+ClaimKey:
+  canonical_question: "Quelle est la version TLS minimum requise ?"
+  key: "tls_min_version"
+  status: emergent | comparable | deprecated | orphan
+```
+
+#### Contradictions exposées (jamais résolues)
+
+| Nature | Description |
+|--------|-------------|
+| `value_conflict` | Valeurs différentes pour même question |
+| `scope_conflict` | Applicabilité différente |
+| `temporal_conflict` | Versions/dates différentes |
+| `missing_claim` | Document ne se prononce pas |
+
+---
+
+## 8. Séparation Scope vs Assertion
+
+### 8.1 Scope Layer vs Assertion Layer
+
+**Status**: ✅ APPROVED — BLOCKING | **Date**: 2026-01-21
+**Source**: [ADR_SCOPE_VS_ASSERTION_SEPARATION.md](ADR_SCOPE_VS_ASSERTION_SEPARATION.md)
+
+#### Décision
+
+Séparation stricte entre deux couches :
+
+| Couche | Ce qu'elle exprime | Densité | Traversable |
+|--------|-------------------|---------|-------------|
+| **Scope Layer** | Ce que le document **couvre** | Dense | Non (navigation) |
+| **Assertion Layer** | Ce que le document **affirme** | Sparse | Oui (raisonnement) |
+
+> **OSMOSIS ne cherche pas à tout relier. Il cherche à ne relier que ce qui est défendable.**
+
+#### Architecture
+
+```
+┌── SCOPE LAYER (dense) ──────────────────────────┐
+│ Document topic, Section scope, DocItem mentions  │
+│ Usage: Navigation, Filtrage, Recherche Anchored  │
+│ Traversable: NON                                 │
+└──────────────────────────────────────────────────┘
+          │ (ancrage, pas promotion)
+          ▼
+┌── ASSERTION LAYER (sparse) ─────────────────────┐
+│ RawAssertion → CanonicalRelation → Semantic...   │
+│ Seules les relations avec PREUVE LOCALE          │
+│ Usage: Raisonnement, Traversée, Inférence        │
+│ Traversable: OUI                                 │
+└──────────────────────────────────────────────────┘
+```
+
+### 8.2 Invariants de séparation
+
+| Invariant | Règle |
+|-----------|-------|
+| **INV-SEP-01** | Un scope ne peut jamais être promu en assertion sans preuve textuelle locale |
+| **INV-SEP-02** | Toute assertion doit avoir un EvidenceBundle avec au moins un span |
+| **INV-SEP-03** | La Scope Layer sert à filtrer/naviguer, jamais à inférer/traverser |
+| **INV-SEP-04** | La frontière Scope/Assertion doit être explicite dans le code et les données |
+
+---
+
 ## Annexe: Pipeline OSMOSE Complet
 
 ```
@@ -630,6 +784,7 @@ Pass 5: Corpus-level Consolidation (existant)
 | 2026-01-17 | 1.0 | Création initiale - Consolidation 8 ADRs |
 | 2026-01-17 | 1.1 | Multi-Span Evidence: clarifications ontologiques |
 | 2026-01-17 | 1.2 | Multi-Span Evidence: agnosticité domaine + langue (POS-based) |
+| 2026-01-29 | 2.0 | Triage ADR: §1.3 Dual Chunking marqué ARCHIVÉ (superseded). Ajout §6 Lecture Stratifiée, §7 North Star Vérité Documentaire, §8 Scope vs Assertion (3 ADRs promus). |
 
 ---
 

@@ -1,7 +1,9 @@
+> ⚠️ ARCHIVED - Dette technique dont le tracking n'est plus maintenu
+
 # ADR: Normalisation des Noms de Propriétés Python - Neo4j
 
 **Date:** 2026-01-19
-**Statut:** APPROUVÉ - En cours d'implémentation
+**Statut:** ARCHIVED
 **Auteur:** OSMOSE Team
 
 ## Contexte et Problème
