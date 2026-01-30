@@ -128,7 +128,7 @@ class DocumentAnalyzerV2:
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                max_tokens=1500
+                max_tokens=3000  # Augmenté: docs EN riches produisent plus de thèmes
             )
             result = self._parse_response(response, doc_id)
         elif self.allow_fallback:
@@ -169,7 +169,12 @@ class DocumentAnalyzerV2:
         if json_match:
             json_str = json_match.group(1)
         else:
-            json_str = response
+            # Gérer les fences non-fermées (réponse tronquée)
+            fence_start = re.search(r'```json\s*', response)
+            if fence_start:
+                json_str = response[fence_start.end():]
+            else:
+                json_str = response
 
         try:
             data = json.loads(json_str)
