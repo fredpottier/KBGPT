@@ -241,10 +241,10 @@ class Pass1OrchestratorV2:
             toc_for_analysis = global_view.toc_enhanced
             logger.info("[OSMOSE:Pass1:1.1] Utilisation TOC enrichie depuis GlobalView")
 
-        # Si GlobalView disponible, envoyer le meta-document complet au LLM
-        # 25000 chars ≈ 8500 tokens — tient dans la fenêtre 16K du vLLM
-        # (le meta-document est déjà compressé à 15-25K par Pass 0.9)
-        analysis_char_limit = 25000 if global_view and global_view.meta_document else 4000
+        # Si GlobalView disponible, envoyer un preview du meta-document
+        # 12000 chars ≈ 4000 tokens input — laisse ~12K tokens pour output (3000 max)
+        # + system prompt + TOC. L'analyse structurelle s'appuie surtout sur la TOC.
+        analysis_char_limit = 12000 if global_view and global_view.meta_document else 4000
 
         subject, themes, is_hostile = self.document_analyzer.analyze(
             doc_id=doc_id,

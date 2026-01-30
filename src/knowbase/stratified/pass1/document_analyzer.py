@@ -128,7 +128,7 @@ class DocumentAnalyzerV2:
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                max_tokens=3000  # Augmenté: docs EN riches produisent plus de thèmes
+                max_tokens=4000  # Docs EN riches produisent beaucoup de thèmes
             )
             result = self._parse_response(response, doc_id)
         elif self.allow_fallback:
