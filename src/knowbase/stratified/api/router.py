@@ -973,6 +973,55 @@ async def _run_reprocess_batch(
                         f"{vision_stats.get('vision_observations', 0)} observations"
                     )
 
+                # 1d. Layer R: Upsert sub-chunks + embeddings dans Qdrant
+                re_meta = cache_result.retrieval_embeddings
+                npz_path = cache_result.retrieval_embeddings_path
+
+                if re_meta and re_meta.get("status") == "success" and npz_path:
+                    _update_reprocess_state(current_phase="LAYER_R_UPSERT")
+                    try:
+                        from knowbase.retrieval.rechunker import SubChunk
+                        from knowbase.retrieval.qdrant_layer_r import upsert_layer_r
+                        import numpy as np
+
+                        npz_data = np.load(npz_path)
+                        embeddings = npz_data["embeddings"]
+
+                        sub_chunks_data = re_meta.get("sub_chunks", [])
+                        if len(sub_chunks_data) != len(embeddings):
+                            raise ValueError(
+                                f"Mismatch: {len(sub_chunks_data)} sub-chunks vs {len(embeddings)} embeddings"
+                            )
+
+                        pairs = []
+                        for idx, sc_data in enumerate(sub_chunks_data):
+                            sc = SubChunk(
+                                chunk_id=sc_data["chunk_id"],
+                                sub_index=sc_data["sub_index"],
+                                text=sc_data["text"],
+                                parent_chunk_id=sc_data["parent_chunk_id"],
+                                section_id=sc_data.get("section_id"),
+                                doc_id=doc_id,
+                                tenant_id=request.tenant_id,
+                                kind=sc_data["kind"],
+                                page_no=sc_data["page_no"],
+                                page_span_min=sc_data.get("page_span_min"),
+                                page_span_max=sc_data.get("page_span_max"),
+                                item_ids=sc_data.get("item_ids", []),
+                                text_origin=sc_data.get("text_origin"),
+                            )
+                            pairs.append((sc, embeddings[idx]))
+
+                        n = upsert_layer_r(pairs, tenant_id=request.tenant_id)
+                        logger.info(f"[OSMOSE:V2:Reprocess] Layer R: {n} points upserted in knowbase_chunks_v2")
+                    except Exception as e:
+                        logger.warning(f"[OSMOSE:V2:Reprocess] Layer R upsert failed (non-blocking): {e}")
+                else:
+                    reason = re_meta.get("status", "missing") if re_meta else "no_meta"
+                    logger.info(
+                        f"[OSMOSE:V2:Reprocess] Layer R skipped for {doc_id} (status={reason})"
+                    )
+
                 # 2. Pass 1: Lecture Stratifiée
                 if request.run_pass1:
                     _update_reprocess_state(current_phase="PASS_1")
@@ -1050,13 +1099,20 @@ async def _run_reprocess_batch(
                     strict_promotion = get_stratified_v2_config("strict_promotion", request.tenant_id)
                     if strict_promotion is None:
                         strict_promotion = False  # Default North Star compliant
-                    logger.info(f"[OSMOSE:V2:Reprocess] strict_promotion={strict_promotion}")
+
+                    # Lire enable_pointer_mode depuis feature_flags
+                    # ADR: Plan Pointer-Based Extraction (2026-01-27)
+                    enable_pointer_mode = get_stratified_v2_config("enable_pointer_mode", request.tenant_id)
+                    if enable_pointer_mode is None:
+                        enable_pointer_mode = False  # Désactivé par défaut pour rétrocompatibilité
+                    logger.info(f"[OSMOSE:V2:Reprocess] strict_promotion={strict_promotion}, enable_pointer_mode={enable_pointer_mode}")
 
                     orchestrator = Pass1OrchestratorV2(
                         llm_client=llm_client,
                         allow_fallback=(llm_client is None),  # Fallback seulement si pas de LLM
                         strict_promotion=strict_promotion,
-                        tenant_id=request.tenant_id
+                        tenant_id=request.tenant_id,
+                        enable_pointer_mode=enable_pointer_mode,
                     )
 
                     # Exécuter Pass 1 avec le mapping pré-calculé et les sections pour Pass 0.9

@@ -76,6 +76,7 @@ class PipelineConfig:
     enable_structural_graph: bool = True  # Option C: Structural Graph depuis DoclingDocument (requis pour Pass 0.5)
     enable_linguistic_coref: bool = True  # Pass 0.5: Résolution de coréférence linguistique (actif par défaut)
     enable_vision_semantic: bool = True  # Pipeline V2: Vision Semantic Reader pour FIGURE_TEXT chunks
+    enable_retrieval_embeddings: bool = True  # Layer R: calculer embeddings TEI pendant burst
 
     # Seuils de gating
     vision_required_threshold: float = 0.60
@@ -107,7 +108,7 @@ class PipelineConfig:
 
     # Options Structural Graph (Option C)
     structural_graph_max_chunk_size: int = 3000  # Taille max chunks narratifs
-    structural_graph_persist_neo4j: bool = True  # Persister dans Neo4j
+    structural_graph_persist_neo4j: bool = False  # Désactivé: schéma V1 inutile, V2 reconstruit depuis cache
 
     # Options Linguistic Coref (Pass 0.5)
     linguistic_coref_confidence_threshold: float = 0.85  # Seuil de confiance
@@ -139,6 +140,7 @@ class PipelineConfig:
             "linguistic_coref_max_sentence_distance": self.linguistic_coref_max_sentence_distance,
             "linguistic_coref_skip_if_exists": self.linguistic_coref_skip_if_exists,
             "enable_vision_semantic": self.enable_vision_semantic,
+            "enable_retrieval_embeddings": self.enable_retrieval_embeddings,
         }
 
 
@@ -504,6 +506,7 @@ class ExtractionPipelineV2:
 
         # === ETAPE 3: Vision Path ===
         vision_extractions: Dict[int, VisionExtraction] = {}
+        vision_indices: List[int] = []  # Initialize empty (used later even when Vision disabled)
 
         if self.config.enable_vision and self._vision_analyzer:
             vision_start = time.time()
@@ -987,6 +990,90 @@ class ExtractionPipelineV2:
             doc_context=doc_context,  # ADR_ASSERTION_AWARE_KG
             stats=result_stats,
         )
+
+        # === LAYER R: Compute retrieval embeddings (burst mode only) ===
+        layer_r_status = "skipped"
+        layer_r_reason = "tei_inactive"
+
+        if structural_graph_result and self.config.enable_retrieval_embeddings:
+            try:
+                from knowbase.common.clients.embeddings import EmbeddingModelManager
+                manager = EmbeddingModelManager()
+                if manager.is_burst_mode_active():
+                    from knowbase.retrieval.rechunker import rechunk_for_retrieval
+
+                    target_chars = manager.get_max_text_chars()
+
+                    sub_chunks = rechunk_for_retrieval(
+                        chunks=structural_graph_result.chunks,
+                        tenant_id=effective_tenant,
+                        doc_id=document_id,
+                        target_chars=target_chars,
+                    )
+                    texts = [sc.text for sc in sub_chunks]
+                    embeddings = manager.encode(texts)
+
+                    # Sérialiser les sub-chunks (meta seulement) dans le cache JSON
+                    result_stats["retrieval_embeddings"] = {
+                        "status": "success",
+                        "sub_chunk_count": len(sub_chunks),
+                        "embedding_dim": 1024,
+                        "model": "multilingual-e5-large",
+                        "target_chars": target_chars,
+                        "sub_chunks": [
+                            {
+                                "chunk_id": sc.chunk_id,
+                                "sub_index": sc.sub_index,
+                                "text": sc.text,
+                                "parent_chunk_id": sc.parent_chunk_id,
+                                "section_id": sc.section_id,
+                                "kind": sc.kind,
+                                "page_no": sc.page_no,
+                                "page_span_min": sc.page_span_min,
+                                "page_span_max": sc.page_span_max,
+                                "item_ids": sc.item_ids,
+                                "text_origin": sc.text_origin,
+                            }
+                            for sc in sub_chunks
+                        ],
+                    }
+
+                    # Sauvegarder les embeddings en sidecar binaire NPZ
+                    import numpy as np
+                    cache_path = self._cache._get_cache_path_by_hash(
+                        self._cache._compute_file_hash(file_path)
+                    ) if self._cache else None
+                    if cache_path:
+                        npz_path = str(cache_path).replace(
+                            f".{self.config.cache_version}cache.json",
+                            ".retrieval_embeddings.npz",
+                        )
+                        np.savez_compressed(npz_path, embeddings=np.stack(embeddings))
+
+                        layer_r_status = "success"
+                        layer_r_reason = None
+                        logger.info(
+                            f"[ExtractionPipelineV2] Layer R: {len(sub_chunks)} sub-chunks embedded "
+                            f"({len(structural_graph_result.chunks)} parent chunks), "
+                            f"NPZ: {Path(npz_path).name}"
+                        )
+                    else:
+                        layer_r_status = "success"
+                        layer_r_reason = "no_cache_path"
+                        logger.info(
+                            f"[ExtractionPipelineV2] Layer R: {len(sub_chunks)} sub-chunks embedded "
+                            f"(no NPZ sidecar — cache disabled)"
+                        )
+            except Exception as e:
+                layer_r_status = "failed"
+                layer_r_reason = str(e)
+                logger.warning(f"[ExtractionPipelineV2] Layer R embedding failed (non-blocking): {e}")
+
+        # Toujours enregistrer le statut Layer R dans les stats (observabilité)
+        result_stats.setdefault("retrieval_embeddings", {}).update({
+            "status": layer_r_status,
+            "reason": layer_r_reason,
+        })
 
         metrics.total_time_ms = (time.time() - total_start) * 1000
 

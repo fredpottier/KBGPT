@@ -50,6 +50,9 @@ class CacheLoadResult:
     vision_merged_count: int = 0     # DEPRECATED: Nombre de chunks FIGURE_TEXT enrichis
     # ADR-20260126: Vision Observations (séparées du graphe de connaissance)
     vision_observations: List[VisionObservation] = field(default_factory=list)
+    # Layer R: sub-chunks meta (du JSON cache) et chemin vers le sidecar NPZ
+    retrieval_embeddings: Optional[Dict] = None
+    retrieval_embeddings_path: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -527,6 +530,23 @@ def load_pass0_from_cache(
             page_count=sg.get("item_count", 0) // 10,  # Estimation
         )
 
+        # Layer R: Charger meta retrieval_embeddings du JSON + détecter sidecar NPZ
+        retrieval_embeddings = stats.get("retrieval_embeddings")
+        retrieval_embeddings_path = None
+        if retrieval_embeddings and retrieval_embeddings.get("status") == "success":
+            # Détecter le sidecar NPZ à côté du cache JSON
+            for suffix in [".v5cache.json", ".v4cache.json", ".v3cache.json", ".v2cache.json"]:
+                candidate = str(cache_path).replace(suffix, ".retrieval_embeddings.npz")
+                if candidate != str(cache_path) and Path(candidate).exists():
+                    retrieval_embeddings_path = candidate
+                    break
+            if retrieval_embeddings_path:
+                logger.info(
+                    f"[OSMOSE:CacheLoader] Found Layer R sidecar NPZ: "
+                    f"{Path(retrieval_embeddings_path).name} "
+                    f"({retrieval_embeddings.get('sub_chunk_count', '?')} sub-chunks)"
+                )
+
         logger.info(
             f"[OSMOSE:CacheLoader] Loaded {len(chunks)} chunks, "
             f"{len(vision_observations)} VisionObservations from cache "
@@ -542,6 +562,8 @@ def load_pass0_from_cache(
             doc_title=doc_title,
             vision_merged_count=vision_merged_count,
             vision_observations=vision_observations,
+            retrieval_embeddings=retrieval_embeddings,
+            retrieval_embeddings_path=retrieval_embeddings_path,
         )
 
     except Exception as e:
