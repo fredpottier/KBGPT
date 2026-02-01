@@ -51,18 +51,52 @@ Parameters:
 
   VllmGpuMemoryUtilization:
     Type: String
-    Default: "0.70"
-    Description: Fraction mémoire GPU pour vLLM (0.0-1.0) - 0.70 laisse ~15GB pour TEI sur L40S 48GB
+    Default: "0.85"
+    Description: Fraction mémoire GPU pour vLLM (0.0-1.0) - 0.85 maximise le cache KV
 
   VllmMaxModelLen:
     Type: Number
     Default: 8192
-    Description: Longueur max du contexte
+    Description: Longueur max du contexte (8192 pour prompts longs d'extraction)
 
   VllmMaxNumSeqs:
     Type: Number
+    Default: 64
+    Description: Nombre max de séquences concurrentes (augmenté pour batching)
+
+  # === Optimisations vLLM (2026-01-27) ===
+  VllmEnablePrefixCaching:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Activer le prefix caching (réutilise le cache KV du prompt système)
+
+  VllmEnableChunkedPrefill:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Activer le chunked prefill (traitement par morceaux des longs prompts)
+
+  VllmMaxNumBatchedTokens:
+    Type: Number
+    Default: 4096
+    Description: Nombre max de tokens par batch
+
+  # === Configuration TEI (Text Embeddings Inference) ===
+  TeiMaxInputLength:
+    Type: Number
+    Default: 512
+    Description: Tokens max par texte (512 tokens ≈ 1500 chars pour e5-large)
+
+  TeiMaxClientBatchSize:
+    Type: Number
     Default: 32
-    Description: Nombre max de séquences concurrentes
+    Description: Nombre max de textes par requête HTTP
+
+  TeiMaxBatchTokens:
+    Type: Number
+    Default: 16384
+    Description: Tokens max par batch total (32 textes × 512 tokens)
 
   # === Ports ===
   VllmPort:
@@ -274,6 +308,12 @@ Resources:
                 VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
                 VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
                 VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
+                VLLM_ENABLE_PREFIX_CACHING="${VllmEnablePrefixCaching}"
+                VLLM_ENABLE_CHUNKED_PREFILL="${VllmEnableChunkedPrefill}"
+                VLLM_MAX_NUM_BATCHED_TOKENS="${VllmMaxNumBatchedTokens}"
+                TEI_MAX_INPUT_LENGTH="${TeiMaxInputLength}"
+                TEI_MAX_CLIENT_BATCH_SIZE="${TeiMaxClientBatchSize}"
+                TEI_MAX_BATCH_TOKENS="${TeiMaxBatchTokens}"
 
                 # ============================================
                 # Docker Setup (DLAMI a Docker préinstallé)
@@ -341,7 +381,18 @@ Resources:
                 # Supprimer ancien container si existant
                 docker rm -f vllm 2>/dev/null || true
 
-                # Créer nouveau container avec modèle local
+                # Construire les arguments optionnels
+                VLLM_EXTRA_ARGS=""
+                if [ "$VLLM_ENABLE_PREFIX_CACHING" = "true" ]; then
+                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-prefix-caching"
+                    echo "  Prefix caching: ENABLED"
+                fi
+                if [ "$VLLM_ENABLE_CHUNKED_PREFILL" = "true" ]; then
+                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-chunked-prefill --max-num-batched-tokens $VLLM_MAX_NUM_BATCHED_TOKENS"
+                    echo "  Chunked prefill: ENABLED (max_batched_tokens=$VLLM_MAX_NUM_BATCHED_TOKENS)"
+                fi
+
+                # Créer nouveau container avec modèle local + optimisations
                 docker run -d --gpus all --restart unless-stopped \
                     -p $VLLM_PORT:8000 --name vllm \
                     -v $VLLM_MODEL_PATH:/model:ro \
@@ -352,10 +403,28 @@ Resources:
                     --gpu-memory-utilization $VLLM_GPU_MEM \
                     --max-model-len $VLLM_MAX_MODEL_LEN \
                     --max-num-seqs $VLLM_MAX_NUM_SEQS \
-                    --trust-remote-code
+                    --trust-remote-code \
+                    $VLLM_EXTRA_ARGS
 
-                # Démarrer embeddings (container existant dans l'AMI)
-                docker start embeddings 2>/dev/null || echo "embeddings not found"
+                # Recréer container TEI avec paramètres configurables
+                # (remplace le container pré-créé dans l'AMI Golden)
+                TEI_MODEL_PATH="/models/intfloat--multilingual-e5-large"
+                docker rm -f embeddings 2>/dev/null || true
+
+                echo "Creating TEI container..."
+                echo "  max-input-length: $TEI_MAX_INPUT_LENGTH"
+                echo "  max-client-batch-size: $TEI_MAX_CLIENT_BATCH_SIZE"
+                echo "  max-batch-tokens: $TEI_MAX_BATCH_TOKENS"
+
+                docker run -d --restart unless-stopped \
+                    -p $EMB_PORT:80 --name embeddings \
+                    -v $TEI_MODEL_PATH:/model:ro \
+                    ghcr.io/huggingface/text-embeddings-inference:cpu-1.6 \
+                    --model-id /model \
+                    --max-input-length $TEI_MAX_INPUT_LENGTH \
+                    --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
+                    --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
+                    --port 80
 
                 # Attendre que les containers soient prêts
                 echo "Waiting for containers to start..."
@@ -528,6 +597,12 @@ Resources:
                 VLLM_GPU_MEM="${VllmGpuMemoryUtilization}"
                 VLLM_MAX_MODEL_LEN="${VllmMaxModelLen}"
                 VLLM_MAX_NUM_SEQS="${VllmMaxNumSeqs}"
+                VLLM_ENABLE_PREFIX_CACHING="${VllmEnablePrefixCaching}"
+                VLLM_ENABLE_CHUNKED_PREFILL="${VllmEnableChunkedPrefill}"
+                VLLM_MAX_NUM_BATCHED_TOKENS="${VllmMaxNumBatchedTokens}"
+                TEI_MAX_INPUT_LENGTH="${TeiMaxInputLength}"
+                TEI_MAX_CLIENT_BATCH_SIZE="${TeiMaxClientBatchSize}"
+                TEI_MAX_BATCH_TOKENS="${TeiMaxBatchTokens}"
 
                 # Docker setup
                 if ! command -v docker &> /dev/null; then
@@ -554,6 +629,15 @@ Resources:
                 VLLM_MODEL_PATH="/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
                 echo "Creating vLLM container with local model: $VLLM_MODEL_PATH"
 
+                # Construire les arguments optionnels
+                VLLM_EXTRA_ARGS=""
+                if [ "$VLLM_ENABLE_PREFIX_CACHING" = "true" ]; then
+                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-prefix-caching"
+                fi
+                if [ "$VLLM_ENABLE_CHUNKED_PREFILL" = "true" ]; then
+                    VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-chunked-prefill --max-num-batched-tokens $VLLM_MAX_NUM_BATCHED_TOKENS"
+                fi
+
                 docker rm -f vllm 2>/dev/null || true
                 docker run -d --gpus all --restart unless-stopped \
                     -p $VLLM_PORT:8000 --name vllm \
@@ -565,9 +649,22 @@ Resources:
                     --gpu-memory-utilization $VLLM_GPU_MEM \
                     --max-model-len $VLLM_MAX_MODEL_LEN \
                     --max-num-seqs $VLLM_MAX_NUM_SEQS \
-                    --trust-remote-code
+                    --trust-remote-code \
+                    $VLLM_EXTRA_ARGS
 
-                docker start embeddings 2>/dev/null || true
+                # Recréer container TEI avec paramètres configurables
+                TEI_MODEL_PATH="/models/intfloat--multilingual-e5-large"
+                docker rm -f embeddings 2>/dev/null || true
+                docker run -d --restart unless-stopped \
+                    -p $EMB_PORT:80 --name embeddings \
+                    -v $TEI_MODEL_PATH:/model:ro \
+                    ghcr.io/huggingface/text-embeddings-inference:cpu-1.6 \
+                    --model-id /model \
+                    --max-input-length $TEI_MAX_INPUT_LENGTH \
+                    --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
+                    --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
+                    --port 80
+
                 sleep 10
                 docker ps
 

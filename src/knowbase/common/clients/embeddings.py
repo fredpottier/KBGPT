@@ -535,9 +535,14 @@ class EmbeddingModelManager:
         Retourne la taille max de texte acceptée par l'encoder (burst ou local).
 
         Utilisé par le rechunker pour ajuster dynamiquement target_chars.
-        Aligné sur _encode_remote().max_text_chars.
+        Lit la config burst si disponible, sinon 1500 par défaut.
         """
-        return 1500
+        try:
+            from knowbase.ingestion.burst.provider_switch import get_burst_concurrency_config
+            config = get_burst_concurrency_config()
+            return config.get("embedding_max_text_chars", 1500)
+        except ImportError:
+            return 1500
 
     def get_sentence_embedding_dimension(self) -> Optional[int]:
         """Retourne la dimension des embeddings (charge le modèle si nécessaire)."""

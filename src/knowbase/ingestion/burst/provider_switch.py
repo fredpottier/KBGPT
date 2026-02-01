@@ -279,14 +279,15 @@ def deactivate_burst_providers() -> Dict[str, Any]:
 # ATTENTION: Valeurs calibrées pour éviter saturation TEI/vLLM sur g6.2xlarge
 # 2024-12-30: Réduit embedding_batch_chars de 6000→4000 pour éviter 413 Payload Too Large
 # 2024-12-31: batch_size=1 pour éviter 413 intermittent sur AMI Golden TEI
+# 2026-02-01: Limites relevées (TEI recréé avec --max-input-length 512 --max-client-batch-size 32)
 BURST_CONCURRENCY_CONFIG = {
     "max_concurrent_llm": 15,        # Appels LLM simultanés (réduit de 20 pour stabilité)
     "max_parallel_segments": 8,      # Segments traités en parallèle (réduit de 10)
     "max_concurrent_embeddings": 6,  # Workers embeddings parallèles
     "max_concurrent_batches": 10,    # Batches gatekeeper (réduit de 15)
-    "embedding_batch_size": 1,       # 1 texte par requête (évite 413 intermittent)
-    "embedding_batch_chars": 600,    # Max chars par requête
-    "embedding_max_text_chars": 500,  # Max chars par texte (réduit pour AMI Golden TEI)
+    "embedding_batch_size": 8,       # 8 textes par requête (TEI max-client-batch-size=32)
+    "embedding_batch_chars": 12000,  # Max chars par requête (~8 × 1500)
+    "embedding_max_text_chars": 1500,  # Max chars par texte (512 tokens e5-large ≈ 1500 chars)
     "circuit_breaker_threshold": 5,  # Arrêt après N échecs consécutifs
     "rate_limits": {
         "SMALL": 10000,  # Pas de limite réelle
