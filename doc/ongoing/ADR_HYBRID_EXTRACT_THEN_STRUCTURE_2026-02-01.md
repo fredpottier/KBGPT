@@ -51,17 +51,23 @@ Un concept ou thème n'est créé qu'à partir d'un **ensemble d'assertions exis
 
 Le clustering se fait d'abord **localement** (par section ou macro-section), puis des fusions inter-zones sont autorisées uniquement si la similarité est forte. Jamais de clustering global sur tout le document.
 
+> **LIGNE ROUGE** : Aucun clustering global plat sur l'ensemble des assertions du document n'est autorisé. Toute similarité inter-zones doit passer par une étape explicite de fusion contrôlée. Cette règle ne peut pas être contournée "pour simplifier" ou "parce que les zones sont petites".
+
 **V1 violait** : clustering global de milliers de ProtoConcepts → explosion combinatoire, clusters faibles.
 
 ### I3 — Budget adaptatif (anti-V1)
 
 Le nombre de concepts "actifs" dans le KG est borné par un budget adapté à la taille du document. Le reste est persisté en "draft" (consultable mais hors KG principal).
 
+> **Le budget est une contrainte épistémique, pas une optimisation de performance.** Il définit la capacité maximale de compréhension stable du document par le système. Au-delà, la connaissance reste accessible (via retrieval) mais non structurée. "Augmenter le budget" n'est jamais la solution — c'est le chemin de retour vers V1.
+
 | Taille document | Budget concepts actifs | Budget thèmes |
 |---|---|---|
 | < 50 pages | 10-20 | 3-7 |
 | 50-150 pages | 20-40 | 5-12 |
 | > 150 pages | 40-60 | 8-18 |
+
+Un concept hors budget n'est pas "faux" — il est "non admis dans la vérité courante du KG".
 
 **V1 violait** : aucun budget, milliers de concepts créés sans limite.
 
@@ -82,6 +88,8 @@ Après construction, chaque concept est vérifié : ses assertions doivent être
 ### I6 — Abstention normale (anti-V2)
 
 Une assertion qui ne rentre proprement dans aucun concept est classée UNLINKED. Ce n'est pas un échec, c'est un résultat attendu. L'assertion reste disponible pour le retrieval (Layer R / recherche vectorielle) mais n'apparaît pas dans le graphe de concepts.
+
+> **UNLINKED est un état de haute intégrité** : il signifie que le système refuse de mentir. Un taux UNLINKED de 20% est infiniment préférable à un taux de 0% avec 30% d'associations fausses.
 
 ---
 
@@ -129,6 +137,8 @@ global_view:
 - Les labels de zone sont **provisoires** et informatifs — ils guident le clustering mais ne contraignent pas
 - Les keywords servent de signature pour la fusion inter-zones en Pass 1.B
 
+> **LIGNE ROUGE** : Le GlobalView n'a pas le droit de produire des entités destinées à être persistées dans le KG (Themes, Concepts, Subjects). Toute structure persistée doit émerger exclusivement de Pass 1.B et suivants. Le moindre glissement vers "suggested themes" ou "candidate taxonomy" dans Pass 0.9 rouvre la porte à V2.1.
+
 ### 3.3 Pass 1.A — Extraction locale d'assertions
 
 **Principe** : lire chaque zone section par section, extraire les assertions ancrées, sans essayer de les classifier.
@@ -162,7 +172,7 @@ prescriptions, définitions et procédures. Pour chaque assertion :
 - N'essaie PAS de classifier ou catégoriser l'assertion
 ```
 
-### 3.4 Pass 1.B — Clustering zone-first
+### 3.4 Pass 1.B — Regroupement sémantique contraint
 
 **Principe** : regrouper les assertions similaires, d'abord au sein de chaque zone, puis fusionner les clusters inter-zones quand la similarité est forte.
 
@@ -335,7 +345,10 @@ purity_rejections: 3      # Concepts échoués au purity check
 | SINK / UNLINKED | 34% (considéré échec) | **15-25%** (considéré normal) |
 | Purity check pass rate | Non mesuré | **> 90%** |
 | Associations fausses (sondage 20 concepts) | ~30% incohérents | **< 5%** |
+| Precision concept→assertion (sondage humain) | Non mesuré | **> 85%** |
 | Budget respecté | N/A | **100%** |
+
+**Note sur la precision** : sur 20 concepts échantillonnés, pourcentage d'assertions jugées pertinentes par un humain. C'est exactement le test qui a révélé le problème SAC↔EDR en V2.1 — il doit être formalisé comme métrique de validation.
 
 ---
 
@@ -353,7 +366,29 @@ purity_rejections: 3      # Concepts échoués au purity check
 
 ---
 
-## 9. Questions ouvertes
+## 9. Preuve par l'absurde — le cas SAC↔EDR dans V2.2
+
+Vérifions que les 3 assertions mal routées vers "SAP Analytics Cloud Live Connection" en V2.1 ne peuvent **pas** produire la même erreur dans V2.2.
+
+**Les 3 assertions** :
+1. "All hosts are equipped with agents for EDR, antivirus, and anti-malware software."
+2. "SAP Internal Cyber Security Centre, dedicated to identifying & mitigating Cyber Security risks"
+3. "Continuous 24x7 monitoring of security events, managing event triage"
+
+**Trajet V2.2** :
+
+- **Pass 1.A** : ces 3 assertions sont extraites dans la zone "Security Operations" (z2), sans concept assigné. Aucune mention de "Analytics Cloud".
+- **Pass 1.B** : clustering intra-zone z2. Ces 3 assertions sont sémantiquement proches (sécurité endpoint/SOC). Elles forment un cluster avec d'autres assertions de sécurité opérationnelle. Le concept "SAP Analytics Cloud" ne peut pas émerger car aucune assertion de z2 ne parle d'Analytics Cloud.
+- **Pass 1.C** : le cluster est nommé par le LLM sur base de son contenu réel → "Security Operations Center" ou "Endpoint Security". Pas "Analytics Cloud".
+- **Pass 1.D** : purity check → les 3 assertions parlent bien de la même chose → validé.
+
+**Résultat** : le concept "SAP Analytics Cloud Live Connection" n'existe tout simplement pas dans V2.2, car aucun cluster d'assertions ne le supporte. Les 3 assertions sont correctement classées sous un concept de sécurité opérationnelle.
+
+**Pourquoi V2.1 échouait** : en V2.1, le LLM inventait "SAP Analytics Cloud" comme thème en Pass 1.1 (sur le sommaire), créait le concept avec des triggers lexicaux larges ("cloud", "connector"), et le reranker forçait un match. Dans V2.2, cette séquence est **impossible par construction** (I1 : set-before-name).
+
+---
+
+## 10. Questions ouvertes
 
 1. **Algorithme de clustering** : HDBSCAN (auto-détecte le nombre de clusters) vs agglomératif (plus contrôlable) ?
 2. **Seuil de fusion inter-zones** : 0.85 cosinus est-il le bon seuil ?
