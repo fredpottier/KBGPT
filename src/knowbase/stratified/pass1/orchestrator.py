@@ -366,6 +366,17 @@ class Pass1OrchestratorV2:
             f"{len(promotion_result.promotable)} promotables"
         )
 
+        # Pass 1.4: Injecter le contexte de localité (avant link_to_concepts)
+        if chunk_to_docitem_map is None:
+            chunk_to_docitem_map = build_chunk_to_docitem_mapping(chunks, docitems)
+            logger.info(f"[OSMOSE:Pass1:1.4] Mapping chunk→DocItem construit ({len(chunk_to_docitem_map)} chunks)")
+
+        self.assertion_extractor.set_locality_context(
+            chunks=chunks,
+            docitems=docitems,
+            chunk_to_docitem_map=chunk_to_docitem_map,
+        )
+
         # Liaison sémantique aux concepts
         concept_links = self.assertion_extractor.link_to_concepts(
             assertions=promotion_result.promotable,
@@ -535,8 +546,21 @@ class Pass1OrchestratorV2:
                 )
 
                 if not new_concepts:
-                    logger.info(f"[OSMOSE:Pass1:1.2b] Aucun nouveau concept valide, arrêt")
-                    break
+                    # Si SINK > 30% et première tentative, retry une fois (LLM JSON flaky)
+                    if iteration == 0 and saturation.no_concept_match_rate >= 0.30:
+                        logger.warning(
+                            f"[OSMOSE:Pass1:1.2b] Aucun concept valide mais SINK={saturation.no_concept_match_rate:.0%} "
+                            f"(>30%), retry unique"
+                        )
+                        new_concepts, refused = self.concept_refiner.refine_concepts(
+                            unlinked_assertions=unlinked,
+                            existing_concepts=[c.model_dump() for c in concepts],
+                            themes=[t.model_dump() for t in themes],
+                            language=subject.language
+                        )
+                    if not new_concepts:
+                        logger.info(f"[OSMOSE:Pass1:1.2b] Aucun nouveau concept valide, arrêt")
+                        break
 
                 # Ajouter les nouveaux concepts
                 for nc in new_concepts:

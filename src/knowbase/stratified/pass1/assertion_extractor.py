@@ -74,7 +74,7 @@ PROMOTION_POLICY: Dict[AssertionType, str] = {
     AssertionType.CONDITIONAL: PromotionTier.CONDITIONAL, # Conditions = utiles si précises
     AssertionType.PERMISSIVE: PromotionTier.CONDITIONAL,  # Options = utiles si spécifiques
     AssertionType.COMPARATIVE: PromotionTier.RARELY,      # Comparaisons = souvent locales
-    AssertionType.PROCEDURAL: PromotionTier.NEVER,        # Procédures = non conceptuelles
+    AssertionType.PROCEDURAL: PromotionTier.CONDITIONAL,   # Procédures = opérationnelles, valeur métier (ADR 2026-01-30)
 }
 
 
@@ -147,6 +147,17 @@ class MultiConceptLink:
         ]
 
 
+@dataclass
+class SectionNode:
+    """Nœud de la hiérarchie de sections (pour admissibilité upstream)."""
+    section_id: str
+    title: str
+    level: int  # 1=H1, 2=H2, 3=H3...
+    parent_id: Optional[str] = None
+    children_ids: List[str] = field(default_factory=list)
+    order: int = 0  # Ordre d'apparition dans le document
+
+
 # Seuils de contrôle multi-linking (C3: Anti "Spray & Pray")
 MIN_LINK_CONFIDENCE = 0.70
 MAX_LINKS_PER_ASSERTION = 5
@@ -193,6 +204,7 @@ class CalibrationProfile:
     sink_band2_gap_min: float = SINK_BAND2_GAP_MIN
     margin_ambiguous: float = MARGIN_AMBIGUOUS
     sink_signal_fort_threshold: float = SINK_SIGNAL_FORT_THRESHOLD  # semi-structurel, overrideable
+    max_band2_width: float = 0.20  # Cap largeur bande 2 (évite zone grise géante)
     # Metadata
     mode: str = "fallback"        # "auto", "profile_override", "fallback"
     profile_name: str = "default"
@@ -307,6 +319,20 @@ class AssertionExtractorV2:
         self._concept_embeddings: Dict[str, np.ndarray] = {}  # {concept_id: embedding 1024D}
         self._assertion_embedding_cache: Dict[str, np.ndarray] = {}  # {assertion_id: embedding}
 
+        # Pass 1.4: Locality Signal — bonus/malus basé sur la co-location page
+        self._concept_source_pages: Dict[str, set] = {}   # {concept_id: Set[int]} pages natives
+        self._chunk_pages: Dict[str, set] = {}             # {chunk_id: Set[int]} pages du chunk
+        self._total_doc_pages: int = 0                     # Nombre total de pages du document
+        self._locality_chunks: Optional[Dict[str, str]] = None       # chunks texte (injecté par orchestrateur)
+        self._locality_docitems: Optional[Dict[str, 'DocItem']] = None  # docitems (injecté)
+        self._locality_chunk_to_docitem_map: Optional[Dict[str, List[str]]] = None  # mapping
+
+        # POC Concept Admissibility — frontières de candidature par section
+        self._chunk_sections: Dict[str, set] = {}          # {chunk_id: Set[section_id]}
+        self._concept_source_sections: Dict[str, set] = {} # {concept_id: Set[section_id]}
+        self._total_doc_sections: int = 0
+        self._section_hierarchy: Dict[str, SectionNode] = {}  # {section_id: SectionNode}
+
     def _load_prompts(self, prompts_path: Optional[Path]) -> Dict:
         """Charge les prompts depuis le fichier YAML."""
         if prompts_path is None:
@@ -350,6 +376,588 @@ class AssertionExtractorV2:
     def _get_concept_info_count(self, concept_id: str) -> int:
         """Retourne le count GELÉ (pas d'incrément pendant le batch)."""
         return self._concept_info_snapshot.get(concept_id, 0)
+
+    # =========================================================================
+    # PASS 1.4: LOCALITY SIGNAL — bonus/malus co-location page
+    # =========================================================================
+
+    # Seuil de diffusion : concept couvrant > 30% des pages → locality neutre
+    DIFFUSION_THRESHOLD = 0.30
+
+    def set_locality_context(
+        self,
+        chunks: Dict[str, str],
+        docitems: Dict[str, 'DocItem'],
+        chunk_to_docitem_map: Dict[str, List[str]],
+    ) -> None:
+        """
+        Injecte le contexte nécessaire au calcul du signal de localité.
+
+        Appelé par l'orchestrateur AVANT link_to_concepts, pour éviter
+        de changer la signature publique de link_to_concepts.
+        """
+        self._locality_chunks = chunks
+        self._locality_docitems = docitems
+        self._locality_chunk_to_docitem_map = chunk_to_docitem_map
+
+    def _build_chunk_pages(self) -> None:
+        """Pré-calcule chunk_id → Set[int] (pages des DocItems du chunk)."""
+        self._chunk_pages = {}
+        if not self._locality_chunk_to_docitem_map or not self._locality_docitems:
+            return
+
+        all_pages: set = set()
+        for chunk_id, docitem_ids in self._locality_chunk_to_docitem_map.items():
+            pages = set()
+            for did in docitem_ids:
+                di = self._locality_docitems.get(did)
+                if di and di.page is not None:
+                    pages.add(di.page)
+            self._chunk_pages[chunk_id] = pages
+            all_pages.update(pages)
+
+        self._total_doc_pages = len(all_pages) if all_pages else 0
+
+    def _build_concept_source_pages(self, concepts: List[Concept]) -> None:
+        """
+        Pré-calcule concept_id → Set[int] (pages natives) avec cascade 3 niveaux.
+
+        Niveau 1: Nom du concept (mention explicite, signal le plus fort)
+        Niveau 2: Triggers discriminants (toxicité < 3%)
+        Niveau 3: Tous les triggers non-toxiques (fallback)
+        """
+        from knowbase.stratified.models import ConceptRole
+
+        self._concept_source_pages = {}
+
+        if not self._locality_chunks or not self._chunk_pages:
+            return
+
+        for concept in concepts:
+            if concept.role == ConceptRole.SINK:
+                continue  # SINK n'a pas de pages sources
+
+            pages: set = set()
+
+            # Niveau 1 — Nom du concept (mention explicite)
+            concept_name_lower = concept.name.lower()
+            if concept_name_lower:
+                name_pattern = re.compile(
+                    r'\b' + re.escape(concept_name_lower) + r'\b',
+                    re.IGNORECASE,
+                )
+                for chunk_id, text in self._locality_chunks.items():
+                    if name_pattern.search(text):
+                        chunk_pg = self._chunk_pages.get(chunk_id, set())
+                        pages.update(chunk_pg)
+
+            # Niveau 2 — Triggers discriminants (toxicité < 3%)
+            if len(pages) < 2:
+                triggers = getattr(concept, 'lexical_triggers', None) or []
+                for t in triggers:
+                    t_lower = t.lower()
+                    if self._trigger_toxicity.get(t_lower, 0.0) < 0.03:
+                        t_pattern = re.compile(
+                            r'\b' + re.escape(t_lower) + r'\b',
+                            re.IGNORECASE,
+                        )
+                        for chunk_id, text in self._locality_chunks.items():
+                            if t_pattern.search(text):
+                                pages.update(self._chunk_pages.get(chunk_id, set()))
+
+            # Niveau 3 — Tous les triggers non-toxiques (fallback)
+            if len(pages) < 2:
+                triggers = getattr(concept, 'lexical_triggers', None) or []
+                for t in triggers:
+                    t_lower = t.lower()
+                    if self._trigger_toxicity.get(t_lower, 0.0) < 0.08:
+                        t_pattern = re.compile(
+                            r'\b' + re.escape(t_lower) + r'\b',
+                            re.IGNORECASE,
+                        )
+                        for chunk_id, text in self._locality_chunks.items():
+                            if t_pattern.search(text):
+                                pages.update(self._chunk_pages.get(chunk_id, set()))
+
+            if pages:
+                self._concept_source_pages[concept.concept_id] = pages
+
+    def _compute_locality_bonus(self, assertion_chunk_id: str, concept_id: str) -> float:
+        """
+        Bonus/malus de localité basé sur la co-location page.
+        Atténué si concept trop diffus (spread élevé).
+
+        Returns: float dans [0.90, 1.10]
+        """
+        concept_pages = self._concept_source_pages.get(concept_id)
+        if not concept_pages:
+            return 1.0  # Pas de données → neutre
+
+        assertion_pages = self._chunk_pages.get(assertion_chunk_id)
+        if not assertion_pages:
+            return 1.0  # Pas de page → neutre
+
+        # Atténuation diffusion : concept trop spread → neutre
+        if self._total_doc_pages > 0:
+            spread_ratio = len(concept_pages) / self._total_doc_pages
+            if spread_ratio > self.DIFFUSION_THRESHOLD:
+                return 1.0  # Concept diffus → pas de signal fiable
+
+        # Distance minimale assertion↔concept (en pages)
+        min_distance = min(
+            abs(ap - cp)
+            for ap in assertion_pages
+            for cp in concept_pages
+        )
+
+        if min_distance == 0:
+            return 1.10   # Même page
+        elif min_distance <= 2:
+            return 1.05   # Pages adjacentes
+        elif min_distance <= 10:
+            return 1.00   # Distance raisonnable, neutre
+        elif min_distance <= 30:
+            return 0.95   # Éloigné
+        else:
+            return 0.90   # Très éloigné
+
+    # =========================================================================
+    # POC CONCEPT ADMISSIBILITY — frontières de candidature par section
+    # =========================================================================
+
+    def _build_chunk_sections(self) -> None:
+        """Pré-calcule chunk_id → Set[section_id] (sections des DocItems du chunk)."""
+        self._chunk_sections = {}
+        if not self._locality_chunk_to_docitem_map or not self._locality_docitems:
+            return
+
+        all_sections: set = set()
+        for chunk_id, docitem_ids in self._locality_chunk_to_docitem_map.items():
+            sections = set()
+            for did in docitem_ids:
+                di = self._locality_docitems.get(did)
+                if di and hasattr(di, 'section_id') and di.section_id:
+                    sections.add(di.section_id)
+            self._chunk_sections[chunk_id] = sections
+            all_sections.update(sections)
+
+        self._total_doc_sections = len(all_sections)
+
+    def _build_concept_source_sections(self, concepts: List[Concept]) -> None:
+        """
+        Pré-calcule concept_id → Set[section_id] via la même cascade que
+        _build_concept_source_pages, mais en collectant les section_ids
+        au lieu des page numbers.
+        """
+        from knowbase.stratified.models import ConceptRole
+
+        self._concept_source_sections = {}
+
+        if not self._locality_chunks or not self._chunk_sections:
+            return
+
+        for concept in concepts:
+            if concept.role == ConceptRole.SINK:
+                continue
+
+            sections: set = set()
+
+            # Niveau 1 — Nom du concept (mention explicite)
+            concept_name_lower = concept.name.lower()
+            if concept_name_lower:
+                name_pattern = re.compile(
+                    r'\b' + re.escape(concept_name_lower) + r'\b',
+                    re.IGNORECASE,
+                )
+                for chunk_id, text in self._locality_chunks.items():
+                    if name_pattern.search(text):
+                        sections.update(self._chunk_sections.get(chunk_id, set()))
+
+            # Niveau 2 — Triggers discriminants (toxicité < 3%)
+            if len(sections) < 2:
+                triggers = getattr(concept, 'lexical_triggers', None) or []
+                for t in triggers:
+                    t_lower = t.lower()
+                    if self._trigger_toxicity.get(t_lower, 0.0) < 0.03:
+                        t_pattern = re.compile(
+                            r'\b' + re.escape(t_lower) + r'\b',
+                            re.IGNORECASE,
+                        )
+                        for chunk_id, text in self._locality_chunks.items():
+                            if t_pattern.search(text):
+                                sections.update(self._chunk_sections.get(chunk_id, set()))
+
+            # Niveau 3 — Tous les triggers non-toxiques (fallback)
+            if len(sections) < 2:
+                triggers = getattr(concept, 'lexical_triggers', None) or []
+                for t in triggers:
+                    t_lower = t.lower()
+                    if self._trigger_toxicity.get(t_lower, 0.0) < 0.08:
+                        t_pattern = re.compile(
+                            r'\b' + re.escape(t_lower) + r'\b',
+                            re.IGNORECASE,
+                        )
+                        for chunk_id, text in self._locality_chunks.items():
+                            if t_pattern.search(text):
+                                sections.update(self._chunk_sections.get(chunk_id, set()))
+
+            if sections:
+                self._concept_source_sections[concept.concept_id] = sections
+
+    def _build_section_hierarchy(self) -> None:
+        """
+        Construit la hiérarchie de sections à partir des DocItems HEADING.
+
+        Parcourt les headings triés par reading_order_index, infère le level
+        via infer_heading_level_from_text(), et construit un arbre parent-enfant.
+        """
+        from knowbase.structural.docitem_builder import infer_heading_level_from_text
+        from knowbase.stratified.models import DocItemType
+
+        self._section_hierarchy = {}
+
+        if not self._locality_docitems:
+            return
+
+        # Collecter les headings triés par ordre de lecture
+        # Note: stratified DocItem utilise .type et .order (pas .item_type/.reading_order_index)
+        headings = []
+        for di in self._locality_docitems.values():
+            di_type = getattr(di, 'type', None) or getattr(di, 'item_type', None)
+            if di_type == DocItemType.HEADING and hasattr(di, 'section_id') and di.section_id:
+                headings.append(di)
+
+        headings.sort(key=lambda di: getattr(di, 'order', 0))
+
+        if not headings:
+            return
+
+        # Inférer les niveaux et construire les nœuds
+        inferred_count = 0
+        fallback_count = 0
+        stack: List[SectionNode] = []  # Stack pour hiérarchie
+
+        for order_idx, di in enumerate(headings):
+            # Inférer le level depuis le texte (stratified DocItem n'a pas heading_level)
+            inferred = infer_heading_level_from_text(di.text)
+            if inferred is not None:
+                level = inferred
+                inferred_count += 1
+            else:
+                level = 1  # Fallback: section plate
+                fallback_count += 1
+
+            node = SectionNode(
+                section_id=di.section_id,
+                title=di.text[:80],
+                level=level,
+                order=order_idx,
+            )
+
+            # Trouver le parent : remonter le stack jusqu'à trouver un level < N
+            while stack and stack[-1].level >= level:
+                stack.pop()
+
+            if stack:
+                node.parent_id = stack[-1].section_id
+                stack[-1].children_ids.append(node.section_id)
+
+            stack.append(node)
+            self._section_hierarchy[di.section_id] = node
+
+        # Stats par niveau
+        level_counts = Counter(n.level for n in self._section_hierarchy.values())
+        h1_count = level_counts.get(1, 0)
+        h2_count = level_counts.get(2, 0)
+        h3plus_count = sum(v for k, v in level_counts.items() if k >= 3)
+
+        logger.info(
+            f"[OSMOSE:Admissibility:Hierarchy] {len(self._section_hierarchy)} sections, "
+            f"H1={h1_count}, H2={h2_count}, H3+={h3plus_count}, "
+            f"level_inferred={inferred_count}, level_fallback={fallback_count}"
+        )
+
+    # =========================================================================
+    # POC UPSTREAM ADMISSIBILITY — Batching section-aware + filtre
+    # =========================================================================
+
+    MIN_BATCH_SIZE = 5
+    MIN_CANDIDATES = 8
+
+    def _build_section_batches(
+        self, assertions: List[RawAssertion]
+    ) -> List[Tuple[List[RawAssertion], set]]:
+        """
+        Regroupe les assertions par section, puis fusionne les micro-batches.
+
+        Returns:
+            Liste de (batch_assertions, batch_section_ids)
+        """
+        # Grouper par section_id principal
+        section_groups: Dict[str, List[RawAssertion]] = {}
+        no_section: List[RawAssertion] = []
+
+        for a in assertions:
+            chunk_secs = self._chunk_sections.get(a.chunk_id, set())
+            if chunk_secs:
+                # Section principale = première par ordre alphabétique (déterministe)
+                primary = min(chunk_secs)
+                if primary not in section_groups:
+                    section_groups[primary] = []
+                section_groups[primary].append(a)
+            else:
+                no_section.append(a)
+
+        # Trier les groupes par order du heading dans le document
+        def section_order(sec_id: str) -> int:
+            node = self._section_hierarchy.get(sec_id)
+            return node.order if node else 999999
+
+        sorted_section_ids = sorted(section_groups.keys(), key=section_order)
+
+        # Construire les batches initiaux: (assertions, section_ids)
+        raw_batches: List[Tuple[List[RawAssertion], set]] = []
+        for sec_id in sorted_section_ids:
+            raw_batches.append((section_groups[sec_id], {sec_id}))
+
+        # Ajouter les assertions sans section au dernier batch ou comme batch séparé
+        if no_section:
+            if raw_batches:
+                last_asserts, last_secs = raw_batches[-1]
+                raw_batches[-1] = (last_asserts + no_section, last_secs)
+            else:
+                raw_batches.append((no_section, set()))
+
+        if not raw_batches:
+            return []
+
+        # Fusion des micro-batches (< MIN_BATCH_SIZE)
+        merged: List[Tuple[List[RawAssertion], set]] = []
+        i = 0
+        while i < len(raw_batches):
+            curr_asserts, curr_secs = raw_batches[i]
+
+            if len(curr_asserts) < self.MIN_BATCH_SIZE:
+                # Trouver le sibling le plus proche dans le même parent H1
+                curr_parent_h1 = self._find_h1_parent(next(iter(curr_secs))) if curr_secs else None
+
+                best_merge_idx = None
+                best_distance = float('inf')
+
+                # Chercher en avant et en arrière
+                for j in range(len(raw_batches)):
+                    if j == i:
+                        continue
+                    other_secs = raw_batches[j][1]
+                    if not other_secs:
+                        continue
+                    other_parent_h1 = self._find_h1_parent(next(iter(other_secs)))
+
+                    # Même parent H1 ou pas de hiérarchie
+                    if curr_parent_h1 is None or other_parent_h1 is None or curr_parent_h1 == other_parent_h1:
+                        distance = abs(i - j)
+                        if distance < best_distance:
+                            best_distance = distance
+                            best_merge_idx = j
+
+                if best_merge_idx is not None and best_merge_idx > i:
+                    # Fusionner avec le batch trouvé (en avant)
+                    other_asserts, other_secs = raw_batches[best_merge_idx]
+                    merged_asserts = curr_asserts + other_asserts
+                    merged_secs = curr_secs | other_secs
+                    raw_batches[best_merge_idx] = (merged_asserts, merged_secs)
+                    i += 1
+                    continue
+                elif best_merge_idx is not None and best_merge_idx < i:
+                    # Le batch cible est déjà dans merged — fusionner avec le dernier merged
+                    if merged:
+                        prev_asserts, prev_secs = merged[-1]
+                        merged[-1] = (prev_asserts + curr_asserts, prev_secs | curr_secs)
+                        i += 1
+                        continue
+
+            merged.append((curr_asserts, curr_secs))
+            i += 1
+
+        # Découpage des gros batches
+        final_batches: List[Tuple[List[RawAssertion], set]] = []
+        for batch_asserts, batch_secs in merged:
+            if len(batch_asserts) > self.LINKING_BATCH_SIZE:
+                for k in range(0, len(batch_asserts), self.LINKING_BATCH_SIZE):
+                    sub = batch_asserts[k:k + self.LINKING_BATCH_SIZE]
+                    final_batches.append((sub, batch_secs))
+            else:
+                final_batches.append((batch_asserts, batch_secs))
+
+        return final_batches
+
+    def _find_h1_parent(self, section_id: str) -> Optional[str]:
+        """Remonte la hiérarchie jusqu'au parent H1 (level=1)."""
+        node = self._section_hierarchy.get(section_id)
+        if not node:
+            return None
+        # Si déjà level 1, c'est le parent H1
+        if node.level == 1:
+            return node.section_id
+        # Remonter
+        visited = set()
+        current = node
+        while current.parent_id and current.parent_id not in visited:
+            visited.add(current.section_id)
+            parent = self._section_hierarchy.get(current.parent_id)
+            if not parent:
+                break
+            if parent.level == 1:
+                return parent.section_id
+            current = parent
+        # Pas de parent H1 trouvé — retourner le plus haut ancêtre
+        return current.section_id
+
+    def _expand_sections(self, batch_section_ids: set) -> set:
+        """
+        Expansion structurelle : remonte aux parents H1 et inclut
+        tous les enfants de ces parents H1.
+        """
+        expanded = set(batch_section_ids)
+
+        # Trouver les parents H1
+        h1_parents = set()
+        for sec_id in batch_section_ids:
+            h1 = self._find_h1_parent(sec_id)
+            if h1:
+                h1_parents.add(h1)
+
+        # Inclure tous les descendants des parents H1
+        for node in self._section_hierarchy.values():
+            h1_of_node = self._find_h1_parent(node.section_id)
+            if h1_of_node in h1_parents:
+                expanded.add(node.section_id)
+
+        return expanded
+
+    def _filter_admissible_concepts(
+        self, batch_section_ids: set, concepts: List[Concept]
+    ) -> Tuple[List[Concept], str]:
+        """
+        Filtre les concepts admissibles pour un batch de sections.
+
+        Règle en 3 étages:
+        A. Base rule (structurelle) + SINK/CENTRAL toujours admissibles
+        B. Expansion structurelle si < MIN_CANDIDATES
+        C. Fallback concepts sans empreinte si toujours < MIN_CANDIDATES
+        Dernier recours: tous les concepts
+
+        Returns:
+            (admissible_concepts, mode) où mode in ('base', 'expanded', 'fallback_global')
+        """
+        from knowbase.stratified.models import ConceptRole
+
+        if not batch_section_ids or not self._section_hierarchy:
+            return concepts, "fallback_global"
+
+        # Classer les concepts
+        always_admissible = []  # SINK + CENTRAL
+        base_admissible = []    # Recouvrement structurel
+        no_footprint = []       # Concepts sans empreinte section
+
+        for c in concepts:
+            if c.role == ConceptRole.SINK or c.role == ConceptRole.CENTRAL:
+                always_admissible.append(c)
+                continue
+
+            concept_secs = self._concept_source_sections.get(c.concept_id)
+            if not concept_secs:
+                no_footprint.append(c)
+                continue
+
+            if concept_secs & batch_section_ids:
+                base_admissible.append(c)
+
+        # A. Base rule + exceptions globales
+        admissible = always_admissible + base_admissible
+        base_count = len(admissible)
+
+        if len(admissible) >= self.MIN_CANDIDATES:
+            # Tri par recouvrement structurel
+            admissible = self._sort_by_overlap(admissible, batch_section_ids)
+            if len(admissible) > 30:
+                logger.warning(
+                    f"[OSMOSE:Admissibility:Truncation] {len(admissible)} → 30 concepts "
+                    f"(triés par recouvrement structurel)"
+                )
+            logger.info(
+                f"[OSMOSE:Admissibility:Filter] "
+                f"base={base_count}, after_expansion={base_count}, "
+                f"after_exceptions={len(admissible)}, mode=base"
+            )
+            return admissible, "base"
+
+        # B. Expansion structurelle
+        expanded_secs = self._expand_sections(batch_section_ids)
+        expanded_admissible = []
+        for c in concepts:
+            if c.role == ConceptRole.SINK or c.role == ConceptRole.CENTRAL:
+                continue  # Déjà dans always_admissible
+            concept_secs = self._concept_source_sections.get(c.concept_id)
+            if not concept_secs:
+                continue  # Traité en fallback
+            if concept_secs & expanded_secs:
+                expanded_admissible.append(c)
+
+        admissible = always_admissible + expanded_admissible
+        expanded_count = len(admissible)
+
+        if len(admissible) >= self.MIN_CANDIDATES:
+            admissible = self._sort_by_overlap(admissible, batch_section_ids)
+            if len(admissible) > 30:
+                logger.warning(
+                    f"[OSMOSE:Admissibility:Truncation] {len(admissible)} → 30 concepts "
+                    f"(triés par recouvrement structurel)"
+                )
+            logger.info(
+                f"[OSMOSE:Admissibility:Filter] "
+                f"base={base_count}, after_expansion={expanded_count}, "
+                f"after_exceptions={len(admissible)}, mode=expanded"
+            )
+            return admissible, "expanded"
+
+        # C. Fallback: inclure concepts sans empreinte section
+        admissible = admissible + no_footprint
+
+        if len(admissible) >= self.MIN_CANDIDATES:
+            admissible = self._sort_by_overlap(admissible, batch_section_ids)
+            if len(admissible) > 30:
+                logger.warning(
+                    f"[OSMOSE:Admissibility:Truncation] {len(admissible)} → 30 concepts "
+                    f"(triés par recouvrement structurel)"
+                )
+            logger.info(
+                f"[OSMOSE:Admissibility:Filter] "
+                f"base={base_count}, after_expansion={expanded_count}, "
+                f"after_exceptions={len(admissible)}, mode=expanded"
+            )
+            return admissible, "expanded"
+
+        # Dernier recours: tous les concepts
+        logger.info(
+            f"[OSMOSE:Admissibility:Filter] "
+            f"base={base_count}, after_expansion={expanded_count}, "
+            f"after_exceptions={len(admissible)}, mode=fallback_global"
+        )
+        return concepts, "fallback_global"
+
+    def _sort_by_overlap(self, concepts: List[Concept], batch_section_ids: set) -> List[Concept]:
+        """Trie les concepts par degré de recouvrement structurel (desc), SINK en dernier."""
+        from knowbase.stratified.models import ConceptRole
+
+        def sort_key(c: Concept) -> Tuple[int, int]:
+            # SINK toujours en dernier
+            if c.role == ConceptRole.SINK:
+                return (1, 0)
+            overlap = len(self._concept_source_sections.get(c.concept_id, set()) & batch_section_ids)
+            return (0, -overlap)  # Négatif pour tri décroissant
+
+        return sorted(concepts, key=sort_key)
 
     # =========================================================================
     # ÉTAPE 1: EXTRACTION DES ASSERTIONS
@@ -706,6 +1314,42 @@ class AssertionExtractorV2:
         # Fix H2: Pré-calculer la toxicité des triggers
         self._precompute_trigger_toxicity(assertions, concepts)
 
+        # Pass 1.4: Construire les données de localité (dépend de _trigger_toxicity)
+        self._build_chunk_pages()
+        self._build_concept_source_pages(concepts)
+
+        # POC Concept Admissibility: Construire les données de sections + hiérarchie
+        self._build_chunk_sections()
+        self._build_concept_source_sections(concepts)
+        self._build_section_hierarchy()
+
+        # Locality summary log
+        if self._concept_source_pages:
+            focused = sum(
+                1 for p in self._concept_source_pages.values()
+                if len(p) > 0 and (self._total_doc_pages == 0 or len(p) / self._total_doc_pages <= self.DIFFUSION_THRESHOLD)
+            )
+            diffuse = sum(
+                1 for p in self._concept_source_pages.values()
+                if len(p) > 0 and self._total_doc_pages > 0 and len(p) / self._total_doc_pages > self.DIFFUSION_THRESHOLD
+            )
+            logger.info(
+                f"[OSMOSE:Rerank:Locality] {len(self._concept_source_pages)} concepts, "
+                f"{focused} focalisés (locality active), {diffuse} diffus (locality neutre), "
+                f"{len(self._chunk_pages)} chunks avec pages, "
+                f"total_doc_pages={self._total_doc_pages}"
+            )
+
+        # POC Admissibility summary log
+        if self._concept_source_sections:
+            concepts_with_sections = len(self._concept_source_sections)
+            chunks_with_sections = sum(1 for s in self._chunk_sections.values() if s)
+            logger.info(
+                f"[OSMOSE:Rerank:Admissibility] {concepts_with_sections} concepts avec sections, "
+                f"{chunks_with_sections} chunks avec sections, "
+                f"total_doc_sections={self._total_doc_sections}"
+            )
+
         # Sprint 2: Pré-calculer les embeddings des concepts pour le semantic tie-breaker
         self._precompute_concept_embeddings(concepts)
 
@@ -720,44 +1364,61 @@ class AssertionExtractorV2:
         concepts: List[Concept]
     ) -> List[ConceptLink]:
         """
-        Linking via raisonnement LLM avec batching parallèle.
+        Linking via raisonnement LLM avec batching section-aware + filtre d'admissibilité.
 
-        Si plus de LINKING_BATCH_SIZE assertions, les découpe en batches
-        et les traite en parallèle.
+        POC Upstream Admissibility V2.1:
+        - Batches section-cohérents (au lieu de découpage aveugle)
+        - Filtre d'admissibilité par recouvrement structurel
+        - Concepts candidats réduits par batch
         """
-        # Si peu d'assertions, traitement direct (avec rerank aussi)
-        if len(assertions) <= self.LINKING_BATCH_SIZE:
-            links = self._link_batch(assertions, concepts)
-            if links:
-                links, lexical_bonuses, semantic_bonuses, calibration = self._rerank_links_specificity(
-                    links, concepts, assertions
-                )
-                links = self._apply_margin_and_topk(links, lexical_bonuses, semantic_bonuses, calibration)
-                logger.info(f"[OSMOSE:Pass1:1.4:Rerank] {len(links)} liens après rerank")
-            return links
+        # Construire les batches section-aware
+        section_batches = self._build_section_batches(assertions)
 
-        # Sinon, batching parallèle
-        batches = [
-            assertions[i:i + self.LINKING_BATCH_SIZE]
-            for i in range(0, len(assertions), self.LINKING_BATCH_SIZE)
-        ]
+        # Fallback: si pas de batches section-aware, utiliser le batching classique
+        if not section_batches:
+            section_batches = [(assertions, set())]
 
         logger.info(
-            f"[OSMOSE:Pass1:1.4] Linking parallèle: {len(assertions)} assertions → "
-            f"{len(batches)} batches, {self.max_workers} workers"
+            f"[OSMOSE:Pass1:1.4] Linking section-aware: {len(assertions)} assertions → "
+            f"{len(section_batches)} batches, {self.max_workers} workers"
         )
 
         all_links = []
         errors_count = 0
+        fallback_global_count = 0
+        expansion_count = 0
+        admissible_counts = []
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_batch = {
-                executor.submit(self._link_batch, batch, concepts): idx
-                for idx, batch in enumerate(batches)
-            }
+            futures = {}
 
-            for future in as_completed(future_to_batch):
-                batch_idx = future_to_batch[future]
+            for batch_idx, (batch_assertions, batch_section_ids) in enumerate(section_batches):
+                admissible_concepts, mode = self._filter_admissible_concepts(
+                    batch_section_ids, concepts
+                )
+
+                if mode == "fallback_global":
+                    fallback_global_count += 1
+                if mode == "expanded":
+                    expansion_count += 1
+
+                admissible_counts.append(len(admissible_concepts))
+
+                logger.info(
+                    f"[OSMOSE:Admissibility:Batch{batch_idx}] "
+                    f"assertions={len(batch_assertions)}, "
+                    f"sections={len(batch_section_ids)}, "
+                    f"concepts={len(admissible_concepts)}/{len(concepts)}, "
+                    f"mode={mode}"
+                )
+
+                future = executor.submit(
+                    self._link_batch, batch_assertions, admissible_concepts
+                )
+                futures[future] = batch_idx
+
+            for future in as_completed(futures):
+                batch_idx = futures[future]
                 try:
                     batch_links = future.result()
                     all_links.extend(batch_links)
@@ -766,16 +1427,31 @@ class AssertionExtractorV2:
                     logger.warning(f"[OSMOSE:Pass1:1.4] Erreur batch {batch_idx}: {e}")
 
         if errors_count > 0:
-            logger.warning(f"[OSMOSE:Pass1:1.4] {errors_count} batches en erreur sur {len(batches)}")
+            logger.warning(
+                f"[OSMOSE:Pass1:1.4] {errors_count} batches en erreur sur {len(section_batches)}"
+            )
+
+        # Résumé global admissibilité
+        avg_adm = sum(admissible_counts) / len(admissible_counts) if admissible_counts else 0
+        sorted_counts = sorted(admissible_counts)
+        p95_adm = sorted_counts[int(len(sorted_counts) * 0.95)] if sorted_counts else 0
+        logger.info(
+            f"[OSMOSE:Admissibility:Summary] "
+            f"{len(section_batches)} batches, "
+            f"avg_concepts={avg_adm:.0f}/{len(concepts)}, "
+            f"p95_concepts={p95_adm}, "
+            f"fallback_global={fallback_global_count}/{len(section_batches)}, "
+            f"expansions={expansion_count}"
+        )
 
         logger.info(f"[OSMOSE:Pass1:1.4] {len(all_links)} liens LLM bruts établis")
 
         # RERANK "Specificity Wins": Post-traitement pour privilégier concepts spécifiques
         if all_links:
-            all_links, lexical_bonuses, semantic_bonuses, calibration = self._rerank_links_specificity(
+            all_links, lexical_bonuses, semantic_bonuses, locality_bonuses, calibration = self._rerank_links_specificity(
                 all_links, concepts, assertions
             )
-            all_links = self._apply_margin_and_topk(all_links, lexical_bonuses, semantic_bonuses, calibration)
+            all_links = self._apply_margin_and_topk(all_links, lexical_bonuses, semantic_bonuses, calibration, locality_bonuses=locality_bonuses)
             logger.info(f"[OSMOSE:Pass1:1.4:Rerank] {len(all_links)} liens après rerank")
 
         return all_links
@@ -1775,6 +2451,18 @@ class AssertionExtractorV2:
                 f"band3=Q50={q_mid:.3f} (Q75={q_high:.3f} too close)"
             )
         sink_band3_floor = raw_band3 - offset
+
+        # Cap largeur bande 2 (évite zone grise géante sur docs à outliers)
+        MAX_BAND2_WIDTH = 0.20
+        band2_width = sink_band3_floor - sink_band1_ceiling
+        if band2_width > MAX_BAND2_WIDTH:
+            # Remonter band1 pour réduire la bande 2 (on garde band3 fixe)
+            sink_band1_ceiling = sink_band3_floor - MAX_BAND2_WIDTH
+            logger.info(
+                f"[OSMOSE:Rerank:Calibration] band2_cap: width {band2_width:.3f} > {MAX_BAND2_WIDTH} "
+                f"→ band1 remonté à {sink_band1_ceiling:.3f}"
+            )
+
         # conf_threshold_original : juste au-dessus de band1
         conf_threshold_original = sink_band1_ceiling + 0.03
         conf_threshold_final = max(conf_final_clamp_min, min(conf_final_clamp_max, sink_band1_ceiling - 0.07))
@@ -1795,6 +2483,7 @@ class AssertionExtractorV2:
             sink_band2_gap_min=sink_band2_gap_min,
             margin_ambiguous=margin_ambiguous,
             sink_signal_fort_threshold=sft,
+            max_band2_width=MAX_BAND2_WIDTH,
             mode="auto",
             profile_name="auto",
             q20=q_low,
@@ -1809,6 +2498,7 @@ class AssertionExtractorV2:
             f"spread={spread:.3f} offset={offset:.3f} n={len(best_scores)} "
             f"conf_orig={conf_threshold_original:.3f} conf_final={conf_threshold_final:.3f} "
             f"gap_min={sink_band2_gap_min:.3f} margin={margin_ambiguous:.3f} "
+            f"band2_width={sink_band3_floor - sink_band1_ceiling:.3f} "
             f"raw_Q20={raw_q20:.3f} raw_Q50={raw_q50:.3f}"
         )
 
@@ -1823,7 +2513,7 @@ class AssertionExtractorV2:
         links: List[ConceptLink],
         concepts: List[Concept],
         assertions: List[RawAssertion]
-    ) -> Tuple[List[ConceptLink], Dict[str, Dict[str, float]], Dict[str, Dict[str, float]]]:
+    ) -> Tuple[List[ConceptLink], Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], 'CalibrationProfile']:
         """
         Rerank les liens pour privilégier les concepts spécifiques.
 
@@ -1845,12 +2535,15 @@ class AssertionExtractorV2:
             - links: Liste des liens avec confidences ajustées
             - lexical_bonuses: {assertion_id: {concept_id: bonus}} pour TOP_K dynamique
             - semantic_bonuses: {assertion_id: {concept_id: bonus}} pour TOP_K semantic
+            - locality_bonuses: {assertion_id: {concept_id: bonus}} pour tie-breaker localité
+            - calibration: Profil de calibration auto-calculé
         """
         from knowbase.stratified.models import ConceptRole
 
         concept_map = {c.concept_id: c for c in concepts}
         assertion_map = {a.assertion_id: a for a in assertions}
         lexical_bonuses: Dict[str, Dict[str, float]] = {}
+        locality_bonuses: Dict[str, Dict[str, float]] = {}
 
         # Sprint 4: Compter les concepts réels (sans SINK)
         num_real_concepts = sum(
@@ -1944,7 +2637,7 @@ class AssertionExtractorV2:
             # Sprint 4 SINK: Malus inhérent -10%
             sink_malus = SINK_MALUS if concept.role == ConceptRole.SINK else 1.0
 
-            # Pass 1: Score SANS pénalité saturante
+            # Pass 1: Score SANS pénalité saturante (locality retiré du multiplicatif, utilisé comme tie-breaker)
             pass1_score = min(1.0, original_conf * combined_bonus * bonus_central * sink_malus)
 
             if link.assertion_id not in provisional_scores:
@@ -2005,7 +2698,10 @@ class AssertionExtractorV2:
                 total_assertions=total_assertions,
             )
 
-            # Score final
+            # 5. Admissibilité désormais upstream (filtre pré-LLM) — plus de malus downstream
+            assertion = assertion_map.get(link.assertion_id)
+
+            # Score final (locality retiré — utilisé comme tie-breaker en aval)
             new_conf = min(1.0, original_conf * combined_bonus * bonus_central * penalty * sink_malus)
 
             # Stocker la confidence originale pour le double seuil
@@ -2014,17 +2710,26 @@ class AssertionExtractorV2:
 
             link.confidence = new_conf
 
+            # Pass 1.4: Calculer locality bonus (stocké pour tie-breaker, pas multiplicatif)
+            locality_bonus = self._compute_locality_bonus(
+                assertion.chunk_id if assertion else "", link.concept_id
+            )
+            if link.assertion_id not in locality_bonuses:
+                locality_bonuses[link.assertion_id] = {}
+            locality_bonuses[link.assertion_id][link.concept_id] = locality_bonus
+
             # Log traçabilité enrichi
             if abs(new_conf - original_conf) > 0.01:
                 logger.debug(
                     f"[OSMOSE:Rerank] {link.assertion_id} → {link.concept_id}: "
                     f"conf {original_conf:.2f} → {new_conf:.2f} "
                     f"(lex={bonus_lexical:.2f}, sem={bonus_semantic:.2f}, "
+                    f"loc={locality_bonus:.2f}, "
                     f"central={bonus_central:.2f}, penalty={penalty:.2f}, "
                     f"sink_malus={sink_malus:.2f}, prov_count={prov_count})"
                 )
 
-        return links, lexical_bonuses, semantic_bonuses, calibration
+        return links, lexical_bonuses, semantic_bonuses, locality_bonuses, calibration
 
     def _should_route_to_sink(
         self,
@@ -2077,7 +2782,16 @@ class AssertionExtractorV2:
                     return "zone_grise_ambigu"
                 return None
 
-        # Un seul candidat non-SINK en bande 2 sans bonus → SINK
+            # Unique candidat non-SINK en bande 2 sans bonus :
+            # Seuil absolu au lieu de SINK automatique.
+            # Accepter si score >= band1 + 25% de la largeur de bande 2.
+            band2_threshold = calibration.sink_band1_ceiling + 0.25 * (
+                calibration.sink_band3_floor - calibration.sink_band1_ceiling
+            )
+            if best_non_sink_score >= band2_threshold:
+                return None  # Score suffisant malgré l'absence de bonus
+
+        # Unique candidat non-SINK en bande 2 avec score trop bas → SINK
         return "zone_grise_neutre"
 
     def _apply_margin_and_topk(
@@ -2086,6 +2800,7 @@ class AssertionExtractorV2:
         lexical_bonuses: Dict[str, Dict[str, float]],
         semantic_bonuses: Optional[Dict[str, Dict[str, float]]] = None,
         calibration: Optional[CalibrationProfile] = None,
+        locality_bonuses: Optional[Dict[str, Dict[str, float]]] = None,
     ) -> List[ConceptLink]:
         """
         Après rerank, re-trier et appliquer les règles de sélection finale.
@@ -2095,6 +2810,7 @@ class AssertionExtractorV2:
         3. Trier par confidence décroissante
         4. Garder top-k (dynamique: =1 si match trigger fort OU semantic discriminant)
         5. Si écart best/second < margin → log AMBIGUOUS
+        6. Locality tie-breaker: si écart < margin et candidat local disponible → préférer le local
 
         Sprint 5: Seuils issus du CalibrationProfile (LLM-agnostique).
 
@@ -2103,6 +2819,7 @@ class AssertionExtractorV2:
             lexical_bonuses: {assertion_id: {concept_id: bonus}} pour TOP_K dynamique
             semantic_bonuses: {assertion_id: {concept_id: bonus}} pour TOP_K semantic
             calibration: Profil de calibration (Sprint 5)
+            locality_bonuses: {assertion_id: {concept_id: bonus}} pour locality tie-breaker
 
         Returns:
             Liste filtrée des liens
@@ -2111,6 +2828,8 @@ class AssertionExtractorV2:
 
         if semantic_bonuses is None:
             semantic_bonuses = {}
+        if locality_bonuses is None:
+            locality_bonuses = {}
         if calibration is None:
             calibration = CalibrationProfile()
 
@@ -2240,14 +2959,27 @@ class AssertionExtractorV2:
                     )
                     continue
 
-            # Détection ambiguïté
+            # Détection ambiguïté + locality tie-breaker
             if len(scored) >= 2:
                 best_conf, second_conf = scored[0][1], scored[1][1]
                 if best_conf - second_conf < calibration.margin_ambiguous:
+                    # Pass 1.4: Locality tie-breaker — si ambiguïté, préférer le candidat local
+                    loc_bonuses = locality_bonuses.get(assertion_id, {})
+                    if loc_bonuses:
+                        best_loc = loc_bonuses.get(scored[0][0].concept_id, 1.0)
+                        second_loc = loc_bonuses.get(scored[1][0].concept_id, 1.0)
+                        if second_loc > best_loc:
+                            # Le second est plus local → swap
+                            scored[0], scored[1] = scored[1], scored[0]
+                            logger.info(
+                                f"[OSMOSE:Rerank:Locality:TieBreaker] {assertion_id}: "
+                                f"swap {scored[1][0].concept_id} (loc={best_loc:.2f}) → "
+                                f"{scored[0][0].concept_id} (loc={second_loc:.2f})"
+                            )
                     logger.info(
                         f"[OSMOSE:Rerank:AMBIGUOUS] {assertion_id}: "
-                        f"{scored[0][0].concept_id} ({best_conf:.2f}) vs "
-                        f"{scored[1][0].concept_id} ({second_conf:.2f})"
+                        f"{scored[0][0].concept_id} ({scored[0][1]:.2f}) vs "
+                        f"{scored[1][0].concept_id} ({scored[1][1]:.2f})"
                     )
 
             # S2-C: Semantic margin → top_k=1 si nettement discriminant
@@ -2334,9 +3066,11 @@ class AssertionExtractorV2:
         """
         from knowbase.stratified.models import ConceptRole
 
+        # Stoplist réduite: on garde seulement les mots vraiment non-discriminants.
+        # "security", "data", "system", "cloud", "platform" retirés car ce sont
+        # des triggers critiques pour les docs SAP techniques.
         RESCUE_STOPLIST = {
-            "security", "data", "system", "service", "management",
-            "access", "support", "cloud", "solution", "platform",
+            "service", "management", "access", "support", "solution",
         }
 
         # Identifier les concept_ids SINK
@@ -2396,7 +3130,7 @@ class AssertionExtractorV2:
                         idf = math.log(total_concepts / max(1, trigger_concept_count[t]))
                         score += idf
 
-                if match_count >= 2 and score > best_score:
+                if match_count >= 1 and score > best_score:
                     best_match = cid
                     best_score = score
 
