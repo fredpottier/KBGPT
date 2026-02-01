@@ -37,13 +37,18 @@ class PurgeService:
         """Initialize purge service."""
         pass
 
-    async def purge_all_data(self, purge_schema: bool = False) -> Dict[str, any]:
+    async def purge_all_data(
+        self,
+        purge_schema: bool = False,
+        recreate_schema: bool = False
+    ) -> Dict[str, any]:
         """
         Purge toutes les données d'ingestion.
 
         Args:
             purge_schema: Si True, supprime aussi les constraints/indexes Neo4j
                          (utile pour repartir de zéro après changements de schéma)
+            recreate_schema: Si True, recrée le schéma Neo4j après purge (MVP V1 + Pipeline V2)
 
         Nettoie:
         - Collection Qdrant (tous les points vectoriels)
@@ -63,7 +68,8 @@ class PurgeService:
             Dict avec résultats de purge par composant
         """
         schema_msg = " + SCHÉMA NEO4J" if purge_schema else ""
-        logger.warning(f"🚨 PURGE SYSTÈME DÉMARRÉE - Suppression données d'ingestion{schema_msg}")
+        recreate_msg = " + RECRÉATION SCHÉMA" if recreate_schema else ""
+        logger.warning(f"🚨 PURGE SYSTÈME DÉMARRÉE - Suppression données d'ingestion{schema_msg}{recreate_msg}")
 
         results = {
             "qdrant": {"success": False, "message": "", "points_deleted": 0},
@@ -71,6 +77,7 @@ class PurgeService:
             "redis": {"success": False, "message": "", "jobs_deleted": 0},
             "postgres": {"success": False, "message": "", "sessions_deleted": 0, "messages_deleted": 0},
             "files": {"success": False, "message": "", "files_deleted": 0},
+            "schema_recreate": {"success": False, "message": "", "constraints_created": 0, "indexes_created": 0},
         }
 
         # 1. Purge Qdrant
@@ -107,6 +114,14 @@ class PurgeService:
         except Exception as e:
             logger.error(f"❌ Erreur purge fichiers: {e}")
             results["files"]["message"] = str(e)
+
+        # 6. Recréation du schéma Neo4j si demandé
+        if recreate_schema:
+            try:
+                results["schema_recreate"] = await self._recreate_neo4j_schema()
+            except Exception as e:
+                logger.error(f"❌ Erreur recréation schéma: {e}")
+                results["schema_recreate"]["message"] = str(e)
 
         logger.warning(f"✅ PURGE TERMINÉE - Résultats: {results}")
         return results
@@ -518,6 +533,121 @@ class PurgeService:
                 "success": False,
                 "message": f"Erreur: {str(e)}",
                 "files_deleted": 0,
+            }
+
+
+    async def _recreate_neo4j_schema(self) -> Dict:
+        """Recrée le schéma Neo4j (constraints et indexes).
+
+        Crée les schémas pour:
+        - MVP V1: InformationMVP, ClaimKey, Contradiction
+        - Pipeline V2: Document, Subject, Theme, Concept, Information
+        - Structural: DocumentContext, SectionContext, etc.
+        """
+        logger.info("🔄 Recréation schéma Neo4j...")
+
+        try:
+            import os
+            from neo4j import GraphDatabase
+            neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+            neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+            neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+            driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+            constraints_created = 0
+            indexes_created = 0
+
+            # Schémas à créer
+            CONSTRAINTS = [
+                # MVP V1: InformationMVP
+                ("information_mvp_id", "CREATE CONSTRAINT information_mvp_id IF NOT EXISTS FOR (i:InformationMVP) REQUIRE i.information_id IS UNIQUE"),
+                # MVP V1: ClaimKey
+                ("claimkey_id", "CREATE CONSTRAINT claimkey_id IF NOT EXISTS FOR (ck:ClaimKey) REQUIRE ck.claimkey_id IS UNIQUE"),
+                # MVP V1: Contradiction
+                ("contradiction_id", "CREATE CONSTRAINT contradiction_id IF NOT EXISTS FOR (c:Contradiction) REQUIRE c.contradiction_id IS UNIQUE"),
+                # Pipeline V2: Document
+                ("document_id", "CREATE CONSTRAINT document_id IF NOT EXISTS FOR (d:Document) REQUIRE d.doc_id IS UNIQUE"),
+                # Pipeline V2: Subject
+                ("subject_id", "CREATE CONSTRAINT subject_id IF NOT EXISTS FOR (s:Subject) REQUIRE s.subject_id IS UNIQUE"),
+                # Pipeline V2: Theme
+                ("theme_id", "CREATE CONSTRAINT theme_id IF NOT EXISTS FOR (t:Theme) REQUIRE t.theme_id IS UNIQUE"),
+                # Pipeline V2: Concept
+                ("concept_id", "CREATE CONSTRAINT concept_id IF NOT EXISTS FOR (c:Concept) REQUIRE c.concept_id IS UNIQUE"),
+                # Pipeline V2: Information
+                ("info_id", "CREATE CONSTRAINT info_id IF NOT EXISTS FOR (i:Information) REQUIRE i.info_id IS UNIQUE"),
+                # Structural: DocumentContext
+                ("doc_context_id", "CREATE CONSTRAINT doc_context_id IF NOT EXISTS FOR (dc:DocumentContext) REQUIRE dc.document_id IS UNIQUE"),
+                # Structural: CanonicalConcept
+                ("canonical_concept_id", "CREATE CONSTRAINT canonical_concept_id IF NOT EXISTS FOR (cc:CanonicalConcept) REQUIRE cc.concept_id IS UNIQUE"),
+                # Structural: ProtoConcept
+                ("proto_concept_id", "CREATE CONSTRAINT proto_concept_id IF NOT EXISTS FOR (pc:ProtoConcept) REQUIRE pc.proto_id IS UNIQUE"),
+            ]
+
+            INDEXES = [
+                # MVP V1: InformationMVP indexes
+                ("information_mvp_tenant", "CREATE INDEX information_mvp_tenant IF NOT EXISTS FOR (i:InformationMVP) ON (i.tenant_id)"),
+                ("information_mvp_status", "CREATE INDEX information_mvp_status IF NOT EXISTS FOR (i:InformationMVP) ON (i.promotion_status)"),
+                ("information_mvp_fingerprint", "CREATE INDEX information_mvp_fingerprint IF NOT EXISTS FOR (i:InformationMVP) ON (i.fingerprint)"),
+                ("information_mvp_document", "CREATE INDEX information_mvp_document IF NOT EXISTS FOR (i:InformationMVP) ON (i.document_id)"),
+                # MVP V1: ClaimKey indexes
+                ("claimkey_tenant", "CREATE INDEX claimkey_tenant IF NOT EXISTS FOR (ck:ClaimKey) ON (ck.tenant_id)"),
+                ("claimkey_status", "CREATE INDEX claimkey_status IF NOT EXISTS FOR (ck:ClaimKey) ON (ck.status)"),
+                ("claimkey_key", "CREATE INDEX claimkey_key IF NOT EXISTS FOR (ck:ClaimKey) ON (ck.key)"),
+                ("claimkey_domain", "CREATE INDEX claimkey_domain IF NOT EXISTS FOR (ck:ClaimKey) ON (ck.domain)"),
+                # MVP V1: Contradiction indexes
+                ("contradiction_claimkey", "CREATE INDEX contradiction_claimkey IF NOT EXISTS FOR (c:Contradiction) ON (c.claimkey_id)"),
+                # Pipeline V2 indexes
+                ("document_tenant", "CREATE INDEX document_tenant IF NOT EXISTS FOR (d:Document) ON (d.tenant_id)"),
+                ("concept_tenant", "CREATE INDEX concept_tenant IF NOT EXISTS FOR (c:Concept) ON (c.tenant_id)"),
+                ("information_tenant", "CREATE INDEX information_tenant IF NOT EXISTS FOR (i:Information) ON (i.tenant_id)"),
+                # Structural indexes
+                ("canonical_concept_tenant", "CREATE INDEX canonical_concept_tenant IF NOT EXISTS FOR (cc:CanonicalConcept) ON (cc.tenant_id)"),
+                ("canonical_concept_type", "CREATE INDEX canonical_concept_type IF NOT EXISTS FOR (cc:CanonicalConcept) ON (cc.type)"),
+                ("proto_concept_tenant", "CREATE INDEX proto_concept_tenant IF NOT EXISTS FOR (pc:ProtoConcept) ON (pc.tenant_id)"),
+            ]
+
+            try:
+                with driver.session() as session:
+                    # Créer les constraints
+                    logger.info("  - Création des contraintes...")
+                    for name, query in CONSTRAINTS:
+                        try:
+                            session.run(query)
+                            constraints_created += 1
+                            logger.debug(f"    ✓ Constraint {name}")
+                        except Exception as e:
+                            logger.warning(f"    ⚠ Constraint {name}: {e}")
+
+                    # Créer les indexes
+                    logger.info("  - Création des index...")
+                    for name, query in INDEXES:
+                        try:
+                            session.run(query)
+                            indexes_created += 1
+                            logger.debug(f"    ✓ Index {name}")
+                        except Exception as e:
+                            logger.warning(f"    ⚠ Index {name}: {e}")
+
+                logger.info(
+                    f"✅ Schéma Neo4j recréé: {constraints_created} contraintes, "
+                    f"{indexes_created} index"
+                )
+                return {
+                    "success": True,
+                    "message": f"Schéma recréé: {constraints_created} contraintes, {indexes_created} index",
+                    "constraints_created": constraints_created,
+                    "indexes_created": indexes_created,
+                }
+            finally:
+                driver.close()
+
+        except Exception as e:
+            logger.error(f"❌ Erreur recréation schéma Neo4j: {e}")
+            return {
+                "success": False,
+                "message": f"Erreur: {str(e)}",
+                "constraints_created": 0,
+                "indexes_created": 0,
             }
 
 

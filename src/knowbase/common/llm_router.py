@@ -561,7 +561,7 @@ class LLMRouter:
         if max_tokens is None:
             max_tokens = task_params.get("max_tokens", 1024)
 
-        logger.debug(f"[LLM_ROUTER] Task: {task_type.value}, Model: {model}, Provider: {provider}, Temp: {temperature}, Tokens: {max_tokens}")
+        logger.debug(f"[LLM_ROUTER] Task: {task_type.value}, Default: {model}/{provider}, Temp: {temperature}, Tokens: {max_tokens}")
 
         try:
             # === Gate Redis : vérifier si vLLM actif via Redis (inter-processus) ===
@@ -569,7 +569,7 @@ class LLMRouter:
             # enable_burst_mode() a été appelé dans un autre processus (app)
             if task_type != TaskType.VISION:  # Vision reste TOUJOURS sur GPT-4o
                 redis_state = self._get_vllm_state_from_redis()
-                logger.info(f"[LLM_ROUTER:GATE] Redis check: found={redis_state is not None}, local_burst={self._burst_mode}")
+                logger.debug(f"[LLM_ROUTER:GATE] Redis check: found={redis_state is not None}, local_burst={self._burst_mode}")
 
                 if redis_state:
                     # vLLM configuré via Redis
@@ -624,14 +624,27 @@ class LLMRouter:
 
             # IMPORTANT: Pas de fallback OpenAI si burst mode actif
             # On laisse l'erreur remonter pour que le job puisse être suspendu/repris
-            if self._burst_mode:
+            # Vérifier AUSSI Redis (pas seulement le flag mémoire locale)
+            # car après un restart de conteneur, _burst_mode est False en mémoire
+            # mais la clé Redis osmose:burst:state peut encore être active.
+            redis_burst_active = False
+            if not self._burst_mode:
+                try:
+                    from knowbase.ingestion.burst.provider_switch import get_burst_state_from_redis
+                    rs = get_burst_state_from_redis()
+                    redis_burst_active = bool(rs and rs.get("active"))
+                except Exception:
+                    pass
+
+            if self._burst_mode or redis_burst_active:
                 logger.error(
                     f"[LLM_ROUTER:BURST] ❌ vLLM call failed, NO fallback to OpenAI. "
+                    f"(local_burst={self._burst_mode}, redis_burst={redis_burst_active}) "
                     f"Error: {e}"
                 )
                 raise
 
-            # Fallback d'urgence UNIQUEMENT si pas en burst mode
+            # Fallback d'urgence UNIQUEMENT si pas en burst mode (ni local ni Redis)
             default_model = self._config.get("default_model", "gpt-4o")
             if model != default_model:
                 logger.info(f"[LLM_ROUTER] Fallback emergency to {default_model}")
@@ -672,7 +685,7 @@ class LLMRouter:
         if max_tokens is None:
             max_tokens = task_params.get("max_tokens", 1024)
 
-        logger.debug(f"[LLM_ROUTER:ASYNC] Task: {task_type.value}, Model: {model}, Provider: {provider}, Temp: {temperature}, Tokens: {max_tokens}")
+        logger.debug(f"[LLM_ROUTER:ASYNC] Task: {task_type.value}, Default: {model}/{provider}, Temp: {temperature}, Tokens: {max_tokens}")
 
         try:
             # === Gate Redis : vérifier si vLLM actif via Redis (inter-processus) ===
@@ -680,7 +693,7 @@ class LLMRouter:
             # enable_burst_mode() a été appelé dans un autre processus (app)
             if task_type != TaskType.VISION:  # Vision reste TOUJOURS sur GPT-4o
                 redis_state = self._get_vllm_state_from_redis()
-                logger.info(f"[LLM_ROUTER:GATE] Redis check: found={redis_state is not None}, local_burst={self._burst_mode}")
+                logger.debug(f"[LLM_ROUTER:GATE] Redis check: found={redis_state is not None}, local_burst={self._burst_mode}")
 
                 if redis_state:
                     # vLLM configuré via Redis
@@ -1134,13 +1147,12 @@ class LLMRouter:
             raise RuntimeError("Burst mode client not initialized")
 
         # Limite de contexte pour Qwen2.5-14B-AWQ
-        # vLLM max context = 16384 tokens TOTAL (input + output) depuis 2026-01-27
-        # On doit réserver max_tokens pour la completion + marge sécurité 30%
-        # (l'estimation tokens est approximative, ~4 chars/token mais varie)
-        VLLM_MAX_CONTEXT = 16384
-        SAFETY_MARGIN = 0.30  # 30% de marge car estimation tokens imprécise
+        # vLLM max_model_len = 16384 tokens TOTAL (input + output)
+        # On doit réserver max_tokens pour la completion + marge sécurité 20%
+        VLLM_MAX_CONTEXT = 16384  # Qwen 2.5 14B supporte 32K natif, on utilise 16K
+        SAFETY_MARGIN = 0.20  # 20% de marge car estimation tokens imprécise
         max_input_tokens = int((VLLM_MAX_CONTEXT - max_tokens) * (1 - SAFETY_MARGIN))
-        max_input_tokens = max(1000, min(max_input_tokens, 8000))  # Entre 1000 et 8000
+        max_input_tokens = max(1000, min(max_input_tokens, 12000))  # Entre 1000 et 12000
 
         # Tronquer les messages si trop longs
         messages = self._truncate_messages_for_context(messages, max_input_tokens)
@@ -1207,13 +1219,12 @@ class LLMRouter:
             raise RuntimeError("Burst mode async client not initialized")
 
         # Limite de contexte pour Qwen2.5-14B-AWQ
-        # vLLM max context = 16384 tokens TOTAL (input + output) depuis 2026-01-27
-        # On doit réserver max_tokens pour la completion + marge sécurité 30%
-        # (l'estimation tokens est approximative, ~4 chars/token mais varie)
-        VLLM_MAX_CONTEXT = 16384
-        SAFETY_MARGIN = 0.30  # 30% de marge car estimation tokens imprécise
+        # vLLM max_model_len = 16384 tokens TOTAL (input + output)
+        # On doit réserver max_tokens pour la completion + marge sécurité 20%
+        VLLM_MAX_CONTEXT = 16384  # Qwen 2.5 14B supporte 32K natif, on utilise 16K
+        SAFETY_MARGIN = 0.20  # 20% de marge car estimation tokens imprécise
         max_input_tokens = int((VLLM_MAX_CONTEXT - max_tokens) * (1 - SAFETY_MARGIN))
-        max_input_tokens = max(1000, min(max_input_tokens, 8000))  # Entre 1000 et 8000
+        max_input_tokens = max(1000, min(max_input_tokens, 12000))  # Entre 1000 et 12000
 
         # Tronquer les messages si trop longs
         messages = self._truncate_messages_for_context(messages, max_input_tokens)

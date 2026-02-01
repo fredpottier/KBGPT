@@ -310,10 +310,10 @@ class TestAssertionExtractorV2:
         assert PROMOTION_POLICY[AssertionType.PRESCRIPTIVE] == PromotionTier.ALWAYS
         assert PROMOTION_POLICY[AssertionType.CAUSAL] == PromotionTier.ALWAYS
 
-    def test_promotion_policy_never(self):
-        """Test Promotion Policy pour type NEVER."""
-        # PROCEDURAL est NEVER
-        assert PROMOTION_POLICY[AssertionType.PROCEDURAL] == PromotionTier.NEVER
+    def test_promotion_policy_procedural(self):
+        """Test Promotion Policy pour type PROCEDURAL (ADR 2026-01-30: CONDITIONAL)."""
+        # PROCEDURAL est CONDITIONAL (ADR 2026-01-30: valeur métier opérationnelle)
+        assert PROMOTION_POLICY[AssertionType.PROCEDURAL] == PromotionTier.CONDITIONAL
 
     def test_promotion_filtering(self, sample_chunks):
         """Test filtrage par Promotion Policy."""

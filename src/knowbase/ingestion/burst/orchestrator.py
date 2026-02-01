@@ -472,6 +472,10 @@ class BurstOrchestrator:
             {"ParameterKey": "VllmDtype", "ParameterValue": self.config.vllm_dtype},
             {"ParameterKey": "VllmMaxModelLen", "ParameterValue": str(self.config.vllm_max_model_len)},
             {"ParameterKey": "VllmMaxNumSeqs", "ParameterValue": str(self.config.vllm_max_num_seqs)},
+            # Optimisations vLLM (2026-01-27)
+            {"ParameterKey": "VllmEnablePrefixCaching", "ParameterValue": "true" if self.config.vllm_enable_prefix_caching else "false"},
+            {"ParameterKey": "VllmEnableChunkedPrefill", "ParameterValue": "true" if self.config.vllm_enable_chunked_prefill else "false"},
+            {"ParameterKey": "VllmMaxNumBatchedTokens", "ParameterValue": str(self.config.vllm_max_num_batched_tokens)},
         ]
 
         # Ajouter VPC/Subnet si configurés

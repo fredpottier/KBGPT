@@ -123,6 +123,18 @@ class DocumentAnalyzerV2:
             toc=toc_text
         )
 
+        # Issue 3: Si la langue a été détectée sur le document original,
+        # injecter un hint explicite pour forcer les thèmes dans la bonne langue.
+        # Le meta-document (Pass 0.9) peut être en FR même si le doc original est EN.
+        if language_override:
+            lang_names = {"en": "English", "fr": "French", "de": "German"}
+            lang_name = lang_names.get(language_override, language_override)
+            user_prompt += (
+                f"\n\nCRITICAL: The original document language is {language_override} ({lang_name}). "
+                f"ALL themes MUST be written in {lang_name}. "
+                f"Set language to \"{language_override}\"."
+            )
+
         # Appeler le LLM
         if self.llm_client:
             response = self.llm_client.generate(

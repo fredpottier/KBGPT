@@ -13,6 +13,7 @@
 |-------|-----|--------|-------------|
 | 0 | Fondations | 🟢 TERMINÉ | 100% |
 | 1 | Pass 0 - Structural Graph | 🟢 TERMINÉ | 100% |
+| 1.5 | Pass 0.9 - Global View Construction | 🟢 TERMINÉ | 100% |
 | 2 | Pass 1 - Lecture Stratifiée | 🟢 TERMINÉ | 100% |
 | 3 | Pass 2 - Enrichissement | 🟢 TERMINÉ | 100% |
 | 4 | Pass 3 - Consolidation | 🟢 TERMINÉ | 100% |
@@ -60,6 +61,62 @@
 | P0-006 | Créer mapping chunk→DocItem | 🟢 | Index inversé |
 | P0-007 | Tests unitaires adapter | 🟢 | 15 tests passent |
 | P0-008 | Test intégration document réel | 🟢 | `test_pass0_integration.py` |
+
+---
+
+## Phase 1.5 : Pass 0.9 - Global View Construction
+
+**Objectif**: Construire une vue globale synthétique du document pour améliorer la couverture de Pass 1.
+**Statut**: 🟢 TERMINÉ (100%)
+**Ref**: `doc/ongoing/ADR_PASS09_GLOBAL_VIEW_CONSTRUCTION.md`
+
+### Contexte du Problème
+
+Le pipeline V2 souffrait d'un **déficit de représentation globale** :
+- DocumentAnalyzer (Pass 1.1): 4000 chars → 0.85% du document
+- ConceptIdentifier (Pass 1.2): 5000 chars → 1.07% du document
+- **Conséquence**: Document 468K chars / 230 pages → 7 thèmes, 5 concepts (attendu: 20-30 / 30-50)
+
+### Solution Implémentée
+
+**Pass 0.9 - Global View Construction** entre Pass 0 et Pass 1.1:
+1. **SectionSummarizer**: Résumé LLM de chaque section (500-1000 chars)
+2. **HierarchicalCompressor**: Compression en meta-document (15-25K chars)
+3. **GlobalViewBuilder**: Orchestrateur avec mode fallback
+
+### Fichiers créés
+
+| Fichier | Description |
+|---------|-------------|
+| `stratified/pass09/__init__.py` | Module exports |
+| `stratified/pass09/models.py` | SectionSummary, GlobalView, Pass09Config |
+| `stratified/pass09/section_summarizer.py` | Résumé LLM par section |
+| `stratified/pass09/hierarchical_compressor.py` | Compression meta-document |
+| `stratified/pass09/global_view_builder.py` | Orchestrateur principal |
+| `tests/stratified/test_pass09_unit.py` | 15 tests unitaires |
+
+### Tâches
+
+| ID | Tâche | Statut |
+|----|-------|--------|
+| P09-001 | Rédiger ADR Global View Construction | 🟢 |
+| P09-002 | Modèles Pydantic (SectionSummary, GlobalView) | 🟢 |
+| P09-003 | SectionSummarizer avec LLM | 🟢 |
+| P09-004 | HierarchicalCompressor | 🟢 |
+| P09-005 | GlobalViewBuilder orchestrateur | 🟢 |
+| P09-006 | Mode fallback (sans LLM) | 🟢 |
+| P09-007 | Intégration dans Pass1OrchestratorV2 | 🟢 |
+| P09-008 | Passage sections depuis router API | 🟢 |
+| P09-009 | Tests unitaires (15 tests) | 🟢 |
+
+### Métriques Cibles Post-Implémentation
+
+| Métrique | Avant | Cible |
+|----------|-------|-------|
+| Couverture document | 1% | 100% |
+| Thèmes | 7 | 15-25 |
+| Concepts | 5 | 20-40 |
+| Informations | 53 | 150-300 |
 
 ---
 

@@ -92,8 +92,13 @@ class Pass1PersisterV2:
                 stats["subject"] = 1
                 logger.info(f"[OSMOSE:Pass1:Persist] Subject créé: {result.subject.subject_id}")
 
-                # 2. Créer les Themes
+                # 2. Créer les Themes (seulement ceux avec au moins 1 concept)
+                themes_with_concepts = {c.theme_id for c in result.concepts}
+                skipped_themes = 0
                 for theme in result.themes:
+                    if theme.theme_id not in themes_with_concepts:
+                        skipped_themes += 1
+                        continue
                     session.execute_write(
                         self._create_theme_tx,
                         result.subject.subject_id,
@@ -101,7 +106,10 @@ class Pass1PersisterV2:
                         self.tenant_id
                     )
                     stats["themes"] += 1
-                logger.info(f"[OSMOSE:Pass1:Persist] {stats['themes']} themes créés")
+                logger.info(
+                    f"[OSMOSE:Pass1:Persist] {stats['themes']} themes créés "
+                    f"({skipped_themes} sans concept filtrés sur {len(result.themes)} total)"
+                )
 
                 # 3. Créer les Concepts
                 for concept in result.concepts:

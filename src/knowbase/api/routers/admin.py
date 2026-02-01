@@ -29,6 +29,10 @@ class PurgeDataRequest(BaseModel):
         default=False,
         description="Si True, purge aussi le schéma Neo4j (constraints/indexes)"
     )
+    recreate_schema: bool = Field(
+        default=False,
+        description="Si True, recrée le schéma Neo4j après la purge (MVP V1 + Pipeline V2)"
+    )
 
 
 @router.post("/purge-data")
@@ -60,19 +64,25 @@ async def purge_all_data(
     **Args:**
     - `purge_schema`: Si True, supprime aussi les constraints/indexes Neo4j
                      (utile après changements de schéma pour éviter les "ghost" labels/relations)
+    - `recreate_schema`: Si True, recrée le schéma Neo4j après purge (MVP V1 + Pipeline V2)
 
     Returns:
         Dict avec résultats de purge par composant
     """
     # Permettre appel sans body (compatibilité avec anciennes versions)
     purge_schema = request.purge_schema if request else False
+    recreate_schema = request.recreate_schema if request else False
 
     schema_msg = " + SCHÉMA" if purge_schema else ""
-    logger.warning(f"🚨 Requête PURGE SYSTÈME reçue{schema_msg}")
+    recreate_msg = " + RECRÉATION" if recreate_schema else ""
+    logger.warning(f"🚨 Requête PURGE SYSTÈME reçue{schema_msg}{recreate_msg}")
 
     try:
         purge_service = PurgeService()
-        results = await purge_service.purge_all_data(purge_schema=purge_schema)
+        results = await purge_service.purge_all_data(
+            purge_schema=purge_schema,
+            recreate_schema=recreate_schema
+        )
 
         # Vérifier si toutes les purges ont réussi
         all_success = all(r.get("success", False) for r in results.values())

@@ -346,10 +346,10 @@ export default function EnrichmentV2Page() {
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery({
     queryKey: ['pipeline-v2', 'stats'],
     queryFn: async () => {
-      const res = await apiClient.get<PipelineV2Stats>('/v2/stats/detailed')
+      const res = await apiClient.get<PipelineV2Stats>('/v2/stats/detailed', { timeout: 15000 })
       if (!res.success) {
         // Fallback to basic stats
-        const basicRes = await apiClient.get<any>('/v2/stats')
+        const basicRes = await apiClient.get<any>('/v2/stats', { timeout: 15000 })
         return {
           documents_count: 0,
           subjects_count: 0,
@@ -364,30 +364,40 @@ export default function EnrichmentV2Page() {
       return res.data
     },
     refetchInterval: 10000,
+    retry: 3,
+    retryDelay: 2000,
+    refetchOnWindowFocus: true,
   })
 
   // Fetch cached documents
   const { data: cachedDocs, isLoading: cacheLoading, refetch: refetchCache } = useQuery({
     queryKey: ['cached-documents'],
     queryFn: async () => {
-      const res = await apiClient.get<CachedDocument[]>('/v2/reprocess/cache')
+      const res = await apiClient.get<CachedDocument[]>('/v2/reprocess/cache', { timeout: 15000 })
       if (!res.success) return []
       return res.data || []
     },
+    retry: 2,
+    retryDelay: 1000,
   })
 
-  // Fetch reprocess status
-  const { data: reprocessStatus, refetch: refetchStatus } = useQuery({
+  // Fetch reprocess status - uses shorter timeout since this should be a fast endpoint
+  const { data: reprocessStatus, refetch: refetchStatus, isError: statusError } = useQuery({
     queryKey: ['reprocess-status'],
     queryFn: async () => {
-      const res = await apiClient.get<ReprocessStatus>('/v2/reprocess/status')
+      const res = await apiClient.get<ReprocessStatus>('/v2/reprocess/status', { timeout: 10000 })
       if (!res.success) return { status: 'idle' as const, total_documents: 0, processed: 0, failed: 0, current_document: null, current_phase: null, progress_percent: 0, started_at: null, errors: [] }
       return res.data
     },
     refetchInterval: (query) => {
       const status = query.state.data?.status
+      // Poll more frequently when running, less when idle
       return status === 'running' ? 2000 : 10000
     },
+    retry: 5,  // More retries for status endpoint
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+    refetchOnWindowFocus: true,
+    refetchIntervalInBackground: true,  // Continue polling even when tab not focused
   })
 
   // Start reprocessing

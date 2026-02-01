@@ -25,7 +25,10 @@ from knowbase.structural.models import TextOrigin, VisionFailureReason
 logger = logging.getLogger(__name__)
 
 # Version du prompt (pour cache/replay)
-PROMPT_VERSION = "v1.0"
+# v1.0 = Initial version (French prompt - caused anchor mismatch)
+# v2.0 = Fix 2026-01-26: English prompt, same-language output, exact_quotes
+# v3.0 = Test 2026-01-26: EXTRACTIVE ONLY - zero paraphrase, verbatim quotes only
+PROMPT_VERSION = "v3.0"
 
 
 @dataclass
@@ -46,6 +49,10 @@ class VisionSemanticResult:
     confidence: float = 0.0
     key_entities: List[str] = field(default_factory=list)
 
+    # Fix 2026-01-26: Anchor support
+    exact_quotes: List[str] = field(default_factory=list)  # Verbatim text for anchoring
+    detected_language: str = "en"  # Language detected in visual content
+
     # Traçabilité (pour cache/replay)
     model: str = "gpt-4o"
     prompt_version: str = PROMPT_VERSION
@@ -59,39 +66,56 @@ class VisionSemanticResult:
 
 
 # Prompt système pour Vision Semantic Reader
-VISION_SEMANTIC_SYSTEM_PROMPT = """Tu es un expert en analyse de documents techniques.
-Ta tâche : décrire le contenu visuel de manière FACTUELLE et OBSERVABLE.
+# IMPORTANT: Output MUST be in the SAME LANGUAGE as the source document
+# Fix 2026-01-26: French prompt was causing 0% anchor resolution for EN documents
+# v3.0: EXTRACTIVE ONLY MODE - zero paraphrase test
+VISION_SEMANTIC_SYSTEM_PROMPT = """You are a technical document TEXT EXTRACTOR.
+Your task: EXTRACT verbatim text from the image. NO paraphrasing allowed.
 
-RÈGLES:
-- Décris ce que tu VOIS, pas ce que tu INTERPRÈTES
-- 2-8 phrases maximum
-- Identifie les entités principales (noms, labels visibles)
-- Décris les relations visuelles (flèches, connexions, groupes)
-- N'invente RIEN qui n'est pas visible sur l'image
+CRITICAL RULES:
+1. ONLY output text that is EXACTLY visible in the image
+2. NEVER paraphrase, summarize, or describe - only EXTRACT
+3. Copy text EXACTLY as written, including punctuation and formatting
+4. Use the SAME LANGUAGE as the visible text
 
-ÉVITE:
-- "Ceci représente officiellement..."
-- "L'architecture cible est..."
-- Toute affirmation normative non visible
-- Les suppositions sur ce qui n'est pas clairement visible
+ABSOLUTELY FORBIDDEN:
+- "The slide presents..." - NO
+- "It is divided into..." - NO
+- "This illustrates..." - NO
+- "The diagram shows..." - NO
+- ANY description or interpretation - NO
+- ANY sentence you invented - NO
 
-FORMAT DE RÉPONSE (JSON):
+ONLY ALLOWED:
+- Direct quotes copied verbatim from the image
+- Text exactly as it appears on the page
+
+RESPONSE FORMAT (JSON):
 {
-  "diagram_type": "architecture_diagram|flowchart|table|slide|form|other",
-  "description": "Description factuelle en 2-8 phrases",
-  "key_entities": ["entité1", "entité2", ...],
+  "diagram_type": "slide|table|diagram|form|other",
+  "verbatim_extracts": [
+    "First exact text block copied from image",
+    "Second exact text block copied from image",
+    "Third exact text block copied from image"
+  ],
+  "key_entities": ["Entity1 as written", "Entity2 as written"],
+  "detected_language": "en|fr|de|es|other",
   "confidence": 0.0-1.0
 }
+
+REMEMBER: If you cannot extract verbatim text, return empty arrays.
+NEVER invent or paraphrase text.
 """
 
-VISION_SEMANTIC_USER_PROMPT = """Analyse cette page de document.
+VISION_SEMANTIC_USER_PROMPT = """EXTRACT all readable text from this document page.
 
-Décris le contenu visuel de manière factuelle :
-- Quel type de visuel (diagramme, tableau, schéma, slide, formulaire) ?
-- Quelles entités sont visibles (labels, noms, composants) ?
-- Quelles relations sont montrées (flèches, liens, hiérarchies) ?
+RULES:
+- Copy text EXACTLY as written (verbatim)
+- NO paraphrasing or describing
+- NO "The slide shows..." or "This illustrates..."
+- ONLY exact quotes from the image
 
-Réponds en JSON comme spécifié."""
+Return JSON with verbatim_extracts array containing exact text blocks."""
 
 
 class VisionSemanticReader:
@@ -266,18 +290,30 @@ class VisionSemanticReader:
             content = response.choices[0].message.content
             result = json.loads(content)
 
-            # Construire le texte sémantique
+            # v3.0: Support both formats (description OR verbatim_extracts)
+            verbatim_extracts = result.get("verbatim_extracts", [])
             description = result.get("description", "")
-            if not description.strip():
-                raise ValueError("Empty description from Vision")
+
+            # Prefer verbatim extracts (v3.0 extractive mode)
+            if verbatim_extracts:
+                # Join extracts as semantic text
+                semantic_text = "\n".join(verbatim_extracts)
+                exact_quotes = verbatim_extracts  # Extracts ARE the quotes
+            elif description.strip():
+                semantic_text = description
+                exact_quotes = result.get("exact_quotes", [])
+            else:
+                raise ValueError("Empty extraction from Vision (no description or verbatim_extracts)")
 
             return VisionSemanticResult(
                 page_no=page_no,
-                semantic_text=description,
+                semantic_text=semantic_text,
                 text_origin=TextOrigin.VISION_SEMANTIC,
                 diagram_type=result.get("diagram_type"),
                 confidence=result.get("confidence", 0.8),
                 key_entities=result.get("key_entities", []),
+                exact_quotes=exact_quotes,  # Fix 2026-01-26
+                detected_language=result.get("detected_language", "en"),  # Fix 2026-01-26
                 model=self.model,
                 prompt_version=PROMPT_VERSION,
                 image_hash=image_hash,

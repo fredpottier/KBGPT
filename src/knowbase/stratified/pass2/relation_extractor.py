@@ -202,35 +202,120 @@ class RelationExtractorV2:
                 index[info.concept_id].append(info)
         return index
 
+    # Nombre max de concepts par batch LLM (évite prompt trop long pour Qwen 14B)
+    BATCH_SIZE = 15
+
     def _extract_via_llm(
         self,
         concepts: List[Concept],
         informations: List[Information],
         concept_to_infos: Dict[str, List[Information]]
     ) -> List[ConceptRelation]:
-        """Extraction via LLM."""
+        """Extraction via LLM par batches de concepts."""
+        # Filtrer les concepts sans informations (inutiles pour les relations)
+        active_concepts = [c for c in concepts if concept_to_infos.get(c.concept_id)]
+        # Exclure le SINK
+        active_concepts = [c for c in active_concepts if c.role.value != "SINK"]
+
+        if not active_concepts:
+            logger.warning("[OSMOSE:Pass2] Aucun concept actif avec informations")
+            return self._extract_heuristic(concepts, informations, concept_to_infos)
+
+        logger.info(
+            f"[OSMOSE:Pass2] {len(active_concepts)} concepts actifs "
+            f"(sur {len(concepts)} total, excl. SINK et vides)"
+        )
+
+        # Découper en batches
+        all_relations: List[ConceptRelation] = []
+        n_batches = (len(active_concepts) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
+
+        for batch_idx in range(n_batches):
+            start = batch_idx * self.BATCH_SIZE
+            end = min(start + self.BATCH_SIZE, len(active_concepts))
+            batch_concepts = active_concepts[start:end]
+
+            # Inclure aussi les concepts hors-batch comme cibles potentielles
+            # (on ne les détaille pas, juste leurs noms)
+            other_concepts = [c for c in active_concepts if c not in batch_concepts]
+
+            relations = self._extract_batch_via_llm(
+                batch_concepts, other_concepts, informations, concept_to_infos
+            )
+            all_relations.extend(relations)
+
+            logger.info(
+                f"[OSMOSE:Pass2] Batch {batch_idx + 1}/{n_batches}: "
+                f"{len(relations)} relations extraites"
+            )
+
+        return all_relations
+
+    def _extract_batch_via_llm(
+        self,
+        batch_concepts: List[Concept],
+        other_concepts: List[Concept],
+        informations: List[Information],
+        concept_to_infos: Dict[str, List[Information]]
+    ) -> List[ConceptRelation]:
+        """Extrait les relations pour un batch de concepts."""
         prompt_config = self.prompts.get("relation_extraction", {})
         system_prompt = prompt_config.get("system", self._default_system_prompt())
-        user_template = prompt_config.get("user", self._default_user_prompt())
 
-        # Formater les données pour le prompt
-        concepts_text = self._format_concepts_for_prompt(concepts, concept_to_infos)
+        # Formater les concepts du batch (détaillés)
+        concepts_text = self._format_concepts_for_prompt(batch_concepts, concept_to_infos)
 
-        user_prompt = user_template.format(
-            concepts=concepts_text,
-            relation_types=", ".join(VALID_RELATION_TYPES)
-        )
+        # Ajouter les autres concepts comme cibles possibles (noms seulement)
+        if other_concepts:
+            other_names = "\n".join(
+                f"  [{c.concept_id}] {c.name}" for c in other_concepts
+            )
+            concepts_text += f"\n\nOTHER CONCEPTS (available as relation targets):\n{other_names}\n"
+
+        user_prompt = f"""Identify the semantic RELATIONS between these concepts.
+
+DETAILED CONCEPTS (with informations):
+{concepts_text}
+
+VALID RELATION TYPES: {", ".join(VALID_RELATION_TYPES)}
+
+RULES:
+- Only create relations with clear evidence from the informations
+- Maximum 3 relations per source concept
+- Source MUST be one of the detailed concepts above
+- Target can be any concept (detailed or other)
+- Include a brief justification for each relation
+
+Reply ONLY with this JSON:
+```json
+{{
+  "relations": [
+    {{
+      "source_concept_id": "concept_xxx",
+      "target_concept_id": "concept_yyy",
+      "relation_type": "REQUIRES",
+      "confidence": 0.85,
+      "justification": "Why this relation exists"
+    }}
+  ]
+}}
+```"""
 
         try:
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                max_tokens=3000
+                max_tokens=2000
             )
-            return self._parse_relations_response(response, concepts, informations)
+
+            if not response or not response.strip():
+                logger.warning("[OSMOSE:Pass2] Réponse LLM vide pour ce batch")
+                return []
+
+            return self._parse_relations_response(response, batch_concepts + other_concepts, informations)
         except Exception as e:
-            logger.warning(f"[OSMOSE:Pass2] Extraction LLM échouée: {e}")
-            return self._extract_heuristic(concepts, informations, concept_to_infos)
+            logger.warning(f"[OSMOSE:Pass2] Extraction LLM échouée pour batch: {e}")
+            return []
 
     def _extract_heuristic(
         self,
@@ -411,24 +496,26 @@ class RelationExtractorV2:
             return []
 
     def _default_system_prompt(self) -> str:
-        return """Tu es un expert en extraction de relations pour OSMOSE.
-Tu dois identifier les RELATIONS entre concepts à partir de leurs informations associées.
+        return """Expert relation extraction for OSMOSE knowledge system.
+Identify semantic RELATIONS between concepts based on their associated informations.
 
-TYPES DE RELATIONS VALIDES:
-- REQUIRES: A nécessite B pour fonctionner
-- ENABLES: A permet ou rend possible B
-- CONSTRAINS: A limite ou contraint B
-- DEPENDS_ON: A dépend de B
-- RELATED_TO: A est lié à B (relation générique)
-- SPECIALIZES: A est une spécialisation/type de B
-- PART_OF: A fait partie de B
-- CONTRADICTS: A contredit B
+VALID RELATION TYPES:
+- REQUIRES: A needs B to function
+- ENABLES: A makes B possible
+- CONSTRAINS: A limits or restricts B
+- DEPENDS_ON: A depends on B
+- RELATED_TO: A is related to B (generic)
+- SPECIALIZES: A is a specialization/type of B
+- PART_OF: A is a component of B
+- CONTRADICTS: A contradicts B
 
-RÈGLES:
-- Chaque relation doit être justifiée par au moins une Information
-- Confiance >= 0.7 pour les relations explicites
-- Confiance 0.5-0.7 pour les relations implicites
-- Maximum 3 relations par concept source"""
+RULES:
+- Each relation must be justified by information content
+- Confidence >= 0.7 for explicit relations
+- Confidence 0.5-0.7 for implicit relations
+- Maximum 3 relations per source concept
+- Prefer specific relation types over RELATED_TO
+- Output ONLY valid JSON"""
 
     def _default_user_prompt(self) -> str:
         return """Identifie les relations entre ces concepts.

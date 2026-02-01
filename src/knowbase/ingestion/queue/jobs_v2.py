@@ -146,7 +146,7 @@ async def _run_extraction_v2(
 
     # Creer configuration pipeline
     config = PipelineConfig(
-        enable_vision=True,
+        enable_vision=vision_config.get("enabled", True),
         enable_gating=True,
         vision_required_threshold=gating_thresholds.get("vision_required", 0.60),
         vision_recommended_threshold=gating_thresholds.get("vision_recommended", 0.40),

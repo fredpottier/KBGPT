@@ -119,24 +119,34 @@ class PointerValidator:
     # Seuil lexical minimal
     LEXICAL_THRESHOLD = 1.5
 
-    # Marqueurs prescriptifs (EN + FR)
+    # Marqueurs prescriptifs (EN + FR) - FIX 2026-01-28: Ajout formes verbales manquantes
     PRESCRIPTIVE_MARKERS = [
-        # Anglais
-        "must", "shall", "required", "mandatory", "obligatory",
-        "need to", "have to", "is required", "are required",
-        # Français
+        # Anglais - Modaux stricts
+        "must", "shall", "mandatory", "obligatory",
+        # Anglais - Formes de "require" (toutes conjugaisons)
+        "require", "requires", "required", "requiring",
+        "need to", "needs to", "have to", "has to",
+        "is required", "are required",
+        # Anglais - Impératifs et restrictions
+        "ensure", "ensures", "always", "never", "only",
+        "prohibited", "forbidden", "not allowed", "not permitted",
+        # Anglais - Formes passives
+        "is mandatory", "is obligatory", "is prohibited",
+        # Français - Formes de "requérir/exiger"
         "doit", "doivent", "obligatoire", "nécessaire", "impératif",
-        "requis", "exigé", "imposé",
+        "requis", "requiert", "requièrent", "exige", "exigent", "exigé",
+        "imposé", "impose", "imposent", "interdit", "toujours", "jamais",
     ]
 
-    # Patterns de valeur par kind
+    # Patterns de valeur par kind - FIX 2026-01-27: Patterns plus flexibles
     VALUE_PATTERNS: Dict[str, str] = {
         "version": r"\d+(\.\d+)+",
         "percentage": r"\d+\s*%",
         "size": r"\d+\s*(GB|TB|MB|TiB|GiB|KB|KiB)",
         "number": r"\d+",
         "boolean": r"\b(true|false|yes|no|enabled|disabled|on|off)\b",
-        "duration": r"\d+\s*(ms|s|sec|min|hour|h|day|d|week|month|year)",
+        # FIX: Accepter "30-day", "30 day", "30day", "30 days"
+        "duration": r"\d+[-\s]*(ms|s|sec|second|min|minute|hour|h|day|d|week|month|year)s?",
     }
 
     # Tokens courts à ignorer dans le scoring lexical
@@ -178,7 +188,8 @@ class PointerValidator:
             concept_label: Label du concept (ex: "TLS minimum version")
             concept_type: Type du concept (PRESCRIPTIVE, DEFINITIONAL, etc.)
             unit_text: Texte verbatim de l'unité pointée
-            value_kind: Kind de valeur attendue (version, percentage, etc.)
+            value_kind: Kind de valeur attendue (IGNORÉ depuis FIX 2026-01-27)
+                        La détection value_kind est maintenant automatique
 
         Returns:
             ValidationResult avec statut, score et détails
@@ -193,8 +204,11 @@ class PointerValidator:
 
         # =====================================================================
         # NIVEAU 1: Support Lexical (scoring pondéré)
+        # FIX 2026-01-27: Ne plus utiliser value_kind du LLM, détecter auto
         # =====================================================================
-        score = self._compute_lexical_score(concept_label, unit_text, value_kind)
+        # Détecter automatiquement si l'unité contient une valeur
+        detected_value_kind = self._detect_value_kind(unit_text)
+        score = self._compute_lexical_score(concept_label, unit_text, detected_value_kind)
 
         if score < self.lexical_threshold:
             return ValidationResult(
@@ -217,16 +231,13 @@ class PointerValidator:
                 )
 
         # =====================================================================
-        # NIVEAU 3: Value Patterns
+        # NIVEAU 3: Value Patterns - SUPPRIMÉ (FIX 2026-01-27)
+        # Le LLM assignait incorrectement value_kind dans 55% des cas
+        # La détection est maintenant automatique et utilisée pour le scoring
         # =====================================================================
-        if value_kind:
-            if not self._check_value_pattern(value_kind, unit_text):
-                return ValidationResult(
-                    status=ValidationStatus.ABSTAIN,
-                    score=score,
-                    reason=AbstainReason.VALUE_PATTERN_MISMATCH,
-                    details=f"Expected {value_kind} pattern not found in unit",
-                )
+        # Note: On ne rejette plus sur value_mismatch car:
+        # 1. Le LLM n'est plus censé fournir value_kind
+        # 2. La détection auto est utilisée uniquement pour le score bonus
 
         # =====================================================================
         # RÉSULTAT
@@ -244,6 +255,18 @@ class PointerValidator:
             score=score,
             details=f"Validated with lexical score {score:.2f}",
         )
+
+    def _detect_value_kind(self, text: str) -> Optional[str]:
+        """
+        Détecte automatiquement le type de valeur dans le texte.
+
+        FIX 2026-01-27: Remplace la confiance au LLM pour value_kind.
+        """
+        # Ordre de priorité: du plus spécifique au moins spécifique
+        for kind in ["version", "percentage", "size", "duration", "boolean"]:
+            if self._check_value_pattern(kind, text):
+                return kind
+        return None
 
     def validate_batch(
         self,
@@ -271,7 +294,8 @@ class PointerValidator:
             concept_type = concept.get("type", "FACTUAL")
             docitem_id = concept.get("docitem_id", "")
             unit_id = concept.get("unit_id", "")
-            value_kind = concept.get("value_kind")
+            # FIX 2026-01-27: Ignorer value_kind du LLM (55% d'erreurs)
+            # value_kind = concept.get("value_kind")  # SUPPRIMÉ
 
             # Retrouver le texte de l'unité
             unit_text = lookup_unit_text(unit_index, docitem_id, unit_id)
@@ -287,12 +311,16 @@ class PointerValidator:
                 stats.abstain_invalid_unit += 1
                 continue
 
-            # Valider
-            result = self.validate(label, concept_type, unit_text, value_kind)
+            # Valider - sans value_kind (détection auto)
+            result = self.validate(label, concept_type, unit_text, value_kind=None)
 
             if result.status == ValidationStatus.VALID:
                 # Ajouter le texte verbatim au concept
                 concept["exact_quote"] = unit_text
+                # FIX: Détecter et stocker le value_kind automatiquement
+                detected_kind = self._detect_value_kind(unit_text)
+                if detected_kind:
+                    concept["value_kind"] = detected_kind
                 valid.append(concept)
                 stats.valid += 1
 
@@ -301,6 +329,10 @@ class PointerValidator:
                 concept["type"] = result.new_type
                 concept["exact_quote"] = unit_text
                 concept["_downgraded_from"] = concept_type
+                # FIX: Détecter value_kind aussi pour les downgraded
+                detected_kind = self._detect_value_kind(unit_text)
+                if detected_kind:
+                    concept["value_kind"] = detected_kind
                 valid.append(concept)
                 stats.downgraded += 1
 
@@ -309,6 +341,7 @@ class PointerValidator:
                 stats.abstained += 1
                 if result.reason == AbstainReason.NO_LEXICAL_SUPPORT:
                     stats.abstain_no_lexical += 1
+                # FIX: value_mismatch ne devrait plus arriver
                 elif result.reason == AbstainReason.VALUE_PATTERN_MISMATCH:
                     stats.abstain_value_mismatch += 1
                 elif result.reason == AbstainReason.EMPTY_UNIT:

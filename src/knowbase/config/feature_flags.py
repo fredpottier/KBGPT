@@ -248,6 +248,33 @@ def get_hybrid_anchor_config(
     return None
 
 
+def get_stratified_v2_config(
+    config_name: str,
+    tenant_id: str = "default"
+) -> Any:
+    """
+    Obtient une configuration du Stratified Pipeline V2.
+
+    Args:
+        config_name: Nom de la config (ex: "strict_promotion", "promotion_threshold")
+        tenant_id: ID tenant pour overrides
+
+    Returns:
+        Valeur de configuration (bool, float, dict, etc.)
+    """
+    flags = _load_feature_flags()
+    flags = _get_environment_overrides(flags)
+    flags = _get_tenant_overrides(flags, tenant_id)
+
+    # Chercher dans stratified_pipeline_v2
+    stratified = flags.get("stratified_pipeline_v2", {})
+
+    if config_name in stratified:
+        return stratified[config_name]
+
+    return None
+
+
 def get_feature_flags(tenant_id: str = "default") -> Dict[str, Any]:
     """
     Retourne tous les feature flags avec overrides appliques.

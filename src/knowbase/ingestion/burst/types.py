@@ -287,9 +287,14 @@ class BurstConfig:
     # vLLM Configuration pour AWQ
     vllm_quantization: str = "awq"  # awq standard (awq_marlin crash sur vLLM v0.6.6)
     vllm_dtype: str = "half"  # FP16 pour inférence AWQ
-    vllm_gpu_memory_utilization: float = 0.70  # 14B AWQ ~10GB réel, réserve 33GB, laisse ~15GB pour TEI
-    vllm_max_model_len: int = 8192  # Context window raisonnable
-    vllm_max_num_seqs: int = 32  # Limite concurrence pour stabilité
+    vllm_gpu_memory_utilization: float = 0.85  # Maximise le cache KV (TEI utilise peu de VRAM)
+    vllm_max_model_len: int = 16384  # 16K context — Qwen 2.5 14B supporte 32K natif
+    vllm_max_num_seqs: int = 64  # Augmenté pour meilleur batching
+
+    # vLLM Optimisations (2026-01-27)
+    vllm_enable_prefix_caching: bool = True  # Réutilise le cache KV du prompt système
+    vllm_enable_chunked_prefill: bool = True  # Traitement par morceaux des longs prompts
+    vllm_max_num_batched_tokens: int = 8192  # Tokens max par batch (relevé pour 16K context)
 
     # Ports
     vllm_port: int = 8000
@@ -334,6 +339,9 @@ class BurstConfig:
             "vllm_gpu_memory_utilization": self.vllm_gpu_memory_utilization,
             "vllm_max_model_len": self.vllm_max_model_len,
             "vllm_max_num_seqs": self.vllm_max_num_seqs,
+            "vllm_enable_prefix_caching": self.vllm_enable_prefix_caching,
+            "vllm_enable_chunked_prefill": self.vllm_enable_chunked_prefill,
+            "vllm_max_num_batched_tokens": self.vllm_max_num_batched_tokens,
             "vllm_port": self.vllm_port,
             "embeddings_port": self.embeddings_port,
             "instance_boot_timeout": self.instance_boot_timeout,
@@ -378,10 +386,15 @@ class BurstConfig:
             vllm_quantization=os.getenv("BURST_VLLM_QUANTIZATION", "awq"),
             vllm_dtype=os.getenv("BURST_VLLM_DTYPE", "half"),
             vllm_gpu_memory_utilization=float(
-                os.getenv("BURST_VLLM_GPU_MEMORY_UTILIZATION", "0.70")
+                os.getenv("BURST_VLLM_GPU_MEMORY_UTILIZATION", "0.85")
             ),
-            vllm_max_model_len=int(os.getenv("BURST_VLLM_MAX_MODEL_LEN", "8192")),
-            vllm_max_num_seqs=int(os.getenv("BURST_VLLM_MAX_NUM_SEQS", "32")),
+            vllm_max_model_len=int(os.getenv("BURST_VLLM_MAX_MODEL_LEN", "16384")),
+            vllm_max_num_seqs=int(os.getenv("BURST_VLLM_MAX_NUM_SEQS", "64")),
+
+            # vLLM Optimisations (2026-01-27)
+            vllm_enable_prefix_caching=os.getenv("BURST_VLLM_ENABLE_PREFIX_CACHING", "true").lower() == "true",
+            vllm_enable_chunked_prefill=os.getenv("BURST_VLLM_ENABLE_CHUNKED_PREFILL", "true").lower() == "true",
+            vllm_max_num_batched_tokens=int(os.getenv("BURST_VLLM_MAX_NUM_BATCHED_TOKENS", "8192")),
 
             # Ports
             vllm_port=int(os.getenv("BURST_VLLM_PORT", "8000")),

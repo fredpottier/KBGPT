@@ -13,18 +13,30 @@ document_analysis:
     You are a document analysis expert for OSMOSE.
     Analyze the document and determine:
 
-    1. Its main SUBJECT (1 concise sentence summary)
+    1. Its main SUBJECT (1 concise sentence that captures the document's INTENT,
+       not just what it describes, but what it seeks to establish, prove, or delimit)
     2. Its dependency STRUCTURE:
        - CENTRAL: Document depends on a central context (e.g., product guide, specific technical documentation)
        - TRANSVERSAL: Independent reference applicable across contexts (e.g., GDPR regulation, ISO standard)
        - CONTEXTUAL: Document combines multiple contexts or is mixed in nature
-    3. Its major THEMES (5-8 maximum, not more)
+    3. Its major THEMES (7-12, adaptive to document complexity)
     4. The document LANGUAGE (fr, en, de)
 
-    CRITICAL RULES:
-    - Be FRUGAL: maximum 8 themes (fewer is better)
+    CRITICAL RULES FOR THEMES:
+    - ADAPTIVE COUNT: Use 7-12 themes depending on document complexity.
+      A document with many distinct top-level sections (chapters) should have MORE themes.
+      Each major chapter or agenda item deserves its own theme.
+    - STRUCTURAL SIGNAL: The Table of Contents / Agenda is the PRIMARY source for themes.
+      Every top-level section (H1/H2) should map to at least one theme.
+    - DO NOT MERGE distinct operational domains into one theme
+      (e.g., "Security Operations" must NOT absorb "Patch Management" or "Disaster Recovery")
+    - Include themes for LIFECYCLE topics (backup, patching, monitoring) not just static descriptions
+    - Include themes for BOUNDARIES (responsibilities, limitations, what is NOT covered)
     - Subject must be 1 sentence, not a paragraph
     - Structure justification must be brief but precise
+    - ⚠️ LANGUAGE DETECTION: Analyze the document content to determine the language
+      (not the prompt language!). If content has "the", "is", "are" → "en".
+      If content has "le", "la", "les" → "fr". If content has "der", "die", "das" → "de".
     - ⚠️ THEMES MUST BE IN THE DOCUMENT'S LANGUAGE (if document is English, themes in English)
 
   user: |
@@ -71,13 +83,14 @@ concept_identification:
 
     ⚠️ CRITICAL RULE - LEXICAL TRIGGERS (C1):
     Each concept MUST have 2-4 "lexical_triggers":
-    - Tokens or expressions that ACTUALLY APPEAR in the document
-    - No paraphrases or invented synonyms
-    - These triggers are used to find the concept in the text
+    - Tokens or expressions that ACTUALLY APPEAR VERBATIM in the document
+    - MUST be in the SAME LANGUAGE as the document content
+    - Copy exact tokens from the document (no translation, no paraphrasing)
+    - These triggers are used for keyword matching to find the concept in the text
 
     CONCEPT NAMING RULES:
     - Use 2-5 descriptive words
-    - Use the DOCUMENT'S LANGUAGE for concept names
+    - Use the DOCUMENT'S LANGUAGE for concept names AND triggers
     - Be SPECIFIC, not generic
     - Include technical terms, product names, specific features
 
@@ -118,7 +131,8 @@ concept_identification:
     RULES:
     - Extract between 20 and {max_concepts} concepts (aim for {max_concepts})
     - Each concept MUST have 2-4 lexical_triggers (tokens present in the text)
-    - Concept names in the DOCUMENT'S LANGUAGE ({language})
+    - Concept names AND lexical_triggers in the DOCUMENT'S LANGUAGE ({language})
+    - Triggers MUST be copied verbatim from the document text (no translation!)
     - Use all 3 role levels proportionally
     - Be SPECIFIC: "FWaaS network security" not just "security"
 
@@ -380,10 +394,85 @@ pointer_batch_extraction:
     ```
 
 # ============================================================================
-# PHASE 1.2b: Concept Refinement (Iterative - V2.2)
+# PHASE 1.2b: Concept Identification BY THEME (Batch Mode)
 # ============================================================================
-# Triggered when too many assertions are NO_CONCEPT_MATCH
-# Analyzes unlinked assertions to identify missing concepts
+# Extraction par batch thématique pour éviter troncature JSON
+# Chaque thème = 1 appel LLM avec quota limité (~10-12 concepts)
+# Ref: doc/ongoing/PLAN_CONCEPT_BATCH_THEMATIQUE.md
+
+concept_identification_by_theme:
+  system: |
+    Expert concept extraction for OSMOSE knowledge system.
+
+    You are extracting concepts for ONE SPECIFIC THEME only.
+
+    CONCEPT NAMING RULES:
+    - Use 2-5 descriptive words
+    - Use the DOCUMENT'S LANGUAGE for concept names
+    - Be SPECIFIC, not generic (e.g., "TLS encryption requirement" not "security")
+
+    ⚠️ CRITICAL RULE - LEXICAL TRIGGERS (C1):
+    Each concept MUST have exactly 3 "lexical_triggers" that:
+    1. ACTUALLY APPEAR VERBATIM in the document content (SAME LANGUAGE as document!)
+    2. Are NOT in the FORBIDDEN_TRIGGERS list (too frequent)
+    3. Are COPIED from the document text (NO translation, NO paraphrasing)
+    4. Include at least ONE discriminant trigger:
+       - Technical acronym (TLS, MFA, KMS, BYOK, HSM, SLA, RTO, RPO, etc.)
+       - Product name (SAProuter, Fiori, S/4HANA, BTP, etc.)
+       - Specific term (whitelisting, failover, provisioning, etc.)
+       - OR a composite trigger in snake_case (e.g., "sap_cloud_erp_private")
+
+    ⚠️ COMPOSITE TRIGGERS:
+    If the concept name is a multi-word proper noun or product name, include ONE
+    trigger as a composite snake_case token formed from the key words.
+    Example: concept "SAP Cloud ERP Private" → trigger "sap_cloud_erp_private"
+
+    ⚠️ FORBIDDEN: Do NOT use theme words alone as triggers.
+    Theme "{theme_name}" words are too generic. Find SPECIFIC terms.
+
+    ROLES:
+    - CENTRAL: Core mechanism/product of this theme (1-2 per theme)
+    - STANDARD: Important related concepts (majority)
+    - CONTEXTUAL: Supporting technical context
+
+    FORMAT: Compact JSON only, NO explanatory text.
+
+  user: |
+    Extract concepts for the theme "{theme_name}" from this document.
+
+    DOCUMENT SUBJECT: {subject}
+    THEME TO EXTRACT: {theme_name}
+    LANGUAGE: {language}
+    MAX CONCEPTS FOR THIS THEME: {max_concepts_per_theme}
+
+    ⚠️ FORBIDDEN TRIGGERS (too frequent in document - DO NOT USE):
+    {forbidden_triggers}
+
+    CONTENT RELEVANT TO THIS THEME:
+    {theme_content}
+
+    Reply ONLY with this JSON:
+    ```json
+    {{
+      "concepts": [
+        {{
+          "name": "Specific name (2-5 words)",
+          "role": "CENTRAL|STANDARD|CONTEXTUAL",
+          "lexical_triggers": ["specific_term", "acronym", "composite_snake_case"]
+        }}
+      ],
+      "refused_terms": [
+        {{"term": "Term", "reason": "NO_COMPLIANT_TRIGGERS"}}
+      ]
+    }}
+    ```
+
+    IMPORTANT: If you cannot find 3 compliant triggers for a concept, put it in
+    refused_terms with reason "NO_COMPLIANT_TRIGGERS" instead of outputting it.
+
+# ============================================================================
+# PHASE 1.2c: Concept Refinement (Iterative - V2.2)
+# ============================================================================
 
 concept_refinement:
   # V2.2: English prompts
@@ -408,7 +497,8 @@ concept_refinement:
 
     ⚠️ LEXICAL TRIGGERS (C1):
     Each new concept MUST have 2-4 lexical_triggers:
-    - Tokens that APPEAR in the provided assertions
+    - Tokens that APPEAR VERBATIM in the provided assertions
+    - SAME LANGUAGE as the assertions (no translation!)
     - No paraphrases or invented synonyms
 
     EXAMPLES:

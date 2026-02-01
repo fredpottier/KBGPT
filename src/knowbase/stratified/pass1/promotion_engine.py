@@ -154,8 +154,8 @@ META_REJECT_PATTERNS = META_REJECT_PATTERNS_FALLBACK
 
 # Patterns de fragments (non-assertions)
 FRAGMENT_PATTERNS = [
-    # Glossaire / Définitions acronymes seuls
-    r"^[A-Z][A-Za-z0-9\s\-]{0,30}\.$",  # "VPC Peering." - nom seul avec point
+    # Glossaire / Définitions acronymes seuls (max 20 chars — ADR 2026-01-30)
+    r"^[A-Z][A-Za-z0-9\s\-]{0,18}\.$",  # "VPC Peering." - label court avec point (max ~20 chars)
     r"^[A-Z][A-Za-z0-9\s\-]{0,20}$",  # "ISO 27001" - nom seul sans ponctuation
     r"^[A-Z]{2,6}$",  # Acronyme seul "VPC"
     # Titres / Headers
@@ -166,19 +166,12 @@ FRAGMENT_PATTERNS = [
 ]
 _COMPILED_FRAGMENT_PATTERNS = [re.compile(p, re.IGNORECASE) for p in FRAGMENT_PATTERNS]
 
-# Verbes indicateurs d'assertion (EN + FR) - au moins un doit être présent
-ASSERTION_VERB_PATTERNS = [
-    # Anglais
-    r"\b(is|are|was|were|has|have|had|will|shall|must|should|can|may|might|could|would)\b",
-    r"\b(provides?|requires?|enables?|allows?|supports?|includes?|defines?|describes?)\b",
-    r"\b(ensures?|maintains?|manages?|controls?|configures?|implements?|integrates?)\b",
-    r"\b(encrypts?|protects?|secures?|validates?|verifies?|monitors?)\b",
-    # Français
-    r"\b(est|sont|a|ont|sera|seront|doit|doivent|peut|peuvent)\b",
-    r"\b(fournit|requiert|permet|supporte|inclut|d[eé]finit|d[eé]crit)\b",
-    r"\b(assure|maintient|g[eè]re|contr[oô]le|configure|impl[eé]mente)\b",
-]
-_COMPILED_VERB_PATTERNS = [re.compile(p, re.IGNORECASE) for p in ASSERTION_VERB_PATTERNS]
+# NOTE ADR 2026-01-30 (Audit Entonnoir):
+# La vérification de verbes (fragment:no_verb) a été DÉSACTIVÉE.
+# Raison: 129/213 rejections (60.6%) étaient des fragments "no_verb" alors que
+# les textes techniques SAP (structures nominales, listes de capacités) sont
+# factuellement valides même sans verbe conjugué.
+# Philosophie: "factuellement permissif > linguistiquement exigeant"
 
 
 def is_fragment(text: str) -> bool:
@@ -189,7 +182,12 @@ def is_fragment(text: str) -> bool:
     - Un acronyme seul
     - Un titre/header
     - Une liste à puce incomplète
-    - Un texte sans verbe (pas de prédicat)
+    - Un texte trop court pour porter un fait
+
+    ADR 2026-01-30 (Audit Entonnoir):
+    - fragment:no_verb DÉSACTIVÉ — les structures nominales techniques sont
+      factuellement valides même sans verbe conjugué.
+    - Seuls les checks structurels (longueur, mots, patterns explicites) restent.
 
     Returns:
         True si c'est un fragment à rejeter
@@ -205,16 +203,14 @@ def is_fragment(text: str) -> bool:
     if len(words) < 3:
         return True
 
-    # Match pattern fragment explicite
+    # Match pattern fragment explicite (acronymes seuls, titres, numéros)
     for pattern in _COMPILED_FRAGMENT_PATTERNS:
         if pattern.match(text):
             return True
 
-    # Pas de verbe = pas d'assertion (sauf définitions "X = Y")
-    if " = " not in text and ": " not in text:
-        has_verb = any(p.search(text) for p in _COMPILED_VERB_PATTERNS)
-        if not has_verb:
-            return True
+    # ADR 2026-01-30: no_verb check DÉSACTIVÉ
+    # Les textes techniques (structures nominales, listes de capacités)
+    # passent maintenant — la valeur factuelle prime sur la forme linguistique.
 
     return False
 

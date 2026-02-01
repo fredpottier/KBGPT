@@ -1113,6 +1113,66 @@ async def cancel_batch(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ResetResponse(BaseModel):
+    """Réponse du reset forcé."""
+    success: bool
+    message: str
+    previous_batch_id: Optional[str] = None
+    previous_status: Optional[str] = None
+
+
+@router.post(
+    "/reset",
+    response_model=ResetResponse,
+    summary="Reset forcé de l'état burst",
+    description="""
+    Force le reset de l'état de l'orchestrator burst.
+
+    **Utilisation:**
+    - Débloquer un état zombie (instance EC2 perdue, état incohérent)
+    - Revenir à l'étape 1 "Préparer" sans redémarrer l'application
+
+    **Attention:** Cette action ne termine PAS les instances EC2 actives.
+    Utilisez d'abord /cancel si une instance est encore active.
+    """
+)
+async def reset_burst_state(
+    admin: dict = Depends(require_admin),
+    tenant_id: str = Depends(get_tenant_id),
+) -> ResetResponse:
+    """Force le reset de l'état burst."""
+    try:
+        from knowbase.ingestion.burst import get_burst_orchestrator, reset_burst_orchestrator
+
+        orchestrator = get_burst_orchestrator()
+
+        # Capturer l'état précédent pour le log
+        previous_batch_id = None
+        previous_status = None
+        if orchestrator.state:
+            previous_batch_id = orchestrator.state.batch_id
+            previous_status = orchestrator.state.status.value
+
+        # Reset le singleton
+        reset_burst_orchestrator()
+
+        logger.warning(
+            f"[BURST] Reset forcé de l'état burst. "
+            f"Précédent: batch={previous_batch_id}, status={previous_status}"
+        )
+
+        return ResetResponse(
+            success=True,
+            message="État burst réinitialisé. Vous pouvez maintenant préparer un nouveau batch.",
+            previous_batch_id=previous_batch_id,
+            previous_status=previous_status
+        )
+
+    except Exception as e:
+        logger.error(f"Erreur reset_burst_state: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get(
     "/events",
     response_model=EventsListResponse,

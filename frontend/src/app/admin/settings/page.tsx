@@ -94,6 +94,7 @@ interface PurgeResponse {
     redis: PurgeResult
     postgres: PurgeResult
     files: PurgeResult
+    schema_recreate?: PurgeResult
   }
 }
 
@@ -382,6 +383,7 @@ export default function AdminSettingsPage() {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [purgeResults, setPurgeResults] = useState<PurgeResponse | null>(null)
   const [purgeSchema, setPurgeSchema] = useState(false)
+  const [recreateSchema, setRecreateSchema] = useState(false)
 
   // EC2 Burst Status Query
   const { data: burstStatus, refetch: refetchBurst } = useQuery<BurstStatus>({
@@ -478,11 +480,11 @@ export default function AdminSettingsPage() {
 
   // Purge mutation
   const purgeMutation = useMutation({
-    mutationFn: async (options: { purge_schema: boolean }) => {
+    mutationFn: async (options: { purge_schema: boolean; recreate_schema: boolean }) => {
       const token = localStorage.getItem('auth_token')
       const response = await axios.post<PurgeResponse>(
         '/api/admin/purge-data',
-        { purge_schema: options.purge_schema },
+        { purge_schema: options.purge_schema, recreate_schema: options.recreate_schema },
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -530,9 +532,10 @@ export default function AdminSettingsPage() {
 
   const handlePurgeConfirm = () => {
     onClose()
-    purgeMutation.mutate({ purge_schema: purgeSchema })
-    // Reset option for next time
+    purgeMutation.mutate({ purge_schema: purgeSchema, recreate_schema: recreateSchema })
+    // Reset options for next time
     setPurgeSchema(false)
+    setRecreateSchema(false)
   }
 
   return (
@@ -1012,6 +1015,13 @@ export default function AdminSettingsPage() {
                       success={purgeResults.results.files?.success || false}
                       details={`${purgeResults.results.files?.files_deleted || 0} fichiers supprimes`}
                     />
+                    {purgeResults.results.schema_recreate && (
+                      <PurgeResultItem
+                        label="Schema Neo4j"
+                        success={purgeResults.results.schema_recreate.success}
+                        details={`${purgeResults.results.schema_recreate.constraints_created || 0} contraintes, ${purgeResults.results.schema_recreate.indexes_created || 0} index crees`}
+                      />
+                    )}
                   </VStack>
                 </Box>
               </MotionBox>
@@ -1070,21 +1080,48 @@ export default function AdminSettingsPage() {
                 p={4}
                 w="full"
               >
-                <Checkbox
-                  isChecked={purgeSchema}
-                  onChange={(e) => setPurgeSchema(e.target.checked)}
-                  colorScheme="orange"
-                  size="md"
-                >
-                  <VStack align="start" spacing={0} ml={1}>
-                    <Text color="text.primary" fontWeight="medium" fontSize="sm">
-                      Purger aussi le schema Neo4j
-                    </Text>
-                    <Text color="text.muted" fontSize="xs">
-                      Supprime les constraints/indexes (utile apres changements de schema)
-                    </Text>
-                  </VStack>
-                </Checkbox>
+                <VStack align="start" spacing={3}>
+                  <Checkbox
+                    isChecked={purgeSchema}
+                    onChange={(e) => {
+                      setPurgeSchema(e.target.checked)
+                      // Si on décoche purge schema, désactiver aussi recreate
+                      if (!e.target.checked) {
+                        setRecreateSchema(false)
+                      }
+                    }}
+                    colorScheme="orange"
+                    size="md"
+                  >
+                    <VStack align="start" spacing={0} ml={1}>
+                      <Text color="text.primary" fontWeight="medium" fontSize="sm">
+                        Purger aussi le schema Neo4j
+                      </Text>
+                      <Text color="text.muted" fontSize="xs">
+                        Supprime les constraints/indexes (utile apres changements de schema)
+                      </Text>
+                    </VStack>
+                  </Checkbox>
+
+                  {/* Option to recreate schema after purge */}
+                  <Checkbox
+                    isChecked={recreateSchema}
+                    onChange={(e) => setRecreateSchema(e.target.checked)}
+                    colorScheme="green"
+                    size="md"
+                    isDisabled={!purgeSchema}
+                    ml={6}
+                  >
+                    <VStack align="start" spacing={0} ml={1}>
+                      <Text color={purgeSchema ? "text.primary" : "text.muted"} fontWeight="medium" fontSize="sm">
+                        Recreer le schema apres purge
+                      </Text>
+                      <Text color="text.muted" fontSize="xs">
+                        Recreer les constraints/indexes (MVP V1 + Pipeline V2)
+                      </Text>
+                    </VStack>
+                  </Checkbox>
+                </VStack>
               </Box>
             </VStack>
           </ModalBody>

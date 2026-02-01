@@ -448,6 +448,28 @@ export default function BurstAdminPage() {
     onError: (error: Error) => { toast({ title: 'Erreur', description: error.message, status: 'error', duration: 3000 }) },
   })
 
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/api/burst/reset`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({})
+      })
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
+      return res.json()
+    },
+    onSuccess: (data) => {
+      toast({
+        title: 'État réinitialisé',
+        description: data.message,
+        status: 'success',
+        duration: 4000
+      })
+      queryClient.invalidateQueries({ queryKey: ['burst'] })
+    },
+    onError: (error: Error) => { toast({ title: 'Erreur', description: error.message, status: 'error', duration: 3000 }) },
+  })
+
   // Modal pour choix d'annulation
   const { isOpen: isCancelModalOpen, onOpen: openCancelModal, onClose: closeCancelModal } = useDisclosure()
 
@@ -585,6 +607,21 @@ export default function BurstAdminPage() {
           >
             Annuler
           </Button>
+          <Tooltip label="Force le reset de l'état (débloquer état zombie)" placement="top">
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<FiRefreshCw />}
+              onClick={() => resetMutation.mutate()}
+              isLoading={resetMutation.isPending}
+              borderColor="orange.600"
+              color="orange.400"
+              _hover={{ borderColor: 'orange.400', bg: 'orange.900', transform: 'translateY(-1px)' }}
+              transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
+            >
+              Reset
+            </Button>
+          </Tooltip>
         </HStack>
 
         {/* Right: Document Counters - pill style like pass2 */}
