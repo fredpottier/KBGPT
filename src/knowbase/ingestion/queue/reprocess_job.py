@@ -483,6 +483,28 @@ def reprocess_batch_job(
                         f"persisted: {persist_stats}"
                     )
 
+                    # 2b. Cross-reference Layer R <-> Neo4j Information
+                    _update_reprocess_state(current_phase="LAYER_R_BRIDGE")
+                    try:
+                        from knowbase.retrieval.layer_r_bridge import cross_reference_layer_r
+
+                        concepts_by_id = {c.concept_id: c.name for c in pass1_result.concepts}
+                        bridge_stats = cross_reference_layer_r(
+                            pass1_result=pass1_result,
+                            concepts_by_id=concepts_by_id,
+                            doc_id=doc_id,
+                            tenant_id=tenant_id,
+                            neo4j_driver=neo4j_client.driver,
+                        )
+                        logger.info(
+                            f"[OSMOSE:V2:Reprocess] Layer R Bridge: "
+                            f"{bridge_stats.qdrant_points_enriched} points enrichis, "
+                            f"{bridge_stats.neo4j_nodes_updated} nodes Neo4j, "
+                            f"{bridge_stats.orphan_informations} orphans"
+                        )
+                    except Exception as e:
+                        logger.warning(f"[OSMOSE:V2:Reprocess] Layer R Bridge failed (non-blocking): {e}")
+
                 # 3. Pass 2: Enrichissement
                 if run_pass2:
                     _update_reprocess_state(current_phase="PASS_2")

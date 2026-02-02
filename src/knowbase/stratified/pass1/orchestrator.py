@@ -14,6 +14,7 @@ Retourne: Pass1Result (contrat JSON canonique)
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import hashlib
@@ -366,6 +367,15 @@ class Pass1OrchestratorV2:
             f"{len(promotion_result.promotable)} promotables"
         )
 
+        # Filtre bruit documentaire (pré-linking)
+        filtered_assertions = self._filter_noise_assertions(promotion_result.promotable)
+        noise_count = len(promotion_result.promotable) - len(filtered_assertions)
+        if noise_count > 0:
+            logger.info(
+                f"[OSMOSE:Pass1:NoiseFilter] {noise_count} assertions bruit supprimées "
+                f"({len(filtered_assertions)} restantes)"
+            )
+
         # Pass 1.4: Injecter le contexte de localité (avant link_to_concepts)
         if chunk_to_docitem_map is None:
             chunk_to_docitem_map = build_chunk_to_docitem_mapping(chunks, docitems)
@@ -379,7 +389,7 @@ class Pass1OrchestratorV2:
 
         # Liaison sémantique aux concepts
         concept_links = self.assertion_extractor.link_to_concepts(
-            assertions=promotion_result.promotable,
+            assertions=filtered_assertions,
             concepts=concepts
         )
 
@@ -387,7 +397,7 @@ class Pass1OrchestratorV2:
         concept_links, rescued_count = self.assertion_extractor.rescue_sink_assertions(
             links=concept_links,
             concepts=concepts,
-            assertions=promotion_result.promotable,
+            assertions=filtered_assertions,
         )
         if rescued_count > 0:
             logger.info(f"[OSMOSE:Pass1:1.3] {rescued_count} assertions rescuées de SINK")
@@ -411,7 +421,7 @@ class Pass1OrchestratorV2:
         )
 
         resolved, failed = self.anchor_resolver.resolve_all(
-            assertions=promotion_result.promotable,
+            assertions=filtered_assertions,
             links=concept_links
         )
 
@@ -431,7 +441,8 @@ class Pass1OrchestratorV2:
                 text=assertion.text,
                 type=assertion.assertion_type,
                 confidence=assertion.confidence,
-                anchor=anchor
+                anchor=anchor,
+                source_chunk_id=assertion.chunk_id,
             )
             informations.append(info)
 
@@ -606,7 +617,8 @@ class Pass1OrchestratorV2:
                             text=assertion.text,
                             type=assertion.assertion_type,
                             confidence=assertion.confidence,
-                            anchor=anchor
+                            anchor=anchor,
+                            source_chunk_id=assertion.chunk_id,
                         )
                         informations.append(info)
                         resolved.append((assertion, anchor, concept_id))
@@ -786,6 +798,38 @@ class Pass1OrchestratorV2:
         )
 
         return result
+
+    # =========================================================================
+    # Filtre bruit documentaire (pré-linking)
+    # =========================================================================
+
+    # Patterns de bruit documentaire
+    _NOISE_PATTERNS = [
+        re.compile(r'©\s*\d{4}', re.IGNORECASE),                    # Copyright
+        re.compile(r'all rights reserved', re.IGNORECASE),           # Copyright
+        re.compile(r'confidential.*proprietary', re.IGNORECASE),     # Disclaimers
+        re.compile(r'SAP AND EXTERNAL PARTIES UNDER NDA', re.IGNORECASE),
+        re.compile(r'INTERNAL\s*\|', re.IGNORECASE),                 # Classification marks
+        re.compile(r'not a commitment.*promise.*legal', re.IGNORECASE),
+        re.compile(r'may not be disclosed without', re.IGNORECASE),
+        re.compile(r'for more information.*see\s', re.IGNORECASE),   # Renvois
+    ]
+    _MIN_ASSERTION_WORDS = 5  # Minimum 5 mots pour être une assertion valide
+
+    def _filter_noise_assertions(self, assertions: list) -> list:
+        """Filtre les assertions bruit avant linking."""
+        filtered = []
+        for a in assertions:
+            text = a.text.strip()
+            # Trop court
+            word_count = len(text.split())
+            if word_count < self._MIN_ASSERTION_WORDS:
+                continue
+            # Match un pattern de bruit
+            if any(p.search(text) for p in self._NOISE_PATTERNS):
+                continue
+            filtered.append(a)
+        return filtered
 
     def _create_sections_from_chunks(
         self,

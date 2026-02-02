@@ -292,6 +292,7 @@ class Pass1PersisterV2:
             i.type = $type,
             i.confidence = $confidence,
             i.docitem_id = $docitem_id,
+            i.source_chunk_id = $source_chunk_id,
             i.created_at = datetime()
         MERGE (c)-[:HAS_INFORMATION]->(i)
         MERGE (i)-[:ANCHORED_IN {span_start: $span_start, span_end: $span_end}]->(di)
@@ -306,6 +307,7 @@ class Pass1PersisterV2:
             "text": info.text,
             "type": info.type.value,
             "confidence": info.confidence,
+            "source_chunk_id": info.source_chunk_id,
             "span_start": info.anchor.span_start,
             "span_end": info.anchor.span_end,
         })

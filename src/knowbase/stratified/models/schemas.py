@@ -179,6 +179,7 @@ class Information(BaseModel):
     type: AssertionType
     confidence: float = Field(ge=0.0, le=1.0)
     anchor: Anchor
+    source_chunk_id: Optional[str] = None  # chunk_id d'origine (Pass 1.3)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 

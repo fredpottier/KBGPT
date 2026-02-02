@@ -219,6 +219,7 @@ def search_layer_r(
             "kind": hit.payload.get("kind"),
             "page_no": hit.payload.get("page_no"),
             "schema_version": hit.payload.get("schema_version"),
+            "anchored_informations": hit.payload.get("anchored_informations", []),
         }
         for hit in results
     ]

@@ -51,8 +51,8 @@ Parameters:
 
   VllmGpuMemoryUtilization:
     Type: String
-    Default: "0.85"
-    Description: Fraction mémoire GPU pour vLLM (0.0-1.0) - 0.85 maximise le cache KV
+    Default: "0.80"
+    Description: Fraction mémoire GPU pour vLLM (0.0-1.0) - 0.80 ≈ 18.4GB vLLM + ~4.6GB libre pour TEI float16
 
   VllmMaxModelLen:
     Type: Number
@@ -83,10 +83,10 @@ Parameters:
     Description: Nombre max de tokens par batch
 
   # === Configuration TEI (Text Embeddings Inference) ===
-  TeiMaxInputLength:
+  TeiPayloadLimit:
     Type: Number
-    Default: 512
-    Description: Tokens max par texte (512 tokens ≈ 1500 chars pour e5-large)
+    Default: 10000000
+    Description: Taille max payload HTTP en bytes (10 MB, évite 413 Payload Too Large)
 
   TeiMaxClientBatchSize:
     Type: Number
@@ -131,7 +131,7 @@ Parameters:
   AmiId:
     Type: String
     Default: "ami-099cbd44d5be7612b"
-    Description: AMI ID (Golden v7 - vLLM v0.6.6.post1 + TEI cpu-1.6, compatible Deep Learning AMI 2026)
+    Description: AMI ID (Golden v7 - vLLM v0.6.6.post1 + TEI 89-1.6 GPU, compatible Deep Learning AMI 2026)
 
   # === SSH ===
   KeyName:
@@ -311,7 +311,7 @@ Resources:
                 VLLM_ENABLE_PREFIX_CACHING="${VllmEnablePrefixCaching}"
                 VLLM_ENABLE_CHUNKED_PREFILL="${VllmEnableChunkedPrefill}"
                 VLLM_MAX_NUM_BATCHED_TOKENS="${VllmMaxNumBatchedTokens}"
-                TEI_MAX_INPUT_LENGTH="${TeiMaxInputLength}"
+                TEI_PAYLOAD_LIMIT="${TeiPayloadLimit}"
                 TEI_MAX_CLIENT_BATCH_SIZE="${TeiMaxClientBatchSize}"
                 TEI_MAX_BATCH_TOKENS="${TeiMaxBatchTokens}"
 
@@ -411,19 +411,20 @@ Resources:
                 TEI_MODEL_PATH="/models/intfloat--multilingual-e5-large"
                 docker rm -f embeddings 2>/dev/null || true
 
-                echo "Creating TEI container..."
-                echo "  max-input-length: $TEI_MAX_INPUT_LENGTH"
+                echo "Creating TEI container (GPU 89-1.6)..."
+                echo "  payload-limit: $TEI_PAYLOAD_LIMIT"
                 echo "  max-client-batch-size: $TEI_MAX_CLIENT_BATCH_SIZE"
                 echo "  max-batch-tokens: $TEI_MAX_BATCH_TOKENS"
 
-                docker run -d --restart unless-stopped \
+                docker run -d --restart unless-stopped --gpus all \
                     -p $EMB_PORT:80 --name embeddings \
                     -v $TEI_MODEL_PATH:/model:ro \
-                    ghcr.io/huggingface/text-embeddings-inference:cpu-1.6 \
+                    ghcr.io/huggingface/text-embeddings-inference:89-1.6 \
                     --model-id /model \
-                    --max-input-length $TEI_MAX_INPUT_LENGTH \
                     --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
                     --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
+                    --payload-limit $TEI_PAYLOAD_LIMIT \
+                    --dtype float16 \
                     --port 80
 
                 # Attendre que les containers soient prêts
@@ -600,7 +601,7 @@ Resources:
                 VLLM_ENABLE_PREFIX_CACHING="${VllmEnablePrefixCaching}"
                 VLLM_ENABLE_CHUNKED_PREFILL="${VllmEnableChunkedPrefill}"
                 VLLM_MAX_NUM_BATCHED_TOKENS="${VllmMaxNumBatchedTokens}"
-                TEI_MAX_INPUT_LENGTH="${TeiMaxInputLength}"
+                TEI_PAYLOAD_LIMIT="${TeiPayloadLimit}"
                 TEI_MAX_CLIENT_BATCH_SIZE="${TeiMaxClientBatchSize}"
                 TEI_MAX_BATCH_TOKENS="${TeiMaxBatchTokens}"
 
@@ -655,14 +656,15 @@ Resources:
                 # Recréer container TEI avec paramètres configurables
                 TEI_MODEL_PATH="/models/intfloat--multilingual-e5-large"
                 docker rm -f embeddings 2>/dev/null || true
-                docker run -d --restart unless-stopped \
+                docker run -d --restart unless-stopped --gpus all \
                     -p $EMB_PORT:80 --name embeddings \
                     -v $TEI_MODEL_PATH:/model:ro \
-                    ghcr.io/huggingface/text-embeddings-inference:cpu-1.6 \
+                    ghcr.io/huggingface/text-embeddings-inference:89-1.6 \
                     --model-id /model \
-                    --max-input-length $TEI_MAX_INPUT_LENGTH \
                     --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
                     --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
+                    --payload-limit $TEI_PAYLOAD_LIMIT \
+                    --dtype float16 \
                     --port 80
 
                 sleep 10
