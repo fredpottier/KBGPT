@@ -127,31 +127,56 @@ class PurgeService:
         return results
 
     async def _purge_qdrant(self) -> Dict:
-        """Purge collection Qdrant (supprime tous les points vectoriels)."""
+        """Purge collections Qdrant (knowbase + knowbase_chunks_v2 Layer R)."""
         logger.info("🔄 Purge Qdrant...")
 
         try:
             from knowbase.common.clients import get_qdrant_client, ensure_qdrant_collection, get_sentence_transformer
+            from knowbase.retrieval.qdrant_layer_r import (
+                COLLECTION_NAME as LAYER_R_COLLECTION,
+                VECTOR_SIZE as LAYER_R_VECTOR_SIZE,
+                DISTANCE as LAYER_R_DISTANCE,
+            )
+            from qdrant_client.models import VectorParams
+
             qdrant_client = get_qdrant_client()
+            total_points = 0
+            purged_collections = []
+
+            # --- 1. Collection principale (knowbase) ---
             collection_name = settings.qdrant_collection
+            try:
+                collection_info = qdrant_client.get_collection(collection_name)
+                total_points += collection_info.points_count
+                qdrant_client.delete_collection(collection_name)
+                vector_size = get_sentence_transformer().get_sentence_embedding_dimension() or 1024
+                ensure_qdrant_collection(collection_name, vector_size)
+                purged_collections.append(collection_name)
+                logger.info(f"✅ Collection '{collection_name}' purgée et recréée ({collection_info.points_count} points)")
+            except Exception as e:
+                logger.warning(f"⚠️ Collection '{collection_name}': {e}")
 
-            # Récupérer nombre de points avant purge
-            collection_info = qdrant_client.get_collection(collection_name)
-            points_count = collection_info.points_count
+            # --- 2. Collection Layer R (knowbase_chunks_v2) ---
+            try:
+                if qdrant_client.collection_exists(LAYER_R_COLLECTION):
+                    layer_r_info = qdrant_client.get_collection(LAYER_R_COLLECTION)
+                    total_points += layer_r_info.points_count
+                    qdrant_client.delete_collection(LAYER_R_COLLECTION)
+                    qdrant_client.create_collection(
+                        collection_name=LAYER_R_COLLECTION,
+                        vectors_config=VectorParams(size=LAYER_R_VECTOR_SIZE, distance=LAYER_R_DISTANCE),
+                    )
+                    purged_collections.append(LAYER_R_COLLECTION)
+                    logger.info(f"✅ Collection '{LAYER_R_COLLECTION}' purgée et recréée ({layer_r_info.points_count} points)")
+            except Exception as e:
+                logger.warning(f"⚠️ Collection '{LAYER_R_COLLECTION}': {e}")
 
-            # Supprimer tous les points de la collection
-            # Option 1: Supprimer et recréer (plus propre)
-            qdrant_client.delete_collection(collection_name)
-
-            # Recréer collection vide avec la bonne dimension
-            vector_size = get_sentence_transformer().get_sentence_embedding_dimension() or 1024
-            ensure_qdrant_collection(collection_name, vector_size)
-
-            logger.info(f"✅ Qdrant purgé: {points_count} points supprimés, collection recréée")
+            msg = f"Collections purgées: {', '.join(purged_collections)}" if purged_collections else "Aucune collection purgée"
+            logger.info(f"✅ Qdrant purgé: {total_points} points supprimés au total")
             return {
                 "success": True,
-                "message": f"Collection '{collection_name}' purgée et recréée",
-                "points_deleted": points_count,
+                "message": msg,
+                "points_deleted": total_points,
             }
 
         except Exception as e:
