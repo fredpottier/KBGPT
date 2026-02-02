@@ -56,8 +56,8 @@ Parameters:
 
   VllmMaxModelLen:
     Type: Number
-    Default: 8192
-    Description: Longueur max du contexte (8192 pour prompts longs d'extraction)
+    Default: 16384
+    Description: Longueur max du contexte (16384 pour prompts longs d'extraction Pass 1)
 
   VllmMaxNumSeqs:
     Type: Number
