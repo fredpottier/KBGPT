@@ -57,8 +57,10 @@ def run_worker(*, queue_name: str | None = None, with_scheduler: bool = True) ->
 
     # IMPORTANT: Use SimpleWorker instead of Worker to avoid fork() with CUDA
     # SimpleWorker runs jobs in the same process (no fork), making it safe for GPU operations
+    # Écouter la queue principale + la queue reprocess (séquentiel, pas de concurrence)
+    reprocess_queue = get_queue("reprocess")
     worker = SimpleWorker(
-        [queue.name],
+        [queue.name, reprocess_queue.name],
         connection=get_redis_connection(),
         job_monitoring_interval=30,  # Vérifier les jobs toutes les 30s au lieu de 10s par défaut
     )
