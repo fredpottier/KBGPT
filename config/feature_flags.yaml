@@ -131,6 +131,11 @@ stratified_pipeline_v2:
   # Garantit l'ancrage verbatim et élimine structurellement la reformulation
   enable_pointer_mode: true
 
+  # V2.2: Pipeline Extract-then-Structure (bottom-up guidé)
+  # ADR: doc/ongoing/ADR_HYBRID_EXTRACT_THEN_STRUCTURE_2026-02-01.md
+  # Désactivé par défaut — activer manuellement pour tests
+  pass1_v22: true
+
   # Pass 3 Configuration
   consolidation_similarity_threshold: 0.85
   enable_llm_validation: true
@@ -380,6 +385,107 @@ phase_1_5:
   agent_architecture: true
   supervisor_agent: true
   extractor_orchestrator: true
+
+
+# ===============================================================================
+# Claim-First Pipeline (Pivot Epistémique)
+# ===============================================================================
+# ADR: Plan Claim-First Pipeline (2026-02-03)
+# Objectif: L'objet central devient la Claim documentée
+#
+# Invariants:
+# - INV-1: Unit = preuve textuelle exacte, Passage = contexte
+# - INV-2: Relations de l'objet détaillé vers l'objet englobant
+# - INV-3: Claim = occurrence mono-document
+# - INV-4: Entity sans rôle structurant (V1)
+# - INV-5: EntityExtractor enrichi (pas juste NER)
+# - INV-6: ClaimClusterer conservateur (2 étages)
+# - INV-7: Suppression legacy = post-validation étendue
+# - INV-8: Applicability over Truth (scope = DocumentContext, pas Claim)
+# - INV-9: Conservative Subject Resolution (aliases typés, pas d'auto-fusion)
+# - INV-10: Discriminants Découverts, pas Hardcodés (domain-agnostic)
+
+claimfirst_pipeline:
+  # Global toggle - Active le nouveau pipeline
+  enabled: false
+
+  # Tenants avec claim-first activé
+  tenants:
+    default: false
+    pilot: true
+
+  # Mode parallèle: exécuter les deux pipelines simultanément
+  # Permet de comparer les résultats avant migration
+  parallel_mode: true
+
+  # Source pour les requêtes
+  # - stratified: Utiliser l'ancien pipeline (défaut)
+  # - claimfirst: Utiliser le nouveau pipeline
+  # - both: Fusionner les résultats des deux
+  query_source: stratified
+
+  # -------------------------------------------------------------------------
+  # Phase 1.5: Subject Resolution (INV-8, INV-9, INV-10)
+  # -------------------------------------------------------------------------
+  subject_resolution:
+    # Seuils pour soft matching embedding (CORRECTIF 3)
+    embedding_threshold: 0.85      # Score minimum pour LOW_CONFIDENCE
+    delta_threshold: 0.06          # Écart minimum avec 2ème candidat
+    # Confiance pour matches non-exact
+    learned_confidence: 0.95       # Pour aliases_learned
+    # Utiliser LLM pour extraction de sujets
+    use_llm_subjects: true
+
+  # Configuration context extraction (INV-10)
+  context_extraction:
+    # Extraire automatiquement les qualificateurs
+    extract_qualifiers: true
+    # Max caractères pour l'analyse du début du document
+    max_first_passages_chars: 5000
+    # Validation corpus-first (≥20% docs pour valider un qualificateur)
+    qualifier_validation_threshold: 0.20
+
+  # -------------------------------------------------------------------------
+  # Configuration extraction Claims
+  # -------------------------------------------------------------------------
+  extraction:
+    min_unit_length: 30        # Longueur minimale d'une unité
+    max_unit_length: 500       # Longueur maximale d'une unité
+    batch_size: 10             # Unités par batch LLM
+
+  # Configuration clustering (INV-6: conservateur, 2 étages)
+  clustering:
+    embedding_threshold: 0.85  # Seuil cosine similarity (conservateur)
+    lexical_overlap_min: 0.3   # % minimum tokens clés en commun
+    require_same_modality: true
+    check_negation: true
+    require_common_entity: true  # Entités communes requises pour merge
+
+  # Configuration relations
+  relations:
+    detect_contradicts: true
+    detect_refines: true
+    detect_qualifies: true
+    min_confidence: 0.7
+    abstention_on_doubt: true  # Règle d'abstention stricte
+
+  # Configuration persistance
+  persistence:
+    enabled: true
+    bridge_layer_r: true       # Adapter le bridge Qdrant
+
+  # -------------------------------------------------------------------------
+  # Query-Time Scoping (INV-8)
+  # -------------------------------------------------------------------------
+  query_scoping:
+    # Activer le scoping obligatoire
+    enabled: true
+    # Comportement si contexte ambigu
+    on_ambiguous: "disambiguate"  # disambiguate | best_match | reject
+    # Nombre max de candidats pour désambiguïsation
+    max_disambiguation_candidates: 5
+    # Utiliser aliases_inferred pour suggestions (jamais pour filtre dur)
+    suggest_inferred_aliases: true
 
 
 # ===============================================================================
