@@ -11,7 +11,19 @@ Composants Clés :
 
 Projet : KnowWhere (OSMOSE)
 Phase : 1 - Semantic Core
+
+DEPRECATED: Phase 1 Semantic Core abandonnée au profit du pipeline stratified.
+Ce module contient du code legacy qui n'est plus activement maintenu.
 """
+
+from knowbase.common.deprecation import deprecated_module, DeprecationKind
+
+deprecated_module(
+    kind=DeprecationKind.PHASE_ABANDONED,
+    reason="Phase 1 Semantic Core abandonnée, remplacée par pipeline stratified",
+    alternative="knowbase.stratified pour l'extraction de connaissances",
+    removal_version="2.0.0",
+)
 
 from .profiler import SemanticDocumentProfiler
 # Modules Phase 1 non encore implémentés (TODO):

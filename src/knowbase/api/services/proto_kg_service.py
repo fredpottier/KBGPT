@@ -10,7 +10,19 @@ Il contient les concepts extraits par OSMOSE avec canonicalisation cross-lingual
 
 Author: OSMOSE Phase 1.5
 Date: 2025-10-14
+
+DEPRECATED: Remplacé par le système graphiti pour la gestion du Knowledge Graph.
+Ce service utilise un schéma Neo4j legacy (CanonicalConcept) qui n'est plus maintenu.
 """
+
+from knowbase.common.deprecation import deprecated_module, DeprecationKind
+
+deprecated_module(
+    kind=DeprecationKind.LEGACY_COMPAT,
+    reason="Remplacé par graphiti pour la gestion du Knowledge Graph",
+    alternative="knowbase.common.clients.graphiti_client",
+    removal_version="2.0.0",
+)
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime
