@@ -47,6 +47,10 @@ class ClaimFirstStatusResponse(BaseModel):
     facets: int = 0
     clusters: int = 0
 
+    # Subject Resolution (INV-8, INV-9)
+    doc_contexts: int = 0
+    subject_anchors: int = 0
+
     # Relations
     supported_by: int = 0
     about: int = 0
@@ -55,6 +59,7 @@ class ClaimFirstStatusResponse(BaseModel):
     contradicts: int = 0
     refines: int = 0
     qualifies: int = 0
+    about_subject: int = 0  # DocumentContext → SubjectAnchor
 
     # Documents
     documents_available: int = 0
@@ -116,6 +121,86 @@ class ClaimFirstStatsResponse(BaseModel):
 
 
 # =============================================================================
+# Temporal Query Schemas (Applicability Axis)
+# =============================================================================
+
+class TemporalQueryRequest(BaseModel):
+    """Requête temporelle (since when, still applicable)."""
+    query_type: str = Field(
+        ...,
+        description="Type: 'since_when' | 'still_applicable' | 'compare'"
+    )
+    capability: Optional[str] = Field(
+        default=None,
+        description="Capability recherchée (pour since_when)"
+    )
+    claim_id: Optional[str] = Field(
+        default=None,
+        description="Claim ID (pour still_applicable)"
+    )
+    context_a: Optional[str] = Field(
+        default=None,
+        description="Premier contexte (pour compare)"
+    )
+    context_b: Optional[str] = Field(
+        default=None,
+        description="Deuxième contexte (pour compare)"
+    )
+    axis_key: str = Field(
+        default="release_id",
+        description="Clé de l'axe pour l'ordre"
+    )
+
+
+class TemporalQueryResponse(BaseModel):
+    """Réponse à une requête temporelle."""
+    query_type: str
+    success: bool
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+class TextValidationRequest(BaseModel):
+    """Requête de validation de texte."""
+    user_statement: str = Field(
+        ...,
+        min_length=10,
+        description="Texte à valider contre le corpus"
+    )
+    target_context: Optional[str] = Field(
+        default=None,
+        description="Contexte cible (ex: '2023')"
+    )
+    subject_filter: Optional[str] = Field(
+        default=None,
+        description="Filtre sur le sujet"
+    )
+
+
+class TextValidationResponse(BaseModel):
+    """Réponse de validation de texte."""
+    status: str = Field(
+        ...,
+        description="CONFIRMED | INCORRECT | UNCERTAIN | NOT_DOCUMENTED"
+    )
+    confidence: float
+    supporting_claims: List[Dict[str, Any]] = []
+    contradicting_claims: List[Dict[str, Any]] = []
+    explanation: str
+
+
+class AxisInfo(BaseModel):
+    """Informations sur un axe d'applicabilité."""
+    axis_id: str
+    axis_key: str
+    axis_display_name: Optional[str] = None
+    is_orderable: bool
+    ordering_confidence: str
+    known_values: List[str] = []
+    doc_count: int = 0
+
+
+# =============================================================================
 # Endpoints
 # =============================================================================
 
@@ -157,6 +242,9 @@ async def get_claimfirst_status(
                 "entities": "MATCH (n:EntityClaimFirst {tenant_id: $tid}) RETURN count(n) as c",
                 "facets": "MATCH (n:Facet {tenant_id: $tid}) RETURN count(n) as c",
                 "clusters": "MATCH (n:ClaimCluster {tenant_id: $tid}) RETURN count(n) as c",
+                # Subject Resolution (INV-8, INV-9)
+                "doc_contexts": "MATCH (n:DocumentContext {tenant_id: $tid}) RETURN count(n) as c",
+                "subject_anchors": "MATCH (n:SubjectAnchor) RETURN count(n) as c",
             }
 
             for key, query in node_queries.items():
@@ -176,6 +264,8 @@ async def get_claimfirst_status(
                 "contradicts": "MATCH (:Claim)-[r:CONTRADICTS]->(:Claim) RETURN count(r) as c",
                 "refines": "MATCH (:Claim)-[r:REFINES]->(:Claim) RETURN count(r) as c",
                 "qualifies": "MATCH (:Claim)-[r:QUALIFIES]->(:Claim) RETURN count(r) as c",
+                # Subject Resolution (INV-8)
+                "about_subject": "MATCH (:DocumentContext)-[r:ABOUT_SUBJECT]->(:SubjectAnchor) RETURN count(r) as c",
             }
 
             for key, query in rel_queries.items():
@@ -603,6 +693,237 @@ async def process_all_documents(
         status="queued",
         total=len(doc_ids),
     )
+
+
+# =============================================================================
+# Temporal Query Endpoints (Applicability Axis)
+# =============================================================================
+
+@router.post(
+    "/query/temporal",
+    response_model=TemporalQueryResponse,
+    summary="Requête temporelle (Since when? / Still applicable?)",
+    description="""
+    Exécute une requête temporelle sur le corpus de claims.
+
+    Types de requêtes:
+    - **since_when**: Depuis quand cette capability existe?
+    - **still_applicable**: Cette claim est-elle encore applicable?
+    - **compare**: Différences entre contextes A et B?
+
+    INV-19: Timeline refusée si ClaimKey non validé.
+    INV-23: Toute réponse cite ses claims sources.
+    """
+)
+async def temporal_query(
+    request: TemporalQueryRequest,
+    tenant_id: str = Depends(get_tenant_id),
+) -> TemporalQueryResponse:
+    """Exécute une requête temporelle."""
+    import os
+    from neo4j import GraphDatabase
+
+    try:
+        neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        from knowbase.claimfirst.query.temporal_query_engine import TemporalQueryEngine
+
+        engine = TemporalQueryEngine(
+            neo4j_driver=driver,
+            tenant_id=tenant_id,
+        )
+
+        result: Dict[str, Any] = {}
+
+        if request.query_type == "since_when":
+            if not request.capability:
+                raise HTTPException(400, "capability required for since_when")
+
+            since_result = engine.query_since_when(
+                capability=request.capability,
+                axis_key=request.axis_key,
+            )
+            result = since_result.model_dump()
+
+        elif request.query_type == "still_applicable":
+            if not request.claim_id:
+                raise HTTPException(400, "claim_id required for still_applicable")
+
+            # Charger la claim
+            with driver.session() as session:
+                claim_result = session.run(
+                    "MATCH (c:Claim {claim_id: $claim_id}) RETURN c.text as text",
+                    claim_id=request.claim_id,
+                )
+                record = claim_result.single()
+                if not record:
+                    raise HTTPException(404, f"Claim {request.claim_id} not found")
+                claim_text = record["text"]
+
+            still_result = engine.query_still_applicable(
+                claim_id=request.claim_id,
+                claim_text=claim_text,
+                axes={},  # Charger les axes depuis Neo4j si nécessaire
+            )
+            result = still_result.model_dump()
+
+        elif request.query_type == "compare":
+            if not request.context_a or not request.context_b:
+                raise HTTPException(400, "context_a and context_b required for compare")
+
+            compare_result = engine.compare_contexts(
+                context_a=request.context_a,
+                context_b=request.context_b,
+                axis_key=request.axis_key,
+            )
+            result = compare_result
+
+        else:
+            raise HTTPException(400, f"Unknown query_type: {request.query_type}")
+
+        driver.close()
+
+        return TemporalQueryResponse(
+            query_type=request.query_type,
+            success=True,
+            result=result,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ClaimFirst] Temporal query failed: {e}")
+        return TemporalQueryResponse(
+            query_type=request.query_type,
+            success=False,
+            error=str(e),
+        )
+
+
+@router.post(
+    "/validate",
+    response_model=TextValidationResponse,
+    summary="Valider un texte contre le corpus",
+    description="""
+    Valide un texte utilisateur contre le corpus de claims.
+
+    Retourne:
+    - **CONFIRMED**: Le texte est supporté par des claims
+    - **INCORRECT**: Le texte contredit des claims
+    - **UNCERTAIN**: Pas assez d'évidence
+    - **NOT_DOCUMENTED**: Sujet non documenté
+
+    INV-23: Cite explicitement les claims sources.
+    """
+)
+async def validate_text(
+    request: TextValidationRequest,
+    tenant_id: str = Depends(get_tenant_id),
+) -> TextValidationResponse:
+    """Valide un texte contre le corpus."""
+    import os
+    from neo4j import GraphDatabase
+
+    try:
+        neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        from knowbase.claimfirst.query.text_validator import TextValidator
+
+        validator = TextValidator(
+            neo4j_driver=driver,
+            tenant_id=tenant_id,
+        )
+
+        result = validator.validate(
+            user_statement=request.user_statement,
+            target_context=request.target_context,
+            subject_filter=request.subject_filter,
+        )
+
+        driver.close()
+
+        return TextValidationResponse(
+            status=result.status.value,
+            confidence=result.confidence,
+            supporting_claims=result.supporting_claims,
+            contradicting_claims=result.contradicting_claims,
+            explanation=result.explanation,
+        )
+
+    except Exception as e:
+        logger.error(f"[ClaimFirst] Text validation failed: {e}")
+        return TextValidationResponse(
+            status="UNCERTAIN",
+            confidence=0.0,
+            explanation=f"Validation error: {e}",
+        )
+
+
+@router.get(
+    "/axes",
+    response_model=List[AxisInfo],
+    summary="Liste des axes d'applicabilité détectés",
+    description="""
+    Retourne tous les axes d'applicabilité détectés dans le corpus.
+
+    Chaque axe contient:
+    - axis_key: Clé neutre (release_id, year, etc.)
+    - ordering_confidence: CERTAIN, INFERRED, ou UNKNOWN
+    - known_values: Valeurs détectées
+    """
+)
+async def list_axes(
+    tenant_id: str = Depends(get_tenant_id),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> List[AxisInfo]:
+    """Liste les axes d'applicabilité détectés."""
+    import os
+    from neo4j import GraphDatabase
+
+    axes = []
+
+    try:
+        neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (ax:ApplicabilityAxis {tenant_id: $tenant_id})
+                RETURN ax
+                ORDER BY ax.doc_count DESC
+                LIMIT $limit
+                """,
+                tenant_id=tenant_id,
+                limit=limit,
+            )
+
+            for record in result:
+                ax = record["ax"]
+                axes.append(AxisInfo(
+                    axis_id=ax.get("axis_id"),
+                    axis_key=ax.get("axis_key"),
+                    axis_display_name=ax.get("axis_display_name"),
+                    is_orderable=ax.get("is_orderable", False),
+                    ordering_confidence=ax.get("ordering_confidence", "unknown"),
+                    known_values=ax.get("known_values") or [],
+                    doc_count=ax.get("doc_count", 0),
+                ))
+
+        driver.close()
+
+    except Exception as e:
+        logger.warning(f"[ClaimFirst] Axes query failed: {e}")
+
+    return axes
 
 
 __all__ = ["router"]

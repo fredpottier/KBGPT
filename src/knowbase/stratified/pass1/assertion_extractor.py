@@ -159,10 +159,10 @@ class SectionNode:
 
 
 # Seuils de contrôle multi-linking (C3: Anti "Spray & Pray")
-MIN_LINK_CONFIDENCE = 0.70
-MAX_LINKS_PER_ASSERTION = 5
-TOP_K_IF_CLOSE = 2
-CLOSE_THRESHOLD = 0.10  # Écart max entre top-1 et top-k
+MIN_LINK_CONFIDENCE = 0.80
+MAX_LINKS_PER_ASSERTION = 1       # Strict 1 lien — diagnostic lisible (réintroduire 2 plus tard si pertinent)
+TOP_K_IF_CLOSE = 2                # Inchangé (inopérant avec MAX=1, gardé pour réactivation future)
+CLOSE_THRESHOLD = 0.05            # Écart plus serré (pour réactivation future)
 
 # ============================================================================
 # SEUILS DE CONFIANCE RERANK — DEFAULTS (fallback CalibrationProfile)
@@ -180,15 +180,15 @@ CLOSE_THRESHOLD = 0.10  # Écart max entre top-1 et top-k
 #   TOP_K_DEFAULT, TOP_K_STRONG_MATCH
 
 # LLM-dépendants (defaults Qwen 14B)
-CONF_THRESHOLD_ORIGINAL = 0.45
-CONF_THRESHOLD_FINAL = 0.35
+CONF_THRESHOLD_ORIGINAL = 0.55    # Monter le seuil pré-rerank
+CONF_THRESHOLD_FINAL = 0.45       # Monter le seuil post-pénalité
 MARGIN_AMBIGUOUS = 0.05
 SINK_BAND1_CEILING = 0.42
 SINK_BAND3_FLOOR = 0.52
 SINK_BAND2_GAP_MIN = 0.04
 
 # Structurels (fixes)
-TOP_K_DEFAULT = 2
+TOP_K_DEFAULT = 1                 # 1 concept par défaut
 TOP_K_STRONG_MATCH = 1
 SINK_MALUS = 0.90
 SINK_SIGNAL_FORT_THRESHOLD = 1.15
@@ -283,7 +283,7 @@ class AssertionExtractorV2:
     """
 
     # Parallélisation: nombre de workers par défaut
-    DEFAULT_MAX_WORKERS = 8
+    DEFAULT_MAX_WORKERS = 16
 
     def __init__(
         self,
@@ -853,6 +853,12 @@ class AssertionExtractorV2:
         from knowbase.stratified.models import ConceptRole
 
         if not batch_section_ids or not self._section_hierarchy:
+            logger.warning(
+                f"[OSMOSE:Admissibility:Fallback] reason=NO_SECTION_SCOPE, "
+                f"batch_section_ids={len(batch_section_ids) if batch_section_ids else 0}, "
+                f"section_hierarchy={len(self._section_hierarchy) if self._section_hierarchy else 0}, "
+                f"returning ALL {len(concepts)} concepts"
+            )
             return concepts, "fallback_global"
 
         # Classer les concepts
@@ -1388,6 +1394,7 @@ class AssertionExtractorV2:
         fallback_global_count = 0
         expansion_count = 0
         admissible_counts = []
+        batch_modes = []
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {}
@@ -1397,6 +1404,20 @@ class AssertionExtractorV2:
                     batch_section_ids, concepts
                 )
 
+                # Cap candidats hard = 8 (hors SINK/CENTRAL)
+                MAX_CANDIDATES_HARD = 8
+                if len(admissible_concepts) > MAX_CANDIDATES_HARD:
+                    from knowbase.stratified.models import ConceptRole
+                    always_keep = [c for c in admissible_concepts if c.role in (ConceptRole.SINK, ConceptRole.CENTRAL)]
+                    rest = [c for c in admissible_concepts if c.role not in (ConceptRole.SINK, ConceptRole.CENTRAL)]
+                    capped = always_keep + rest[:MAX_CANDIDATES_HARD - len(always_keep)]
+                    logger.info(
+                        f"[OSMOSE:Admissibility:Cap] candidate_cap_applied=true "
+                        f"original={len(admissible_concepts)} capped={len(capped)}"
+                    )
+                    admissible_concepts = capped
+
+                batch_modes.append(mode)
                 if mode == "fallback_global":
                     fallback_global_count += 1
                 if mode == "expanded":
@@ -1432,6 +1453,7 @@ class AssertionExtractorV2:
             )
 
         # Résumé global admissibilité
+        from collections import Counter
         avg_adm = sum(admissible_counts) / len(admissible_counts) if admissible_counts else 0
         sorted_counts = sorted(admissible_counts)
         p95_adm = sorted_counts[int(len(sorted_counts) * 0.95)] if sorted_counts else 0
@@ -1442,6 +1464,14 @@ class AssertionExtractorV2:
             f"p95_concepts={p95_adm}, "
             f"fallback_global={fallback_global_count}/{len(section_batches)}, "
             f"expansions={expansion_count}"
+        )
+        # Résumé admissibilité diagnostique par mode
+        modes_counter = Counter(batch_modes)
+        logger.info(
+            f"[OSMOSE:Admissibility:GlobalSummary] "
+            f"base={modes_counter.get('base', 0)}, "
+            f"expanded={modes_counter.get('expanded', 0)}, "
+            f"fallback_global={modes_counter.get('fallback_global', 0)}"
         )
 
         logger.info(f"[OSMOSE:Pass1:1.4] {len(all_links)} liens LLM bruts établis")
@@ -1565,7 +1595,10 @@ class AssertionExtractorV2:
             if c.role == ConceptRole.SINK:
                 sink_line = f"- {c.concept_id}: {c.name} (SINK — utiliser si aucun concept métier ne convient)"
             else:
-                lines.append(f"- {c.concept_id}: {c.name} ({c.role.value})")
+                if c.definition:
+                    lines.append(f"- {c.concept_id}: {c.name} — {c.definition}")
+                else:
+                    lines.append(f"- {c.concept_id}: {c.name}")
         # SINK en dernier pour ne pas polluer le raisonnement
         if sink_line:
             lines.append(sink_line)
@@ -1738,12 +1771,17 @@ class AssertionExtractorV2:
             if triggers and not has_trigger:
                 confidence_adj -= 0.20
 
-            # --- C3 v2: Hard Gate (ancrage minimal) ---
+            # Concepts sans triggers ET sans ancrage lexical = suspects
             concept_name = concept_names.get(concept_id, "") if concept_names else ""
             has_name_token = self._has_concept_name_token(unit_text, concept_name)
+            if not triggers and not has_name_token:
+                confidence_adj -= 0.15
 
-            # Rejet si: pas de trigger ET pas de token du nom ET conf_adj < 0.55
-            if not has_trigger and not has_name_token and confidence_adj < 0.55:
+            # --- C3 v2: Hard Gate (ancrage minimal) ---
+            # concept_name et has_name_token déjà calculés ci-dessus
+
+            # Rejet si: pas de trigger ET pas de token du nom ET conf_adj < 0.70
+            if not has_trigger and not has_name_token and confidence_adj < 0.70:
                 logger.debug(
                     f"[OSMOSE:C3v2] Rejeté {concept_id}: pas de signal lexical, "
                     f"conf_adj={confidence_adj:.2f}"
@@ -2994,6 +3032,15 @@ class AssertionExtractorV2:
             top_k = TOP_K_STRONG_MATCH if has_strong_match else TOP_K_DEFAULT
             kept = scored[:top_k]
 
+            # Logging ties serrés (pour future réactivation top-2)
+            if top_k == 1 and len(scored) >= 2 and scored[0][1] - scored[1][1] < 0.05:
+                logger.info(
+                    f"[OSMOSE:Rerank:TieDetected] assertion={assertion_id} "
+                    f"winner={scored[0][0].concept_id} conf={scored[0][1]:.3f} "
+                    f"runner_up={scored[1][0].concept_id} conf={scored[1][1]:.3f} "
+                    f"gap={scored[0][1] - scored[1][1]:.3f}"
+                )
+
             # Ajouter les liens retenus
             for link, _, _ in kept:
                 filtered_links.append(link)
@@ -3187,50 +3234,71 @@ Réponds avec ce JSON:
 ```"""
 
     def _default_linking_system(self) -> str:
-        return """Tu es un expert en raisonnement sémantique pour OSMOSE.
-Tu dois déterminer quelles ASSERTIONS apportent de la connaissance sur quels CONCEPTS.
+        return """You are a strict linker for OSMOSE knowledge graph construction.
+Your job is to decide whether each assertion adds a NEW and SPECIFIC property to exactly one concept.
 
-IMPORTANT - Ce n'est PAS un matching lexical:
-- Une assertion peut concerner un concept sans le mentionner explicitement
-- Un concept en français peut être lié à une assertion en anglais
-- Le lien doit être SÉMANTIQUE (le sens), pas lexical (les mots)
+ABSOLUTE RULES:
+1. Prefer false negatives over false positives. When in doubt → SINK.
+2. A concept match must be SPECIFIC: the assertion must directly describe, define, constrain, or require something about that concept.
+3. Do NOT link by broad theme (e.g., "it's about security" or "it's about compliance").
+4. Choose the MOST SPECIFIC concept. If two concepts seem equally valid, choose SINK.
+5. Maximum 1 concept per assertion (exceptionally 2 if the assertion explicitly names both).
 
-Types de liens:
-- defines: L'assertion définit le concept
-- describes: L'assertion décrit une propriété du concept
-- constrains: L'assertion impose une contrainte
-- enables: L'assertion dit ce que le concept permet
-- conditions: L'assertion spécifie une condition
-- causes: L'assertion décrit un effet
+WHAT IS "SPECIFIC"?
+- The assertion states a requirement, definition, capability, constraint, parameter, threshold, or explicit rule ABOUT the concept.
+- Test: if you replace the concept name with "the system" and the assertion still makes sense, it is NOT specific → SINK.
 
-CONCEPT SPÉCIAL "Assertions non classées" (SINK):
-- Si aucun concept n'est clairement applicable à une assertion, utilise le concept SINK
-- Préfère toujours un concept métier spécifique quand c'est possible
-- SINK est un dernier recours, pas un choix par défaut"""
+WHAT SHOULD GO TO SINK:
+- Copyright notices, disclaimers, confidentiality mentions
+- Section titles or headings without substantive content
+- Generic statements that apply to any IT system
+- Fragments without a clear subject or predicate
+
+NEGATIVE EXAMPLES (DO NOT link these):
+- "© 2023 SAP SE or an SAP affiliate company" → SINK (copyright noise)
+- "Overall cloud security is assured via contracting assurances" → SINK for "Cloud Security Compliance Scanning" (too generic, not about scanning)
+- "Short Distance DR vs Long Distance DR" → SINK for "Secure Connectivity" (this is about DR, not connectivity)
+- "Customer initiates DR drill by creating service request" → SINK for "Shared Security Governance" (this is a DR procedure, not governance)
+
+LINK TYPES:
+- defines: assertion defines the concept
+- describes: assertion describes a specific property
+- constrains: assertion imposes a specific constraint
+- enables: assertion states what the concept enables
+- conditions: assertion specifies a condition
+- causes: assertion describes a causal effect"""
 
     def _default_linking_user(self) -> str:
-        return """Établis les liens sémantiques.
+        return """Link each assertion to at most ONE concept. If no concept is a specific match, use SINK.
 
 ASSERTIONS:
 {assertions}
 
-CONCEPTS:
+CANDIDATE CONCEPTS:
 {concepts}
 
-Réponds avec ce JSON:
+Return JSON:
 ```json
 {{
   "links": [
     {{
       "assertion_id": "assert_abc123",
-      "concept_id": "concept_xyz",
-      "link_type": "defines|describes|constrains|enables|conditions|causes",
-      "justification": "Pourquoi cette assertion concerne ce concept",
-      "confidence": 0.85
+      "concept_links": [
+        {{
+          "concept_id": "concept_xyz",
+          "link_type": "defines|describes|constrains|enables|conditions|causes",
+          "justification": "Specific reason this assertion is about THIS concept",
+          "confidence": 0.85
+        }}
+      ]
     }}
   ]
 }}
-```"""
+```
+
+REMEMBER: confidence 0.90+ = assertion explicitly names or directly describes the concept.
+confidence 0.70-0.89 = strong indirect link with specific evidence.
+confidence < 0.70 = weak link, prefer SINK instead."""
 
     # =========================================================================
     # MVP V1: ENRICHISSEMENT INFORMATION-FIRST

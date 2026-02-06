@@ -36,8 +36,22 @@ from knowbase.claimfirst.models.document_context import DocumentContext, Resolut
 
 from knowbase.claimfirst.extractors.claim_extractor import ClaimExtractor
 from knowbase.claimfirst.extractors.entity_extractor import EntityExtractor
+from knowbase.claimfirst.extractors.entity_canonicalizer import EntityCanonicalizer
 from knowbase.claimfirst.extractors.context_extractor import ContextExtractor
 from knowbase.claimfirst.resolution.subject_resolver import SubjectResolver
+from knowbase.claimfirst.resolution.subject_resolver_v2 import SubjectResolverV2
+from knowbase.claimfirst.models.comparable_subject import ComparableSubject
+from knowbase.claimfirst.axes.axis_detector import ApplicabilityAxisDetector
+from knowbase.claimfirst.axes.axis_value_validator import AxisValueValidator
+from knowbase.claimfirst.models.applicability_axis import ApplicabilityAxis
+from knowbase.claimfirst.applicability import (
+    EvidenceUnitSegmenter,
+    CandidateMiner,
+    FrameBuilder,
+    FrameValidationPipeline,
+    FrameAdapter,
+    ApplicabilityFrame,
+)
 from knowbase.claimfirst.linkers.passage_linker import PassageLinker
 from knowbase.claimfirst.linkers.entity_linker import EntityLinker
 from knowbase.claimfirst.linkers.facet_matcher import FacetMatcher
@@ -93,9 +107,31 @@ class ClaimFirstOrchestrator:
             tenant_id=tenant_id,
         )
 
+        # Composant SubjectResolverV2 (INV-25: Domain-Agnostic)
+        # Résout le ComparableSubject + classifie en AXIS_VALUE/DOC_TYPE/NOISE
+        self.subject_resolver_v2 = SubjectResolverV2(
+            tenant_id=tenant_id,
+            llm_client=llm_client,
+        )
+
+        # Composant Applicability Axis (INV-12, INV-14, INV-25, INV-26)
+        # LLM-first extraction (INV-25 Domain Agnosticism)
+        self.axis_detector = ApplicabilityAxisDetector(
+            llm_client=llm_client,
+            use_llm_extraction=True,  # LLM-first pour versioning domain-agnostic
+            tenant_id=tenant_id,
+        )
+
+        # Composant Axis Value Validator (Extract-then-Validate pattern)
+        self.axis_validator = AxisValueValidator(
+            llm_client=llm_client,
+            max_passages_sample=3,
+        )
+
         # Composants Phase 1
         self.claim_extractor = ClaimExtractor(llm_client)
         self.entity_extractor = EntityExtractor()
+        self.entity_canonicalizer = EntityCanonicalizer(tenant_id=tenant_id)
         self.passage_linker = PassageLinker()
         self.entity_linker = EntityLinker()
         self.facet_matcher = FacetMatcher()
@@ -110,6 +146,9 @@ class ClaimFirstOrchestrator:
 
         # Cache des SubjectAnchors connus
         self._subject_anchors: List[SubjectAnchor] = []
+
+        # Cache des ApplicabilityAxis connus
+        self._applicability_axes: List[ApplicabilityAxis] = []
 
     def process(
         self,
@@ -142,7 +181,11 @@ class ClaimFirstOrchestrator:
             )
 
         pass0 = cache_result.pass0_result
-        doc_title = cache_result.doc_title or doc_id
+        # Utiliser le titre du cache, ou None si absent (pas le doc_id comme fallback)
+        # Le doc_id est un nom de fichier qui cause des extractions erronées
+        doc_title = cache_result.doc_title if cache_result.doc_title else None
+        # Pour les autres usages, on garde doc_id comme fallback pour l'affichage
+        doc_title_display = doc_title or doc_id
 
         # Phase 0: Créer les Passages depuis les DocItems
         logger.info("[OSMOSE:ClaimFirst] Phase 0: Creating passages...")
@@ -151,17 +194,57 @@ class ClaimFirstOrchestrator:
 
         # Phase 0.5: Extraire DocumentContext et résoudre SubjectAnchors (INV-8, INV-9)
         logger.info("[OSMOSE:ClaimFirst] Phase 0.5: Extracting document context...")
-        doc_context = self._extract_document_context(
+        doc_context, new_anchors = self._extract_document_context(
             doc_id=doc_id,
             tenant_id=tenant_id,
             passages=passages,
             doc_title=doc_title,
         )
         logger.info(
-            f"  → Context: {len(doc_context.raw_subjects)} subjects, "
+            f"  → Context: primary='{doc_context.primary_subject}', "
+            f"{len(doc_context.raw_subjects)} topics, "
+            f"{len(doc_context.subject_ids)} resolved, "
             f"{len(doc_context.qualifiers)} qualifiers, "
+            f"{len(new_anchors)} new anchors, "
             f"status={doc_context.resolution_status.value}"
         )
+
+        # Phase 0.55: Resolve ComparableSubject (INV-25: Domain-Agnostic)
+        logger.info("[OSMOSE:ClaimFirst] Phase 0.55: Resolving comparable subject...")
+        comparable_subject = self._resolve_comparable_subject(
+            doc_id=doc_id,
+            tenant_id=tenant_id,
+            passages=passages,
+            doc_context=doc_context,
+            doc_title=doc_title,
+        )
+        if comparable_subject:
+            logger.info(
+                f"  → ComparableSubject: '{comparable_subject.canonical_name}' "
+                f"(confidence={comparable_subject.confidence:.2f})"
+            )
+        else:
+            logger.info("  → ComparableSubject: abstained or not resolved")
+
+        # Phase 0.6: Build applicability frame (evidence-locked, replaces AxisDetector)
+        logger.info("[OSMOSE:ClaimFirst] Phase 0.6: Building applicability frame...")
+        applicability_frame, detected_axes = self._build_applicability_frame(
+            doc_id=doc_id,
+            tenant_id=tenant_id,
+            passages=passages,
+            doc_context=doc_context,
+            doc_title=doc_title,
+        )
+        logger.info(
+            f"  → {len(detected_axes)} axes detected: "
+            f"{[ax.axis_key for ax in detected_axes]}"
+        )
+        if applicability_frame:
+            logger.info(
+                f"  → Frame: {len(applicability_frame.fields)} fields, "
+                f"{len(applicability_frame.unknowns)} unknowns, "
+                f"method={applicability_frame.method}"
+            )
 
         # Phase 1: Extraire les Claims (pointer mode)
         logger.info("[OSMOSE:ClaimFirst] Phase 1: Extracting claims...")
@@ -181,6 +264,14 @@ class ClaimFirstOrchestrator:
             tenant_id=tenant_id,
         )
         logger.info(f"  → {len(entities)} entities extracted")
+
+        # Phase 2.5: Canonicaliser les Entities (LLM-based fusion)
+        logger.info("[OSMOSE:ClaimFirst] Phase 2.5: Canonicalizing entities...")
+        entities, claim_entity_map = self.entity_canonicalizer.canonicalize(
+            entities=entities,
+            claim_entity_map=claim_entity_map,
+        )
+        logger.info(f"  → {len(entities)} entities after canonicalization")
 
         # Phase 3: Matcher les Facets
         logger.info("[OSMOSE:ClaimFirst] Phase 3: Matching facets...")
@@ -255,6 +346,11 @@ class ClaimFirstOrchestrator:
         result = ClaimFirstResult(
             tenant_id=tenant_id,
             doc_id=doc_id,
+            doc_context=doc_context,
+            comparable_subject=comparable_subject,
+            subject_anchors=new_anchors,
+            detected_axes=detected_axes,
+            applicability_frame=applicability_frame,
             passages=passages,
             claims=claims,
             entities=entities,
@@ -305,7 +401,114 @@ class ClaimFirstOrchestrator:
             persist_stats = self.persister.persist(result)
             logger.info(f"  → {persist_stats}")
 
+        # Phase 8: Persist chunks to Qdrant Layer R
+        if self.persist_enabled and result.passages:
+            try:
+                logger.info("[OSMOSE:ClaimFirst] Phase 8: Persisting chunks to Qdrant...")
+                qdrant_count = self._persist_chunks_to_qdrant(
+                    passages=result.passages,
+                    doc_id=result.doc_id,
+                    tenant_id=result.tenant_id,
+                )
+                result.qdrant_points_upserted = qdrant_count
+                logger.info(f"  → {qdrant_count} points upserted to Qdrant Layer R")
+            except Exception as e:
+                logger.warning(
+                    f"[OSMOSE:ClaimFirst] Qdrant persistence failed (non-blocking): {e}"
+                )
+
         return result
+
+    # =========================================================================
+    # Phase 8: Qdrant Layer R persistence
+    # =========================================================================
+
+    def _persist_chunks_to_qdrant(
+        self,
+        passages: List[Passage],
+        doc_id: str,
+        tenant_id: str,
+    ) -> int:
+        """
+        Persiste les Passages ClaimFirst comme chunks vectoriels dans Qdrant Layer R.
+
+        Chaque Passage est converti en SubChunk (sub_index=0, atomique)
+        puis encodé et upserté de manière idempotente (UUID5).
+
+        Args:
+            passages: Passages du document
+            doc_id: Document ID
+            tenant_id: Tenant ID
+
+        Returns:
+            Nombre de points upsertés
+        """
+        from knowbase.retrieval.qdrant_layer_r import (
+            delete_doc_from_layer_r,
+            ensure_layer_r_collection,
+            upsert_layer_r,
+        )
+        from knowbase.retrieval.rechunker import SubChunk
+        from knowbase.common.clients.embeddings import get_embedding_manager
+
+        # Filtrer les passages vides ou trop courts
+        MIN_CHARS = 20
+        valid_passages = [p for p in passages if p.text and len(p.text.strip()) >= MIN_CHARS]
+        if not valid_passages:
+            logger.info(f"[OSMOSE:ClaimFirst] No valid passages to persist to Qdrant")
+            return 0
+
+        # Supprimer les anciens points de ce document (idempotence sur re-import)
+        try:
+            delete_doc_from_layer_r(doc_id, tenant_id)
+        except Exception as e:
+            logger.debug(f"[OSMOSE:ClaimFirst] Qdrant delete_doc skipped: {e}")
+
+        # Mapping item_type → kind pour Qdrant
+        KIND_MAP = {
+            "paragraph": "NARRATIVE_TEXT",
+            "heading": "NARRATIVE_TEXT",
+            "table": "TABLE",
+            "figure": "FIGURE",
+            "code": "CODE",
+            "list_item": "NARRATIVE_TEXT",
+        }
+
+        # Convertir Passages → SubChunks
+        sub_chunks = []
+        for p in valid_passages:
+            sc = SubChunk(
+                chunk_id=p.passage_id,
+                sub_index=0,
+                text=p.text,
+                parent_chunk_id=p.passage_id,
+                section_id=p.section_id,
+                doc_id=p.doc_id,
+                tenant_id=p.tenant_id,
+                kind=KIND_MAP.get(p.item_type, "NARRATIVE_TEXT"),
+                page_no=p.page_no or 0,
+                page_span_min=p.page_no,
+                page_span_max=p.page_no,
+                item_ids=p.unit_ids if p.unit_ids else [],
+                text_origin=f"claimfirst:{p.passage_id}",
+            )
+            sub_chunks.append(sc)
+
+        logger.debug(
+            f"[OSMOSE:ClaimFirst] Encoding {len(sub_chunks)} passages for Qdrant..."
+        )
+
+        # Générer les embeddings
+        texts = [sc.text for sc in sub_chunks]
+        manager = get_embedding_manager()
+        embeddings = manager.encode(texts)
+
+        # Créer les paires (SubChunk, embedding) et upserter
+        pairs = list(zip(sub_chunks, embeddings))
+        ensure_layer_r_collection()
+        n = upsert_layer_r(pairs, tenant_id=tenant_id)
+
+        return n
 
     def _create_passages(
         self,
@@ -373,13 +576,226 @@ class ClaimFirstOrchestrator:
 
         return embeddings
 
+    def _build_applicability_frame(
+        self,
+        doc_id: str,
+        tenant_id: str,
+        passages: List[Passage],
+        doc_context: DocumentContext,
+        doc_title: Optional[str] = None,
+    ) -> Tuple[Optional[ApplicabilityFrame], List[ApplicabilityAxis]]:
+        """
+        Construit l'ApplicabilityFrame via le pipeline evidence-locked A→B→C→D.
+
+        Remplace l'ancien _detect_document_axes.
+
+        Args:
+            doc_id: Document ID
+            tenant_id: Tenant ID
+            passages: Passages du document
+            doc_context: Contexte documentaire
+            doc_title: Titre du document
+
+        Returns:
+            Tuple[Optional[ApplicabilityFrame], List[ApplicabilityAxis]]
+        """
+        try:
+            # Layer A: Segmenter les passages en EvidenceUnits
+            segmenter = EvidenceUnitSegmenter()
+            units = segmenter.segment(passages)
+
+            if not units:
+                logger.info("[OSMOSE:ClaimFirst] No evidence units produced, skipping frame")
+                return None, []
+
+            # Layer B: Scan déterministe pour markers et value candidates
+            miner = CandidateMiner()
+            profile = miner.mine(
+                units=units,
+                doc_id=doc_id,
+                title=doc_title,
+                primary_subject=doc_context.primary_subject,
+            )
+
+            # Layer C: Construire le frame (LLM evidence-locked ou fallback déterministe)
+            builder = FrameBuilder(
+                llm_client=self.llm_client,
+                use_llm=True,
+            )
+
+            # Charger le Domain Context optionnel
+            domain_context_prompt = self._get_domain_context_prompt(tenant_id)
+
+            frame = builder.build(
+                profile=profile,
+                units=units,
+                domain_context_prompt=domain_context_prompt,
+            )
+
+            # Layer D: Valider le frame
+            validator = FrameValidationPipeline()
+            frame = validator.validate(frame, units, profile)
+
+            # Adapter: Frame → ApplicabilityAxis[] (rétrocompat)
+            adapter = FrameAdapter()
+
+            # Mettre à jour le DocumentContext
+            adapter.update_document_context(frame, doc_context)
+
+            # Convertir en axes pour compatibilité
+            detected_axes = adapter.frame_to_axes(
+                frame=frame,
+                tenant_id=tenant_id,
+                doc_id=doc_id,
+            )
+
+            # Mettre à jour le cache d'axes
+            for axis in detected_axes:
+                existing = next(
+                    (ax for ax in self._applicability_axes if ax.axis_id == axis.axis_id),
+                    None
+                )
+                if existing:
+                    for v in axis.known_values:
+                        existing.add_value(v, doc_id)
+                else:
+                    self._applicability_axes.append(axis)
+
+            return frame, detected_axes
+
+        except Exception as e:
+            logger.error(
+                f"[OSMOSE:ClaimFirst] ApplicabilityFrame pipeline failed: {e}",
+                exc_info=True,
+            )
+            return None, []
+
+    def _get_domain_context_prompt(self, tenant_id: str) -> Optional[str]:
+        """
+        Charge le Domain Context depuis le store si configuré pour le tenant.
+
+        Returns:
+            Texte de contexte domaine ou None
+        """
+        try:
+            from knowbase.ontology.domain_context_store import DomainContextStore
+
+            store = DomainContextStore()
+            context = store.get_active_context(tenant_id)
+            if context:
+                return context.get("description", None)
+        except Exception:
+            pass
+        return None
+
+    def _detect_document_axes(
+        self,
+        doc_id: str,
+        tenant_id: str,
+        passages: List[Passage],
+        doc_context: DocumentContext,
+        doc_title: Optional[str] = None,
+    ) -> List[ApplicabilityAxis]:
+        """
+        Détecte les axes d'applicabilité pour un document.
+
+        Pattern "Extract-then-Validate":
+        1. Bootstrap patterns détectent des candidats
+        2. LLM valide/choisit la valeur appropriée (INV-25 domain-agnostic)
+
+        INV-12, INV-14, INV-25, INV-26.
+
+        Args:
+            doc_id: Document ID
+            tenant_id: Tenant ID
+            passages: Passages du document
+            doc_context: Contexte documentaire
+            doc_title: Titre du document
+
+        Returns:
+            Liste des ApplicabilityAxis détectés
+        """
+        from knowbase.claimfirst.axes.axis_order_inferrer import AxisOrderInferrer
+
+        # 1. Détecter les observations d'axes (candidats)
+        observations = self.axis_detector.detect(
+            doc_id=doc_id,
+            tenant_id=tenant_id,
+            passages=passages,
+            doc_title=doc_title,
+        )
+
+        if not observations:
+            return []
+
+        logger.debug(
+            f"[OSMOSE:ClaimFirst] Axis candidates before validation: "
+            f"{[(o.axis_key, o.values_extracted) for o in observations]}"
+        )
+
+        # 2. Valider via LLM (Extract-then-Validate pattern)
+        validated_observations = self.axis_validator.validate(
+            observations=observations,
+            doc_title=doc_title,
+            passages=passages,
+        )
+
+        logger.debug(
+            f"[OSMOSE:ClaimFirst] Axis values after validation: "
+            f"{[(o.axis_key, o.values_extracted) for o in validated_observations]}"
+        )
+
+        if not validated_observations:
+            logger.info(
+                f"[OSMOSE:ClaimFirst] All axis candidates rejected by LLM validation"
+            )
+            return []
+
+        # 3. Créer les axes depuis les observations validées
+        order_inferrer = AxisOrderInferrer()
+        detected_axes = self.axis_detector.create_axes_from_observations(
+            observations=validated_observations,
+            tenant_id=tenant_id,
+            doc_id=doc_id,
+            order_inferrer=order_inferrer,
+        )
+
+        # 4. Mettre à jour le doc_context avec les valeurs d'axes validées
+        for obs in validated_observations:
+            if obs.values_extracted and obs.evidence_spans:
+                evidence = obs.evidence_spans[0]
+                doc_context.axis_values[obs.axis_key] = {
+                    "value_type": "scalar",
+                    "scalar_value": obs.values_extracted[0],
+                    "evidence_passage_id": evidence.passage_id,
+                    "evidence_snippet_ref": evidence.snippet_ref,
+                    "reliability": obs.reliability,
+                }
+                if obs.axis_key not in doc_context.applicable_axes:
+                    doc_context.applicable_axes.append(obs.axis_key)
+
+        # 5. Mettre à jour le cache d'axes
+        for axis in detected_axes:
+            existing = next(
+                (ax for ax in self._applicability_axes if ax.axis_id == axis.axis_id),
+                None
+            )
+            if existing:
+                # Fusionner les valeurs
+                for v in axis.known_values:
+                    existing.add_value(v, doc_id)
+            else:
+                self._applicability_axes.append(axis)
+
+        return detected_axes
+
     def _extract_document_context(
         self,
         doc_id: str,
         tenant_id: str,
         passages: List[Passage],
         doc_title: Optional[str] = None,
-    ) -> DocumentContext:
+    ) -> Tuple[DocumentContext, List[SubjectAnchor]]:
         """
         Extrait le DocumentContext et résout les SubjectAnchors.
 
@@ -393,7 +809,9 @@ class ClaimFirstOrchestrator:
             doc_title: Titre du document
 
         Returns:
-            DocumentContext configuré avec sujets résolus
+            Tuple[DocumentContext, List[SubjectAnchor]]:
+                - DocumentContext configuré avec sujets résolus
+                - Liste des SubjectAnchors créés/mis à jour pour ce document
         """
         # 1. Extraire le contexte (sujets bruts, qualificateurs)
         context = self.context_extractor.extract(
@@ -404,6 +822,8 @@ class ClaimFirstOrchestrator:
         )
 
         # 2. Résoudre les sujets vers SubjectAnchors (INV-9)
+        new_anchors: List[SubjectAnchor] = []
+
         if context.raw_subjects:
             results = self.subject_resolver.resolve_batch(
                 raw_subjects=context.raw_subjects,
@@ -423,11 +843,217 @@ class ClaimFirstOrchestrator:
                     if doc_id not in result.anchor.source_doc_ids:
                         result.anchor.source_doc_ids.append(doc_id)
 
+                    # Collecter les anchors impliqués (nouveaux ou mis à jour)
+                    new_anchors.append(result.anchor)
+
                     # Mettre à jour le cache si nouveau
                     if result.match_type == "new":
                         self._subject_anchors.append(result.anchor)
 
-        return context
+        return context, new_anchors
+
+    def _resolve_comparable_subject(
+        self,
+        doc_id: str,
+        tenant_id: str,
+        passages: List[Passage],
+        doc_context: DocumentContext,
+        doc_title: Optional[str] = None,
+    ) -> Optional[ComparableSubject]:
+        """
+        Résout le ComparableSubject via SubjectResolverV2.
+
+        INV-25: Domain-Agnostic - aucun vocabulaire IT/SAP hardcodé.
+
+        Le resolver v2 classifie les candidats extraits en:
+        - COMPARABLE_SUBJECT: sujet stable comparable entre documents
+        - AXIS_VALUE: valeur discriminante (temporal, geographic, revision, etc.)
+        - DOC_TYPE: type/genre documentaire
+        - NOISE: bruit à ignorer
+
+        Args:
+            doc_id: Document ID
+            tenant_id: Tenant ID
+            passages: Passages du document
+            doc_context: Contexte documentaire déjà extrait
+            doc_title: Titre du document
+
+        Returns:
+            ComparableSubject si résolu, None si abstention
+        """
+        # 1. Préparer les candidats depuis les sources disponibles
+        candidates = self._extract_resolver_candidates(
+            doc_context=doc_context,
+            passages=passages,
+            doc_title=doc_title,
+        )
+
+        if not candidates:
+            logger.debug("[OSMOSE:ClaimFirst] No candidates for subject resolution")
+            return None
+
+        # 2. Préparer les snippets sources pour le prompt
+        header_snippets = self._extract_header_snippets(passages, max_snippets=5)
+        cover_snippets = self._extract_cover_snippets(passages, max_snippets=3)
+        global_view_excerpt = self._extract_global_view_excerpt(passages, max_chars=1200)
+
+        # 3. Appeler SubjectResolverV2
+        resolver_output, comparable_subject = self.subject_resolver_v2.resolve(
+            candidates=candidates,
+            filename=doc_id,  # doc_id sert de filename si pas de métadonnée explicite
+            title=doc_title or "",
+            header_snippets=header_snippets,
+            cover_snippets=cover_snippets,
+            global_view_excerpt=global_view_excerpt,
+        )
+
+        # 4. Traiter le résultat
+        if resolver_output and not resolver_output.abstain.must_abstain:
+            # Log les axis_values détectés pour information
+            if resolver_output.axis_values:
+                logger.debug(
+                    f"[OSMOSE:ClaimFirst] SubjectResolverV2 detected axis_values: "
+                    f"{[(av.value_raw, av.discriminating_role.value) for av in resolver_output.axis_values]}"
+                )
+
+            # Log le doc_type si détecté
+            if resolver_output.doc_type and resolver_output.doc_type.label != "unknown":
+                logger.debug(
+                    f"[OSMOSE:ClaimFirst] SubjectResolverV2 detected doc_type: "
+                    f"'{resolver_output.doc_type.label}'"
+                )
+                # Enrichir le doc_context avec le doc_type si pas déjà défini
+                if not doc_context.document_type:
+                    doc_context.document_type = resolver_output.doc_type.label
+
+        return comparable_subject
+
+    def _extract_resolver_candidates(
+        self,
+        doc_context: DocumentContext,
+        passages: List[Passage],
+        doc_title: Optional[str] = None,
+    ) -> List[str]:
+        """
+        Extrait les candidats pour SubjectResolverV2.
+
+        Sources:
+        - primary_subject du doc_context
+        - raw_subjects du doc_context
+        - qualifiers du doc_context
+        - Titre du document (tokenisé)
+        - En-têtes des premiers passages
+
+        Args:
+            doc_context: Contexte documentaire
+            passages: Passages du document
+            doc_title: Titre du document
+
+        Returns:
+            Liste de candidats uniques
+        """
+        candidates = set()
+
+        # 1. Primary subject (si présent)
+        if doc_context.primary_subject:
+            candidates.add(doc_context.primary_subject)
+
+        # 2. Raw subjects (topics secondaires)
+        for subject in doc_context.raw_subjects:
+            if subject:
+                candidates.add(subject)
+
+        # 3. Qualifiers (dict: key -> value)
+        for key, value in doc_context.qualifiers.items():
+            if value:
+                candidates.add(str(value))
+            # La clé aussi peut être informative (ex: "version")
+            if key and key not in ("type", "status"):
+                candidates.add(str(key))
+
+        # 4. Titre du document (segments significatifs)
+        if doc_title:
+            # Ajouter le titre complet
+            candidates.add(doc_title)
+            # Extraire segments entre délimiteurs courants
+            import re
+            # Délimiteurs plus restrictifs pour éviter de couper "S/4HANA"
+            segments = re.split(r'[-–—|:]', doc_title)
+            for seg in segments:
+                seg = seg.strip()
+                if seg and len(seg) >= 5:  # Min 5 chars pour éviter fragments
+                    candidates.add(seg)
+
+        # 5. Titres de sections des premiers passages
+        for passage in passages[:10]:  # Premiers 10 passages
+            if passage.section_title:
+                candidates.add(passage.section_title)
+
+        # Nettoyer et filtrer
+        cleaned = []
+        for c in candidates:
+            c = c.strip()
+            if c and len(c) >= 2 and len(c) <= 200:
+                cleaned.append(c)
+
+        # Dédupliquer en préservant l'ordre
+        seen = set()
+        result = []
+        for c in cleaned:
+            c_lower = c.lower()
+            if c_lower not in seen:
+                seen.add(c_lower)
+                result.append(c)
+
+        return result[:20]  # Max 20 candidats
+
+    def _extract_header_snippets(
+        self,
+        passages: List[Passage],
+        max_snippets: int = 5,
+    ) -> List[str]:
+        """Extrait les snippets d'en-têtes (titres de sections) depuis les passages."""
+        snippets = []
+        for passage in passages[:20]:
+            if passage.section_title and passage.section_title not in snippets:
+                snippets.append(passage.section_title)
+                if len(snippets) >= max_snippets:
+                    break
+        return snippets
+
+    def _extract_cover_snippets(
+        self,
+        passages: List[Passage],
+        max_snippets: int = 3,
+    ) -> List[str]:
+        """Extrait les snippets de couverture (premiers passages)."""
+        snippets = []
+        for passage in passages[:5]:
+            text = passage.text[:300] if passage.text else ""
+            if text:
+                snippets.append(text)
+                if len(snippets) >= max_snippets:
+                    break
+        return snippets
+
+    def _extract_global_view_excerpt(
+        self,
+        passages: List[Passage],
+        max_chars: int = 1200,
+    ) -> str:
+        """Construit un extrait de vue globale depuis les passages."""
+        texts = []
+        current_len = 0
+
+        for passage in passages[:20]:
+            text = passage.text[:200] if passage.text else ""
+            if text:
+                if current_len + len(text) > max_chars:
+                    break
+                texts.append(text)
+                current_len += len(text) + 10  # +10 pour le séparateur
+
+        return " ... ".join(texts)
 
     def load_subject_anchors_from_neo4j(self) -> int:
         """
@@ -473,8 +1099,12 @@ class ClaimFirstOrchestrator:
         return {
             "context_extractor": self.context_extractor.get_stats(),
             "subject_resolver": self.subject_resolver.get_stats(),
+            "subject_resolver_v2": self.subject_resolver_v2.get_stats(),
+            "axis_detector": self.axis_detector.get_stats(),
+            "axis_validator": self.axis_validator.get_stats(),
             "claim_extractor": self.claim_extractor.get_stats(),
             "entity_extractor": self.entity_extractor.get_stats(),
+            "entity_canonicalizer": self.entity_canonicalizer.get_stats(),
             "passage_linker": self.passage_linker.get_stats(),
             "entity_linker": self.entity_linker.get_stats(),
             "facet_matcher": self.facet_matcher.get_stats(),
@@ -482,14 +1112,19 @@ class ClaimFirstOrchestrator:
             "relation_detector": self.relation_detector.get_stats(),
             "persister": self.persister.get_stats() if self.persister else {},
             "subject_anchors_cached": len(self._subject_anchors),
+            "applicability_axes_cached": len(self._applicability_axes),
         }
 
     def reset_stats(self) -> None:
         """Réinitialise toutes les statistiques."""
         self.context_extractor.reset_stats()
         self.subject_resolver.reset_stats()
+        self.subject_resolver_v2.reset_stats()
+        self.axis_detector.reset_stats()
+        self.axis_validator.reset_stats()
         self.claim_extractor.reset_stats()
         self.entity_extractor.reset_stats()
+        self.entity_canonicalizer.reset_stats()
         self.passage_linker.reset_stats()
         self.entity_linker.reset_stats()
         self.facet_matcher.reset_stats()

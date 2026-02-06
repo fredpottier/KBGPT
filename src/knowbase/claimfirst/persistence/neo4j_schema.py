@@ -100,9 +100,11 @@ class ClaimFirstSchema:
         "Entity",
         "Facet",
         "ClaimCluster",
-        "Document",        # Réutilisé depuis le schéma existant
-        "SubjectAnchor",   # INV-9: Sujet canonique avec aliases typés
-        "DocumentContext", # INV-8: Contexte d'applicabilité du document
+        "Document",           # Réutilisé depuis le schéma existant
+        "SubjectAnchor",      # INV-9: Sujet canonique avec aliases typés
+        "DocumentContext",    # INV-8: Contexte d'applicabilité du document
+        "ApplicabilityAxis",  # INV-12/14/25: Axe d'applicabilité
+        "ComparableSubject",  # INV-25: Sujet stable comparable entre documents
     ]
 
     # Types de relations
@@ -117,8 +119,10 @@ class ClaimFirstSchema:
         "REFINES",           # Claim → Claim
         "QUALIFIES",         # Claim → Claim
         "HAS_CONTEXT",       # Document → DocumentContext (INV-8)
-        "ABOUT_SUBJECT",     # DocumentContext → SubjectAnchor (INV-8)
+        "ABOUT_SUBJECT",     # DocumentContext → SubjectAnchor (INV-8) - topics secondaires
+        "ABOUT_COMPARABLE",  # DocumentContext → ComparableSubject (INV-25) - sujet stable
         "POSSIBLE_EQUIVALENT",  # SubjectAnchor → SubjectAnchor (INV-9)
+        "HAS_AXIS_VALUE",    # DocumentContext → ApplicabilityAxis (INV-26)
     ]
 
     # Contraintes (unicité)
@@ -176,6 +180,22 @@ class ClaimFirstSchema:
             name="doc_context_unique",
             label="DocumentContext",
             property_key="doc_id",
+            constraint_type="UNIQUE"
+        ),
+
+        # ApplicabilityAxis: unique par axis_id (INV-12/14/25)
+        SchemaConstraint(
+            name="axis_id_unique",
+            label="ApplicabilityAxis",
+            property_key="axis_id",
+            constraint_type="UNIQUE"
+        ),
+
+        # ComparableSubject: unique par subject_id (INV-25)
+        SchemaConstraint(
+            name="comparable_subject_unique",
+            label="ComparableSubject",
+            property_key="subject_id",
             constraint_type="UNIQUE"
         ),
     ])
@@ -303,6 +323,60 @@ class ClaimFirstSchema:
             name="doccontext_status",
             label="DocumentContext",
             property_keys=["resolution_status"]
+        ),
+
+        # ==== INV-12/14/25/26: ApplicabilityAxis ====
+
+        # Index sur axis_key pour ApplicabilityAxis lookup
+        SchemaIndex(
+            name="axis_key_idx",
+            label="ApplicabilityAxis",
+            property_keys=["tenant_id", "axis_key"]
+        ),
+
+        # Index sur tenant_id pour ApplicabilityAxis multi-tenant
+        SchemaIndex(
+            name="axis_tenant",
+            label="ApplicabilityAxis",
+            property_keys=["tenant_id"]
+        ),
+
+        # Index sur ordering_confidence pour filtrage
+        SchemaIndex(
+            name="axis_ordering_confidence",
+            label="ApplicabilityAxis",
+            property_keys=["ordering_confidence"]
+        ),
+
+        # ==== INV-25: ComparableSubject ====
+
+        # Index sur canonical_name pour ComparableSubject lookup
+        SchemaIndex(
+            name="comparable_subject_name",
+            label="ComparableSubject",
+            property_keys=["canonical_name"]
+        ),
+
+        # Index sur tenant_id pour ComparableSubject multi-tenant
+        SchemaIndex(
+            name="comparable_subject_tenant",
+            label="ComparableSubject",
+            property_keys=["tenant_id"]
+        ),
+
+        # Index composite pour ComparableSubject (tenant_id, canonical_name)
+        SchemaIndex(
+            name="comparable_subject_tenant_name",
+            label="ComparableSubject",
+            property_keys=["tenant_id", "canonical_name"]
+        ),
+
+        # Index fulltext sur aliases pour recherche de sujets comparables
+        SchemaIndex(
+            name="comparable_subject_aliases_search",
+            label="ComparableSubject",
+            property_keys=["aliases"],
+            index_type="FULLTEXT"
         ),
     ])
 
@@ -475,6 +549,16 @@ def get_cleanup_queries(tenant_id: str) -> List[str]:
         MATCH (sa:SubjectAnchor {{tenant_id: '{tenant_id}'}})-[r:POSSIBLE_EQUIVALENT]->()
         DELETE r
         """,
+        # INV-26: Relations HAS_AXIS_VALUE
+        f"""
+        MATCH (dc:DocumentContext {{tenant_id: '{tenant_id}'}})-[r:HAS_AXIS_VALUE]->()
+        DELETE r
+        """,
+        # INV-25: Relations ABOUT_COMPARABLE
+        f"""
+        MATCH (dc:DocumentContext {{tenant_id: '{tenant_id}'}})-[r:ABOUT_COMPARABLE]->()
+        DELETE r
+        """,
         # Puis les nœuds
         f"MATCH (c:Claim {{tenant_id: '{tenant_id}'}}) DELETE c",
         f"MATCH (p:Passage {{tenant_id: '{tenant_id}'}}) DELETE p",
@@ -483,6 +567,8 @@ def get_cleanup_queries(tenant_id: str) -> List[str]:
         f"MATCH (cc:ClaimCluster {{tenant_id: '{tenant_id}'}}) DELETE cc",
         f"MATCH (dc:DocumentContext {{tenant_id: '{tenant_id}'}}) DELETE dc",
         f"MATCH (sa:SubjectAnchor {{tenant_id: '{tenant_id}'}}) DELETE sa",
+        f"MATCH (ax:ApplicabilityAxis {{tenant_id: '{tenant_id}'}}) DELETE ax",
+        f"MATCH (cs:ComparableSubject {{tenant_id: '{tenant_id}'}}) DELETE cs",
     ]
 
 

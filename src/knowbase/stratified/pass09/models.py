@@ -6,7 +6,7 @@ Modèles de données pour Global View Construction.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -30,7 +30,7 @@ class Pass09Config:
     min_coverage_ratio: float = 0.95
 
     # Parallélisation
-    max_concurrent_summaries: int = 10
+    max_concurrent_summaries: int = 20
 
     # Fallback
     enable_fallback: bool = True
@@ -125,6 +125,9 @@ class GlobalView:
     is_fallback: bool = False  # True si construit sans LLM
     errors: List[str] = field(default_factory=list)
 
+    # V2.2: Zones détectées pour clustering zone-first
+    zones: List["Zone"] = field(default_factory=list)
+
     def is_valid(self, config: Pass09Config) -> bool:
         """Vérifie si la GlobalView est valide selon la config."""
         # Couverture suffisante
@@ -139,3 +142,21 @@ class GlobalView:
             return False
 
         return True
+
+
+@dataclass
+class Zone:
+    """
+    Zone documentaire pour clustering zone-first (V2.2).
+
+    Une zone correspond à une section H1 ou à un découpage automatique
+    si le document n'a pas de structure H1 exploitable.
+    Les zones sont purement informationnelles — elles ne produisent PAS
+    de Themes/Concepts, uniquement des labels et keywords.
+    """
+
+    zone_id: str                         # "z1", "z2", ...
+    label: str                           # Heading H1 (informatif, pas prescriptif)
+    section_ids: List[str]               # Sections couvertes
+    keywords: List[str] = field(default_factory=list)  # Agrégés depuis concepts_mentioned
+    page_range: Tuple[int, int] = (0, 0)  # (page_min, page_max)

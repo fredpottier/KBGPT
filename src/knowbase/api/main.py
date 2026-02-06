@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers
+from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu
 # Pipeline V2 - Stratified Reading Model
 from knowbase.stratified.api import router as stratified_v2_router
 # MVP V1 - Challenge de Texte (Usage B)
@@ -252,11 +252,20 @@ def create_app() -> FastAPI:
     app.include_router(analytics.router, prefix="/api")  # 📊 Import Analytics - Dashboard analyse imports V2
     app.include_router(markers.router, prefix="/api")  # 🏷️ Markers API - Liste markers pour diff queries (PR3)
 
+    # 🖥️ OSMOSE GPU Infrastructure - Health check & restart services EC2
+    app.include_router(gpu.router)  # Endpoints: /api/gpu/health, /api/gpu/restart-service
+
+    # 🔥 OSMOSE Pipeline Claim-First (Pivot Épistémique)
+    app.include_router(claimfirst.router)  # Endpoints: /api/claimfirst/status, /api/claimfirst/jobs, etc.
+
     # 🌊 OSMOSE Pipeline V2 - Stratified Reading Model (Phase 2)
     app.include_router(stratified_v2_router, prefix="/api")  # Endpoints: /api/v2/ingest, /api/v2/enrich, etc.
 
     # 🌊 OSMOSE MVP V1 - Challenge de Texte (Usage B)
     app.include_router(challenge_router.router)  # Endpoint: /api/v2/challenge
+
+    # 🔍 OSMOSE Verification - Vérification texte contre KG
+    app.include_router(verify.router)  # Endpoints: /api/verify/analyze, /api/verify/correct
 
     return app
 

@@ -14,6 +14,7 @@ Pass 2 enrichit le graphe sémantique créé par Pass 1.
 import json
 import re
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
@@ -226,28 +227,30 @@ class RelationExtractorV2:
             f"(sur {len(concepts)} total, excl. SINK et vides)"
         )
 
-        # Découper en batches
+        # Découper en batches et exécuter en parallèle (ThreadPoolExecutor)
         all_relations: List[ConceptRelation] = []
         n_batches = (len(active_concepts) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
 
-        for batch_idx in range(n_batches):
+        def _process_batch(batch_idx: int) -> Tuple[int, List[ConceptRelation]]:
             start = batch_idx * self.BATCH_SIZE
             end = min(start + self.BATCH_SIZE, len(active_concepts))
             batch_concepts = active_concepts[start:end]
-
-            # Inclure aussi les concepts hors-batch comme cibles potentielles
-            # (on ne les détaille pas, juste leurs noms)
             other_concepts = [c for c in active_concepts if c not in batch_concepts]
-
             relations = self._extract_batch_via_llm(
                 batch_concepts, other_concepts, informations, concept_to_infos
             )
-            all_relations.extend(relations)
+            return batch_idx, relations
 
-            logger.info(
-                f"[OSMOSE:Pass2] Batch {batch_idx + 1}/{n_batches}: "
-                f"{len(relations)} relations extraites"
-            )
+        max_workers = min(n_batches, 4)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [pool.submit(_process_batch, i) for i in range(n_batches)]
+            for future in as_completed(futures):
+                batch_idx, relations = future.result()
+                all_relations.extend(relations)
+                logger.info(
+                    f"[OSMOSE:Pass2] Batch {batch_idx + 1}/{n_batches}: "
+                    f"{len(relations)} relations extraites"
+                )
 
         return all_relations
 

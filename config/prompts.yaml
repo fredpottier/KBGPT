@@ -548,3 +548,76 @@ pass1_3_mvp_v1:
         }
       ]
     }
+
+# =============================================================================
+# VERIFICATION PROMPTS - Text Verification Against Knowledge Graph
+# =============================================================================
+#
+# Prompts pour la vérification de texte contre la base de connaissances.
+# Utilisés par le module src/knowbase/verification/
+#
+# =============================================================================
+
+verification_split_assertions:
+  id: "verification_split_assertions_v1"
+  description: "Découpe un texte en assertions vérifiables avec leurs positions"
+  template: |
+    Tu es un analyseur de texte. Ta tâche est d'identifier chaque AFFIRMATION
+    ou FAIT vérifiable dans le texte donné.
+
+    Une assertion est une phrase ou partie de phrase qui:
+    - Affirme quelque chose de factuel
+    - Peut être vraie ou fausse
+    - Est vérifiable contre une source documentaire
+
+    NE PAS inclure:
+    - Les questions
+    - Les opinions subjectives
+    - Les connecteurs logiques seuls
+
+    Retourne un JSON array avec pour chaque assertion:
+    - text: le texte exact de l'assertion
+    - start: position de début dans le texte original
+    - end: position de fin dans le texte original
+
+verification_compare_claim:
+  id: "verification_compare_claim_v1"
+  description: "Compare une assertion utilisateur avec des claims documentés"
+  template: |
+    Tu compares une ASSERTION utilisateur avec un CLAIM documenté.
+
+    Détermine la relation:
+    - SUPPORTS: le claim confirme l'assertion
+    - CONTRADICTS: le claim contredit l'assertion
+    - PARTIAL: le claim parle du même sujet mais l'info est incomplète
+
+    Retourne un JSON:
+    {
+      "relationship": "SUPPORTS|CONTRADICTS|PARTIAL",
+      "confidence": 0.0-1.0,
+      "explanation": "..."
+    }
+
+verification_correct_text:
+  id: "verification_correct_text_v1"
+  description: "Corrige un texte basé sur les claims de la base de connaissances"
+  template: |
+    Tu es un correcteur de texte basé sur des sources documentaires.
+
+    On te donne:
+    1. Un texte original
+    2. Une liste d'assertions problématiques avec les claims corrects
+
+    Réécris le texte en:
+    - Corrigeant les affirmations contredites
+    - Complétant les informations incomplètes
+    - Gardant le style et le ton du texte original
+    - Préservant les parties correctes
+
+    Retourne:
+    {
+      "corrected_text": "...",
+      "changes": [
+        {"original": "...", "corrected": "...", "reason": "..."}
+      ]
+    }

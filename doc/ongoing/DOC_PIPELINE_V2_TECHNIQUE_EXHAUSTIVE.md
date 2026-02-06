@@ -4,8 +4,8 @@
 **Produit:** OSMOSIS
 **Statut:** EN COURS DE RÉDACTION
 **Date de création:** 2026-01-29
-**Dernière MAJ:** 2026-01-29
-**Branche:** `pivot/stratified-pipeline-v2`
+**Dernière MAJ:** 2026-02-02
+**Branche:** `feat/pass1-hybrid-extract-then-structure`
 
 ---
 
@@ -1978,6 +1978,38 @@ Ces sections sont passées via le paramètre `sections=sections_for_pass09` à l
 | R09-5 | **Modèle LLM hardcodé** | 🟢 | Le modèle `"gpt-4o-mini"` est hardcodé dans `_call_openai_style()` et dans les métadonnées de `GlobalView`. Pas de routing via `llm_models.yaml`. | Acceptable pour V2 beta. À intégrer au `LLMRouter` pour la production. |
 | R09-6 | **Pas de cache des résumés** | 🟡 | Chaque exécution de Pass 0.9 recalcule tous les résumés de section, même pour un document déjà traité. Pas de persistance des `SectionSummary`. | Ajouter un cache basé sur `hash(section_text)` pour éviter les appels LLM redondants lors de re-traitements. |
 | R09-7 | **Fourchette de taille plus large que l'ADR** | 🟢 | L'ADR spécifie 15-25K chars, l'implémentation accepte 5K-30K. | La fourchette élargie est pragmatique pour gérer les documents très courts (< 15K) et très longs (> 25K). Le `meta_document_target_chars = 20000` reste dans la cible ADR. |
+
+### 8.8 Pipeline V2.2 — Extract-then-Structure (2026-02-02)
+
+**ADR de référence :** `doc/ongoing/ADR_PASS1_V22_HYBRID_EXTRACT_THEN_STRUCTURE.md`
+**Feature flag :** `stratified_pipeline_v2.pass1_v22` (défaut: `false`)
+
+Le pipeline V2.2 introduit une approche **Extract-then-Structure** qui s'appuie sur les zones de la GlobalView construite en Pass 0.9. Au lieu du flux V2.1 (analyse documentaire → concepts → assertions linéaire), le V2.2 :
+
+1. **Construit la GlobalView avec zones** — La GlobalView identifie des zones thématiques cohérentes dans le document
+2. **Extrait par zone** — Chaque zone est traitée indépendamment par un orchestrateur `Pass1OrchestratorV22`
+3. **Structure a posteriori** — Les concepts et informations sont structurés après extraction, pas avant
+
+**Fichiers clés :**
+
+| Fichier | Rôle |
+|---------|------|
+| `src/knowbase/stratified/pass1_v22/orchestrator.py` | `Pass1OrchestratorV22` — orchestrateur zone-aware |
+| `src/knowbase/stratified/pass09/global_view_builder.py` | `GlobalViewBuilder.build_sync()` — construction GlobalView avec zones |
+| `src/knowbase/stratified/pass09/models.py` | Modèle `GlobalView` avec `zones: List[Zone]` |
+
+**Fallback :** Si la GlobalView ne produit pas de zones, le pipeline retombe sur V2.1 automatiquement.
+
+**Activation dans le reprocess :**
+
+```python
+use_v22 = get_stratified_v2_config("pass1_v22", tenant_id)
+if use_v22:
+    gv_builder = GlobalViewBuilder(llm_client=llm_client)
+    global_view = gv_builder.build_sync(...)
+    orchestrator_v22 = Pass1OrchestratorV22(...)
+    pass1_result = orchestrator_v22.process(global_view=global_view, ...)
+```
 
 ---
 
@@ -4157,7 +4189,7 @@ Le dispatcher est le point central de routage des documents vers les jobs RQ. De
 | Paramètre | Source | Valeur |
 |-----------|--------|--------|
 | `REDIS_URL` | Variable d'environnement | `redis://knowbase-redis:6379/0` (par défaut) |
-| `DEFAULT_QUEUE_NAME` | Constante | `"knowbase"` |
+| `DEFAULT_QUEUE_NAME` | Env `INGESTION_QUEUE` ou `"ingestion"` | Queue principale d'ingestion |
 | `DEFAULT_JOB_TIMEOUT` | `settings.ingestion_job_timeout` | Configurable |
 | `result_ttl` | `DEFAULT_JOB_TIMEOUT` | Même valeur que le timeout |
 | `failure_ttl` | `DEFAULT_JOB_TIMEOUT` | Même valeur que le timeout |
@@ -4362,7 +4394,60 @@ Outre le job principal `ingest_document_v2_job`, `jobs_v2.py` expose deux jobs s
 - Supprime le fichier meta après traitement
 - Progression UI via callback (`pipeline_progress_callback`)
 
-### 16.8 Conformité ADR — Orchestration
+### 16.8 Reprocess Batch — Isolation dans le Worker RQ (2026-02-02)
+
+**Fichier job :** `src/knowbase/ingestion/queue/reprocess_job.py` — fonction `reprocess_batch_job()`
+**Endpoint API :** `POST /v2/reprocess/start` (dans `src/knowbase/stratified/api/router.py`)
+**Worker :** `src/knowbase/ingestion/queue/worker.py` — SimpleWorker écoute les queues `ingestion` + `reprocess`
+
+#### 16.8.1 Problème résolu
+
+Avant le 2026-02-02, le reprocess batch utilisait `FastAPI BackgroundTasks` dans le même process Uvicorn que l'API. Les appels LLM bloquants + Neo4j + Qdrant saturaient les threads, rendant l'API totalement unresponsive pendant 30-120 minutes.
+
+#### 16.8.2 Architecture actuelle
+
+```
+POST /v2/reprocess/start
+  → Validation + liste des documents depuis cache
+  → Initialise l'état dans Redis (clé osmose:v2:reprocess:state)
+  → Enqueue dans la queue RQ "reprocess" (job_timeout=7200s)
+  → Retourne immédiatement (API libre)
+
+Worker RQ (knowbase-worker, SimpleWorker):
+  → Écoute les queues: ["ingestion", "reprocess"]
+  → Exécute reprocess_batch_job() séquentiellement
+  → Tracking de progression via Redis (cross-container)
+```
+
+#### 16.8.3 Job `reprocess_batch_job()`
+
+**Arguments sérialisables (pas d'objets Pydantic) :**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `documents` | `List[dict]` | Liste de dicts `{document_id, cache_path, ...}` |
+| `run_pass1` | `bool` | Exécuter Pass 1 |
+| `run_pass2` | `bool` | Exécuter Pass 2 |
+| `run_pass3` | `bool` | Exécuter Pass 3 (consolidation) |
+| `tenant_id` | `str` | Tenant ID |
+
+**Séquence par document :**
+
+1. `LOADING_CACHE` — Charge le Pass0Result depuis le cache d'extraction
+2. `PERSIST_PASS0` — Persiste Pass 0 dans Neo4j (Document, Section, DocItem)
+3. `LAYER_R_UPSERT` ou `LAYER_R_RECOMPUTE` — Upsert des sub-chunks dans Qdrant (knowbase_chunks_v2)
+4. `PASS_1` — Lecture Stratifiée (V2.1 ou V2.2 selon feature flag)
+5. `PASS_2` — Enrichissement sémantique (relations inter-concepts)
+6. `PASS_3` — Consolidation corpus (si demandé)
+
+**Tracking de progression :**
+- Redis clé `osmose:v2:reprocess:state` (TTL 1h)
+- Polled par `GET /v2/reprocess/status` (non-bloquant)
+- Annulation via `POST /v2/reprocess/cancel` (écrit `status=cancelled` dans Redis, vérifié à chaque document)
+
+**Ce qui ne change pas :** Les endpoints status/cancel lisent/écrivent Redis directement, fonctionnant cross-container sans modification.
+
+### 16.9 Conformité ADR — Orchestration
 
 | # | Axe ADR | Statut | Détail |
 |---|---------|--------|--------|
@@ -4370,8 +4455,9 @@ Outre le job principal `ingest_document_v2_job`, `jobs_v2.py` expose deux jobs s
 | AV2-8 | Dual storage (Neo4j + Qdrant) | ✅ | Le job V2 orchestre extraction → OSMOSE Agentique, qui persiste dans les deux stores. |
 | AV2-9 | Pass 3 mode manuel + batch | ✅ | Pass 3 n'est pas inline dans le job principal — exécutée via `enabled_phases` en mode background/scheduled. |
 | NS-2 | LLM = Extracteur evidence-locked | ⚠️ | Le mode Burst permet d'utiliser un modèle local (Qwen 2.5 7B) potentiellement moins strict que les modèles cloud. La qualité doit être validée. |
+| — | Reprocess isolé du process API | ✅ | Le reprocess batch est exécuté dans le worker RQ dédié (queue `reprocess`), libérant l'API. (2026-02-02) |
 
-### 16.9 Risques — Orchestration
+### 16.10 Risques — Orchestration
 
 | ID | Risque | Sévérité | Description | Mitigation |
 |----|--------|----------|-------------|------------|

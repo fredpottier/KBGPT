@@ -568,6 +568,7 @@ class PurgeService:
         - MVP V1: InformationMVP, ClaimKey, Contradiction
         - Pipeline V2: Document, Subject, Theme, Concept, Information
         - Structural: DocumentContext, SectionContext, etc.
+        - Claim-First Pipeline: Claim, Passage, Entity, Facet, ClaimCluster
         """
         logger.info("🔄 Recréation schéma Neo4j...")
 
@@ -652,6 +653,22 @@ class PurgeService:
                             logger.debug(f"    ✓ Index {name}")
                         except Exception as e:
                             logger.warning(f"    ⚠ Index {name}: {e}")
+
+                    # --- Pipeline Claim-First ---
+                    logger.info("  - Création schéma Claim-First (Pipeline V3)...")
+                    try:
+                        from knowbase.claimfirst.persistence.neo4j_schema import setup_claimfirst_schema
+                        claimfirst_stats = setup_claimfirst_schema(driver, drop_existing=False)
+                        constraints_created += claimfirst_stats.get("constraints_created", 0)
+                        indexes_created += claimfirst_stats.get("indexes_created", 0)
+                        logger.info(
+                            f"    ✓ Claim-First: {claimfirst_stats.get('constraints_created', 0)} contraintes, "
+                            f"{claimfirst_stats.get('indexes_created', 0)} index"
+                        )
+                    except ImportError as e:
+                        logger.warning(f"    ⚠ Module claimfirst non disponible: {e}")
+                    except Exception as e:
+                        logger.warning(f"    ⚠ Erreur schéma Claim-First: {e}")
 
                 logger.info(
                     f"✅ Schéma Neo4j recréé: {constraints_created} contraintes, "

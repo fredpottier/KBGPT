@@ -1117,7 +1117,7 @@ export default function AdminSettingsPage() {
                         Recreer le schema apres purge
                       </Text>
                       <Text color="text.muted" fontSize="xs">
-                        Recreer les constraints/indexes (MVP V1 + Pipeline V2)
+                        Recreer les constraints/indexes (MVP V1 + Pipeline V2 + Claim-First)
                       </Text>
                     </VStack>
                   </Checkbox>

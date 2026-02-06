@@ -1,117 +1,24 @@
 # ===============================================================================
-# 🌊 OSMOSE Feature Flags Configuration
+# 🌊 OSMOSE Feature Flags Configuration - SIMPLIFIED
 # ===============================================================================
 #
-# Feature flags pour contrôler le déploiement progressif des fonctionnalités.
-# Format: feature_name: enabled (bool) ou configuration détaillée
+# Ce fichier contient UNIQUEMENT les flags réellement utilisés dans le code.
+# Les sections mortes (phase_1, phase_1_5) ont été supprimées.
 #
 # Usage:
 #   from knowbase.config.feature_flags import is_feature_enabled
-#   if is_feature_enabled("enable_hybrid_extraction"):
+#   if is_feature_enabled("stratified_pipeline_v2"):
 #       ...
 #
 # ===============================================================================
 
 # ===============================================================================
-# Phase 1.8 - LLM Hybrid Intelligence
+# PIPELINE PRINCIPAL - Stratified V2
 # ===============================================================================
-
-phase_1_8:
-  # Global Phase 1.8 toggle (master switch)
-  enabled: true
-
-  # -------------------------------------------------------------------------
-  # Sprint 1.8.1 - Extraction Concepts Hybrid
-  # -------------------------------------------------------------------------
-
-  # LOW_QUALITY_NER Routing: Route segments problématiques vers LLM
-  # Condition: < 3 entities ET > 200 tokens → SMALL LLM
-  # Impact: Rappel concepts 70% → 85%
-  enable_hybrid_extraction: true
-  low_quality_ner:
-    entity_threshold: 3      # Min entities pour considérer "quality OK"
-    token_threshold: 200     # Min tokens pour considérer segment "long"
-
-  # Document Context Global: Génère résumé pour désambiguïsation
-  # Impact: Precision +15-20%
-  enable_document_context: true
-  document_context:
-    max_length: 500          # Max caractères pour le résumé
-    cache_enabled: true      # Cache par document_id
-
-  # LLM-as-a-Judge: Validation clustering via LLM (KGGen-inspired)
-  # Impact: Réduit faux positifs clustering -47%
-  enable_llm_judge_validation: true
-  llm_judge:
-    threshold: 0.85          # Seuil confidence pour merger
-    min_similarity: 0.75     # Min similarity pour considérer LLM
-    max_similarity: 0.95     # Max similarity pour auto-merge
-
-  # -------------------------------------------------------------------------
-  # Sprint 1.8.1c - Dictionnaires Métier NER (EntityRuler)
-  # -------------------------------------------------------------------------
-
-  # EntityRuler: Dictionnaires métier préchargés
-  # Impact: Precision NER 70% → 85-90%
-  enable_entity_ruler: true
-  entity_ruler:
-    # Dictionnaires globaux à charger
-    # Note: Aucun dictionnaire prédéfini (solution domain-agnostic)
-    # Les ontologies sont apprises progressivement via les documents importés
-    # ou configurées via le Domain Context par le client
-    global_ontologies: []
-    # Support custom tenant (permet de charger des ontologies spécifiques)
-    enable_custom_tenant: true
-
-  # -------------------------------------------------------------------------
-  # Sprint 1.8.2 - Gatekeeper Prefetch Ontology
-  # -------------------------------------------------------------------------
-
-  # Prefetch Ontology: Cache ontologie par type document
-  # Impact: Cache hit rate 50% → 70%, LLM calls -20%
-  enable_ontology_prefetch: true
-  ontology_prefetch:
-    ttl_seconds: 3600        # 1 heure
-    max_entries_per_domain: 500
-
-  # -------------------------------------------------------------------------
-  # Sprint 1.8.3 - Relations LLM Smart Enrichment
-  # -------------------------------------------------------------------------
-
-  # Enrichissement Relations: LLM sur zone grise (0.4-0.6 confidence)
-  # Impact: Precision relations 60% → 80%, Rappel 50% → 70%
-  # DÉSACTIVÉ 2026-01-01: Unifié sur Pass 2 ENRICH_RELATIONS (ADR-compliant)
-  # Voir doc/ongoing/CONSISTENCY_AUDIT_2026-01.md
-  enable_llm_relation_enrichment: false
-  relation_enrichment:
-    min_confidence: 0.4      # Zone grise min
-    max_confidence: 0.6      # Zone grise max
-    batch_size: 50           # Paires par appel LLM
-    max_batches: 20          # Budget cap
-
-  # -------------------------------------------------------------------------
-  # Sprint 1.8.4 - Business Rules Engine
-  # -------------------------------------------------------------------------
-
-  # Business Rules: Validation métier custom par tenant
-  # Impact: Différenciateur marché vs Copilot/Gemini
-  enable_business_rules_engine: true
-
-
-# ===============================================================================
-# Stratified Pipeline V2 - Lecture Stratifiée
-# ===============================================================================
-# ADR: doc/ongoing/ARCH_STRATIFIED_PIPELINE_V2.md
-# Objectif: Réduire nodes de ~4700/doc à ~195/doc via lecture stratifiée
+# Pipeline actif pour l'ingestion standard (via /documents/import)
 
 stratified_pipeline_v2:
-  # Global toggle - Active le nouveau pipeline
-  enabled: true  # ACTIVÉ - Pipeline V2 prêt pour re-processing
-
-  # API Version
-  # - false: Endpoints legacy actifs
-  # - true: Endpoints V2 deviennent principaux
-  use_v2_endpoints: false
+  enabled: true
 
   # Frugality Guards
   max_concepts_per_document: 15
@@ -119,44 +26,32 @@ stratified_pipeline_v2:
   max_relations_per_concept: 3
 
   # Promotion Policy
-  # ADR: North Star "Documentary Truth" - stocker tous les faits explicites,
-  # filtrer via ClaimKey comparability, pas via rejet à l'ingestion
-  strict_promotion: false   # False = CONDITIONAL (conf>=0.7) + RARELY (conf>=0.9) promues
-  promotion_threshold: 0.7  # Confidence minimum pour CONDITIONAL tier
-  abstention_log: true      # Loguer les assertions abstenues
+  strict_promotion: false
+  promotion_threshold: 0.7
+  abstention_log: true
 
-  # Pointer-Based Extraction Mode (Anti-Reformulation)
-  # ADR: Plan Pointer-Based Extraction (2026-01-27)
-  # Le LLM POINTE vers des unités numérotées au lieu de COPIER le texte
-  # Garantit l'ancrage verbatim et élimine structurellement la reformulation
+  # Pointer Mode (anti-reformulation)
   enable_pointer_mode: true
 
-  # V2.2: Pipeline Extract-then-Structure (bottom-up guidé)
-  # ADR: doc/ongoing/ADR_HYBRID_EXTRACT_THEN_STRUCTURE_2026-02-01.md
-  # Désactivé par défaut — activer manuellement pour tests
+  # V2.2 Extract-then-Structure
   pass1_v22: true
 
   # Pass 3 Configuration
   consolidation_similarity_threshold: 0.85
   enable_llm_validation: true
 
-  # -------------------------------------------------------------------------
-  # Calibration LLM-agnostique des seuils rerank (Sprint 5)
-  # -------------------------------------------------------------------------
-  # Mode "auto" (défaut) : quantiles sur chaque batch
-  # Mode "profile_override" : valeurs explicites ci-dessous
-  # NOTE: Déplacé ici depuis phase_2_hybrid_anchor (Issue 2 — config non lue)
+  # Calibration LLM
   llm_calibration:
     mode: "auto"
     auto_fallback:
       min_sample_size: 5
-      min_score_spread: 0.03  # Baissé de 0.05 — active auto-calibration pour spreads serrés
-      band_separation_threshold: 0.08   # si spread < ce seuil, band3 = Q_mid au lieu de Q_high
-      conf_final_clamp_min: 0.15        # borne basse conf_threshold_final
-      conf_final_clamp_max: 0.45        # borne haute conf_threshold_final
-      percentile_low: 10                # → band1_ceiling, conf_thresholds
-      percentile_mid: 50                # → fallback band3 si spread serré
-      percentile_high: 75               # → band3_floor
+      min_score_spread: 0.03
+      band_separation_threshold: 0.08
+      conf_final_clamp_min: 0.15
+      conf_final_clamp_max: 0.45
+      percentile_low: 10
+      percentile_mid: 50
+      percentile_high: 75
     profile:
       name: "qwen_14b"
       conf_threshold_original: 0.45
@@ -165,349 +60,215 @@ stratified_pipeline_v2:
       sink_band3_floor: 0.52
       sink_band2_gap_min: 0.04
       margin_ambiguous: 0.05
-      sink_signal_fort_threshold: 1.15  # semi-structurel, overrideable
+      sink_signal_fort_threshold: 1.15
 
 
 # ===============================================================================
-# Phase 2 - Hybrid Anchor Model Architecture
+# HYBRID INTELLIGENCE - Améliorations LLM
 # ===============================================================================
-# ADR: doc/ongoing/ADR_HYBRID_ANCHOR_MODEL.md
-# Objectif: Réduire temps traitement de 35+ min à ~10 min par document
+# Flags pour les optimisations LLM (tous activés par défaut)
+
+hybrid_intelligence:
+  # Route segments problématiques vers LLM
+  enable_hybrid_extraction: true
+  low_quality_ner:
+    entity_threshold: 3
+    token_threshold: 200
+
+  # Contexte document pour désambiguïsation
+  enable_document_context: true
+  document_context:
+    max_length: 500
+    cache_enabled: true
+
+  # LLM-as-a-Judge pour clustering
+  enable_llm_judge_validation: true
+  llm_judge:
+    threshold: 0.85
+    min_similarity: 0.75
+    max_similarity: 0.95
+
+  # Dictionnaires métier NER
+  enable_entity_ruler: true
+  entity_ruler:
+    global_ontologies: []
+    enable_custom_tenant: true
+
+  # Prefetch ontologie
+  enable_ontology_prefetch: true
+  ontology_prefetch:
+    ttl_seconds: 3600
+    max_entries_per_domain: 500
+
+  # Enrichissement relations (DÉSACTIVÉ - unifié sur Pass 2)
+  enable_llm_relation_enrichment: false
+
+  # Business Rules Engine
+  enable_business_rules_engine: true
+
+
+# ===============================================================================
+# PHASE 2 - Hybrid Anchor Model
+# ===============================================================================
+# Configuration du Pass 2 (enrichissement asynchrone)
 
 phase_2_hybrid_anchor:
-  # Global toggle
   enabled: true
-
-  # -------------------------------------------------------------------------
-  # Pass 2 Mode Configuration
-  # -------------------------------------------------------------------------
-  # inline: Exécute Pass 2 immédiatement après Pass 1 (mode Burst GPU)
-  # background: Job asynchrone via RQ worker (mode normal)
-  # scheduled: Batch nocturne (corpus stable)
   pass2_mode: "background"
 
-  # -------------------------------------------------------------------------
-  # Anchor Configuration
-  # -------------------------------------------------------------------------
   anchor_config:
-    # Seuil fuzzy matching pour anchor valide
     min_fuzzy_score: 85
-    # Marquer approximate si score < seuil mais > min_approximate
     min_approximate_score: 70
-    # Rejeter anchor si score < min_approximate
     reject_below_score: 70
 
-  # -------------------------------------------------------------------------
-  # Promotion Configuration (ProtoConcept → CanonicalConcept)
-  # -------------------------------------------------------------------------
   promotion_config:
-    # Critères pour "stable" (promu avec confiance)
     min_proto_concepts_for_stable: 2
     min_anchor_sections_for_stable: 2
-
-    # Voie d'exception pour singletons critiques
     allow_singleton_if_high_signal: true
+    high_signal_roles: ["requirement", "prohibition", "definition", "constraint", "obligation"]
+    high_signal_modals: ["shall", "must", "required", "prohibited", "mandatory"]
+    high_signal_sections: ["requirements", "security", "compliance", "sla", "constraints", "obligations"]
+    high_signal_domains: ["gdpr", "security", "disaster_recovery", "sla", "compliance", "legal"]
 
-    # Rôles anchor considérés "high-signal"
-    high_signal_roles:
-      - "requirement"
-      - "prohibition"
-      - "definition"
-      - "constraint"
-      - "obligation"
-
-    # Modaux normatifs pour détection high-signal
-    high_signal_modals:
-      - "shall"
-      - "must"
-      - "required"
-      - "prohibited"
-      - "mandatory"
-
-    # Sections critiques pour high-signal
-    high_signal_sections:
-      - "requirements"
-      - "security"
-      - "compliance"
-      - "sla"
-      - "constraints"
-      - "obligations"
-
-    # Domaines high-value
-    high_signal_domains:
-      - "gdpr"
-      - "security"
-      - "disaster_recovery"
-      - "sla"
-      - "compliance"
-      - "legal"
-
-  # -------------------------------------------------------------------------
-  # Chunking Configuration (Document-Centric)
-  # -------------------------------------------------------------------------
   chunking_config:
-    chunk_size_tokens: 256       # Réduit de 512 pour meilleure granularité
-    chunk_overlap_tokens: 64     # Overlap pour continuité contextuelle
-    min_chunk_tokens: 50         # Minimum pour éviter chunks trop petits
+    chunk_size_tokens: 256
+    chunk_overlap_tokens: 64
+    min_chunk_tokens: 50
 
-  # -------------------------------------------------------------------------
-  # Payload Qdrant - Champs autorisés (Invariant d'Architecture)
-  # -------------------------------------------------------------------------
-  # IMPORTANT: Ne JAMAIS ajouter d'autres champs dans anchored_concepts
-  allowed_anchor_payload_fields:
-    - "concept_id"
-    - "label"
-    - "role"
-    - "span"
-    - "chunk_id"
+  allowed_anchor_payload_fields: ["concept_id", "label", "role", "span", "chunk_id"]
 
-  # -------------------------------------------------------------------------
-  # Pass 2 Configuration (Enrichissement)
-  # -------------------------------------------------------------------------
   pass2_config:
-    # Mode d'exécution: inline | background | scheduled | disabled
     mode: "background"
-    # Phases activées
-    # NOTE 2025-01-01: enrich_relations réactivé avec implémentation ADR-compliant
-    # Segment-first extraction avec quote + chunk_id + span obligatoires
-    # Voir: src/knowbase/relations/segment_window_relation_extractor.py
-    # NOTE 2026-01-19: Ajout structural_topics (Pass 2a) requis pour Pass 3
     enabled_phases:
-      - "corpus_promotion"       # Pass 2.0: Promotion unifiée (ADR_UNIFIED_CORPUS_PROMOTION)
-      - "structural_topics"      # Pass 2a: Topics + HAS_TOPIC + COVERS (requis pour Pass 3)
-      - "classify_fine"          # Pass 2b-1: Classification fine des concepts
-      - "enrich_relations"       # Pass 2b-2: ADR-compliant implementation
-      - "normative_extraction"   # Pass 2c: NormativeRule + SpecFact (ADR_NORMATIVE_RULES_SPEC_FACTS)
-      - "semantic_consolidation" # Pass 3: Semantic Consolidation (proven relations)
-      - "cross_doc"              # Cross-document linking (Entity Resolution)
-    # Priorité jobs background
+      - "corpus_promotion"
+      - "structural_topics"
+      - "classify_fine"
+      - "enrich_relations"
+      - "normative_extraction"
+      - "semantic_consolidation"
+      - "cross_doc"
     default_priority: 0
 
-  # -------------------------------------------------------------------------
-  # Classification Configuration
-  # -------------------------------------------------------------------------
   classification_config:
-    # Patterns custom par tenant (optionnel)
     custom_patterns: {}
 
-  # -------------------------------------------------------------------------
-  # Hybrid Search Configuration (Phase 7)
-  # -------------------------------------------------------------------------
   search_config:
-    # Poids pour fusion chunks/concepts
     chunk_weight: 0.6
     concept_weight: 0.4
-    # Score minimum pour inclusion
     min_score: 0.5
-    # Max chunks additionnels via anchor expansion
     max_anchor_expansion: 5
-    # Mode par défaut: chunks_only | concepts_only | hybrid | anchor_first
     default_mode: "hybrid"
 
-  # NOTE: llm_calibration déplacé sous stratified_pipeline_v2 (Issue 2 fix)
-
-  # Navigation Layer Configuration
-  # -------------------------------------------------------------------------
-  # ADR: doc/ongoing/ADR_NAVIGATION_LAYER.md
-  # Couche de navigation non-sémantique pour exploration corpus-level
   navigation_layer:
-    # Feature toggles
-    enable_document_context: true    # DocumentContext - 1 par document
-    enable_section_context: true     # SectionContext - ~5-20 par document
-    enable_window_context: false     # WindowContext - DÉSACTIVÉ par défaut (ADR)
-
-    # Budgets (pour éviter explosion)
-    max_windows_per_document: 50     # Cap WindowContext par document
-    max_mentions_per_concept: 100    # Top-N mentions par concept
-
-    # Seuils
-    min_mention_count: 1             # Min mentions pour créer lien MENTIONED_IN
+    enable_document_context: true
+    enable_section_context: true
+    enable_window_context: false
+    max_windows_per_document: 50
+    max_mentions_per_concept: 100
+    min_mention_count: 1
 
 
 # ===============================================================================
-# Extraction V2 - Pipeline Unifié Docling + Vision Gating
+# EXTRACTION V2 - Docling + Vision Gating
 # ===============================================================================
-# ADR: doc/OSMOSIS_EXTRACTION_V2_DECISIONS.md
-# Objectif: Pipeline d'extraction unifié avec Vision Gating V4
+# Pipeline d'extraction unifié (V1 supprimé)
 
 extraction_v2:
-  # Pipeline V2 actif par defaut (V1 supprime - Cleanup 2025-01-05)
   enabled: true
 
-  # Configuration Vision
-  # ADR-20260126: Vision reste actif mais ses outputs vont dans VisionObservation
-  # et non plus dans InformationMVP (séparation ontologique)
   vision_config:
     enabled: true
-    # Modèle Vision à utiliser
     model: "gpt-4o"
-    # Température pour génération
     temperature: 0.0
-    # Budget max pages Vision par document (null = illimité)
     budget: null
-    # Inclure pages RECOMMENDED (pas seulement REQUIRED)
     include_recommended: true
 
-  # Seuils de gating
   gating_thresholds:
-    # Score VNS >= ce seuil → VISION_REQUIRED
     vision_required: 0.60
-    # Score VNS >= ce seuil → VISION_RECOMMENDED
     vision_recommended: 0.40
 
-  # Formats supportés
-  supported_formats:
-    - "pdf"
-    - "pptx"
-    - "docx"
-    - "xlsx"
+  supported_formats: ["pdf", "pptx", "docx", "xlsx"]
 
-  # Cache
   cache:
     enabled: true
-    version: "v5"  # v5: DocItems sérialisés pour Pipeline V2
+    version: "v5"
 
 
 # ===============================================================================
-# Phases Antérieures (Référence)
+# CLAIM-FIRST PIPELINE (Pivot Épistémique)
 # ===============================================================================
-
-phase_1:
-  # Phase 1.0-1.7 features (toutes actives en production)
-  semantic_extraction: true
-  multilingual_ner: true
-  concept_clustering: true
-  neo4j_graph: true
-  qdrant_vectors: true
-
-phase_1_5:
-  # Agent architecture
-  agent_architecture: true
-  supervisor_agent: true
-  extractor_orchestrator: true
-
-
-# ===============================================================================
-# Claim-First Pipeline (Pivot Epistémique)
-# ===============================================================================
-# ADR: Plan Claim-First Pipeline (2026-02-03)
-# Objectif: L'objet central devient la Claim documentée
-#
-# Invariants:
-# - INV-1: Unit = preuve textuelle exacte, Passage = contexte
-# - INV-2: Relations de l'objet détaillé vers l'objet englobant
-# - INV-3: Claim = occurrence mono-document
-# - INV-4: Entity sans rôle structurant (V1)
-# - INV-5: EntityExtractor enrichi (pas juste NER)
-# - INV-6: ClaimClusterer conservateur (2 étages)
-# - INV-7: Suppression legacy = post-validation étendue
-# - INV-8: Applicability over Truth (scope = DocumentContext, pas Claim)
-# - INV-9: Conservative Subject Resolution (aliases typés, pas d'auto-fusion)
-# - INV-10: Discriminants Découverts, pas Hardcodés (domain-agnostic)
+# Pipeline alternatif via /admin/claimfirst
+# INV-8: Applicability over Truth
+# INV-9: Conservative Subject Resolution
+# INV-10: Discriminants Découverts
 
 claimfirst_pipeline:
-  # Global toggle - Active le nouveau pipeline
   enabled: false
-
-  # Tenants avec claim-first activé
   tenants:
     default: false
     pilot: true
-
-  # Mode parallèle: exécuter les deux pipelines simultanément
-  # Permet de comparer les résultats avant migration
   parallel_mode: true
-
-  # Source pour les requêtes
-  # - stratified: Utiliser l'ancien pipeline (défaut)
-  # - claimfirst: Utiliser le nouveau pipeline
-  # - both: Fusionner les résultats des deux
   query_source: stratified
 
-  # -------------------------------------------------------------------------
-  # Phase 1.5: Subject Resolution (INV-8, INV-9, INV-10)
-  # -------------------------------------------------------------------------
+  # Subject Resolution (INV-8, INV-9)
   subject_resolution:
-    # Seuils pour soft matching embedding (CORRECTIF 3)
-    embedding_threshold: 0.85      # Score minimum pour LOW_CONFIDENCE
-    delta_threshold: 0.06          # Écart minimum avec 2ème candidat
-    # Confiance pour matches non-exact
-    learned_confidence: 0.95       # Pour aliases_learned
-    # Utiliser LLM pour extraction de sujets
+    embedding_threshold: 0.85
+    delta_threshold: 0.06
+    learned_confidence: 0.95
     use_llm_subjects: true
 
-  # Configuration context extraction (INV-10)
+  # Context Extraction (INV-10)
   context_extraction:
-    # Extraire automatiquement les qualificateurs
     extract_qualifiers: true
-    # Max caractères pour l'analyse du début du document
     max_first_passages_chars: 5000
-    # Validation corpus-first (≥20% docs pour valider un qualificateur)
     qualifier_validation_threshold: 0.20
 
-  # -------------------------------------------------------------------------
-  # Configuration extraction Claims
-  # -------------------------------------------------------------------------
+  # Claims
   extraction:
-    min_unit_length: 30        # Longueur minimale d'une unité
-    max_unit_length: 500       # Longueur maximale d'une unité
-    batch_size: 10             # Unités par batch LLM
+    min_unit_length: 30
+    max_unit_length: 500
+    batch_size: 10
 
-  # Configuration clustering (INV-6: conservateur, 2 étages)
+  # Clustering (INV-6: conservateur)
   clustering:
-    embedding_threshold: 0.85  # Seuil cosine similarity (conservateur)
-    lexical_overlap_min: 0.3   # % minimum tokens clés en commun
+    embedding_threshold: 0.85
+    lexical_overlap_min: 0.3
     require_same_modality: true
     check_negation: true
-    require_common_entity: true  # Entités communes requises pour merge
+    require_common_entity: true
 
-  # Configuration relations
+  # Relations
   relations:
     detect_contradicts: true
     detect_refines: true
     detect_qualifies: true
     min_confidence: 0.7
-    abstention_on_doubt: true  # Règle d'abstention stricte
+    abstention_on_doubt: true
 
-  # Configuration persistance
+  # Persistance
   persistence:
     enabled: true
-    bridge_layer_r: true       # Adapter le bridge Qdrant
+    bridge_layer_r: true
 
-  # -------------------------------------------------------------------------
   # Query-Time Scoping (INV-8)
-  # -------------------------------------------------------------------------
   query_scoping:
-    # Activer le scoping obligatoire
     enabled: true
-    # Comportement si contexte ambigu
-    on_ambiguous: "disambiguate"  # disambiguate | best_match | reject
-    # Nombre max de candidats pour désambiguïsation
+    on_ambiguous: "disambiguate"
     max_disambiguation_candidates: 5
-    # Utiliser aliases_inferred pour suggestions (jamais pour filtre dur)
     suggest_inferred_aliases: true
 
 
 # ===============================================================================
-# Architecture de Déploiement
+# NOTES D'ARCHITECTURE
 # ===============================================================================
 #
-# IMPORTANT: OSMOSE utilise une architecture "1 instance = 1 client"
-#
-# Chaque client a sa propre instance dédiée avec :
-# - Sa propre base Neo4j
-# - Sa propre base Qdrant
-# - Ses propres fichiers de configuration
-#
-# Avantages :
-# - Isolation totale des données (exigence enterprise/réglementaire)
+# OSMOSE utilise une architecture "1 instance = 1 client"
+# - Isolation totale des données
 # - Configuration spécifique par client
-# - Audit simplifié
-# - Argument commercial : "Votre instance dédiée"
-#
-# En conséquence :
-# - Pas de multi-tenancy logique sur une même instance
 # - Le tenant_id reste "default" (ou nom client pour les logs)
-# - Cette configuration s'applique à TOUTE l'instance
+#
+# Pipelines disponibles:
+# 1. Stratified V2 (défaut) - via /documents/import
+# 2. Claim-First (expérimental) - via /admin/claimfirst
 #
 # ===============================================================================

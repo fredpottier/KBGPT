@@ -165,29 +165,26 @@ def is_feature_enabled(
             return value.get("enabled", default)
 
     # =========================================================================
-    # Phase 1.8 : Chercher dans phase_1_8
+    # Hybrid Intelligence : Chercher dans hybrid_intelligence (nouveau)
     # =========================================================================
-    phase_1_8 = flags.get("phase_1_8", {})
-
-    # Vérifier master switch
-    if not phase_1_8.get("enabled", True):
-        logger.debug(f"[FeatureFlags] Phase 1.8 disabled globally")
-        return False
-
-    if feature_name in phase_1_8:
-        value = phase_1_8[feature_name]
+    hybrid_intel = flags.get("hybrid_intelligence", {})
+    if feature_name in hybrid_intel:
+        value = hybrid_intel[feature_name]
         if isinstance(value, bool):
             return value
         elif isinstance(value, dict):
             return value.get("enabled", default)
 
     # =========================================================================
-    # Phases antérieures : phase_1_5, phase_1
+    # Legacy: Chercher dans phase_1_8 (compatibilité)
     # =========================================================================
-    for phase_key in ["phase_1_5", "phase_1"]:
-        phase = flags.get(phase_key, {})
-        if feature_name in phase:
-            return phase[feature_name]
+    phase_1_8 = flags.get("phase_1_8", {})
+    if phase_1_8.get("enabled", True) and feature_name in phase_1_8:
+        value = phase_1_8[feature_name]
+        if isinstance(value, bool):
+            return value
+        elif isinstance(value, dict):
+            return value.get("enabled", default)
 
     return default
 
@@ -210,9 +207,15 @@ def get_feature_config(
     flags = _get_environment_overrides(flags)
     flags = _get_tenant_overrides(flags, tenant_id)
 
-    # Chercher dans phase_1_8
-    phase_1_8 = flags.get("phase_1_8", {})
+    # Chercher dans hybrid_intelligence (nouveau)
+    hybrid_intel = flags.get("hybrid_intelligence", {})
+    if config_name in hybrid_intel:
+        value = hybrid_intel[config_name]
+        if isinstance(value, dict):
+            return value
 
+    # Fallback: Chercher dans phase_1_8 (legacy)
+    phase_1_8 = flags.get("phase_1_8", {})
     if config_name in phase_1_8:
         value = phase_1_8[config_name]
         if isinstance(value, dict):

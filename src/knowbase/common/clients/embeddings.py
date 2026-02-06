@@ -257,8 +257,40 @@ class EmbeddingModelManager:
         consecutive_failures = 0
         circuit_broken = False
 
+        def _post_embed(batch: List[str]) -> np.ndarray:
+            """Appel HTTP POST vers le endpoint /embed."""
+            response = requests.post(
+                f"{self._burst_endpoint}/embed",
+                json={"inputs": batch},
+                timeout=self._burst_timeout,
+                headers={"Content-Type": "application/json"}
+            )
+            response.raise_for_status()
+            return np.array(response.json())
+
+        def _encode_with_split(batch: List[str], depth: int = 0) -> np.ndarray:
+            """
+            Encode un batch, avec split adaptatif en cas de 413 Payload Too Large.
+
+            Si le endpoint refuse le payload (413), le batch est coupé en deux
+            et chaque moitié est retentée récursivement (jusqu'à depth=3).
+            """
+            try:
+                return _post_embed(batch)
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None and e.response.status_code == 413 and depth < 3 and len(batch) > 1:
+                    mid = len(batch) // 2
+                    logger.warning(
+                        f"[EMBEDDINGS:BURST] 413 Payload Too Large ({len(batch)} texts, "
+                        f"~{sum(len(t) for t in batch)} chars) → split en 2 (depth={depth+1})"
+                    )
+                    left = _encode_with_split(batch[:mid], depth + 1)
+                    right = _encode_with_split(batch[mid:], depth + 1)
+                    return np.vstack([left, right])
+                raise
+
         def encode_batch_with_retry(batch_idx: int, batch: List[str]) -> tuple:
-            """Encode un batch avec retry en cas d'erreur."""
+            """Encode un batch avec retry + split adaptatif en cas de 413."""
             nonlocal consecutive_failures, circuit_broken
 
             # Check circuit breaker before starting
@@ -268,16 +300,14 @@ class EmbeddingModelManager:
             last_error = None
             for attempt in range(max_retries):
                 try:
-                    response = requests.post(
-                        f"{self._burst_endpoint}/embed",
-                        json={"inputs": batch},
-                        timeout=self._burst_timeout,
-                        headers={"Content-Type": "application/json"}
-                    )
-                    response.raise_for_status()
+                    result = _encode_with_split(batch)
                     # Success - reset consecutive failures
                     consecutive_failures = 0
-                    return batch_idx, np.array(response.json())
+                    return batch_idx, result
+                except requests.exceptions.HTTPError as e:
+                    # 413 non-résolu après splits → échec définitif
+                    last_error = e
+                    break
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     last_error = e
                     if attempt < max_retries - 1:
@@ -293,7 +323,7 @@ class EmbeddingModelManager:
             if consecutive_failures >= circuit_breaker_threshold:
                 circuit_broken = True
                 logger.error(
-                    f"[EMBEDDINGS:BURST] ⚡ Circuit breaker tripped after {consecutive_failures} "
+                    f"[EMBEDDINGS:BURST] Circuit breaker tripped after {consecutive_failures} "
                     f"consecutive failures"
                 )
             raise last_error

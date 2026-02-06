@@ -14,10 +14,12 @@ Adapté du POC: poc/extractors/concept_identifier.py
 
 import asyncio
 import json
+import os
 import re
 import logging
 import math
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Set, Tuple
 from pathlib import Path
 import yaml
@@ -372,25 +374,35 @@ class ConceptIdentifierV2:
             f"[OSMOSE:Pass1:1.2:C1] {len(forbidden_triggers)} forbidden triggers calculés"
         )
 
+        # Pré-calculer les theme_content en parallèle (CPU-bound)
+        with ThreadPoolExecutor(max_workers=min(8, len(themes))) as pool:
+            theme_contents = list(pool.map(
+                lambda t: self._extract_theme_content(content, t), themes
+            ))
+
         # Préparer les tâches parallèles
         tasks = []
-        for theme in themes:
-            # Extraire le contenu pertinent pour ce thème
-            theme_content = self._extract_theme_content(content, theme)
-
+        for i, theme in enumerate(themes):
             task = self._extract_concepts_for_theme(
                 doc_id=doc_id,
                 subject_text=subject_text,
                 theme=theme,
-                theme_content=theme_content,
+                theme_content=theme_contents[i],
                 language=language,
                 max_concepts=concepts_per_theme,
                 forbidden_triggers=forbidden_triggers  # Pass to LLM prompt
             )
             tasks.append((theme, task))
 
-        # Exécuter en parallèle
-        coroutines = [t[1] for t in tasks]
+        # Exécuter en parallèle avec semaphore pour limiter la concurrence LLM
+        MAX_CONCURRENT = int(os.environ.get("OSMOSE_LLM_CONCURRENCY", "16"))
+        sem = asyncio.Semaphore(MAX_CONCURRENT)
+
+        async def bounded(coro):
+            async with sem:
+                return await coro
+
+        coroutines = [bounded(t[1]) for t in tasks]
         results = await asyncio.gather(*coroutines, return_exceptions=True)
 
         # Merge et déduplication

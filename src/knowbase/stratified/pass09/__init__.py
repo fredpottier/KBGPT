@@ -33,6 +33,7 @@ from knowbase.stratified.pass09.models import (
     GlobalView,
     GlobalViewCoverage,
     Pass09Config,
+    Zone,
 )
 from knowbase.stratified.pass09.global_view_builder import GlobalViewBuilder, build_global_view
 from knowbase.stratified.pass09.section_summarizer import SectionSummarizer
@@ -47,4 +48,5 @@ __all__ = [
     "GlobalView",
     "GlobalViewCoverage",
     "Pass09Config",
+    "Zone",
 ]

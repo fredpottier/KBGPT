@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from knowbase.stratified.pass09.hierarchical_compressor import HierarchicalCompressor
-from knowbase.stratified.pass09.models import GlobalView, GlobalViewCoverage, Pass09Config
+from knowbase.stratified.pass09.models import GlobalView, GlobalViewCoverage, Pass09Config, Zone
 from knowbase.stratified.pass09.section_summarizer import SectionSummarizer
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,9 @@ class GlobalViewBuilder:
                 doc_title=doc_title,
             )
 
+        # V2.2: Détecter les zones pour clustering zone-first
+        global_view.zones = self._detect_zones(sections, global_view)
+
         # Finaliser les métadonnées
         global_view.build_time_seconds = time.time() - start_time
 
@@ -173,6 +176,9 @@ class GlobalViewBuilder:
                 section_texts=section_texts,
                 doc_title=doc_title,
             )
+
+        # V2.2: Détecter les zones pour clustering zone-first
+        global_view.zones = self._detect_zones(sections, global_view)
 
         global_view.build_time_seconds = time.time() - start_time
 
@@ -273,6 +279,219 @@ class GlobalViewBuilder:
             is_fallback=False,
             errors=summarizer_stats.get("errors", []),
         )
+
+    def _detect_zones(
+        self,
+        sections: List[Dict],
+        global_view: GlobalView,
+    ) -> List[Zone]:
+        """
+        Détecte les zones documentaires pour le clustering zone-first (V2.2).
+
+        Algorithme:
+        1. Parcourir les sections séquentiellement, nouvelle zone à chaque H1 (level=1)
+        2. Agréger keywords depuis section_summaries.concepts_mentioned
+        3. Calculer page_range depuis les sections
+        4. Fallback auto-split si aucun H1 ou zone > 50 pages
+
+        Complexité: O(n), pas de LLM.
+
+        LIGNE ROUGE: les zones ne produisent PAS de Themes/Concepts.
+        """
+        if not sections:
+            return []
+
+        # Phase 1: Détecter les frontières H1
+        h1_boundaries = []
+        for i, section in enumerate(sections):
+            level = section.get("level", 1)
+            if level == 1:
+                h1_boundaries.append(i)
+
+        # Phase 2: Construire les zones depuis les frontières H1
+        zones = []
+        if h1_boundaries:
+            for zone_idx, start_idx in enumerate(h1_boundaries):
+                end_idx = (
+                    h1_boundaries[zone_idx + 1]
+                    if zone_idx + 1 < len(h1_boundaries)
+                    else len(sections)
+                )
+
+                zone_sections = sections[start_idx:end_idx]
+                zone = self._build_zone_from_sections(
+                    zone_id=f"z{zone_idx + 1}",
+                    zone_sections=zone_sections,
+                    global_view=global_view,
+                )
+                zones.append(zone)
+        else:
+            # Pas de H1: créer une zone unique initialement
+            zone = self._build_zone_from_sections(
+                zone_id="z1",
+                zone_sections=sections,
+                global_view=global_view,
+            )
+            zones = [zone]
+
+        # Phase 3: Fallback auto-split pour zones > 50 pages
+        MAX_ZONE_PAGES = 50
+        TARGET_ZONE_PAGES = 30
+        final_zones = []
+        zone_counter = 1
+
+        for zone in zones:
+            page_min, page_max = zone.page_range
+            zone_page_span = max(1, page_max - page_min + 1)
+
+            if zone_page_span > MAX_ZONE_PAGES:
+                # Subdiviser en sous-zones de ~TARGET_ZONE_PAGES pages
+                sub_zones = self._split_zone(
+                    zone=zone,
+                    sections=sections,
+                    global_view=global_view,
+                    target_pages=TARGET_ZONE_PAGES,
+                    start_counter=zone_counter,
+                )
+                final_zones.extend(sub_zones)
+                zone_counter += len(sub_zones)
+            else:
+                zone.zone_id = f"z{zone_counter}"
+                final_zones.append(zone)
+                zone_counter += 1
+
+        # Phase 4: Zone unique si document < 15 pages sans structure
+        # (dernier recours absolu, pas de split nécessaire)
+        if not final_zones:
+            zone = self._build_zone_from_sections(
+                zone_id="z1",
+                zone_sections=sections,
+                global_view=global_view,
+            )
+            final_zones = [zone]
+
+        logger.info(
+            f"[OSMOSE:Pass0.9] Detected {len(final_zones)} zones "
+            f"from {len(sections)} sections "
+            f"(H1 boundaries: {len(h1_boundaries)})"
+        )
+
+        return final_zones
+
+    def _build_zone_from_sections(
+        self,
+        zone_id: str,
+        zone_sections: List[Dict],
+        global_view: GlobalView,
+    ) -> Zone:
+        """Construit une Zone depuis une liste de sections."""
+        section_ids = []
+        keywords = []
+        page_min = float("inf")
+        page_max = 0
+
+        for section in zone_sections:
+            sid = section.get("id") or section.get("section_id", "")
+            section_ids.append(sid)
+
+            # Agréger keywords depuis section_summaries
+            summary = global_view.section_summaries.get(sid)
+            if summary:
+                keywords.extend(summary.concepts_mentioned)
+
+            # Page range
+            page = section.get("page", section.get("page_no", 0))
+            if isinstance(page, (int, float)) and page > 0:
+                page_min = min(page_min, int(page))
+                page_max = max(page_max, int(page))
+
+        if page_min == float("inf"):
+            page_min = 0
+
+        # Déduplication keywords
+        seen = set()
+        unique_keywords = []
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower not in seen:
+                seen.add(kw_lower)
+                unique_keywords.append(kw)
+
+        label = (
+            zone_sections[0].get("title")
+            or zone_sections[0].get("name", f"Zone {zone_id}")
+        ) if zone_sections else f"Zone {zone_id}"
+
+        return Zone(
+            zone_id=zone_id,
+            label=label,
+            section_ids=section_ids,
+            keywords=unique_keywords,
+            page_range=(int(page_min), int(page_max)),
+        )
+
+    def _split_zone(
+        self,
+        zone: Zone,
+        sections: List[Dict],
+        global_view: GlobalView,
+        target_pages: int,
+        start_counter: int,
+    ) -> List[Zone]:
+        """
+        Subdivise une zone trop grande en sous-zones de ~target_pages pages.
+
+        Découpe aux frontières de sections, pas au milieu.
+        """
+        # Filtrer les sections qui appartiennent à cette zone
+        zone_section_ids = set(zone.section_ids)
+        zone_sections = [
+            s for s in sections
+            if (s.get("id") or s.get("section_id", "")) in zone_section_ids
+        ]
+
+        if not zone_sections:
+            return [zone]
+
+        sub_zones = []
+        current_batch = []
+        current_page_min = float("inf")
+        current_page_max = 0
+
+        for section in zone_sections:
+            page = section.get("page", section.get("page_no", 0))
+            if isinstance(page, (int, float)) and page > 0:
+                page = int(page)
+            else:
+                page = current_page_max  # Conserver continuité
+
+            current_batch.append(section)
+            if page > 0:
+                current_page_min = min(current_page_min, page)
+                current_page_max = max(current_page_max, page)
+
+            span = max(1, current_page_max - current_page_min + 1)
+            if span >= target_pages and current_batch:
+                sub_zone = self._build_zone_from_sections(
+                    zone_id=f"z{start_counter + len(sub_zones)}",
+                    zone_sections=current_batch,
+                    global_view=global_view,
+                )
+                sub_zones.append(sub_zone)
+                current_batch = []
+                current_page_min = float("inf")
+                current_page_max = 0
+
+        # Reste
+        if current_batch:
+            sub_zone = self._build_zone_from_sections(
+                zone_id=f"z{start_counter + len(sub_zones)}",
+                zone_sections=current_batch,
+                global_view=global_view,
+            )
+            sub_zones.append(sub_zone)
+
+        return sub_zones
 
     def _extract_section_texts(
         self,

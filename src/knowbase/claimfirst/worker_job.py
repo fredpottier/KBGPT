@@ -109,6 +109,9 @@ def claimfirst_process_job(
     }
 
     for i, doc_id in enumerate(doc_ids):
+        logger.info(
+            f"[OSMOSE:ClaimFirst:Worker] === Document {i+1}/{len(doc_ids)}: {doc_id} ==="
+        )
         try:
             _update_state(
                 redis_client,

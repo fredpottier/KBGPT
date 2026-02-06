@@ -127,11 +127,11 @@ Parameters:
     Description: Subnet ID (vide = subnet par défaut)
 
   # === AMI ===
-  # AMI Golden OSMOSE v7 - vLLM v0.6.6.post1 compatible CUDA 13/Driver 580
+  # AMI Golden OSMOSE v8 - vLLM v0.6.6.post1 + TEI 89-1.6 GPU (corrige bug TEI CPU)
   AmiId:
     Type: String
-    Default: "ami-099cbd44d5be7612b"
-    Description: AMI ID (Golden v7 - vLLM v0.6.6.post1 + TEI 89-1.6 GPU, compatible Deep Learning AMI 2026)
+    Default: "ami-0a52b60280f390e94"
+    Description: AMI ID (Golden v8 - vLLM v0.6.6.post1 + TEI 89-1.6 GPU, compatible Deep Learning AMI 2026)
 
   # === SSH ===
   KeyName:

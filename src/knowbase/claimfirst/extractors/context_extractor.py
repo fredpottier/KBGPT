@@ -136,6 +136,14 @@ class ContextExtractor:
         )
         self._stats["subjects_extracted"] += len(raw_subjects)
 
+        # Séparer le sujet principal (premier retourné par LLM) des topics
+        primary_subject = None
+        secondary_subjects = raw_subjects
+        if raw_subjects:
+            # Le premier élément est le sujet principal (si retourné par LLM)
+            primary_subject = raw_subjects[0]
+            secondary_subjects = raw_subjects[1:]
+
         # 2. Extraire les qualificateurs (INV-10: découverts, pas hardcodés)
         qualifiers, qualifier_candidates = self._extract_qualifiers(
             passages=passages,
@@ -159,7 +167,8 @@ class ContextExtractor:
         context = DocumentContext(
             doc_id=doc_id,
             tenant_id=tenant_id,
-            raw_subjects=raw_subjects,
+            primary_subject=primary_subject,
+            raw_subjects=secondary_subjects,
             qualifiers=qualifiers,
             qualifier_candidates=qualifier_candidates,
             document_type=document_type,
@@ -169,8 +178,8 @@ class ContextExtractor:
 
         logger.info(
             f"[ContextExtractor] Extracted context for {doc_id}: "
-            f"{len(raw_subjects)} subjects, {len(qualifiers)} qualifiers, "
-            f"type='{document_type or 'unknown'}'"
+            f"primary='{primary_subject}', {len(secondary_subjects)} topics, "
+            f"{len(qualifiers)} qualifiers, type='{document_type or 'unknown'}'"
         )
 
         return context
@@ -251,10 +260,15 @@ class ContextExtractor:
         capitalized_subjects = self._extract_capitalized_subjects(first_text)
         candidates.extend(capitalized_subjects[:3])  # Limiter à 3
 
-        # 5. LLM si activé
+        # 5. LLM si activé - utiliser DocumentAnalyzer pour analyse complète
         if self.use_llm_subjects and self.llm_client:
-            llm_subjects = self._extract_subjects_with_llm(first_text)
-            candidates.extend(llm_subjects)
+            llm_subjects = self._extract_subjects_with_document_analyzer(
+                doc_title=doc_title,
+                passages=passages,
+            )
+            if llm_subjects:
+                # Le sujet principal du DocumentAnalyzer va en premier
+                candidates = llm_subjects + candidates
             self._stats["llm_calls"] += 1
 
         # Déduplication et normalisation
@@ -262,7 +276,13 @@ class ContextExtractor:
         unique_candidates = []
         for candidate in candidates:
             normalized = candidate.strip()
-            if normalized and normalized.lower() not in seen:
+            if not normalized:
+                continue
+            # Filtrer les noms de fichiers (doc_id) - contiennent généralement des underscores
+            # et des patterns comme UUID ou timestamps
+            if re.match(r"^[\w\d_-]{30,}$", normalized):
+                continue  # Probablement un doc_id, pas un vrai sujet
+            if normalized.lower() not in seen:
                 seen.add(normalized.lower())
                 unique_candidates.append(normalized)
 
@@ -336,50 +356,185 @@ class ContextExtractor:
 
         return candidates
 
-    def _extract_subjects_with_llm(self, text: str) -> List[str]:
+    def _extract_subjects_with_document_analyzer(
+        self,
+        doc_title: Optional[str],
+        passages: List[Passage],
+    ) -> List[str]:
+        """
+        Extrait les sujets via DocumentAnalyzerV2.
+
+        Utilise l'analyse complète du document (titre + TOC + contenu)
+        pour identifier le sujet principal de manière fiable.
+        """
+        try:
+            from knowbase.stratified.pass1.document_analyzer import DocumentAnalyzerV2
+
+            # Construire le contenu complet (ou un échantillon représentatif)
+            sorted_passages = sorted(passages, key=lambda p: p.reading_order_index)
+
+            # Prendre le début, le milieu et la fin pour représentation
+            content_parts = []
+            total = len(sorted_passages)
+            if total > 0:
+                # Début (premiers 30%)
+                start_idx = int(total * 0.3)
+                for p in sorted_passages[:start_idx]:
+                    content_parts.append(p.text)
+
+                # Milieu (10% autour du centre)
+                mid_start = int(total * 0.45)
+                mid_end = int(total * 0.55)
+                for p in sorted_passages[mid_start:mid_end]:
+                    content_parts.append(p.text)
+
+            content = "\n".join(content_parts)[:15000]  # Limiter à 15k caractères
+
+            # Extraire la TOC si possible
+            analyzer = DocumentAnalyzerV2(
+                llm_client=self._create_llm_adapter(),
+                allow_fallback=True,
+            )
+
+            toc = analyzer.extract_toc_from_content(content)
+
+            # Analyser le document
+            subject, themes, is_hostile = analyzer.analyze(
+                doc_id="temp",
+                doc_title=doc_title or "Unknown",
+                content=content,
+                toc=toc,
+                char_limit=8000,  # Plus de contexte
+            )
+
+            subjects = []
+            # Le nom du sujet est le sujet principal
+            if subject and subject.name:
+                subjects.append(subject.name)
+
+            # Ajouter quelques thèmes comme topics secondaires
+            for theme in themes[:3]:
+                if theme.name and theme.name not in subjects:
+                    subjects.append(theme.name)
+
+            logger.info(
+                f"[ContextExtractor] DocumentAnalyzer extracted: "
+                f"subject='{subject.name if subject else None}', "
+                f"{len(themes)} themes"
+            )
+
+            return subjects
+
+        except Exception as e:
+            logger.warning(f"[ContextExtractor] DocumentAnalyzer failed: {e}")
+            # Fallback vers l'ancienne méthode
+            first_text = "\n".join(p.text for p in passages[:10])[:5000]
+            return self._extract_subjects_with_llm(first_text, doc_title)
+
+    def _create_llm_adapter(self):
+        """Crée un adaptateur LLM compatible avec DocumentAnalyzer."""
+        class LLMAdapter:
+            def generate(self, system_prompt: str, user_prompt: str, max_tokens: int = 2000) -> str:
+                from knowbase.common.llm_router import get_llm_router, TaskType
+                router = get_llm_router()
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ]
+                return router.complete(
+                    task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=max_tokens,
+                )
+        return LLMAdapter()
+
+    def _extract_subjects_with_llm(self, text: str, doc_title: Optional[str] = None) -> List[str]:
         """
         Extrait les sujets via LLM.
 
-        Prompt focalisé sur extraction de sujets explicites.
+        Prompt focalisé sur extraction du SUJET PRINCIPAL + topics secondaires.
+        Le sujet principal est retourné EN PREMIER dans la liste.
         """
-        prompt = """Identify the PRIMARY SUBJECT(S) of this document excerpt.
+        # Inclure le titre si disponible (souvent contient le sujet principal)
+        title_hint = ""
+        if doc_title:
+            title_hint = f"\nDocument title: {doc_title}\n"
 
-A subject is:
-- A product, service, or solution name (e.g., "SAP S/4HANA", "Azure DevOps")
-- A regulation, standard, or framework name (e.g., "GDPR", "ISO 27001")
-- A technical topic or domain (e.g., "Cloud Security", "Data Migration")
+        prompt = """Analyze this document and identify:
 
-Return ONLY subjects that are EXPLICITLY mentioned in the text.
-Do NOT infer, generalize, or make up subjects.
+1. PRIMARY SUBJECT: The main subject this document is ABOUT.
+   This could be:
+   - A product, software, or service name
+   - A regulation, law, or directive name
+   - A standard or framework name
+   - An organization or institution
+   - A process or methodology
 
-Format your response as a JSON array of strings:
-["Subject 1", "Subject 2"]
+   The primary subject is what the document DESCRIBES, EXPLAINS, or DOCUMENTS.
+   NOT something merely mentioned in passing.
 
-If no clear subject is found, return: []
+2. SECONDARY TOPICS: Other relevant topics discussed (max 3)
+   - Features, capabilities, or aspects covered
+   - Related concepts or domains
 
-Text:
+IMPORTANT:
+- Return ONLY what is EXPLICITLY mentioned in the text
+- Do NOT infer, generalize, or make up subjects
+- The PRIMARY SUBJECT should be a proper noun or specific name when possible
+
+Format your response as JSON:
+{{
+  "primary_subject": "Subject Name" or null if unclear,
+  "topics": ["Topic 1", "Topic 2"]
+}}
+{title_hint}
+Text excerpt:
 {text}
-""".format(text=text[:3000])  # Limiter la taille
+""".format(title_hint=title_hint, text=text[:3000])  # Limiter la taille
 
         try:
-            response = self.llm_client.chat.completions.create(
-                model="gpt-4o-mini",  # Modèle rapide pour extraction
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                max_tokens=200,
-            )
+            # Utiliser le LLM Router pour le mode Burst (vLLM sur EC2)
+            from knowbase.common.llm_router import get_llm_router, TaskType
 
-            content = response.choices[0].message.content.strip()
+            router = get_llm_router()
+
+            content = router.complete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,  # Extraction structurée
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,  # Légère variation pour éviter réponses tronquées
+                max_tokens=500,
+            ).strip()
 
             # Parser la réponse JSON
             import json
-            # Nettoyer la réponse
+            # Nettoyer la réponse - enlever markdown
             content = re.sub(r"```json\s*", "", content)
-            content = re.sub(r"```\s*$", "", content)
+            content = re.sub(r"```\s*", "", content)
+            content = content.strip()
 
-            subjects = json.loads(content)
-            if isinstance(subjects, list):
-                return [s for s in subjects if isinstance(s, str)]
+            # Extraire le JSON de la réponse (peut contenir du texte avant/après)
+            json_match = re.search(r'\{[^{}]*"primary_subject"[^{}]*\}', content, re.DOTALL)
+            if json_match:
+                content = json_match.group(0)
+            else:
+                # Essayer de trouver n'importe quel objet JSON
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    content = json_match.group(0)
+
+            data = json.loads(content)
+
+            subjects = []
+            # Sujet principal EN PREMIER (priorité)
+            if data.get("primary_subject"):
+                subjects.append(data["primary_subject"])
+
+            # Topics secondaires ensuite
+            if data.get("topics") and isinstance(data["topics"], list):
+                subjects.extend([t for t in data["topics"] if isinstance(t, str)])
+
+            return subjects
 
         except Exception as e:
             logger.warning(f"[ContextExtractor] LLM subject extraction failed: {e}")

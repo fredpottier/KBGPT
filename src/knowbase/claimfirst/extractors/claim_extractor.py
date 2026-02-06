@@ -20,9 +20,11 @@ INV-1: La preuve d'une Claim est `unit_ids`, pas `passage_id`.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any
 
 from knowbase.claimfirst.models.claim import Claim, ClaimType, ClaimScope
@@ -103,6 +105,23 @@ def build_claim_extraction_prompt(units_text: str, doc_title: str, doc_type: str
     )
 
 
+# Nombre max d'appels LLM en parallèle (évite de surcharger vLLM/OpenAI)
+MAX_CONCURRENT_LLM_CALLS = 20
+
+
+@dataclass
+class BatchTask:
+    """Tâche de batch pour extraction parallèle."""
+    batch_id: int
+    units: List[AssertionUnit]
+    passage: Passage
+    unit_result: UnitIndexResult
+    tenant_id: str
+    doc_id: str
+    doc_title: str
+    doc_type: str
+
+
 class ClaimExtractor:
     """
     Extracteur de Claims documentées.
@@ -111,6 +130,8 @@ class ClaimExtractor:
     puis le LLM pour identifier les claims en mode pointer.
 
     Le verbatim est GARANTI car reconstruit depuis l'index d'unités.
+
+    Les appels LLM sont parallélisés pour optimiser les performances.
     """
 
     def __init__(
@@ -119,18 +140,21 @@ class ClaimExtractor:
         min_unit_length: int = 30,
         max_unit_length: int = 500,
         batch_size: int = 10,
+        max_concurrent: int = MAX_CONCURRENT_LLM_CALLS,
     ):
         """
         Initialise l'extracteur.
 
         Args:
-            llm_client: Client LLM pour l'extraction
+            llm_client: Client LLM pour l'extraction (non utilisé, gardé pour compatibilité)
             min_unit_length: Longueur minimale d'une unité
             max_unit_length: Longueur maximale d'une unité
             batch_size: Nombre d'unités par batch LLM
+            max_concurrent: Nombre max d'appels LLM en parallèle
         """
         self.llm_client = llm_client
         self.batch_size = batch_size
+        self.max_concurrent = max_concurrent
 
         # Indexer pour segmentation
         self.unit_indexer = AssertionUnitIndexer(
@@ -188,17 +212,20 @@ class ClaimExtractor:
             f"from {len(unit_index)} passages"
         )
 
-        # Phase 2: Extraire les claims par batch
+        # Phase 2: Collecter tous les batches à traiter
+        batch_tasks: List[BatchTask] = []
+        batch_id = 0
+
         for passage_id, unit_result in unit_index.items():
             passage = next((p for p in passages if p.passage_id == passage_id), None)
             if not passage:
                 continue
 
-            # Traiter par batch si beaucoup d'unités
+            # Créer une tâche par batch
             for i in range(0, len(unit_result.units), self.batch_size):
                 batch_units = unit_result.units[i:i + self.batch_size]
-
-                batch_claims = self._extract_claims_from_units(
+                batch_tasks.append(BatchTask(
+                    batch_id=batch_id,
                     units=batch_units,
                     passage=passage,
                     unit_result=unit_result,
@@ -206,8 +233,19 @@ class ClaimExtractor:
                     doc_id=doc_id,
                     doc_title=doc_title,
                     doc_type=doc_type,
-                )
-                claims.extend(batch_claims)
+                ))
+                batch_id += 1
+
+        logger.info(
+            f"[OSMOSE:ClaimExtractor] Processing {len(batch_tasks)} batches "
+            f"with max {self.max_concurrent} concurrent LLM calls..."
+        )
+
+        # Phase 3: Exécuter tous les batches en parallèle
+        if batch_tasks:
+            claims = asyncio.run(self._extract_all_batches_async(batch_tasks))
+        else:
+            claims = []
 
         logger.info(
             f"[OSMOSE:ClaimExtractor] Extracted {len(claims)} claims "
@@ -215,6 +253,119 @@ class ClaimExtractor:
         )
 
         return claims, unit_index
+
+    async def _extract_all_batches_async(
+        self,
+        batch_tasks: List[BatchTask],
+    ) -> List[Claim]:
+        """
+        Exécute tous les batches en parallèle avec un semaphore.
+
+        Args:
+            batch_tasks: Liste des tâches de batch
+
+        Returns:
+            Liste de toutes les claims extraites
+        """
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+        all_claims: List[Claim] = []
+        lock = asyncio.Lock()
+
+        async def process_batch(task: BatchTask) -> None:
+            async with semaphore:
+                try:
+                    claims = await self._extract_claims_from_units_async(task)
+                    async with lock:
+                        all_claims.extend(claims)
+                except Exception as e:
+                    logger.error(f"[OSMOSE:ClaimExtractor] Batch {task.batch_id} failed: {e}")
+
+        # Lancer toutes les tâches en parallèle
+        await asyncio.gather(*[process_batch(task) for task in batch_tasks])
+
+        return all_claims
+
+    async def _extract_claims_from_units_async(
+        self,
+        task: BatchTask,
+    ) -> List[Claim]:
+        """
+        Version async de _extract_claims_from_units.
+
+        Utilise le LLM Router async pour bénéficier de la parallélisation.
+        """
+        if not task.units:
+            return []
+
+        # Formatter les unités pour le LLM
+        units_text = format_units_for_llm(task.units)
+
+        # Construire le prompt
+        prompt = build_claim_extraction_prompt(
+            units_text=units_text,
+            doc_title=task.doc_title or "Unknown",
+            doc_type=task.doc_type,
+        )
+
+        # Appel LLM async
+        try:
+            response = await self._call_llm_async(prompt)
+            self.stats["llm_calls"] += 1
+
+            # Parser la réponse JSON
+            raw_claims = self._parse_llm_response(response)
+
+        except Exception as e:
+            logger.error(f"[OSMOSE:ClaimExtractor] LLM error: {e}")
+            return []
+
+        # Construire les Claims avec verbatim garanti
+        claims = []
+        for raw in raw_claims:
+            try:
+                claim = self._build_claim(
+                    raw=raw,
+                    units=task.units,
+                    unit_result=task.unit_result,
+                    passage=task.passage,
+                    tenant_id=task.tenant_id,
+                    doc_id=task.doc_id,
+                )
+                if claim:
+                    claims.append(claim)
+                    self.stats["claims_extracted"] += 1
+                else:
+                    self.stats["claims_rejected"] += 1
+            except Exception as e:
+                logger.warning(f"[OSMOSE:ClaimExtractor] Failed to build claim: {e}")
+                self.stats["claims_rejected"] += 1
+
+        return claims
+
+    async def _call_llm_async(self, prompt: str) -> str:
+        """
+        Version async de _call_llm.
+
+        Utilise le LLM Router async pour la parallélisation.
+        """
+        from knowbase.common.llm_router import get_llm_router, TaskType
+
+        router = get_llm_router()
+
+        messages = [
+            {"role": "system", "content": "Tu es un expert en extraction d'assertions."},
+            {"role": "user", "content": prompt}
+        ]
+
+        # Appel async via le router (utilise vLLM si burst mode actif)
+        response = await router.acomplete(
+            task_type=TaskType.KNOWLEDGE_EXTRACTION,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=2000,
+        )
+
+        return response
 
     def _extract_claims_from_units(
         self,
@@ -284,37 +435,27 @@ class ClaimExtractor:
         """
         Appelle le LLM pour extraire les claims.
 
-        Override cette méthode pour utiliser différents providers.
+        Utilise le LLM Router pour bénéficier du mode Burst (vLLM sur EC2).
         """
-        # Interface générique - à adapter selon le client LLM disponible
-        if hasattr(self.llm_client, "chat"):
-            # OpenAI-like interface
-            response = self.llm_client.chat.completions.create(
-                model="gpt-4o-mini",  # Modèle rapide et économique
-                messages=[
-                    {"role": "system", "content": "Tu es un expert en extraction d'assertions."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,  # Déterministe
-                response_format={"type": "json_object"},
-            )
-            content = response.choices[0].message.content
-            if hasattr(response, "usage"):
-                self.stats["tokens_used"] += response.usage.total_tokens
-            return content
+        # Utiliser le LLM Router pour le mode Burst
+        from knowbase.common.llm_router import get_llm_router, TaskType
 
-        elif hasattr(self.llm_client, "generate"):
-            # Interface générique generate
-            response = self.llm_client.generate(prompt)
-            return response
+        router = get_llm_router()
 
-        elif hasattr(self.llm_client, "invoke"):
-            # LangChain-like interface
-            response = self.llm_client.invoke(prompt)
-            return response.content if hasattr(response, "content") else str(response)
+        messages = [
+            {"role": "system", "content": "Tu es un expert en extraction d'assertions."},
+            {"role": "user", "content": prompt}
+        ]
 
-        else:
-            raise ValueError("LLM client interface not recognized")
+        # Appel via le router (utilise vLLM si burst mode actif)
+        response = router.complete(
+            task_type=TaskType.KNOWLEDGE_EXTRACTION,
+            messages=messages,
+            temperature=0.1,  # Déterministe
+            max_tokens=2000,
+        )
+
+        return response
 
     def _parse_llm_response(self, response: str) -> List[dict]:
         """

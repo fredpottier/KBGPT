@@ -154,12 +154,78 @@ def fetch_job(job_id: str) -> Optional[Job]:
         return None
 
 
+# ===============================================================================
+# Claim-First Pipeline (Pivot Epistémique)
+# ===============================================================================
+
+def enqueue_claimfirst_process(
+    doc_ids: list[str],
+    tenant_id: str = "default",
+    queue_name: Optional[str] = None,
+    cache_dir: str = "/data/extraction_cache",
+) -> Job:
+    """
+    Enqueue un job de traitement claim-first.
+
+    Args:
+        doc_ids: Liste des document IDs à traiter
+        tenant_id: Tenant ID
+        queue_name: Nom de la queue (optionnel, défaut: reprocess)
+        cache_dir: Répertoire du cache d'extraction
+
+    Returns:
+        Job RQ
+    """
+    from uuid import uuid4
+
+    job_id = f"claimfirst_{uuid4().hex[:8]}"
+    queue_name = queue_name or "reprocess"
+
+    logger.info(
+        f"[ClaimFirst] Enqueueing {len(doc_ids)} documents for claim-first processing"
+    )
+
+    job = get_queue(queue_name).enqueue_call(
+        func="knowbase.claimfirst.worker_job.claimfirst_process_job",
+        kwargs={
+            "doc_ids": doc_ids,
+            "tenant_id": tenant_id,
+            "cache_dir": cache_dir,
+        },
+        job_id=job_id,
+        result_ttl=7200,  # 2 heures
+        failure_ttl=7200,
+        timeout=7200,  # 2 heures max (gros documents)
+        description=f"Claim-First processing for {len(doc_ids)} documents",
+    )
+
+    return _register_meta(
+        job,
+        job_type="claimfirst",
+        pipeline_version="claimfirst_v1",
+        document_count=len(doc_ids),
+    )
+
+
+def get_claimfirst_status() -> dict:
+    """
+    Récupère l'état actuel du job claim-first.
+
+    Returns:
+        État du job depuis Redis
+    """
+    from knowbase.claimfirst.worker_job import get_claimfirst_status as _get_status
+    return _get_status()
+
+
 __all__ = [
     "enqueue_pptx_ingestion",
     "enqueue_pdf_ingestion",
     "enqueue_excel_ingestion",
     "enqueue_fill_excel",
     "enqueue_document_v2",
+    "enqueue_claimfirst_process",
+    "get_claimfirst_status",
     "fetch_job",
     "get_queue",
 ]

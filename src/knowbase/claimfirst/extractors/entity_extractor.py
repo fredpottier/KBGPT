@@ -60,10 +60,8 @@ SUBJECT_PATTERNS = [
     # "X requires ..." patterns
     (r"^([A-Z][A-Za-z0-9\s\-/]+?)\s+requires?\s+", EntityType.PRODUCT),
 
-    # SAP-specific patterns
-    (r"\b(SAP\s+[A-Z][A-Za-z0-9\s\-/]+?)\s+(?:is|provides?|enables?|supports?)", EntityType.PRODUCT),
-    (r"\b(S/4HANA[A-Za-z0-9\s\-]*?)\s+", EntityType.PRODUCT),
-    (r"\b(BTP[A-Za-z0-9\s\-]*?)\s+", EntityType.PRODUCT),
+    # NOTE: Aucun pattern domain-specific (INV-25 agnosticisme)
+    # La canonicalisation LLM (EntityCanonicalizer) gère les variantes
 ]
 
 # Pattern pour acronymes
@@ -88,6 +86,8 @@ class EntityExtractor:
         self,
         min_mentions: int = 1,
         max_entities_per_claim: int = 5,
+        max_entity_length: int = 60,
+        max_entity_words: int = 6,
         custom_stoplist: Optional[Set[str]] = None,
     ):
         """
@@ -96,10 +96,14 @@ class EntityExtractor:
         Args:
             min_mentions: Nombre minimal de mentions pour garder une entité
             max_entities_per_claim: Nombre max d'entités par claim
+            max_entity_length: Longueur max d'un nom d'entité (caractères)
+            max_entity_words: Nombre max de mots dans un nom d'entité
             custom_stoplist: Stoplist personnalisée (en plus de la défaut)
         """
         self.min_mentions = min_mentions
         self.max_entities_per_claim = max_entities_per_claim
+        self.max_entity_length = max_entity_length
+        self.max_entity_words = max_entity_words
 
         # Stoplist combinée
         self.stoplist = ENTITY_STOPLIST.copy()
@@ -112,6 +116,8 @@ class EntityExtractor:
             "entities_created": 0,
             "filtered_by_stoplist": 0,
             "filtered_by_length": 0,
+            "filtered_by_too_long": 0,
+            "filtered_by_too_many_words": 0,
         }
 
     def extract_from_claims(
@@ -274,7 +280,10 @@ class EntityExtractor:
         Critères:
         - Pas dans la stoplist
         - Longueur minimale (2 caractères normalisés)
+        - Longueur maximale (évite les phrases)
+        - Nombre de mots limité (évite les descriptions)
         - Pas que des chiffres
+        - Ne commence pas par un article/pronom (signe de phrase)
         """
         if not name:
             return False
@@ -285,12 +294,33 @@ class EntityExtractor:
         if normalized in self.stoplist:
             return False
 
-        # Longueur
+        # Longueur minimale
         if len(normalized) < 2:
+            return False
+
+        # Longueur maximale (évite les phrases)
+        if len(name) > self.max_entity_length:
+            self.stats["filtered_by_too_long"] += 1
+            return False
+
+        # Nombre de mots limité (évite les descriptions)
+        word_count = len(name.split())
+        if word_count > self.max_entity_words:
+            self.stats["filtered_by_too_many_words"] += 1
             return False
 
         # Pas que des chiffres
         if normalized.replace("-", "").replace(" ", "").isdigit():
+            return False
+
+        # Ne commence pas par un article/pronom/verbe (signe de phrase incomplète)
+        phrase_starters = {
+            "the", "a", "an", "this", "that", "these", "those",
+            "it", "they", "we", "you", "he", "she",
+            "built-in", "recommendations", "future", "combined",
+        }
+        first_word = name.split()[0].lower() if name.split() else ""
+        if first_word in phrase_starters:
             return False
 
         return True
@@ -342,6 +372,8 @@ class EntityExtractor:
             "entities_created": 0,
             "filtered_by_stoplist": 0,
             "filtered_by_length": 0,
+            "filtered_by_too_long": 0,
+            "filtered_by_too_many_words": 0,
         }
 
 

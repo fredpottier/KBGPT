@@ -29,13 +29,11 @@ import {
   FiActivity,
   FiHome,
   FiGlobe,
-  FiSliders,
   FiCloud,
-  FiBarChart2,
   FiGitBranch,
-  FiTag,
-  FiShield,
-  FiZap,
+  FiTarget,
+  FiCheckSquare,
+  FiCpu,
 } from 'react-icons/fi'
 
 // Configuration des menus
@@ -50,6 +48,12 @@ const navigationConfig = {
     label: 'Compare',
     href: '/compare',
     icon: FiGitBranch,
+    isDropdown: false,
+  },
+  verify: {
+    label: 'Vérifier',
+    href: '/verify',
+    icon: FiCheckSquare,
     isDropdown: false,
   },
   documents: {
@@ -68,13 +72,9 @@ const navigationConfig = {
     items: [
       { label: 'Dashboard', href: '/admin', icon: FiHome },
       { label: 'Domain Context', href: '/admin/domain-context', icon: FiGlobe },
-      { label: 'Profil Visibilite', href: '/admin/visibility-profile', icon: FiSliders },
-      { label: 'Enrichissement KG', href: '/admin/enrichment', icon: FiActivity },
-      { label: 'Pipeline V2', href: '/admin/enrichment-v2', icon: FiZap },
-      { label: 'Governance / Tensions', href: '/admin/governance', icon: FiShield },
-      { label: 'Markers', href: '/admin/markers', icon: FiTag },
+      { label: 'Claim-First', href: '/admin/claimfirst', icon: FiTarget },
+      { label: 'Infrastructure GPU', href: '/admin/gpu', icon: FiCpu },
       { label: 'Mode Burst (Spot)', href: '/admin/burst', icon: FiCloud },
-      { label: 'Import Analytics', href: '/analytics', icon: FiBarChart2 },
       { label: 'Configuration', href: '/admin/settings', icon: FiSettings },
     ],
   },
@@ -196,6 +196,7 @@ export default function TopNavigation() {
   const isActiveSection = (section: string) => {
     if (section === 'chat') return pathname?.startsWith('/chat')
     if (section === 'compare') return pathname?.startsWith('/compare')
+    if (section === 'verify') return pathname?.startsWith('/verify')
     if (section === 'documents') return pathname?.startsWith('/documents')
     if (section === 'admin') return pathname?.startsWith('/admin')
     return false
@@ -247,6 +248,15 @@ export default function TopNavigation() {
           >
             <Icon as={navigationConfig.compare.icon} />
             <Text>{navigationConfig.compare.label}</Text>
+          </NavLink>
+
+          {/* Verify - lien direct */}
+          <NavLink
+            href={navigationConfig.verify.href!}
+            isActive={isActiveSection('verify')}
+          >
+            <Icon as={navigationConfig.verify.icon} />
+            <Text>{navigationConfig.verify.label}</Text>
           </NavLink>
 
           {/* Documents - dropdown */}

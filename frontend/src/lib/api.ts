@@ -417,4 +417,15 @@ export const api = {
     generateSummary: (sessionId: string, format: 'business' | 'technical' | 'executive' = 'business') =>
       apiClient.post(`/sessions/${sessionId}/summary`, { format }),
   },
+
+  // Verification - Text verification against Knowledge Graph
+  verify: {
+    // Analyze text and verify assertions
+    analyze: (text: string, tenantId: string = 'default') =>
+      apiClient.post('/verify/analyze', { text, tenant_id: tenantId }),
+
+    // Generate corrected text based on verified assertions
+    correct: (text: string, assertions: any[], tenantId: string = 'default') =>
+      apiClient.post('/verify/correct', { text, assertions, tenant_id: tenantId }),
+  },
 }
