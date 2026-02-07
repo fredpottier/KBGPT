@@ -155,6 +155,30 @@ class TestChainDetectorGuardRails:
         # "system" est dans la stoplist
         assert len(relations) == 0
 
+    def test_generic_plural_join_key_rejected(self):
+        """Pluriels génériques (users, items, etc.) rejetés comme join_key."""
+        generic_plurals = ["users", "customers", "items", "components", "functions"]
+        for term in generic_plurals:
+            claims = [
+                _make_claim_dict("c1", "doc1", "SAP S/4HANA", "PROVIDES", term),
+                _make_claim_dict("c2", "doc1", term, "USES", "Dashboard"),
+            ]
+            detector = ChainDetector()
+            relations = detector.detect_from_dicts(claims)
+            assert len(relations) == 0, f"Generic plural '{term}' should be rejected as join_key"
+
+    def test_domain_generic_join_key_rejected(self):
+        """Termes génériques agnostiques (integration, monitoring, etc.) rejetés."""
+        generic_terms = ["integration", "monitoring", "report", "data", "system"]
+        for term in generic_terms:
+            claims = [
+                _make_claim_dict("c1", "doc1", "Platform Alpha", "PROVIDES", term),
+                _make_claim_dict("c2", "doc1", term, "USES", "Dashboard"),
+            ]
+            detector = ChainDetector()
+            relations = detector.detect_from_dicts(claims)
+            assert len(relations) == 0, f"Generic term '{term}' should be rejected as join_key"
+
     def test_short_join_key_rejected(self):
         """Join key < 3 caractères → rejeté."""
         claims = [
@@ -301,6 +325,34 @@ class TestChainLinks:
         assert link.target_predicate == "PROVIDES"
         assert link.doc_id == "doc1"
         assert link.join_key_freq == 2  # c1 et c2 touchent ce join_key
+
+
+class TestChainDetectorPredicateFilter:
+    """Tests du filtre prédicats canoniques."""
+
+    def test_non_canonical_predicate_excluded(self):
+        """Claims avec prédicats non-canoniques sont ignorées."""
+        claims = [
+            _make_claim_dict("c1", "doc1", "SAP S/4HANA", "MONITORS", "Performance"),
+            _make_claim_dict("c2", "doc1", "Performance", "CONNECTS_TO", "Dashboard"),
+        ]
+        detector = ChainDetector()
+        relations = detector.detect_from_dicts(claims)
+        assert len(relations) == 0
+
+    def test_mixed_canonical_non_canonical(self):
+        """Seules les claims canoniques participent aux chaînes."""
+        claims = [
+            _make_claim_dict("c1", "doc1", "SAP S/4HANA", "USES", "Material Ledger"),
+            _make_claim_dict("c2", "doc1", "Material Ledger", "MONITORS", "Stock"),
+            _make_claim_dict("c3", "doc1", "Material Ledger", "ENABLES", "Valuation"),
+        ]
+        detector = ChainDetector()
+        relations = detector.detect_from_dicts(claims)
+        # c1→c3 seulement (c2 rejeté car MONITORS non-canonique)
+        assert len(relations) == 1
+        assert relations[0].source_claim_id == "c1"
+        assert relations[0].target_claim_id == "c3"
 
 
 class TestChainDetectorStats:

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -189,9 +189,48 @@ class Entity(BaseModel):
         )
 
 
+# Pattern domain-agnostic pour séparer un suffixe version d'un nom d'entity
+# Exemples : "S/4HANA 2023" → ("S/4HANA", "2023"), "React 18.2" → ("React", "18.2")
+VERSION_TAIL_PATTERN = re.compile(
+    r'^(.+?)\s+'              # nom de base (non-greedy)
+    r'(v?\d+(?:\.\d+)*'       # version numérique: "2023", "v3.2", "18.2.1"
+    r'|[IVX]+(?:\.[IVX]+)*'   # version romaine: "III", "IV.2"
+    r')$',
+    re.IGNORECASE
+)
+
+
+def strip_version_qualifier(name: str) -> Tuple[str, Optional[str]]:
+    """
+    Sépare un nom d'entity de son éventuel suffixe version.
+
+    Domain-agnostic : fonctionne pour tout produit/standard/concept.
+
+    Exemples:
+        "S/4HANA 2023" → ("S/4HANA", "2023")
+        "Windows 11"   → ("Windows", "11")
+        "React 18.2"   → ("React", "18.2")
+        "Clio III"     → ("Clio", "III")
+        "SAP BTP"      → ("SAP BTP", None)  # pas de version
+        "v2"           → ("v2", None)  # base trop courte
+
+    Returns:
+        Tuple (base_name, version_qualifier) — version est None si absent
+    """
+    stripped = name.strip()
+    m = VERSION_TAIL_PATTERN.match(stripped)
+    if m:
+        base = m.group(1).strip()
+        version = m.group(2).strip()
+        # Garder seulement si le nom de base est significatif (>=2 chars)
+        if len(base) >= 2:
+            return base, version
+    return stripped, None
+
+
 # Stoplist métier (termes trop génériques)
 ENTITY_STOPLIST = frozenset({
-    # Termes génériques anglais
+    # Termes génériques anglais (singuliers)
     "system", "information", "data", "service", "process",
     "document", "section", "table", "figure", "example",
     "user", "customer", "administrator", "admin",
@@ -208,6 +247,15 @@ ENTITY_STOPLIST = frozenset({
     "result", "results", "output", "input", "entry",
     "case", "scenario", "instance", "example", "sample",
     "step", "steps", "action", "task", "activity",
+    # Pluriels courants (manquants, détectés par audit qualité v1.6.1)
+    "systems", "services", "processes", "documents", "applications",
+    "users", "customers", "administrators", "items", "elements",
+    "components", "modules", "functions", "objects", "features",
+    "files", "operations", "methods", "parameters", "options",
+    "settings", "configurations", "values", "messages", "entries",
+    "tasks", "activities", "actions", "solutions", "platforms",
+    # Termes suffisamment génériques pour être du bruit dans tout domaine
+    "integration", "monitoring", "report", "reports",
 
     # Termes déictiques et articles (NE JAMAIS être des entités)
     "this", "that", "these", "those",
@@ -215,6 +263,26 @@ ENTITY_STOPLIST = frozenset({
     "a", "an", "the",
     "some", "any", "all", "each", "every",
     "one", "other", "another",
+
+    # Prépositions anglaises (mots-outils, jamais des entities)
+    "to", "of", "in", "on", "at", "by", "for", "with", "from",
+    "into", "onto", "upon", "about", "between", "through",
+    "over", "under", "after", "before", "during", "without",
+    # Conjonctions et négations
+    "and", "or", "but", "not", "no", "nor", "yet", "so",
+    "if", "then", "else", "because", "since", "while", "although",
+    # Adverbes courants
+    "also", "than", "very", "only", "just",
+    "here", "there", "now", "already", "still",
+    # Verbes trop courts / génériques (formes simples, pas des noms propres)
+    "use", "used", "uses", "using",
+    "set", "get", "run", "put", "let",
+    "made", "make", "take", "give", "keep",
+    "need", "needs", "needed",
+    # Pronoms et déterminants manquants
+    "he", "she", "we", "they", "you", "me", "him", "us", "them",
+    "his", "her", "our", "your", "their", "my",
+    "which", "where", "when", "how", "what", "who", "whom",
 
     # Termes génériques français
     "système", "information", "donnée", "service", "processus",
@@ -250,6 +318,31 @@ PHRASE_FRAGMENT_INDICATORS = frozenset({
     "doit", "devrait", "peut", "pourrait", "sera", "serait",
 })
 
+# Mots-outils purs (prépositions, conjonctions, pronoms, articles) qui ne doivent
+# JAMAIS commencer un nom d'entity multi-mots. Séparé de ENTITY_STOPLIST qui contient
+# aussi des termes domaine génériques ("system", "activity") valides comme premier mot.
+_FUNCTION_WORDS = frozenset({
+    # Prépositions
+    "to", "of", "in", "on", "at", "by", "for", "with", "from",
+    "into", "onto", "upon", "about", "between", "through",
+    "over", "under", "after", "before", "during", "without",
+    # Conjonctions / négations
+    "and", "or", "but", "not", "no", "nor", "yet", "so",
+    "if", "then", "else", "because", "since", "while", "although",
+    # Adverbes
+    "also", "than", "very", "only", "just",
+    "here", "there", "now", "already", "still",
+    # Pronoms
+    "he", "she", "we", "they", "you", "me", "him", "us", "them",
+    "his", "her", "our", "your", "their", "my",
+    "which", "where", "when", "how", "what", "who", "whom",
+    # Déictiques / articles
+    "this", "that", "these", "those", "it", "its",
+    "a", "an", "the", "some", "any", "each", "every",
+    # Adj. non-informatifs en début de nom
+    "different", "certain", "other", "various", "several",
+})
+
 
 def is_valid_entity_name(name: str) -> bool:
     """
@@ -274,7 +367,20 @@ def is_valid_entity_name(name: str) -> bool:
     name_stripped = name.strip()
     normalized = Entity.normalize(name)
 
-    # Acronyme majuscule (2-5 lettres) = toujours valide
+    # Vérifier stoplist EN PREMIER (même les acronymes comme "IS", "OF", "TO")
+    if normalized in ENTITY_STOPLIST:
+        return False
+
+    # Contient des indicateurs de fragment de phrase
+    words = set(normalized.lower().split())
+    if words & PHRASE_FRAGMENT_INDICATORS:
+        return False
+
+    # Pas que des chiffres / codes numériques
+    if re.sub(r"[\s\-_./]", "", normalized).isdigit():
+        return False
+
+    # Acronyme majuscule (2-5 lettres) = valide si pas dans la stoplist
     # Ex: EU, AD, BW, TLS, GDPR
     if re.match(r"^[A-Z]{2,5}$", name_stripped):
         return True
@@ -287,23 +393,16 @@ def is_valid_entity_name(name: str) -> bool:
     if len(normalized) > 80:
         return False
 
-    # Dans la stoplist
-    if normalized in ENTITY_STOPLIST:
-        return False
-
-    # Commence par un terme déictique ou article
-    first_word = normalized.split()[0] if normalized.split() else ""
-    if first_word in {"this", "that", "these", "those", "the", "a", "an",
-                      "ce", "cette", "ces", "cet", "le", "la", "les", "un", "une"}:
-        return False
-
-    # Contient des indicateurs de fragment de phrase
-    words = set(normalized.lower().split())
-    if words & PHRASE_FRAGMENT_INDICATORS:
-        return False
+    # Multi-mots : le premier mot ne doit pas être un mot-outil de la langue
+    # (prépositions, conjonctions, pronoms — PAS les termes domaine comme "system", "activity")
+    words = normalized.split()
+    if len(words) > 1:
+        first_word = words[0]
+        if first_word in _FUNCTION_WORDS or first_word in PHRASE_FRAGMENT_INDICATORS:
+            return False
 
     # Trop de mots (>8 = probablement une phrase)
-    if len(normalized.split()) > 8:
+    if len(words) > 8:
         return False
 
     return True
@@ -314,5 +413,7 @@ __all__ = [
     "EntityType",
     "ENTITY_STOPLIST",
     "PHRASE_FRAGMENT_INDICATORS",
+    "VERSION_TAIL_PATTERN",
     "is_valid_entity_name",
+    "strip_version_qualifier",
 ]

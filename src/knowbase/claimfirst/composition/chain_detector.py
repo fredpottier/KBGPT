@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 MAX_EDGES_PER_KEY = 10
 
+# Prédicats canoniques — seuls les claims avec ces prédicats participent aux chaînes
+_CANONICAL_PREDICATES = frozenset({
+    "USES", "REQUIRES", "BASED_ON", "SUPPORTS", "ENABLES",
+    "PROVIDES", "EXTENDS", "REPLACES", "PART_OF",
+    "INTEGRATED_IN", "COMPATIBLE_WITH", "CONFIGURES",
+})
+
 
 @dataclass
 class ChainLink:
@@ -100,8 +107,9 @@ class ChainDetector:
         Returns:
             Liste de ClaimRelation de type CHAINS_TO
         """
-        # Filtrer les claims avec structured_form valide
+        # Filtrer les claims avec structured_form valide + prédicat canonique
         valid = []
+        skipped_pred = 0
         for cd in claim_dicts:
             sf = cd.get("structured_form")
             if not sf:
@@ -109,9 +117,16 @@ class ChainDetector:
             subj = sf.get("subject", "")
             pred = sf.get("predicate", "")
             obj = sf.get("object", "")
-            if subj and pred and obj:
-                valid.append(cd)
+            if not (subj and pred and obj):
+                continue
+            # Rejeter les prédicats non-canoniques (MONITORS, CONNECTS_TO, etc.)
+            if pred.upper() not in _CANONICAL_PREDICATES:
+                skipped_pred += 1
+                continue
+            valid.append(cd)
 
+        if skipped_pred:
+            logger.info(f"[OSMOSE:ChainDetector] {skipped_pred} claims skipped (non-canonical predicate)")
         self._stats["claims_with_sf"] = len(valid)
 
         if not valid:
@@ -271,8 +286,12 @@ class ChainDetector:
             subj = sf.get("subject", "")
             pred = sf.get("predicate", "")
             obj = sf.get("object", "")
-            if subj and pred and obj:
-                valid.append(cd)
+            if not (subj and pred and obj):
+                continue
+            # Rejeter les prédicats non-canoniques
+            if pred.upper() not in _CANONICAL_PREDICATES:
+                continue
+            valid.append(cd)
 
         if not valid:
             return []
