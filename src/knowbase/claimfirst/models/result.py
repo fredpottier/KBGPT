@@ -38,6 +38,9 @@ class RelationType(str, Enum):
     QUALIFIES = "QUALIFIES"
     """La claim A conditionne/nuance la claim B."""
 
+    CHAINS_TO = "CHAINS_TO"
+    """La claim A chaîne vers la claim B via un join S/P/O (object_A == subject_B)."""
+
 
 class ClaimRelation(BaseModel):
     """

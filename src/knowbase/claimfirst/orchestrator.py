@@ -57,6 +57,8 @@ from knowbase.claimfirst.linkers.entity_linker import EntityLinker
 from knowbase.claimfirst.linkers.facet_matcher import FacetMatcher
 from knowbase.claimfirst.clustering.claim_clusterer import ClaimClusterer
 from knowbase.claimfirst.clustering.relation_detector import RelationDetector
+from knowbase.claimfirst.composition.chain_detector import ChainDetector
+from knowbase.claimfirst.composition.slot_enricher import SlotEnricher
 from knowbase.claimfirst.persistence.claim_persister import ClaimPersister
 
 from knowbase.stratified.pass0.cache_loader import CacheLoadResult
@@ -137,6 +139,8 @@ class ClaimFirstOrchestrator:
         self.facet_matcher = FacetMatcher()
         self.claim_clusterer = ClaimClusterer()
         self.relation_detector = RelationDetector()
+        self.chain_detector = ChainDetector()
+        self.slot_enricher = SlotEnricher()
 
         # Persistance
         if neo4j_driver:
@@ -268,6 +272,18 @@ class ClaimFirstOrchestrator:
             f"{dedup_stats['removed_spo']} removed (SPO triplet)"
         )
 
+        # Phase 1.7: Slot enrichment (claims sans structured_form)
+        claims_without_sf = [c for c in claims if not c.structured_form]
+        if claims_without_sf:
+            logger.info(
+                f"[OSMOSE:ClaimFirst] Phase 1.7: Enriching {len(claims_without_sf)} "
+                f"claims without structured_form..."
+            )
+            enrichment_result = self.slot_enricher.enrich(claims_without_sf)
+            logger.info(
+                f"  → {enrichment_result.claims_enriched}/{len(claims_without_sf)} enriched"
+            )
+
         # Phase 2: Extraire les Entities
         logger.info("[OSMOSE:ClaimFirst] Phase 2: Extracting entities...")
         entities, claim_entity_map = self.entity_extractor.extract_from_claims(
@@ -350,6 +366,12 @@ class ClaimFirstOrchestrator:
             entities_by_claim=claim_entity_map,
         )
         logger.info(f"  → {len(relations)} relations detected")
+
+        # Phase 6.5: Chaînes compositionnelles S/P/O
+        logger.info("[OSMOSE:ClaimFirst] Phase 6.5: Detecting S/P/O chains...")
+        chain_relations = self.chain_detector.detect(claims)
+        relations.extend(chain_relations)
+        logger.info(f"  → {len(chain_relations)} chains detected")
 
         # Construire le résultat
         processing_time_ms = int((time.time() - start_time) * 1000)
@@ -1206,6 +1228,8 @@ class ClaimFirstOrchestrator:
             "facet_matcher": self.facet_matcher.get_stats(),
             "claim_clusterer": self.claim_clusterer.get_stats(),
             "relation_detector": self.relation_detector.get_stats(),
+            "chain_detector": self.chain_detector.get_stats(),
+            "slot_enricher": self.slot_enricher.get_stats(),
             "persister": self.persister.get_stats() if self.persister else {},
             "subject_anchors_cached": len(self._subject_anchors),
             "applicability_axes_cached": len(self._applicability_axes),
@@ -1226,6 +1250,8 @@ class ClaimFirstOrchestrator:
         self.facet_matcher.reset_stats()
         self.claim_clusterer.reset_stats()
         self.relation_detector.reset_stats()
+        self.chain_detector.reset_stats()
+        self.slot_enricher.reset_stats()
         if self.persister:
             self.persister.reset_stats()
 
