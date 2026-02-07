@@ -32,7 +32,9 @@ from knowbase.claimfirst.models.entity import (
     Entity,
     EntityType,
     ENTITY_STOPLIST,
+    PHRASE_FRAGMENT_INDICATORS,
     is_valid_entity_name,
+    strip_version_qualifier,
 )
 from knowbase.claimfirst.models.passage import Passage
 
@@ -161,6 +163,11 @@ class EntityExtractor:
             entity_ids = []
 
             for name, entity_type in candidates:
+                # Version stripping domain-agnostic
+                base_name, version = strip_version_qualifier(name)
+                if version:
+                    name = base_name  # utiliser le nom sans version
+
                 normalized = Entity.normalize(name)
 
                 # Filtrer stoplist
@@ -262,6 +269,16 @@ class EntityExtractor:
             if self._is_valid_candidate(title):
                 candidates.append((title, EntityType.CONCEPT))
 
+        # Source 6: Subject/Object depuis structured_form (source la plus fiable)
+        sf = claim.structured_form
+        if sf and isinstance(sf, dict):
+            for field in ("subject", "object"):
+                value = sf.get(field)
+                if value and isinstance(value, str) and len(value.strip()) >= 2:
+                    sf_name = value.strip()
+                    if self._is_valid_candidate(sf_name):
+                        candidates.append((sf_name, EntityType.CONCEPT))
+
         # Dedup en préservant l'ordre
         seen = set()
         unique_candidates = []
@@ -313,14 +330,8 @@ class EntityExtractor:
         if normalized.replace("-", "").replace(" ", "").isdigit():
             return False
 
-        # Ne commence pas par un article/pronom/verbe (signe de phrase incomplète)
-        phrase_starters = {
-            "the", "a", "an", "this", "that", "these", "those",
-            "it", "they", "we", "you", "he", "she",
-            "built-in", "recommendations", "future", "combined",
-        }
-        first_word = name.split()[0].lower() if name.split() else ""
-        if first_word in phrase_starters:
+        # Vérifier via is_valid_entity_name (stoplist enrichie + PHRASE_FRAGMENT_INDICATORS)
+        if not is_valid_entity_name(name):
             return False
 
         return True

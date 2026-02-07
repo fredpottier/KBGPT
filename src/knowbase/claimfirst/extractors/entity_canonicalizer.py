@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
-from knowbase.claimfirst.models.entity import Entity, EntityType
+from knowbase.claimfirst.models.entity import Entity, EntityType, strip_version_qualifier
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,14 @@ GROUPING RULES
 
 2. DIFFERENT ENTITIES if:
    - They refer to genuinely different things
-   - Version numbers make them distinct products (e.g., "Product v1" vs "Product v2" are DIFFERENT)
    - Similar names but different contexts
 
-3. CANONICAL NAME SELECTION:
+3. VERSION SUFFIXES:
+   - Version suffixes should be IGNORED for grouping (e.g., "Product 2023" and "Product" are the SAME entity)
+   - "Product v1", "Product v2", "Product 2023" → all group under "Product"
+   - The version is metadata, not part of the entity identity
+
+4. CANONICAL NAME SELECTION:
    - Prefer the MOST COMPLETE and OFFICIAL form
    - Include vendor/company prefix if commonly used
    - Prefer expanded form over acronym (but keep acronym as alias)
@@ -173,6 +177,17 @@ class EntityCanonicalizer:
             self._stats["entities_output"] = len(entities)
             return entities, claim_entity_map
 
+        # Pré-traitement : version stripping domain-agnostic
+        # "S/4HANA 2023" → entity rename "S/4HANA", "2023" stocké en alias
+        for entity in entities:
+            base_name, version = strip_version_qualifier(entity.name)
+            if version:
+                original_name = entity.name
+                object.__setattr__(entity, "name", base_name)
+                object.__setattr__(entity, "normalized_name", Entity.normalize(base_name))
+                if original_name not in entity.aliases:
+                    entity.aliases.append(original_name)
+
         # Extraire les noms uniques pour le LLM
         entity_names = list({e.name for e in entities})
 
@@ -221,8 +236,6 @@ class EntityCanonicalizer:
         from knowbase.common.llm_router import get_llm_router, TaskType
         from knowbase.ontology.domain_context_injector import get_domain_context_injector
 
-        self._stats["llm_calls"] += 1
-
         # Enrichir le prompt avec le contexte domaine
         injector = get_domain_context_injector()
         enriched_system_prompt = injector.inject_context(
@@ -230,33 +243,52 @@ class EntityCanonicalizer:
             tenant_id=self.tenant_id,
         )
 
-        # Construire le prompt utilisateur
-        # Limiter au batch_size
-        names_batch = entity_names[:self.batch_size]
-        user_prompt = USER_PROMPT_TEMPLATE.format(
-            count=len(names_batch),
-            entities_json=json.dumps(names_batch, ensure_ascii=False, indent=2),
-        )
+        # Traiter TOUS les batches (pas seulement le premier)
+        all_groups: List[EntityGroup] = []
+        all_ungrouped: List[str] = []
 
-        try:
-            router = get_llm_router()
-            messages = [
-                {"role": "system", "content": enriched_system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
-            response = router.complete(
-                task_type=TaskType.KNOWLEDGE_EXTRACTION,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=4000,
+        for batch_start in range(0, len(entity_names), self.batch_size):
+            names_batch = entity_names[batch_start:batch_start + self.batch_size]
+            self._stats["llm_calls"] += 1
+
+            user_prompt = USER_PROMPT_TEMPLATE.format(
+                count=len(names_batch),
+                entities_json=json.dumps(names_batch, ensure_ascii=False, indent=2),
             )
 
-            return self._parse_response(response, names_batch)
+            try:
+                router = get_llm_router()
+                messages = [
+                    {"role": "system", "content": enriched_system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ]
+                response = router.complete(
+                    task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=4000,
+                )
 
-        except Exception as e:
-            logger.error(f"[EntityCanonicalizer] LLM call failed: {e}")
-            self._stats["llm_errors"] += 1
+                batch_result = self._parse_response(response, names_batch)
+                if batch_result:
+                    all_groups.extend(batch_result.entity_groups)
+                    all_ungrouped.extend(batch_result.ungrouped)
+                else:
+                    # Fallback : garder les noms du batch en ungrouped
+                    all_ungrouped.extend(names_batch)
+
+            except Exception as e:
+                logger.error(f"[EntityCanonicalizer] LLM call failed (batch {batch_start}): {e}")
+                self._stats["llm_errors"] += 1
+                all_ungrouped.extend(names_batch)
+
+        if not all_groups and not all_ungrouped:
             return None
+
+        return CanonicalizationResult(
+            entity_groups=all_groups,
+            ungrouped=all_ungrouped,
+        )
 
     def _parse_response(
         self,

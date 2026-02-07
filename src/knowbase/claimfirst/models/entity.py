@@ -256,6 +256,10 @@ ENTITY_STOPLIST = frozenset({
     "tasks", "activities", "actions", "solutions", "platforms",
     # Termes suffisamment génériques pour être du bruit dans tout domaine
     "integration", "monitoring", "report", "reports",
+    # Mots anglais courants qui se déguisent en acronymes 2-5 lettres
+    # (passent le filtre acronyme ^[A-Z]{2,5}$ mais ne sont pas des acronymes)
+    "as", "new", "up", "non", "map", "fix", "key", "end",
+    "add", "top", "per", "via", "due", "own", "old",
 
     # Termes déictiques et articles (NE JAMAIS être des entités)
     "this", "that", "these", "those",
