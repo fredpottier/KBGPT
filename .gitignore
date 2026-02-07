@@ -32,8 +32,9 @@ logs/
 DOCS_DONE/
 DOCS_IN/
 models/
-# Exception: extraction_v2/models is code, not data
+# Exception: extraction_v2/models and claimfirst/models are code, not data
 !src/knowbase/extraction_v2/models/
+!src/knowbase/claimfirst/models/
 public_files/
 status/
 data/**

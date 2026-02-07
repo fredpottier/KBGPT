@@ -246,15 +246,27 @@ class ClaimFirstOrchestrator:
                 f"method={applicability_frame.method}"
             )
 
-        # Phase 1: Extraire les Claims (pointer mode)
-        logger.info("[OSMOSE:ClaimFirst] Phase 1: Extracting claims...")
+        # Phase 1: Extraire les Claims (pointer mode, prompt V2 enrichi)
+        logger.info("[OSMOSE:ClaimFirst] Phase 1: Extracting claims (V2 prompt)...")
+        domain_context_block = self._get_domain_context_block(tenant_id)
         claims, unit_index = self.claim_extractor.extract(
             passages=passages,
             tenant_id=tenant_id,
             doc_id=doc_id,
             doc_title=doc_title,
+            doc_subject=doc_context.primary_subject or "",
+            domain_context=domain_context_block,
         )
         logger.info(f"  → {len(claims)} claims extracted")
+
+        # Phase 1.5: Déduplication déterministe (texte exact + triplet S/P/O)
+        logger.info("[OSMOSE:ClaimFirst] Phase 1.5: Deduplicating claims...")
+        claims, dedup_stats = self._deduplicate_claims(claims)
+        logger.info(
+            f"  → {dedup_stats['kept']} claims kept, "
+            f"{dedup_stats['removed_text']} removed (exact text), "
+            f"{dedup_stats['removed_spo']} removed (SPO triplet)"
+        )
 
         # Phase 2: Extraire les Entities
         logger.info("[OSMOSE:ClaimFirst] Phase 2: Extracting entities...")
@@ -510,6 +522,73 @@ class ClaimFirstOrchestrator:
 
         return n
 
+    def _deduplicate_claims(
+        self,
+        claims: List[Claim],
+    ) -> Tuple[List[Claim], Dict[str, int]]:
+        """
+        Déduplication déterministe intra-document.
+
+        Niveau 1: Texte exact (même text normalisé → garder meilleure confidence)
+        Niveau 2: Triplet S/P/O (même structured_form → garder meilleure confidence)
+
+        Calcule content_fingerprint sur chaque claim survivante.
+
+        Args:
+            claims: Claims extraites (toutes du même document)
+
+        Returns:
+            Tuple[claims dédup, stats dict]
+        """
+        if not claims:
+            return claims, {"kept": 0, "removed_text": 0, "removed_spo": 0}
+
+        initial_count = len(claims)
+
+        # Niveau 1: Dédup texte exact
+        best_by_text: Dict[str, Claim] = {}
+        for claim in claims:
+            key = claim.text.lower().strip()
+            existing = best_by_text.get(key)
+            if existing is None or claim.confidence > existing.confidence:
+                best_by_text[key] = claim
+
+        after_text = list(best_by_text.values())
+        removed_text = initial_count - len(after_text)
+
+        # Niveau 2: Dédup triplet S/P/O
+        best_by_spo: Dict[Tuple[str, str, str], Claim] = {}
+        no_spo: List[Claim] = []
+
+        for claim in after_text:
+            sf = claim.structured_form
+            if sf and sf.get("subject") and sf.get("predicate") and sf.get("object"):
+                key = (
+                    str(sf["subject"]).lower().strip(),
+                    str(sf["predicate"]).lower().strip(),
+                    str(sf["object"]).lower().strip(),
+                )
+                existing = best_by_spo.get(key)
+                if existing is None or claim.confidence > existing.confidence:
+                    best_by_spo[key] = claim
+            else:
+                no_spo.append(claim)
+
+        after_spo = list(best_by_spo.values()) + no_spo
+        removed_spo = len(after_text) - len(after_spo)
+
+        # Calculer content_fingerprint sur les survivantes
+        for claim in after_spo:
+            claim.content_fingerprint = claim.compute_content_fingerprint()
+
+        stats = {
+            "kept": len(after_spo),
+            "removed_text": removed_text,
+            "removed_spo": removed_spo,
+        }
+
+        return after_spo, stats
+
     def _create_passages(
         self,
         pass0,
@@ -575,6 +654,23 @@ class ClaimFirstOrchestrator:
             logger.warning(f"[OSMOSE:ClaimFirst] Failed to generate embeddings: {e}")
 
         return embeddings
+
+    def _get_domain_context_block(self, tenant_id: str) -> str:
+        """
+        Charge le bloc Domain Context pour injection dans le prompt V2.
+
+        Retourne une chaîne vide si aucun contexte n'est configuré.
+        """
+        try:
+            from knowbase.ontology.domain_context_injector import get_domain_context_injector
+            injector = get_domain_context_injector()
+            # On injecte sur un prompt vide pour récupérer uniquement le bloc contexte
+            result = injector.inject_context("", tenant_id)
+            if result.strip():
+                return result.strip()
+        except Exception as e:
+            logger.debug(f"[OSMOSE:ClaimFirst] Domain context not available: {e}")
+        return ""
 
     def _build_applicability_frame(
         self,
