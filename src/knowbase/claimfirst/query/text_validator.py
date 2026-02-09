@@ -204,11 +204,12 @@ class TextValidator:
 
         try:
             with self.neo4j_driver.session() as session:
-                # Recherche fulltext
+                # Recherche fulltext (exclut les claims archivées — Chantier 0 Phase 1B)
                 query = """
                 CALL db.index.fulltext.queryNodes('claim_text_search', $statement)
                 YIELD node AS c, score
                 WHERE score > $threshold AND c.tenant_id = $tenant_id
+                  AND (c.archived IS NULL OR c.archived = false)
                 """
 
                 params = {
@@ -272,10 +273,12 @@ class TextValidator:
         try:
             with self.neo4j_driver.session() as session:
                 # Chercher claims similaires puis vérifier les relations CONTRADICTS
+                # (exclut les claims archivées — Chantier 0 Phase 1B)
                 query = """
                 CALL db.index.fulltext.queryNodes('claim_text_search', $statement)
                 YIELD node AS c, score
                 WHERE score > $threshold AND c.tenant_id = $tenant_id
+                  AND (c.archived IS NULL OR c.archived = false)
                 OPTIONAL MATCH (c)-[:CONTRADICTS]-(contra:Claim)
                 """
 

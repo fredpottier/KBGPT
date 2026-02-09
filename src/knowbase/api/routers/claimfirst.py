@@ -40,8 +40,7 @@ router = APIRouter(
 
 class ClaimFirstStatusResponse(BaseModel):
     """Statut global du pipeline Claim-First."""
-    # Neo4j counts
-    passages: int = 0
+    # Neo4j counts (Passage retiré — Chantier 0 Phase 1A)
     claims: int = 0
     entities: int = 0
     facets: int = 0
@@ -51,8 +50,7 @@ class ClaimFirstStatusResponse(BaseModel):
     doc_contexts: int = 0
     subject_anchors: int = 0
 
-    # Relations
-    supported_by: int = 0
+    # Relations (SUPPORTED_BY retiré — Chantier 0 Phase 1A)
     about: int = 0
     has_facet: int = 0
     in_cluster: int = 0
@@ -236,8 +234,8 @@ async def get_claimfirst_status(
 
         with driver.session() as session:
             # Node counts - Claim-First specific labels
+            # Note: Passage retiré (Chantier 0 Phase 1A)
             node_queries = {
-                "passages": "MATCH (n:Passage {tenant_id: $tid}) RETURN count(n) as c",
                 "claims": "MATCH (n:Claim {tenant_id: $tid}) RETURN count(n) as c",
                 "entities": "MATCH (n:EntityClaimFirst {tenant_id: $tid}) RETURN count(n) as c",
                 "facets": "MATCH (n:Facet {tenant_id: $tid}) RETURN count(n) as c",
@@ -255,9 +253,8 @@ async def get_claimfirst_status(
                 except Exception:
                     pass
 
-            # Relation counts
+            # Relation counts (SUPPORTED_BY retiré — Chantier 0 Phase 1A)
             rel_queries = {
-                "supported_by": "MATCH ()-[r:SUPPORTED_BY]->() RETURN count(r) as c",
                 "about": "MATCH (:Claim)-[r:ABOUT]->(:EntityClaimFirst) RETURN count(r) as c",
                 "has_facet": "MATCH (:Claim)-[r:HAS_FACET]->(:Facet) RETURN count(r) as c",
                 "in_cluster": "MATCH (:Claim)-[r:IN_CLUSTER]->(:ClaimCluster) RETURN count(r) as c",
@@ -567,8 +564,8 @@ async def get_claimfirst_stats(
         driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
         with driver.session() as session:
-            # Node counts
-            node_labels = ["Passage", "Claim", "EntityClaimFirst", "Facet", "ClaimCluster"]
+            # Node counts (Passage retiré — Chantier 0 Phase 1A)
+            node_labels = ["Claim", "EntityClaimFirst", "Facet", "ClaimCluster"]
             for label in node_labels:
                 query = f"MATCH (n:{label} {{tenant_id: $tid}}) RETURN count(n) as c"
                 try:
@@ -578,8 +575,8 @@ async def get_claimfirst_stats(
                 except Exception:
                     response.node_counts[label] = 0
 
-            # Relation counts
-            rel_types = ["SUPPORTED_BY", "ABOUT", "HAS_FACET", "IN_CLUSTER",
+            # Relation counts (SUPPORTED_BY retiré — Chantier 0 Phase 1A)
+            rel_types = ["ABOUT", "HAS_FACET", "IN_CLUSTER",
                         "CONTRADICTS", "REFINES", "QUALIFIES"]
             for rel_type in rel_types:
                 query = f"MATCH ()-[r:{rel_type}]->() RETURN count(r) as c"

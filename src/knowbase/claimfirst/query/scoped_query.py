@@ -451,12 +451,14 @@ class ScopedQueryEngine:
         qualifiers = qualifiers or {}
 
         # Construire la query Cypher avec filtres optionnels
+        # (exclut les claims archivées — Chantier 0 Phase 1B)
         query = """
         MATCH (sa:SubjectAnchor {subject_id: $subject_id, tenant_id: $tenant_id})
         MATCH (dc:DocumentContext)-[:ABOUT_SUBJECT]->(sa)
         MATCH (d:Document)-[:HAS_CONTEXT]->(dc)
         MATCH (c:Claim)-[:IN_DOCUMENT]->(d)
         WHERE c.tenant_id = $tenant_id
+          AND (c.archived IS NULL OR c.archived = false)
         """
 
         # Ajouter les filtres de qualificateurs

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from knowbase.claimfirst.models.claim import Claim
@@ -118,22 +119,51 @@ class ClaimPersister:
                     session, result.doc_context, result.detected_axes
                 )
 
-            # 1. Passages (seulement ceux liés à des claims)
-            # Collecter les passage_ids référencés
-            linked_passage_ids = {passage_id for _, passage_id in result.claim_passage_links}
-            passages_to_persist = [p for p in result.passages if p.passage_id in linked_passage_ids]
+            # 1. Passages — conditionnel via OSMOSE_SKIP_PASSAGE_PERSIST
+            skip_passage_persist = os.getenv("OSMOSE_SKIP_PASSAGE_PERSIST", "true").lower() == "true"
 
-            logger.debug(
-                f"[OSMOSE:ClaimPersister] Persisting {len(passages_to_persist)}/{len(result.passages)} "
-                f"passages (filtering orphans)"
-            )
+            # Construire un index passage_id → Passage pour enrichir les claims
+            passage_index = {p.passage_id: p for p in result.passages}
 
-            for passage in passages_to_persist:
-                self._persist_passage(session, passage)
+            if not skip_passage_persist:
+                # Comportement legacy : persister les Passages comme nœuds Neo4j
+                linked_passage_ids = {passage_id for _, passage_id in result.claim_passage_links}
+                passages_to_persist = [p for p in result.passages if p.passage_id in linked_passage_ids]
 
-            # 2. Claims
+                logger.debug(
+                    f"[OSMOSE:ClaimPersister] Persisting {len(passages_to_persist)}/{len(result.passages)} "
+                    f"passages (filtering orphans)"
+                )
+
+                for passage in passages_to_persist:
+                    self._persist_passage(session, passage)
+            else:
+                passages_to_persist = []
+                logger.debug(
+                    "[OSMOSE:ClaimPersister] OSMOSE_SKIP_PASSAGE_PERSIST=true — "
+                    "passages stockés comme propriétés sur les Claims"
+                )
+
+            # Construire un mapping claim_id → passage pour extra_props
+            claim_passage_map: Dict[str, str] = {}
+            for claim_id, passage_id in result.claim_passage_links:
+                claim_passage_map[claim_id] = passage_id
+
+            # 2. Claims (avec extra_props passage si skip_passage_persist)
             for claim in result.claims:
-                self._persist_claim(session, claim)
+                extra_props = None
+                if skip_passage_persist:
+                    p_id = claim_passage_map.get(claim.claim_id)
+                    passage = passage_index.get(p_id) if p_id else None
+                    if passage:
+                        extra_props = {
+                            "passage_text": passage.text,
+                            "section_title": passage.section_title,
+                            "page_no": passage.page_no,
+                            "passage_char_start": passage.char_start,
+                            "passage_char_end": passage.char_end,
+                        }
+                self._persist_claim(session, claim, extra_props=extra_props)
 
             # 3. Entities
             for entity in result.entities:
@@ -147,12 +177,14 @@ class ClaimPersister:
             for cluster in result.clusters:
                 self._persist_cluster(session, cluster)
 
-            # 6. Relations Passage → Document (FROM) - seulement les passages persistés
-            self._persist_passage_document_links(session, passages_to_persist, result.doc_id)
+            # 6-7. Relations Passage (seulement si passages persistés comme nœuds)
+            if not skip_passage_persist:
+                # 6. Relations Passage → Document (FROM)
+                self._persist_passage_document_links(session, passages_to_persist, result.doc_id)
 
-            # 7. Relations Claim → Passage (SUPPORTED_BY)
-            for claim_id, passage_id in result.claim_passage_links:
-                self._persist_supported_by(session, claim_id, passage_id)
+                # 7. Relations Claim → Passage (SUPPORTED_BY)
+                for claim_id, passage_id in result.claim_passage_links:
+                    self._persist_supported_by(session, claim_id, passage_id)
 
             # 8. Relations Claim → Entity (ABOUT)
             for claim_id, entity_id in result.claim_entity_links:
@@ -196,9 +228,11 @@ class ClaimPersister:
         session.run(query, passage_id=passage.passage_id, props=props)
         self.stats["passages_created"] += 1
 
-    def _persist_claim(self, session, claim: Claim) -> None:
-        """Persiste une Claim."""
+    def _persist_claim(self, session, claim: Claim, extra_props: Optional[Dict[str, Any]] = None) -> None:
+        """Persiste une Claim avec propriétés supplémentaires optionnelles."""
         props = claim.to_neo4j_properties()
+        if extra_props:
+            props.update(extra_props)
         query = """
         MERGE (c:Claim {claim_id: $claim_id})
         SET c += $props
@@ -843,17 +877,19 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
             result = session.run(claim_query, doc_id=doc_id, tenant_id=tenant_id)
             stats["claims_deleted"] = result.single()["count"]
 
-            # Supprimer les passages
-            passage_query = """
-            MATCH (p:Passage {doc_id: $doc_id, tenant_id: $tenant_id})
-            WHERE NOT EXISTS {
-                MATCH (c:Claim)-[:SUPPORTED_BY]->(p)
-            }
-            DELETE p
-            RETURN count(p) as count
-            """
-            result = session.run(passage_query, doc_id=doc_id, tenant_id=tenant_id)
-            stats["passages_deleted"] = result.single()["count"]
+            # Supprimer les passages (seulement si pas en mode skip)
+            skip_passage_persist = os.getenv("OSMOSE_SKIP_PASSAGE_PERSIST", "true").lower() == "true"
+            if not skip_passage_persist:
+                passage_query = """
+                MATCH (p:Passage {doc_id: $doc_id, tenant_id: $tenant_id})
+                WHERE NOT EXISTS {
+                    MATCH (c:Claim)-[:SUPPORTED_BY]->(p)
+                }
+                DELETE p
+                RETURN count(p) as count
+                """
+                result = session.run(passage_query, doc_id=doc_id, tenant_id=tenant_id)
+                stats["passages_deleted"] = result.single()["count"]
 
         logger.info(
             f"[OSMOSE:ClaimPersister] Deleted claims for doc {doc_id}: "

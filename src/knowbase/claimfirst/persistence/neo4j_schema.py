@@ -4,11 +4,12 @@ Schéma Neo4j pour le pipeline Claim-First.
 
 Définit les contraintes, indexes et labels pour le graphe de claims.
 
-Architecture (CHEMIN CANONIQUE - INV-8 CORRECTIF 6 + PATCH C):
+Architecture (CHEMIN CANONIQUE - INV-8 CORRECTIF 6 + PATCH C + CHANTIER 0):
 
     # CHEMIN CANONIQUE (seul officiel, ne jamais en créer d'autre)
     (Document)-[:HAS_CONTEXT]->(DocumentContext)-[:ABOUT_SUBJECT]->(SubjectAnchor)
-    (Document)<-[:FROM]-(Passage)<-[:SUPPORTED_BY]-(Claim)
+    # Passages migrés comme propriétés sur Claim (Chantier 0 Phase 1A)
+    # Claim.passage_text, .section_title, .page_no, .passage_char_start, .passage_char_end
 
     # SHORTCUT UNIQUE autorisé (pour perf query)
     (Claim)-[:IN_DOCUMENT]->(Document)
@@ -94,8 +95,8 @@ class ClaimFirstSchema:
     """
 
     # Labels des nœuds
+    # Note: Passage retiré (Chantier 0 Phase 1A — données migrées sur Claim)
     LABELS = [
-        "Passage",
         "Claim",
         "Entity",
         "Facet",
@@ -108,9 +109,8 @@ class ClaimFirstSchema:
     ]
 
     # Types de relations
+    # Note: FROM et SUPPORTED_BY retirés (Chantier 0 Phase 1A)
     RELATION_TYPES = [
-        "FROM",              # Passage → Document
-        "SUPPORTED_BY",      # Claim → Passage
         "ABOUT",             # Claim → Entity (pas de role V1, INV-4)
         "HAS_FACET",         # Claim → Facet
         "IN_CLUSTER",        # Claim → ClaimCluster
@@ -126,15 +126,8 @@ class ClaimFirstSchema:
     ]
 
     # Contraintes (unicité)
+    # Note: passage_unique retiré (Chantier 0 Phase 1A)
     constraints: List[SchemaConstraint] = field(default_factory=lambda: [
-        # Passage: unique par (passage_id, tenant_id)
-        SchemaConstraint(
-            name="passage_unique",
-            label="Passage",
-            property_key="passage_id",
-            constraint_type="UNIQUE"
-        ),
-
         # Claim: unique par (claim_id, tenant_id)
         SchemaConstraint(
             name="claim_unique",
@@ -208,21 +201,12 @@ class ClaimFirstSchema:
             label="Claim",
             property_keys=["doc_id"]
         ),
-        SchemaIndex(
-            name="passage_doc",
-            label="Passage",
-            property_keys=["doc_id"]
-        ),
+        # Note: passage_doc et passage_tenant retirés (Chantier 0 Phase 1A)
 
         # Index sur tenant_id pour multi-tenant
         SchemaIndex(
             name="claim_tenant",
             label="Claim",
-            property_keys=["tenant_id"]
-        ),
-        SchemaIndex(
-            name="passage_tenant",
-            label="Passage",
             property_keys=["tenant_id"]
         ),
         SchemaIndex(
@@ -528,12 +512,9 @@ def get_cleanup_queries(tenant_id: str) -> List[str]:
     """
     return [
         # Supprimer les relations d'abord
+        # Note: SUPPORTED_BY et FROM retirés (Chantier 0 Phase 1A)
         f"""
-        MATCH (c:Claim {{tenant_id: '{tenant_id}'}})-[r:SUPPORTED_BY|ABOUT|HAS_FACET|IN_CLUSTER|IN_DOCUMENT|CONTRADICTS|REFINES|QUALIFIES]->()
-        DELETE r
-        """,
-        f"""
-        MATCH (p:Passage {{tenant_id: '{tenant_id}'}})-[r:FROM]->()
+        MATCH (c:Claim {{tenant_id: '{tenant_id}'}})-[r:ABOUT|HAS_FACET|IN_CLUSTER|IN_DOCUMENT|CONTRADICTS|REFINES|QUALIFIES]->()
         DELETE r
         """,
         # INV-8/INV-9: Relations DocumentContext et SubjectAnchor
@@ -560,8 +541,8 @@ def get_cleanup_queries(tenant_id: str) -> List[str]:
         DELETE r
         """,
         # Puis les nœuds
+        # Note: Passage retiré (Chantier 0 Phase 1A)
         f"MATCH (c:Claim {{tenant_id: '{tenant_id}'}}) DELETE c",
-        f"MATCH (p:Passage {{tenant_id: '{tenant_id}'}}) DELETE p",
         f"MATCH (e:Entity {{tenant_id: '{tenant_id}'}}) DELETE e",
         f"MATCH (f:Facet {{tenant_id: '{tenant_id}'}}) DELETE f",
         f"MATCH (cc:ClaimCluster {{tenant_id: '{tenant_id}'}}) DELETE cc",
