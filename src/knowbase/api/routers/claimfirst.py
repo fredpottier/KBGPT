@@ -923,4 +923,115 @@ async def list_axes(
     return axes
 
 
+@router.post(
+    "/archive-isolated",
+    summary="Archiver les claims isolées",
+    description="""
+    Identifie et archive les claims sans relations structurantes
+    (pas de CHAINS_TO, ABOUT, REFINES, QUALIFIES, CONTRADICTS)
+    et sans structured_form.
+
+    Mode dry-run par défaut. Passer execute=true pour archiver.
+
+    Chantier 0 - Phase 1B.
+    """
+)
+async def archive_isolated_claims(
+    execute: bool = Query(default=False, description="Exécuter l'archivage (sinon dry-run)"),
+    tenant_id: str = Depends(get_tenant_id),
+    admin: dict = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Archive les claims isolées."""
+    import os
+    from neo4j import GraphDatabase
+
+    try:
+        neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session() as session:
+            # Compter claims totales
+            result = session.run(
+                "MATCH (c:Claim {tenant_id: $tid}) RETURN count(c) AS c",
+                tid=tenant_id,
+            )
+            total_claims = result.single()["c"]
+
+            # Identifier les claims isolées
+            result = session.run(
+                """
+                MATCH (c:Claim {tenant_id: $tid})
+                WHERE c.structured_form_json IS NULL
+                  AND NOT EXISTS { (c)-[:CHAINS_TO]->() }
+                  AND NOT EXISTS { ()-[:CHAINS_TO]->(c) }
+                  AND NOT EXISTS { (c)-[:ABOUT]->() }
+                  AND NOT EXISTS { (c)-[:REFINES]->() }
+                  AND NOT EXISTS { ()-[:REFINES]->(c) }
+                  AND NOT EXISTS { (c)-[:QUALIFIES]->() }
+                  AND NOT EXISTS { ()-[:QUALIFIES]->(c) }
+                  AND NOT EXISTS { (c)-[:CONTRADICTS]->() }
+                  AND NOT EXISTS { ()-[:CONTRADICTS]->(c) }
+                RETURN c.claim_id AS claim_id
+                """,
+                tid=tenant_id,
+            )
+            isolated_ids = [r["claim_id"] for r in result]
+
+            if not execute:
+                driver.close()
+                return {
+                    "mode": "dry-run",
+                    "total_claims": total_claims,
+                    "isolated_count": len(isolated_ids),
+                    "isolated_percentage": round(100 * len(isolated_ids) / total_claims, 1) if total_claims else 0,
+                    "message": f"{len(isolated_ids)} claims isolées détectées. Relancer avec execute=true pour archiver.",
+                }
+
+            # Archiver par batch
+            archived = 0
+            batch_size = 500
+            for i in range(0, len(isolated_ids), batch_size):
+                batch = isolated_ids[i:i + batch_size]
+                result = session.run(
+                    """
+                    UNWIND $ids AS cid
+                    MATCH (c:Claim {claim_id: cid, tenant_id: $tid})
+                    SET c.archived = true,
+                        c.archived_at = datetime(),
+                        c.archived_reason = 'isolated_claim_phase0'
+                    RETURN count(c) AS archived
+                    """,
+                    ids=batch,
+                    tid=tenant_id,
+                )
+                archived += result.single()["archived"]
+
+            # Vérification
+            result = session.run(
+                "MATCH (c:Claim {tenant_id: $tid, archived: true}) RETURN count(c) AS c",
+                tid=tenant_id,
+            )
+            total_archived = result.single()["c"]
+
+        driver.close()
+
+        logger.info(
+            f"[ClaimFirst] Archivage: {archived} claims archivées par {admin.get('email', 'admin')}"
+        )
+
+        return {
+            "mode": "execute",
+            "total_claims": total_claims,
+            "newly_archived": archived,
+            "total_archived": total_archived,
+            "message": f"{archived} claims isolées archivées avec succès.",
+        }
+
+    except Exception as e:
+        logger.error(f"[ClaimFirst] Archive failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 __all__ = ["router"]

@@ -20,6 +20,7 @@ Exemple:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -130,6 +131,7 @@ class EntityCanonicalizer:
         tenant_id: str = "default",
         min_entities_for_llm: int = 5,
         batch_size: int = 100,
+        max_concurrent: int = 10,
     ):
         """
         Initialise le canonicalizer.
@@ -138,10 +140,12 @@ class EntityCanonicalizer:
             tenant_id: Tenant ID pour injection contexte domaine
             min_entities_for_llm: Nombre min d'entités pour déclencher LLM
             batch_size: Taille max d'un batch pour le LLM
+            max_concurrent: Nombre max d'appels LLM en parallèle
         """
         self.tenant_id = tenant_id
         self.min_entities_for_llm = min_entities_for_llm
         self.batch_size = batch_size
+        self.max_concurrent = max_concurrent
 
         self._stats = {
             "entities_input": 0,
@@ -225,62 +229,56 @@ class EntityCanonicalizer:
         entity_names: List[str],
     ) -> Optional[CanonicalizationResult]:
         """
-        Appelle le LLM pour grouper les entités.
+        Appelle le LLM pour grouper les entités en parallèle.
 
-        Args:
-            entity_names: Noms d'entités à grouper
-
-        Returns:
-            CanonicalizationResult ou None si erreur
+        Utilise asyncio.gather + semaphore pour paralléliser les appels LLM
+        (même pattern que ClaimExtractor et SlotEnricher).
         """
         from knowbase.common.llm_router import get_llm_router, TaskType
         from knowbase.ontology.domain_context_injector import get_domain_context_injector
 
-        # Enrichir le prompt avec le contexte domaine
         injector = get_domain_context_injector()
         enriched_system_prompt = injector.inject_context(
             base_prompt=SYSTEM_PROMPT_CANONICALIZER,
             tenant_id=self.tenant_id,
         )
 
-        # Traiter TOUS les batches (pas seulement le premier)
-        all_groups: List[EntityGroup] = []
-        all_ungrouped: List[str] = []
-
+        # Préparer tous les batches
+        batches: List[List[str]] = []
         for batch_start in range(0, len(entity_names), self.batch_size):
-            names_batch = entity_names[batch_start:batch_start + self.batch_size]
-            self._stats["llm_calls"] += 1
+            batches.append(entity_names[batch_start:batch_start + self.batch_size])
 
-            user_prompt = USER_PROMPT_TEMPLATE.format(
-                count=len(names_batch),
-                entities_json=json.dumps(names_batch, ensure_ascii=False, indent=2),
+        nb_batches = len(batches)
+        logger.info(
+            f"[EntityCanonicalizer] {len(entity_names)} entities → {nb_batches} batches "
+            f"(parallel, max_concurrent={self.max_concurrent})"
+        )
+
+        # Exécuter tous les batches en parallèle
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    batch_results = pool.submit(
+                        asyncio.run, self._process_all_batches_async(batches, enriched_system_prompt)
+                    ).result()
+            else:
+                batch_results = asyncio.run(
+                    self._process_all_batches_async(batches, enriched_system_prompt)
+                )
+        except RuntimeError:
+            batch_results = asyncio.run(
+                self._process_all_batches_async(batches, enriched_system_prompt)
             )
 
-            try:
-                router = get_llm_router()
-                messages = [
-                    {"role": "system", "content": enriched_system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ]
-                response = router.complete(
-                    task_type=TaskType.KNOWLEDGE_EXTRACTION,
-                    messages=messages,
-                    temperature=0.1,
-                    max_tokens=4000,
-                )
-
-                batch_result = self._parse_response(response, names_batch)
-                if batch_result:
-                    all_groups.extend(batch_result.entity_groups)
-                    all_ungrouped.extend(batch_result.ungrouped)
-                else:
-                    # Fallback : garder les noms du batch en ungrouped
-                    all_ungrouped.extend(names_batch)
-
-            except Exception as e:
-                logger.error(f"[EntityCanonicalizer] LLM call failed (batch {batch_start}): {e}")
-                self._stats["llm_errors"] += 1
-                all_ungrouped.extend(names_batch)
+        # Agréger les résultats
+        all_groups: List[EntityGroup] = []
+        all_ungrouped: List[str] = []
+        for br in batch_results:
+            if br:
+                all_groups.extend(br.entity_groups)
+                all_ungrouped.extend(br.ungrouped)
 
         if not all_groups and not all_ungrouped:
             return None
@@ -289,6 +287,64 @@ class EntityCanonicalizer:
             entity_groups=all_groups,
             ungrouped=all_ungrouped,
         )
+
+    async def _process_all_batches_async(
+        self,
+        batches: List[List[str]],
+        system_prompt: str,
+    ) -> List[Optional[CanonicalizationResult]]:
+        """Exécute tous les batches en parallèle avec semaphore."""
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+        results: List[Optional[CanonicalizationResult]] = [None] * len(batches)
+
+        async def process_batch(idx: int, names_batch: List[str]) -> None:
+            async with semaphore:
+                result = await self._call_batch_async(names_batch, system_prompt)
+                results[idx] = result
+
+        await asyncio.gather(
+            *[process_batch(i, batch) for i, batch in enumerate(batches)]
+        )
+        return results
+
+    async def _call_batch_async(
+        self,
+        names_batch: List[str],
+        system_prompt: str,
+    ) -> Optional[CanonicalizationResult]:
+        """Appel LLM async pour un batch d'entités."""
+        from knowbase.common.llm_router import get_llm_router, TaskType
+
+        self._stats["llm_calls"] += 1
+
+        user_prompt = USER_PROMPT_TEMPLATE.format(
+            count=len(names_batch),
+            entities_json=json.dumps(names_batch, ensure_ascii=False, indent=2),
+        )
+
+        try:
+            router = get_llm_router()
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            response = await router.acomplete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=4000,
+            )
+
+            batch_result = self._parse_response(response, names_batch)
+            if batch_result:
+                return batch_result
+            else:
+                return CanonicalizationResult(ungrouped=list(names_batch))
+
+        except Exception as e:
+            logger.error(f"[EntityCanonicalizer] Async LLM call failed: {e}")
+            self._stats["llm_errors"] += 1
+            return CanonicalizationResult(ungrouped=list(names_batch))
 
     def _parse_response(
         self,

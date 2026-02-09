@@ -45,13 +45,13 @@ import {
   FiAlertTriangle,
   FiTarget,
   FiXCircle,
+  FiArchive,
 } from 'react-icons/fi'
 import { useAuth } from '@/contexts/AuthContext'
 import { apiClient } from '@/lib/api'
 
 // Types
 interface ClaimFirstStatus {
-  passages: number
   claims: number
   entities: number
   facets: number
@@ -59,8 +59,7 @@ interface ClaimFirstStatus {
   // Subject Resolution (INV-8, INV-9)
   doc_contexts: number
   subject_anchors: number
-  // Relations
-  supported_by: number
+  // Relations (Passage/SUPPORTED_BY retirés — Chantier 0)
   about: number
   has_facet: number
   in_cluster: number
@@ -75,6 +74,16 @@ interface ClaimFirstStatus {
   job_running: boolean
   current_job_id: string | null
   current_phase: string | null
+}
+
+interface ArchiveResult {
+  mode: string
+  total_claims: number
+  isolated_count?: number
+  isolated_percentage?: number
+  newly_archived?: number
+  total_archived?: number
+  message: string
 }
 
 interface AvailableDocument {
@@ -133,7 +142,7 @@ const MetricCard = ({
         </Box>
         <Box>
           <Text fontSize="lg" fontWeight="bold" color="#f1f5f9" lineHeight={1}>
-            {value.toLocaleString()}
+            {(value ?? 0).toLocaleString()}
           </Text>
           <Text fontSize="xs" color="#94a3b8">{label}</Text>
         </Box>
@@ -145,8 +154,8 @@ const MetricCard = ({
 // Relation stat display
 const RelationStat = ({ label, value, color = 'gray' }: { label: string; value: number; color?: string }) => (
   <VStack spacing={0}>
-    <Text fontWeight="bold" fontSize="lg" color={value > 0 ? `${color}.400` : '#64748b'}>
-      {value.toLocaleString()}
+    <Text fontWeight="bold" fontSize="lg" color={(value ?? 0) > 0 ? `${color}.400` : '#64748b'}>
+      {(value ?? 0).toLocaleString()}
     </Text>
     <Text fontSize="xs" color="#64748b">{label}</Text>
   </VStack>
@@ -163,6 +172,8 @@ export default function ClaimFirstPage() {
   const [jobLoading, setJobLoading] = useState(false)
   const [currentJob, setCurrentJob] = useState<JobStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [archiveLoading, setArchiveLoading] = useState(false)
+  const [archiveResult, setArchiveResult] = useState<ArchiveResult | null>(null)
 
   // Load status and documents
   const loadData = useCallback(async () => {
@@ -305,6 +316,57 @@ export default function ClaimFirstPage() {
     }
   }
 
+  // Archive isolated claims (Phase 1B)
+  const handleArchiveDryRun = async () => {
+    try {
+      setArchiveLoading(true)
+      setArchiveResult(null)
+      const res = await apiClient.post<ArchiveResult>('/claimfirst/archive-isolated?execute=false', {})
+      if (res.success && res.data) {
+        setArchiveResult(res.data)
+      } else {
+        throw new Error(res.error || 'Échec du dry-run')
+      }
+    } catch (err) {
+      toast({
+        title: 'Erreur',
+        description: err instanceof Error ? err.message : 'Erreur inconnue',
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setArchiveLoading(false)
+    }
+  }
+
+  const handleArchiveExecute = async () => {
+    try {
+      setArchiveLoading(true)
+      const res = await apiClient.post<ArchiveResult>('/claimfirst/archive-isolated?execute=true', {})
+      if (res.success && res.data) {
+        setArchiveResult(res.data)
+        toast({
+          title: 'Archivage terminé',
+          description: res.data.message,
+          status: 'success',
+          duration: 5000,
+        })
+        loadData()
+      } else {
+        throw new Error(res.error || 'Échec de l\'archivage')
+      }
+    } catch (err) {
+      toast({
+        title: 'Erreur',
+        description: err instanceof Error ? err.message : 'Erreur inconnue',
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setArchiveLoading(false)
+    }
+  }
+
   // Loading states
   if (authLoading) {
     return (
@@ -402,7 +464,6 @@ export default function ClaimFirstPage() {
         <>
           {/* Stats Grid */}
           <Flex gap={3} mb={4} flexWrap="wrap">
-            <MetricCard label="Passages" value={status.passages} icon={FiFileText} color="gray" tooltip="Passages de contexte" />
             <MetricCard label="Claims" value={status.claims} icon={FiCheckCircle} color="green" tooltip="Affirmations documentées" />
             <MetricCard label="Entities" value={status.entities} icon={FiDatabase} color="blue" tooltip="Ancres de navigation" />
             <MetricCard label="Facets" value={status.facets} icon={FiLayers} color="purple" tooltip="Axes de navigation" />
@@ -414,8 +475,7 @@ export default function ClaimFirstPage() {
           {/* Relations Stats */}
           <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4} mb={4}>
             <Text fontSize="sm" fontWeight="semibold" color="#94a3b8" mb={3}>RELATIONS</Text>
-            <SimpleGrid columns={{ base: 4, md: 8 }} gap={4}>
-              <RelationStat label="SUPPORTED_BY" value={status.supported_by} color="green" />
+            <SimpleGrid columns={{ base: 4, md: 7 }} gap={4}>
               <RelationStat label="ABOUT" value={status.about} color="blue" />
               <RelationStat label="HAS_FACET" value={status.has_facet} color="purple" />
               <RelationStat label="IN_CLUSTER" value={status.in_cluster} color="orange" />
@@ -424,6 +484,90 @@ export default function ClaimFirstPage() {
               <RelationStat label="QUALIFIES" value={status.qualifies} color="pink" />
               <RelationStat label="ABOUT_SUBJECT" value={status.about_subject} color="teal" />
             </SimpleGrid>
+          </Box>
+
+          {/* Archive Isolated Claims — Chantier 0 Phase 1B */}
+          <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4} mb={4}>
+            <Flex justify="space-between" align="center" mb={3}>
+              <HStack spacing={2}>
+                <Icon as={FiArchive} color="yellow.400" boxSize={4} />
+                <Text fontSize="sm" fontWeight="semibold" color="#f1f5f9">
+                  Archivage claims isolées
+                </Text>
+                <Badge colorScheme="yellow" variant="subtle" fontSize="xs">Post-import</Badge>
+              </HStack>
+              <HStack spacing={2}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  colorScheme="yellow"
+                  onClick={handleArchiveDryRun}
+                  isLoading={archiveLoading}
+                  leftIcon={<Icon as={FiActivity} />}
+                >
+                  Analyser
+                </Button>
+                <Button
+                  size="xs"
+                  colorScheme="yellow"
+                  onClick={handleArchiveExecute}
+                  isLoading={archiveLoading}
+                  isDisabled={!archiveResult || archiveResult.mode === 'execute'}
+                  leftIcon={<Icon as={FiArchive} />}
+                >
+                  Archiver
+                </Button>
+              </HStack>
+            </Flex>
+            <Text fontSize="xs" color="#64748b" mb={2}>
+              Marque les claims sans structured_form et sans relations (CHAINS_TO, ABOUT, REFINES...) comme archivées.
+              Elles sont exclues du query engine mais conservées dans le graphe.
+            </Text>
+            {archiveResult && (
+              <Box
+                bg={archiveResult.mode === 'execute' ? 'green.900' : '#0f172a'}
+                border="1px solid"
+                borderColor={archiveResult.mode === 'execute' ? 'green.700' : '#334155'}
+                rounded="md"
+                p={3}
+                mt={2}
+              >
+                <HStack spacing={4} flexWrap="wrap">
+                  <VStack spacing={0} align="start">
+                    <Text fontSize="xs" color="#64748b">Claims totales</Text>
+                    <Text fontSize="sm" fontWeight="bold" color="#f1f5f9">
+                      {archiveResult.total_claims?.toLocaleString()}
+                    </Text>
+                  </VStack>
+                  {archiveResult.mode === 'dry-run' ? (
+                    <>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Isolées détectées</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="yellow.300">
+                          {archiveResult.isolated_count?.toLocaleString()} ({archiveResult.isolated_percentage}%)
+                        </Text>
+                      </VStack>
+                    </>
+                  ) : (
+                    <>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Nouvellement archivées</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="green.300">
+                          {archiveResult.newly_archived?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Total archivées</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="green.300">
+                          {archiveResult.total_archived?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                    </>
+                  )}
+                </HStack>
+                <Text fontSize="xs" color="#94a3b8" mt={2}>{archiveResult.message}</Text>
+              </Box>
+            )}
           </Box>
 
           {/* Current Job Status */}
