@@ -159,6 +159,20 @@ def claimfirst_process_job(
             results["failed"] += 1
             results["errors"].append(f"{doc_id}: {str(e)}")
 
+    # Phase 9 : Détection cross-doc (après TOUS les documents)
+    if results["processed"] >= 2 and neo4j_driver:
+        try:
+            _update_state(redis_client, phase="CROSS_DOC_CHAINS")
+            logger.info("[OSMOSE:ClaimFirst:Worker] Phase 9: Detecting cross-doc chains...")
+            cross_doc_result = _detect_cross_doc_chains(neo4j_driver, tenant_id)
+            results["cross_doc_chains"] = cross_doc_result.get("chains_persisted", 0)
+            logger.info(
+                f"  → {cross_doc_result.get('chains_persisted', 0)} cross-doc chains created"
+            )
+        except Exception as e:
+            logger.error(f"[OSMOSE:ClaimFirst:Worker] Cross-doc detection failed: {e}")
+            results["cross_doc_chains"] = 0
+
     # Finalisation
     _update_state(
         redis_client,
@@ -179,6 +193,120 @@ def claimfirst_process_job(
         neo4j_driver.close()
 
     return results
+
+
+def _detect_cross_doc_chains(neo4j_driver, tenant_id: str) -> dict:
+    """
+    Détecte et persiste les chaînes cross-document après import.
+
+    Réutilise la logique de detect_cross_doc_chains.py mais inline
+    pour éviter les dépendances script.
+    """
+    import json
+    from collections import defaultdict
+    from knowbase.claimfirst.composition.chain_detector import ChainDetector
+
+    with neo4j_driver.session() as session:
+        # 1. Charger claims avec structured_form
+        result = session.run(
+            """
+            MATCH (c:Claim {tenant_id: $tid})
+            WHERE c.structured_form_json IS NOT NULL
+            RETURN c.claim_id AS claim_id, c.doc_id AS doc_id,
+                   c.structured_form_json AS sf_json, c.confidence AS confidence
+            """,
+            tid=tenant_id,
+        )
+        claims = []
+        for r in result:
+            try:
+                sf = json.loads(r["sf_json"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            claims.append({
+                "claim_id": r["claim_id"],
+                "doc_id": r["doc_id"],
+                "structured_form": sf,
+                "confidence": r["confidence"] or 0.5,
+            })
+
+        doc_ids = list({c["doc_id"] for c in claims})
+        if len(doc_ids) < 2:
+            logger.info("[OSMOSE:ClaimFirst:Worker] < 2 documents, skipping cross-doc")
+            return {"chains_persisted": 0}
+
+        # 2. Entity index
+        eidx = session.run(
+            "MATCH (e:Entity {tenant_id: $tid}) RETURN e.normalized_name AS norm, e.entity_id AS eid",
+            tid=tenant_id,
+        )
+        entity_index = {r["norm"]: r["eid"] for r in eidx if r["norm"]}
+
+        # 3. Hub detection
+        total_docs = len(doc_ids)
+        hub_result = session.run(
+            """
+            MATCH (e:Entity {tenant_id: $tid})<-[:ABOUT]-(c:Claim)
+            WHERE c.structured_form_json IS NOT NULL
+            WITH e, count(DISTINCT c.doc_id) AS nb_docs, count(c) AS nb_claims
+            RETURN e.normalized_name AS name, nb_docs, nb_claims
+            """,
+            tid=tenant_id,
+        )
+        hub_entities = set()
+        for r in hub_result:
+            if r["nb_claims"] > 200 or (r["nb_docs"] >= total_docs and r["nb_claims"] / max(r["nb_docs"], 1) > 150.0):
+                hub_entities.add(r["name"])
+
+        logger.info(f"  → {len(claims)} claims SF, {len(doc_ids)} docs, {len(hub_entities)} hubs exclus")
+
+        # 4. Detect
+        idf_map = ChainDetector.compute_idf(claims, entity_index=entity_index)
+        detector = ChainDetector()
+        links = detector.detect_cross_doc(
+            claims, hub_entities=hub_entities,
+            entity_index=entity_index, idf_map=idf_map,
+        )
+
+        logger.info(f"  → {len(links)} cross-doc chains detected")
+
+        # 5. Persist
+        persisted = 0
+        for link in links:
+            jk_idf = idf_map.get(link.join_key, 0.0)
+            r = session.run(
+                """
+                MATCH (c1:Claim {claim_id: $src, tenant_id: $tid})
+                MATCH (c2:Claim {claim_id: $tgt, tenant_id: $tid})
+                MERGE (c1)-[r:CHAINS_TO]->(c2)
+                SET r.confidence = 1.0,
+                    r.basis = $basis,
+                    r.join_key = $jk,
+                    r.join_key_idf = $idf,
+                    r.method = 'spo_join_cross_doc',
+                    r.join_method = $jm,
+                    r.derived = true,
+                    r.cross_doc = true,
+                    r.source_doc_id = $sdid,
+                    r.target_doc_id = $tdid,
+                    r.join_key_freq = $freq
+                RETURN r IS NOT NULL AS ok
+                """,
+                src=link.source_claim_id,
+                tgt=link.target_claim_id,
+                tid=tenant_id,
+                basis=f"join_key={link.join_key}",
+                jk=link.join_key,
+                idf=jk_idf,
+                jm=link.join_method,
+                sdid=link.source_doc_id,
+                tdid=link.target_doc_id,
+                freq=link.join_key_freq,
+            )
+            if r.single():
+                persisted += 1
+
+        return {"chains_persisted": persisted, "chains_detected": len(links)}
 
 
 def _get_llm_client():

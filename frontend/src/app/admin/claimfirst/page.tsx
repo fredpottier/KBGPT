@@ -86,6 +86,20 @@ interface ArchiveResult {
   message: string
 }
 
+interface CrossDocResult {
+  mode: string
+  claims_with_sf: number
+  documents: number
+  chains_detected?: number
+  chains_persisted?: number
+  total_cross_doc?: number
+  total_intra_doc?: number
+  hubs_excluded?: number
+  existing_intra?: number
+  existing_cross?: number
+  message: string
+}
+
 interface AvailableDocument {
   doc_id: string
   filename: string
@@ -174,6 +188,8 @@ export default function ClaimFirstPage() {
   const [error, setError] = useState<string | null>(null)
   const [archiveLoading, setArchiveLoading] = useState(false)
   const [archiveResult, setArchiveResult] = useState<ArchiveResult | null>(null)
+  const [crossDocLoading, setCrossDocLoading] = useState(false)
+  const [crossDocResult, setCrossDocResult] = useState<CrossDocResult | null>(null)
 
   // Load status and documents
   const loadData = useCallback(async () => {
@@ -364,6 +380,57 @@ export default function ClaimFirstPage() {
       })
     } finally {
       setArchiveLoading(false)
+    }
+  }
+
+  // Cross-doc chain detection
+  const handleCrossDocDryRun = async () => {
+    try {
+      setCrossDocLoading(true)
+      setCrossDocResult(null)
+      const res = await apiClient.post<CrossDocResult>('/claimfirst/detect-cross-doc?execute=false', {})
+      if (res.success && res.data) {
+        setCrossDocResult(res.data)
+      } else {
+        throw new Error(res.error || 'Échec de la détection')
+      }
+    } catch (err) {
+      toast({
+        title: 'Erreur',
+        description: err instanceof Error ? err.message : 'Erreur inconnue',
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setCrossDocLoading(false)
+    }
+  }
+
+  const handleCrossDocExecute = async () => {
+    try {
+      setCrossDocLoading(true)
+      const res = await apiClient.post<CrossDocResult>('/claimfirst/detect-cross-doc?execute=true', {})
+      if (res.success && res.data) {
+        setCrossDocResult(res.data)
+        toast({
+          title: 'Chaînes cross-doc créées',
+          description: res.data.message,
+          status: 'success',
+          duration: 5000,
+        })
+        loadData()
+      } else {
+        throw new Error(res.error || 'Échec de la détection')
+      }
+    } catch (err) {
+      toast({
+        title: 'Erreur',
+        description: err instanceof Error ? err.message : 'Erreur inconnue',
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setCrossDocLoading(false)
     }
   }
 
@@ -566,6 +633,108 @@ export default function ClaimFirstPage() {
                   )}
                 </HStack>
                 <Text fontSize="xs" color="#94a3b8" mt={2}>{archiveResult.message}</Text>
+              </Box>
+            )}
+          </Box>
+
+          {/* Cross-Doc Chain Detection */}
+          <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4} mb={4}>
+            <Flex justify="space-between" align="center" mb={3}>
+              <HStack spacing={2}>
+                <Icon as={FiLink2} color="blue.400" boxSize={4} />
+                <Text fontSize="sm" fontWeight="semibold" color="#f1f5f9">
+                  Chaînes cross-document
+                </Text>
+                <Badge colorScheme="blue" variant="subtle" fontSize="xs">Post-import</Badge>
+              </HStack>
+              <HStack spacing={2}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  colorScheme="blue"
+                  onClick={handleCrossDocDryRun}
+                  isLoading={crossDocLoading}
+                  leftIcon={<Icon as={FiActivity} />}
+                >
+                  Analyser
+                </Button>
+                <Button
+                  size="xs"
+                  colorScheme="blue"
+                  onClick={handleCrossDocExecute}
+                  isLoading={crossDocLoading}
+                  isDisabled={!crossDocResult || crossDocResult.mode === 'execute' || (crossDocResult.chains_detected ?? 0) === 0}
+                  leftIcon={<Icon as={FiLink2} />}
+                >
+                  Créer les chaînes
+                </Button>
+              </HStack>
+            </Flex>
+            <Text fontSize="xs" color="#64748b" mb={2}>
+              Détecte les ponts sémantiques entre documents via les entités S/P/O partagées (object→subject).
+              Exécuté automatiquement après l{"'"}import, ou manuellement ici.
+            </Text>
+            {crossDocResult && (
+              <Box
+                bg={crossDocResult.mode === 'execute' ? 'green.900' : '#0f172a'}
+                border="1px solid"
+                borderColor={crossDocResult.mode === 'execute' ? 'green.700' : '#334155'}
+                rounded="md"
+                p={3}
+                mt={2}
+              >
+                <HStack spacing={4} flexWrap="wrap">
+                  <VStack spacing={0} align="start">
+                    <Text fontSize="xs" color="#64748b">Claims S/P/O</Text>
+                    <Text fontSize="sm" fontWeight="bold" color="#f1f5f9">
+                      {crossDocResult.claims_with_sf?.toLocaleString()}
+                    </Text>
+                  </VStack>
+                  <VStack spacing={0} align="start">
+                    <Text fontSize="xs" color="#64748b">Documents</Text>
+                    <Text fontSize="sm" fontWeight="bold" color="#f1f5f9">
+                      {crossDocResult.documents}
+                    </Text>
+                  </VStack>
+                  {crossDocResult.mode === 'dry-run' ? (
+                    <>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Chaînes détectées</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="blue.300">
+                          {crossDocResult.chains_detected?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Cross-doc existantes</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="#94a3b8">
+                          {crossDocResult.existing_cross?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                    </>
+                  ) : (
+                    <>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Chaînes créées</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="green.300">
+                          {crossDocResult.chains_persisted?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Total cross-doc</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="green.300">
+                          {crossDocResult.total_cross_doc?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Total intra-doc</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="#94a3b8">
+                          {crossDocResult.total_intra_doc?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                    </>
+                  )}
+                </HStack>
+                <Text fontSize="xs" color="#94a3b8" mt={2}>{crossDocResult.message}</Text>
               </Box>
             )}
           </Box>

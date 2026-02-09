@@ -1034,4 +1034,198 @@ async def archive_isolated_claims(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post(
+    "/detect-cross-doc",
+    summary="Détecter les chaînes cross-document",
+    description="""
+    Détecte les chaînes CHAINS_TO entre claims de documents différents
+    en joignant par entity (object→subject via S/P/O).
+
+    Mode dry-run par défaut. Passer execute=true pour persister.
+
+    Doit être exécuté après l'import de tous les documents.
+    """
+)
+async def detect_cross_doc_chains(
+    execute: bool = Query(default=False, description="Persister les chaînes (sinon dry-run)"),
+    tenant_id: str = Depends(get_tenant_id),
+    admin: dict = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Détecte et persiste les chaînes cross-document."""
+    import json
+    import os
+    from collections import defaultdict
+    from neo4j import GraphDatabase
+
+    try:
+        neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        with driver.session() as session:
+            # 1. Charger claims avec structured_form
+            result = session.run(
+                """
+                MATCH (c:Claim {tenant_id: $tid})
+                WHERE c.structured_form_json IS NOT NULL
+                RETURN c.claim_id AS claim_id, c.doc_id AS doc_id,
+                       c.structured_form_json AS sf_json, c.confidence AS confidence
+                ORDER BY c.doc_id
+                """,
+                tid=tenant_id,
+            )
+            claims = []
+            for r in result:
+                try:
+                    sf = json.loads(r["sf_json"])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                claims.append({
+                    "claim_id": r["claim_id"],
+                    "doc_id": r["doc_id"],
+                    "structured_form": sf,
+                    "confidence": r["confidence"] or 0.5,
+                })
+
+            doc_ids = list({c["doc_id"] for c in claims})
+
+            if len(doc_ids) < 2:
+                driver.close()
+                return {
+                    "mode": "dry-run",
+                    "claims_with_sf": len(claims),
+                    "documents": len(doc_ids),
+                    "chains_detected": 0,
+                    "message": "Moins de 2 documents — pas de cross-doc possible.",
+                }
+
+            # 2. Entity index
+            eidx_result = session.run(
+                "MATCH (e:Entity {tenant_id: $tid}) RETURN e.normalized_name AS norm, e.entity_id AS eid",
+                tid=tenant_id,
+            )
+            entity_index = {r["norm"]: r["eid"] for r in eidx_result if r["norm"]}
+
+            # 3. Hub detection
+            doc_count_r = session.run(
+                "MATCH (c:Claim {tenant_id: $tid}) WHERE c.structured_form_json IS NOT NULL RETURN count(DISTINCT c.doc_id) AS td",
+                tid=tenant_id,
+            )
+            total_docs = doc_count_r.single()["td"]
+
+            hub_result = session.run(
+                """
+                MATCH (e:Entity {tenant_id: $tid})<-[:ABOUT]-(c:Claim)
+                WHERE c.structured_form_json IS NOT NULL
+                WITH e, count(DISTINCT c.doc_id) AS nb_docs, count(c) AS nb_claims
+                RETURN e.normalized_name AS name, nb_docs, nb_claims
+                ORDER BY nb_claims DESC
+                """,
+                tid=tenant_id,
+            )
+            hub_entities = set()
+            for r in hub_result:
+                nb_claims = r["nb_claims"]
+                nb_docs = r["nb_docs"]
+                ratio = nb_claims / nb_docs if nb_docs > 0 else 0
+                if nb_claims > 200 or (nb_docs >= total_docs and ratio > 150.0):
+                    hub_entities.add(r["name"])
+
+            # 4. Detect
+            from knowbase.claimfirst.composition.chain_detector import ChainDetector
+
+            idf_map = ChainDetector.compute_idf(claims, entity_index=entity_index)
+            detector = ChainDetector()
+            links = detector.detect_cross_doc(
+                claims, hub_entities=hub_entities,
+                entity_index=entity_index, idf_map=idf_map,
+            )
+
+            # Existing counts
+            existing_cross = session.run(
+                "MATCH (:Claim {tenant_id: $tid})-[r:CHAINS_TO {cross_doc: true}]->() RETURN count(r) AS c",
+                tid=tenant_id,
+            ).single()["c"]
+            existing_intra = session.run(
+                "MATCH (:Claim {tenant_id: $tid})-[r:CHAINS_TO]->() WHERE coalesce(r.cross_doc, false) = false RETURN count(r) AS c",
+                tid=tenant_id,
+            ).single()["c"]
+
+            if not execute:
+                driver.close()
+                return {
+                    "mode": "dry-run",
+                    "claims_with_sf": len(claims),
+                    "documents": len(doc_ids),
+                    "chains_detected": len(links),
+                    "hubs_excluded": len(hub_entities),
+                    "existing_intra": existing_intra,
+                    "existing_cross": existing_cross,
+                    "message": f"{len(links)} chaînes cross-doc détectées. Relancer avec execute=true pour persister.",
+                }
+
+            # 5. Persist
+            persisted = 0
+            for link in links:
+                jk_idf = idf_map.get(link.join_key, 0.0)
+                r = session.run(
+                    """
+                    MATCH (c1:Claim {claim_id: $src, tenant_id: $tid})
+                    MATCH (c2:Claim {claim_id: $tgt, tenant_id: $tid})
+                    MERGE (c1)-[r:CHAINS_TO]->(c2)
+                    SET r.confidence = 1.0,
+                        r.basis = $basis,
+                        r.join_key = $jk,
+                        r.join_key_idf = $idf,
+                        r.method = 'spo_join_cross_doc',
+                        r.join_method = $jm,
+                        r.derived = true,
+                        r.cross_doc = true,
+                        r.source_doc_id = $sdid,
+                        r.target_doc_id = $tdid,
+                        r.join_key_freq = $freq
+                    RETURN r IS NOT NULL AS ok
+                    """,
+                    src=link.source_claim_id,
+                    tgt=link.target_claim_id,
+                    tid=tenant_id,
+                    basis=f"join_key={link.join_key}",
+                    jk=link.join_key,
+                    idf=jk_idf,
+                    jm=link.join_method,
+                    sdid=link.source_doc_id,
+                    tdid=link.target_doc_id,
+                    freq=link.join_key_freq,
+                )
+                if r.single():
+                    persisted += 1
+
+            # Final counts
+            final_cross = session.run(
+                "MATCH (:Claim {tenant_id: $tid})-[r:CHAINS_TO {cross_doc: true}]->() RETURN count(r) AS c",
+                tid=tenant_id,
+            ).single()["c"]
+
+        driver.close()
+
+        logger.info(
+            f"[ClaimFirst] Cross-doc: {persisted} chaînes créées par {admin.get('email', 'admin')}"
+        )
+
+        return {
+            "mode": "execute",
+            "claims_with_sf": len(claims),
+            "documents": len(doc_ids),
+            "chains_persisted": persisted,
+            "total_cross_doc": final_cross,
+            "total_intra_doc": existing_intra,
+            "message": f"{persisted} chaînes cross-doc créées. Total: {final_cross} cross-doc + {existing_intra} intra-doc.",
+        }
+
+    except Exception as e:
+        logger.error(f"[ClaimFirst] Cross-doc detection failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 __all__ = ["router"]
