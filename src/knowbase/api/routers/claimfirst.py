@@ -1228,4 +1228,244 @@ async def detect_cross_doc_chains(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post(
+    "/canonicalize-entities",
+    summary="Canonicaliser les entités existantes",
+    description="""
+    Fusionne les entités dupliquées dans Neo4j :
+    - Variantes version : "S/4HANA 2023" → "S/4HANA"
+    - Containment : "S4HANA" ⊂ "SAP S4HANA"
+    - Annotation des hubs (entités avec >50 claims ABOUT)
+
+    Mode dry-run par défaut. Passer execute=true pour appliquer.
+    Doit être exécuté après l'import de tous les documents.
+    """
+)
+async def canonicalize_entities(
+    execute: bool = Query(default=False, description="Appliquer les fusions (sinon dry-run)"),
+    hub_threshold: int = Query(default=50, description="Seuil de claims pour annoter un hub"),
+    tenant_id: str = Depends(get_tenant_id),
+    admin: dict = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Canonicalise les entités existantes dans Neo4j."""
+    import os
+    from neo4j import GraphDatabase
+
+    try:
+        neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        # Import inline pour éviter les dépendances circulaires
+        from knowbase.claimfirst.models.entity import (
+            Entity,
+            strip_version_qualifier,
+            is_valid_entity_name,
+        )
+
+        with driver.session() as session:
+            # 1. Charger les entities
+            result = session.run(
+                """
+                MATCH (e:Entity {tenant_id: $tid})
+                OPTIONAL MATCH (e)<-[:ABOUT]-(c:Claim)
+                WITH e, count(c) AS claim_count
+                RETURN e.entity_id AS entity_id,
+                       e.name AS name,
+                       e.normalized_name AS normalized_name,
+                       e.aliases AS aliases,
+                       e.entity_type AS entity_type,
+                       claim_count
+                ORDER BY e.name
+                """,
+                tid=tenant_id,
+            )
+            entities = [dict(record) for record in result]
+
+            if not entities:
+                driver.close()
+                return {
+                    "mode": "dry-run",
+                    "entities_initial": 0,
+                    "version_merges": 0,
+                    "containment_merges": 0,
+                    "hubs_annotated": 0,
+                    "message": "Aucune entité à traiter.",
+                }
+
+            # 2. Identifier les groupes version
+            from collections import defaultdict
+            groups: dict = defaultdict(list)
+            for e in entities:
+                base_name, version = strip_version_qualifier(e["name"])
+                base_normalized = Entity.normalize(base_name)
+                groups[base_normalized].append((e, version))
+
+            version_groups = {}
+            for base_norm, members in groups.items():
+                if len(members) > 1:
+                    version_groups[base_norm] = [m[0] for m in members]
+
+            version_merge_count = sum(
+                len(members) - 1
+                for members in version_groups.values()
+            )
+
+            # 3. Identifier les containments
+            by_norm: dict = {}
+            for e in entities:
+                norm = e.get("normalized_name") or Entity.normalize(e["name"])
+                by_norm[norm] = e
+
+            parents_by_child: dict = defaultdict(list)
+            norms = sorted(by_norm.keys(), key=len)
+            for i, short_norm in enumerate(norms):
+                if len(short_norm) < 4:
+                    continue
+                for long_norm in norms[i + 1:]:
+                    words_long = long_norm.split()
+                    words_short = short_norm.split()
+                    extra_words = len(words_long) - len(words_short)
+                    if extra_words > 2 or extra_words < 1:
+                        continue
+                    if words_long[-len(words_short):] == words_short:
+                        parents_by_child[short_norm].append(long_norm)
+
+            containment_pairs = []
+            for child_norm, parent_norms in parents_by_child.items():
+                if len(parent_norms) == 1:
+                    source = by_norm[child_norm]
+                    target = by_norm[parent_norms[0]]
+                    if is_valid_entity_name(source["name"]) and is_valid_entity_name(target["name"]):
+                        containment_pairs.append((source, target))
+
+            if not execute:
+                driver.close()
+                return {
+                    "mode": "dry-run",
+                    "entities_initial": len(entities),
+                    "version_merges": version_merge_count,
+                    "containment_merges": len(containment_pairs),
+                    "total_merges": version_merge_count + len(containment_pairs),
+                    "entities_after": len(entities) - version_merge_count - len(containment_pairs),
+                    "message": (
+                        f"{version_merge_count} fusions version + {len(containment_pairs)} fusions containment détectées. "
+                        f"Relancer avec execute=true pour appliquer."
+                    ),
+                }
+
+            # 4. Exécuter les fusions version
+            version_merged = 0
+            for base_norm, members in version_groups.items():
+                canonical = None
+                for m in members:
+                    _, version = strip_version_qualifier(m["name"])
+                    if version is None:
+                        canonical = m
+                        break
+                if canonical is None:
+                    canonical = max(members, key=lambda m: m["claim_count"])
+                for m in members:
+                    if m["entity_id"] != canonical["entity_id"]:
+                        session.run(
+                            """
+                            MATCH (source:Entity {entity_id: $source_id, tenant_id: $tid})
+                            MATCH (target:Entity {entity_id: $target_id, tenant_id: $tid})
+                            OPTIONAL MATCH (c:Claim)-[r:ABOUT]->(source)
+                            WITH source, target, collect(c) AS claims, collect(r) AS rels
+                            FOREACH (r IN rels | DELETE r)
+                            WITH source, target, claims
+                            UNWIND claims AS c
+                            MERGE (c)-[:ABOUT]->(target)
+                            WITH source, target
+                            SET target.aliases = CASE
+                                WHEN target.aliases IS NULL THEN [source.name]
+                                WHEN NOT source.name IN target.aliases THEN target.aliases + source.name
+                                ELSE target.aliases
+                            END
+                            WITH source, target
+                            DETACH DELETE source
+                            """,
+                            source_id=m["entity_id"],
+                            target_id=canonical["entity_id"],
+                            tid=tenant_id,
+                        )
+                        version_merged += 1
+
+            # 5. Exécuter les fusions containment
+            containment_merged = 0
+            for source, target in containment_pairs:
+                session.run(
+                    """
+                    MATCH (source:Entity {entity_id: $source_id, tenant_id: $tid})
+                    MATCH (target:Entity {entity_id: $target_id, tenant_id: $tid})
+                    OPTIONAL MATCH (c:Claim)-[r:ABOUT]->(source)
+                    WITH source, target, collect(c) AS claims, collect(r) AS rels
+                    FOREACH (r IN rels | DELETE r)
+                    WITH source, target, claims
+                    UNWIND claims AS c
+                    MERGE (c)-[:ABOUT]->(target)
+                    WITH source, target
+                    SET target.aliases = CASE
+                        WHEN target.aliases IS NULL THEN [source.name]
+                        WHEN NOT source.name IN target.aliases THEN target.aliases + source.name
+                        ELSE target.aliases
+                    END
+                    WITH source, target
+                    DETACH DELETE source
+                    """,
+                    source_id=source["entity_id"],
+                    target_id=target["entity_id"],
+                    tid=tenant_id,
+                )
+                containment_merged += 1
+
+            # 6. Annoter les hubs
+            hub_result = session.run(
+                """
+                MATCH (e:Entity {tenant_id: $tid})<-[:ABOUT]-(c:Claim)
+                WITH e, count(c) AS degree
+                WHERE degree > $threshold
+                SET e.is_hub = true, e.hub_degree = degree
+                RETURN count(e) AS hubs_annotated
+                """,
+                tid=tenant_id,
+                threshold=hub_threshold,
+            )
+            hubs_annotated = hub_result.single()["hubs_annotated"]
+
+            # Compter le résultat final
+            final_count = session.run(
+                "MATCH (e:Entity {tenant_id: $tid}) RETURN count(e) AS cnt",
+                tid=tenant_id,
+            ).single()["cnt"]
+
+        driver.close()
+
+        logger.info(
+            f"[ClaimFirst] Canonicalization: {version_merged} version + {containment_merged} containment merges, "
+            f"{hubs_annotated} hubs annotated by {admin.get('email', 'admin')}"
+        )
+
+        return {
+            "mode": "execute",
+            "entities_initial": len(entities),
+            "version_merges": version_merged,
+            "containment_merges": containment_merged,
+            "total_merges": version_merged + containment_merged,
+            "hubs_annotated": hubs_annotated,
+            "entities_after": final_count,
+            "message": (
+                f"{version_merged + containment_merged} entités fusionnées "
+                f"({version_merged} version, {containment_merged} containment), "
+                f"{hubs_annotated} hubs annotés. {final_count} entités restantes."
+            ),
+        }
+
+    except Exception as e:
+        logger.error(f"[ClaimFirst] Canonicalization failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 __all__ = ["router"]

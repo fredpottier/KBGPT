@@ -173,6 +173,22 @@ def claimfirst_process_job(
             logger.error(f"[OSMOSE:ClaimFirst:Worker] Cross-doc detection failed: {e}")
             results["cross_doc_chains"] = 0
 
+    # Phase 10 : Canonicalisation cross-doc des entités (après TOUS les documents)
+    if results["processed"] >= 2 and neo4j_driver:
+        try:
+            _update_state(redis_client, phase="CANONICALIZE_ENTITIES")
+            logger.info("[OSMOSE:ClaimFirst:Worker] Phase 10: Canonicalizing entities cross-doc...")
+            canon_result = _canonicalize_entities_cross_doc(neo4j_driver, tenant_id)
+            results["entities_merged"] = canon_result.get("total_merges", 0)
+            results["hubs_annotated"] = canon_result.get("hubs_annotated", 0)
+            logger.info(
+                f"  → {canon_result.get('total_merges', 0)} entities merged, "
+                f"{canon_result.get('hubs_annotated', 0)} hubs annotated"
+            )
+        except Exception as e:
+            logger.error(f"[OSMOSE:ClaimFirst:Worker] Entity canonicalization failed: {e}")
+            results["entities_merged"] = 0
+
     # Finalisation
     _update_state(
         redis_client,
@@ -307,6 +323,169 @@ def _detect_cross_doc_chains(neo4j_driver, tenant_id: str) -> dict:
                 persisted += 1
 
         return {"chains_persisted": persisted, "chains_detected": len(links)}
+
+
+def _canonicalize_entities_cross_doc(neo4j_driver, tenant_id: str) -> dict:
+    """
+    Canonicalise les entités cross-document après import.
+
+    Fusionne les variantes version et les containments,
+    puis annote les hubs.
+    """
+    from collections import defaultdict
+    from knowbase.claimfirst.models.entity import (
+        Entity,
+        strip_version_qualifier,
+        is_valid_entity_name,
+    )
+
+    with neo4j_driver.session() as session:
+        # 1. Charger les entities
+        result = session.run(
+            """
+            MATCH (e:Entity {tenant_id: $tid})
+            OPTIONAL MATCH (e)<-[:ABOUT]-(c:Claim)
+            WITH e, count(c) AS claim_count
+            RETURN e.entity_id AS entity_id,
+                   e.name AS name,
+                   e.normalized_name AS normalized_name,
+                   e.entity_type AS entity_type,
+                   claim_count
+            """,
+            tid=tenant_id,
+        )
+        entities = [dict(record) for record in result]
+        logger.info(f"  → {len(entities)} entities loaded")
+
+        if not entities:
+            return {"total_merges": 0, "hubs_annotated": 0}
+
+        # 2. Groupes version
+        groups: dict = defaultdict(list)
+        for e in entities:
+            base_name, version = strip_version_qualifier(e["name"])
+            base_normalized = Entity.normalize(base_name)
+            groups[base_normalized].append((e, version))
+
+        version_merged = 0
+        for base_norm, members in groups.items():
+            if len(members) <= 1:
+                continue
+            canonical = None
+            for m, version in members:
+                if version is None:
+                    canonical = m
+                    break
+            if canonical is None:
+                canonical = max([m for m, _ in members], key=lambda m: m["claim_count"])
+
+            for m, _ in members:
+                if m["entity_id"] != canonical["entity_id"]:
+                    session.run(
+                        """
+                        MATCH (source:Entity {entity_id: $source_id, tenant_id: $tid})
+                        MATCH (target:Entity {entity_id: $target_id, tenant_id: $tid})
+                        OPTIONAL MATCH (c:Claim)-[r:ABOUT]->(source)
+                        WITH source, target, collect(c) AS claims, collect(r) AS rels
+                        FOREACH (r IN rels | DELETE r)
+                        WITH source, target, claims
+                        UNWIND claims AS c
+                        MERGE (c)-[:ABOUT]->(target)
+                        WITH source, target
+                        SET target.aliases = CASE
+                            WHEN target.aliases IS NULL THEN [source.name]
+                            WHEN NOT source.name IN target.aliases THEN target.aliases + source.name
+                            ELSE target.aliases
+                        END
+                        WITH source, target
+                        DETACH DELETE source
+                        """,
+                        source_id=m["entity_id"],
+                        target_id=canonical["entity_id"],
+                        tid=tenant_id,
+                    )
+                    version_merged += 1
+
+        # 3. Containments
+        by_norm: dict = {}
+        for e in entities:
+            norm = e.get("normalized_name") or Entity.normalize(e["name"])
+            if norm not in by_norm:  # Garder le premier (certains ont pu être supprimés)
+                by_norm[norm] = e
+
+        parents_by_child: dict = defaultdict(list)
+        norms = sorted(by_norm.keys(), key=len)
+        for i, short_norm in enumerate(norms):
+            if len(short_norm) < 4:
+                continue
+            for long_norm in norms[i + 1:]:
+                words_long = long_norm.split()
+                words_short = short_norm.split()
+                extra_words = len(words_long) - len(words_short)
+                if extra_words > 2 or extra_words < 1:
+                    continue
+                if words_long[-len(words_short):] == words_short:
+                    parents_by_child[short_norm].append(long_norm)
+
+        containment_merged = 0
+        for child_norm, parent_norms in parents_by_child.items():
+            if len(parent_norms) != 1:
+                continue
+            source = by_norm.get(child_norm)
+            target = by_norm.get(parent_norms[0])
+            if not source or not target:
+                continue
+            if not is_valid_entity_name(source["name"]) or not is_valid_entity_name(target["name"]):
+                continue
+            session.run(
+                """
+                MATCH (source:Entity {entity_id: $source_id, tenant_id: $tid})
+                MATCH (target:Entity {entity_id: $target_id, tenant_id: $tid})
+                OPTIONAL MATCH (c:Claim)-[r:ABOUT]->(source)
+                WITH source, target, collect(c) AS claims, collect(r) AS rels
+                FOREACH (r IN rels | DELETE r)
+                WITH source, target, claims
+                UNWIND claims AS c
+                MERGE (c)-[:ABOUT]->(target)
+                WITH source, target
+                SET target.aliases = CASE
+                    WHEN target.aliases IS NULL THEN [source.name]
+                    WHEN NOT source.name IN target.aliases THEN target.aliases + source.name
+                    ELSE target.aliases
+                END
+                WITH source, target
+                DETACH DELETE source
+                """,
+                source_id=source["entity_id"],
+                target_id=target["entity_id"],
+                tid=tenant_id,
+            )
+            containment_merged += 1
+
+        # 4. Annoter les hubs
+        hub_result = session.run(
+            """
+            MATCH (e:Entity {tenant_id: $tid})<-[:ABOUT]-(c:Claim)
+            WITH e, count(c) AS degree
+            WHERE degree > 50
+            SET e.is_hub = true, e.hub_degree = degree
+            RETURN count(e) AS hubs_annotated
+            """,
+            tid=tenant_id,
+        )
+        hubs_annotated = hub_result.single()["hubs_annotated"]
+
+        logger.info(
+            f"  → {version_merged} version + {containment_merged} containment merges, "
+            f"{hubs_annotated} hubs"
+        )
+
+        return {
+            "version_merges": version_merged,
+            "containment_merges": containment_merged,
+            "total_merges": version_merged + containment_merged,
+            "hubs_annotated": hubs_annotated,
+        }
 
 
 def _get_llm_client():

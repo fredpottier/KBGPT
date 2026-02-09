@@ -100,6 +100,17 @@ interface CrossDocResult {
   message: string
 }
 
+interface CanonResult {
+  mode: string
+  entities_initial: number
+  version_merges: number
+  containment_merges: number
+  total_merges: number
+  entities_after?: number
+  hubs_annotated?: number
+  message: string
+}
+
 interface AvailableDocument {
   doc_id: string
   filename: string
@@ -190,6 +201,8 @@ export default function ClaimFirstPage() {
   const [archiveResult, setArchiveResult] = useState<ArchiveResult | null>(null)
   const [crossDocLoading, setCrossDocLoading] = useState(false)
   const [crossDocResult, setCrossDocResult] = useState<CrossDocResult | null>(null)
+  const [canonLoading, setCanonLoading] = useState(false)
+  const [canonResult, setCanonResult] = useState<CanonResult | null>(null)
 
   // Load status and documents
   const loadData = useCallback(async () => {
@@ -431,6 +444,57 @@ export default function ClaimFirstPage() {
       })
     } finally {
       setCrossDocLoading(false)
+    }
+  }
+
+  // Entity canonicalization
+  const handleCanonDryRun = async () => {
+    try {
+      setCanonLoading(true)
+      setCanonResult(null)
+      const res = await apiClient.post<CanonResult>('/claimfirst/canonicalize-entities?execute=false', {})
+      if (res.success && res.data) {
+        setCanonResult(res.data)
+      } else {
+        throw new Error(res.error || 'Échec de l\'analyse')
+      }
+    } catch (err) {
+      toast({
+        title: 'Erreur',
+        description: err instanceof Error ? err.message : 'Erreur inconnue',
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setCanonLoading(false)
+    }
+  }
+
+  const handleCanonExecute = async () => {
+    try {
+      setCanonLoading(true)
+      const res = await apiClient.post<CanonResult>('/claimfirst/canonicalize-entities?execute=true', {})
+      if (res.success && res.data) {
+        setCanonResult(res.data)
+        toast({
+          title: 'Entités canonicalisées',
+          description: res.data.message,
+          status: 'success',
+          duration: 5000,
+        })
+        loadData()
+      } else {
+        throw new Error(res.error || 'Échec de la canonicalisation')
+      }
+    } catch (err) {
+      toast({
+        title: 'Erreur',
+        description: err instanceof Error ? err.message : 'Erreur inconnue',
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setCanonLoading(false)
     }
   }
 
@@ -735,6 +799,110 @@ export default function ClaimFirstPage() {
                   )}
                 </HStack>
                 <Text fontSize="xs" color="#94a3b8" mt={2}>{crossDocResult.message}</Text>
+              </Box>
+            )}
+          </Box>
+
+          {/* Entity Canonicalization */}
+          <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4} mb={4}>
+            <Flex justify="space-between" align="center" mb={3}>
+              <HStack spacing={2}>
+                <Icon as={FiTarget} color="purple.400" boxSize={4} />
+                <Text fontSize="sm" fontWeight="semibold" color="#f1f5f9">
+                  Canonicalisation des entités
+                </Text>
+                <Badge colorScheme="purple" variant="subtle" fontSize="xs">Post-import</Badge>
+              </HStack>
+              <HStack spacing={2}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  colorScheme="purple"
+                  onClick={handleCanonDryRun}
+                  isLoading={canonLoading}
+                  leftIcon={<Icon as={FiActivity} />}
+                >
+                  Analyser
+                </Button>
+                <Button
+                  size="xs"
+                  colorScheme="purple"
+                  onClick={handleCanonExecute}
+                  isLoading={canonLoading}
+                  isDisabled={!canonResult || canonResult.mode === 'execute' || (canonResult.total_merges ?? 0) === 0}
+                  leftIcon={<Icon as={FiTarget} />}
+                >
+                  Fusionner
+                </Button>
+              </HStack>
+            </Flex>
+            <Text fontSize="xs" color="#64748b" mb={2}>
+              Fusionne les entités dupliquées cross-document : variantes version
+              (&quot;S/4HANA 2023&quot; → &quot;S/4HANA&quot;) et containments
+              (&quot;S4HANA&quot; ⊂ &quot;SAP S4HANA&quot;).
+              Exécuté automatiquement après l{"'"}import, ou manuellement ici.
+            </Text>
+            {canonResult && (
+              <Box
+                bg={canonResult.mode === 'execute' ? 'green.900' : '#0f172a'}
+                border="1px solid"
+                borderColor={canonResult.mode === 'execute' ? 'green.700' : '#334155'}
+                rounded="md"
+                p={3}
+                mt={2}
+              >
+                <HStack spacing={4} flexWrap="wrap">
+                  <VStack spacing={0} align="start">
+                    <Text fontSize="xs" color="#64748b">Entités initiales</Text>
+                    <Text fontSize="sm" fontWeight="bold" color="#f1f5f9">
+                      {canonResult.entities_initial?.toLocaleString()}
+                    </Text>
+                  </VStack>
+                  {canonResult.mode === 'dry-run' ? (
+                    <>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Fusions version</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="purple.300">
+                          {canonResult.version_merges?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Fusions containment</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="purple.300">
+                          {canonResult.containment_merges?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Total fusions</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="purple.300">
+                          {canonResult.total_merges?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                    </>
+                  ) : (
+                    <>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Fusionnées</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="green.300">
+                          {canonResult.total_merges?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Entités restantes</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="green.300">
+                          {canonResult.entities_after?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                      <VStack spacing={0} align="start">
+                        <Text fontSize="xs" color="#64748b">Hubs annotés</Text>
+                        <Text fontSize="sm" fontWeight="bold" color="#94a3b8">
+                          {canonResult.hubs_annotated?.toLocaleString()}
+                        </Text>
+                      </VStack>
+                    </>
+                  )}
+                </HStack>
+                <Text fontSize="xs" color="#94a3b8" mt={2}>{canonResult.message}</Text>
               </Box>
             )}
           </Box>
