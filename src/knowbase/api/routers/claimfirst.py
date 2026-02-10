@@ -387,6 +387,44 @@ async def list_available_documents(
     }
 
 
+@router.get(
+    "/imported-doc-ids",
+    summary="Doc IDs déjà importés dans le KG",
+    description="Retourne les doc_ids ayant des Claims dans Neo4j, avec le nombre de claims par document.",
+)
+async def get_imported_doc_ids(
+    tenant_id: str = Depends(get_tenant_id),
+) -> Dict[str, Any]:
+    """Retourne les doc_ids déjà importés via ClaimFirst."""
+    import os
+    from neo4j import GraphDatabase
+
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+
+    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (c:Claim {tenant_id: $tid})
+                WHERE c.doc_id IS NOT NULL
+                RETURN c.doc_id AS doc_id, count(c) AS claim_count
+                ORDER BY claim_count DESC
+                """,
+                tid=tenant_id,
+            )
+            imported = {r["doc_id"]: r["claim_count"] for r in result}
+    finally:
+        driver.close()
+
+    return {
+        "imported": imported,
+        "count": len(imported),
+    }
+
+
 @router.post(
     "/jobs",
     response_model=ClaimFirstJobResponse,

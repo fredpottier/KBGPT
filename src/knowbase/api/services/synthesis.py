@@ -22,22 +22,28 @@ SYNTHESIS_PROMPT = """Tu es un assistant expert qui aide les utilisateurs à tro
 
 1. **Synthétise** les informations des sources pour répondre à la question de manière claire et structurée.
 
-2. **Contexte conversationnel** : Si un contexte de conversation précédente est fourni, utilise-le pour comprendre les références implicites ("cela", "cette personne", "ce document", etc.) et maintenir la continuité de la discussion.
+2. **Raisonnement cross-document (PRIORITAIRE)** : Si une section "Raisonnement cross-document" est fournie, elle contient des chaînes de faits reliant plusieurs documents. Ces chaînes constituent **LA réponse principale** à la question — elles révèlent des liens architecturaux qu'aucun document seul ne contient. Tu DOIS :
+   - **Structurer ta réponse autour de ces chaînes** (pas autour des chunks individuels)
+   - **Expliquer la chaîne complète** : "A repose sur B (source 1), qui lui-même s'appuie sur C (source 2)"
+   - **Citer tous les documents de la chaîne** pour montrer le raisonnement multi-source
+   - Les chunks individuels servent de **complément**, pas de base de la réponse
 
-3. **Citations obligatoires** : Pour chaque information importante dont la source est connue, cite-la ainsi :
+3. **Contexte conversationnel** : Si un contexte de conversation précédente est fourni, utilise-le pour comprendre les références implicites ("cela", "cette personne", "ce document", etc.) et maintenir la continuité de la discussion.
+
+4. **Citations obligatoires** : Pour chaque information importante dont la source est connue, cite-la ainsi :
    - Format simple : *(Source : Document ABC, slide 12)*
    - Si plusieurs slides d'un même document : *(Source : Document ABC, slides 12-15)*
    - Si plusieurs documents : indique le nom du document à chaque citation
 
-4. **Ne jamais** utiliser "Bloc #X", "Extrait X", "Document inconnu" ou "Source inconnue" - cite UNIQUEMENT les documents dont le nom est explicitement fourni dans les sources. Si une source n'a pas de nom de document clair, n'ajoute pas de citation pour cette information.
+5. **Ne jamais** utiliser "Bloc #X", "Extrait X", "Document inconnu" ou "Source inconnue" - cite UNIQUEMENT les documents dont le nom est explicitement fourni dans les sources. Si une source n'a pas de nom de document clair, n'ajoute pas de citation pour cette information.
 
-5. **Structure** ta réponse avec des sections ou puces si approprié.
+6. **Structure** ta réponse avec des sections ou puces si approprié.
 
-6. Si les sources sont **insuffisantes** pour répondre complètement, indique-le clairement.
+7. Si les sources sont **insuffisantes** pour répondre complètement, indique-le clairement.
 
-7. Si des informations sont **contradictoires**, mentionne les deux versions avec leurs sources.
+8. Si des informations sont **contradictoires**, mentionne les deux versions avec leurs sources.
 
-8. Réponds en **français**.
+9. Réponds en **français**.
 
 Réponse :"""
 
@@ -99,7 +105,8 @@ def synthesize_response(
     chunks: List[Dict[str, Any]],
     graph_context_text: str = "",
     session_context_text: str = "",
-    kg_signals: Dict[str, Any] = None
+    kg_signals: Dict[str, Any] = None,
+    chain_signals: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Génère une réponse synthétisée à partir des chunks et de la question.
@@ -111,6 +118,8 @@ def synthesize_response(
         session_context_text: Contexte conversationnel formaté (Memory Layer Phase 2.5)
         kg_signals: Signaux KG optionnels pour le calcul de confiance
                    {"concepts_count", "relations_count", "sources_count", "avg_confidence"}
+        chain_signals: Signaux de qualité des chaînes CHAINS_TO multi-doc
+                      {"chain_count", "distinct_docs_count", "max_hops", "avg_hops"}
 
     Returns:
         Dictionnaire contenant la réponse synthétisée et les métadonnées
@@ -234,8 +243,45 @@ def synthesize_response(
                 f"(concepts={concepts_count}, relations={relations_count}, sources={kg_sources})"
             )
 
-        # Score final = base + KG bonus (le KG ne peut qu'améliorer)
-        confidence = min(base_confidence_final + kg_bonus, 1.0)
+        # Bonus chaînes multi-doc CHAINS_TO (raisonnement transitif cross-document)
+        chain_bonus = 0.0
+        if chain_signals:
+            distinct_docs = chain_signals.get("distinct_docs_count", 0)
+            chain_count = chain_signals.get("chain_count", 0)
+            max_hops = chain_signals.get("max_hops", 0)
+
+            # Bonus proportionnel au nombre de docs distincts traversés
+            if distinct_docs >= 4:
+                chain_bonus += 0.12  # +12% pour 4+ docs (raisonnement riche)
+            elif distinct_docs >= 3:
+                chain_bonus += 0.08  # +8% pour 3 docs
+            elif distinct_docs >= 2:
+                chain_bonus += 0.05  # +5% pour 2 docs
+
+            # Bonus pour chaînes longues (plus de hops = raisonnement plus profond)
+            if max_hops >= 3:
+                chain_bonus += 0.05  # +5% pour chaînes à 3+ hops
+            elif max_hops >= 2:
+                chain_bonus += 0.03  # +3% pour chaînes à 2 hops
+
+            # Bonus pour multiplicité des chaînes (corroboration)
+            if chain_count >= 3:
+                chain_bonus += 0.05  # +5% pour 3+ chaînes distinctes
+            elif chain_count >= 2:
+                chain_bonus += 0.03  # +3% pour 2 chaînes
+
+            logger.debug(
+                f"[SYNTHESIS] Chain bonus: {chain_bonus:.2%} "
+                f"(docs={distinct_docs}, chains={chain_count}, max_hops={max_hops})"
+            )
+
+        # Plafonner le chain_bonus : la confiance totale ne doit pas dépasser 90%
+        # (un système de connaissance ne devrait jamais être "certain à 99%")
+        max_chain = max(0, 0.90 - base_confidence_final - kg_bonus)
+        chain_bonus = min(chain_bonus, max_chain)
+
+        # Score final = base + KG bonus + chain bonus (plafonné à 90%)
+        confidence = min(base_confidence_final + kg_bonus + chain_bonus, 0.90)
 
         return {
             "synthesized_answer": synthesized_answer.strip(),
@@ -244,6 +290,7 @@ def synthesize_response(
             "confidence_breakdown": {
                 "base_score": round(base_confidence_final, 3),
                 "kg_bonus": round(kg_bonus, 3),
+                "chain_bonus": round(chain_bonus, 3),
                 "final_score": round(confidence, 3)
             }
         }

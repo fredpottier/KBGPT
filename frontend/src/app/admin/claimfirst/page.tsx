@@ -203,6 +203,7 @@ export default function ClaimFirstPage() {
   const [crossDocResult, setCrossDocResult] = useState<CrossDocResult | null>(null)
   const [canonLoading, setCanonLoading] = useState(false)
   const [canonResult, setCanonResult] = useState<CanonResult | null>(null)
+  const [importedDocs, setImportedDocs] = useState<Record<string, number>>({})
 
   // Load status and documents
   const loadData = useCallback(async () => {
@@ -210,9 +211,10 @@ export default function ClaimFirstPage() {
       setLoading(true)
       setError(null)
 
-      const [statusRes, docsRes] = await Promise.all([
+      const [statusRes, docsRes, importedRes] = await Promise.all([
         apiClient.get<ClaimFirstStatus>('/claimfirst/status'),
         apiClient.get<{ documents: AvailableDocument[]; count: number }>('/claimfirst/documents?limit=200'),
+        apiClient.get<{ imported: Record<string, number>; count: number }>('/claimfirst/imported-doc-ids'),
       ])
 
       if (statusRes.success && statusRes.data) {
@@ -232,6 +234,10 @@ export default function ClaimFirstPage() {
 
       if (docsRes.success && docsRes.data) {
         setDocuments(docsRes.data.documents || [])
+      }
+
+      if (importedRes.success && importedRes.data) {
+        setImportedDocs(importedRes.data.imported || {})
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -281,6 +287,7 @@ export default function ClaimFirstPage() {
 
   const selectAll = () => setSelectedDocs(new Set(documents.map((d) => d.doc_id)))
   const selectNone = () => setSelectedDocs(new Set())
+  const selectNewOnly = () => setSelectedDocs(new Set(documents.filter((d) => !importedDocs[d.doc_id]).map((d) => d.doc_id)))
 
   // Handle job creation
   const handleProcessSelected = async () => {
@@ -992,7 +999,7 @@ export default function ClaimFirstPage() {
               <Box>
                 <Text fontWeight="semibold" color="#f1f5f9">Documents disponibles</Text>
                 <Text fontSize="sm" color="#64748b">
-                  {documents.length} documents dans le cache d'extraction
+                  {documents.length} documents — <Text as="span" color="green.400">{documents.filter(d => importedDocs[d.doc_id]).length} importés</Text>, <Text as="span" color="orange.300">{documents.filter(d => !importedDocs[d.doc_id]).length} nouveaux</Text>
                 </Text>
               </Box>
               <HStack spacing={2}>
@@ -1001,6 +1008,9 @@ export default function ClaimFirstPage() {
                 </Button>
                 <Button size="xs" variant="ghost" color="#94a3b8" onClick={selectNone}>
                   Aucun
+                </Button>
+                <Button size="xs" variant="ghost" color="green.400" onClick={selectNewOnly}>
+                  Nouveaux uniquement
                 </Button>
               </HStack>
             </Flex>
@@ -1061,32 +1071,43 @@ export default function ClaimFirstPage() {
                     </Tr>
                   </Thead>
                   <Tbody>
-                    {documents.map((doc) => (
-                      <Tr
-                        key={doc.doc_id}
-                        _hover={{ bg: '#334155' }}
-                        cursor="pointer"
-                        onClick={() => toggleDoc(doc.doc_id)}
-                        bg={selectedDocs.has(doc.doc_id) ? '#334155' : 'transparent'}
-                      >
-                        <Td borderBottom="1px solid" borderColor="#1e293b">
-                          <Checkbox
-                            isChecked={selectedDocs.has(doc.doc_id)}
-                            onChange={() => toggleDoc(doc.doc_id)}
-                            colorScheme="purple"
-                          />
-                        </Td>
-                        <Td borderBottom="1px solid" borderColor="#1e293b">
-                          <code style={{ fontSize: '11px', color: '#94a3b8' }}>{doc.doc_id}</code>
-                        </Td>
-                        <Td color="#f1f5f9" borderBottom="1px solid" borderColor="#1e293b">
-                          {doc.filename}
-                        </Td>
-                        <Td fontSize="xs" color="#64748b" borderBottom="1px solid" borderColor="#1e293b">
-                          {doc.cached_at ? new Date(doc.cached_at).toLocaleDateString() : '-'}
-                        </Td>
-                      </Tr>
-                    ))}
+                    {documents.map((doc) => {
+                      const isImported = !!importedDocs[doc.doc_id]
+                      const claimCount = importedDocs[doc.doc_id] || 0
+                      return (
+                        <Tr
+                          key={doc.doc_id}
+                          _hover={{ bg: '#334155' }}
+                          cursor="pointer"
+                          onClick={() => toggleDoc(doc.doc_id)}
+                          bg={selectedDocs.has(doc.doc_id) ? '#334155' : 'transparent'}
+                        >
+                          <Td borderBottom="1px solid" borderColor="#1e293b">
+                            <Checkbox
+                              isChecked={selectedDocs.has(doc.doc_id)}
+                              onChange={() => toggleDoc(doc.doc_id)}
+                              colorScheme="purple"
+                            />
+                          </Td>
+                          <Td borderBottom="1px solid" borderColor="#1e293b">
+                            <code style={{ fontSize: '11px', color: isImported ? '#4ade80' : '#94a3b8' }}>{doc.doc_id}</code>
+                          </Td>
+                          <Td borderBottom="1px solid" borderColor="#1e293b">
+                            <Text as="span" color={isImported ? '#4ade80' : '#f1f5f9'}>
+                              {doc.filename}
+                            </Text>
+                            {isImported && (
+                              <Text as="span" fontSize="2xs" color="#22c55e" ml={2}>
+                                ({claimCount} claims)
+                              </Text>
+                            )}
+                          </Td>
+                          <Td fontSize="xs" color="#64748b" borderBottom="1px solid" borderColor="#1e293b">
+                            {doc.cached_at ? new Date(doc.cached_at).toLocaleDateString() : '-'}
+                          </Td>
+                        </Tr>
+                      )
+                    })}
                   </Tbody>
                 </Table>
               </Box>

@@ -5,7 +5,7 @@ import os
 from typing import Any, Optional
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import FieldCondition, Filter, MatchValue, HasIdCondition
+from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue, HasIdCondition
 from sentence_transformers import SentenceTransformer
 
 from knowbase.config.settings import Settings
@@ -30,14 +30,19 @@ def build_response_payload(result, public_url: str) -> dict[str, Any]:
     chunk = payload.get("chunk", {})
 
     # Gestion des URLs avec fallback vers l'ancienne structure ET document_name
-    # Priorité: document.source_file_url > payload.source_file_url > payload.document_name
+    # Priorité: document.source_file_url > payload.source_file_url > payload.document_name > payload.doc_id
     source_file_url = (
         document.get("source_file_url") or
         payload.get("source_file_url") or
-        payload.get("document_name", "")  # Fallback vers document_name (nouvelle structure OSMOSE)
+        payload.get("document_name", "") or
+        payload.get("doc_id", "")  # Fallback knowbase_chunks_v2
     )
     slide_image_url = document.get("slide_image_url") or payload.get("slide_image_url", "")
-    slide_index = chunk.get("slide_index") or payload.get("slide_index", "")
+    slide_index = (
+        chunk.get("slide_index") or
+        payload.get("slide_index") or
+        payload.get("page_no", "")  # Fallback knowbase_chunks_v2
+    )
 
     # Construction de l'URL thumbnail complète
     if slide_image_url and not slide_image_url.startswith("http"):
@@ -68,6 +73,7 @@ def search_documents(
     session_id: str | None = None,
     use_hybrid_anchor_search: bool = False,
     use_graph_first: bool = True,  # Activé par défaut pour utiliser Topics/COVERS (mode ANCHORED)
+    use_kg_traversal: bool = True,  # 🔗 OSMOSE: Traversée multi-hop CHAINS_TO
     use_instrumented: bool = False,
 ) -> dict[str, Any]:
     """
@@ -277,18 +283,25 @@ def search_documents(
 
     # Recherche classique (seulement si graph-first ET hybrid search n'ont pas fonctionné)
     if not graph_first_succeeded and not hybrid_search_succeeded:
-        # Construction du filtre de base (pour recherche classique)
-        filter_conditions = [FieldCondition(key="type", match=MatchValue(value="rfp_qa"))]
+        # Construction du filtre
+        must_not_conditions = []
+        must_conditions = []
+
+        # Exclure les Q/A RFP si le champ type existe (ancienne collection knowbase)
+        # knowbase_chunks_v2 n'a pas ce champ, le filtre est ignoré proprement
+        if settings.qdrant_collection == "knowbase":
+            must_not_conditions.append(
+                FieldCondition(key="type", match=MatchValue(value="rfp_qa"))
+            )
 
         # Ajouter le filtre par solution si spécifié
-        must_conditions = []
         if solution:
             must_conditions.append(
                 FieldCondition(key="solution.main", match=MatchValue(value=solution))
             )
 
         query_filter = Filter(
-            must_not=filter_conditions,
+            must_not=must_not_conditions if must_not_conditions else None,
             must=must_conditions if must_conditions else None
         )
         results = qdrant_client.search(
@@ -401,6 +414,74 @@ def search_documents(
             logger.warning(f"[OSMOSE] Graph enrichment failed (non-blocking): {e}")
             # Continue sans enrichissement KG
 
+    # 🔗 OSMOSE: Traversée multi-hop CHAINS_TO pour raisonnement transitif cross-document
+    chain_signals = {}
+    if use_kg_traversal and use_graph_context:
+        try:
+            logger.info(f"[OSMOSE] KG traversal starting for query: {query[:80]}...")
+            kg_chains_text, kg_chain_doc_ids, chain_signals = _get_kg_traversal_context(query, tenant_id)
+            if kg_chains_text:
+                # 1. Injecter le markdown dans le contexte LLM (synthèse reformule en français)
+                graph_context_text += "\n\n" + kg_chains_text
+                logger.info(
+                    f"[OSMOSE] KG traversal: {len(kg_chains_text)} chars context, "
+                    f"{len(kg_chain_doc_ids)} chain doc_ids, "
+                    f"chain_signals={chain_signals}"
+                )
+
+                # 2. Recherche Qdrant ciblée sur les documents de la chaîne
+                #    pour trouver les VRAIS chunks riches (pas des claims brutes)
+                existing_doc_ids = {
+                    c.get("source_file", "").split("/")[-1].replace(".pptx", "").replace(".pdf", "")
+                    for c in reranked_chunks
+                }
+                # Ne chercher que les doc_ids pas déjà couverts par la recherche vectorielle
+                new_doc_ids = [
+                    did for did in kg_chain_doc_ids
+                    if not any(did[:20] in ed for ed in existing_doc_ids if ed)
+                ]
+
+                if new_doc_ids:
+                    try:
+                        kg_doc_filter = Filter(
+                            must=[FieldCondition(key="doc_id", match=MatchAny(any=new_doc_ids))]
+                        )
+                        kg_qdrant_results = qdrant_client.search(
+                            collection_name=settings.qdrant_collection,
+                            query_vector=query_vector,
+                            limit=5,
+                            with_payload=True,
+                            query_filter=kg_doc_filter,
+                        )
+                        kg_real_chunks = [
+                            build_response_payload(r, PUBLIC_URL)
+                            for r in kg_qdrant_results
+                            if r.score >= SCORE_THRESHOLD * 0.8  # seuil légèrement assoupli
+                        ]
+                        # Ajouter les vrais chunks (sans doublons)
+                        added = 0
+                        for kc in kg_real_chunks:
+                            is_dup = any(
+                                c.get("text", "")[:80] == kc.get("text", "")[:80]
+                                for c in reranked_chunks
+                            )
+                            if not is_dup:
+                                reranked_chunks.append(kc)
+                                added += 1
+                        if added:
+                            logger.info(
+                                f"[OSMOSE] KG traversal: added {added} real Qdrant chunks "
+                                f"from chain documents {new_doc_ids[:3]}"
+                            )
+                    except Exception as e:
+                        logger.warning(f"[OSMOSE] KG Qdrant lookup failed (non-blocking): {e}")
+            else:
+                logger.info("[OSMOSE] KG traversal returned no chains")
+        except Exception as e:
+            logger.warning(f"[OSMOSE] KG traversal failed (non-blocking): {e}")
+            import traceback
+            logger.debug(f"[OSMOSE] KG traversal traceback: {traceback.format_exc()}")
+
     # Extraire les signaux KG pour le calcul de confiance
     kg_signals = None
     if graph_context_data:
@@ -426,7 +507,8 @@ def search_documents(
         reranked_chunks,
         graph_context_text,
         session_context_text,
-        kg_signals
+        kg_signals,
+        chain_signals=chain_signals
     )
 
     response = {
@@ -766,6 +848,205 @@ def get_available_solutions(
 
     # Retourner la liste triée
     return sorted(list(solutions))
+
+
+def _get_kg_traversal_context(query: str, tenant_id: str) -> tuple[str, list[str], dict]:
+    """
+    Traversée multi-hop CHAINS_TO dans le Knowledge Graph.
+
+    Extrait les entités de la question, cherche les claims liées,
+    puis traverse CHAINS_TO (1-3 hops) pour découvrir le raisonnement
+    transitif cross-document.
+
+    Retourne:
+        - texte markdown formaté à injecter dans le contexte LLM (synthèse)
+        - liste de doc_ids des documents traversés par les chaînes
+          (pour recherche Qdrant ciblée sur ces documents)
+        - signaux de qualité des chaînes (pour scoring de confiance)
+    """
+    import re
+    from neo4j import GraphDatabase
+    from knowbase.config.settings import get_settings
+
+    settings = get_settings()
+
+    # 1. Extraire les entités candidates de la question
+    # Stratégie : chercher les noms propres/techniques, pas les mots courants
+
+    # Acronymes (ex: "PLM", "ABAP", "BTP", "SAP") — toujours utiles
+    acronyms = re.findall(r'\b[A-Z]{2,}(?:\s+[A-Z]{2,})*\b', query)
+
+    # Expressions techniques : acronyme + suite de mots anglais (ex: "PLM for discrete manufacturing")
+    # Exige des mots de 3+ lettres après la liaison pour éviter "de", "du", "la", etc.
+    technical_phrases = re.findall(
+        r'\b([A-Z]{2,}(?:\s+(?:for|of|and|in|on|with)\s+[a-z]\w{2,}(?:\s+[a-z]\w{2,}){0,3})?)\b',
+        query
+    )
+
+    # Termes capitalisés multi-mots (ex: "SAP HANA", "ABAP Platform")
+    capitalized_terms = re.findall(r'\b([A-Z][A-Za-z0-9/\-]+(?:\s+[A-Z][A-Za-z0-9/\-]+)+)\b', query)
+
+    # Combiner et dédupliquer — les plus longs d'abord (plus spécifiques)
+    all_terms = technical_phrases + capitalized_terms + acronyms
+    stop_words = {"Sur", "Par", "Pour", "Dans", "Des", "Les", "Une", "Que", "En",
+                  "Est", "Avec", "The", "For", "And", "With", "SAP"}
+    candidates = []
+    for term in all_terms:
+        term = term.strip()
+        if term not in stop_words and len(term) >= 2 and term not in candidates:
+            candidates.append(term)
+
+    if not candidates:
+        return "", [], {}
+
+    # Limiter à 5 candidats, les plus longs en premier (plus spécifiques)
+    candidates = sorted(candidates, key=len, reverse=True)[:5]
+
+    # Éliminer les candidats courts déjà couverts par un candidat plus long
+    # Ex: "ERP" est redondant si "SAP Cloud ERP Private Edition" est déjà candidat
+    filtered = []
+    for c in candidates:
+        if any(c != longer and c.lower() in longer.lower() for longer in candidates if len(longer) > len(c)):
+            continue
+        filtered.append(c)
+    candidates = filtered
+
+    logger.info(f"[OSMOSE] KG traversal candidates: {candidates}")
+
+    # 2. Query Cypher : Entity → Claim ABOUT → CHAINS_TO*1..3
+    # Priorise les chaînes cross-doc et les entités les plus spécifiques
+    cypher = """
+    UNWIND $candidates AS candidate
+    CALL (candidate) {
+        MATCH (e:Entity {tenant_id: $tid})
+        WHERE toLower(e.normalized_name) CONTAINS toLower(candidate)
+           OR toLower(e.name) CONTAINS toLower(candidate)
+           OR any(alias IN coalesce(e.aliases, []) WHERE toLower(alias) CONTAINS toLower(candidate))
+        // Prioriser les entités plus spécifiques (noms longs = plus précis)
+        WITH e ORDER BY size(e.name) DESC
+        LIMIT 5
+        MATCH (start_claim:Claim {tenant_id: $tid})-[:ABOUT]->(e)
+        WITH start_claim, e
+        LIMIT 15
+        MATCH path = (start_claim)-[:CHAINS_TO*1..3]->(end_claim:Claim {tenant_id: $tid})
+        WITH e.name AS entity_name,
+             start_claim.doc_id AS start_doc,
+             end_claim.doc_id AS end_doc,
+             [rel IN relationships(path) | {
+                 cross_doc: rel.cross_doc,
+                 join_key: rel.join_key,
+                 confidence: rel.confidence
+             }] AS chain_rels,
+             [node IN nodes(path) | {
+                 text: node.text,
+                 doc_id: node.doc_id,
+                 claim_type: node.claim_type
+             }] AS chain_steps,
+             length(path) AS hops
+        // Compter les docs distincts dans la chaîne
+        WITH entity_name, start_doc, end_doc, chain_rels, chain_steps, hops,
+             size(apoc.coll.toSet([node IN chain_steps | node.doc_id])) AS distinct_docs
+        // Prioriser : 1) plus de docs distincts, 2) cross-doc, 3) hops longs (plus riches)
+        ORDER BY
+            distinct_docs DESC,
+            CASE WHEN any(r IN chain_rels WHERE r.cross_doc = true) THEN 0 ELSE 1 END,
+            hops DESC
+        LIMIT 5
+        RETURN entity_name, chain_steps, chain_rels, hops
+    }
+    RETURN candidate, entity_name, chain_steps, chain_rels, hops
+    LIMIT 15
+    """
+
+    driver = GraphDatabase.driver(
+        settings.neo4j_uri,
+        auth=(settings.neo4j_user, settings.neo4j_password)
+    )
+
+    try:
+        with driver.session() as session:
+            result = session.run(cypher, tid=tenant_id, candidates=candidates)
+            records = [dict(r) for r in result]
+    finally:
+        driver.close()
+
+    if not records:
+        return "", [], {}
+
+    # 3. Filtrer : ne garder que les chaînes cross-doc (le vrai apport du KG)
+    cross_doc_records = []
+    for rec in records:
+        steps = rec["chain_steps"]
+        docs_in_chain = list(dict.fromkeys(s.get("doc_id", "") for s in steps))
+        if len(docs_in_chain) > 1:
+            rec["_docs"] = docs_in_chain
+            cross_doc_records.append(rec)
+
+    if not cross_doc_records:
+        return "", [], {}
+
+    # Helper : doc_id → nom court lisible
+    def _short_doc_name(doc_id: str) -> str:
+        # "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba" → "Business Scope S4HANA Cloud Private Edition FPS03"
+        parts = doc_id.split("_", 1)
+        name = parts[1] if len(parts) > 1 else doc_id
+        name = re.sub(r'_[a-f0-9]{8,}$', '', name)  # retirer le hash final
+        name = name.replace("-", " ").replace("_", " ").strip()
+        # Simplifier les noms trop longs
+        name = name.replace("Implementation Best Practices", "Best Practices")
+        name = name.replace("incl. clean core environment setup", "clean core")
+        return name
+
+    # 4. Formater en markdown (pour le LLM de synthèse) + collecter les doc_ids
+    lines = ["## Raisonnement cross-document (Knowledge Graph)\n"]
+    lines.append("IMPORTANT : Ces chaînes de faits relient plusieurs documents et révèlent "
+                 "des liens architecturaux impossibles à trouver dans un seul document. "
+                 "Tu DOIS reformuler ces chaînes dans la langue de la question en expliquant "
+                 "clairement la logique transitive : A implique B (source 1), "
+                 "qui implique C (source 2), etc.\n")
+    seen_chains = set()
+    all_chain_doc_ids = set()
+    chain_hops_list = []  # hops de chaque chaîne retenue (pour signaux qualité)
+
+    for rec in cross_doc_records:
+        steps = rec["chain_steps"]
+        hops = rec["hops"]
+        entity = rec["entity_name"]
+        docs_in_chain = rec["_docs"]
+
+        # Dédupliquer par contenu des étapes
+        chain_key = " → ".join(s.get("doc_id", "") + ":" + (s.get("text", "")[:50]) for s in steps)
+        if chain_key in seen_chains:
+            continue
+        seen_chains.add(chain_key)
+        chain_hops_list.append(hops)
+
+        # Collecter les doc_ids pour recherche Qdrant ciblée
+        for doc_id in docs_in_chain:
+            all_chain_doc_ids.add(doc_id)
+
+        # Markdown pour le contexte LLM (synthesis prompt)
+        lines.append(f"**Chaîne cross-document ({hops} étapes)** — via {entity}")
+        for i, step in enumerate(steps):
+            doc = step.get("doc_id", "?")
+            text = step.get("text", "").strip()
+            short_doc = _short_doc_name(doc)
+            prefix = "  →" if i > 0 else "  •"
+            lines.append(f"{prefix} {text} *(source: {short_doc})*")
+        lines.append("")
+
+    if not all_chain_doc_ids:
+        return "", [], {}
+
+    # Signaux de qualité des chaînes pour le scoring de confiance
+    chain_signals = {
+        "chain_count": len(seen_chains),
+        "distinct_docs_count": len(all_chain_doc_ids),
+        "max_hops": max(chain_hops_list) if chain_hops_list else 0,
+        "avg_hops": sum(chain_hops_list) / len(chain_hops_list) if chain_hops_list else 0,
+    }
+
+    return "\n".join(lines), list(all_chain_doc_ids), chain_signals
 
 
 __all__ = ["search_documents", "get_available_solutions", "TOP_K", "SCORE_THRESHOLD"]
