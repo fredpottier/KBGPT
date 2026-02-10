@@ -45,6 +45,12 @@ class SearchRequest(BaseModel):
         """
     )
 
+    # 🔗 OSMOSE KG Traversal (multi-hop CHAINS_TO)
+    use_kg_traversal: bool = Field(
+        default=True,
+        description="Activer la traversée multi-hop CHAINS_TO dans le Knowledge Graph pour le raisonnement transitif cross-document"
+    )
+
     # 🎯 OSMOSE Assertion-Centric
     use_instrumented: bool = Field(
         default=False,

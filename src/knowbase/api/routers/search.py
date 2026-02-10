@@ -63,6 +63,7 @@ def search(
         graph_enrichment_level=request.graph_enrichment_level,
         session_id=request.session_id,
         use_graph_first=request.use_graph_first,
+        use_kg_traversal=request.use_kg_traversal,
         use_instrumented=request.use_instrumented,
     )
 

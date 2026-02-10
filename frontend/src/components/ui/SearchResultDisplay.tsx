@@ -130,17 +130,8 @@ export default function SearchResultDisplay({
         <ConfidenceBadge confidence={searchResult.confidence} />
       )}
 
-      {/* 🎯 OSMOSE Assertion-Centric: Reponse instrumentee (prioritaire) */}
-      {instrumentedAnswer && (
-        <InstrumentedAnswerDisplay
-          answer={instrumentedAnswer}
-          chunks={searchResult.results}
-          onSlideClick={handleSlideClick}
-        />
-      )}
-
-      {/* Synthesized Answer classique (si pas d'instrumented answer) */}
-      {searchResult.synthesis && !instrumentedAnswer && (
+      {/* Synthesized Answer : toujours affichée en premier (réponse LLM reformulée) */}
+      {searchResult.synthesis && (
         <SynthesizedAnswer
           synthesis={searchResult.synthesis}
           chunks={searchResult.results}
@@ -149,6 +140,15 @@ export default function SearchResultDisplay({
           proofGraph={proofGraph || searchResult.proof_graph}
           explorationIntelligence={explorationIntelligence}
           onSearch={onSearch}
+        />
+      )}
+
+      {/* 🎯 OSMOSE Assertion-Centric: Preuves détaillées (sous la synthèse) */}
+      {instrumentedAnswer && (
+        <InstrumentedAnswerDisplay
+          answer={instrumentedAnswer}
+          chunks={searchResult.results}
+          onSlideClick={handleSlideClick}
         />
       )}
 

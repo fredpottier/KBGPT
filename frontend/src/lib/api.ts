@@ -203,6 +203,7 @@ export const api = {
         use_graph_context: useGraphContext,
         graph_enrichment_level: graphEnrichmentLevel,
         session_id: sessionId,
+        use_kg_traversal: useGraphContext !== false,  // 🔗 OSMOSE: Traversée KG multi-hop, liée au toggle Graph Context
         use_instrumented: useInstrumented ?? true,  // 🎯 OSMOSE: Activer le rendu instrumenté par défaut
       }),
     history: () => apiClient.get('/chat/history'), // Not implemented in backend yet

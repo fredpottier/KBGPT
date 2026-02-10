@@ -13,7 +13,8 @@ task_models:
   metadata: "gpt-4o"
 
   # Résumés de textes longs (>10k tokens)
-  long_summary: "gpt-4o-mini"
+  # NOTE: claude-3-haiku car quota OpenAI épuisé. Quand burst mode actif, vLLM Qwen 14B prend la priorité.
+  long_summary: "claude-3-haiku-20240307"
 
   # Enrichissement de contenu court
   enrichment: "claude-3-haiku-20240307"
