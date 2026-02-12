@@ -305,7 +305,8 @@ def _detect_cross_doc_chains(neo4j_driver, tenant_id: str) -> dict:
                     r.cross_doc = true,
                     r.source_doc_id = $sdid,
                     r.target_doc_id = $tdid,
-                    r.join_key_freq = $freq
+                    r.join_key_freq = $freq,
+                    r.join_key_name = $jkn
                 RETURN r IS NOT NULL AS ok
                 """,
                 src=link.source_claim_id,
@@ -318,6 +319,7 @@ def _detect_cross_doc_chains(neo4j_driver, tenant_id: str) -> dict:
                 sdid=link.source_doc_id,
                 tdid=link.target_doc_id,
                 freq=link.join_key_freq,
+                jkn=link.join_key_name,
             )
             if r.single():
                 persisted += 1

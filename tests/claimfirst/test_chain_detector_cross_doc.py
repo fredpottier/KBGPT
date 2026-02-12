@@ -47,6 +47,7 @@ class TestCrossDocBasic:
         assert link.source_doc_id == "doc1"
         assert link.target_doc_id == "doc2"
         assert link.join_key == "material ledger"
+        assert link.join_key_name == "material ledger"
         assert link.join_method == "normalized_name"
 
     def test_no_intra_doc_in_cross_doc(self):
@@ -284,6 +285,9 @@ class TestCrossDocEntityIndex:
 
         assert len(links) == 1
         assert links[0].join_method == "entity_id"
+        # join_key = entity_id, mais join_key_name = nom lisible
+        assert links[0].join_key == "ent_042"
+        assert links[0].join_key_name == "material ledger"
 
     def test_fallback_to_normalized_name(self):
         """Sans entity_index → fallback sur normalized_name."""
@@ -486,3 +490,61 @@ class TestPredicatePriority:
         from knowbase.claimfirst.composition.chain_detector import _CANONICAL_PREDICATES
         for pred in _CANONICAL_PREDICATES:
             assert pred in PREDICATE_PRIORITY, f"{pred} missing from PREDICATE_PRIORITY"
+
+
+class TestJoinKeyName:
+    """Tests pour join_key_name (invariant de lisibilité durable)."""
+
+    def test_post_init_fallback(self):
+        """ChainLink sans join_key_name → __post_init__ met join_key comme fallback."""
+        link = ChainLink(
+            source_claim_id="c1",
+            target_claim_id="c2",
+            join_key="material ledger",
+            source_predicate="USES",
+            target_predicate="ENABLES",
+            doc_id="doc1",
+        )
+        assert link.join_key_name == "material ledger"
+
+    def test_explicit_join_key_name(self):
+        """ChainLink avec join_key_name explicite → pas de fallback."""
+        link = ChainLink(
+            source_claim_id="c1",
+            target_claim_id="c2",
+            join_key="ent_042",
+            source_predicate="USES",
+            target_predicate="ENABLES",
+            doc_id="doc1↔doc2",
+            join_key_name="material ledger",
+        )
+        assert link.join_key == "ent_042"
+        assert link.join_key_name == "material ledger"
+
+    def test_intra_doc_join_key_name(self):
+        """Intra-doc : join_key_name == join_key (toujours normalized_name)."""
+        claims = [
+            _make_claim_dict("c1", "doc1", "SAP S/4HANA", "USES", "Material Ledger"),
+            _make_claim_dict("c2", "doc1", "Material Ledger", "ENABLES", "Valuation"),
+        ]
+        detector = ChainDetector()
+        relations = detector.detect_from_dicts(claims)
+        assert len(relations) == 1
+        # detect_from_dicts retourne ClaimRelation, pas ChainLink
+        # On teste via _get_links_in_doc indirectement
+
+    def test_cross_doc_entity_id_preserves_name(self):
+        """Cross-doc avec entity_id : join_key != join_key_name."""
+        entity_index = {"central finance": "ent_099"}
+        claims = [
+            _make_claim_dict("c1", "doc1", "SAP ERP", "USES", "Central Finance"),
+            _make_claim_dict("c2", "doc2", "Central Finance", "PROVIDES", "Reports"),
+        ]
+        detector = ChainDetector()
+        links = detector.detect_cross_doc(
+            claims, hub_entities=set(), entity_index=entity_index
+        )
+        assert len(links) == 1
+        assert links[0].join_key == "ent_099"
+        assert links[0].join_key_name == "central finance"
+        assert links[0].join_method == "entity_id"

@@ -934,7 +934,7 @@ def _get_kg_traversal_context(query: str, tenant_id: str) -> tuple[str, list[str
              end_claim.doc_id AS end_doc,
              [rel IN relationships(path) | {
                  cross_doc: rel.cross_doc,
-                 join_key: rel.join_key,
+                 join_key: COALESCE(rel.join_key_name, rel.join_key),
                  confidence: rel.confidence
              }] AS chain_rels,
              [node IN nodes(path) | {

@@ -71,6 +71,12 @@ class ChainLink:
     is_cross_doc: bool = False
     join_key_idf: float = 0.0
     join_method: str = "normalized_name"
+    # Nom lisible de l'entity de jointure (invariant de lisibilité durable)
+    join_key_name: str = ""
+
+    def __post_init__(self):
+        if not self.join_key_name:
+            self.join_key_name = self.join_key
 
 
 class ChainDetector:
@@ -106,8 +112,10 @@ class ChainDetector:
             "claims_with_sf": 0,
             "hubs_excluded": 0,
             "join_keys_found": 0,
+            "join_keys_below_min_idf": 0,
             "join_keys_capped": 0,
             "chains_detected": 0,
+            "duplicate_text_skipped": 0,
             "joins_by_entity_id": 0,
             "joins_by_normalized": 0,
             "doc_pairs_capped": 0,
@@ -443,6 +451,7 @@ class ChainDetector:
                         target_predicate=tgt_sf.get("predicate", ""),
                         doc_id=doc_id,
                         join_key_freq=freq,
+                        join_key_name=join_key,
                     )
                     links.append(link)
                     edges_emitted += 1
@@ -459,6 +468,7 @@ class ChainDetector:
         hub_entities: Set[str],
         entity_index: Optional[Dict[str, str]] = None,
         idf_map: Optional[Dict[str, float]] = None,
+        min_idf: float = 0.0,
     ) -> List[ChainLink]:
         """
         Détecte les chaînes S/P/O cross-document.
@@ -490,17 +500,19 @@ class ChainDetector:
 
         for cd in valid:
             sf = cd["structured_form"]
-            obj_key, obj_method = self._resolve_join_key(
+            obj_key, obj_method, obj_norm = self._resolve_join_key(
                 sf["object"], entity_index
             )
-            subj_key, subj_method = self._resolve_join_key(
+            subj_key, subj_method, subj_norm = self._resolve_join_key(
                 sf["subject"], entity_index
             )
             # Stocker la méthode de résolution sur le dict pour usage ultérieur
             cd["_obj_key"] = obj_key
             cd["_obj_method"] = obj_method
+            cd["_obj_norm"] = obj_norm
             cd["_subj_key"] = subj_key
             cd["_subj_method"] = subj_method
+            cd["_subj_norm"] = subj_norm
 
             object_index[obj_key].append(cd)
             subject_index[subj_key].append(cd)
@@ -541,6 +553,11 @@ class ChainDetector:
 
             jk_idf = idf_map.get(join_key, 0.0)
 
+            # FIX: Plancher IDF — rejeter les join_keys trop génériques
+            if min_idf > 0 and jk_idf < min_idf:
+                self._cross_doc_stats["join_keys_below_min_idf"] += 1
+                continue
+
             # Paires candidates : uniquement cross-doc
             candidates_for_key: List[Tuple[float, float, str, str, Dict, Dict, str]] = []
             for src in sources:
@@ -548,6 +565,13 @@ class ChainDetector:
                     if src["doc_id"] == tgt["doc_id"]:
                         continue
                     if src["claim_id"] == tgt["claim_id"]:
+                        continue
+
+                    # FIX: Exclure les paires de claims au texte identique
+                    src_text = src.get("text", "")
+                    tgt_text = tgt.get("text", "")
+                    if src_text and tgt_text and src_text == tgt_text:
+                        self._cross_doc_stats["duplicate_text_skipped"] += 1
                         continue
 
                     # Cycle trivial
@@ -642,6 +666,7 @@ class ChainDetector:
                 is_cross_doc=True,
                 join_key_idf=jk_idf,
                 join_method=method,
+                join_key_name=src.get("_obj_norm", join_key),
             )
             links.append(link)
 
@@ -674,7 +699,7 @@ class ChainDetector:
     def _resolve_join_key(
         name: str,
         entity_index: Dict[str, str],
-    ) -> Tuple[str, str]:
+    ) -> Tuple[str, str, str]:
         """
         Résout un nom d'entity vers sa clé de jointure.
 
@@ -682,12 +707,13 @@ class ChainDetector:
         Sinon → fallback sur Entity.normalize(name).
 
         Returns:
-            Tuple (join_key, method) — method est "entity_id" ou "normalized_name"
+            Tuple (join_key, method, normalized_name) — normalized_name toujours
+            le nom lisible, même quand join_key est un entity_id.
         """
         norm = Entity.normalize(name)
         if norm in entity_index:
-            return entity_index[norm], "entity_id"
-        return norm, "normalized_name"
+            return entity_index[norm], "entity_id", norm
+        return norm, "normalized_name", norm
 
     @staticmethod
     def compute_idf(

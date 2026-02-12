@@ -54,7 +54,8 @@ def load_claims_with_sf(session, tenant_id: str) -> List[dict]:
         RETURN c.claim_id AS claim_id,
                c.doc_id AS doc_id,
                c.structured_form_json AS structured_form_json,
-               c.confidence AS confidence
+               c.confidence AS confidence,
+               c.text AS text
         ORDER BY c.doc_id
         """,
         tenant_id=tenant_id,
@@ -70,6 +71,7 @@ def load_claims_with_sf(session, tenant_id: str) -> List[dict]:
             "doc_id": record["doc_id"],
             "structured_form": sf,
             "confidence": record["confidence"] or 0.5,
+            "text": record["text"] or "",
         })
     return claims
 
@@ -210,16 +212,62 @@ def purge_cross_doc_chains(session, tenant_id: str) -> int:
     return record["deleted"] if record else 0
 
 
+def derive_chain_type(source_pred: str, target_pred: str) -> str:
+    """
+    Dérive un chain_type sémantique depuis les prédicats source/target.
+
+    Categories:
+      - dependency_chain : REQUIRES, BASED_ON
+      - composition_chain : PART_OF, PROVIDES, USES
+      - integration_chain : INTEGRATED_IN, COMPATIBLE_WITH, CONFIGURES
+      - evolution_chain : REPLACES, EXTENDS
+      - capability_chain : ENABLES, SUPPORTS
+      - transitive_<pred> : même prédicat source et target
+    """
+    sp = source_pred.upper()
+    tp = target_pred.upper()
+
+    if sp == tp:
+        return f"transitive_{sp.lower()}"
+
+    dependency = {"REQUIRES", "BASED_ON"}
+    composition = {"PART_OF", "PROVIDES", "USES"}
+    integration = {"INTEGRATED_IN", "COMPATIBLE_WITH", "CONFIGURES"}
+    evolution = {"REPLACES", "EXTENDS"}
+    capability = {"ENABLES", "SUPPORTS"}
+
+    for category, name in [
+        (dependency, "dependency_chain"),
+        (evolution, "evolution_chain"),
+        (integration, "integration_chain"),
+        (composition, "composition_chain"),
+        (capability, "capability_chain"),
+    ]:
+        if sp in category or tp in category:
+            return name
+
+    return "generic_chain"
+
+
+def idf_to_confidence(idf: float) -> float:
+    """Convertit un score IDF en confidence [0.1, 0.99]."""
+    return max(0.1, min(idf / 10.0, 0.99))
+
+
 def persist_cross_doc_chain(session, link, tenant_id: str, idf: float) -> bool:
     """Persiste un ChainLink cross-doc comme edge CHAINS_TO dans Neo4j."""
+    chain_type = derive_chain_type(link.source_predicate, link.target_predicate)
+    confidence = idf_to_confidence(idf)
+
     result = session.run(
         """
         MATCH (c1:Claim {claim_id: $source_id, tenant_id: $tenant_id})
         MATCH (c2:Claim {claim_id: $target_id, tenant_id: $tenant_id})
         MERGE (c1)-[r:CHAINS_TO]->(c2)
-        SET r.confidence = 1.0,
+        SET r.confidence = $confidence,
             r.basis = $basis,
             r.join_key = $join_key,
+            r.join_key_name = $join_key_name,
             r.join_key_idf = $idf,
             r.method = 'spo_join_cross_doc',
             r.join_method = $join_method,
@@ -227,7 +275,10 @@ def persist_cross_doc_chain(session, link, tenant_id: str, idf: float) -> bool:
             r.cross_doc = true,
             r.source_doc_id = $source_doc_id,
             r.target_doc_id = $target_doc_id,
-            r.join_key_freq = $freq
+            r.join_key_freq = $freq,
+            r.chain_type = $chain_type,
+            r.source_predicate = $source_pred,
+            r.target_predicate = $target_pred
         RETURN r IS NOT NULL AS created
         """,
         source_id=link.source_claim_id,
@@ -235,11 +286,16 @@ def persist_cross_doc_chain(session, link, tenant_id: str, idf: float) -> bool:
         tenant_id=tenant_id,
         basis=f"join_key={link.join_key}",
         join_key=link.join_key,
+        join_key_name=link.join_key_name,
         idf=idf,
+        confidence=confidence,
         join_method=link.join_method,
         source_doc_id=link.source_doc_id,
         target_doc_id=link.target_doc_id,
         freq=link.join_key_freq,
+        chain_type=chain_type,
+        source_pred=link.source_predicate,
+        target_pred=link.target_predicate,
     )
     record = result.single()
     return bool(record and record["created"])
@@ -263,6 +319,8 @@ def main():
                         help="Max edges cross-doc par join_key (default: 5)")
     parser.add_argument("--max-edges-per-doc-pair", type=int, default=50,
                         help="Max edges cross-doc par paire de docs (default: 50)")
+    parser.add_argument("--min-idf", type=float, default=4.0,
+                        help="Seuil IDF minimum pour un join_key (default: 4.0)")
     parser.add_argument("--purge-first", action="store_true",
                         help="Purger les cross-doc existantes avant le run")
     args = parser.parse_args()
@@ -332,7 +390,8 @@ def main():
             logger.info(
                 f"\n[OSMOSE] Détection des chaînes cross-doc "
                 f"(max_per_key={args.max_edges_per_key}, "
-                f"max_per_doc_pair={args.max_edges_per_doc_pair})..."
+                f"max_per_doc_pair={args.max_edges_per_doc_pair}, "
+                f"min_idf={args.min_idf})..."
             )
             detector = ChainDetector(
                 max_edges_per_key_cross_doc=args.max_edges_per_key,
@@ -343,6 +402,7 @@ def main():
                 hub_entities=hub_entities,
                 entity_index=entity_index,
                 idf_map=idf_map,
+                min_idf=args.min_idf,
             )
             logger.info(f"  → {len(links)} chaînes cross-doc détectées")
 
@@ -350,7 +410,9 @@ def main():
             cross_stats = detector.get_cross_doc_stats()
             logger.info(f"  → claims_with_sf: {cross_stats['claims_with_sf']}")
             logger.info(f"  → join_keys_found: {cross_stats['join_keys_found']}")
+            logger.info(f"  → join_keys_below_min_idf: {cross_stats.get('join_keys_below_min_idf', 0)}")
             logger.info(f"  → join_keys_capped: {cross_stats['join_keys_capped']}")
+            logger.info(f"  → duplicate_text_skipped: {cross_stats.get('duplicate_text_skipped', 0)}")
             logger.info(f"  → joins_by_entity_id: {cross_stats['joins_by_entity_id']}")
             logger.info(f"  → joins_by_normalized: {cross_stats['joins_by_normalized']}")
             logger.info(f"  → doc_pairs_capped: {cross_stats['doc_pairs_capped']}")
