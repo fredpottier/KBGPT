@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # Seuils de clustering
 EMBEDDING_THRESHOLD = 0.85  # Seuil cosine similarity (haut = conservateur)
 LEXICAL_OVERLAP_MIN = 0.3  # % minimum de tokens clés en commun
+MAX_CLUSTER_SIZE = 50  # Cap de taille max par cluster
 
 # Patterns de modalité
 STRONG_OBLIGATION = {"must", "shall", "required", "mandatory", "obligatory"}
@@ -145,7 +146,7 @@ class ClaimClusterer:
         )
 
         # Construire les clusters via Union-Find
-        clusters = self._build_clusters(claims, valid_pairs, tenant_id)
+        clusters = self._build_clusters(claims, valid_pairs, tenant_id, embeddings)
         self.stats["clusters_created"] = len(clusters)
 
         return clusters
@@ -243,6 +244,7 @@ class ClaimClusterer:
         claims: List[Claim],
         valid_pairs: List[Tuple[Claim, Claim]],
         tenant_id: str,
+        embeddings: Optional[Dict[str, np.ndarray]] = None,
     ) -> List[ClaimCluster]:
         """
         Construit les clusters via Union-Find.
@@ -251,6 +253,7 @@ class ClaimClusterer:
             claims: Toutes les claims
             valid_pairs: Pairs validées (c1, c2)
             tenant_id: Tenant ID
+            embeddings: Dict claim_id → embedding vector (pour trim centroïde)
 
         Returns:
             Liste de ClaimClusters
@@ -291,25 +294,38 @@ class ClaimClusterer:
         seen_claims: Set[str] = set()
 
         for root, claim_ids in groups.items():
-            unique_ids = list(set(claim_ids))
+            unique_ids = sorted(set(claim_ids))  # sorted() pour déterminisme
             if len(unique_ids) < 2:
                 continue
 
             # Skip si déjà traités
             if any(cid in seen_claims for cid in unique_ids):
                 continue
-            seen_claims.update(unique_ids)
 
             # Récupérer les claims
             cluster_claims = [claim_index[cid] for cid in unique_ids if cid in claim_index]
             if len(cluster_claims) < 2:
                 continue
 
+            # Cap de taille : si trop grand, garder les N claims les plus proches du centroïde
+            if len(cluster_claims) > MAX_CLUSTER_SIZE and embeddings:
+                cluster_claims = self._trim_to_core(cluster_claims, embeddings, MAX_CLUSTER_SIZE)
+                unique_ids = [c.claim_id for c in cluster_claims]
+            elif len(cluster_claims) > MAX_CLUSTER_SIZE:
+                # Sans embeddings : garder les N avec meilleure confiance
+                cluster_claims = sorted(
+                    cluster_claims, key=lambda c: (-c.confidence, c.claim_id)
+                )[:MAX_CLUSTER_SIZE]
+                unique_ids = [c.claim_id for c in cluster_claims]
+
+            # seen_claims APRÈS le trim (ne marquer que les claims gardées)
+            seen_claims.update(unique_ids)
+
             # Choisir le label canonique (claim avec meilleure confiance)
             best_claim = max(cluster_claims, key=lambda c: c.confidence)
 
             # Documents uniques
-            doc_ids = list(set(c.doc_id for c in cluster_claims))
+            doc_ids = sorted(set(c.doc_id for c in cluster_claims))
 
             cluster = ClaimCluster(
                 cluster_id=f"cluster_{uuid.uuid4().hex[:12]}",
@@ -324,6 +340,28 @@ class ClaimClusterer:
             clusters.append(cluster)
 
         return clusters
+
+    def _trim_to_core(
+        self,
+        claims: List[Claim],
+        embeddings: Dict[str, np.ndarray],
+        max_size: int,
+    ) -> List[Claim]:
+        """Garde les max_size claims les plus proches du centroïde du cluster."""
+        vectors = [embeddings[c.claim_id] for c in claims if c.claim_id in embeddings]
+        if not vectors:
+            # Fallback sans embeddings : confiance + ID pour déterminisme
+            return sorted(claims, key=lambda c: (-c.confidence, c.claim_id))[:max_size]
+        centroid = np.mean(vectors, axis=0)
+        scored = []
+        for c in claims:
+            if c.claim_id in embeddings:
+                sim = self._cosine_similarity(embeddings[c.claim_id], centroid)
+            else:
+                sim = 0.0
+            scored.append((sim, c.claim_id, c))  # claim_id pour tie-breaking déterministe
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        return [c for _, _, c in scored[:max_size]]
 
     def _cosine_similarity(self, v1: np.ndarray, v2: np.ndarray) -> float:
         """Calcule la similarité cosine entre deux vecteurs."""
@@ -439,4 +477,5 @@ __all__ = [
     "ClaimClusterer",
     "EMBEDDING_THRESHOLD",
     "LEXICAL_OVERLAP_MIN",
+    "MAX_CLUSTER_SIZE",
 ]

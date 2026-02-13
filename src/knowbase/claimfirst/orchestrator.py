@@ -61,6 +61,7 @@ from knowbase.claimfirst.clustering.relation_detector import RelationDetector
 from knowbase.claimfirst.composition.chain_detector import ChainDetector
 from knowbase.claimfirst.composition.slot_enricher import SlotEnricher
 from knowbase.claimfirst.persistence.claim_persister import ClaimPersister
+from knowbase.claimfirst.quality_filters import filter_claims_quality
 
 from knowbase.stratified.pass0.cache_loader import CacheLoadResult
 from knowbase.stratified.pass1.assertion_unit_indexer import UnitIndexResult
@@ -134,7 +135,10 @@ class ClaimFirstOrchestrator:
 
         # Composants Phase 1
         self.claim_extractor = ClaimExtractor(llm_client)
-        self.entity_extractor = EntityExtractor()
+        self.entity_extractor = EntityExtractor(
+            max_entity_length=50,
+            max_entity_words=6,  # Noms marketing SAP font parfois 6 mots
+        )
         self.entity_canonicalizer = EntityCanonicalizer(tenant_id=tenant_id)
         self.passage_linker = PassageLinker()
         self.entity_linker = EntityLinker()
@@ -272,6 +276,16 @@ class ClaimFirstOrchestrator:
             f"  → {dedup_stats['kept']} claims kept, "
             f"{dedup_stats['removed_text']} removed (exact text), "
             f"{dedup_stats['removed_spo']} removed (SPO triplet)"
+        )
+
+        # Phase 1.6: Filtrage qualité (post-dedup, pré-enrichment)
+        logger.info("[OSMOSE:ClaimFirst] Phase 1.6: Quality filtering...")
+        claims, quality_stats = self._filter_claims_quality(claims)
+        logger.info(
+            f"  → {quality_stats['kept']} kept, "
+            f"{quality_stats['filtered_short']} too short, "
+            f"{quality_stats['filtered_boilerplate']} boilerplate, "
+            f"{quality_stats['filtered_heading']} heading-like"
         )
 
         # Phase 1.7: Slot enrichment (claims sans structured_form)
@@ -612,6 +626,13 @@ class ClaimFirstOrchestrator:
         }
 
         return after_spo, stats
+
+    def _filter_claims_quality(
+        self,
+        claims: List[Claim],
+    ) -> Tuple[List[Claim], Dict[str, int]]:
+        """Délègue au module quality_filters (Phase 1.6)."""
+        return filter_claims_quality(claims)
 
     def _create_passages(
         self,

@@ -375,6 +375,16 @@ def is_valid_entity_name(name: str) -> bool:
     if normalized in ENTITY_STOPLIST:
         return False
 
+    # Ponctuation de phrase (virgule, point-virgule, point) → c'est une phrase
+    # Exclure les . dans les versions/nombres (ex: "S/4HANA 2.0")
+    text_without_versions = re.sub(r'\d+\.\d+', '', name_stripped)
+    if re.search(r'[,;.]', text_without_versions):
+        return False
+
+    # Parenthèses avec un long contenu → définition, pas nom d'entité
+    if re.findall(r'\([^)]{15,}\)', name_stripped):
+        return False
+
     # Contient des indicateurs de fragment de phrase
     words = set(normalized.lower().split())
     if words & PHRASE_FRAGMENT_INDICATORS:
