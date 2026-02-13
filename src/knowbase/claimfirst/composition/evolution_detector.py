@@ -327,21 +327,32 @@ class VersionEvolutionDetector:
         subject_name: str,
     ) -> List[VersionPair]:
         """
-        Fallback : utiliser qualifiers["year"] ou temporal_scope pour ordonner.
+        Fallback : utiliser axis_data["year"], qualifiers["year"] ou temporal_scope.
 
         Marque axis_confidence = "heuristic".
         """
+        import re
+
         doc_years: List[Tuple[str, str]] = []
         for doc in docs:
             year = None
-            qualifiers = doc.get("qualifiers")
-            if isinstance(qualifiers, dict):
-                year = qualifiers.get("year")
+            # Source 1 : axis_data avec axis_key="year"
+            for ad in doc.get("axis_data", []):
+                if ad.get("axis_key") == "year" and ad.get("scalar_value"):
+                    # Extraire la partie 4 chiffres (ex: "2023" depuis "2023")
+                    m = re.search(r"(20\d{2})", str(ad["scalar_value"]))
+                    if m:
+                        year = m.group(1)
+                        break
+            # Source 2 : qualifiers["year"]
+            if not year:
+                qualifiers = doc.get("qualifiers")
+                if isinstance(qualifiers, dict):
+                    year = qualifiers.get("year")
+            # Source 3 : temporal_scope
             if not year:
                 ts = doc.get("temporal_scope", "")
                 if ts:
-                    # Essayer d'extraire une année 4 chiffres
-                    import re
                     m = re.search(r"(20\d{2})", ts)
                     if m:
                         year = m.group(1)
@@ -351,25 +362,37 @@ class VersionEvolutionDetector:
         if len(doc_years) < 2:
             return []
 
-        # Trier par année
-        doc_years.sort(key=lambda dy: dy[1])
+        # Grouper par année → ne garder que les années avec exactement 1 doc
+        from collections import Counter
+        year_counts = Counter(dy[1] for dy in doc_years)
+        ambiguous_years = {y for y, c in year_counts.items() if c > 1}
 
-        # Vérifier unicité
-        years = [dy[1] for dy in doc_years]
-        if len(set(years)) < len(years):
-            self._stats["subjects_tie_abstain"] += 1
+        if ambiguous_years:
+            self._stats["subjects_tie_abstain"] += len(ambiguous_years)
+            logger.info(
+                f"  [heuristic] {subject_name}: années ambiguës (>1 doc) ignorées: "
+                f"{sorted(ambiguous_years)}"
+            )
+
+        # Filtrer : garder uniquement les docs dont l'année est unambiguë
+        unambiguous = [(d, y) for d, y in doc_years if y not in ambiguous_years]
+
+        if len(unambiguous) < 2:
             return []
+
+        # Trier par année
+        unambiguous.sort(key=lambda dy: dy[1])
 
         # Paires adjacentes
         pairs = []
-        for i in range(len(doc_years) - 1):
+        for i in range(len(unambiguous) - 1):
             pairs.append(VersionPair(
                 subject_id=subject_id,
                 subject_name=subject_name,
-                old_doc_id=doc_years[i][0],
-                new_doc_id=doc_years[i + 1][0],
-                old_value=doc_years[i][1],
-                new_value=doc_years[i + 1][1],
+                old_doc_id=unambiguous[i][0],
+                new_doc_id=unambiguous[i + 1][0],
+                old_value=unambiguous[i][1],
+                new_value=unambiguous[i + 1][1],
                 axis_key="year_heuristic",
                 axis_confidence="heuristic",
             ))

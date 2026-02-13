@@ -42,6 +42,7 @@ from knowbase.claimfirst.resolution.subject_resolver import SubjectResolver
 from knowbase.claimfirst.resolution.subject_resolver_v2 import SubjectResolverV2
 from knowbase.claimfirst.models.comparable_subject import ComparableSubject
 from knowbase.claimfirst.axes.axis_detector import ApplicabilityAxisDetector
+from knowbase.claimfirst.axes.axis_order_inferrer import AxisOrderInferrer
 from knowbase.claimfirst.axes.axis_value_validator import AxisValueValidator
 from knowbase.claimfirst.models.applicability_axis import ApplicabilityAxis
 from knowbase.claimfirst.applicability import (
@@ -128,6 +129,7 @@ class ClaimFirstOrchestrator:
         self.axis_validator = AxisValueValidator(
             llm_client=llm_client,
             max_passages_sample=3,
+            tenant_id=tenant_id,
         )
 
         # Composants Phase 1
@@ -768,16 +770,45 @@ class ClaimFirstOrchestrator:
             )
 
             # Mettre à jour le cache d'axes
+            _order_inferrer = AxisOrderInferrer()
             for axis in detected_axes:
                 existing = next(
                     (ax for ax in self._applicability_axes if ax.axis_id == axis.axis_id),
                     None
                 )
                 if existing:
+                    changed = False
                     for v in axis.known_values:
-                        existing.add_value(v, doc_id)
+                        changed |= existing.add_value(v, doc_id)
+
+                    # Re-inférer l'ordre après merge si nouvelles valeurs
+                    if changed and len(existing.known_values) >= 2:
+                        order_result = _order_inferrer.infer_order(
+                            axis_key=existing.axis_key,
+                            values=list(existing.known_values),
+                        )
+                        if order_result.is_orderable:
+                            existing.is_orderable = True
+                            existing.order_type = order_result.order_type
+                            existing.ordering_confidence = order_result.confidence
+                            existing.value_order = order_result.inferred_order
+                            logger.info(
+                                f"[OSMOSE:ClaimFirst] Axis {existing.axis_key} "
+                                f"re-inferred post-merge: {order_result.inferred_order} "
+                                f"({order_result.confidence.value})"
+                            )
+                        # Ne pas écraser un axe déjà orderable par un résultat négatif
                 else:
                     self._applicability_axes.append(axis)
+
+            # Propager les axes re-inférés dans detected_axes pour persistence
+            for i, axis in enumerate(detected_axes):
+                cached = next(
+                    (ax for ax in self._applicability_axes if ax.axis_id == axis.axis_id),
+                    None
+                )
+                if cached and cached.is_orderable and not axis.is_orderable:
+                    detected_axes[i] = cached
 
             return frame, detected_axes
 
@@ -787,24 +818,6 @@ class ClaimFirstOrchestrator:
                 exc_info=True,
             )
             return None, []
-
-    def _get_domain_context_prompt(self, tenant_id: str) -> Optional[str]:
-        """
-        Charge le Domain Context depuis le store si configuré pour le tenant.
-
-        Returns:
-            Texte de contexte domaine ou None
-        """
-        try:
-            from knowbase.ontology.domain_context_store import DomainContextStore
-
-            store = DomainContextStore()
-            context = store.get_active_context(tenant_id)
-            if context:
-                return context.get("description", None)
-        except Exception:
-            pass
-        return None
 
     def _detect_document_axes(
         self,

@@ -135,8 +135,7 @@ class ClaimPersister:
                     f"passages (filtering orphans)"
                 )
 
-                for passage in passages_to_persist:
-                    self._persist_passage(session, passage)
+                self._persist_passages_batch(session, passages_to_persist)
             else:
                 passages_to_persist = []
                 logger.debug(
@@ -149,54 +148,39 @@ class ClaimPersister:
             for claim_id, passage_id in result.claim_passage_links:
                 claim_passage_map[claim_id] = passage_id
 
-            # 2. Claims (avec extra_props passage si skip_passage_persist)
-            for claim in result.claims:
-                extra_props = None
-                if skip_passage_persist:
-                    p_id = claim_passage_map.get(claim.claim_id)
-                    passage = passage_index.get(p_id) if p_id else None
-                    if passage:
-                        extra_props = {
-                            "passage_text": passage.text,
-                            "section_title": passage.section_title,
-                            "page_no": passage.page_no,
-                            "passage_char_start": passage.char_start,
-                            "passage_char_end": passage.char_end,
-                        }
-                self._persist_claim(session, claim, extra_props=extra_props)
+            # 2. Claims (batch UNWIND)
+            self._persist_claims_batch(
+                session, result.claims, claim_passage_map,
+                passage_index, skip_passage_persist,
+            )
 
-            # 3. Entities
-            for entity in result.entities:
-                self._persist_entity(session, entity)
+            # 3. Entities (batch UNWIND)
+            self._persist_entities_batch(session, result.entities)
 
-            # 4. Facets
-            for facet in result.facets:
-                self._persist_facet(session, facet)
+            # 4. Facets (batch UNWIND)
+            self._persist_facets_batch(session, result.facets)
 
-            # 5. ClaimClusters
-            for cluster in result.clusters:
-                self._persist_cluster(session, cluster)
+            # 5. ClaimClusters (batch UNWIND)
+            self._persist_clusters_batch(session, result.clusters)
 
             # 6-7. Relations Passage (seulement si passages persistés comme nœuds)
             if not skip_passage_persist:
-                # 6. Relations Passage → Document (FROM)
-                self._persist_passage_document_links(session, passages_to_persist, result.doc_id)
+                # 6. Relations Passage → Document (FROM) (batch UNWIND)
+                self._persist_passage_doc_links_batch(
+                    session, passages_to_persist, result.doc_id,
+                )
 
-                # 7. Relations Claim → Passage (SUPPORTED_BY)
-                for claim_id, passage_id in result.claim_passage_links:
-                    self._persist_supported_by(session, claim_id, passage_id)
+                # 7. Relations Claim → Passage (SUPPORTED_BY) (batch UNWIND)
+                self._persist_supported_by_batch(session, result.claim_passage_links)
 
-            # 8. Relations Claim → Entity (ABOUT)
-            for claim_id, entity_id in result.claim_entity_links:
-                self._persist_about(session, claim_id, entity_id)
+            # 8. Relations Claim → Entity (ABOUT) (batch UNWIND)
+            self._persist_about_batch(session, result.claim_entity_links)
 
-            # 9. Relations Claim → Facet (HAS_FACET)
-            for claim_id, facet_id in result.claim_facet_links:
-                self._persist_has_facet(session, claim_id, facet_id)
+            # 9. Relations Claim → Facet (HAS_FACET) (batch UNWIND)
+            self._persist_has_facet_batch(session, result.claim_facet_links)
 
-            # 10. Relations Claim → Cluster (IN_CLUSTER)
-            for claim_id, cluster_id in result.claim_cluster_links:
-                self._persist_in_cluster(session, claim_id, cluster_id)
+            # 10. Relations Claim → Cluster (IN_CLUSTER) (batch UNWIND)
+            self._persist_in_cluster_batch(session, result.claim_cluster_links)
 
             # 11. Relations inter-claims (CONTRADICTS, REFINES, QUALIFIES)
             for relation in result.relations:
@@ -639,21 +623,43 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         new_values = props.pop("known_values", []) or []
         new_doc_ids = props.pop("source_doc_ids", []) or []
 
+        # Extraire value_order pour le passer séparément au Cypher
+        new_value_order = props.pop("value_order", None)
+
         query = """
         MERGE (ax:ApplicabilityAxis {axis_id: $axis_id})
         ON CREATE SET
             ax = $props,
             ax.known_values = $new_values,
             ax.source_doc_ids = $new_doc_ids,
+            ax.value_order = $new_value_order,
             ax.doc_count = 1
         ON MATCH SET
             ax.known_values = apoc.coll.toSet(coalesce(ax.known_values, []) + $new_values),
             ax.source_doc_ids = apoc.coll.toSet(coalesce(ax.source_doc_ids, []) + $new_doc_ids),
             ax.doc_count = size(apoc.coll.toSet(coalesce(ax.source_doc_ids, []) + $new_doc_ids)),
-            ax.axis_display_name = CASE WHEN ax.axis_display_name IS NULL THEN $props.axis_display_name ELSE ax.axis_display_name END,
-            ax.is_orderable = $props.is_orderable,
-            ax.order_type = $props.order_type,
-            ax.ordering_confidence = $props.ordering_confidence
+            ax.axis_display_name = CASE
+                WHEN ax.axis_display_name IS NULL THEN $props.axis_display_name
+                ELSE ax.axis_display_name
+            END,
+            ax.is_orderable = coalesce(ax.is_orderable, false) OR coalesce($props.is_orderable, false),
+            ax.order_type = CASE
+                WHEN $props.order_type <> 'none' THEN $props.order_type
+                ELSE coalesce(ax.order_type, $props.order_type)
+            END,
+            ax.ordering_confidence = CASE
+                WHEN $props.ordering_confidence = 'certain' THEN 'certain'
+                WHEN ax.ordering_confidence = 'certain' THEN 'certain'
+                WHEN $props.ordering_confidence = 'inferred' THEN 'inferred'
+                WHEN ax.ordering_confidence = 'inferred' THEN 'inferred'
+                ELSE coalesce(ax.ordering_confidence, $props.ordering_confidence)
+            END,
+            ax.value_order = CASE
+                WHEN $new_value_order IS NOT NULL AND size($new_value_order) >= 2 THEN $new_value_order
+                WHEN ax.value_order IS NOT NULL AND size(ax.value_order) >= 2 THEN ax.value_order
+                ELSE coalesce($new_value_order, ax.value_order)
+            END,
+            ax.updated_at = $props.updated_at
         """
         session.run(
             query,
@@ -661,6 +667,7 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
             props=props,
             new_values=new_values,
             new_doc_ids=new_doc_ids,
+            new_value_order=new_value_order,
         )
         self.stats["axes_created"] += 1
 
@@ -837,6 +844,178 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
             props=props,
         )
         self.stats["relations_created"] += 1
+
+    # ──────────────────────────────────────────────────────────────
+    # Batch persistence (UNWIND) — réduit ~90% des round-trips Neo4j
+    # ──────────────────────────────────────────────────────────────
+
+    def _persist_passages_batch(self, session, passages: List[Passage]) -> None:
+        """Persiste les Passages en batch via UNWIND."""
+        if not passages:
+            return
+        batch = [p.to_neo4j_properties() for p in passages]
+        session.run("""
+            UNWIND $batch AS item
+            MERGE (p:Passage {passage_id: item.passage_id})
+            SET p += item
+        """, batch=batch)
+        self.stats["passages_created"] += len(passages)
+
+    def _persist_claims_batch(
+        self,
+        session,
+        claims: List[Claim],
+        claim_passage_map: Dict[str, str],
+        passage_index: Dict[str, Passage],
+        skip_passage_persist: bool,
+    ) -> None:
+        """Persiste les Claims en batch via UNWIND (avec passage props si applicable)."""
+        if not claims:
+            return
+        batch = []
+        for claim in claims:
+            props = claim.to_neo4j_properties()
+            if skip_passage_persist:
+                p_id = claim_passage_map.get(claim.claim_id)
+                passage = passage_index.get(p_id) if p_id else None
+                if passage:
+                    props.update({
+                        "passage_text": passage.text,
+                        "section_title": passage.section_title,
+                        "page_no": passage.page_no,
+                        "passage_char_start": passage.char_start,
+                        "passage_char_end": passage.char_end,
+                    })
+            batch.append(props)
+        session.run("""
+            UNWIND $batch AS item
+            MERGE (c:Claim {claim_id: item.claim_id})
+            SET c += item
+        """, batch=batch)
+        self.stats["claims_created"] += len(claims)
+
+    def _persist_entities_batch(self, session, entities: List[Entity]) -> None:
+        """Persiste les Entities en batch via UNWIND."""
+        if not entities:
+            return
+        batch = [e.to_neo4j_properties() for e in entities]
+        session.run("""
+            UNWIND $batch AS item
+            MERGE (e:Entity {normalized_name: item.normalized_name, tenant_id: item.tenant_id})
+            ON CREATE SET e += item
+            ON MATCH SET e.mention_count = e.mention_count + 1
+        """, batch=batch)
+        self.stats["entities_created"] += len(entities)
+
+    def _persist_facets_batch(self, session, facets: List[Facet]) -> None:
+        """Persiste les Facets en batch via UNWIND."""
+        if not facets:
+            return
+        batch = [f.to_neo4j_properties() for f in facets]
+        session.run("""
+            UNWIND $batch AS item
+            MERGE (f:Facet {facet_id: item.facet_id})
+            SET f += item
+        """, batch=batch)
+        self.stats["facets_created"] += len(facets)
+
+    def _persist_clusters_batch(self, session, clusters: List[ClaimCluster]) -> None:
+        """Persiste les ClaimClusters en batch via UNWIND."""
+        if not clusters:
+            return
+        batch = [c.to_neo4j_properties() for c in clusters]
+        session.run("""
+            UNWIND $batch AS item
+            MERGE (cc:ClaimCluster {cluster_id: item.cluster_id})
+            SET cc += item
+        """, batch=batch)
+        self.stats["clusters_created"] += len(clusters)
+
+    def _persist_passage_doc_links_batch(
+        self,
+        session,
+        passages: List[Passage],
+        doc_id: str,
+    ) -> None:
+        """Crée les relations Passage → Document (FROM) en batch."""
+        if not passages:
+            return
+        batch = [{"passage_id": p.passage_id} for p in passages]
+        session.run("""
+            UNWIND $batch AS item
+            MATCH (p:Passage {passage_id: item.passage_id})
+            MATCH (d:Document {doc_id: $doc_id})
+            MERGE (p)-[:FROM]->(d)
+        """, batch=batch, doc_id=doc_id)
+        self.stats["relations_created"] += len(passages)
+
+    def _persist_supported_by_batch(
+        self,
+        session,
+        links: List[Tuple[str, str]],
+    ) -> None:
+        """Crée les relations Claim → Passage (SUPPORTED_BY) en batch."""
+        if not links:
+            return
+        batch = [{"claim_id": cid, "passage_id": pid} for cid, pid in links]
+        session.run("""
+            UNWIND $batch AS item
+            MATCH (c:Claim {claim_id: item.claim_id})
+            MATCH (p:Passage {passage_id: item.passage_id})
+            MERGE (c)-[:SUPPORTED_BY]->(p)
+        """, batch=batch)
+        self.stats["relations_created"] += len(links)
+
+    def _persist_about_batch(
+        self,
+        session,
+        links: List[Tuple[str, str]],
+    ) -> None:
+        """Crée les relations Claim → Entity (ABOUT) en batch."""
+        if not links:
+            return
+        batch = [{"claim_id": cid, "entity_id": eid} for cid, eid in links]
+        session.run("""
+            UNWIND $batch AS item
+            MATCH (c:Claim {claim_id: item.claim_id})
+            MATCH (e:Entity {entity_id: item.entity_id})
+            MERGE (c)-[:ABOUT]->(e)
+        """, batch=batch)
+        self.stats["relations_created"] += len(links)
+
+    def _persist_has_facet_batch(
+        self,
+        session,
+        links: List[Tuple[str, str]],
+    ) -> None:
+        """Crée les relations Claim → Facet (HAS_FACET) en batch."""
+        if not links:
+            return
+        batch = [{"claim_id": cid, "facet_id": fid} for cid, fid in links]
+        session.run("""
+            UNWIND $batch AS item
+            MATCH (c:Claim {claim_id: item.claim_id})
+            MATCH (f:Facet {facet_id: item.facet_id})
+            MERGE (c)-[:HAS_FACET]->(f)
+        """, batch=batch)
+        self.stats["relations_created"] += len(links)
+
+    def _persist_in_cluster_batch(
+        self,
+        session,
+        links: List[Tuple[str, str]],
+    ) -> None:
+        """Crée les relations Claim → ClaimCluster (IN_CLUSTER) en batch."""
+        if not links:
+            return
+        batch = [{"claim_id": cid, "cluster_id": clid} for cid, clid in links]
+        session.run("""
+            UNWIND $batch AS item
+            MATCH (c:Claim {claim_id: item.claim_id})
+            MATCH (cc:ClaimCluster {cluster_id: item.cluster_id})
+            MERGE (c)-[:IN_CLUSTER]->(cc)
+        """, batch=batch)
+        self.stats["relations_created"] += len(links)
 
     def delete_document_claims(
         self,
