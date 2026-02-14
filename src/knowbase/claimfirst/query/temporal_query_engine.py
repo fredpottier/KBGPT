@@ -476,6 +476,7 @@ class TemporalQueryEngine:
                 if cluster_id:
                     query = """
                     MATCH (c:Claim)-[:IN_CLUSTER]->(cluster:ClaimCluster {cluster_id: $cluster_id})
+                    WHERE (c.archived IS NULL OR c.archived = false)
                     MATCH (c)-[:IN_DOCUMENT]->(d:Document)
                     OPTIONAL MATCH (d)-[:HAS_CONTEXT]->(dc:DocumentContext)
                     RETURN c.claim_id as claim_id,
@@ -486,7 +487,7 @@ class TemporalQueryEngine:
                     query = """
                     CALL db.index.fulltext.queryNodes('claim_text_search', $capability)
                     YIELD node AS c, score
-                    WHERE score > 0.5
+                    WHERE score > 0.5 AND (c.archived IS NULL OR c.archived = false)
                     MATCH (c)-[:IN_DOCUMENT]->(d:Document)
                     OPTIONAL MATCH (d)-[:HAS_CONTEXT]->(dc:DocumentContext)
                     RETURN c.claim_id as claim_id,
@@ -605,6 +606,7 @@ class TemporalQueryEngine:
                     MATCH (c:Claim {claim_id: $claim_id})-[:IN_CLUSTER]->(cluster)
                     MATCH (other:Claim)-[:IN_CLUSTER]->(cluster)
                     WHERE other.claim_id <> $claim_id
+                      AND (other.archived IS NULL OR other.archived = false)
                     MATCH (other)-[:IN_DOCUMENT]->(d:Document)-[:HAS_CONTEXT]->(dc:DocumentContext)
                     WHERE any(k IN keys(dc.axis_values) WHERE dc.axis_values[k].scalar_value = $context)
                     RETURN other.claim_id as related_id
@@ -653,6 +655,7 @@ class TemporalQueryEngine:
                     MATCH (c:Claim {claim_id: $claim_id})-[:IN_CLUSTER]->(cluster)
                     MATCH (removal:Claim)-[:IN_CLUSTER]->(cluster)
                     WHERE removal.text =~ '(?i).*(removed|deprecated|discontinued|replaced by|no longer).*'
+                      AND (removal.archived IS NULL OR removal.archived = false)
                     MATCH (removal)-[:IN_DOCUMENT]->(d:Document)-[:HAS_CONTEXT]->(dc:DocumentContext)
                     WHERE any(k IN keys(dc.axis_values) WHERE dc.axis_values[k].scalar_value = $context)
                     RETURN removal.claim_id as removal_id, removal.text as removal_text
@@ -683,6 +686,7 @@ class TemporalQueryEngine:
                 result = session.run(
                     """
                     MATCH (c:Claim {tenant_id: $tenant_id})-[:IN_DOCUMENT]->(d:Document)
+                    WHERE (c.archived IS NULL OR c.archived = false)
                     MATCH (d)-[:HAS_CONTEXT]->(dc:DocumentContext)
                     WHERE any(k IN keys(dc.axis_values) WHERE dc.axis_values[k].scalar_value = $context)
                     RETURN c.claim_id as claim_id, c.text as text

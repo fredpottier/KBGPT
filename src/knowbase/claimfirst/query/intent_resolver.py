@@ -400,6 +400,7 @@ class IntentResolver:
                     CALL db.index.fulltext.queryNodes('claim_text_search', $query)
                     YIELD node AS claim, score
                     WITH claim, score
+                    WHERE (claim.archived IS NULL OR claim.archived = false)
                     MATCH (claim)-[:IN_CLUSTER]->(cluster:ClaimCluster {tenant_id: $tenant_id})
                     WITH cluster, max(score) as max_score, count(claim) as matching_claims
                     MATCH (c:Claim)-[:IN_CLUSTER]->(cluster)
