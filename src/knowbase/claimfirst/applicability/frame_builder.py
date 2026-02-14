@@ -8,6 +8,7 @@ Le LLM reçoit uniquement:
   in_header, cooccurs_subject, nearby_markers, unit_ids[:5]
 - Markers par catégorie
 - Domain Context (optionnel)
+- Pre-identified Values du SubjectResolver (priors avec contrat d'autorité)
 
 Règles dans le prompt:
 - Ne référencer QUE des IDs existants
@@ -22,7 +23,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import re
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 from knowbase.claimfirst.applicability.models import (
     ApplicabilityFrame,
@@ -34,6 +37,32 @@ from knowbase.claimfirst.applicability.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# RESOLVER PRIOR AUTHORITY CONTRACT
+# ============================================================================
+
+ROLE_TO_FIELD = {
+    "revision": "release_id",
+    "temporal": "doc_year",
+    "geographic": "region",
+    "applicability_scope": "edition",
+    "status": "lifecycle_status",
+}
+
+
+class ResolverPriorStatus(str, Enum):
+    """Statut d'identification du resolver pour le contrat d'autorité."""
+
+    CONFIRMED = "confirmed"
+    """Le resolver a trouvé une revision fiable (confidence >= 0.7)."""
+
+    ABSENT = "absent"
+    """Le resolver n'a trouvé aucune revision."""
+
+    WEAK_GUESS = "weak_guess"
+    """Pas de prior resolver mais preuve forte Layer B (named_version + in_title)."""
+
 
 # ============================================================================
 # PROMPT TEMPLATE
@@ -53,6 +82,8 @@ FRAME_BUILDER_PROMPT = """You are an evidence-locked metadata extractor. Your jo
 {markers_section}
 
 {domain_context_section}
+
+{resolver_prior_section}
 
 ## STRICT RULES
 1. You may ONLY use candidate_ids and unit_ids that appear above
@@ -134,6 +165,7 @@ class FrameBuilder:
         profile: CandidateProfile,
         units: List[EvidenceUnit],
         domain_context_prompt: Optional[str] = None,
+        resolver_axis_values: Optional[List] = None,
     ) -> ApplicabilityFrame:
         """
         Construit le frame d'applicabilité.
@@ -142,6 +174,7 @@ class FrameBuilder:
             profile: Profil de candidats (sortie Layer B)
             units: EvidenceUnits (sortie Layer A)
             domain_context_prompt: Contexte domaine optionnel
+            resolver_axis_values: AxisValueOutput du SubjectResolver (priors)
 
         Returns:
             ApplicabilityFrame (non validé, pré-Layer D)
@@ -154,10 +187,32 @@ class FrameBuilder:
                 method="no_candidates",
             )
 
+        # 1. Convertir les priors du resolver en FrameFields
+        prior_fields, prior_status = self._resolve_priors(resolver_axis_values)
+
+        # 2. Enrichir les evidence_unit_ids via token matching dans les units
+        if prior_fields:
+            self._link_priors_to_evidence(prior_fields, units, profile)
+            # 2b. Dédupliquer : si plusieurs priors pour le même field_name,
+            # garder celui qui a le plus d'evidence (ex: "2021" x208 > "9.0" x2)
+            prior_fields = self._deduplicate_priors(prior_fields)
+
+        if prior_fields:
+            logger.debug(
+                f"[OSMOSE:FrameBuilder] Resolver priors: status={prior_status.value}, "
+                f"fields={[(f.field_name, f.value_normalized) for f in prior_fields]}"
+            )
+
+        # 3. Appeler LLM / fallback
         if self.use_llm:
             try:
-                frame = self._build_with_llm(profile, units, domain_context_prompt)
+                frame = self._build_with_llm(
+                    profile, units, domain_context_prompt,
+                    prior_fields, prior_status,
+                )
                 if frame and frame.fields:
+                    # 4. Fusionner priors avec réponse LLM (contrat d'autorité)
+                    frame = self._merge_with_priors(frame, prior_fields, prior_status)
                     return frame
                 logger.warning(
                     f"[OSMOSE:FrameBuilder] LLM returned empty frame for {profile.doc_id}, "
@@ -169,7 +224,118 @@ class FrameBuilder:
                     f"falling back to deterministic"
                 )
 
-        return self._build_deterministic(profile, units)
+        frame = self._build_deterministic(profile, units)
+        # Appliquer aussi le contrat d'autorité au fallback déterministe
+        frame = self._merge_with_priors(frame, prior_fields, prior_status)
+        return frame
+
+    # =========================================================================
+    # Resolver priors
+    # =========================================================================
+
+    def _resolve_priors(
+        self,
+        axis_values: Optional[List],
+    ) -> Tuple[List[FrameField], ResolverPriorStatus]:
+        """Convertit les axis_values du SubjectResolver en FrameFields priors."""
+        if not axis_values:
+            return [], ResolverPriorStatus.ABSENT
+
+        fields = []
+        has_revision = False
+        for av in axis_values:
+            role = av.discriminating_role.value
+            field_name = ROLE_TO_FIELD.get(role)
+            if not field_name:
+                continue
+            if av.confidence < 0.7:
+                continue
+
+            if role == "revision":
+                has_revision = True
+
+            fields.append(FrameField(
+                field_name=field_name,
+                value_normalized=av.value_raw,
+                display_label=role,
+                evidence_unit_ids=[],
+                candidate_ids=[],
+                confidence=FrameFieldConfidence.HIGH,
+                reasoning=(
+                    f"SubjectResolver prior ({role}, conf={av.confidence:.2f}): "
+                    f"{av.rationale}"
+                ),
+            ))
+
+        status = ResolverPriorStatus.CONFIRMED if has_revision else ResolverPriorStatus.ABSENT
+        return fields, status
+
+    def _link_priors_to_evidence(
+        self,
+        prior_fields: List[FrameField],
+        units: List[EvidenceUnit],
+        profile: CandidateProfile,
+    ) -> None:
+        """Enrichit les evidence_unit_ids des priors par token matching."""
+        for field in prior_fields:
+            value_tokens = set(re.split(r'\W+', field.value_normalized.lower()))
+            value_tokens.discard('')
+            if not value_tokens:
+                continue
+
+            # Linker aux EvidenceUnits
+            for unit in units:
+                unit_tokens = set(re.split(r'\W+', unit.text.lower()))
+                if value_tokens.issubset(unit_tokens):
+                    field.evidence_unit_ids.append(unit.unit_id)
+                    if len(field.evidence_unit_ids) >= 5:
+                        break
+
+            # Linker aux candidats Layer B
+            for vc in profile.value_candidates:
+                vc_tokens = set(re.split(r'\W+', vc.raw_value.lower()))
+                if (value_tokens == vc_tokens
+                        or field.value_normalized.lower() == vc.raw_value.lower()):
+                    field.candidate_ids.append(vc.candidate_id)
+
+    def _deduplicate_priors(
+        self,
+        prior_fields: List[FrameField],
+    ) -> List[FrameField]:
+        """
+        Déduplique les priors quand plusieurs axis_values mappent vers le même field_name.
+
+        Ex: resolver retourne "2021" (revision) et "9.0" (revision) → les deux deviennent
+        release_id. On garde celui qui a le plus d'evidence (evidence_unit_ids + candidate_ids).
+        """
+        from collections import defaultdict
+        groups: dict = defaultdict(list)
+        for f in prior_fields:
+            groups[f.field_name].append(f)
+
+        result = []
+        for field_name, candidates in groups.items():
+            if len(candidates) == 1:
+                result.append(candidates[0])
+                continue
+
+            # Départager par: evidence_count + candidate_count, puis confiance
+            def _score(f: FrameField) -> tuple:
+                return (len(f.evidence_unit_ids), len(f.candidate_ids))
+
+            candidates.sort(key=_score, reverse=True)
+            winner = candidates[0]
+            losers = candidates[1:]
+            loser_vals = [f.value_normalized for f in losers]
+            logger.debug(
+                f"[OSMOSE:FrameBuilder] Prior dedup '{field_name}': "
+                f"kept '{winner.value_normalized}' "
+                f"(evidence={len(winner.evidence_unit_ids)}, candidates={len(winner.candidate_ids)}), "
+                f"discarded {loser_vals}"
+            )
+            result.append(winner)
+
+        return result
 
     # =========================================================================
     # LLM-based construction
@@ -180,6 +346,8 @@ class FrameBuilder:
         profile: CandidateProfile,
         units: List[EvidenceUnit],
         domain_context_prompt: Optional[str] = None,
+        prior_fields: Optional[List[FrameField]] = None,
+        prior_status: ResolverPriorStatus = ResolverPriorStatus.ABSENT,
     ) -> ApplicabilityFrame:
         """Construction via LLM evidence-locked."""
         from knowbase.common.llm_router import get_llm_router, TaskType
@@ -191,6 +359,10 @@ class FrameBuilder:
         if domain_context_prompt:
             domain_context_section = f"## Domain Context\n{domain_context_prompt}"
 
+        resolver_prior_section = self._format_resolver_prior_section(
+            prior_fields, prior_status,
+        )
+
         prompt = FRAME_BUILDER_PROMPT.format(
             title=profile.title or "Unknown",
             primary_subject=profile.primary_subject or "Unknown",
@@ -199,6 +371,7 @@ class FrameBuilder:
             candidates_section=candidates_section,
             markers_section=markers_section,
             domain_context_section=domain_context_section,
+            resolver_prior_section=resolver_prior_section,
         )
 
         router = get_llm_router()
@@ -214,6 +387,37 @@ class FrameBuilder:
             f"(first 300 chars): {response[:300]}"
         )
         return self._parse_llm_response(response, profile)
+
+    def _format_resolver_prior_section(
+        self,
+        prior_fields: Optional[List[FrameField]],
+        prior_status: ResolverPriorStatus,
+    ) -> str:
+        """Formate la section Pre-identified Values pour le prompt LLM."""
+        if prior_status == ResolverPriorStatus.CONFIRMED and prior_fields:
+            lines = ["## Pre-identified Values (from document structure analysis)",
+                      "The following values were identified by analyzing document title, headers, and structure:"]
+            for f in prior_fields:
+                lines.append(
+                    f"- {f.field_name}=\"{f.value_normalized}\" "
+                    f"(role={f.display_label}, confidence={f.confidence.value})"
+                )
+            lines.append("")
+            lines.append("RULES for pre-identified values:")
+            lines.append("- CONFIRM these values unless candidates clearly contradict them with strong evidence")
+            lines.append("- To OVERRIDE, you MUST cite evidence_unit_ids that support the override")
+            lines.append("- Do NOT invent new release_id/version fields — if pre-identified says release_id=X, use it")
+            return "\n".join(lines)
+
+        # ABSENT: pas de version identifiée
+        return (
+            "## Pre-identified Values\n"
+            "No version/release was identified in the document structure.\n"
+            "This document likely has NO specific version/release.\n"
+            "Do NOT create release_id or version fields from bare decimal candidates.\n"
+            "Only create release_id if a named_version candidate (e.g. \"Release X\", \"Version X\") exists\n"
+            "with in_title=True OR frequency >= 3."
+        )
 
     def _format_candidates(self, profile: CandidateProfile, max_candidates: int = 50) -> str:
         """Formate les candidats pour le prompt LLM (top N par score)."""
@@ -365,6 +569,98 @@ class FrameBuilder:
         )
 
     # =========================================================================
+    # Authority contract: merge priors with LLM/deterministic output
+    # =========================================================================
+
+    def _merge_with_priors(
+        self,
+        frame: ApplicabilityFrame,
+        prior_fields: List[FrameField],
+        prior_status: ResolverPriorStatus,
+    ) -> ApplicabilityFrame:
+        """
+        Fusionne les priors du resolver avec le frame produit (LLM ou déterministe).
+
+        Contrat d'autorité:
+        - CONFIRMED + LLM confirme → garder HIGH
+        - CONFIRMED + LLM override avec evidence → accepter MEDIUM
+        - CONFIRMED + LLM override sans evidence → rejeté, garder prior
+        - ABSENT → supprimer release_id sauf WEAK_GUESS légitime
+        """
+        if not prior_fields:
+            # Mode ABSENT : supprimer tout release_id que le LLM aurait inventé
+            if prior_status == ResolverPriorStatus.ABSENT:
+                kept = []
+                for f in frame.fields:
+                    if f.field_name in ("release_id", "version"):
+                        if self._is_weak_guess_legitimate(f):
+                            f.reasoning = f"WEAK_GUESS (no resolver prior): {f.reasoning}"
+                            kept.append(f)
+                        else:
+                            frame.validation_notes.append(
+                                f"AuthorityContract: rejected '{f.field_name}={f.value_normalized}' "
+                                f"— no resolver prior, insufficient evidence"
+                            )
+                    else:
+                        kept.append(f)
+                frame.fields = kept
+            return frame
+
+        # Mode CONFIRMED : fusionner
+        prior_by_name = {f.field_name: f for f in prior_fields}
+        merged = []
+        used_priors: set = set()
+
+        for f in frame.fields:
+            if f.field_name in prior_by_name:
+                prior = prior_by_name[f.field_name]
+                used_priors.add(f.field_name)
+                if f.value_normalized.lower() == prior.value_normalized.lower():
+                    # LLM confirme → garder le prior avec HIGH
+                    merged.append(prior)
+                elif f.evidence_unit_ids:
+                    # LLM override avec evidence → accepter MEDIUM + log
+                    f.confidence = FrameFieldConfidence.MEDIUM
+                    f.reasoning = (
+                        f"resolver_disagreed (prior='{prior.value_normalized}'): "
+                        f"{f.reasoning}"
+                    )
+                    frame.validation_notes.append(
+                        f"AuthorityContract: resolver_disagreed on '{f.field_name}' "
+                        f"prior='{prior.value_normalized}' vs llm='{f.value_normalized}'"
+                    )
+                    merged.append(f)
+                else:
+                    # LLM override SANS evidence → rejeté, garder prior
+                    frame.validation_notes.append(
+                        f"AuthorityContract: rejected override '{f.field_name}="
+                        f"{f.value_normalized}' — no evidence, keeping prior "
+                        f"'{prior.value_normalized}'"
+                    )
+                    merged.append(prior)
+            else:
+                merged.append(f)
+
+        # Ajouter les priors non traités par le LLM
+        for name, prior in prior_by_name.items():
+            if name not in used_priors:
+                merged.append(prior)
+
+        frame.fields = merged
+        return frame
+
+    def _is_weak_guess_legitimate(self, field: FrameField) -> bool:
+        """
+        WEAK_GUESS accepté seulement si named_version + in_title ou frequency >= 3.
+
+        Détection via le reasoning ou les candidate_ids du champ.
+        """
+        r = (field.reasoning or "").lower()
+        has_named_signal = "in_title=true" in r or "named_version" in r
+        not_low = field.confidence != FrameFieldConfidence.LOW
+        return has_named_signal and not_low
+
+    # =========================================================================
     # Deterministic fallback
     # =========================================================================
 
@@ -487,4 +783,6 @@ class FrameBuilder:
 
 __all__ = [
     "FrameBuilder",
+    "ResolverPriorStatus",
+    "ROLE_TO_FIELD",
 ]

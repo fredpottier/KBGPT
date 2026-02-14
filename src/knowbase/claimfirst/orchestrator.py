@@ -221,7 +221,7 @@ class ClaimFirstOrchestrator:
 
         # Phase 0.55: Resolve ComparableSubject (INV-25: Domain-Agnostic)
         logger.info("[OSMOSE:ClaimFirst] Phase 0.55: Resolving comparable subject...")
-        comparable_subject = self._resolve_comparable_subject(
+        comparable_subject, resolver_axis_values = self._resolve_comparable_subject(
             doc_id=doc_id,
             tenant_id=tenant_id,
             passages=passages,
@@ -244,6 +244,7 @@ class ClaimFirstOrchestrator:
             passages=passages,
             doc_context=doc_context,
             doc_title=doc_title,
+            resolver_axis_values=resolver_axis_values,
         )
         logger.info(
             f"  → {len(detected_axes)} axes detected: "
@@ -728,6 +729,7 @@ class ClaimFirstOrchestrator:
         passages: List[Passage],
         doc_context: DocumentContext,
         doc_title: Optional[str] = None,
+        resolver_axis_values: Optional[List] = None,
     ) -> Tuple[Optional[ApplicabilityFrame], List[ApplicabilityAxis]]:
         """
         Construit l'ApplicabilityFrame via le pipeline evidence-locked A→B→C→D.
@@ -740,6 +742,7 @@ class ClaimFirstOrchestrator:
             passages: Passages du document
             doc_context: Contexte documentaire
             doc_title: Titre du document
+            resolver_axis_values: AxisValueOutput du SubjectResolver (priors)
 
         Returns:
             Tuple[Optional[ApplicabilityFrame], List[ApplicabilityAxis]]
@@ -775,6 +778,7 @@ class ClaimFirstOrchestrator:
                 profile=profile,
                 units=units,
                 domain_context_prompt=domain_context_prompt,
+                resolver_axis_values=resolver_axis_values,
             )
 
             # Layer D: Valider le frame
@@ -1015,7 +1019,7 @@ class ClaimFirstOrchestrator:
         passages: List[Passage],
         doc_context: DocumentContext,
         doc_title: Optional[str] = None,
-    ) -> Optional[ComparableSubject]:
+    ) -> Tuple[Optional[ComparableSubject], List]:
         """
         Résout le ComparableSubject via SubjectResolverV2.
 
@@ -1035,7 +1039,7 @@ class ClaimFirstOrchestrator:
             doc_title: Titre du document
 
         Returns:
-            ComparableSubject si résolu, None si abstention
+            Tuple[ComparableSubject ou None, List[AxisValueOutput]]
         """
         # 1. Préparer les candidats depuis les sources disponibles
         candidates = self._extract_resolver_candidates(
@@ -1046,7 +1050,7 @@ class ClaimFirstOrchestrator:
 
         if not candidates:
             logger.debug("[OSMOSE:ClaimFirst] No candidates for subject resolution")
-            return None
+            return None, []
 
         # 2. Préparer les snippets sources pour le prompt
         header_snippets = self._extract_header_snippets(passages, max_snippets=5)
@@ -1064,12 +1068,14 @@ class ClaimFirstOrchestrator:
         )
 
         # 4. Traiter le résultat
+        axis_values = []
         if resolver_output and not resolver_output.abstain.must_abstain:
-            # Log les axis_values détectés pour information
+            # Récupérer les axis_values pour propagation au FrameBuilder
             if resolver_output.axis_values:
+                axis_values = resolver_output.axis_values
                 logger.debug(
                     f"[OSMOSE:ClaimFirst] SubjectResolverV2 detected axis_values: "
-                    f"{[(av.value_raw, av.discriminating_role.value) for av in resolver_output.axis_values]}"
+                    f"{[(av.value_raw, av.discriminating_role.value) for av in axis_values]}"
                 )
 
             # Log le doc_type si détecté
@@ -1082,7 +1088,7 @@ class ClaimFirstOrchestrator:
                 if not doc_context.document_type:
                     doc_context.document_type = resolver_output.doc_type.label
 
-        return comparable_subject
+        return comparable_subject, axis_values
 
     def _extract_resolver_candidates(
         self,

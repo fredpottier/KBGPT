@@ -6,12 +6,23 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from knowbase.claimfirst.applicability.frame_builder import FrameBuilder
+from knowbase.claimfirst.applicability.frame_builder import (
+    FrameBuilder,
+    ResolverPriorStatus,
+    ROLE_TO_FIELD,
+)
 from knowbase.claimfirst.applicability.models import (
+    ApplicabilityFrame,
     CandidateProfile,
     EvidenceUnit,
+    FrameField,
     FrameFieldConfidence,
     ValueCandidate,
+)
+from knowbase.claimfirst.models.subject_resolver_output import (
+    AxisValueOutput,
+    DiscriminatingRole,
+    SupportEvidence,
 )
 
 
@@ -273,3 +284,266 @@ class TestFrameBuilderLLM:
 
         assert len(frame.fields) == 1
         assert frame.fields[0].value_normalized == "2023"
+
+
+# ============================================================================
+# Tests pour le contrat d'autorité (resolver priors)
+# ============================================================================
+
+def _make_axis_value(
+    value_raw: str,
+    role: DiscriminatingRole,
+    confidence: float = 0.9,
+    rationale: str = "test rationale",
+) -> AxisValueOutput:
+    """Helper pour créer un AxisValueOutput de test."""
+    return AxisValueOutput(
+        value_raw=value_raw,
+        discriminating_role=role,
+        confidence=confidence,
+        rationale=rationale,
+        support=SupportEvidence(),
+    )
+
+
+class TestResolverPriors:
+    """Tests pour le contrat d'autorité SubjectResolver → FrameBuilder."""
+
+    def test_resolver_revision_creates_release_id(self):
+        """axis_value revision conf=0.9 → FrameField release_id HIGH."""
+        builder = FrameBuilder(llm_client=None, use_llm=False)
+        axis_values = [
+            _make_axis_value("2023", DiscriminatingRole.REVISION, confidence=0.9),
+        ]
+
+        prior_fields, status = builder._resolve_priors(axis_values)
+
+        assert status == ResolverPriorStatus.CONFIRMED
+        assert len(prior_fields) == 1
+        assert prior_fields[0].field_name == "release_id"
+        assert prior_fields[0].value_normalized == "2023"
+        assert prior_fields[0].confidence == FrameFieldConfidence.HIGH
+
+    def test_resolver_temporal_creates_doc_year_not_release(self):
+        """temporal → doc_year, PAS release_id."""
+        builder = FrameBuilder(llm_client=None, use_llm=False)
+        axis_values = [
+            _make_axis_value("2023", DiscriminatingRole.TEMPORAL, confidence=0.85),
+        ]
+
+        prior_fields, status = builder._resolve_priors(axis_values)
+
+        # Temporal seul ne produit pas CONFIRMED (pas de revision)
+        assert status == ResolverPriorStatus.ABSENT
+        assert len(prior_fields) == 1
+        assert prior_fields[0].field_name == "doc_year"
+        # Ne doit PAS produire release_id
+        field_names = [f.field_name for f in prior_fields]
+        assert "release_id" not in field_names
+
+    def test_no_resolver_values_status_absent(self):
+        """Pas d'axis_values → status ABSENT."""
+        builder = FrameBuilder(llm_client=None, use_llm=False)
+
+        prior_fields, status = builder._resolve_priors(None)
+        assert status == ResolverPriorStatus.ABSENT
+        assert prior_fields == []
+
+        prior_fields2, status2 = builder._resolve_priors([])
+        assert status2 == ResolverPriorStatus.ABSENT
+        assert prior_fields2 == []
+
+    def test_resolver_low_confidence_ignored(self):
+        """axis_value conf=0.5 → ignoré (sous le seuil 0.7)."""
+        builder = FrameBuilder(llm_client=None, use_llm=False)
+        axis_values = [
+            _make_axis_value("2023", DiscriminatingRole.REVISION, confidence=0.5),
+        ]
+
+        prior_fields, status = builder._resolve_priors(axis_values)
+
+        assert status == ResolverPriorStatus.ABSENT
+        assert len(prior_fields) == 0
+
+    def test_absent_status_blocks_llm_release_id(self):
+        """LLM produit release_id mais status ABSENT → rejeté."""
+        builder = FrameBuilder(llm_client=None, use_llm=False)
+
+        # Simuler un frame LLM qui a produit un release_id
+        frame = ApplicabilityFrame(
+            doc_id="test_doc",
+            fields=[
+                FrameField(
+                    field_name="release_id",
+                    value_normalized="3.0",
+                    confidence=FrameFieldConfidence.MEDIUM,
+                    reasoning="bare decimal version found",
+                ),
+            ],
+            method="llm_evidence_locked",
+        )
+
+        # Merge avec status ABSENT et pas de priors
+        result = builder._merge_with_priors(
+            frame, [], ResolverPriorStatus.ABSENT,
+        )
+
+        # Le release_id doit avoir été rejeté (pas de named_version/in_title)
+        assert result.get_field("release_id") is None
+        assert any("AuthorityContract: rejected" in n for n in result.validation_notes)
+
+    def test_confirmed_prior_survives_llm_override_no_evidence(self):
+        """LLM override sans evidence → rejeté, prior conservé."""
+        builder = FrameBuilder(llm_client=None, use_llm=False)
+
+        prior_fields = [
+            FrameField(
+                field_name="release_id",
+                value_normalized="2023",
+                display_label="revision",
+                confidence=FrameFieldConfidence.HIGH,
+                reasoning="SubjectResolver prior (revision, conf=0.90): from title",
+            ),
+        ]
+
+        # Frame LLM qui essaie d'overrider avec une valeur différente SANS evidence
+        frame = ApplicabilityFrame(
+            doc_id="test_doc",
+            fields=[
+                FrameField(
+                    field_name="release_id",
+                    value_normalized="2024",
+                    confidence=FrameFieldConfidence.HIGH,
+                    evidence_unit_ids=[],  # Pas d'evidence !
+                    reasoning="LLM thinks 2024",
+                ),
+            ],
+            method="llm_evidence_locked",
+        )
+
+        result = builder._merge_with_priors(
+            frame, prior_fields, ResolverPriorStatus.CONFIRMED,
+        )
+
+        # Le prior doit survivre
+        release = result.get_field("release_id")
+        assert release is not None
+        assert release.value_normalized == "2023"
+        assert release.confidence == FrameFieldConfidence.HIGH
+        assert any("rejected override" in n for n in result.validation_notes)
+
+    def test_llm_override_with_evidence_accepted(self):
+        """LLM override avec evidence_unit_ids → accepté MEDIUM."""
+        builder = FrameBuilder(llm_client=None, use_llm=False)
+
+        prior_fields = [
+            FrameField(
+                field_name="release_id",
+                value_normalized="2023",
+                display_label="revision",
+                confidence=FrameFieldConfidence.HIGH,
+                reasoning="SubjectResolver prior (revision, conf=0.90): from title",
+            ),
+        ]
+
+        # Frame LLM qui override AVEC evidence
+        frame = ApplicabilityFrame(
+            doc_id="test_doc",
+            fields=[
+                FrameField(
+                    field_name="release_id",
+                    value_normalized="2024",
+                    confidence=FrameFieldConfidence.HIGH,
+                    evidence_unit_ids=["EU:0:0", "EU:1:0"],  # Evidence fournie
+                    reasoning="Found 2024 in body with strong context",
+                ),
+            ],
+            method="llm_evidence_locked",
+        )
+
+        result = builder._merge_with_priors(
+            frame, prior_fields, ResolverPriorStatus.CONFIRMED,
+        )
+
+        # L'override doit être accepté mais dégradé à MEDIUM
+        release = result.get_field("release_id")
+        assert release is not None
+        assert release.value_normalized == "2024"
+        assert release.confidence == FrameFieldConfidence.MEDIUM
+        assert "resolver_disagreed" in release.reasoning
+        assert any("resolver_disagreed" in n for n in result.validation_notes)
+
+    def test_duplicate_revision_priors_deduped_by_evidence(self):
+        """Deux revisions (ex: "2021" et "9.0") → celle avec le plus d'evidence gagne.
+
+        Cas réel: "Document Version: 9.0" vs "SAP S/4HANA 2021" (208 mentions).
+        """
+        builder = FrameBuilder(llm_client=None, use_llm=False)
+
+        # Le resolver retourne deux revisions
+        axis_values = [
+            _make_axis_value("2021", DiscriminatingRole.REVISION, confidence=1.0,
+                             rationale="SAP S/4HANA 2021 in title"),
+            _make_axis_value("9.0", DiscriminatingRole.REVISION, confidence=1.0,
+                             rationale="Document Version: 9.0 in header"),
+        ]
+
+        # Units avec "2021" beaucoup plus fréquent que "9.0"
+        units = [
+            EvidenceUnit(unit_id="EU:0:0", text="Operations Guide for SAP S/4HANA 2021",
+                         passage_idx=0, sentence_idx=0),
+            EvidenceUnit(unit_id="EU:0:1", text="Document Version: 9.0 2025-07-23",
+                         passage_idx=0, sentence_idx=1),
+            EvidenceUnit(unit_id="EU:1:0", text="This guide describes SAP S/4HANA 2021 operations.",
+                         passage_idx=1, sentence_idx=0),
+            EvidenceUnit(unit_id="EU:2:0", text="SAP S/4HANA 2021 supports new features.",
+                         passage_idx=2, sentence_idx=0),
+            EvidenceUnit(unit_id="EU:3:0", text="Version for SAP S/4HANA 2021 SPS07",
+                         passage_idx=3, sentence_idx=0),
+        ]
+
+        profile = CandidateProfile(
+            doc_id="test_doc",
+            title="Operations Guide for SAP S/4HANA 2021",
+            primary_subject="SAP S/4HANA",
+            total_units=5,
+            total_chars=500,
+            value_candidates=[
+                ValueCandidate(
+                    candidate_id="VC:numeric_identifier:2021",
+                    raw_value="2021",
+                    value_type="numeric_identifier",
+                    unit_ids=["EU:0:0", "EU:1:0", "EU:2:0", "EU:3:0"],
+                    frequency=208,
+                    in_title=True,
+                    cooccurs_with_subject=True,
+                ),
+                ValueCandidate(
+                    candidate_id="VC:version:90",
+                    raw_value="9.0",
+                    value_type="version",
+                    unit_ids=["EU:0:1"],
+                    frequency=2,
+                    in_header_zone=True,
+                ),
+            ],
+        )
+
+        prior_fields, status = builder._resolve_priors(axis_values)
+        assert status == ResolverPriorStatus.CONFIRMED
+        # Avant dedup: 2 priors release_id
+        assert len(prior_fields) == 2
+
+        # Link evidence
+        builder._link_priors_to_evidence(prior_fields, units, profile)
+
+        # "2021" doit avoir plus d'evidence que "9.0"
+        field_2021 = [f for f in prior_fields if f.value_normalized == "2021"][0]
+        field_90 = [f for f in prior_fields if f.value_normalized == "9.0"][0]
+        assert len(field_2021.evidence_unit_ids) > len(field_90.evidence_unit_ids)
+
+        # Après dedup: 1 seul prior release_id, c'est "2021"
+        deduped = builder._deduplicate_priors(prior_fields)
+        assert len(deduped) == 1
+        assert deduped[0].value_normalized == "2021"
+        assert deduped[0].field_name == "release_id"

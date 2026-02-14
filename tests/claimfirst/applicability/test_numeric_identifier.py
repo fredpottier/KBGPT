@@ -91,8 +91,13 @@ class TestDeterministicNumericIdentifier:
         assert "numeric_identifier_ambiguous" in frame.unknowns
         assert frame.get_field("year") is None
 
-    def test_numeric_identifier_title_plus_subject_promotes_to_release_id(self):
-        """numeric_identifier dans le titre + co-occurrence sujet → release_id."""
+    def test_numeric_identifier_title_plus_subject_blocked_by_authority_contract(self):
+        """numeric_identifier dans le titre + co-occurrence sujet → rejeté par contrat d'autorité.
+
+        Depuis le contrat d'autorité (ResolverPriorStatus), en mode ABSENT
+        (pas de resolver prior), un numeric_identifier nu ne peut plus devenir
+        release_id. Seul un named_version avec in_title ou frequency >= 3 passe.
+        """
         profile = CandidateProfile(
             doc_id="test",
             total_units=1,
@@ -116,11 +121,9 @@ class TestDeterministicNumericIdentifier:
 
         assert frame.method == "deterministic_fallback"
         release = frame.get_field("release_id")
-        assert release is not None
-        assert release.value_normalized == "2023"
-        # LOW car sans LLM, numeric_identifier reste ambigu même avec signaux forts
-        assert release.confidence == FrameFieldConfidence.LOW
-        assert "numeric_identifier_ambiguous" not in frame.unknowns
+        # Contrat d'autorité: sans resolver prior, numeric_identifier seul → rejeté
+        assert release is None
+        assert any("AuthorityContract: rejected" in n for n in frame.validation_notes)
 
     def test_named_version_still_becomes_release_id(self):
         """named_version → release_id inchangé en mode déterministe."""
