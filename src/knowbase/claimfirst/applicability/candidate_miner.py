@@ -67,6 +67,13 @@ COPYRIGHT_CONTEXT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Contextes SLA/métriques à filtrer pour les versions
+SLA_CONTEXT_PATTERN = re.compile(
+    r"(sla|uptime|availability|service\s+level|guaranteed|latency|throughput|"
+    r"response\s+time|success\s+rate|error\s+rate|cpu|memory|bandwidth)",
+    re.IGNORECASE,
+)
+
 # Year: 4 digits, 19xx ou 20xx
 YEAR_PATTERN = re.compile(r"\b((?:19|20)\d{2})\b")
 
@@ -285,6 +292,23 @@ class CandidateMiner:
             # Exclure les adresses IP (0.0.0.0, 123.456.789.0, etc.)
             if _IP_LIKE_PATTERN.match(raw):
                 continue
+            # Exclure les pourcentages (99.9%, 99.7 %)
+            end_pos = match.end()
+            rest = text[end_pos:end_pos + 3].lstrip()
+            if rest.startswith("%") or rest.startswith("％"):
+                continue
+            # Exclure les valeurs en contexte SLA/métriques (±100 chars)
+            offset = match.start()
+            ctx_start = max(0, offset - 100)
+            ctx_end = min(len(text), end_pos + 100)
+            nearby_text = text[ctx_start:ctx_end]
+            if SLA_CONTEXT_PATTERN.search(nearby_text):
+                try:
+                    major = int(raw.split(".")[0])
+                    if major >= 50:
+                        continue  # 99.9 near SLA → skip
+                except ValueError:
+                    pass
             # Exclure si déjà capturé par named_version
             if not self._overlaps_existing(match.start(), results):
                 results.append(("version", raw, match.start()))

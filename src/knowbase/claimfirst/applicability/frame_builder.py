@@ -78,6 +78,12 @@ FRAME_BUILDER_PROMPT = """You are an evidence-locked metadata extractor. Your jo
     (release_id, publication_year, regulation_version, model_generation, trial_phase, etc.)
     NEVER use value_type names as field_name (numeric_identifier, named_version, etc.)
 11. Do NOT create fields for IP addresses, port numbers, or non-version numeric patterns
+12. Do NOT create fields for SLA percentages, performance metrics, or availability targets:
+    "99.7%" near "SLA/uptime/availability" → NOT a version/release
+    Values with major number >= 50 (like 99.9, 99.7, 95.0) are almost never versions
+13. Bare decimal numbers (type=version, e.g. "3.0", "3.1") without an explicit version keyword
+    are AMBIGUOUS. Prefer named_version candidates (e.g. "Version 3.0") over bare decimals.
+    If only bare decimals exist, set confidence to "low" and explain why in reasoning
 
 ## Output JSON Format
 {{

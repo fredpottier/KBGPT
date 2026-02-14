@@ -15,6 +15,7 @@ from knowbase.claimfirst.applicability.validators import (
     EvidenceIntegrityValidator,
     FrameValidationPipeline,
     LexicalSanityValidator,
+    MetricContextValidator,
     NoEvidenceValidator,
     ValueConsistencyValidator,
 )
@@ -268,6 +269,118 @@ class TestLexicalSanityValidator:
         result = validator.validate(frame, units, profile)
 
         assert result.fields[0].confidence == FrameFieldConfidence.LOW
+
+
+class TestMetricContextValidator:
+    """Tests pour MetricContextValidator."""
+
+    def test_rejects_high_version_number(self):
+        """Rejette un release_id avec major >= 50 (probablement SLA)."""
+        units = [
+            EvidenceUnit(unit_id="EU:0:0", text="SLA guarantees 99.9% uptime.", passage_idx=0, sentence_idx=0),
+        ]
+        frame = ApplicabilityFrame(
+            doc_id="test",
+            fields=[
+                FrameField(
+                    field_name="release_id",
+                    value_normalized="99.9",
+                    evidence_unit_ids=["EU:0:0"],
+                ),
+            ],
+        )
+
+        validator = MetricContextValidator()
+        result = validator.validate(frame, units, _make_profile())
+
+        assert len(result.fields) == 0  # Rejeté
+        assert any("MetricContext" in n for n in result.validation_notes)
+
+    def test_keeps_low_version_number(self):
+        """Garde un release_id avec major < 50 (version légitime)."""
+        units = [
+            EvidenceUnit(unit_id="EU:0:0", text="Upgrade to 3.2.1 for new features.", passage_idx=0, sentence_idx=0),
+        ]
+        frame = ApplicabilityFrame(
+            doc_id="test",
+            fields=[
+                FrameField(
+                    field_name="version",
+                    value_normalized="3.2.1",
+                    evidence_unit_ids=["EU:0:0"],
+                ),
+            ],
+        )
+
+        validator = MetricContextValidator()
+        result = validator.validate(frame, units, _make_profile())
+
+        assert len(result.fields) == 1
+        assert result.fields[0].confidence != FrameFieldConfidence.LOW
+
+    def test_degrades_sla_context(self):
+        """Dégrade la confiance si keywords SLA dans l'evidence."""
+        units = [
+            EvidenceUnit(unit_id="EU:0:0", text="The SLA for version 3.0 guarantees availability.", passage_idx=0, sentence_idx=0),
+        ]
+        frame = ApplicabilityFrame(
+            doc_id="test",
+            fields=[
+                FrameField(
+                    field_name="version",
+                    value_normalized="3.0",
+                    evidence_unit_ids=["EU:0:0"],
+                ),
+            ],
+        )
+
+        validator = MetricContextValidator()
+        result = validator.validate(frame, units, _make_profile())
+
+        assert len(result.fields) == 1
+        assert result.fields[0].confidence == FrameFieldConfidence.LOW
+
+    def test_ignores_non_version_fields(self):
+        """N'affecte pas les champs qui ne sont pas version/release."""
+        units = [
+            EvidenceUnit(unit_id="EU:0:0", text="Published in 2023.", passage_idx=0, sentence_idx=0),
+        ]
+        frame = ApplicabilityFrame(
+            doc_id="test",
+            fields=[
+                FrameField(
+                    field_name="publication_year",
+                    value_normalized="2023",
+                    evidence_unit_ids=["EU:0:0"],
+                ),
+            ],
+        )
+
+        validator = MetricContextValidator()
+        result = validator.validate(frame, units, _make_profile())
+
+        assert len(result.fields) == 1
+
+    def test_named_version_not_rejected(self):
+        """Un named_version comme 'Release 2023' n'est pas rejeté (valeur non numérique pure)."""
+        units = [
+            EvidenceUnit(unit_id="EU:0:0", text="This applies to Release 2023.", passage_idx=0, sentence_idx=0),
+        ]
+        frame = ApplicabilityFrame(
+            doc_id="test",
+            fields=[
+                FrameField(
+                    field_name="release_id",
+                    value_normalized="Release 2023",
+                    evidence_unit_ids=["EU:0:0"],
+                ),
+            ],
+        )
+
+        validator = MetricContextValidator()
+        result = validator.validate(frame, units, _make_profile())
+
+        assert len(result.fields) == 1
 
 
 class TestFrameValidationPipeline:

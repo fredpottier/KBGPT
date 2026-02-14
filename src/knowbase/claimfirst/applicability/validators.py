@@ -230,6 +230,77 @@ class LexicalSanityValidator:
 
 
 # ============================================================================
+# Validator 5: Metric Context (anti-SLA / anti-percentage)
+# ============================================================================
+
+class MetricContextValidator:
+    """
+    Rejette les valeurs qui sont probablement des métriques SLA/performance,
+    pas des versions ou releases.
+
+    Règles:
+    - version/release avec major >= 50 → rejeté (99.9, 99.7 = SLA percentages)
+    - version/release dont l'evidence contient des keywords SLA → dégradé LOW
+    """
+
+    SLA_KEYWORDS = frozenset({
+        "sla", "uptime", "availability", "service level",
+        "guaranteed", "latency", "throughput", "response time",
+        "success rate", "error rate", "%",
+    })
+
+    def validate(
+        self,
+        frame: ApplicabilityFrame,
+        units: List[EvidenceUnit],
+        profile: CandidateProfile,
+    ) -> ApplicabilityFrame:
+        unit_map: Dict[str, EvidenceUnit] = {u.unit_id: u for u in units}
+        kept: List[FrameField] = []
+
+        for field in frame.fields:
+            if field.field_name not in ("release_id", "version"):
+                kept.append(field)
+                continue
+
+            value = field.value_normalized.strip()
+
+            # Check 1: valeur numérique avec major >= 50 → rejeté
+            try:
+                major = int(value.split(".")[0])
+                if major >= 50:
+                    frame.validation_notes.append(
+                        f"MetricContext: rejected '{field.field_name}={value}' "
+                        f"— major >= 50, likely SLA/metric percentage"
+                    )
+                    continue  # Ne pas garder
+            except ValueError:
+                pass  # Pas numérique pur (ex: "SP 12"), on continue
+
+            # Check 2: keywords SLA dans les evidence units → dégrader LOW
+            has_sla_context = False
+            for uid in field.evidence_unit_ids:
+                unit = unit_map.get(uid)
+                if unit:
+                    text_lower = unit.text.lower()
+                    if any(kw in text_lower for kw in self.SLA_KEYWORDS):
+                        has_sla_context = True
+                        break
+
+            if has_sla_context:
+                field.confidence = FrameFieldConfidence.LOW
+                frame.validation_notes.append(
+                    f"MetricContext: degraded '{field.field_name}={value}' to LOW "
+                    f"— SLA/metric context detected in evidence"
+                )
+
+            kept.append(field)
+
+        frame.fields = kept
+        return frame
+
+
+# ============================================================================
 # Pipeline
 # ============================================================================
 
@@ -250,6 +321,7 @@ class FrameValidationPipeline:
             NoEvidenceValidator(),
             ValueConsistencyValidator(),
             LexicalSanityValidator(),
+            MetricContextValidator(),
         ]
 
     def validate(
@@ -288,4 +360,5 @@ __all__ = [
     "NoEvidenceValidator",
     "ValueConsistencyValidator",
     "LexicalSanityValidator",
+    "MetricContextValidator",
 ]

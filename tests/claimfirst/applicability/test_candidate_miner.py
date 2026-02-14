@@ -194,3 +194,43 @@ class TestCandidateMiner:
         assert profile.total_units == 0
         assert len(profile.value_candidates) == 0
         assert len(profile.markers) == 0
+
+    def test_sla_percentage_filtered(self):
+        """Les pourcentages SLA ne sont pas extraits comme versions."""
+        units = [
+            _make_unit("The SLA guarantees 99.9% uptime for all tenants.", p_idx=0, s_idx=0),
+            _make_unit("Availability target is 99.7% under standard conditions.", p_idx=1, s_idx=0),
+        ]
+        profile = self.miner.mine(units, "doc1")
+        versions = profile.get_candidates_by_type("version")
+        version_values = {v.raw_value for v in versions}
+        assert "99.9" not in version_values
+        assert "99.7" not in version_values
+
+    def test_percentage_sign_filtered(self):
+        """Les nombres suivis de % ne sont pas extraits comme versions."""
+        units = [_make_unit("Success rate was 95.5% across all regions.")]
+        profile = self.miner.mine(units, "doc1")
+        versions = profile.get_candidates_by_type("version")
+        version_values = {v.raw_value for v in versions}
+        assert "95.5" not in version_values
+
+    def test_low_version_near_sla_kept(self):
+        """Les vraies versions basses (< 50) ne sont pas filtrées par le contexte SLA."""
+        units = [_make_unit("The SLA module requires 3.2 or later to function.")]
+        profile = self.miner.mine(units, "doc1")
+        versions = profile.get_candidates_by_type("version")
+        version_values = {v.raw_value for v in versions}
+        assert "3.2" in version_values
+
+    def test_real_version_not_affected(self):
+        """Les vraies versions ne sont pas affectées par les filtres SLA."""
+        units = [
+            _make_unit("Upgrade to 6.0 EHP 8 for full support.", p_idx=0, s_idx=0),
+            _make_unit("Compatible with platform 12.1 and later.", p_idx=1, s_idx=0),
+        ]
+        profile = self.miner.mine(units, "doc1")
+        versions = profile.get_candidates_by_type("version")
+        version_values = {v.raw_value for v in versions}
+        assert "6.0" in version_values
+        assert "12.1" in version_values
