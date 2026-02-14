@@ -70,8 +70,11 @@ COPYRIGHT_CONTEXT_PATTERN = re.compile(
 # Year: 4 digits, 19xx ou 20xx
 YEAR_PATTERN = re.compile(r"\b((?:19|20)\d{2})\b")
 
-# Version: v1.0, 2.1.3, etc.
-VERSION_PATTERN = re.compile(r"\bv?(\d+\.\d+(?:\.\d+)*)\b")
+# Version: v1.0, 2.1.3, etc. (max 3 segments pour exclure les IP-like X.X.X.X)
+VERSION_PATTERN = re.compile(r"\bv?(\d+\.\d+(?:\.\d+)?)\b")
+
+# Filtre IP: exclut les valeurs qui ressemblent à des adresses IP (4 octets 0-255)
+_IP_LIKE_PATTERN = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
 
 # Named version: Version X, Release X, Edition X, Phase X, FPS X, SP X
 # Le token capturé après le mot-clé DOIT contenir au moins un chiffre
@@ -279,6 +282,9 @@ class CandidateMiner:
         # Versions numériques (v1.0, 2.1.3)
         for match in VERSION_PATTERN.finditer(text):
             raw = match.group(1)
+            # Exclure les adresses IP (0.0.0.0, 123.456.789.0, etc.)
+            if _IP_LIKE_PATTERN.match(raw):
+                continue
             # Exclure si déjà capturé par named_version
             if not self._overlaps_existing(match.start(), results):
                 results.append(("version", raw, match.start()))
@@ -306,7 +312,7 @@ class CandidateMiner:
 
             # Exclure si déjà dans une date ISO ou named_version
             if not self._overlaps_existing(offset, results):
-                results.append(("year", year_str, offset))
+                results.append(("numeric_identifier", year_str, offset))
 
         return results
 

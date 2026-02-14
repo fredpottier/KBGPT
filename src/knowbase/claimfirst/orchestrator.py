@@ -374,12 +374,13 @@ class ClaimFirstOrchestrator:
 
         logger.info(f"  → {len(clusters)} clusters created")
 
-        # Phase 6: Détection de relations
+        # Phase 6: Détection de relations (value-level CONTRADICTS + regex REFINES/QUALIFIES)
         logger.info("[OSMOSE:ClaimFirst] Phase 6: Detecting relations...")
         relations = self.relation_detector.detect(
             claims=claims,
             clusters=clusters if clusters else None,
             entities_by_claim=claim_entity_map,
+            entities=entities,
         )
         logger.info(f"  → {len(relations)} relations detected")
 
@@ -714,7 +715,10 @@ class ClaimFirstOrchestrator:
             if result.strip():
                 return result.strip()
         except Exception as e:
-            logger.debug(f"[OSMOSE:ClaimFirst] Domain context not available: {e}")
+            logger.warning(
+                f"[OSMOSE:ClaimFirst] Domain context not available for tenant "
+                f"'{tenant_id}': {e} — version disambiguation will be degraded"
+            )
         return ""
 
     def _build_applicability_frame(
@@ -765,7 +769,7 @@ class ClaimFirstOrchestrator:
             )
 
             # Charger le Domain Context optionnel
-            domain_context_prompt = self._get_domain_context_prompt(tenant_id)
+            domain_context_prompt = self._get_domain_context_block(tenant_id)
 
             frame = builder.build(
                 profile=profile,

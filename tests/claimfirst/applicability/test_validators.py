@@ -39,9 +39,9 @@ def _make_profile() -> CandidateProfile:
         total_chars=200,
         value_candidates=[
             ValueCandidate(
-                candidate_id="VC:year:abc123",
+                candidate_id="VC:numeric_identifier:abc123",
                 raw_value="2023",
-                value_type="year",
+                value_type="numeric_identifier",
                 unit_ids=["EU:0:0", "EU:1:0"],
                 frequency=2,
             ),

@@ -26,8 +26,20 @@ from knowbase.claimfirst.models.entity import Entity
 
 logger = logging.getLogger(__name__)
 
-# Priorité des axes pour la détection "auto" — déterministe et stable
-AXIS_PRIORITY = ["release_id", "version", "year", "effective_date", "edition", "phase"]
+# Priorité des axes pour la détection "auto" — déterministe, stable et domain-agnostic.
+# Couvre : logiciel (release_id, version), réglementaire (regulation_version),
+# automobile (model_generation), pharma (trial_phase), temporel (year, effective_date).
+AXIS_PRIORITY = [
+    "release_id",            # Identifiant de version/release (tout domaine)
+    "version",               # Version numérique explicite
+    "regulation_version",    # Norme réglementaire (Bâle III, Solvency II...)
+    "model_generation",      # Génération produit (Clio III, iPhone 15...)
+    "trial_phase",           # Phase clinique (Phase I, Phase III...)
+    "year",                  # Année calendaire
+    "effective_date",        # Date d'entrée en vigueur
+    "edition",               # Édition (Private, Standard, 3rd Edition...)
+    "phase",                 # Phase générique
+]
 
 
 class ClaimEvolution(str, Enum):

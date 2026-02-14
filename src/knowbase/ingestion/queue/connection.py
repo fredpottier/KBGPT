@@ -28,8 +28,19 @@ DEFAULT_JOB_TIMEOUT = get_default_job_timeout()
 
 @lru_cache(maxsize=1)
 def get_redis_connection() -> redis.Redis:
-    """Return a cached Redis connection for the ingestion queue."""
-    return redis.from_url(REDIS_URL)
+    """Return a cached Redis connection for the ingestion queue.
+
+    Configure socket_keepalive et health_check_interval pour éviter
+    les déconnexions TCP idle (Docker Desktop Windows coupe après ~5 min).
+    """
+    return redis.from_url(
+        REDIS_URL,
+        socket_keepalive=True,
+        socket_timeout=300,
+        socket_connect_timeout=10,
+        health_check_interval=60,
+        retry_on_timeout=True,
+    )
 
 
 def get_queue(name: str | None = None, *, timeout: int | None = None) -> Queue:

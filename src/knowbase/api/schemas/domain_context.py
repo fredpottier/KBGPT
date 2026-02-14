@@ -63,6 +63,20 @@ class DomainContextCreate(BaseModel):
         description="Priorité injection contexte dans prompts LLM"
     )
 
+    versioning_hints: str = Field(
+        default="",
+        max_length=500,
+        description="Conventions de versioning spécifiques au domaine (texte libre)",
+        json_schema_extra={"example": "FPS01 < FPS02 < FPS03 are ordered Feature Pack Stacks."}
+    )
+
+    identification_semantics: str = Field(
+        default="",
+        max_length=1000,
+        description="Règles d'identification sémantique des valeurs ambiguës (release_id vs year, etc.)",
+        json_schema_extra={"example": "Rule: 4-digit number after product name → release_id. Counter-example: 4-digit in copyright line → NOT release_id."}
+    )
+
 
 class DomainContextResponse(BaseModel):
     """Schema réponse Domain Context."""
@@ -76,6 +90,8 @@ class DomainContextResponse(BaseModel):
     common_acronyms: Dict[str, str] = Field(default_factory=dict)
     key_concepts: List[str] = Field(default_factory=list)
     context_priority: str = Field(default="medium")
+    versioning_hints: str = Field(default="")
+    identification_semantics: str = Field(default="")
     llm_injection_prompt: str = Field(..., description="Prompt généré pour injection LLM")
     created_at: datetime = Field(..., description="Date création")
     updated_at: datetime = Field(..., description="Date mise à jour")
@@ -93,6 +109,8 @@ class DomainContextPreviewRequest(BaseModel):
     common_acronyms: Dict[str, str] = Field(default_factory=dict)
     key_concepts: List[str] = Field(default_factory=list)
     context_priority: Literal["low", "medium", "high"] = Field(default="medium")
+    versioning_hints: str = Field(default="", max_length=500)
+    identification_semantics: str = Field(default="", max_length=1000)
 
 
 class DomainContextPreviewResponse(BaseModel):

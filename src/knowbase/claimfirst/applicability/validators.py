@@ -200,10 +200,10 @@ class LexicalSanityValidator:
             if len(value) > self.MAX_VALUE_LENGTH:
                 issues.append(f"value too long ({len(value)} chars)")
 
-            # Vérifications spécifiques par type de champ
-            if field.field_name == "year":
+            # Check year-format si le champ est explicitement un *_year ou "year"
+            if field.field_name.endswith("_year") or field.field_name == "year":
                 if not re.match(r"^(19|20)\d{2}$", value):
-                    issues.append(f"'{value}' is not a valid year")
+                    issues.append(f"'{value}' does not match year format YYYY")
 
             if field.field_name in ("release_id", "version"):
                 # Ne doit pas contenir le nom du produit

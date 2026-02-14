@@ -363,9 +363,9 @@ BOOTSTRAP_QUALIFIERS = {
         r"(Enterprise|Standard|Professional|Private|Public)\s+(?:Edition|Cloud)",
         re.IGNORECASE
     ),
-    "year": re.compile(
-        r"\b(20\d{2})\b"
-    ),
+    # "year" retiré : un nombre 4 chiffres peut être année, version,
+    # quantité, nom commercial... Seul le LLM (applicability frame)
+    # peut désambiguïser avec le contexte.
 }
 
 

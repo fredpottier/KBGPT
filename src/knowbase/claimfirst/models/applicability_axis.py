@@ -318,15 +318,19 @@ class ApplicabilityAxis(BaseModel):
         )
 
 
-# Clés d'axes neutres prédéfinies (bootstrap, pas exhaustif)
+# Clés d'axes neutres prédéfinies (bootstrap, pas exhaustif, domain-agnostic)
 NEUTRAL_AXIS_KEYS = frozenset({
-    "release_id",      # Identifiant de release/version (neutre IT)
-    "year",            # Année calendaire
-    "effective_date",  # Date d'entrée en vigueur
-    "edition",         # Édition (Enterprise, Standard...)
-    "region",          # Région géographique
-    "phase",           # Phase de déploiement
-    "tier",            # Niveau/tier de service
+    "release_id",           # Identifiant de version/release (tout domaine)
+    "version",              # Version numérique explicite
+    "regulation_version",   # Norme réglementaire (Bâle III, IFRS 9...)
+    "model_generation",     # Génération produit (Clio III, Galaxy S24...)
+    "trial_phase",          # Phase clinique (Phase I, Phase III...)
+    "year",                 # Année calendaire
+    "effective_date",       # Date d'entrée en vigueur
+    "edition",              # Édition (Enterprise, Standard, 3rd Edition...)
+    "region",               # Région géographique
+    "phase",                # Phase de déploiement
+    "tier",                 # Niveau/tier de service
 })
 
 

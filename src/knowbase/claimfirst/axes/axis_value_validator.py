@@ -51,6 +51,7 @@ class AxisValueValidator:
         llm_client: Optional[Any] = None,
         max_passages_sample: int = 3,
         min_candidates_for_validation: int = 1,
+        tenant_id: Optional[str] = None,
     ):
         """
         Initialise le validateur.
@@ -59,10 +60,12 @@ class AxisValueValidator:
             llm_client: Client LLM (si None, bypass validation)
             max_passages_sample: Nombre max de passages à envoyer au LLM
             min_candidates_for_validation: Minimum de candidats pour déclencher validation
+            tenant_id: Tenant ID pour injection contexte domaine
         """
         self.llm_client = llm_client
         self.max_passages_sample = max_passages_sample
         self.min_candidates_for_validation = min_candidates_for_validation
+        self.tenant_id = tenant_id
 
         self.stats = {
             "validations_attempted": 0,
@@ -199,28 +202,9 @@ class AxisValueValidator:
 
         candidates_str = "\n".join(candidates_desc)
 
-        # Construire instructions spécifiques selon l'axe
+        # Domain-agnostic: no hardcoded axis instructions (INV-25)
+        # The Domain Context injection in _call_llm() provides domain-specific rules
         axis_specific_instructions = ""
-        if axis_key == "release_id":
-            axis_specific_instructions = """
-4. Pour release_id: L'année/version dans le TITRE du document est généralement la valeur correcte
-   - Exemple: "Product X 2023 User Guide" → release_id = "2023"
-   - Les versions mineures (5.1, 2.0) dans le CONTENU sont souvent des versions de document, PAS des releases produit
-   - Privilégier les années au format YYYY (1809, 2020, 2023, 2025) qui représentent des releases produit
-"""
-        elif axis_key == "edition":
-            axis_specific_instructions = """
-4. Pour edition: Doit apparaître avec le mot "Edition" ou caractériser EXPLICITEMENT le document
-   - "Private Edition documentation" → edition = "Private"
-   - Simple mention de "Cloud" dans le texte n'est PAS une edition (ex: "SAP Analytics Cloud")
-   - Si le document couvre TOUTES les éditions, ne pas sélectionner d'edition
-"""
-        elif axis_key == "year":
-            axis_specific_instructions = """
-4. Pour year: C'est l'année de PUBLICATION du document (copyright, date de mise à jour)
-   - Différent de release_id qui est la version du PRODUIT documenté
-   - Copyright 2025 → year = "2025"
-"""
 
         # Prompt de validation
         axis_desc = axis_display_name or axis_key
@@ -252,23 +236,38 @@ IMPORTANT: Réponds UNIQUEMENT avec le JSON, sans texte avant ou après."""
             return result
 
         except Exception as e:
-            logger.warning(f"[OSMOSE:AxisValidator] LLM validation failed: {e}")
-            # En cas d'erreur, prendre la première valeur (comportement fallback)
+            logger.warning(
+                f"[OSMOSE:AxisValidator] LLM validation failed for axis "
+                f"'{axis_key}' with {len(candidate_values)} candidates: {e}"
+            )
+            # Ne PAS deviner : retourner None pour éviter les faux positifs
+            # (ex: "2.0" promu en release_id par erreur)
             return ValidationResult(
                 axis_key=axis_key,
-                selected_value=candidate_values[0] if candidate_values else None,
-                confidence=0.5,
-                reasoning=f"Fallback après erreur: {str(e)[:50]}",
+                selected_value=None,
+                confidence=0.0,
+                reasoning=f"LLM validation failed, no blind fallback: {str(e)[:80]}",
                 was_validated=False,
             )
 
     def _call_llm(self, prompt: str) -> str:
-        """Appelle le LLM via le router."""
+        """Appelle le LLM via le router, enrichi du contexte métier."""
         from knowbase.common.llm_router import get_llm_router, TaskType
+        from knowbase.ontology.domain_context_injector import get_domain_context_injector
+
+        system_prompt = "You are an expert in document versioning axis validation."
+
+        if self.tenant_id:
+            try:
+                injector = get_domain_context_injector()
+                system_prompt = injector.inject_context(system_prompt, self.tenant_id)
+            except Exception as e:
+                logger.warning(f"[OSMOSE:AxisValidator] Domain context injection failed: {e}")
 
         router = get_llm_router()
         messages = [
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
         ]
         response = router.complete(
             task_type=TaskType.FAST_CLASSIFICATION,

@@ -1,210 +1,332 @@
 # OSMOSE — Chantiers prochaines étapes
 
-*Date : 2026-02-09 — Mise à jour post-investigation clusters + query engine*
+*Date : 2026-02-13 — Mise à jour complète post-audit 22 documents*
 
-## État actuel du KG (5 documents)
+---
+
+## État actuel du KG (22 documents)
 
 ### Inventaire des nodes
 
 | Label | Nombre | Par doc (moy.) | Projection 500 docs |
 |-------|--------|----------------|---------------------|
-| Claim | 10 959 | 2 192 | ~1 096 000 |
-| Passage | 6 220 | 1 244 | ~622 000 |
-| Entity | 4 417 | ~883* | ~200 000** |
-| ClaimCluster | 1 151 | 230 | ~115 000 |
-| DocumentContext | 5 | 1 | 500 |
-| Autres (Facet, SubjectAnchor...) | 48 | ~10 | ~5 000 |
-| **TOTAL NODES** | **22 800** | **4 560** | **~2 038 000** |
+| Claim | 37 748 | 1 716 | ~600 000* |
+| Entity | 22 329 | ~1 015** | ~100 000** |
+| ClaimCluster | 2 954 | 134 | ~50 000 |
+| Passage | **0** | 0 | 0 |
+| DocumentContext | 22 | 1 | 500 |
+| **TOTAL NODES** | **63 147** | **2 870** | **~750 000** |
 
-*\* Les entities sont partiellement partagées entre docs (111 cross-doc sur 4 417).*
-*\*\* L'Entity count scale sub-linéairement grâce au partage cross-doc, estimé ~200K.*
+*\* Projection sub-linéaire : la dédup S/P/O et le partage d'entities cross-doc réduisent la croissance.*
+*\*\* Les entities sont partiellement partagées entre docs. Scale sub-linéairement.*
 
 ### Inventaire des edges
 
 | Type | Nombre | Description |
 |------|--------|-------------|
-| ABOUT | 13 827 | Claim → Entity |
-| SUPPORTED_BY | 10 959 | Claim → Passage |
-| IN_CLUSTER | 4 443 | Claim → ClaimCluster |
-| CHAINS_TO | 1 882 | Claim → Claim (1 596 intra + 286 cross) |
-| HAS_FACET | 1 435 | Claim → Facet |
-| REFINES | 892 | Claim → Claim |
-| QUALIFIES | 222 | Claim → Claim |
-| Autres | 32 | ABOUT_SUBJECT, HAS_AXIS_VALUE, ABOUT_COMPARABLE |
-| **TOTAL EDGES** | **33 692** | **Ratio edges/nodes = 1.48** |
+| ABOUT | 63 181 | Claim → Entity |
+| QUALIFIES | 38 173 | Claim → Claim (qualifie/conditionne) |
+| IN_CLUSTER | 14 880 | Claim → ClaimCluster |
+| CHAINS_TO | 4 862 | Claim → Claim (intra + cross-doc) |
+| REFINES | 4 631 | Claim → Claim (précise/détaille) |
+| CONTRADICTS | 334 | Claim → Claim (contradiction détectée) |
+| Autres | ~3 212 | HAS_AXIS_VALUE, ABOUT_SUBJECT, ABOUT_COMPARABLE... |
+| **TOTAL EDGES** | **~129 273** | **Ratio edges/nodes = 2.05** |
 
-### Claims par document
+### Comparaison avec l'état précédent (5 docs → 22 docs)
 
-| Document | Claims | Passages | Ratio claims/passages |
-|----------|--------|----------|-----------------------|
-| Feature Scope 2023 (025) | 5 839 | 1 927 | 3.03 |
-| Business Scope 2025 (023) | 2 291 | 1 972 | 1.16 |
-| Business Scope 1809 (018) | 1 245 | 1 072 | 1.16 |
-| Operations Guide 2021 (014) | 929 | 719 | 1.29 |
-| RISE with SAP (020) | 655 | 530 | 1.24 |
-
-**Observation critique :** Le Feature Scope 2023 génère à lui seul 5 839 claims (53% du total). La densité de claims varie de 1:1 à 3:1 par passage.
-
-### Distribution des Passages (partagés ou non)
-
-| Bucket | Nb Passages | Total edges SUPPORTED_BY |
-|--------|-------------|-------------------------|
-| 1 claim (1:1) | 4 778 (77%) | 4 778 |
-| 2-3 claims | 816 | 1 930 |
-| 4-10 claims | 555 | 3 267 |
-| 10+ claims | 71 | 984 |
-
-**77% des Passages** sont 1:1 avec une Claim → transformables en propriété sans problème. **23%** supportent 2+ claims (co-localisation).
-
-### Distribution des ClaimClusters
-
-| Bucket | Nb clusters | % |
-|--------|-------------|---|
-| 1-5 claims | 1 084 | 94% |
-| 6-20 claims | 58 | 5% |
-| 21-50 claims | 3 | <1% |
-| 51-100 claims | 1 | <1% |
-| 100+ claims | 5 | <1% |
-
-**94% des clusters sont petits et sains** (1-5 claims). 5 méga-clusters (100+ claims) sont des artefacts de la dérive transitive du Union-Find.
-
-### Anatomie des claims sans structured_form
-
-| has_chain | has_entity | has_refines | Nb claims | Archivable ? |
-|-----------|-----------|-------------|-----------|-------------|
-| Non | Non | Non | 2 986 | **Oui — candidats prioritaires** |
-| Non | Oui | Non | 1 981 | Prudence — participent à ABOUT |
-| Non | Oui | Oui | 64 | Non — participent à REFINES |
-| Non | Non | Oui | 40 | Non — participent à REFINES |
+| Métrique | 5 docs (09/02) | 22 docs (13/02) | Évolution |
+|----------|----------------|-----------------|-----------|
+| Nodes | 22 800 | 63 147 | ×2.8 (sub-linéaire) |
+| Edges | 33 692 | 129 273 | ×3.8 |
+| Passage nodes | 6 220 | **0** | **Phase 1A appliquée** |
+| CONTRADICTS | 0 | 334 | **Phase 6 activée** |
+| REFINES | 892 | 4 631 | ×5.2 |
+| QUALIFIES | 222 | 38 173 | ×172 (explosion) |
+| CHAINS_TO | 1 882 | 4 862 | ×2.6 |
 
 ---
 
-## ⚠️ CHANTIER 0 — Rationalisation du graphe (BLOQUANT)
+## Bilan des chantiers — Ce qui est FAIT vs À FAIRE
 
-### Le problème
+### ✅ CHANTIER 0 Phase 1A — Passage → propriétés — **FAIT**
 
-**22 800 nodes pour 5 documents.** Projection naïve : **~2 millions de nodes pour 500 documents.**
+Les Passages sont stockés comme propriétés JSON sur les Claims (via `OSMOSE_SKIP_PASSAGE_PERSIST=true`, défaut). **0 nœuds Passage dans Neo4j**. L'evidence (verbatim + span) est préservée dans `passage_text`, `section_title`, `page_no`, etc.
 
-Problèmes concrets :
-1. **Performance** — Les traversées cross-doc deviennent coûteuses à grande échelle
-2. **Coût d'extraction** — Scale linéairement avec le nombre de claims
-3. **Bruit** — Claims unitaires ("Feature X NEW 1809") gonflent le graphe sans valeur
-4. **Visualisation** — Graphe illisible au-delà de ~50 000 nodes
+### ⬜ CHANTIER 0 Phase 1B — Archivage claims isolées — **À FAIRE**
 
-### Diagnostic consolidé
+Pas de logique d'archivage implémentée. Toutes les claims sont persistées indifféremment.
 
-#### Le ClaimClusterer est déjà sémantique (correction d'un diagnostic initial erroné)
+### ⬜ CHANTIER 0 Phase 2 — Assainissement clusters — **À FAIRE**
 
-Le `ClaimClusterer` (`src/knowbase/claimfirst/clustering/claim_clusterer.py`) fait un vrai clustering sémantique :
-- **Étage 1** : similarité cosinus sur embeddings (seuil 0.85 — conservateur)
-- **Étage 2** : validation stricte (mêmes entités, même modalité must/may, pas de négation inversée, overlap lexical minimum)
+Le `ClaimClusterer` n'a **aucun cap de taille** sur les clusters. Le Union-Find peut produire des méga-clusters non bornés. Pas de logique de split ni de recalcul d'intégrité.
 
-L'intention est explicite dans le code (INV-3) : *"Le cluster exprime : ces claims de différents docs disent la même chose."*
+- Avec 22 docs : 2 954 clusters, probablement ~13 clusters >100 claims
+- Le `claim_count` sur les propriétés peut être désynchronisé des edges réels
 
-**L'algorithme est bon. Le problème est l'exploitabilité, pas la sémantique.**
+### ⚠️ CHANTIER 0 Phase 3 — Entity Resolution — **PARTIELLEMENT FAIT**
 
-#### Les clusters sont déjà consommés par le query engine
+L'`EntityCanonicalizer` (Phase 2.5 du pipeline) fait déjà une canonicalisation LLM. Mais pas d'ER agressive (normalisation + lex_key + gating + fusion d'alias). Avec 22 329 entities, beaucoup de variantes existent ("SAP S/4HANA" vs "S/4HANA" vs "S4HANA").
 
-Investigation code : `intent_resolver.py` et `temporal_query_engine.py` traversent les clusters pour :
-- **Claims similaires cross-doc** : `claim → IN_CLUSTER → cluster ← IN_CLUSTER ← other claims`
-- **Évolution temporelle** : claims du cluster → documents datés → timeline
-- **Détection de dépréciations** : claims contenant "removed/deprecated" dans le même cluster
+### ✅ CHANTIER 2 — Détection CONTRADICTS — **FAIT (intra-cluster)**
 
-**Conséquence : les clusters ne sont pas dormants. Leur assainissement améliore directement la qualité des résultats de recherche actuels.**
+Le `RelationDetector` (Phase 6 du pipeline) détecte CONTRADICTS, REFINES et QUALIFIES automatiquement pendant l'import. **334 CONTRADICTS** trouvées. Fonctionne en intra-cluster (optimisation O(n²) → O(k²) par cluster).
 
-#### Les 3 vrais problèmes des clusters
+**Limite** : Pas de détection CONTRADICTS cross-cluster ni cross-doc explicite. Les contradictions ne sont trouvées que si les claims sont dans le même cluster.
 
-**1. Méga-clusters (dérive transitive du Union-Find)**
-- 5 clusters > 100 claims (total 1 322 claims)
-- Cause : A~B et B~C ⇒ A,B,C fusionnés même si A et C n'ont rien en commun
-- Impact : ces clusters "poubelles" polluent le temporal_query_engine et l'intent_resolver
+### ⚠️ CHANTIER 3 — Timeline / Evolution — **PARTIELLEMENT FAIT**
 
-**2. Intégrité incohérente**
-- Certains clusters affichent `claim_count=1513` mais n'ont que 418 edges IN_CLUSTER
-- Cause probable : résidus de purge/reimport, propriétés `claim_ids` désynchronisées
-- Règle : **la vérité = les edges, pas les propriétés**
+Le `VersionEvolutionDetector` est **construit et testé** (`composition/evolution_detector.py`), mais **NON intégré dans le pipeline orchestrateur**. Il :
+- Détecte les paires de versions adjacentes via `ComparableSubject` + `ApplicabilityAxis`
+- Compare les claims : UNCHANGED / MODIFIED / ADDED / REMOVED
+- Fingerprinting déterministe S|P|O
 
-**3. Couverture insuffisante**
-- 4 443 edges IN_CLUSTER pour 10 959 claims → **~40% de couverture seulement**
-- Les 60% restantes sont des singletons sans cluster
+**Ce qui manque** : intégration dans le pipeline OU persistence automatique des `EvolutionLink`.
+
+### ✅ CHANTIER 5 — Plus de documents — **FAIT**
+
+22 documents importés (vs 5 initiaux). 231 paires de documents possibles.
+
+### ⚠️ CHANTIER 6 — REFINES cross-doc — **FAIT (intra-cluster)**
+
+4 631 REFINES détectées automatiquement par le `RelationDetector`. Même limite que CONTRADICTS : intra-cluster uniquement.
 
 ---
 
-### Plan d'exécution en 3 phases
+## Nouveautés implémentées (session 2026-02-13)
 
-### Phase 1 — Réduction cardinalité immédiate (quick win, faible risque)
+### ✅ Track B — Domain Context Injection dans AxisDetector/Validator
 
-#### A. Passage → propriété
+- `AxisDetector._call_llm()` enrichit le system prompt via `DomainContextInjector`
+- `AxisValueValidator._call_llm()` idem
+- `tenant_id` propagé depuis l'orchestrateur
 
-Supprimer les 6 220 nodes Passage et les 10 959 edges SUPPORTED_BY. Migrer l'evidence dans un champ `Claim.evidence` (texte + localisation).
+### ✅ Track C — Champ `versioning_hints` dans DomainContextProfile
 
-Gestion des Passages partagés (23%) :
-- **Option simple** : duplication contrôlée de l'evidence sur chaque claim liée
-- **Option avancée** : `evidence_key` + dédup externe
+Nouveau champ `versioning_hints` (texte libre, 500 chars max) ajouté sur toute la pile :
+- Modèle Pydantic + sérialisation Neo4j
+- Colonne PostgreSQL
+- Store (save/get/list)
+- API schemas (Create, Response, Preview)
+- API router (create, get, preview, prompt generation)
+- Injecteur : section "Versioning conventions" dans `[DOMAIN CONTEXT]`
 
-#### B. Archivage safe des claims isolées
+### ✅ Track B1 — Fix re-persistence axes ordonnés
 
-Archiver uniquement les claims **totalement isolées** (~2 986) :
-- `structured_form IS NULL`
-- ET `degree(CHAINS_TO) = 0`
-- ET `degree(ABOUT) = 0`
-- ET `degree(REFINES) = 0`
+L'orchestrateur propage désormais les axes re-inférés (post-merge cache) dans `detected_axes` pour persistence. Les axes `is_orderable=True` ne sont plus perdus.
 
-Marquage `archived: true`, exclusion des traversées par défaut, accessibles en mode verbose.
+### ✅ Batch persistence (claim_persister.py)
 
-**Gain attendu Phase 1 : ~40% de réduction** (6 220 Passage nodes + ~2 986 claims archivées = ~9 200 nodes en moins).
+Remplacement des appels Neo4j 1-par-1 par UNWIND batch pour passages, claims, entities, relations. ~90% de round-trips en moins (non commité).
 
-| Métrique | Avant | Après Phase 1 |
-|----------|-------|---------------|
-| Nodes | 22 800 | ~13 600 |
-| Edges | 33 692 | ~22 700 |
+### ✅ Nettoyage dead code
 
----
-
-### Phase 2-lite — Assainissement clusters (améliore le query engine existant)
-
-**Ce n'est pas un "nice to have" futur — c'est une action de qualité immédiate** puisque les clusters sont déjà consommés par `intent_resolver.py` et `temporal_query_engine.py`.
-
-#### A. Intégrité
-- Recalculer `claim_count` et `claim_ids` depuis les edges IN_CLUSTER réels
-- Éliminer les propriétés incohérentes
-
-#### B. Casser les méga-clusters
-- Cap de taille (ex. 20 claims max)
-- Ou vérification de cohésion par rapport au centroïde (chaque claim doit rester proche du centre)
-- Split en sous-clusters si hétérogénéité détectée
-
-#### C. Couverture
-- Stratégie pour les singletons : soit clusters singletons, soit fallback claim-level documenté et explicite
-
-#### D. Labels de navigation
-- Ajouter `cluster_title` / `cluster_summary` pour remplacer le `canonical_label` actuel (texte tronqué de la meilleure claim)
+Suppression de `_get_domain_context_prompt()` (appelait `store.get_active_context()` inexistant).
 
 ---
 
-### Phase 3 — Entity Resolution agressive (win-win : cardinalité + qualité)
+## 🎯 UPGRADES À IMPLÉMENTER AVANT RÉIMPORT
 
-- **4 417 entities** dont beaucoup de variantes : "SAP S/4HANA", "S/4HANA", "S4HANA", "SAP S/4HANA Cloud"
-- ER pragmatique orientée alias : normalisation + lex_key + gating
-- Objectif : ~1 500-2 000 entities post-ER
-- Ce levier **améliore aussi** le cross-doc (plus de partage d'entities entre documents) et la pertinence des résultats
+Le réimport des 22 documents prend ~6 heures. Chaque upgrade implémenté maintenant sera appliqué à l'ensemble du corpus. Voici la liste exhaustive priorisée.
 
 ---
 
-### Cibles de rationalisation
+### PRIORITÉ 1 — Qualité d'extraction (impact direct sur toutes les claims)
 
-| Métrique | Actuel (5 docs) | Post Phase 1 | Post Phase 3 | Projection 500 docs |
-|----------|-----------------|--------------|--------------|---------------------|
-| Claims actives | 10 959 | ~7 970 | ~7 000 | ~400 000 |
-| Passages | 6 220 | 0 (propriétés) | 0 | 0 |
-| Entities | 4 417 | 4 417 | ~1 500-2 000 | ~50 000 |
-| ClaimClusters | 1 151 | 1 151 | ~1 000 | ~100 000 |
-| **TOTAL NODES** | **22 800** | **~13 600** | **~9 500** | **~550 000** |
-| **Réduction** | — | **40%** | **~58%** | **~73% vs naïf** |
+#### 1.1 Filtres qualité post-extraction des claims
+
+**Problème** : L'audit qualité (`AUDIT_QUALITE_CLAIMS_V1.6.md`) identifie ~13% de bruit dans les claims :
+- Fragments < 30 chars ("You can also use the", "Refer to the SAP Notes")
+- Claims commençant par "You can" (instructions génériques, pas des claims techniques)
+- Boilerplate (copyright, disclaimers, "See SAP Note XXXX")
+- Claims tronquées/incomplètes
+
+**Implémentation** : Ajouter des filtres post-extraction dans le pipeline (Phase 1.5 ou nouveau Phase 1.6) :
+- `min_claim_length` : 30 chars (vs 10 actuellement)
+- Blacklist de patterns boilerplate : "Refer to SAP Note", "See the following", "You can also"
+- Détection de fragments : claims sans verbe principal
+- Flag `quality_score` ou `is_noise` sur la Claim
+
+**Fichiers** : `claim_extractor.py`, nouveau `claim_quality_filter.py`
+**Complexité** : Faible — filtrage déterministe, pas de LLM
+
+#### 1.2 Resserrer les limites des noms d'entities
+
+**Problème** : `max_entity_length = 60` chars laisse passer des noms trop longs qui sont en fait des phrases. Exemples : "SAP S/4HANA Cloud Private Edition with Intelligent Scenario Planning"
+
+**Implémentation** :
+- Baisser `max_entity_length` de 60 → 40 chars
+- Ajouter filtre "that/which" explicite (actuellement indirect via PHRASE_FRAGMENT_INDICATORS)
+- Ajouter "and", "or", "including" aux indicateurs de fragments
+
+**Fichiers** : `entity_extractor.py` (L91, L314-348)
+**Complexité** : Triviale
+
+#### 1.3 Améliorer le prompt d'extraction V2
+
+**Problème** : Le ratio structured_form est ~53%. Les claims sans SF sont des impasses.
+
+**Implémentation** :
+- Renforcer la consigne S/P/O dans le prompt d'extraction
+- Ajouter des exemples few-shot pour les cas ambigus (titres de section, bullet points)
+- Option : fallback extraction S/P/O pour les claims qui n'en ont pas après Phase 1
+
+**Fichiers** : `claim_extractor.py`, `config/prompts.yaml` si externalisé
+**Complexité** : Moyenne — itération sur le prompt LLM
 
 ---
 
-### Invariants non négociables
+### PRIORITÉ 2 — Cardinalité et structure du graphe
+
+#### 2.1 Cap de taille sur les clusters (mega-cluster breaking)
+
+**Problème** : Le Union-Find peut produire des clusters arbitrairement grands via dérive transitive. Ces méga-clusters polluent le query engine.
+
+**Implémentation** :
+- Ajouter `MAX_CLUSTER_SIZE = 20` dans `ClaimClusterer`
+- Après Union-Find : si cluster > cap, split par re-clustering (k-means sur embeddings du cluster)
+- Recalculer `claim_count` et `claim_ids` depuis les edges réels
+
+**Fichiers** : `claim_clusterer.py` (L264-326)
+**Complexité** : Moyenne — algorithme de split à concevoir
+
+#### 2.2 Archivage des claims isolées (Chantier 0 Phase 1B)
+
+**Problème** : Des milliers de claims sans structured_form, sans entity, sans relation — pur bruit.
+
+**Implémentation** :
+- Ajouter propriété `archived: true` aux claims isolées
+- Critères : `structured_form IS NULL AND degree(ABOUT)=0 AND degree(CHAINS_TO)=0 AND degree(REFINES)=0`
+- Exclure des traversées par défaut dans le query engine
+- Mode verbose pour les inclure si besoin
+
+**Fichiers** : `claim_persister.py` (post-persist flag), query engine (filter)
+**Complexité** : Faible
+
+#### 2.3 Nettoyage du répertoire doublé `composition/composition/`
+
+**Problème** : `src/knowbase/claimfirst/composition/composition/` contient une vieille version du `chain_detector.py` (intra-doc only). Non importé, stale.
+
+**Implémentation** : Supprimer le répertoire.
+**Complexité** : Triviale
+
+---
+
+### PRIORITÉ 3 — Détection d'évolution temporelle (promesse OSMOSE)
+
+#### 3.1 Intégrer EvolutionDetector dans le pipeline OU post-import automatique
+
+**Problème** : `VersionEvolutionDetector` est construit et testé mais n'est appelé que via script offline. Après un réimport, il faut relancer manuellement.
+
+**Options** :
+- **Option A** : Intégrer comme Phase 6.7 dans l'orchestrateur (après relations, avant persist)
+  - Pro : automatique à chaque import
+  - Con : nécessite tous les docs chargés en mémoire pour comparer
+- **Option B** : Script post-import automatique (déclenché par hook ou endpoint API)
+  - Pro : simple, découplé
+  - Con : pas intégré au pipeline
+
+**Fichiers** : `orchestrator.py` ou nouveau script/endpoint
+**Complexité** : Moyenne (option A) / Faible (option B)
+
+#### 3.2 Persistence des EvolutionLink dans Neo4j
+
+**Problème** : Le détecteur produit des `EvolutionLink` (UNCHANGED/MODIFIED/ADDED/REMOVED) mais il n'y a pas de persistence automatique. Seul le script offline persiste.
+
+**Implémentation** :
+- Ajouter `_persist_evolution_links()` au `ClaimPersister`
+- Relation EVOLVES_TO avec propriétés : `evolution_type`, `old_object_raw`, `new_object_raw`
+- Ou : réutiliser CHAINS_TO avec `method=version_evolution`
+
+**Fichiers** : `claim_persister.py`, `evolution_detector.py`
+**Complexité** : Faible
+
+#### 3.3 Fix des axes pour la détection d'évolution
+
+**Problème** : Le script `fix_axis_ordering.py` corrige les axes `is_orderable=False`. Après réimport, le fix B1 (re-persistence) devrait résoudre ça. Mais le `release_id` axis avec valeurs hétérogènes (semver+YYMM+SP+Edition) nécessite `versioning_hints` configuré.
+
+**État** : versioning_hints déjà configuré via API pour le tenant "default". Le fix B1 est en place.
+
+**Action** : Vérifier après réimport que les axes sont bien `is_orderable=True`.
+**Complexité** : Validation seulement
+
+---
+
+### PRIORITÉ 4 — Cross-doc enrichi
+
+#### 4.1 Cross-doc chain detection dans le pipeline
+
+**Problème** : `ChainDetector.detect_cross_doc()` existe mais n'est pas appelé par le pipeline. Seul `detect()` (intra-doc) est appelé en Phase 6.5. Le cross-doc ne fonctionne que via le script offline.
+
+**Implémentation** :
+- Appeler `chain_detector.detect_cross_doc()` dans l'orchestrateur après Phase 6.5
+- Nécessite accès aux claims des documents déjà importés (Neo4j query)
+- Alternative : le garder en post-import script mais le déclencher automatiquement
+
+**Fichiers** : `orchestrator.py` (Phase 6.5+)
+**Complexité** : Moyenne — gestion du contexte multi-doc
+
+#### 4.2 CONTRADICTS et REFINES cross-cluster
+
+**Problème** : La détection actuelle est limitée aux paires intra-cluster. Des contradictions entre clusters différents ne sont pas détectées.
+
+**Implémentation** : Étendre RelationDetector avec un mode cross-cluster basé sur :
+- Mêmes entities (join par Entity node)
+- Structured forms avec même subject+predicate, objects divergents
+
+**Fichiers** : `relation_detector.py`
+**Complexité** : Élevée — explosion combinatoire à maîtriser
+
+---
+
+### PRIORITÉ 5 — Améliorations secondaires
+
+#### 5.1 Labels de navigation pour clusters
+
+Ajouter `cluster_title` / `cluster_summary` (LLM-generated) pour remplacer le `canonical_label` actuel.
+
+#### 5.2 Enrichissement slot (Phase 1.7 existante)
+
+La Phase 1.7 "Slot Enrichment" existe déjà dans le pipeline. Vérifier son efficacité sur le corpus de 22 docs.
+
+#### 5.3 Entity Resolution agressive (Chantier 0 Phase 3)
+
+ER avec normalisation + lex_key + gating pour fusionner les variantes ("SAP S/4HANA" / "S/4HANA" / "S4HANA"). Objectif : réduire de 22 329 → ~10 000 entities.
+
+---
+
+## Recommandation pour le réimport
+
+### Implémenter AVANT le réimport (gain maximal / effort minimal)
+
+| # | Upgrade | Impact | Effort | Priorité |
+|---|---------|--------|--------|----------|
+| 1 | Filtres qualité claims (1.1) | Élimine ~13% de bruit | Faible | **P1** |
+| 2 | Resserrer entity names (1.2) | Moins d'entities-phrases | Trivial | **P1** |
+| 3 | Cap mega-clusters (2.1) | Clusters exploitables | Moyen | **P2** |
+| 4 | Supprimer composition/composition/ (2.3) | Nettoyage | Trivial | **P2** |
+| 5 | Commiter les 3 fichiers modifiés | Préservation | Trivial | **P0** |
+
+### Implémenter PENDANT ou juste APRÈS le réimport
+
+| # | Upgrade | Impact | Effort | Priorité |
+|---|---------|--------|--------|----------|
+| 6 | Script post-import evolution (3.1-B) | Evolution temporelle | Faible | **P3** |
+| 7 | Script post-import cross-doc chains | Chaînes cross-doc | Faible | **P3** |
+| 8 | Archivage claims isolées (2.2) | Réduction bruit | Faible | **P2** |
+
+### Reporter (hors scope réimport)
+
+| # | Upgrade | Raison du report |
+|---|---------|-----------------|
+| 9 | CONTRADICTS cross-cluster (4.2) | Complexité élevée, nécessite conception |
+| 10 | ER agressive (5.3) | Chantier majeur, mérite sa propre itération |
+| 11 | Hybride RAG+KG (Chantier 1) | Chantier produit, pas un upgrade pipeline |
+| 12 | Labels clusters (5.1) | Nice-to-have, pas de valeur ajoutée pour l'import |
+
+---
+
+## Invariants non négociables
 
 1. **Aucune perte de preuve** : claim → evidence exacte (verbatim + span) doit rester possible
 2. **Aucune dégradation des requêtes existantes** : query engine, temporal, intent resolver
@@ -213,142 +335,16 @@ Marquage `archived: true`, exclusion des traversées par défaut, accessibles en
 
 ---
 
-## Chantier 1 — Couche d'exploitation hybride RAG + KG
-
-### Objectif
-Permettre à un utilisateur de poser une question en langage naturel et recevoir une réponse qui combine le RAG (réponse directe) et le KG (connaissance transversale).
-
-### Approche envisagée
-1. L'utilisateur pose une question
-2. **Branche RAG** : recherche vectorielle Qdrant → top-k chunks
-3. **Branche KG** : extraction d'entités de la question → résolution vers Entity nodes → traversée CHAINS_TO (2-3 hops) → claims atteintes
-4. **Fusion** : les deux ensembles de contexte sont combinés et passés au LLM pour synthèse
-5. **Réponse** : le LLM cite ses sources (chunks RAG + chaînes KG)
-
-### Valeur
-C'est ce qui transforme le PoC en produit. Sans ça, le KG reste un bel objet technique que seul un développeur Cypher peut interroger.
-
-### Prérequis
-- Chantier 0 Phase 1 minimum (traversées performantes)
-- Un endpoint API qui orchestre les deux branches
-
-### Preuve de concept existante
-- Comparaison RAG vs KG documentée : `doc/ongoing/COMPARAISON_RAG_VS_KG_CROSS_DOC.md`
-- RAG : 0/40 pertinents sur questions transversales cross-doc
-- KG : ~15/15 pertinents avec chaînes complètes sur 3 documents
-
----
-
-## Chantier 2 — Détection CONTRADICTS cross-doc
-
-### Objectif
-Détecter les contradictions entre documents — cas critique pour la fiabilité des réponses RFP.
-
-### Exemples concrets attendus
-- Doc 1809 : *"Feature X is available"* → Doc 2023 : *"Feature X has been deprecated"*
-- Doc scope : *"Supports up to 10 000 users"* → Doc ops : *"Recommended for up to 5 000 users"*
-
-### Approche envisagée
-1. **Phase déterministe** : mêmes subject+object, prédicats contradictoires (USES/REPLACES, ENABLES/REQUIRES)
-2. **Phase LLM** : passer les paires ambiguës au LLM avec prompt de détection
-3. **Relation CONTRADICTS** avec propriétés de traçabilité
-
-### Prérequis
-- Chantier 0 pour réduire le nombre de paires à comparer
-- Structured_form sur un maximum de claims
-
----
-
-## Chantier 3 — Timeline / Evolution Tracker
-
-### Objectif
-Matérialiser la dimension temporelle — comment les features évoluent entre versions de documents.
-
-### Données disponibles
-4 millésimes : 1809 → 2021 → 2023 → 2025. Les CHAINS_TO cross-doc relient déjà des claims entre versions mais sans notion d'ordre temporel.
-
-### Approche envisagée
-1. **Attribut `doc_date` ou `doc_version`** sur les DocumentContext
-2. **Relation SUPERSEDES** : claim récente affine/remplace claim ancienne
-3. **Vue timeline** : pour une entity, afficher l'évolution chronologique
-
-### Valeur
-Promesse originale OSMOSE ("CRR Evolution Tracker"). *"Le Material Ledger était optionnel en 1809, intégré en 2023, et inclus dans PCE en 2025."*
-
----
-
-## Chantier 4 — Enrichissement des structured_forms manquantes
-
-### Objectif
-Passer de 53.7% à 80%+ de claims avec structured_form.
-
-### Situation actuelle
-- 5 888 / 10 959 claims ont une SF (53.7%)
-- Les 46% restantes sont des impasses dans le graphe
-- Beaucoup sont des titres de section, bullet points courts, ou phrases complexes
-
-### Approche envisagée
-- Prompt V3 plus agressif pour l'extraction S/P/O
-- Pass de ré-extraction ciblé sur les claims sans SF
-- Ou : archivage des claims non-structurables (cf. Chantier 0 Phase 1B)
-
----
-
-## Chantier 5 — Ingestion de documents supplémentaires
-
-### Objectif
-Passer de 5 à 20+ documents pour augmenter la valeur cross-doc.
-
-### Impact attendu
-Valeur cross-doc **quadratique** : 5 docs = 10 paires, 20 docs = 190 paires.
-
-### Prérequis
-- Chantier 0 IMPÉRATIF avant de scale
-- Pipeline d'ingestion optimisé pour batch
-
----
-
-## Chantier 6 — Détection REFINES cross-doc
-
-### Objectif
-Détecter quand une claim d'un document précise/détaille une claim d'un autre.
-
-### Exemple
-- Doc A : *"S/4HANA supports asset management"*
-- Doc B : *"S/4HANA supports asset management with predictive maintenance, IoT integration, and mobile work orders"*
-
-### Note
-892 REFINES intra-doc existent déjà. L'extension cross-doc suivrait le pattern CHAINS_TO cross-doc.
-
----
-
-## Ordre de priorité
-
-```
-Chantier 0 — Rationalisation du graphe          ████████████ BLOQUANT
-  Phase 1 : Passage→propriété + archivage         → gain 40%
-  Phase 2 : Assainir clusters                      → qualité query engine
-  Phase 3 : ER agressive                           → gain 58% + qualité
-    ↓
-Chantier 1 — Hybride RAG + KG                   ████████████ PRODUIT
-    ↓
-Chantier 5 — Plus de documents                   ████████░░░░ SCALE
-    ↓
-Chantier 2 — CONTRADICTS                         ███████░░░░░ VALEUR MÉTIER
-Chantier 3 — Timeline                            ███████░░░░░ PROMESSE OSMOSE
-    ↓
-Chantier 4 — Enrichissement SF                   ██████░░░░░░ DENSIFICATION
-Chantier 6 — REFINES cross-doc                   █████░░░░░░░ PRÉCISION
-```
-
----
-
 ## Références
 
-- Comparaison RAG vs KG : `doc/ongoing/COMPARAISON_RAG_VS_KG_CROSS_DOC.md`
+- Audit qualité claims : `doc/ongoing/AUDIT_QUALITE_CLAIMS_V1.6.md`
 - ClaimClusterer : `src/knowbase/claimfirst/clustering/claim_clusterer.py`
-- Query engine (consomme clusters) : `src/knowbase/claimfirst/query/intent_resolver.py`, `temporal_query_engine.py`
-- Implémentation cross-doc : `src/knowbase/claimfirst/composition/chain_detector.py`
-- Script cross-doc : `app/scripts/detect_cross_doc_chains.py`
+- Query engine : `src/knowbase/claimfirst/query/intent_resolver.py`, `temporal_query_engine.py`
+- ChainDetector : `src/knowbase/claimfirst/composition/chain_detector.py`
+- EvolutionDetector : `src/knowbase/claimfirst/composition/evolution_detector.py`
+- RelationDetector : `src/knowbase/claimfirst/clustering/relation_detector.py`
+- Script fix axes : `app/scripts/fix_axis_ordering.py`
+- Script evolution : `app/scripts/detect_version_evolution.py`
+- Script cross-doc chains : `app/scripts/detect_cross_doc_chains.py`
 - Tests cross-doc : `tests/claimfirst/test_chain_detector_cross_doc.py` (32 tests)
-- Tests intra-doc : `tests/claimfirst/test_chain_detector.py` (24 tests)
+- Tests evolution : `tests/claimfirst/test_evolution_detector.py`

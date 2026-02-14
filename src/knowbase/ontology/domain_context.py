@@ -88,6 +88,25 @@ class DomainContextProfile(BaseModel):
         description="Concepts clés du domaine à reconnaître prioritairement"
     )
 
+    versioning_hints: str = Field(
+        default="",
+        description="Conventions de versioning spécifiques au domaine (texte libre, max 500 chars)",
+        max_length=500,
+    )
+
+    identification_semantics: str = Field(
+        default="",
+        description=(
+            "How to identify what constitutes a version, release, year, or other identifier "
+            "in this domain. Use structured rules for clarity:\n"
+            "  Rule: <pattern> → <interpretation>\n"
+            "  Counter-example: <pattern> → <NOT this>\n"
+            "Example: 'Rule: 4-digit number after product name → release_id. "
+            "Counter-example: 4-digit in copyright line → NOT release_id.'"
+        ),
+        max_length=1000,
+    )
+
     context_priority: Literal["low", "medium", "high"] = Field(
         default="medium",
         description="Priorité injection contexte dans prompts LLM"
@@ -149,6 +168,8 @@ class DomainContextProfile(BaseModel):
             "document_types": json.dumps(self.document_types),
             "common_acronyms": json.dumps(self.common_acronyms),
             "key_concepts": json.dumps(self.key_concepts),
+            "versioning_hints": self.versioning_hints,
+            "identification_semantics": self.identification_semantics,
             "context_priority": self.context_priority,
             "llm_injection_prompt": self.llm_injection_prompt,
             "created_at": self.created_at.isoformat(),
@@ -177,6 +198,8 @@ class DomainContextProfile(BaseModel):
             document_types=json.loads(props.get("document_types", "[]")),
             common_acronyms=json.loads(props.get("common_acronyms", "{}")),
             key_concepts=json.loads(props.get("key_concepts", "[]")),
+            versioning_hints=props.get("versioning_hints", ""),
+            identification_semantics=props.get("identification_semantics", ""),
             context_priority=props.get("context_priority", "medium"),
             llm_injection_prompt=props["llm_injection_prompt"],
             created_at=datetime.fromisoformat(props["created_at"]),
@@ -206,6 +229,11 @@ class DomainContextProfile(BaseModel):
                     "Business Technology Platform"
                 ],
                 "context_priority": "high",
+                "identification_semantics": (
+                    "Rule: 4-digit number after product name (e.g. S/4HANA 2023) → release_id. "
+                    "Rule: FPS + number → patch level. "
+                    "Counter-example: 4-digit in copyright line → NOT release_id."
+                ),
                 "llm_injection_prompt": "You are analyzing documents from SAP enterprise software ecosystem. Common products include S/4HANA (ERP), SuccessFactors (HCM), SAP Analytics Cloud (BI), and Business Technology Platform (integration). When you see acronyms like SAC, BTP, SF, or HCM, interpret them in this SAP context unless context clearly suggests otherwise."
             }
         }

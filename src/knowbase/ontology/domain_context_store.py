@@ -77,6 +77,8 @@ class DomainContextStore:
                 existing.key_concepts = json.dumps(profile.key_concepts)
                 existing.context_priority = profile.context_priority
                 existing.llm_injection_prompt = profile.llm_injection_prompt
+                existing.versioning_hints = profile.versioning_hints
+                existing.identification_semantics = profile.identification_semantics
                 # updated_at is auto-updated by SQLAlchemy
             else:
                 # Insert
@@ -91,6 +93,8 @@ class DomainContextStore:
                     key_concepts=json.dumps(profile.key_concepts),
                     context_priority=profile.context_priority,
                     llm_injection_prompt=profile.llm_injection_prompt,
+                    versioning_hints=profile.versioning_hints,
+                    identification_semantics=profile.identification_semantics,
                 )
                 session.add(new_context)
 
@@ -146,6 +150,8 @@ class DomainContextStore:
                 key_concepts=json.loads(record.key_concepts or "[]"),
                 context_priority=record.context_priority or "medium",
                 llm_injection_prompt=record.llm_injection_prompt,
+                versioning_hints=getattr(record, 'versioning_hints', '') or "",
+                identification_semantics=getattr(record, 'identification_semantics', '') or "",
                 created_at=record.created_at,
                 updated_at=record.updated_at,
             )
@@ -230,6 +236,8 @@ class DomainContextStore:
                     key_concepts=json.loads(record.key_concepts or "[]"),
                     context_priority=record.context_priority or "medium",
                     llm_injection_prompt=record.llm_injection_prompt,
+                    versioning_hints=getattr(record, 'versioning_hints', '') or "",
+                    identification_semantics=getattr(record, 'identification_semantics', '') or "",
                     created_at=record.created_at,
                     updated_at=record.updated_at,
                 )

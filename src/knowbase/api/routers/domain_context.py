@@ -178,7 +178,9 @@ def _generate_prompt_via_llm(
     sub_domains: list,
     key_concepts: list,
     common_acronyms: dict,
-    context_priority: str
+    context_priority: str,
+    versioning_hints: str = "",
+    identification_semantics: str = "",
 ) -> str:
     """
     Utilise un LLM pour générer un prompt d'injection structuré et intelligent.
@@ -213,8 +215,14 @@ def _generate_prompt_via_llm(
         "business_summary": domain_summary,
         "sub_domains": sub_domains,
         "key_concepts": key_concepts,
-        "acronyms": common_acronyms
+        "acronyms": common_acronyms,
     }
+    if versioning_hints:
+        domain_data["versioning_hints"] = versioning_hints
+    # identification_semantics est passé en paramètre mais injecté directement
+    # dans le DomainContextInjector, pas dans le prompt de génération LLM
+    if identification_semantics:
+        domain_data["identification_semantics"] = identification_semantics
 
     system_prompt = """You are an expert prompt engineer. Your task is to generate a DOMAIN CONTEXT prompt that will be injected into other LLM prompts to help them better understand and process domain-specific documents.
 
@@ -299,7 +307,9 @@ def _generate_llm_injection_prompt(
     common_acronyms: dict,
     key_concepts: list,
     context_priority: str,
-    auto_translate: bool = True
+    auto_translate: bool = True,
+    versioning_hints: str = "",
+    identification_semantics: str = "",
 ) -> tuple[str, bool]:
     """
     Génère le prompt d'injection LLM à partir des paramètres.
@@ -370,7 +380,9 @@ def _generate_llm_injection_prompt(
         sub_domains=sub_domains,
         key_concepts=key_concepts,
         common_acronyms=common_acronyms,
-        context_priority=context_priority
+        context_priority=context_priority,
+        versioning_hints=versioning_hints,
+        identification_semantics=identification_semantics,
     )
 
     return prompt, was_translated
@@ -409,6 +421,8 @@ async def get_domain_context():
             common_acronyms=profile.common_acronyms,
             key_concepts=profile.key_concepts,
             context_priority=profile.context_priority,
+            versioning_hints=profile.versioning_hints,
+            identification_semantics=profile.identification_semantics,
             llm_injection_prompt=profile.llm_injection_prompt,
             created_at=profile.created_at,
             updated_at=profile.updated_at,
@@ -442,7 +456,9 @@ async def create_or_update_domain_context(data: DomainContextCreate):
             common_acronyms=data.common_acronyms,
             key_concepts=data.key_concepts,
             context_priority=data.context_priority,
-            auto_translate=True
+            auto_translate=True,
+            versioning_hints=data.versioning_hints,
+            identification_semantics=data.identification_semantics,
         )
 
         if was_translated:
@@ -460,6 +476,8 @@ async def create_or_update_domain_context(data: DomainContextCreate):
             common_acronyms=data.common_acronyms,
             key_concepts=data.key_concepts,
             context_priority=data.context_priority,
+            versioning_hints=data.versioning_hints,
+            identification_semantics=data.identification_semantics,
             llm_injection_prompt=llm_injection_prompt,
             created_at=now,
             updated_at=now,
@@ -481,6 +499,8 @@ async def create_or_update_domain_context(data: DomainContextCreate):
             common_acronyms=profile.common_acronyms,
             key_concepts=profile.key_concepts,
             context_priority=profile.context_priority,
+            versioning_hints=profile.versioning_hints,
+            identification_semantics=profile.identification_semantics,
             llm_injection_prompt=profile.llm_injection_prompt,
             created_at=profile.created_at,
             updated_at=profile.updated_at,
@@ -545,7 +565,9 @@ async def preview_injection_prompt(data: DomainContextPreviewRequest):
         common_acronyms=data.common_acronyms,
         key_concepts=data.key_concepts,
         context_priority=data.context_priority,
-        auto_translate=True
+        auto_translate=True,
+        versioning_hints=data.versioning_hints,
+        identification_semantics=data.identification_semantics,
     )
 
     if was_translated:

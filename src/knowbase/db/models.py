@@ -1005,6 +1005,20 @@ class DomainContext(Base):
         comment="Texte prêt pour injection dans prompts système LLM"
     )
 
+    versioning_hints = Column(
+        Text,
+        nullable=True,
+        default="",
+        comment="Conventions de versioning spécifiques au domaine (texte libre)"
+    )
+
+    identification_semantics = Column(
+        Text,
+        nullable=True,
+        default="",
+        comment="Règles d'identification sémantique des valeurs ambiguës (release_id vs year, etc.)"
+    )
+
     # Timestamps
     created_at = Column(
         DateTime(timezone=True),

@@ -117,6 +117,18 @@ Common acronyms in this domain:
 Key concepts to recognize:
 {concepts_text}"""
 
+        if getattr(profile, 'versioning_hints', '') and profile.versioning_hints.strip():
+            section += f"""
+
+Versioning conventions for this domain:
+{profile.versioning_hints}"""
+
+        if getattr(profile, 'identification_semantics', '') and profile.identification_semantics.strip():
+            section += f"""
+
+Identification semantics for this domain:
+{profile.identification_semantics}"""
+
         section += """
 [END DOMAIN CONTEXT]"""
 

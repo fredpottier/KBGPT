@@ -357,13 +357,14 @@ class TestExtractBootstrapQualifiers:
         assert "edition" in qualifiers
         assert "Enterprise" in qualifiers["edition"]
 
-    def test_extracts_year(self):
-        """Test extraction de l'année."""
+    def test_year_not_in_bootstrap(self):
+        """year retiré du bootstrap — trop ambigu sans LLM (géré par applicability frame)."""
         text = "Document published in 2024 for the new platform."
         qualifiers = extract_bootstrap_qualifiers(text)
 
-        assert "year" in qualifiers
-        assert qualifiers["year"] == "2024"
+        # "year" ne fait plus partie des BOOTSTRAP_QUALIFIERS
+        # (un 4-digit peut être version, année, quantité, nom commercial...)
+        assert "year" not in qualifiers
 
 
 class TestResolutionStatus:

@@ -278,12 +278,23 @@ IMPORTANT: Réponds UNIQUEMENT avec le JSON, sans texte avant ou après."""
             return False
 
     def _call_llm(self, prompt: str) -> str:
-        """Appelle le LLM via le router."""
+        """Appelle le LLM via le router, enrichi du contexte métier."""
         from knowbase.common.llm_router import get_llm_router, TaskType
+        from knowbase.ontology.domain_context_injector import get_domain_context_injector
+
+        system_prompt = "You are an expert in document versioning axis detection."
+
+        if self.tenant_id:
+            try:
+                injector = get_domain_context_injector()
+                system_prompt = injector.inject_context(system_prompt, self.tenant_id)
+            except Exception as e:
+                logger.warning(f"[OSMOSE:AxisDetector] Domain context injection failed: {e}")
 
         router = get_llm_router()
         messages = [
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
         ]
         response = router.complete(
             task_type=TaskType.FAST_CLASSIFICATION,

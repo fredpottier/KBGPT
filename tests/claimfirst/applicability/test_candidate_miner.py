@@ -31,7 +31,7 @@ class TestCandidateMiner:
         """Extrait les années."""
         units = [_make_unit("This document covers features for 2023.")]
         profile = self.miner.mine(units, "doc1")
-        years = profile.get_candidates_by_type("year")
+        years = profile.get_candidates_by_type("numeric_identifier")
         assert len(years) == 1
         assert years[0].raw_value == "2023"
 
@@ -39,7 +39,7 @@ class TestCandidateMiner:
         """Filtre les années dans un contexte copyright."""
         units = [_make_unit("Copyright © 2019 SAP SE. All rights reserved.")]
         profile = self.miner.mine(units, "doc1")
-        years = profile.get_candidates_by_type("year")
+        years = profile.get_candidates_by_type("numeric_identifier")
         assert len(years) == 0
 
     def test_extract_version(self):
@@ -65,7 +65,7 @@ class TestCandidateMiner:
             _make_unit("See the 2023 documentation for details.", p_idx=2, s_idx=0),
         ]
         profile = self.miner.mine(units, "doc1")
-        years = profile.get_candidates_by_type("year")
+        years = profile.get_candidates_by_type("numeric_identifier")
         year_2023 = next((y for y in years if y.raw_value == "2023"), None)
         assert year_2023 is not None
         assert year_2023.frequency == 3
@@ -74,7 +74,7 @@ class TestCandidateMiner:
         """Détecte les valeurs présentes dans le titre."""
         units = [_make_unit("This document covers 2023 features.")]
         profile = self.miner.mine(units, "doc1", title="Product Guide 2023")
-        years = profile.get_candidates_by_type("year")
+        years = profile.get_candidates_by_type("numeric_identifier")
         year_2023 = next((y for y in years if y.raw_value == "2023"), None)
         assert year_2023 is not None
         assert year_2023.in_title is True
@@ -86,7 +86,7 @@ class TestCandidateMiner:
             _make_unit("Some content.", p_idx=50, s_idx=0),
         ]
         profile = self.miner.mine(units, "doc1")
-        years = profile.get_candidates_by_type("year")
+        years = profile.get_candidates_by_type("numeric_identifier")
         year_2023 = next((y for y in years if y.raw_value == "2023"), None)
         assert year_2023 is not None
         assert year_2023.in_header_zone is True
@@ -95,7 +95,7 @@ class TestCandidateMiner:
         """Détecte la co-occurrence avec le primary_subject."""
         units = [_make_unit("S/4HANA 2023 includes new features.")]
         profile = self.miner.mine(units, "doc1", primary_subject="S/4HANA")
-        years = profile.get_candidates_by_type("year")
+        years = profile.get_candidates_by_type("numeric_identifier")
         year_2023 = next((y for y in years if y.raw_value == "2023"), None)
         assert year_2023 is not None
         assert year_2023.cooccurs_with_subject is True
@@ -122,7 +122,7 @@ class TestCandidateMiner:
         """Extrait les snippets de contexte."""
         units = [_make_unit("The document covers 2023 features and updates.")]
         profile = self.miner.mine(units, "doc1")
-        years = profile.get_candidates_by_type("year")
+        years = profile.get_candidates_by_type("numeric_identifier")
         year_2023 = next((y for y in years if y.raw_value == "2023"), None)
         assert year_2023 is not None
         assert len(year_2023.context_snippets) >= 1
@@ -161,6 +161,32 @@ class TestCandidateMiner:
         assert "Version 2023" in values
         assert "FPS 01" in values
         assert "SP 12" in values
+
+    def test_ip_addresses_filtered_out(self):
+        """Les adresses IP ne sont pas extraites comme versions."""
+        units = [
+            _make_unit("Configure the server at 0.0.0.0 for all interfaces.", p_idx=0, s_idx=0),
+            _make_unit("Example IP: 123.456.789.0 is used for testing.", p_idx=1, s_idx=0),
+            _make_unit("The proxy address is 192.168.1.1 on the network.", p_idx=2, s_idx=0),
+        ]
+        profile = self.miner.mine(units, "doc1")
+        versions = profile.get_candidates_by_type("version")
+        version_values = {v.raw_value for v in versions}
+        assert "0.0.0.0" not in version_values
+        assert "123.456.789.0" not in version_values
+        assert "192.168.1.1" not in version_values
+
+    def test_real_versions_not_filtered(self):
+        """Les vraies versions ne sont pas affectées par le filtre IP."""
+        units = [
+            _make_unit("Compatible with 3.2.1 of the platform.", p_idx=0, s_idx=0),
+            _make_unit("Requires v2.0 or later.", p_idx=1, s_idx=0),
+        ]
+        profile = self.miner.mine(units, "doc1")
+        versions = profile.get_candidates_by_type("version")
+        version_values = {v.raw_value for v in versions}
+        assert "3.2.1" in version_values
+        assert "2.0" in version_values
 
     def test_empty_units(self):
         """Gère une liste vide d'unités."""

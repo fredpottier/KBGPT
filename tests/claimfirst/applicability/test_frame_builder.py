@@ -43,9 +43,9 @@ def _make_profile() -> CandidateProfile:
                 in_header_zone=True,
             ),
             ValueCandidate(
-                candidate_id="VC:year:def",
+                candidate_id="VC:numeric_identifier:def",
                 raw_value="2023",
-                value_type="year",
+                value_type="numeric_identifier",
                 unit_ids=["EU:0:0", "EU:0:1"],
                 frequency=2,
                 in_title=True,
@@ -88,8 +88,35 @@ class TestFrameBuilderDeterministic:
         assert len(frame.fields) == 0
         assert len(frame.unknowns) >= 1
 
-    def test_deterministic_year_separate_from_release(self):
-        """Le year est séparé du release_id si valeurs différentes."""
+    def test_deterministic_version_not_promoted_to_release(self):
+        """version nue (ex: '2.0') n'est PAS promue en release_id sans LLM."""
+        profile = CandidateProfile(
+            doc_id="test",
+            total_units=3,
+            total_chars=200,
+            value_candidates=[
+                ValueCandidate(
+                    candidate_id="VC:version:abc",
+                    raw_value="2.0",
+                    value_type="version",
+                    unit_ids=["EU:0:0"],
+                    frequency=3,
+                    in_title=True,
+                    cooccurs_with_subject=True,
+                ),
+            ],
+        )
+
+        builder = FrameBuilder(llm_client=None, use_llm=False)
+        frame = builder.build(profile, _make_units())
+
+        release = frame.get_field("release_id")
+        # "2.0" est trop ambigu sans LLM → NE DOIT PAS devenir release_id
+        assert release is None
+        assert "version_ambiguous" in frame.unknowns
+
+    def test_deterministic_numeric_identifier_goes_to_unknowns(self):
+        """numeric_identifier est ambigu → unknowns en mode déterministe."""
         profile = CandidateProfile(
             doc_id="test",
             total_units=3,
@@ -104,9 +131,9 @@ class TestFrameBuilderDeterministic:
                     in_title=True,
                 ),
                 ValueCandidate(
-                    candidate_id="VC:year:def",
+                    candidate_id="VC:numeric_identifier:def",
                     raw_value="2023",
-                    value_type="year",
+                    value_type="numeric_identifier",
                     unit_ids=["EU:0:1"],
                     frequency=1,
                     in_header_zone=True,
@@ -118,11 +145,10 @@ class TestFrameBuilderDeterministic:
         frame = builder.build(profile, _make_units())
 
         release = frame.get_field("release_id")
-        year = frame.get_field("year")
         assert release is not None
         assert release.value_normalized == "Release 1809"
-        assert year is not None
-        assert year.value_normalized == "2023"
+        # numeric_identifier ne crée pas de champ year en déterministe
+        assert "numeric_identifier_ambiguous" in frame.unknowns
 
 
 class TestFrameBuilderLLM:
@@ -137,7 +163,7 @@ class TestFrameBuilderLLM:
                     "value_normalized": "2023",
                     "display_label": "version",
                     "evidence_unit_ids": ["EU:0:0", "EU:0:1"],
-                    "candidate_ids": ["VC:year:def"],
+                    "candidate_ids": ["VC:numeric_identifier:def"],
                     "confidence": "high",
                     "reasoning": "Most frequent year in title and header"
                 }
@@ -233,7 +259,7 @@ class TestFrameBuilderLLM:
                     "field_name": "year",
                     "value_normalized": "2023",
                     "evidence_unit_ids": ["EU:0:0"],
-                    "candidate_ids": ["VC:year:def"],
+                    "candidate_ids": ["VC:numeric_identifier:def"],
                     "confidence": "medium",
                 }
             ],

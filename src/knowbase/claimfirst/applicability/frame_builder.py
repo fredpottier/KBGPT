@@ -59,18 +59,33 @@ FRAME_BUILDER_PROMPT = """You are an evidence-locked metadata extractor. Your jo
 2. You may ONLY use raw_values from the candidates listed above
 3. If a field cannot be determined from the candidates → add it to "unknowns"
 4. NEVER invent values that don't appear in the candidates
-5. For "release_id" or "version": use the value that best identifies the document version (prefer named_version > version > year from title/header)
-6. For "year": use a calendar year (4 digits) that represents the document's temporal scope
-7. Do NOT include the product name in version values
-8. Prefer candidates that are: in_title > in_header > high_frequency > cooccurs_subject
+5. A numeric_identifier (4-digit number like 2023, 1809) is AMBIGUOUS:
+   it could be a release identifier, a calendar year, a regulation version,
+   a model year, a clinical trial phase number, etc.
+   Use document context + Domain Context identification semantics to decide.
+   Examples:
+     "ProductX 2023 Security Guide" → 2023 is likely release_id
+     "Copyright 2023 Acme Corp" → 2023 is likely publication_year
+     "Basel III Framework" → III is likely regulation_version
+     "Clio III Owner Manual" → III is likely model_generation
+6. If Domain Context provides identification semantics → follow those rules
+7. Without Domain Context: adjacent to subject name = likely release_id or model identifier;
+   in copyright/publication context = likely publication_year;
+   standalone with temporal markers = likely calendar year
+8. Do NOT include the subject/product name in version values
+9. Prefer candidates that are: in_title > in_header > high_frequency > cooccurs_subject
+10. Choose the most specific field_name for the value's role in THIS domain
+    (release_id, publication_year, regulation_version, model_generation, trial_phase, etc.)
+    NEVER use value_type names as field_name (numeric_identifier, named_version, etc.)
+11. Do NOT create fields for IP addresses, port numbers, or non-version numeric patterns
 
 ## Output JSON Format
 {{
   "fields": [
     {{
-      "field_name": "release_id",
+      "field_name": "<domain-specific role: release_id, model_generation, regulation_version, trial_phase, publication_year, etc.>",
       "value_normalized": "<exact raw_value from a candidate>",
-      "display_label": "<version|release|edition|etc.>",
+      "display_label": "<version|release|edition|generation|phase|etc.>",
       "evidence_unit_ids": ["EU:0:1", "EU:3:0"],
       "candidate_ids": ["VC:named_version:abc123"],
       "confidence": "high|medium|low",
@@ -101,6 +116,12 @@ class FrameBuilder:
         """
         self.llm_client = llm_client
         self.use_llm = use_llm and llm_client is not None
+        if use_llm and llm_client is None:
+            logger.warning(
+                "[OSMOSE:FrameBuilder] use_llm=True but llm_client is None — "
+                "version detection will use deterministic fallback only "
+                "(reduced accuracy for release_id identification)"
+            )
 
     def build(
         self,
@@ -123,7 +144,7 @@ class FrameBuilder:
             return ApplicabilityFrame(
                 doc_id=profile.doc_id,
                 fields=[],
-                unknowns=["release_id", "year", "edition"],
+                unknowns=["release_id", "edition"],
                 method="no_candidates",
             )
 
@@ -179,7 +200,7 @@ class FrameBuilder:
             task_type=TaskType.METADATA_EXTRACTION,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=1000,
+            max_tokens=2000,
         )
 
         logger.debug(
@@ -258,7 +279,7 @@ class FrameBuilder:
             return ApplicabilityFrame(
                 doc_id=profile.doc_id,
                 fields=[],
-                unknowns=["release_id", "year"],
+                unknowns=["release_id"],
                 method="llm_parse_error",
             )
 
@@ -267,8 +288,20 @@ class FrameBuilder:
         valid_candidate_ids = {vc.candidate_id for vc in profile.value_candidates}
         valid_raw_values = {vc.raw_value.lower() for vc in profile.value_candidates}
 
+        # field_names interdits (value_types bruts utilisés par erreur comme field_name)
+        INVALID_FIELD_NAMES = {"numeric_identifier", "named_version", "unknown"}
+
         for field_data in data.get("fields", []):
+            field_name = field_data.get("field_name", "unknown")
             value = field_data.get("value_normalized", "")
+
+            # Rejeter les field_names qui sont en fait des value_types
+            if field_name in INVALID_FIELD_NAMES:
+                logger.debug(
+                    f"[OSMOSE:FrameBuilder] LLM used value_type '{field_name}' as field_name "
+                    f"— skipping (value='{value}')"
+                )
+                continue
 
             # Vérifier que la valeur existe dans les candidats
             if value.lower() not in valid_raw_values:
@@ -294,6 +327,28 @@ class FrameBuilder:
                 reasoning=field_data.get("reasoning"),
             ))
 
+        # Confidence gate: "year" sans marqueur temporel → LOW
+        TEMPORAL_MARKERS = {"copyright", "published", "publication", "fiscal",
+                            "calendar", "effective", "dated", "issued",
+                            "as of", "valid", "revision", "amendment"}
+        for field in fields:
+            if "year" in field.field_name.lower():
+                texts_to_check = [(field.reasoning or "").lower()]
+                for cid in field.candidate_ids:
+                    for vc in profile.value_candidates:
+                        if vc.candidate_id == cid:
+                            texts_to_check.extend(
+                                s.lower() for s in vc.context_snippets
+                            )
+                            break
+                combined = " ".join(texts_to_check)
+                if not any(m in combined for m in TEMPORAL_MARKERS):
+                    field.confidence = FrameFieldConfidence.LOW
+                    logger.debug(
+                        f"[OSMOSE:FrameBuilder] ConfidenceGate: '{field.field_name}' "
+                        f"degraded to LOW — no temporal marker in reasoning or context"
+                    )
+
         unknowns = data.get("unknowns", [])
 
         return ApplicabilityFrame(
@@ -315,33 +370,53 @@ class FrameBuilder:
         """
         Fallback déterministe si LLM indisponible.
 
-        Priorité:
-        1. named_version dans le titre/header
-        2. version dans le titre
-        3. year dans le titre/header (hors copyright)
+        Seuls les signaux NON ambigus sont utilisés :
+        1. named_version (ex: "Release 4", "Version 2023", "Phase III") → release_id
+        2. numeric_identifier dans titre + co-occurrent sujet → release_id (confiance basse)
+        3. Tout le reste → unknowns (version nue "2.0" est TROP ambiguë sans LLM)
         """
         fields: List[FrameField] = []
         unknowns: List[str] = []
 
-        # Tenter release_id via named_version
+        # named_version UNIQUEMENT (pas "version" nu : "2.0" est trop ambigu)
         release_field = self._pick_best_candidate(
-            profile, ["named_version", "version"], "release_id"
+            profile, ["named_version"], "release_id"
         )
+
+        # Si pas de named_version, tenter numeric_identifier avec signal fort
+        numeric_candidates = profile.get_candidates_by_type("numeric_identifier")
+        if not release_field and numeric_candidates:
+            # numeric_identifier dans le titre ET co-occurrent avec le sujet
+            # = signal suffisant pour release_id (ex: "ProductX 2023 Guide")
+            title_subject = [
+                nc for nc in numeric_candidates
+                if nc.in_title and nc.cooccurs_with_subject
+            ]
+            if title_subject:
+                best_ni = max(title_subject, key=lambda c: c.frequency)
+                release_field = FrameField(
+                    field_name="release_id",
+                    value_normalized=best_ni.raw_value,
+                    display_label="numeric_identifier",
+                    evidence_unit_ids=best_ni.unit_ids[:5],
+                    candidate_ids=[best_ni.candidate_id],
+                    confidence=FrameFieldConfidence.LOW,
+                    reasoning="deterministic: numeric_identifier in title + cooccurs with subject (no LLM)",
+                )
+            else:
+                unknowns.append("numeric_identifier_ambiguous")
+        elif numeric_candidates:
+            unknowns.append("numeric_identifier_ambiguous")
+
+        # "version" type (ex: "2.0", "3.1.4") est toujours ambigu sans LLM
+        version_candidates = profile.get_candidates_by_type("version")
+        if version_candidates and not release_field:
+            unknowns.append("version_ambiguous")
+
         if release_field:
             fields.append(release_field)
         else:
             unknowns.append("release_id")
-
-        # Tenter year
-        year_field = self._pick_best_candidate(
-            profile, ["year"], "year"
-        )
-        if year_field:
-            # Éviter doublon si le year est la même valeur que le release_id
-            if not release_field or year_field.value_normalized != release_field.value_normalized:
-                fields.append(year_field)
-        else:
-            unknowns.append("year")
 
         # Edition, effective_date → unknowns par défaut en mode déterministe
         unknowns.extend(["edition", "effective_date"])
@@ -394,7 +469,7 @@ class FrameBuilder:
         return FrameField(
             field_name=field_name,
             value_normalized=best.raw_value,
-            display_label=best.value_type if best.value_type != "year" else None,
+            display_label=best.value_type if best.value_type != "numeric_identifier" else None,
             evidence_unit_ids=best.unit_ids[:5],
             candidate_ids=[best.candidate_id],
             confidence=confidence,

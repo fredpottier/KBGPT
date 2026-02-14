@@ -23,6 +23,10 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from knowbase.claimfirst.models.claim import Claim
 from knowbase.claimfirst.models.result import ClaimRelation, RelationType, ClaimCluster
+from knowbase.claimfirst.clustering.value_contradicts import (
+    detect_value_contradictions,
+    ContradictionVerdict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +100,9 @@ class RelationDetector:
         self.detect_qualifies = detect_qualifies
         self.flag_potential_conflicts = flag_potential_conflicts
 
+        # Entity index pour le mode value-level (ClaimKey canonical)
+        self._entity_index: Dict[str, object] = {}
+
         self.stats = {
             "pairs_analyzed": 0,
             "contradicts_found": 0,
@@ -110,6 +117,7 @@ class RelationDetector:
         claims: List[Claim],
         clusters: Optional[List[ClaimCluster]] = None,
         entities_by_claim: Optional[Dict[str, List[str]]] = None,
+        entities: Optional[List] = None,
     ) -> List[ClaimRelation]:
         """
         Détecte les relations entre claims.
@@ -118,10 +126,17 @@ class RelationDetector:
             claims: Claims à analyser
             clusters: Clusters pour limiter la recherche (optionnel)
             entities_by_claim: Dict claim_id → [entity_ids] (optionnel)
+            entities: Liste d'Entity pour ClaimKey canonical (value-level)
 
         Returns:
             Liste de ClaimRelations
         """
+        # Construire entity_index si entities fourni (pour mode value-level)
+        if entities:
+            self._entity_index = {
+                getattr(e, "entity_id", ""): e for e in entities
+            }
+
         relations: List[ClaimRelation] = []
 
         # Si clusters fournis, analyser uniquement intra-cluster
@@ -136,30 +151,129 @@ class RelationDetector:
             ]
 
         logger.info(
-            f"[OSMOSE:RelationDetector] Analyzing {len(pairs)} claim pairs..."
+            f"[OSMOSE:RelationDetector] Analyzing {len(pairs)} claim pairs "
+            f"(value-level CONTRADICTS)..."
         )
 
-        for c1, c2 in pairs:
-            self.stats["pairs_analyzed"] += 1
+        return self._detect_value_level(pairs, entities_by_claim)
 
-            # Skip si claims du même document et même passage
-            # (pas de contradiction intra-passage normalement)
-            if c1.doc_id == c2.doc_id and c1.passage_id == c2.passage_id:
-                continue
+    def _detect_value_level(
+        self,
+        pairs: List[Tuple[Claim, Claim]],
+        entities_by_claim: Optional[Dict[str, List[str]]],
+    ) -> List[ClaimRelation]:
+        """Mode value-level : formel + LLM arbiter."""
+        relations: List[ClaimRelation] = []
 
-            # Détecter les relations
-            rel = self._detect_relation(c1, c2, entities_by_claim)
+        # Phase 1: Comparaison formelle (déterministe, pas de LLM)
+        formal_results, need_llm_pairs, stats = detect_value_contradictions(
+            claim_pairs=pairs,
+            entities_by_claim=entities_by_claim,
+            entity_index=self._entity_index,
+            context_gate=None,  # Intra-doc → pas de gate
+        )
+
+        # Phase 2: LLM arbiter pour les cas NEED_LLM
+        for c1, c2 in need_llm_pairs:
+            rel = self._llm_arbitrate(c1, c2)
             if rel:
                 relations.append(rel)
 
+        # Phase 3: REFINES + QUALIFIES (ancien code regex, inchangé)
+        for c1, c2 in pairs:
+            if c1.doc_id == c2.doc_id and c1.passage_id == c2.passage_id:
+                continue
+            if not self._have_common_subject(c1, c2, entities_by_claim):
+                continue
+            if self.detect_refines:
+                rel = self._detect_refinement(c1, c2)
+                if rel:
+                    relations.append(rel)
+            if self.detect_qualifies:
+                rel = self._detect_qualification(c1, c2)
+                if rel:
+                    relations.append(rel)
+
         logger.info(
-            f"[OSMOSE:RelationDetector] Found {len(relations)} relations "
-            f"({self.stats['contradicts_found']} contradicts, "
-            f"{self.stats['refines_found']} refines, "
-            f"{self.stats['qualifies_found']} qualifies)"
+            f"[OSMOSE:RelationDetector] Value-level stats: {stats} | "
+            f"LLM arbitrated: {len(need_llm_pairs)} → "
+            f"{self.stats['contradicts_found']} CONTRADICTS"
         )
 
         return relations
+
+    def _llm_arbitrate(
+        self,
+        c1: Claim,
+        c2: Claim,
+    ) -> Optional[ClaimRelation]:
+        """
+        Arbitrage LLM pour les cas value-level ambigus.
+
+        Prompt scope-aware avec 6 labels (dont EVOLUTION, DIFFERENT_SCOPE).
+        GF-4 : "candidate" pas "same for sure".
+        """
+        from knowbase.common.llm_router import get_llm_router, TaskType
+
+        sf1 = c1.structured_form or {}
+        sf2 = c2.structured_form or {}
+
+        user_content = (
+            "Two claims are CANDIDATES for comparison (same predicate, "
+            "likely same subject). If they actually refer to different "
+            "subjects or contexts, choose DIFFERENT_SCOPE.\n\n"
+            f"Claim A [{c1.doc_id}]: {c1.text}\n"
+            f"  → {sf1.get('subject', '')} | "
+            f"{sf1.get('predicate', '')} | {sf1.get('object', '')}\n"
+            f"Claim B [{c2.doc_id}]: {c2.text}\n"
+            f"  → {sf2.get('subject', '')} | "
+            f"{sf2.get('predicate', '')} | {sf2.get('object', '')}\n\n"
+            "Answer with ONE word:\n"
+            "CONTRADICTS - mutually exclusive on the same scope\n"
+            "COMPATIBLE - consistent, complementary, or same meaning\n"
+            "EVOLUTION - newer version supersedes older (not contradiction)\n"
+            "DIFFERENT_SCOPE - different contexts, versions, or conditions\n"
+            "QUALIFIES - one adds a condition to the other\n"
+            "UNCLEAR - insufficient information to decide"
+        )
+
+        messages = [{"role": "user", "content": user_content}]
+
+        try:
+            router = get_llm_router()
+            response = router.complete(
+                task_type=TaskType.FAST_CLASSIFICATION,
+                messages=messages,
+                max_tokens=5,
+                temperature=0.0,
+            )
+            label = response.strip().upper().split()[0] if response else "UNCLEAR"
+        except Exception as e:
+            logger.warning(
+                f"[OSMOSE:RelationDetector] LLM arbitration failed: {e}"
+            )
+            return None
+
+        if label == "CONTRADICTS":
+            self.stats["contradicts_found"] += 1
+            return ClaimRelation(
+                source_claim_id=c1.claim_id,
+                target_claim_id=c2.claim_id,
+                relation_type=RelationType.CONTRADICTS,
+                confidence=0.75,
+                basis="LLM arbitration (value-level)",
+            )
+        elif label == "QUALIFIES":
+            self.stats["qualifies_found"] += 1
+            return ClaimRelation(
+                source_claim_id=c1.claim_id,
+                target_claim_id=c2.claim_id,
+                relation_type=RelationType.QUALIFIES,
+                confidence=0.70,
+                basis="LLM arbitration → QUALIFIES",
+            )
+        # EVOLUTION, DIFFERENT_SCOPE, COMPATIBLE, UNCLEAR → pas de relation
+        return None
 
     def _get_cluster_pairs(
         self,
@@ -443,6 +557,7 @@ class RelationDetector:
             "potential_conflicts": 0,
             "abstentions": 0,
         }
+        self._entity_index = {}
 
 
 __all__ = [

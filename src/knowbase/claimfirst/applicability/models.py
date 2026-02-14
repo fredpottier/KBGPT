@@ -114,7 +114,7 @@ class ValueCandidate:
     """Valeur brute extraite."""
 
     value_type: str
-    """Type: year, version, named_version, date."""
+    """Type: numeric_identifier, version, named_version, date."""
 
     unit_ids: List[str] = field(default_factory=list)
     """IDs des EvidenceUnits où la valeur a été trouvée."""

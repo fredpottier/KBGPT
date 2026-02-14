@@ -574,9 +574,7 @@ Text excerpt:
             if key in bootstrap_found:
                 validated[key] = bootstrap_found[key]
 
-        # year est un candidat (pas toujours pertinent)
-        if "year" in bootstrap_found:
-            candidates["year"] = bootstrap_found["year"]
+        # "year" retiré des bootstrap — géré par le LLM (applicability frame)
 
         # 2. Chercher dans les métadonnées
         if metadata:
