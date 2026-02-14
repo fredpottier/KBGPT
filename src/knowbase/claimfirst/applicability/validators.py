@@ -235,12 +235,14 @@ class LexicalSanityValidator:
 
 class MetricContextValidator:
     """
-    Rejette les valeurs qui sont probablement des métriques SLA/performance,
-    pas des versions ou releases.
+    Détecte les valeurs dans un contexte SLA/performance et dégrade leur confiance.
 
-    Règles:
-    - version/release avec major >= 50 → rejeté (99.9, 99.7 = SLA percentages)
+    Règle:
     - version/release dont l'evidence contient des keywords SLA → dégradé LOW
+
+    Note: l'ancien check "major >= 50" a été supprimé — le contrat d'autorité
+    (ResolverPriorStatus) le rend redondant et il causait des faux positifs
+    sur les identifiants numériques légitimes (2021, 1809, etc.).
     """
 
     SLA_KEYWORDS = frozenset({
@@ -265,19 +267,12 @@ class MetricContextValidator:
 
             value = field.value_normalized.strip()
 
-            # Check 1: valeur numérique avec major >= 50 → rejeté
-            try:
-                major = int(value.split(".")[0])
-                if major >= 50:
-                    frame.validation_notes.append(
-                        f"MetricContext: rejected '{field.field_name}={value}' "
-                        f"— major >= 50, likely SLA/metric percentage"
-                    )
-                    continue  # Ne pas garder
-            except ValueError:
-                pass  # Pas numérique pur (ex: "SP 12"), on continue
+            # Note: l'ancien Check "major >= 50" a été supprimé.
+            # Le contrat d'autorité (ResolverPriorStatus) rend ce check redondant
+            # et il causait des faux positifs sur les identifiants numériques
+            # légitimes (2021, 1809, etc.)
 
-            # Check 2: keywords SLA dans les evidence units → dégrader LOW
+            # Check: keywords SLA dans les evidence units → dégrader LOW
             has_sla_context = False
             for uid in field.evidence_unit_ids:
                 unit = unit_map.get(uid)

@@ -274,8 +274,12 @@ class TestLexicalSanityValidator:
 class TestMetricContextValidator:
     """Tests pour MetricContextValidator."""
 
-    def test_rejects_high_version_number(self):
-        """Rejette un release_id avec major >= 50 (probablement SLA)."""
+    def test_sla_value_degraded_by_keyword_context(self):
+        """release_id "99.9" avec contexte SLA → dégradé LOW (pas rejeté).
+
+        Le check "major >= 50" a été supprimé (redondant avec le contrat d'autorité).
+        Seul le check par keywords SLA dans l'evidence reste actif.
+        """
         units = [
             EvidenceUnit(unit_id="EU:0:0", text="SLA guarantees 99.9% uptime.", passage_idx=0, sentence_idx=0),
         ]
@@ -293,7 +297,8 @@ class TestMetricContextValidator:
         validator = MetricContextValidator()
         result = validator.validate(frame, units, _make_profile())
 
-        assert len(result.fields) == 0  # Rejeté
+        assert len(result.fields) == 1  # Gardé mais dégradé
+        assert result.fields[0].confidence == FrameFieldConfidence.LOW
         assert any("MetricContext" in n for n in result.validation_notes)
 
     def test_keeps_low_version_number(self):
