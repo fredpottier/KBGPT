@@ -416,13 +416,13 @@ class SlotEnricher:
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
             temperature=0.1,
-            max_tokens=1500,
+            max_tokens=4000,
         )
 
         return response
 
     def _parse_llm_response(self, response: str) -> List[Dict[str, Any]]:
-        """Parse la réponse JSON du LLM (robuste)."""
+        """Parse la réponse JSON du LLM (robuste, avec récupération partielle)."""
         if not response:
             return []
 
@@ -457,8 +457,37 @@ class SlotEnricher:
             except json.JSONDecodeError:
                 pass
 
-        logger.warning("[OSMOSE:SlotEnricher] Failed to parse LLM response as JSON array")
+        # Récupération partielle : JSON tronqué (max_tokens atteint)
+        if start >= 0:
+            truncated = text[start:]
+            recovered = self._recover_truncated_json(truncated)
+            if recovered:
+                logger.warning(
+                    f"[OSMOSE:SlotEnricher] Recovered {len(recovered)} items from truncated JSON "
+                    f"(response len={len(response)})"
+                )
+                return recovered
+
+        logger.warning(
+            f"[OSMOSE:SlotEnricher] Failed to parse LLM response as JSON array "
+            f"(len={len(response)}, starts_with={repr(response[:80])})"
+        )
         return []
+
+    def _recover_truncated_json(self, text: str) -> Optional[List[Dict[str, Any]]]:
+        """Récupère les éléments complets d'un JSON array tronqué."""
+        import re
+        # Trouver tous les objets complets {...} dans le texte
+        items = []
+        pattern = re.compile(r'\{[^{}]*\}')
+        for match in pattern.finditer(text):
+            try:
+                obj = json.loads(match.group())
+                if "index" in obj:
+                    items.append(obj)
+            except json.JSONDecodeError:
+                continue
+        return items if items else None
 
     def _validate_triplet(self, sf: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """

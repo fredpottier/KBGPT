@@ -1166,6 +1166,10 @@ class LLMRouter:
         # Qwen3 a le thinking ON par défaut dans son template, donc on doit
         # explicitement envoyer enable_thinking=false pour chaque requête.
         # Seules les tâches qui demandent explicitement enable_thinking=True l'activent.
+        #
+        # IMPORTANT: chat_template_kwargs est UNRELIABLE sous charge concurrente
+        # (bug vLLM batching). On utilise /nothink dans le user message comme
+        # fallback fiable — traité au niveau du template, pas des kwargs.
         enable_thinking = kwargs.get('enable_thinking', False)
         has_json_schema = bool(kwargs.get('json_schema') or kwargs.get('guided_json'))
 
@@ -1179,16 +1183,17 @@ class LLMRouter:
                 f"[BURST:vLLM] Thinking mode ENABLED for {task_type.value} "
                 f"(parser=qwen3, temp={temperature})"
             )
-        elif enable_thinking and has_json_schema:
-            # Thinking + JSON structuré → thinking OFF (incompatible)
-            api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": False}
-            logger.warning(
-                f"[BURST:vLLM] Thinking mode SKIPPED for {task_type.value} "
-                f"— incompatible avec JSON schema"
-            )
         else:
-            # Par défaut : thinking OFF
+            # Thinking OFF (par défaut ou forcé pour JSON schema)
             api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": False}
+            # Double sécurité : /nothink dans le dernier user message
+            # Fiable sous charge concurrente (contrairement à chat_template_kwargs seul)
+            messages = self._append_nothink_directive(messages)
+            if enable_thinking and has_json_schema:
+                logger.warning(
+                    f"[BURST:vLLM] Thinking mode SKIPPED for {task_type.value} "
+                    f"— incompatible avec JSON schema"
+                )
 
         # === STRUCTURED OUTPUTS (Volet C) ===
         # Support pour vLLM JSON schema enforcement
@@ -1240,6 +1245,15 @@ class LLMRouter:
                 reasoning_content = think_match.group(1)
                 content = _re.sub(r'<think>.*?</think>', '', content, flags=_re.DOTALL).strip()
                 logger.info(f"[BURST:vLLM:THINKING] reasoning length: {len(reasoning_content)} chars, stripped from content")
+            elif '<think>' in content and '</think>' not in content:
+                # Thinking tronqué (max_tokens atteint avant </think>)
+                think_start = content.index('<think>')
+                truncated_reasoning = content[think_start + 7:]
+                content = content[:think_start].strip()
+                logger.warning(
+                    f"[BURST:vLLM:THINKING] TRUNCATED thinking detected "
+                    f"({len(truncated_reasoning)} chars), stripped from content"
+                )
 
         return content
 
@@ -1278,6 +1292,10 @@ class LLMRouter:
         # === THINKING MODE (Qwen3) ===
         # Qwen3 a le thinking ON par défaut dans son template, donc on doit
         # explicitement envoyer enable_thinking=false pour chaque requête.
+        #
+        # IMPORTANT: chat_template_kwargs est UNRELIABLE sous charge concurrente
+        # (bug vLLM batching). On utilise /nothink dans le user message comme
+        # fallback fiable — traité au niveau du template, pas des kwargs.
         enable_thinking = kwargs.get('enable_thinking', False)
         has_json_schema = bool(kwargs.get('json_schema') or kwargs.get('guided_json'))
 
@@ -1290,14 +1308,17 @@ class LLMRouter:
                 f"[BURST:vLLM:ASYNC] Thinking mode ENABLED for {task_type.value} "
                 f"(parser=qwen3, temp={temperature})"
             )
-        elif enable_thinking and has_json_schema:
-            api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": False}
-            logger.warning(
-                f"[BURST:vLLM:ASYNC] Thinking mode SKIPPED for {task_type.value} "
-                f"— incompatible avec JSON schema"
-            )
         else:
+            # Thinking OFF (par défaut ou forcé pour JSON schema)
             api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": False}
+            # Double sécurité : /nothink dans le dernier user message
+            # Fiable sous charge concurrente (contrairement à chat_template_kwargs seul)
+            messages = self._append_nothink_directive(messages)
+            if enable_thinking and has_json_schema:
+                logger.warning(
+                    f"[BURST:vLLM:ASYNC] Thinking mode SKIPPED for {task_type.value} "
+                    f"— incompatible avec JSON schema"
+                )
 
         # === STRUCTURED OUTPUTS (Volet C) ===
         # Support pour vLLM JSON schema enforcement
@@ -1345,8 +1366,34 @@ class LLMRouter:
                 reasoning_content = think_match.group(1)
                 content = _re.sub(r'<think>.*?</think>', '', content, flags=_re.DOTALL).strip()
                 logger.info(f"[BURST:vLLM:ASYNC:THINKING] reasoning length: {len(reasoning_content)} chars, stripped from content")
+            elif '<think>' in content and '</think>' not in content:
+                # Thinking tronqué (max_tokens atteint avant </think>)
+                think_start = content.index('<think>')
+                truncated_reasoning = content[think_start + 7:]
+                content = content[:think_start].strip()
+                logger.warning(
+                    f"[BURST:vLLM:ASYNC:THINKING] TRUNCATED thinking detected "
+                    f"({len(truncated_reasoning)} chars), stripped from content"
+                )
 
         return content
+
+    @staticmethod
+    def _append_nothink_directive(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Ajoute /nothink au dernier message user pour désactiver le thinking Qwen3.
+
+        Contournement d'un bug vLLM batching : chat_template_kwargs est parfois
+        ignoré sous charge concurrente, mais /nothink dans le message est traité
+        de manière fiable par le template Qwen3.
+        """
+        messages = [m.copy() for m in messages]
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if not content.rstrip().endswith("/nothink"):
+                    msg["content"] = content.rstrip() + " /nothink"
+                break
+        return messages
 
     def _estimate_tokens(self, text: str) -> int:
         """Estimation grossière des tokens (~ 4 chars = 1 token)."""
