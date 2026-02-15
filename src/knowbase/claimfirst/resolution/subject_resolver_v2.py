@@ -396,9 +396,8 @@ class SubjectResolverV2:
         response = router.complete(
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
-            temperature=0.1,  # sera overridden à 0.6 par le router en thinking mode
+            temperature=0.1,
             max_tokens=2000,
-            enable_thinking=True,  # Qwen3 thinking pour classification complexe
         )
         return response
 

@@ -97,7 +97,7 @@ class LLMRouter:
         self._burst_vllm_client = None
         self._burst_async_vllm_client = None
         self._burst_model: str = "Qwen/Qwen3-14B-AWQ"  # Nom réel du modèle (pour logs)
-        self._burst_vllm_served_model: str = "/model"  # Nom exposé par vLLM (chemin volume Docker)
+        self._burst_vllm_served_model: str = "Qwen/Qwen3-14B-AWQ"  # Nom exposé par vLLM (served_model_name)
 
         # === Gate Redis pour vLLM (partage inter-processus) ===
         self._redis_burst_cache: Optional[Dict[str, Any]] = None
@@ -221,6 +221,7 @@ class LLMRouter:
         self._burst_mode = True
         self._burst_endpoint = vllm_url.rstrip("/")
         self._burst_model = model or "Qwen/Qwen3-14B-AWQ"
+        self._burst_vllm_served_model = self._burst_model  # vLLM sert le modèle sous son vrai nom
 
         # Créer clients vLLM dédiés au mode burst
         self._burst_vllm_client = OpenAI(
@@ -400,6 +401,7 @@ class LLMRouter:
             self._burst_mode = True
             self._burst_endpoint = vllm_url.rstrip("/")
             self._burst_model = vllm_model or "Qwen/Qwen3-14B-AWQ"
+            self._burst_vllm_served_model = self._burst_model  # vLLM sert le modèle sous son vrai nom
 
             self._burst_vllm_client = OpenAI(
                 api_key="EMPTY",
@@ -1209,7 +1211,7 @@ class LLMRouter:
                 logger.debug(f"[BURST:vLLM] Removed response_format for model {self._burst_model}")
 
         response = self._burst_vllm_client.chat.completions.create(
-            model=self._burst_vllm_served_model,  # Utiliser le nom exposé par vLLM ("/model")
+            model=self._burst_vllm_served_model,  # Nom du modèle servi par vLLM
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -1317,7 +1319,7 @@ class LLMRouter:
                 api_kwargs.pop('response_format', None)
 
         response = await self._burst_async_vllm_client.chat.completions.create(
-            model=self._burst_vllm_served_model,  # Utiliser le nom exposé par vLLM ("/model")
+            model=self._burst_vllm_served_model,  # Nom du modèle servi par vLLM
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,

@@ -6,7 +6,25 @@ systemctl start docker && systemctl enable docker
 docker pull vllm/vllm-openai:v0.9.2 &
 docker pull ghcr.io/huggingface/text-embeddings-inference:1.5 &
 wait
-docker run -d --gpus all -p 8000:8000 --name vllm vllm/vllm-openai:v0.9.2 --model Qwen/Qwen3-14B-AWQ --quantization awq --dtype half --gpu-memory-utilization 0.85 --max-model-len 32768 --max-num-seqs 32 --trust-remote-code --reasoning-parser qwen3
+
+# Patch AWQ Marlin (bug vLLM v0.9.2 : user_quant="awq" non reconnu pour Marlin)
+mkdir -p /opt/burst/patches
+docker create --name vllm-temp vllm/vllm-openai:v0.9.2
+docker cp vllm-temp:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py /opt/burst/patches/awq_marlin.py
+docker rm vllm-temp
+python3 -c "
+p='/opt/burst/patches/awq_marlin.py'
+c=open(p).read()
+old='or user_quant == \"awq_marlin\")'
+new='or user_quant == \"awq_marlin\"\n                            or user_quant == \"awq\")'
+if old in c and 'or user_quant == \"awq\")' not in c:
+    open(p,'w').write(c.replace(old,new))
+    print('[BURST] Patched awq_marlin.py')
+"
+
+docker run -d --gpus all -p 8000:8000 --name vllm \
+  -v /opt/burst/patches/awq_marlin.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py:ro \
+  vllm/vllm-openai:v0.9.2 --model Qwen/Qwen3-14B-AWQ --quantization awq_marlin --dtype half --gpu-memory-utilization 0.85 --max-model-len 32768 --max-num-seqs 32 --trust-remote-code --reasoning-parser qwen3
 # TEI avec limites augmentées (évite 413 Payload Too Large)
 # --max-client-batch-size: max inputs par requête (défaut: 32 → 64)
 # --max-batch-tokens: max tokens par batch (défaut: 16384 → 32768)

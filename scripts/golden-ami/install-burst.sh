@@ -82,6 +82,42 @@ docker pull ghcr.io/huggingface/text-embeddings-inference:1.5
 echo "OK - Images Docker pullees"
 
 # -----------------------------------------------------------------------------
+# 4b. Patch vLLM AWQ Marlin (contournement bug vLLM v0.9.2)
+# -----------------------------------------------------------------------------
+# vLLM v0.9.2 ne reconnait pas user_quant="awq" comme candidat Marlin.
+# Le modele Qwen3-14B-AWQ a quant_method="awq" dans config.json, donc
+# override_quantization_method() refuse l'upgrade vers awq_marlin.
+# Ce patch ajoute "or user_quant == 'awq'" pour forcer l'activation Marlin.
+# Resultat: ~26 t/s au lieu de ~3 t/s (8.5x speedup confirme).
+echo ""
+echo "[4b/7] Patch vLLM AWQ Marlin activation..."
+mkdir -p /opt/burst/patches
+
+# Extraire le fichier original depuis l'image Docker
+docker create --name vllm-temp vllm/vllm-openai:v0.9.2 2>/dev/null
+docker cp vllm-temp:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py /opt/burst/patches/awq_marlin.py
+docker rm vllm-temp
+
+# Appliquer le patch
+python3 << 'PATCH_SCRIPT'
+path = "/opt/burst/patches/awq_marlin.py"
+with open(path) as f:
+    code = f.read()
+
+old = 'or user_quant == "awq_marlin")'
+new = 'or user_quant == "awq_marlin"\n                            or user_quant == "awq")'
+
+if old in code and 'or user_quant == "awq")' not in code:
+    with open(path, 'w') as f:
+        f.write(code.replace(old, new))
+    print("  OK - awq_marlin.py patched for Marlin kernel activation")
+else:
+    print("  INFO - awq_marlin.py already patched or upstream fix applied")
+PATCH_SCRIPT
+
+echo "OK - Patch AWQ Marlin pret"
+
+# -----------------------------------------------------------------------------
 # 5. Creation des services systemd
 # -----------------------------------------------------------------------------
 echo ""
@@ -104,9 +140,10 @@ ExecStart=/usr/bin/docker run --rm --gpus all \
     --name vllm \
     -v /models:/root/.cache/huggingface \
     -e HF_HOME=/root/.cache/huggingface \
+    -v /opt/burst/patches/awq_marlin.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py:ro \
     vllm/vllm-openai:v0.9.2 \
     --model Qwen/Qwen3-14B-AWQ \
-    --quantization awq \
+    --quantization awq_marlin \
     --dtype half \
     --gpu-memory-utilization 0.85 \
     --max-model-len 32768 \

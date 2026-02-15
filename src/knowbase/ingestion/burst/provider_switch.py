@@ -108,22 +108,21 @@ def get_burst_state_from_redis() -> Optional[Dict[str, Any]]:
 
 def _convert_to_vllm_model_name(model_name: Optional[str]) -> str:
     """
-    Convertit un nom de modèle HuggingFace vers le format vLLM.
+    Retourne le nom du modèle tel que servi par vLLM.
 
-    vLLM expose les modèles avec le préfixe /models/ et remplace / par --
-    Ex: "Qwen/Qwen3-14B-AWQ" -> "/models/Qwen--Qwen3-14B-AWQ"
+    Avec Golden AMI v9+, vLLM sert le modèle sous son nom HuggingFace natif
+    (ex: "Qwen/Qwen3-14B-AWQ"), pas sous le chemin volume Docker.
     """
     if not model_name:
-        return "/models/Qwen--Qwen3-14B-AWQ"
+        return "Qwen/Qwen3-14B-AWQ"
 
-    # Si déjà au bon format, retourner tel quel
+    # Si c'est un ancien chemin /models/, convertir vers le format HuggingFace
     if model_name.startswith("/models/"):
-        return model_name
+        # "/models/Qwen--Qwen3-14B-AWQ" -> "Qwen/Qwen3-14B-AWQ"
+        stripped = model_name.replace("/models/", "", 1)
+        return stripped.replace("--", "/", 1)
 
-    # Convertir HuggingFace format vers vLLM format
-    # "Qwen/Qwen3-14B-AWQ" -> "Qwen--Qwen3-14B-AWQ"
-    converted = model_name.replace("/", "--")
-    return f"/models/{converted}"
+    return model_name
 
 
 def activate_burst_providers(

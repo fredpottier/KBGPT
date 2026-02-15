@@ -36,12 +36,29 @@ docker pull ghcr.io/huggingface/text-embeddings-inference:1.5 &
 wait
 echo "Docker images pulled"
 
-# Lancer vLLM (Qwen 2.5 14B AWQ)
+# Patch AWQ Marlin (bug vLLM v0.9.2 : user_quant="awq" non reconnu)
+echo "Patching vLLM for AWQ Marlin activation..."
+mkdir -p /opt/burst/patches
+docker create --name vllm-temp vllm/vllm-openai:v0.9.2
+docker cp vllm-temp:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py /opt/burst/patches/awq_marlin.py
+docker rm vllm-temp
+python3 -c "
+p='/opt/burst/patches/awq_marlin.py'
+c=open(p).read()
+old='or user_quant == \"awq_marlin\")'
+new='or user_quant == \"awq_marlin\"\n                            or user_quant == \"awq\")'
+if old in c and 'or user_quant == \"awq\")' not in c:
+    open(p,'w').write(c.replace(old,new))
+    print('Patched awq_marlin.py')
+"
+
+# Lancer vLLM (Qwen3 14B AWQ + Marlin kernels)
 echo "Starting vLLM..."
 docker run -d --gpus all -p 8000:8000 --name vllm \
+    -v /opt/burst/patches/awq_marlin.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py:ro \
     vllm/vllm-openai:v0.9.2 \
     --model Qwen/Qwen3-14B-AWQ \
-    --quantization awq \
+    --quantization awq_marlin \
     --dtype half \
     --gpu-memory-utilization 0.85 \
     --max-model-len 32768 --reasoning-parser qwen3 \
