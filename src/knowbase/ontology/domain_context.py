@@ -107,6 +107,17 @@ class DomainContextProfile(BaseModel):
         max_length=1000,
     )
 
+    axis_reclassification_rules: str = Field(
+        default="",
+        description=(
+            "JSON array of deterministic post-LLM reclassification rules for axis_values. "
+            "Each rule: {rule_id, priority?, conditions: {value_pattern?, current_role?, "
+            "title_contains_value?, title_context_pattern?, evidence_quote_contains_any?, "
+            "rationale_contains_any?}, action: {new_role, confidence_boost?, confidence_override?}}"
+        ),
+        max_length=5000,
+    )
+
     context_priority: Literal["low", "medium", "high"] = Field(
         default="medium",
         description="Priorité injection contexte dans prompts LLM"
@@ -170,6 +181,7 @@ class DomainContextProfile(BaseModel):
             "key_concepts": json.dumps(self.key_concepts),
             "versioning_hints": self.versioning_hints,
             "identification_semantics": self.identification_semantics,
+            "axis_reclassification_rules": self.axis_reclassification_rules,
             "context_priority": self.context_priority,
             "llm_injection_prompt": self.llm_injection_prompt,
             "created_at": self.created_at.isoformat(),
@@ -200,6 +212,7 @@ class DomainContextProfile(BaseModel):
             key_concepts=json.loads(props.get("key_concepts", "[]")),
             versioning_hints=props.get("versioning_hints", ""),
             identification_semantics=props.get("identification_semantics", ""),
+            axis_reclassification_rules=props.get("axis_reclassification_rules", ""),
             context_priority=props.get("context_priority", "medium"),
             llm_injection_prompt=props["llm_injection_prompt"],
             created_at=datetime.fromisoformat(props["created_at"]),

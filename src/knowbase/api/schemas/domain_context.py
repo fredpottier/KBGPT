@@ -77,6 +77,12 @@ class DomainContextCreate(BaseModel):
         json_schema_extra={"example": "Rule: 4-digit number after product name → release_id. Counter-example: 4-digit in copyright line → NOT release_id."}
     )
 
+    axis_reclassification_rules: str = Field(
+        default="",
+        max_length=5000,
+        description="JSON array of deterministic post-LLM reclassification rules for axis_values",
+    )
+
 
 class DomainContextResponse(BaseModel):
     """Schema réponse Domain Context."""
@@ -92,6 +98,7 @@ class DomainContextResponse(BaseModel):
     context_priority: str = Field(default="medium")
     versioning_hints: str = Field(default="")
     identification_semantics: str = Field(default="")
+    axis_reclassification_rules: str = Field(default="")
     llm_injection_prompt: str = Field(..., description="Prompt généré pour injection LLM")
     created_at: datetime = Field(..., description="Date création")
     updated_at: datetime = Field(..., description="Date mise à jour")
@@ -111,6 +118,7 @@ class DomainContextPreviewRequest(BaseModel):
     context_priority: Literal["low", "medium", "high"] = Field(default="medium")
     versioning_hints: str = Field(default="", max_length=500)
     identification_semantics: str = Field(default="", max_length=1000)
+    axis_reclassification_rules: str = Field(default="", max_length=5000)
 
 
 class DomainContextPreviewResponse(BaseModel):

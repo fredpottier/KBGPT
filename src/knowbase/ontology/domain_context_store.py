@@ -79,6 +79,7 @@ class DomainContextStore:
                 existing.llm_injection_prompt = profile.llm_injection_prompt
                 existing.versioning_hints = profile.versioning_hints
                 existing.identification_semantics = profile.identification_semantics
+                existing.axis_reclassification_rules = profile.axis_reclassification_rules
                 # updated_at is auto-updated by SQLAlchemy
             else:
                 # Insert
@@ -95,6 +96,7 @@ class DomainContextStore:
                     llm_injection_prompt=profile.llm_injection_prompt,
                     versioning_hints=profile.versioning_hints,
                     identification_semantics=profile.identification_semantics,
+                    axis_reclassification_rules=profile.axis_reclassification_rules,
                 )
                 session.add(new_context)
 
@@ -152,6 +154,7 @@ class DomainContextStore:
                 llm_injection_prompt=record.llm_injection_prompt,
                 versioning_hints=getattr(record, 'versioning_hints', '') or "",
                 identification_semantics=getattr(record, 'identification_semantics', '') or "",
+                axis_reclassification_rules=getattr(record, 'axis_reclassification_rules', '') or "",
                 created_at=record.created_at,
                 updated_at=record.updated_at,
             )
@@ -238,6 +241,7 @@ class DomainContextStore:
                     llm_injection_prompt=record.llm_injection_prompt,
                     versioning_hints=getattr(record, 'versioning_hints', '') or "",
                     identification_semantics=getattr(record, 'identification_semantics', '') or "",
+                    axis_reclassification_rules=getattr(record, 'axis_reclassification_rules', '') or "",
                     created_at=record.created_at,
                     updated_at=record.updated_at,
                 )

@@ -1019,6 +1019,13 @@ class DomainContext(Base):
         comment="Règles d'identification sémantique des valeurs ambiguës (release_id vs year, etc.)"
     )
 
+    axis_reclassification_rules = Column(
+        Text,
+        nullable=True,
+        default="",
+        comment="JSON array of deterministic post-LLM reclassification rules"
+    )
+
     # Timestamps
     created_at = Column(
         DateTime(timezone=True),
