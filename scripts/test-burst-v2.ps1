@@ -42,22 +42,22 @@ exec > /var/log/burst-init.log 2>&1
 echo "=== OSMOSE Burst Init ==="
 date
 
-VLLM_MODEL="Qwen/Qwen2.5-14B-Instruct-AWQ"
+VLLM_MODEL="Qwen/Qwen3-14B-AWQ"
 EMBEDDINGS_MODEL="intfloat/multilingual-e5-large"
 
 systemctl start docker
 systemctl enable docker
 
 echo "Pulling images..."
-docker pull vllm/vllm-openai:latest &
+docker pull vllm/vllm-openai:v0.9.2 &
 docker pull ghcr.io/huggingface/text-embeddings-inference:1.5 &
 wait
 
 echo "Starting vLLM..."
 docker run -d --gpus all -p 8000:8000 --name vllm --restart unless-stopped \
-  vllm/vllm-openai:latest \
+  vllm/vllm-openai:v0.9.2 \
   --model $VLLM_MODEL --quantization awq --dtype half \
-  --gpu-memory-utilization 0.85 --max-model-len 8192 --max-num-seqs 32 --trust-remote-code
+  --gpu-memory-utilization 0.85 --max-model-len 32768 --reasoning-parser qwen3 --max-num-seqs 32 --trust-remote-code
 
 echo "Starting TEI..."
 docker run -d --gpus all -p 8001:80 --name embeddings --restart unless-stopped \
@@ -202,7 +202,7 @@ if ($ready) {
 
     # Test
     Write-Host "[6/6] Testing vLLM..." -ForegroundColor Yellow
-    $body = '{"model":"Qwen/Qwen2.5-14B-Instruct-AWQ","messages":[{"role":"user","content":"Dis Bonjour OSMOSE"}],"max_tokens":30}'
+    $body = '{"model":"Qwen/Qwen3-14B-AWQ","messages":[{"role":"user","content":"Dis Bonjour OSMOSE"}],"max_tokens":30}'
     try {
         $r = Invoke-RestMethod -Uri "http://${INSTANCE_IP}:8000/v1/chat/completions" -Method POST -ContentType "application/json" -Body $body -TimeoutSec 60
         Write-Host "Response: $($r.choices[0].message.content)" -ForegroundColor Green

@@ -265,7 +265,7 @@ class BurstConfig:
     """
     Configuration du mode Burst.
 
-    Optimisé pour Qwen 2.5 14B AWQ sur EC2 Spot g6/g6e.
+    Optimisé pour Qwen 3 14B AWQ sur EC2 Spot g6/g6e.
     """
 
     # AWS
@@ -280,21 +280,25 @@ class BurstConfig:
         default_factory=lambda: ["g6.2xlarge", "g6e.xlarge", "g5.2xlarge"]
     )
 
-    # Models - Qwen 2.5 14B AWQ (quantifié 4-bit, ~8GB VRAM)
-    vllm_model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ"
+    # Models - Qwen 3 14B AWQ (quantifié 4-bit, ~8GB VRAM)
+    vllm_model: str = "Qwen/Qwen3-14B-AWQ"
     embeddings_model: str = "intfloat/multilingual-e5-large"
 
     # vLLM Configuration pour AWQ
-    vllm_quantization: str = "awq"  # awq standard (awq_marlin crash sur vLLM v0.6.6)
+    vllm_quantization: str = "awq"  # awq standard (awq_marlin crash sur Qwen)
     vllm_dtype: str = "half"  # FP16 pour inférence AWQ
     vllm_gpu_memory_utilization: float = 0.85  # Maximise le cache KV (TEI utilise peu de VRAM)
-    vllm_max_model_len: int = 16384  # 16K context — Qwen 2.5 14B supporte 32K natif
+    vllm_max_model_len: int = 32768  # 32K context — Qwen3 14B natif
     vllm_max_num_seqs: int = 64  # Augmenté pour meilleur batching
 
     # vLLM Optimisations (2026-01-27)
     vllm_enable_prefix_caching: bool = True  # Réutilise le cache KV du prompt système
     vllm_enable_chunked_prefill: bool = True  # Traitement par morceaux des longs prompts
-    vllm_max_num_batched_tokens: int = 8192  # Tokens max par batch (relevé pour 16K context)
+    vllm_max_num_batched_tokens: int = 8192  # Tokens max par batch
+
+    # vLLM Reasoning (Qwen3)
+    vllm_reasoning_parser: str = "qwen3"  # Parser pour thinking mode
+    vllm_default_thinking_enabled: bool = False  # Thinking OFF par défaut (activé per-request)
 
     # Ports
     vllm_port: int = 8000
@@ -354,7 +358,9 @@ class BurstConfig:
             "deep_learning_ami_os": self.deep_learning_ami_os,
             "burst_pending_dir": self.burst_pending_dir,
             "callback_url": self.callback_url,
-            "max_concurrent_docs": self.max_concurrent_docs
+            "max_concurrent_docs": self.max_concurrent_docs,
+            "vllm_reasoning_parser": self.vllm_reasoning_parser,
+            "vllm_default_thinking_enabled": self.vllm_default_thinking_enabled
         }
 
     @classmethod
@@ -376,7 +382,7 @@ class BurstConfig:
             ).split(","),
 
             # Models
-            vllm_model=os.getenv("BURST_VLLM_MODEL", "Qwen/Qwen2.5-14B-Instruct-AWQ"),
+            vllm_model=os.getenv("BURST_VLLM_MODEL", "Qwen/Qwen3-14B-AWQ"),
             embeddings_model=os.getenv(
                 "BURST_EMBEDDINGS_MODEL",
                 "intfloat/multilingual-e5-large"
@@ -388,13 +394,17 @@ class BurstConfig:
             vllm_gpu_memory_utilization=float(
                 os.getenv("BURST_VLLM_GPU_MEMORY_UTILIZATION", "0.85")
             ),
-            vllm_max_model_len=int(os.getenv("BURST_VLLM_MAX_MODEL_LEN", "16384")),
+            vllm_max_model_len=int(os.getenv("BURST_VLLM_MAX_MODEL_LEN", "32768")),
             vllm_max_num_seqs=int(os.getenv("BURST_VLLM_MAX_NUM_SEQS", "64")),
 
             # vLLM Optimisations (2026-01-27)
             vllm_enable_prefix_caching=os.getenv("BURST_VLLM_ENABLE_PREFIX_CACHING", "true").lower() == "true",
             vllm_enable_chunked_prefill=os.getenv("BURST_VLLM_ENABLE_CHUNKED_PREFILL", "true").lower() == "true",
             vllm_max_num_batched_tokens=int(os.getenv("BURST_VLLM_MAX_NUM_BATCHED_TOKENS", "8192")),
+
+            # Reasoning (Qwen3)
+            vllm_reasoning_parser=os.getenv("BURST_VLLM_REASONING_PARSER", "qwen3"),
+            vllm_default_thinking_enabled=os.getenv("BURST_VLLM_DEFAULT_THINKING", "false").lower() == "true",
 
             # Ports
             vllm_port=int(os.getenv("BURST_VLLM_PORT", "8000")),

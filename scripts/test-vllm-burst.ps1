@@ -31,7 +31,7 @@ systemctl enable docker
 
 # Pull images en parallele
 echo "Pulling Docker images..."
-docker pull vllm/vllm-openai:latest &
+docker pull vllm/vllm-openai:v0.9.2 &
 docker pull ghcr.io/huggingface/text-embeddings-inference:1.5 &
 wait
 echo "Docker images pulled"
@@ -39,12 +39,12 @@ echo "Docker images pulled"
 # Lancer vLLM (Qwen 2.5 14B AWQ)
 echo "Starting vLLM..."
 docker run -d --gpus all -p 8000:8000 --name vllm \
-    vllm/vllm-openai:latest \
-    --model Qwen/Qwen2.5-14B-Instruct-AWQ \
+    vllm/vllm-openai:v0.9.2 \
+    --model Qwen/Qwen3-14B-AWQ \
     --quantization awq \
     --dtype half \
     --gpu-memory-utilization 0.85 \
-    --max-model-len 8192 \
+    --max-model-len 32768 --reasoning-parser qwen3 \
     --max-num-seqs 32 \
     --trust-remote-code
 
@@ -118,7 +118,7 @@ try {
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host "  TEST vLLM BURST MODE" -ForegroundColor Cyan
     Write-Host "  Instance: $INSTANCE_TYPE" -ForegroundColor Cyan
-    Write-Host "  Model: Qwen/Qwen2.5-14B-Instruct-AWQ" -ForegroundColor Cyan
+    Write-Host "  Model: Qwen/Qwen3-14B-AWQ" -ForegroundColor Cyan
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host ""
 
@@ -202,7 +202,7 @@ try {
 
     $testPrompt = "Explique en 2 phrases ce qu'est SAP S/4HANA."
     $requestBody = @{
-        model = "Qwen/Qwen2.5-14B-Instruct-AWQ"
+        model = "Qwen/Qwen3-14B-AWQ"
         messages = @(
             @{ role = "user"; content = $testPrompt }
         )
@@ -230,7 +230,7 @@ try {
         $logEntry = @{
             timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
             instance_type = $INSTANCE_TYPE
-            model = "Qwen/Qwen2.5-14B-Instruct-AWQ"
+            model = "Qwen/Qwen3-14B-AWQ"
             prompt = $testPrompt
             response = $answer
             tokens = $tokens

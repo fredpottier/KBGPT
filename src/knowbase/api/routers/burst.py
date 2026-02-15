@@ -136,7 +136,7 @@ class BurstConfigResponse(BaseModel):
     aws_region: str = "eu-west-1"
     spot_max_price: float = 0.80
     spot_instance_types: List[str] = ["g5.xlarge", "g5.2xlarge", "g4dn.xlarge"]
-    vllm_model: str = "Qwen/Qwen2.5-7B-Instruct"
+    vllm_model: str = "Qwen/Qwen3-14B-AWQ"
     embeddings_model: str = "intfloat/multilingual-e5-large"
     vllm_port: int = 8000
     embeddings_port: int = 8001

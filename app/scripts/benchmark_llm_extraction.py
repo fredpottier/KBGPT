@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 OSMOSE Burst Mode - Benchmark LLM Extraction
-Compare vLLM (Qwen 2.5 14B AWQ) vs ChatGPT (gpt-4o-mini) pour l'extraction de concepts.
+Compare vLLM (Qwen3 14B AWQ) vs ChatGPT (gpt-4o-mini) pour l'extraction de concepts.
 
 Usage:
     python scripts/benchmark_llm_extraction.py --vllm-url http://IP:8000 --chunks 5
@@ -35,7 +35,7 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = "gpt-4o-mini"  # Modèle utilisé en production
 
-VLLM_MODEL = "/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
+VLLM_MODEL = "/models/Qwen--Qwen3-14B-AWQ"
 
 # Prompt d'extraction (identique à concept_extractor.py)
 EXTRACTION_PROMPT_FR = """Extrait les concepts clés du texte suivant.

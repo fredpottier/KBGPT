@@ -1,14 +1,14 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'OSMOSE Burst - EC2 Spot Fleet for Qwen 2.5 14B AWQ + Embeddings'
+Description: 'OSMOSE Burst - EC2 Spot Fleet for Qwen3-14B-AWQ + Embeddings'
 
 # ============================================================================
 # OSMOSE KnowWhere - Burst Mode Infrastructure v2.0
 #
-# Optimisé pour Qwen 2.5 14B AWQ sur instances g6/g6e avec Deep Learning AMI.
+# Optimisé pour Qwen3-14B-AWQ sur instances g6/g6e avec Deep Learning AMI.
 # L'AMI Deep Learning inclut les drivers NVIDIA préinstallés = boot rapide.
 #
 # Modèles:
-#   - vLLM: Qwen/Qwen2.5-14B-Instruct-AWQ (~8GB VRAM)
+#   - vLLM: Qwen/Qwen3-14B-AWQ (~8GB VRAM)
 #   - TEI: intfloat/multilingual-e5-large (~2GB VRAM)
 #   - Total: ~10-12GB sur GPU 24GB (L4/A10G)
 #
@@ -28,7 +28,7 @@ Parameters:
   # === Modèles ===
   VllmModel:
     Type: String
-    Default: "Qwen/Qwen2.5-14B-Instruct-AWQ"
+    Default: "Qwen/Qwen3-14B-AWQ"
     Description: Modèle HuggingFace pour vLLM (AWQ quantifié)
 
   EmbeddingsModel:
@@ -56,8 +56,8 @@ Parameters:
 
   VllmMaxModelLen:
     Type: Number
-    Default: 16384
-    Description: Longueur max du contexte (16384 pour prompts longs d'extraction Pass 1)
+    Default: 32768
+    Description: Longueur max du contexte (32768 natif Qwen3, doublé vs Qwen2.5)
 
   VllmMaxNumSeqs:
     Type: Number
@@ -127,11 +127,11 @@ Parameters:
     Description: Subnet ID (vide = subnet par défaut)
 
   # === AMI ===
-  # AMI Golden OSMOSE v8 - vLLM v0.6.6.post1 + TEI 89-1.6 GPU (corrige bug TEI CPU)
+  # AMI Golden OSMOSE v9 - vLLM v0.9.2 + Qwen3-14B-AWQ + TEI 89-1.6 GPU
   AmiId:
     Type: String
-    Default: "ami-0a52b60280f390e94"
-    Description: AMI ID (Golden v8 - vLLM v0.6.6.post1 + TEI 89-1.6 GPU, compatible Deep Learning AMI 2026)
+    Default: "ami-05ec81177dc825d56"
+    Description: AMI ID (Golden v9 - vLLM v0.9.2 + Qwen3-14B-AWQ + TEI 89-1.6 GPU, eu-central-1)
 
   # === SSH ===
   KeyName:
@@ -373,7 +373,7 @@ Resources:
                 # Créer container vLLM avec modèle local (EBS)
                 # Le modèle est déjà téléchargé dans /models sur l'AMI
                 # ============================================
-                VLLM_MODEL_PATH="/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
+                VLLM_MODEL_PATH="/models/Qwen--Qwen3-14B-AWQ"
 
                 echo "Creating vLLM container with local model..."
                 echo "Model path: $VLLM_MODEL_PATH"
@@ -396,7 +396,7 @@ Resources:
                 docker run -d --gpus all --restart unless-stopped \
                     -p $VLLM_PORT:8000 --name vllm \
                     -v $VLLM_MODEL_PATH:/model:ro \
-                    vllm/vllm-openai:v0.6.6.post1 \
+                    vllm/vllm-openai:v0.9.2 \
                     --model /model \
                     --quantization $VLLM_QUANTIZATION \
                     --dtype $VLLM_DTYPE \
@@ -404,6 +404,7 @@ Resources:
                     --max-model-len $VLLM_MAX_MODEL_LEN \
                     --max-num-seqs $VLLM_MAX_NUM_SEQS \
                     --trust-remote-code \
+                    --reasoning-parser qwen3 \
                     $VLLM_EXTRA_ARGS
 
                 # Recréer container TEI avec paramètres configurables
@@ -627,7 +628,7 @@ Resources:
                 # ============================================
                 # Créer container vLLM avec modèle local (EBS)
                 # ============================================
-                VLLM_MODEL_PATH="/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
+                VLLM_MODEL_PATH="/models/Qwen--Qwen3-14B-AWQ"
                 echo "Creating vLLM container with local model: $VLLM_MODEL_PATH"
 
                 # Construire les arguments optionnels
@@ -643,7 +644,7 @@ Resources:
                 docker run -d --gpus all --restart unless-stopped \
                     -p $VLLM_PORT:8000 --name vllm \
                     -v $VLLM_MODEL_PATH:/model:ro \
-                    vllm/vllm-openai:v0.6.6.post1 \
+                    vllm/vllm-openai:v0.9.2 \
                     --model /model \
                     --quantization $VLLM_QUANTIZATION \
                     --dtype $VLLM_DTYPE \
@@ -651,6 +652,7 @@ Resources:
                     --max-model-len $VLLM_MAX_MODEL_LEN \
                     --max-num-seqs $VLLM_MAX_NUM_SEQS \
                     --trust-remote-code \
+                    --reasoning-parser qwen3 \
                     $VLLM_EXTRA_ARGS
 
                 # Recréer container TEI avec paramètres configurables

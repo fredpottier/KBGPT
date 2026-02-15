@@ -64,6 +64,10 @@ class TokenTracker:
         "qwen2.5:7b": ModelPricing("qwen2.5:7b", 0.0001, 0.0001, "sagemaker"),     # ml.g5.xlarge
         "llava:34b": ModelPricing("llava:34b", 0.0004, 0.0004, "sagemaker"),       # ml.g5.4xlarge (vision)
         "phi3:3.8b": ModelPricing("phi3:3.8b", 0.00005, 0.00005, "sagemaker"),     # ml.m5.xlarge (CPU)
+
+        # Burst (EC2 Spot vLLM)
+        "burst/Qwen/Qwen3-14B-AWQ": ModelPricing("burst/Qwen/Qwen3-14B-AWQ", 0.0002, 0.0002, "burst"),
+        "burst/Qwen/Qwen2.5-14B-Instruct-AWQ": ModelPricing("burst/Qwen/Qwen2.5-14B-Instruct-AWQ", 0.0002, 0.0002, "burst"),
     }
 
     def __init__(self, log_file: Optional[Path] = None):

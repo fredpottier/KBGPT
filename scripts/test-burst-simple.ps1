@@ -80,7 +80,7 @@ echo "=== OSMOSE Burst Init ==="
 date
 
 # Variables
-VLLM_MODEL="Qwen/Qwen2.5-14B-Instruct-AWQ"
+VLLM_MODEL="Qwen/Qwen3-14B-AWQ"
 EMBEDDINGS_MODEL="intfloat/multilingual-e5-large"
 
 # Start Docker (DLAMI has it pre-installed)
@@ -89,7 +89,7 @@ systemctl enable docker
 
 # Pull images in parallel
 echo "Pulling Docker images..."
-docker pull vllm/vllm-openai:latest &
+docker pull vllm/vllm-openai:v0.9.2 &
 docker pull ghcr.io/huggingface/text-embeddings-inference:1.5 &
 wait
 echo "Images pulled."
@@ -100,12 +100,12 @@ docker run -d --gpus all \
   -p 8000:8000 \
   --name vllm \
   --restart unless-stopped \
-  vllm/vllm-openai:latest \
+  vllm/vllm-openai:v0.9.2 \
   --model $VLLM_MODEL \
   --quantization awq \
   --dtype half \
   --gpu-memory-utilization 0.85 \
-  --max-model-len 8192 \
+  --max-model-len 32768 --reasoning-parser qwen3 \
   --max-num-seqs 32 \
   --trust-remote-code
 
@@ -258,7 +258,7 @@ Write-Host ""
 
 # Wait for services
 Write-Host "[6/6] Waiting for vLLM + Embeddings (8-15 min for 14B model)..." -ForegroundColor Yellow
-Write-Host "       Model loading: Qwen/Qwen2.5-14B-Instruct-AWQ" -ForegroundColor Gray
+Write-Host "       Model loading: Qwen/Qwen3-14B-AWQ" -ForegroundColor Gray
 
 $HEALTH_URL = "http://${INSTANCE_IP}:8080/health"
 $VLLM_URL = "http://${INSTANCE_IP}:8000"
@@ -307,7 +307,7 @@ if ($ready) {
     # Test vLLM
     Write-Host "Testing vLLM API..." -ForegroundColor Yellow
     $testBody = @{
-        model = "Qwen/Qwen2.5-14B-Instruct-AWQ"
+        model = "Qwen/Qwen3-14B-AWQ"
         messages = @(
             @{ role = "user"; content = "Dis 'Bonjour OSMOSE' en une phrase." }
         )

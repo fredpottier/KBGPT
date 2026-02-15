@@ -296,6 +296,9 @@ class SubjectResolverV2:
             self._stats["parse_errors"] += 1
             return SubjectResolverOutput.create_abstain("Failed to parse LLM response"), None
 
+        # Post-processing déterministe (règles DomainContext)
+        resolver_output = self._apply_reclassification_rules(resolver_output, title)
+
         # Valider
         if not resolver_output.is_valid():
             self._stats["validation_errors"] += 1
@@ -393,8 +396,9 @@ class SubjectResolverV2:
         response = router.complete(
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
-            temperature=0.1,
+            temperature=0.1,  # sera overridden à 0.6 par le router en thinking mode
             max_tokens=2000,
+            enable_thinking=True,  # Qwen3 thinking pour classification complexe
         )
         return response
 
@@ -502,6 +506,113 @@ class SubjectResolverV2:
             return obj
 
         return normalize_evidence_spans(data)
+
+    def _apply_reclassification_rules(
+        self,
+        resolver_output: SubjectResolverOutput,
+        title: str,
+    ) -> SubjectResolverOutput:
+        """Post-processing déterministe piloté par config DomainContext."""
+        from knowbase.ontology.domain_context_store import get_domain_context_store
+
+        store = get_domain_context_store()
+        profile = store.get_profile(self.tenant_id)
+        if not profile or not profile.axis_reclassification_rules:
+            return resolver_output
+
+        try:
+            rules = json.loads(profile.axis_reclassification_rules)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(
+                "[SubjectResolverV2] Invalid JSON in axis_reclassification_rules, skipping"
+            )
+            return resolver_output
+        if not isinstance(rules, list) or not rules:
+            return resolver_output
+
+        # Trier par priorité décroissante (plus haute priorité d'abord)
+        rules.sort(key=lambda r: r.get("priority", 0), reverse=True)
+
+        title_lower = title.lower() if title else ""
+        for av in resolver_output.axis_values:
+            for rule in rules:
+                if self._rule_matches(av, rule, title_lower):
+                    action = rule.get("action", {})
+                    new_role_str = action.get("new_role")
+                    if not new_role_str:
+                        continue
+
+                    try:
+                        new_role = DiscriminatingRole(new_role_str)
+                    except ValueError:
+                        logger.warning(
+                            f"[SubjectResolverV2] Invalid role '{new_role_str}' "
+                            f"in rule '{rule.get('rule_id', '?')}', skipping"
+                        )
+                        continue
+
+                    old_role = av.discriminating_role.value
+                    av.discriminating_role = new_role
+                    if "confidence_boost" in action:
+                        av.confidence = min(1.0, av.confidence + action["confidence_boost"])
+                    if "confidence_override" in action:
+                        av.confidence = action["confidence_override"]
+                    av.rationale = (
+                        f"[Reclassified {old_role}\u2192{new_role_str} "
+                        f"by rule '{rule.get('rule_id', '?')}'] {av.rationale}"
+                    )
+                    logger.debug(
+                        f"[SubjectResolverV2] Reclassified '{av.value_raw}' "
+                        f"{old_role}\u2192{new_role_str} (rule={rule.get('rule_id', '?')})"
+                    )
+                    break  # Première règle qui matche gagne
+
+        return resolver_output
+
+    def _rule_matches(self, av, rule: dict, title_lower: str) -> bool:
+        """Évalue si une règle matche un axis_value. Toutes les conditions sont AND."""
+        conditions = rule.get("conditions", {})
+        if not conditions:
+            return False
+
+        # 1. value_pattern: regex sur value_raw
+        if "value_pattern" in conditions:
+            if not re.match(conditions["value_pattern"], av.value_raw):
+                return False
+
+        # 2. current_role: rôle actuel
+        if "current_role" in conditions:
+            if av.discriminating_role.value != conditions["current_role"]:
+                return False
+
+        # 3. title_contains_value: la valeur est dans le titre
+        if conditions.get("title_contains_value"):
+            if av.value_raw.lower() not in title_lower:
+                return False
+
+        # 4. title_context_pattern: regex sur le titre complet
+        if "title_context_pattern" in conditions:
+            if not re.search(conditions["title_context_pattern"], title_lower):
+                return False
+
+        # 5. evidence_quote_contains_any: citation structurée du LLM
+        if "evidence_quote_contains_any" in conditions:
+            keywords = conditions["evidence_quote_contains_any"]
+            quotes = [
+                span.quote.lower()
+                for span in (av.support.evidence_spans if av.support else [])
+            ]
+            all_quotes = " ".join(quotes)
+            if not any(kw.lower() in all_quotes for kw in keywords):
+                return False
+
+        # 6. rationale_contains_any: best-effort sur le rationale LLM
+        if "rationale_contains_any" in conditions:
+            rationale_lower = av.rationale.lower()
+            if not any(kw.lower() in rationale_lower for kw in conditions["rationale_contains_any"]):
+                return False
+
+        return True
 
     def map_role_to_axis_key(self, role: DiscriminatingRole) -> str:
         """

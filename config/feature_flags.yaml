@@ -53,7 +53,7 @@ stratified_pipeline_v2:
       percentile_mid: 50
       percentile_high: 75
     profile:
-      name: "qwen_14b"
+      name: "qwen3_14b"
       conf_threshold_original: 0.45
       conf_threshold_final: 0.35
       sink_band1_ceiling: 0.42

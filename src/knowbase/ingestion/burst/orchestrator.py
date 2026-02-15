@@ -1216,7 +1216,7 @@ Parameters:
     Type: String
   VllmModel:
     Type: String
-    Default: "Qwen/Qwen2.5-7B-Instruct"
+    Default: "Qwen/Qwen3-14B-AWQ"
   EmbeddingsModel:
     Type: String
     Default: "intfloat/multilingual-e5-large"

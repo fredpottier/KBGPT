@@ -36,10 +36,10 @@ exec > /var/log/burst.log 2>&1
 set -ex
 echo "=== BURST INIT ===" && date
 systemctl start docker && systemctl enable docker
-docker pull vllm/vllm-openai:latest &
+docker pull vllm/vllm-openai:v0.9.2 &
 docker pull ghcr.io/huggingface/text-embeddings-inference:1.5 &
 wait
-docker run -d --gpus all -p 8000:8000 --name vllm vllm/vllm-openai:latest --model Qwen/Qwen2.5-14B-Instruct-AWQ --quantization awq --dtype half --gpu-memory-utilization 0.85 --max-model-len 8192 --max-num-seqs 32 --trust-remote-code
+docker run -d --gpus all -p 8000:8000 --name vllm vllm/vllm-openai:v0.9.2 --model Qwen/Qwen3-14B-AWQ --quantization awq --dtype half --gpu-memory-utilization 0.85 --max-model-len 32768 --reasoning-parser qwen3 --max-num-seqs 32 --trust-remote-code
 docker run -d --gpus all -p 8001:80 --name emb ghcr.io/huggingface/text-embeddings-inference:1.5 --model-id intfloat/multilingual-e5-large
 python3 -c "
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -136,7 +136,7 @@ if ($ready) {
 
     Write-Host "[6/6] Testing..." -ForegroundColor Yellow
     try {
-        $b = '{"model":"Qwen/Qwen2.5-14B-Instruct-AWQ","messages":[{"role":"user","content":"Say hello OSMOSE"}],"max_tokens":20}'
+        $b = '{"model":"Qwen/Qwen3-14B-AWQ","messages":[{"role":"user","content":"Say hello OSMOSE"}],"max_tokens":20}'
         $r = Invoke-RestMethod -Uri "http://${IP}:8000/v1/chat/completions" -Method POST -ContentType "application/json" -Body $b -TimeoutSec 60
         Write-Host "Response: $($r.choices[0].message.content)" -ForegroundColor Green
     } catch { Write-Host "Test error: $_" -ForegroundColor Red }

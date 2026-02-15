@@ -40,17 +40,17 @@ echo "[3/7] Telechargement des modeles (peut prendre 10-15 min)..."
 # Installer huggingface_hub si pas present
 pip install -q huggingface_hub
 
-# Telecharger Qwen 2.5 14B AWQ
-echo "  - Telechargement Qwen 2.5 14B AWQ (~8GB)..."
+# Telecharger Qwen3 14B AWQ
+echo "  - Telechargement Qwen3 14B AWQ (~8GB)..."
 python3 << 'EOF'
 from huggingface_hub import snapshot_download
 import os
 
 # Modele LLM
-print("    Downloading Qwen/Qwen2.5-14B-Instruct-AWQ...")
+print("    Downloading Qwen/Qwen3-14B-AWQ...")
 snapshot_download(
-    "Qwen/Qwen2.5-14B-Instruct-AWQ",
-    local_dir="/models/Qwen--Qwen2.5-14B-Instruct-AWQ",
+    "Qwen/Qwen3-14B-AWQ",
+    local_dir="/models/Qwen--Qwen3-14B-AWQ",
     local_dir_use_symlinks=False
 )
 print("    Done!")
@@ -74,7 +74,7 @@ echo ""
 echo "[4/7] Pull des images Docker..."
 
 echo "  - vLLM OpenAI (~8GB)..."
-docker pull vllm/vllm-openai:latest
+docker pull vllm/vllm-openai:v0.9.2
 
 echo "  - Text Embeddings Inference (~2GB)..."
 docker pull ghcr.io/huggingface/text-embeddings-inference:1.5
@@ -104,14 +104,15 @@ ExecStart=/usr/bin/docker run --rm --gpus all \
     --name vllm \
     -v /models:/root/.cache/huggingface \
     -e HF_HOME=/root/.cache/huggingface \
-    vllm/vllm-openai:latest \
-    --model Qwen/Qwen2.5-14B-Instruct-AWQ \
+    vllm/vllm-openai:v0.9.2 \
+    --model Qwen/Qwen3-14B-AWQ \
     --quantization awq \
     --dtype half \
     --gpu-memory-utilization 0.85 \
-    --max-model-len 8192 \
+    --max-model-len 32768 \
     --max-num-seqs 32 \
-    --trust-remote-code
+    --trust-remote-code \
+    --reasoning-parser qwen3
 ExecStop=/usr/bin/docker stop vllm
 
 [Install]

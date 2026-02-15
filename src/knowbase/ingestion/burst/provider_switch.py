@@ -111,17 +111,17 @@ def _convert_to_vllm_model_name(model_name: Optional[str]) -> str:
     Convertit un nom de modèle HuggingFace vers le format vLLM.
 
     vLLM expose les modèles avec le préfixe /models/ et remplace / par --
-    Ex: "Qwen/Qwen2.5-14B-Instruct-AWQ" -> "/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
+    Ex: "Qwen/Qwen3-14B-AWQ" -> "/models/Qwen--Qwen3-14B-AWQ"
     """
     if not model_name:
-        return "/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
+        return "/models/Qwen--Qwen3-14B-AWQ"
 
     # Si déjà au bon format, retourner tel quel
     if model_name.startswith("/models/"):
         return model_name
 
     # Convertir HuggingFace format vers vLLM format
-    # "Qwen/Qwen2.5-14B-Instruct-AWQ" -> "Qwen--Qwen2.5-14B-Instruct-AWQ"
+    # "Qwen/Qwen3-14B-AWQ" -> "Qwen--Qwen3-14B-AWQ"
     converted = model_name.replace("/", "--")
     return f"/models/{converted}"
 
@@ -141,7 +141,7 @@ def activate_burst_providers(
     Args:
         vllm_url: URL du serveur vLLM (ex: http://ec2-xxx:8000)
         embeddings_url: URL du service embeddings (ex: http://ec2-xxx:8001)
-        vllm_model: Modèle vLLM à utiliser (défaut: Qwen/Qwen2.5-7B-Instruct)
+        vllm_model: Modèle vLLM à utiliser (défaut: Qwen/Qwen3-14B-AWQ)
         dual_logging: Si True, garde OpenAI + appelle vLLM en parallèle pour comparaison
 
     Returns:

@@ -73,7 +73,7 @@ Write-Host ""
 
 # 4. Wait for services
 Write-Host "[4/5] Waiting for vLLM + Embeddings to start (8-15 min)..." -ForegroundColor Yellow
-Write-Host "       Model: Qwen/Qwen2.5-14B-Instruct-AWQ (needs ~5min to load)"
+Write-Host "       Model: Qwen/Qwen3-14B-AWQ (needs ~5min to load)"
 
 $HEALTH_URL = "http://${INSTANCE_IP}:8080/health"
 $VLLM_URL = "http://${INSTANCE_IP}:8000"
@@ -122,7 +122,7 @@ if (-not $ready) {
     Write-Host "[5/5] Testing vLLM API..." -ForegroundColor Yellow
 
     $testBody = @{
-        model = "Qwen/Qwen2.5-14B-Instruct-AWQ"
+        model = "Qwen/Qwen3-14B-AWQ"
         messages = @(
             @{ role = "user"; content = "Say 'Hello OSMOSE' in exactly 3 words." }
         )
