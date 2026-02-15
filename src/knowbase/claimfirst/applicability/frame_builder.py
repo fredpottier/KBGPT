@@ -212,7 +212,7 @@ class FrameBuilder:
                 )
                 if frame and frame.fields:
                     # 4. Fusionner priors avec réponse LLM (contrat d'autorité)
-                    frame = self._merge_with_priors(frame, prior_fields, prior_status)
+                    frame = self._merge_with_priors(frame, prior_fields, prior_status, profile)
                     return frame
                 logger.warning(
                     f"[OSMOSE:FrameBuilder] LLM returned empty frame for {profile.doc_id}, "
@@ -226,7 +226,7 @@ class FrameBuilder:
 
         frame = self._build_deterministic(profile, units)
         # Appliquer aussi le contrat d'autorité au fallback déterministe
-        frame = self._merge_with_priors(frame, prior_fields, prior_status)
+        frame = self._merge_with_priors(frame, prior_fields, prior_status, profile)
         return frame
 
     # =========================================================================
@@ -577,6 +577,7 @@ class FrameBuilder:
         frame: ApplicabilityFrame,
         prior_fields: List[FrameField],
         prior_status: ResolverPriorStatus,
+        profile: Optional[CandidateProfile] = None,
     ) -> ApplicabilityFrame:
         """
         Fusionne les priors du resolver avec le frame produit (LLM ou déterministe).
@@ -586,23 +587,41 @@ class FrameBuilder:
         - CONFIRMED + LLM override avec evidence → accepter MEDIUM
         - CONFIRMED + LLM override sans evidence → rejeté, garder prior
         - ABSENT → supprimer release_id sauf WEAK_GUESS légitime
+        - ABSENT + tout rejeté → fallback titre numeric_identifier
         """
         if not prior_fields:
             # Mode ABSENT : supprimer tout release_id que le LLM aurait inventé
             if prior_status == ResolverPriorStatus.ABSENT:
                 kept = []
+                had_release_rejected = False
                 for f in frame.fields:
                     if f.field_name in ("release_id", "version"):
-                        if self._is_weak_guess_legitimate(f):
+                        if self._is_weak_guess_legitimate(f, profile):
                             f.reasoning = f"WEAK_GUESS (no resolver prior): {f.reasoning}"
                             kept.append(f)
                         else:
+                            had_release_rejected = True
                             frame.validation_notes.append(
                                 f"AuthorityContract: rejected '{f.field_name}={f.value_normalized}' "
                                 f"— no resolver prior, insufficient evidence"
                             )
                     else:
                         kept.append(f)
+
+                # Fallback : si tous les release_id rejetés, tenter
+                # un numeric_identifier du titre comme release_id
+                has_release = any(
+                    f.field_name in ("release_id", "version") for f in kept
+                )
+                if had_release_rejected and not has_release and profile:
+                    fallback = self._fallback_title_numeric(profile)
+                    if fallback:
+                        kept.append(fallback)
+                        frame.validation_notes.append(
+                            f"AuthorityContract: fallback to title numeric_identifier "
+                            f"'{fallback.value_normalized}'"
+                        )
+
                 frame.fields = kept
             return frame
 
@@ -649,16 +668,67 @@ class FrameBuilder:
         frame.fields = merged
         return frame
 
-    def _is_weak_guess_legitimate(self, field: FrameField) -> bool:
+    def _is_weak_guess_legitimate(
+        self,
+        field: FrameField,
+        profile: Optional[CandidateProfile] = None,
+    ) -> bool:
         """
-        WEAK_GUESS accepté seulement si named_version + in_title ou frequency >= 3.
+        WEAK_GUESS accepté si :
+        1. named_version signal (in_title ou named_version dans reasoning), OU
+        2. candidat backing avec in_title=True (vérifié via le profil)
 
-        Détection via le reasoning ou les candidate_ids du champ.
+        ET confiance != LOW.
         """
         r = (field.reasoning or "").lower()
         has_named_signal = "in_title=true" in r or "named_version" in r
+
+        # Vérifier aussi les candidats du profil pour le signal in_title
+        if not has_named_signal and profile and field.candidate_ids:
+            for vc in profile.value_candidates:
+                if vc.candidate_id in field.candidate_ids and vc.in_title:
+                    has_named_signal = True
+                    break
+
         not_low = field.confidence != FrameFieldConfidence.LOW
         return has_named_signal and not_low
+
+    def _fallback_title_numeric(
+        self,
+        profile: CandidateProfile,
+    ) -> Optional[FrameField]:
+        """
+        Fallback quand tous les release_id sont rejetés par l'Authority Contract.
+
+        Cherche un numeric_identifier (year) dans le titre + co-occurrent
+        avec le sujet. Ex: "S4HANA 2023 Upgrade Guide" → release_id=2023.
+        """
+        candidates = profile.get_candidates_by_type("numeric_identifier")
+        title_candidates = [
+            c for c in candidates
+            if c.in_title and c.cooccurs_with_subject
+        ]
+        if not title_candidates:
+            return None
+
+        best = max(title_candidates, key=lambda c: c.frequency)
+        logger.info(
+            f"[OSMOSE:FrameBuilder] AuthorityContract fallback: "
+            f"title numeric_identifier '{best.raw_value}' "
+            f"(freq={best.frequency}, in_title=True)"
+        )
+        return FrameField(
+            field_name="release_id",
+            value_normalized=best.raw_value,
+            display_label="numeric_identifier",
+            evidence_unit_ids=best.unit_ids[:5],
+            candidate_ids=[best.candidate_id],
+            confidence=FrameFieldConfidence.MEDIUM,
+            reasoning=(
+                f"AuthorityContract fallback: numeric_identifier in title "
+                f"(freq={best.frequency}, cooccurs_with_subject=True)"
+            ),
+        )
 
     # =========================================================================
     # Deterministic fallback

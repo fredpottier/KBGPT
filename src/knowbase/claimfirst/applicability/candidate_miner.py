@@ -292,6 +292,18 @@ class CandidateMiner:
             # Exclure les adresses IP (0.0.0.0, 123.456.789.0, etc.)
             if _IP_LIKE_PATTERN.match(raw):
                 continue
+            # Exclure les all-zeros (0.0, 0.0.0 — placeholders)
+            segments = raw.split(".")
+            if all(s == "0" for s in segments):
+                continue
+            # Exclure les patterns type numéro de téléphone/IP partiel
+            # (3+ segments avec tous les segments >= 100, ex: 123.456.789)
+            if len(segments) >= 3:
+                try:
+                    if all(int(s) >= 100 for s in segments):
+                        continue
+                except ValueError:
+                    pass
             # Exclure les pourcentages (99.9%, 99.7 %)
             end_pos = match.end()
             rest = text[end_pos:end_pos + 3].lstrip()

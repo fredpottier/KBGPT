@@ -211,8 +211,8 @@ class TestLexicalSanityValidator:
 
         assert result.fields[0].confidence != FrameFieldConfidence.LOW
 
-    def test_invalid_year_degraded(self):
-        """Une année invalide dégrade la confiance."""
+    def test_invalid_year_rejected(self):
+        """Une année invalide est rejetée (pas juste dégradée)."""
         units = _make_units()
         frame = ApplicabilityFrame(
             doc_id="test",
@@ -228,7 +228,9 @@ class TestLexicalSanityValidator:
         validator = LexicalSanityValidator()
         result = validator.validate(frame, units, _make_profile())
 
-        assert result.fields[0].confidence == FrameFieldConfidence.LOW
+        # Year fields avec format invalide sont maintenant REJETÉS
+        assert len(result.fields) == 0
+        assert any("REJECTED" in n for n in result.validation_notes)
 
     def test_value_too_long_degraded(self):
         """Une valeur trop longue dégrade la confiance."""

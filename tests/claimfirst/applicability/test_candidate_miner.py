@@ -234,3 +234,31 @@ class TestCandidateMiner:
         version_values = {v.raw_value for v in versions}
         assert "6.0" in version_values
         assert "12.1" in version_values
+
+    def test_all_zeros_version_filtered(self):
+        """Les versions all-zeros (0.0, 0.0.0) sont des placeholders, pas des versions."""
+        units = [
+            _make_unit("Document Version 0.0.0 (draft)", p_idx=0, s_idx=0),
+            _make_unit("Compatibility: 0.0 placeholder.", p_idx=1, s_idx=0),
+        ]
+        profile = self.miner.mine(units, "doc1")
+        versions = profile.get_candidates_by_type("version")
+        version_values = {v.raw_value for v in versions}
+        assert "0.0.0" not in version_values
+        assert "0.0" not in version_values
+
+    def test_phone_like_pattern_filtered(self):
+        """Les patterns type numéro de téléphone (123.456.789) sont filtrés."""
+        units = [_make_unit("Contact: 123.456.789 for support.")]
+        profile = self.miner.mine(units, "doc1")
+        versions = profile.get_candidates_by_type("version")
+        version_values = {v.raw_value for v in versions}
+        assert "123.456.789" not in version_values
+
+    def test_real_3segment_version_kept(self):
+        """Les vraies versions 3 segments (ex: 7.58.1) sont conservées."""
+        units = [_make_unit("Requires kernel 7.58.1 or later.")]
+        profile = self.miner.mine(units, "doc1")
+        versions = profile.get_candidates_by_type("version")
+        version_values = {v.raw_value for v in versions}
+        assert "7.58.1" in version_values

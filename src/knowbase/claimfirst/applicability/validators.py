@@ -220,7 +220,17 @@ class LexicalSanityValidator:
                     f"LexicalSanity: issues with '{field.field_name}'="
                     f"'{value}': {', '.join(issues)}"
                 )
-                # Ne pas rejeter, mais dégrader confiance
+                # Year fields avec format invalide → REJETER (pas juste dégrader)
+                # "H1, 2025" ou "2023-10-11" dans un champ doc_year est inutilisable
+                is_year_field = field.field_name.endswith("_year") or field.field_name == "year"
+                has_year_format_issue = any("does not match year format" in i for i in issues)
+                if is_year_field and has_year_format_issue:
+                    frame.validation_notes.append(
+                        f"LexicalSanity: REJECTED '{field.field_name}'="
+                        f"'{value}' — invalid year format"
+                    )
+                    continue  # Ne pas ajouter à kept
+                # Autres issues → dégrader confiance
                 field.confidence = FrameFieldConfidence.LOW
 
             kept.append(field)

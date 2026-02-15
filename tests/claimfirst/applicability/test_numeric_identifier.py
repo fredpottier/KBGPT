@@ -91,12 +91,13 @@ class TestDeterministicNumericIdentifier:
         assert "numeric_identifier_ambiguous" in frame.unknowns
         assert frame.get_field("year") is None
 
-    def test_numeric_identifier_title_plus_subject_blocked_by_authority_contract(self):
-        """numeric_identifier dans le titre + co-occurrence sujet → rejeté par contrat d'autorité.
+    def test_numeric_identifier_title_plus_subject_accepted_by_authority_fallback(self):
+        """numeric_identifier dans le titre + co-occurrence sujet → accepté par fallback.
 
-        Depuis le contrat d'autorité (ResolverPriorStatus), en mode ABSENT
-        (pas de resolver prior), un numeric_identifier nu ne peut plus devenir
-        release_id. Seul un named_version avec in_title ou frequency >= 3 passe.
+        Depuis le fallback Authority Contract : en mode ABSENT (pas de resolver prior),
+        si le named_version initial est rejeté mais qu'un numeric_identifier est
+        in_title + cooccurs_with_subject, il est accepté comme release_id MEDIUM.
+        Ex: "S/4HANA 2023 Upgrade Guide" → release_id=2023.
         """
         profile = CandidateProfile(
             doc_id="test",
@@ -121,9 +122,11 @@ class TestDeterministicNumericIdentifier:
 
         assert frame.method == "deterministic_fallback"
         release = frame.get_field("release_id")
-        # Contrat d'autorité: sans resolver prior, numeric_identifier seul → rejeté
-        assert release is None
-        assert any("AuthorityContract: rejected" in n for n in frame.validation_notes)
+        # Fallback Authority Contract: numeric_identifier in_title → accepté MEDIUM
+        assert release is not None
+        assert release.value_normalized == "2023"
+        assert release.confidence == FrameFieldConfidence.MEDIUM
+        assert any("fallback" in n.lower() for n in frame.validation_notes)
 
     def test_named_version_still_becomes_release_id(self):
         """named_version → release_id inchangé en mode déterministe."""
