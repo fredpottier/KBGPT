@@ -193,6 +193,7 @@ const INDUSTRY_OPTIONS = [
   { value: 'insurance', label: 'Assurance' },
   { value: 'retail', label: 'Retail / Commerce' },
   { value: 'manufacturing', label: 'Industrie / Manufacturing' },
+  { value: 'sap_ecosystem', label: 'SAP Ecosystem' },
   { value: 'technology', label: 'Technologie / IT' },
   { value: 'energy', label: 'Energie' },
   { value: 'logistics', label: 'Logistique / Transport' },
@@ -209,6 +210,11 @@ interface IndustryPreset {
   acronymsSuggestions: Record<string, string>
   targetUsersSuggestions: string[]
   documentTypesSuggestions: string[]
+  // Version & Axes presets (optional)
+  versioningHints?: string
+  identificationSemantics?: string
+  axisReclassificationRules?: string
+  axisPolicy?: AxisPolicyState
 }
 
 const INDUSTRY_PRESETS: Record<string, IndustryPreset> = {
@@ -318,6 +324,116 @@ const INDUSTRY_PRESETS: Record<string, IndustryPreset> = {
     acronymsSuggestions: { 'KYC': 'Know Your Customer', 'AML': 'Anti-Money Laundering', 'VaR': 'Value at Risk' },
     targetUsersSuggestions: ['Traders', 'Analystes financiers', 'Risk managers', 'Compliance officers'],
     documentTypesSuggestions: ['Rapports de gestion', 'Analyses de risque', 'Prospectus'],
+  },
+  sap_ecosystem: {
+    descriptionPlaceholder: "Base de connaissances SAP couvrant l'ensemble de l'ecosysteme : ERP (S/4HANA), plateforme cloud (BTP), solutions metiers (SuccessFactors, Ariba, Concur, Fieldglass), analytics, integration et IA. Le corpus inclut Feature Scope Descriptions, guides de securite, guides d'integration, operations guides et release notes.",
+    subDomainsSuggestions: [
+      'S/4HANA Cloud Public Edition',
+      'S/4HANA Cloud Private Edition',
+      'S/4HANA On-Premise',
+      'SAP BTP',
+      'SAP Integration Suite',
+      'SAP SuccessFactors',
+      'SAP Ariba',
+      'SAP Concur',
+      'SAP Fieldglass',
+      'SAP Analytics Cloud',
+      'SAP Signavio',
+      'SAP Build',
+      'SAP Joule',
+      'SAP DRC',
+      'SAP Business AI',
+    ],
+    keyConceptsSuggestions: [
+      'Clean Core',
+      'Key User Extensibility',
+      'Developer Extensibility',
+      'Side-by-Side Extensions',
+      'In-App Extensions',
+      'Communication Arrangements',
+      'Intelligent Enterprise',
+      'Business Network',
+      'Spend Management',
+    ],
+    acronymsSuggestions: {
+      'S/4HANA': 'SAP S/4HANA - Next-generation ERP suite',
+      'BTP': 'Business Technology Platform',
+      'PCE': 'Private Cloud Edition',
+      'RISE': 'RISE with SAP (Private Edition offering)',
+      'GROW': 'GROW with SAP (Public Edition offering)',
+      'HCM': 'Human Capital Management (SuccessFactors)',
+      'HXM': 'Human Experience Management (SuccessFactors)',
+      'SAC': 'SAP Analytics Cloud',
+      'CAP': 'Cloud Application Programming Model',
+      'RAP': 'RESTful ABAP Programming Model',
+      'CF': 'Cloud Foundry',
+      'DRC': 'Document and Reporting Compliance',
+      'FSD': 'Feature Scope Description',
+      'SPS': 'Support Package Stack',
+      'FPS': 'Feature Pack Stack',
+      'CPI': 'Cloud Platform Integration (ancien nom Integration Suite)',
+      'EWM': 'Extended Warehouse Management',
+      'TM': 'Transportation Management',
+    },
+    targetUsersSuggestions: [
+      'Solution Architects',
+      'SAP Consultants',
+      'Technical Consultants',
+      'Developers',
+      'Key Users',
+      'Functional Consultants',
+      'Integration Specialists',
+    ],
+    documentTypesSuggestions: [
+      'Feature Scope Description',
+      'Security Guide',
+      'Integration Guide',
+      'Operations Guide',
+      'Release Notes',
+      'Implementation Guide',
+      'Best Practices',
+      'API Documentation',
+    ],
+    versioningHints: "SAP INDEPENDENT versioning axes: (1) release_id: On-Premise YYMM (1503-1909), then YYYY (2020-2023+). Cloud uses YYMM (1603-2508+). Both are release identifiers, NOT dates. (2) SP 01..99: Support Packages, ordered within a release. (3) FPS01..FPS99: Feature Pack Stacks, cumulative. (4) Document Version (5.0, 3.1): document revision, NOT product release. Each is a SEPARATE axis.",
+    identificationSemantics: 'Rule: YYMM or YYYY number immediately after SAP product name (e.g. "S/4HANA 2023", "S/4HANA Cloud 2302", "S/4HANA 1809") → release_id. These are product release identifiers, NOT publication dates or temporal references.\nRule: "Document Version" or "Doc Version" followed by X.Y (e.g. 5.0, 3.1) → document_version. This is the document revision, NOT the product release.\nRule: On-Premise releases switched from YYMM to YYYY in 2020: 1503, 1511, 1605, 1610, 1709, 1809, 1909 (YYMM), then 2020, 2021, 2022, 2023 (YYYY).\nCounter-example: 4-digit year in copyright/legal line ("© 2025 SAP SE") → NOT release_id.\nCounter-example: ISO date YYYY-MM-DD ("2025-08-06") → temporal date, NOT release_id.',
+    axisReclassificationRules: JSON.stringify([
+      {
+        rule_id: 'yyyy_in_title_with_product_is_revision',
+        priority: 100,
+        description: 'YYYY temporal in title near product name = release_id, not temporal',
+        conditions: {
+          value_pattern: '^(19|20)\\d{2}$',
+          current_role: 'temporal',
+          title_contains_value: true,
+          title_context_pattern: '(?i)(s/4hana|sap\\s|release|version|upgrade|feature pack)',
+        },
+        action: { new_role: 'revision' },
+      },
+      {
+        rule_id: 'doc_version_not_product_release',
+        priority: 90,
+        description: 'Document Version X.Y in evidence = doc revision, not product release',
+        conditions: {
+          value_pattern: '^\\d+\\.\\d+$',
+          current_role: 'revision',
+          evidence_quote_contains_any: ['document version', 'doc version', 'document revision'],
+        },
+        action: { new_role: 'unknown', confidence_override: 0.3 },
+      },
+    ], null, 2),
+    axisPolicy: {
+      strip_prefixes: ['Version', 'Release', 'Edition'],
+      canonicalization_enabled: true,
+      expected_axes: ['release_id', 'version', 'edition'],
+      excluded_axes: ['trial_phase', 'model_generation', 'regulation_version'],
+      strict_expected: false,
+      year_range: { min: 1990, max_relative: 2 },
+      plausibility_overrides: {
+        lifecycle_status: {
+          reject_patterns: ['^\\d{4}-\\d{2}-\\d{2}$'],
+        },
+      },
+    },
   },
   technology: {
     descriptionPlaceholder: "Entreprise technologique developpant des logiciels...",
@@ -524,7 +640,17 @@ export default function DomainContextPage() {
       target_users: [...new Set([...formData.target_users, ...currentPreset.targetUsersSuggestions])],
       document_types: [...new Set([...formData.document_types, ...currentPreset.documentTypesSuggestions])],
       common_acronyms: { ...currentPreset.acronymsSuggestions, ...formData.common_acronyms },
+      versioning_hints: formData.versioning_hints || currentPreset.versioningHints || '',
+      identification_semantics: formData.identification_semantics || currentPreset.identificationSemantics || '',
+      axis_reclassification_rules: formData.axis_reclassification_rules || currentPreset.axisReclassificationRules || '',
     })
+    // Apply axis policy preset if available and current is default
+    if (currentPreset.axisPolicy) {
+      setAxisPolicy(prev => {
+        const isDefault = prev.expected_axes.length === 0 && prev.excluded_axes.length === 0 && prev.strip_prefixes.length === 0
+        return isDefault ? { ...currentPreset.axisPolicy! } : prev
+      })
+    }
   }
 
   const applySuggestions = (field: 'sub_domains' | 'key_concepts' | 'target_users' | 'document_types') => {
@@ -1331,19 +1457,38 @@ export default function DomainContextPage() {
                 </SimpleGrid>
               </FormControl>
 
+              {/* Strict Expected toggle */}
+              <FormControl>
+                <HStack spacing={3}>
+                  <Checkbox
+                    isChecked={axisPolicy.strict_expected}
+                    onChange={(e) => setAxisPolicy(prev => ({ ...prev, strict_expected: e.target.checked }))}
+                    colorScheme="purple"
+                    sx={{
+                      '.chakra-checkbox__control': { borderColor: 'border.default' },
+                    }}
+                  >
+                    <Text fontSize="sm" color="text.secondary">Strict mode</Text>
+                  </Checkbox>
+                </HStack>
+                <FormHelperText color="text.muted" ml={6}>
+                  Si active, les axes hors "Expected" sont rejetes (hard filter). Sinon, ils sont gardes avec une note (soft boost).
+                </FormHelperText>
+              </FormControl>
+
               <Divider borderColor="border.default" />
 
               {/* Strip Prefixes */}
               <FormControl>
                 <FormLabel color="text.secondary" fontSize="sm">Strip Prefixes</FormLabel>
                 <FormHelperText color="text.muted" mb={3}>
-                  Prefixes a retirer automatiquement des valeurs d'axes (ex: "v", "V", "release-")
+                  Mots-prefixes a retirer des valeurs d'axes pour canonicalisation (ex: "Version 2025" → "2025")
                 </FormHelperText>
                 <HStack mb={3}>
                   <Input
                     value={newStripPrefix}
                     onChange={(e) => setNewStripPrefix(e.target.value)}
-                    placeholder="Ex: v, V, release-"
+                    placeholder="Ex: Version, Release, Edition"
                     {...inputStyles}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -1368,6 +1513,27 @@ export default function DomainContextPage() {
                   ))}
                 </Wrap>
               </FormControl>
+
+              {/* Canonicalization toggle */}
+              {axisPolicy.strip_prefixes.length > 0 && (
+                <FormControl>
+                  <HStack spacing={3}>
+                    <Checkbox
+                      isChecked={axisPolicy.canonicalization_enabled}
+                      onChange={(e) => setAxisPolicy(prev => ({ ...prev, canonicalization_enabled: e.target.checked }))}
+                      colorScheme="green"
+                      sx={{
+                        '.chakra-checkbox__control': { borderColor: 'border.default' },
+                      }}
+                    >
+                      <Text fontSize="sm" color="text.secondary">Canonicalisation active</Text>
+                    </Checkbox>
+                  </HStack>
+                  <FormHelperText color="text.muted" ml={6}>
+                    Decochez pour desactiver la canonicalisation meme si des prefixes sont configures.
+                  </FormHelperText>
+                </FormControl>
+              )}
 
               {/* Year Range */}
               <FormControl>
