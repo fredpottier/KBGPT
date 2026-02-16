@@ -433,6 +433,19 @@ class ClaimFirstOrchestrator:
             f"{result.cluster_count} clusters in {processing_time_ms}ms"
         )
 
+        # Ligne résumé structurée logfmt — parsable par Loki pour dashboard Grafana
+        logger.info(
+            f"[CLAIMFIRST:SUMMARY] "
+            f"doc_id={doc_id} "
+            f"claims={result.claim_count} "
+            f"entities={result.entity_count} "
+            f"facets={result.facet_count} "
+            f"clusters={result.cluster_count} "
+            f"llm_calls={result.llm_calls} "
+            f"llm_tokens={result.llm_tokens_used} "
+            f"duration_ms={processing_time_ms}"
+        )
+
         return result
 
     def process_and_persist(

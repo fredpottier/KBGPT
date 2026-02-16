@@ -375,7 +375,22 @@ def ingest_document_v2_job(
             },
         }
 
-        logger.info(f"[V2] Job completed: {document_id}")
+        # Ligne résumé structurée logfmt — parsable par Loki pour dashboard Grafana
+        logger.info(
+            f"[V2:SUMMARY] "
+            f"doc_id={document_id} "
+            f"file={path.name} "
+            f"type={file_type} "
+            f"pages={metrics.get('total_pages', 0)} "
+            f"chars={len(full_text)} "
+            f"concepts={osmose_result.get('concepts_extracted', 0)} "
+            f"canonical={osmose_result.get('canonical_concepts', 0)} "
+            f"relations={osmose_result.get('relations_stored', 0)} "
+            f"chunks={osmose_result.get('embeddings_stored', 0)} "
+            f"extraction_s={metrics.get('extraction_time_ms', 0) / 1000:.1f} "
+            f"osmose_s={osmose_result.get('duration_seconds', 0):.1f} "
+            f"status=completed"
+        )
         return result
 
     except Exception as e:

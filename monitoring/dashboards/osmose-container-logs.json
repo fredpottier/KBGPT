@@ -591,6 +591,290 @@
       ],
       "title": "🚨 Erreurs et Critiques Récentes",
       "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "osmose_s"},
+            "properties": [
+              {"id": "unit", "value": "s"},
+              {"id": "displayName", "value": "Durée OSMOSE"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "extraction_s"},
+            "properties": [
+              {"id": "unit", "value": "s"},
+              {"id": "displayName", "value": "Durée Extraction"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "file"},
+            "properties": [
+              {"id": "displayName", "value": "Fichier"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "pages"},
+            "properties": [
+              {"id": "displayName", "value": "Pages"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "concepts"},
+            "properties": [
+              {"id": "displayName", "value": "Concepts"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "canonical"},
+            "properties": [
+              {"id": "displayName", "value": "Canoniques"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "relations"},
+            "properties": [
+              {"id": "displayName", "value": "Relations"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "chunks"},
+            "properties": [
+              {"id": "displayName", "value": "Chunks"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Time"},
+            "properties": [
+              {"id": "displayName", "value": "Date"}
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 9,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "Date", "desc": true}],
+        "frameIndex": 0,
+        "footer": {"show": false}
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=\"ingestion-worker\"} |= \"[V2:SUMMARY]\" | regexp `file=(?P<file>\\S+) type=(?P<type>\\S+) pages=(?P<pages>\\d+) chars=(?P<chars>\\d+) concepts=(?P<concepts>\\d+) canonical=(?P<canonical>\\d+) relations=(?P<relations>\\d+) chunks=(?P<chunks>\\d+) extraction_s=(?P<extraction_s>[\\d.]+) osmose_s=(?P<osmose_s>[\\d.]+)`",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "📋 Documents Traités (résumé par document)",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "keepLabels": ["file", "pages", "concepts", "canonical", "relations", "chunks", "extraction_s", "osmose_s"]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "id": true,
+              "tsNs": true,
+              "labels": true,
+              "Line": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisLabel": "Secondes",
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "barAlignment": 0,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "stacking": {"mode": "none"}
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "id": 10,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "single", "sort": "none"}
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "max_over_time({service=\"ingestion-worker\"} |= \"[V2:SUMMARY]\" | regexp `file=(?P<file>\\S+).*osmose_s=(?P<osmose_s>[\\d.]+)` | unwrap osmose_s | __error__=\"\" [$__interval]) by (file)",
+          "legendFormat": "OSMOSE ({{file}})",
+          "queryType": "range",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "max_over_time({service=\"ingestion-worker\"} |= \"[V2:SUMMARY]\" | regexp `file=(?P<file>\\S+).*extraction_s=(?P<extraction_s>[\\d.]+)` | unwrap extraction_s | __error__=\"\" [$__interval]) by (file)",
+          "legendFormat": "Extraction ({{file}})",
+          "queryType": "range",
+          "refId": "B"
+        }
+      ],
+      "title": "⏱️ Durée de Traitement par Document",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "claims"},
+            "properties": [
+              {"id": "displayName", "value": "Claims"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "entities"},
+            "properties": [
+              {"id": "displayName", "value": "Entités"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "facets"},
+            "properties": [
+              {"id": "displayName", "value": "Facettes"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "clusters"},
+            "properties": [
+              {"id": "displayName", "value": "Clusters"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "llm_calls"},
+            "properties": [
+              {"id": "displayName", "value": "Appels LLM"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "llm_tokens"},
+            "properties": [
+              {"id": "displayName", "value": "Tokens LLM"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "duration_ms"},
+            "properties": [
+              {"id": "unit", "value": "ms"},
+              {"id": "displayName", "value": "Durée ClaimFirst"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Time"},
+            "properties": [
+              {"id": "displayName", "value": "Date"}
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "id": 11,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "Date", "desc": true}],
+        "frameIndex": 0,
+        "footer": {"show": false}
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=\"ingestion-worker\"} |= \"[CLAIMFIRST:SUMMARY]\" | regexp `doc_id=(?P<doc_id>\\S+) claims=(?P<claims>\\d+) entities=(?P<entities>\\d+) facets=(?P<facets>\\d+) clusters=(?P<clusters>\\d+) llm_calls=(?P<llm_calls>\\d+) llm_tokens=(?P<llm_tokens>\\d+) duration_ms=(?P<duration_ms>\\d+)`",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "🧠 Métriques ClaimFirst par Document",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "keepLabels": ["doc_id", "claims", "entities", "facets", "clusters", "llm_calls", "llm_tokens", "duration_ms"]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "id": true,
+              "tsNs": true,
+              "labels": true,
+              "Line": true
+            }
+          }
+        }
+      ]
     }
   ],
   "refresh": "30s",
