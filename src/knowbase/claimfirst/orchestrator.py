@@ -220,6 +220,12 @@ class ClaimFirstOrchestrator:
             f"status={doc_context.resolution_status.value}"
         )
 
+        # Enrichir doc_title depuis le primary_subject si absent du cache
+        # Le primary_subject est extrait par le LLM et contient souvent le titre réel
+        if not doc_title and doc_context.primary_subject:
+            doc_title = doc_context.primary_subject
+            logger.info(f"  → doc_title inferred from primary_subject: '{doc_title}'")
+
         # Phase 0.55: Resolve ComparableSubject (INV-25: Domain-Agnostic)
         logger.info("[OSMOSE:ClaimFirst] Phase 0.55: Resolving comparable subject...")
         comparable_subject, resolver_axis_values = self._resolve_comparable_subject(

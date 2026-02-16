@@ -410,7 +410,7 @@ class FrameBuilder:
             task_type=TaskType.METADATA_EXTRACTION,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=2000,
+            max_tokens=3000,
             json_schema=FRAME_BUILDER_SCHEMA,
         )
 
@@ -497,6 +497,55 @@ class FrameBuilder:
             lines.append(f"- {cat}: {count} occurrences")
         return "\n".join(lines)
 
+    def _try_repair_truncated_json(self, response: str, doc_id: str) -> Optional[dict]:
+        """
+        Tente de réparer un JSON tronqué par max_tokens.
+
+        Stratégie : extraire les objets field complets du array "fields"
+        même si le JSON est coupé au milieu du dernier objet.
+        """
+        import re
+
+        # Vérifier que ça ressemble au début de notre schema attendu
+        if '"fields"' not in response:
+            return None
+
+        # Extraire tous les objets field complets via regex
+        # Chaque field est un objet JSON avec "field_name" comme premier champ
+        field_pattern = re.compile(
+            r'\{\s*"field_name"\s*:\s*"[^"]+"\s*,'
+            r'\s*"value_normalized"\s*:\s*"[^"]*"\s*,'
+            r'\s*"display_label"\s*:\s*"[^"]*"\s*,'
+            r'\s*"evidence_unit_ids"\s*:\s*\[[^\]]*\]\s*,'
+            r'\s*"candidate_ids"\s*:\s*\[[^\]]*\]\s*,'
+            r'\s*"confidence"\s*:\s*"[^"]*"\s*,'
+            r'\s*"reasoning"\s*:\s*"(?:[^"\\]|\\.)*"\s*'
+            r'\}',
+            re.DOTALL,
+        )
+
+        matches = field_pattern.findall(response)
+        if not matches:
+            return None
+
+        # Reconstruire un JSON valide avec les fields récupérés
+        recovered_fields = []
+        for m in matches:
+            try:
+                field_obj = json.loads(m)
+                recovered_fields.append(field_obj)
+            except json.JSONDecodeError:
+                continue
+
+        if not recovered_fields:
+            return None
+
+        logger.info(
+            f"[OSMOSE:FrameBuilder] Repaired truncated JSON for {doc_id}: "
+            f"recovered {len(recovered_fields)} complete fields from max_tokens cutoff"
+        )
+        return {"fields": recovered_fields, "unknowns": []}
+
     def _parse_llm_response(
         self,
         response: str,
@@ -514,16 +563,19 @@ class FrameBuilder:
         try:
             data = json.loads(response)
         except json.JSONDecodeError:
-            logger.warning(
-                f"[OSMOSE:FrameBuilder] Failed to parse LLM JSON for {profile.doc_id}. "
-                f"Raw response (first 500 chars): {response[:500]}"
-            )
-            return ApplicabilityFrame(
-                doc_id=profile.doc_id,
-                fields=[],
-                unknowns=["release_id"],
-                method="llm_parse_error",
-            )
+            # Tentative de récupération : JSON tronqué par max_tokens
+            data = self._try_repair_truncated_json(response, profile.doc_id)
+            if data is None:
+                logger.warning(
+                    f"[OSMOSE:FrameBuilder] Failed to parse LLM JSON for {profile.doc_id}. "
+                    f"Raw response (first 500 chars): {response[:500]}"
+                )
+                return ApplicabilityFrame(
+                    doc_id=profile.doc_id,
+                    fields=[],
+                    unknowns=["release_id"],
+                    method="llm_parse_error",
+                )
 
         # Construire les champs
         fields: List[FrameField] = []
@@ -633,6 +685,28 @@ class FrameBuilder:
 
         unknowns = data.get("unknowns", [])
 
+        # Déduplication : 1 seule valeur par field_name (le frame décrit UN document)
+        # Garder la meilleure : HIGH > MEDIUM > LOW, puis plus d'evidence_unit_ids
+        _CONF_RANK = {FrameFieldConfidence.HIGH: 3, FrameFieldConfidence.MEDIUM: 2, FrameFieldConfidence.LOW: 1}
+        seen: Dict[str, FrameField] = {}
+        dedup_count = 0
+        for f in fields:
+            existing = seen.get(f.field_name)
+            if existing is None:
+                seen[f.field_name] = f
+            else:
+                dedup_count += 1
+                f_rank = (_CONF_RANK.get(f.confidence, 0), len(f.evidence_unit_ids or []))
+                e_rank = (_CONF_RANK.get(existing.confidence, 0), len(existing.evidence_unit_ids or []))
+                if f_rank > e_rank:
+                    seen[f.field_name] = f
+        fields = list(seen.values())
+        if dedup_count:
+            logger.info(
+                f"[OSMOSE:FrameBuilder] Deduplicated {dedup_count} duplicate field(s) "
+                f"— kept {len(fields)} unique axes"
+            )
+
         return ApplicabilityFrame(
             doc_id=profile.doc_id,
             fields=fields,
@@ -666,9 +740,21 @@ class FrameBuilder:
             if prior_status == ResolverPriorStatus.ABSENT:
                 kept = []
                 had_release_rejected = False
+                logger.debug(
+                    f"[OSMOSE:FrameBuilder] AuthorityContract ABSENT mode: "
+                    f"checking {len(frame.fields)} fields: "
+                    f"{[(f.field_name, f.value_normalized) for f in frame.fields]}"
+                )
                 for f in frame.fields:
                     if f.field_name in ("release_id", "version"):
-                        if self._is_weak_guess_legitimate(f, profile):
+                        legitimate = self._is_weak_guess_legitimate(f, profile)
+                        logger.debug(
+                            f"[OSMOSE:FrameBuilder] AuthorityContract: "
+                            f"'{f.field_name}={f.value_normalized}' "
+                            f"weak_guess_legitimate={legitimate} "
+                            f"(candidate_ids={f.candidate_ids}, confidence={f.confidence})"
+                        )
+                        if legitimate:
                             f.reasoning = f"WEAK_GUESS (no resolver prior): {f.reasoning}"
                             kept.append(f)
                         else:
@@ -748,22 +834,38 @@ class FrameBuilder:
         """
         WEAK_GUESS accepté si :
         1. named_version signal (in_title ou named_version dans reasoning), OU
-        2. candidat backing avec in_title=True (vérifié via le profil)
+        2. candidat backing avec in_title=True (vérifié via candidate_ids OU raw_value match)
 
         ET confiance != LOW.
         """
         r = (field.reasoning or "").lower()
-        has_named_signal = "in_title=true" in r or "named_version" in r
+        has_title_signal = "in_title=true" in r or "named_version" in r
 
-        # Vérifier aussi les candidats du profil pour le signal in_title
-        if not has_named_signal and profile and field.candidate_ids:
+        # Vérifier les candidats du profil pour le signal in_title
+        # D'abord par candidate_ids (fiable si le LLM a bien renvoyé les IDs)
+        if not has_title_signal and profile:
+            cid_set = set(field.candidate_ids) if field.candidate_ids else set()
+            value_lower = field.value_normalized.lower()
             for vc in profile.value_candidates:
-                if vc.candidate_id in field.candidate_ids and vc.in_title:
-                    has_named_signal = True
+                if not vc.in_title:
+                    continue
+                # Match par candidate_id OU par raw_value (le LLM peut inventer les IDs)
+                if vc.candidate_id in cid_set or vc.raw_value.lower() == value_lower:
+                    logger.debug(
+                        f"[OSMOSE:FrameBuilder] _is_weak_guess: matched vc "
+                        f"'{vc.raw_value}' (type={vc.value_type}, in_title={vc.in_title}) "
+                        f"via {'cid' if vc.candidate_id in cid_set else 'raw_value'}"
+                    )
+                    has_title_signal = True
                     break
 
         not_low = field.confidence != FrameFieldConfidence.LOW
-        return has_named_signal and not_low
+        logger.debug(
+            f"[OSMOSE:FrameBuilder] _is_weak_guess: "
+            f"field='{field.field_name}={field.value_normalized}' "
+            f"has_title_signal={has_title_signal}, not_low={not_low}"
+        )
+        return has_title_signal and not_low
 
     def _fallback_title_numeric(
         self,
@@ -772,22 +874,25 @@ class FrameBuilder:
         """
         Fallback quand tous les release_id sont rejetés par l'Authority Contract.
 
-        Cherche un numeric_identifier (year) dans le titre + co-occurrent
-        avec le sujet. Ex: "S4HANA 2023 Upgrade Guide" → release_id=2023.
+        Cherche un numeric_identifier (year) dans le titre.
+        Priorité : cooccurs_with_subject > fréquence.
+        Ex: "S4HANA 2023 Upgrade Guide" → release_id=2023.
         """
         candidates = profile.get_candidates_by_type("numeric_identifier")
-        title_candidates = [
-            c for c in candidates
-            if c.in_title and c.cooccurs_with_subject
-        ]
+        title_candidates = [c for c in candidates if c.in_title]
         if not title_candidates:
             return None
 
-        best = max(title_candidates, key=lambda c: c.frequency)
+        # Prioriser ceux qui co-occurrent avec le sujet, sinon prendre le plus fréquent
+        best = max(
+            title_candidates,
+            key=lambda c: (c.cooccurs_with_subject, c.frequency),
+        )
         logger.info(
             f"[OSMOSE:FrameBuilder] AuthorityContract fallback: "
             f"title numeric_identifier '{best.raw_value}' "
-            f"(freq={best.frequency}, in_title=True)"
+            f"(freq={best.frequency}, in_title=True, "
+            f"cooccurs_with_subject={best.cooccurs_with_subject})"
         )
         return FrameField(
             field_name="release_id",
@@ -798,7 +903,8 @@ class FrameBuilder:
             confidence=FrameFieldConfidence.MEDIUM,
             reasoning=(
                 f"AuthorityContract fallback: numeric_identifier in title "
-                f"(freq={best.frequency}, cooccurs_with_subject=True)"
+                f"(freq={best.frequency}, cooccurs_with_subject="
+                f"{best.cooccurs_with_subject})"
             ),
         )
 
