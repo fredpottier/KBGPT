@@ -356,7 +356,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({service=~\"$service\"} |~ \"(?i)error\" [1h]))",
+          "expr": "sum(count_over_time({service=~\"$service\"} |~ \" (ERROR|CRITICAL):\" [1h]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -584,7 +584,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "{service=~\"$service\"} |~ \"(?i)(error|critical)\"",
+          "expr": "{service=~\"$service\"} |~ \" (ERROR|CRITICAL):\"",
           "queryType": "range",
           "refId": "A"
         }
