@@ -426,7 +426,7 @@ const INDUSTRY_PRESETS: Record<string, IndustryPreset> = {
       canonicalization_enabled: true,
       expected_axes: ['release_id', 'version', 'edition'],
       excluded_axes: ['trial_phase', 'model_generation', 'regulation_version'],
-      strict_expected: false,
+      strict_expected: true,
       year_range: { min: 1990, max_relative: 2 },
       plausibility_overrides: {
         lifecycle_status: {
