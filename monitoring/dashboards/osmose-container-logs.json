@@ -163,12 +163,12 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "Appels LLM",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "bars",
             "fillOpacity": 80,
-            "gradientMode": "none",
+            "gradientMode": "scheme",
             "hideFrom": {
               "tooltip": false,
               "viz": false,
@@ -199,64 +199,51 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "short"
         },
         "overrides": [
           {
             "matcher": {
-              "id": "byName",
-              "options": "ERROR"
+              "id": "byFrameRefID",
+              "options": "B"
             },
             "properties": [
               {
-                "id": "color",
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 15
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.stacking",
                 "value": {
-                  "fixedColor": "red",
-                  "mode": "fixed"
+                  "group": "B",
+                  "mode": "none"
                 }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "WARNING"
-            },
-            "properties": [
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "Tokens (input)"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "orange",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "INFO"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "blue",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "DEBUG"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "green",
+                  "fixedColor": "rgba(255, 255, 255, 0.4)",
                   "mode": "fixed"
                 }
               }
@@ -282,7 +269,7 @@
         },
         "tooltip": {
           "mode": "multi",
-          "sort": "none"
+          "sort": "desc"
         }
       },
       "targets": [
@@ -292,13 +279,24 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({service=~\"$service\"} [5m]))",
+          "expr": "sum by (task) (count_over_time({service=~\"ingestion-worker|app\"} |= \"TOKEN_TRACKER\" | regexp `\\((?P<task>[^)]+)\\)` [$__interval]))",
+          "legendFormat": "{{task}}",
           "queryType": "range",
-          "refId": "A",
-          "legendFormat": "{{level}}"
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(sum_over_time({service=~\"ingestion-worker|app\"} |= \"TOKEN_TRACKER\" | regexp `In: (?P<input>\\d+)` | unwrap input [$__interval]))",
+          "legendFormat": "Tokens (input)",
+          "queryType": "range",
+          "refId": "B"
         }
       ],
-      "title": "📈 Distribution par Niveau (5min)",
+      "title": "🤖 Volumetrie LLM (appels + tokens)",
       "type": "timeseries"
     },
     {
