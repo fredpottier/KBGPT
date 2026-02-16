@@ -77,12 +77,9 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE = 15
 MAX_CONCURRENT = 10
 
-SLOT_ENRICHMENT_PROMPT = """You are an expert in structured knowledge extraction.
+SLOT_ENRICHMENT_PROMPT = """Extract structured triplets from claims. Return ONLY a JSON array, no extra text or explanation.
 
-You receive a batch of claims (documented assertions). For each, extract
-the structured triplet (subject, predicate, object) if one exists.
-
-## STRICT CONSTRAINT — Predicates (CLOSED list, 12 only)
+## Predicates (CLOSED list, 12 only)
 
 | Predicate | Meaning |
 |-----------|---------|
@@ -104,23 +101,14 @@ RULES:
 - If no clear relation between two named entities → null.
 - If the predicate does not fit any of the 12 → null.
 - Prefer null over invention.
+- Use "Known entities" when listed. Do NOT invent entities not in the claim.
 
-HINT: When available, "Known entities" lists entities already linked to this claim.
-Subject and object SHOULD be picked from this list when applicable.
-If no entity from the list fits as subject or object, you may use other proper nouns
-from the claim text. Do NOT invent entities not mentioned in the claim.
-
-## Claims to analyze
+## Claims
 
 {claims_block}
 
-## Response format (JSON array)
-[
-  {{"index": 1, "structured_form": {{"subject": "X", "predicate": "USES", "object": "Y"}}}},
-  {{"index": 2, "structured_form": null}},
-  ...
-]
-"""
+## Response — ONLY a JSON array, one entry per claim, no comments:
+[{{"index":1,"structured_form":{{"subject":"SAP S/4HANA","predicate":"USES","object":"SAP HANA"}}}},{{"index":2,"structured_form":null}}]"""
 
 
 @dataclass
@@ -408,7 +396,6 @@ class SlotEnricher:
         prompt = SLOT_ENRICHMENT_PROMPT.format(claims_block=claims_block)
 
         messages = [
-            {"role": "system", "content": "You are an expert in structured knowledge extraction."},
             {"role": "user", "content": prompt},
         ]
 
@@ -416,7 +403,7 @@ class SlotEnricher:
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
             temperature=0.1,
-            max_tokens=4000,
+            max_tokens=1500,
         )
 
         return response

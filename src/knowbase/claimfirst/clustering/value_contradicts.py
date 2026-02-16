@@ -286,11 +286,18 @@ def compare_values(vf1: ValueFrame, vf2: ValueFrame) -> ContradictionResult:
             vtype,
         )
 
-    # UNTYPED: toujours LLM
+    # UNTYPED: co-existing alternatives (non-exclusive by default)
+    #
+    # Dans un corpus documentaire, "X USES Y" et "X USES Z" signifie
+    # presque toujours que X utilise les DEUX (alternatives co-existantes).
+    # Les vrais contradictions textuelles (négation, modalités opposées)
+    # sont déjà détectées en amont par les regex patterns de
+    # RelationDetector._detect_contradiction().
+    # Seuls NUMBER/VERSION différents justifient un arbitrage LLM.
     return ContradictionResult(
-        ContradictionVerdict.NEED_LLM,
-        0.0,
-        "untyped values: needs LLM arbitration",
+        ContradictionVerdict.COMPATIBLE,
+        0.7,
+        "untyped objects: co-existing alternatives (non-exclusive default)",
         vtype,
     )
 
