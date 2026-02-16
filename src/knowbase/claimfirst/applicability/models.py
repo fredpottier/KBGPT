@@ -14,6 +14,7 @@ Si une valeur n'existe dans aucun candidat, elle ne peut pas apparaître en sort
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional
@@ -136,6 +137,36 @@ class ValueCandidate:
 
     context_snippets: List[str] = field(default_factory=list)
     """Max 3 extraits de contexte autour de la valeur (±50 chars)."""
+
+    canonical_value: Optional[str] = None
+    """Forme canonique comparable. None si raw_value est déjà canonique."""
+
+
+def compute_canonical_value(
+    raw_value: str,
+    value_type: str,
+    strip_prefixes: Optional[List[str]] = None,
+) -> Optional[str]:
+    """
+    Calcule la forme canonique d'une valeur candidate.
+
+    La canonicalisation est PILOTÉE PAR LA POLICY (strip_prefixes) :
+    - Sans policy (strip_prefixes=None ou []) → retourne None (raw IS canonical)
+    - Avec policy strip_prefixes=["Version", "Release", "Edition"] :
+      "Edition 2025" → "2025", "Release 1809" → "1809"
+    - Seul value_type="named_version" est candidat à la canonicalisation
+
+    Returns None quand raw_value est déjà la forme canonique.
+    """
+    if value_type != "named_version" or not strip_prefixes:
+        return None
+
+    pattern = re.compile(
+        r"^(" + "|".join(re.escape(p) for p in strip_prefixes) + r")\s+",
+        re.IGNORECASE,
+    )
+    canonical = pattern.sub("", raw_value).strip()
+    return canonical if canonical != raw_value else None
 
 
 @dataclass
@@ -319,4 +350,5 @@ __all__ = [
     "FrameFieldConfidence",
     "FrameField",
     "ApplicabilityFrame",
+    "compute_canonical_value",
 ]

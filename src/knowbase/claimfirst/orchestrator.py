@@ -22,6 +22,7 @@ INV-10: Discriminants Découverts, pas Hardcodés
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -722,6 +723,28 @@ class ClaimFirstOrchestrator:
             )
         return ""
 
+    def _get_axis_policy(self, tenant_id: str) -> dict:
+        """
+        Charge axis_policy depuis le DomainContext.
+        Résultat cacheable par tenant pour la durée d'un run d'import.
+        """
+        cache_key = f"_axis_policy_{tenant_id}"
+        cached = getattr(self, cache_key, None)
+        if cached is not None:
+            return cached
+
+        policy: dict = {}
+        try:
+            from knowbase.ontology.domain_context_store import get_domain_context_store
+            dc_profile = get_domain_context_store().get_profile(tenant_id)
+            if dc_profile and dc_profile.axis_policy:
+                policy = json.loads(dc_profile.axis_policy)
+        except Exception:
+            pass
+
+        setattr(self, cache_key, policy)
+        return policy
+
     def _build_applicability_frame(
         self,
         doc_id: str,
@@ -765,6 +788,18 @@ class ClaimFirstOrchestrator:
                 primary_subject=doc_context.primary_subject,
             )
 
+            # Compute canonical values using DomainContext policy
+            axis_policy = self._get_axis_policy(tenant_id)
+            strip_prefixes = axis_policy.get("strip_prefixes", [])
+            canonicalization_enabled = axis_policy.get("canonicalization_enabled", True)
+
+            if strip_prefixes and canonicalization_enabled:
+                from knowbase.claimfirst.applicability.models import compute_canonical_value
+                for vc in profile.value_candidates:
+                    vc.canonical_value = compute_canonical_value(
+                        vc.raw_value, vc.value_type, strip_prefixes
+                    )
+
             # Layer C: Construire le frame (LLM evidence-locked ou fallback déterministe)
             builder = FrameBuilder(
                 llm_client=self.llm_client,
@@ -782,20 +817,21 @@ class ClaimFirstOrchestrator:
             )
 
             # Layer D: Valider le frame
-            validator = FrameValidationPipeline()
+            validator = FrameValidationPipeline(tenant_id=tenant_id)
             frame = validator.validate(frame, units, profile)
 
             # Adapter: Frame → ApplicabilityAxis[] (rétrocompat)
             adapter = FrameAdapter()
 
             # Mettre à jour le DocumentContext
-            adapter.update_document_context(frame, doc_context)
+            adapter.update_document_context(frame, doc_context, profile=profile)
 
             # Convertir en axes pour compatibilité
             detected_axes = adapter.frame_to_axes(
                 frame=frame,
                 tenant_id=tenant_id,
                 doc_id=doc_id,
+                profile=profile,
             )
 
             # Mettre à jour le cache d'axes

@@ -1,12 +1,13 @@
 'use client'
 
 /**
- * OSMOS Domain Context - Dark Elegance Edition
+ * OSMOSE Domain Context - Dark Elegance Edition v2
  *
- * Premium business context configuration
+ * Premium business context configuration with Version & Axes,
+ * Rules Engine, and enhanced Preview sections.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   Box,
   Heading,
@@ -43,6 +44,16 @@ import {
   useDisclosure,
   Icon,
   Center,
+  Checkbox,
+  SimpleGrid,
+  Badge,
+  NumberInput,
+  NumberInputField,
+  NumberInputStepper,
+  NumberIncrementStepper,
+  NumberDecrementStepper,
+  IconButton,
+  Divider,
 } from '@chakra-ui/react'
 import { motion } from 'framer-motion'
 import {
@@ -56,9 +67,17 @@ import {
   FiAlertTriangle,
   FiZap,
   FiChevronDown,
+  FiSettings,
+  FiCode,
+  FiPlus,
+  FiMinus,
 } from 'react-icons/fi'
 
 const MotionBox = motion(Box)
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface DomainContext {
   tenant_id: string
@@ -70,6 +89,10 @@ interface DomainContext {
   common_acronyms: Record<string, string>
   key_concepts: string[]
   context_priority: 'low' | 'medium' | 'high'
+  versioning_hints: string
+  identification_semantics: string
+  axis_reclassification_rules: string
+  axis_policy: string
   llm_injection_prompt: string
   created_at: string
   updated_at: string
@@ -84,7 +107,81 @@ interface FormData {
   common_acronyms: Record<string, string>
   key_concepts: string[]
   context_priority: 'low' | 'medium' | 'high'
+  versioning_hints: string
+  identification_semantics: string
+  axis_reclassification_rules: string
+  axis_policy: string
 }
+
+interface AxisPolicyState {
+  strip_prefixes: string[]
+  canonicalization_enabled: boolean
+  expected_axes: string[]
+  excluded_axes: string[]
+  strict_expected: boolean
+  year_range: { min: number; max_relative: number }
+  plausibility_overrides: Record<string, { reject_patterns?: string[]; accept_patterns?: string[] }>
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const NEUTRAL_AXIS_KEYS = [
+  { key: 'release_id', label: 'Release ID' },
+  { key: 'version', label: 'Version' },
+  { key: 'regulation_version', label: 'Regulation Version' },
+  { key: 'model_generation', label: 'Model Generation' },
+  { key: 'trial_phase', label: 'Trial Phase' },
+  { key: 'year', label: 'Year' },
+  { key: 'effective_date', label: 'Effective Date' },
+  { key: 'edition', label: 'Edition' },
+  { key: 'region', label: 'Region' },
+  { key: 'phase', label: 'Phase' },
+  { key: 'tier', label: 'Tier' },
+]
+
+const DEFAULT_AXIS_POLICY: AxisPolicyState = {
+  strip_prefixes: [],
+  canonicalization_enabled: true,
+  expected_axes: [],
+  excluded_axes: [],
+  strict_expected: false,
+  year_range: { min: 1990, max_relative: 2 },
+  plausibility_overrides: {},
+}
+
+const RULE_TEMPLATE = {
+  rule_id: 'new_rule',
+  priority: 50,
+  conditions: {
+    value_pattern: '',
+    current_role: 'temporal',
+    title_contains_value: false,
+  },
+  action: {
+    new_role: 'revision',
+  },
+}
+
+const INITIAL_FORM_DATA: FormData = {
+  domain_summary: '',
+  industry: '',
+  sub_domains: [],
+  target_users: [],
+  document_types: [],
+  common_acronyms: {},
+  key_concepts: [],
+  context_priority: 'medium',
+  versioning_hints: '',
+  identification_semantics: '',
+  axis_reclassification_rules: '',
+  axis_policy: '',
+}
+
+// ---------------------------------------------------------------------------
+// Industry presets
+// ---------------------------------------------------------------------------
 
 const INDUSTRY_OPTIONS = [
   { value: 'regulatory', label: 'Reglementaire EU / Conformite' },
@@ -240,7 +337,10 @@ const INDUSTRY_PRESETS: Record<string, IndustryPreset> = {
   },
 }
 
-// Section Card Component
+// ---------------------------------------------------------------------------
+// Reusable UI components
+// ---------------------------------------------------------------------------
+
 const SectionCard = ({
   title,
   icon,
@@ -279,7 +379,6 @@ const SectionCard = ({
   </Box>
 )
 
-// Status Badge
 const StatusBadge = ({ configured }: { configured: boolean }) => (
   <HStack
     spacing={1.5}
@@ -295,13 +394,12 @@ const StatusBadge = ({ configured }: { configured: boolean }) => (
   </HStack>
 )
 
-// Input style
 const inputStyles = {
-  bg: "bg.tertiary",
-  border: "1px solid",
-  borderColor: "border.default",
-  rounded: "lg",
-  color: "text.primary",
+  bg: 'bg.tertiary',
+  border: '1px solid',
+  borderColor: 'border.default',
+  rounded: 'lg',
+  color: 'text.primary',
   _placeholder: { color: 'text.muted' },
   _hover: { borderColor: 'border.active' },
   _focus: {
@@ -309,6 +407,65 @@ const inputStyles = {
     boxShadow: '0 0 0 1px var(--chakra-colors-brand-500)',
   },
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function parseAxisPolicy(raw: string): AxisPolicyState {
+  if (!raw) return { ...DEFAULT_AXIS_POLICY }
+  try {
+    const parsed = JSON.parse(raw)
+    return {
+      strip_prefixes: Array.isArray(parsed.strip_prefixes) ? parsed.strip_prefixes : [],
+      canonicalization_enabled: parsed.canonicalization_enabled ?? true,
+      expected_axes: Array.isArray(parsed.expected_axes) ? parsed.expected_axes : [],
+      excluded_axes: Array.isArray(parsed.excluded_axes) ? parsed.excluded_axes : [],
+      strict_expected: parsed.strict_expected ?? false,
+      year_range: {
+        min: parsed.year_range?.min ?? 1990,
+        max_relative: parsed.year_range?.max_relative ?? 2,
+      },
+      plausibility_overrides: parsed.plausibility_overrides && typeof parsed.plausibility_overrides === 'object'
+        ? parsed.plausibility_overrides
+        : {},
+    }
+  } catch {
+    return { ...DEFAULT_AXIS_POLICY }
+  }
+}
+
+function serializeAxisPolicy(state: AxisPolicyState): string {
+  const obj: Record<string, any> = {}
+  if (state.strip_prefixes.length > 0) obj.strip_prefixes = state.strip_prefixes
+  if (!state.canonicalization_enabled) obj.canonicalization_enabled = false
+  if (state.expected_axes.length > 0) obj.expected_axes = state.expected_axes
+  if (state.excluded_axes.length > 0) obj.excluded_axes = state.excluded_axes
+  if (state.strict_expected) obj.strict_expected = true
+  if (state.year_range.min !== 1990 || state.year_range.max_relative !== 2) {
+    obj.year_range = state.year_range
+  }
+  if (Object.keys(state.plausibility_overrides).length > 0) {
+    obj.plausibility_overrides = state.plausibility_overrides
+  }
+  if (Object.keys(obj).length === 0) return ''
+  return JSON.stringify(obj, null, 2)
+}
+
+function tryParseJson(raw: string): { valid: boolean; count: number; error?: string } {
+  if (!raw.trim()) return { valid: true, count: 0 }
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return { valid: true, count: parsed.length }
+    return { valid: true, count: 1 }
+  } catch (e: any) {
+    return { valid: false, count: 0, error: e.message }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main Page Component
+// ---------------------------------------------------------------------------
 
 export default function DomainContextPage() {
   const [loading, setLoading] = useState(true)
@@ -320,25 +477,38 @@ export default function DomainContextPage() {
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
   const toast = useToast()
 
-  const [formData, setFormData] = useState<FormData>({
-    domain_summary: '',
-    industry: '',
-    sub_domains: [],
-    target_users: [],
-    document_types: [],
-    common_acronyms: {},
-    key_concepts: [],
-    context_priority: 'medium',
-  })
+  // ---- Form state ----
+  const [formData, setFormData] = useState<FormData>({ ...INITIAL_FORM_DATA })
 
+  // ---- Axis policy structured state ----
+  const [axisPolicy, setAxisPolicy] = useState<AxisPolicyState>({ ...DEFAULT_AXIS_POLICY })
+
+  // ---- Tag input states ----
   const [newSubDomain, setNewSubDomain] = useState('')
   const [newTargetUser, setNewTargetUser] = useState('')
   const [newDocType, setNewDocType] = useState('')
   const [newKeyConcept, setNewKeyConcept] = useState('')
   const [newAcronym, setNewAcronym] = useState('')
   const [newAcronymExpansion, setNewAcronymExpansion] = useState('')
+  const [newStripPrefix, setNewStripPrefix] = useState('')
 
+  // ---- Rules JSON validation state ----
+  const [rulesJsonStatus, setRulesJsonStatus] = useState<{ valid: boolean; count: number; error?: string }>({ valid: true, count: 0 })
+
+  // ---- Override editor state ----
+  const [newOverrideAxis, setNewOverrideAxis] = useState('')
+
+  // ---- Computed ----
   const currentPreset = formData.industry ? INDUSTRY_PRESETS[formData.industry] || INDUSTRY_PRESETS.other : null
+
+  // Validate rules JSON on change
+  useEffect(() => {
+    setRulesJsonStatus(tryParseJson(formData.axis_reclassification_rules))
+  }, [formData.axis_reclassification_rules])
+
+  // ---------------------------------------------------------------------------
+  // Industry preset logic (preserved from v1)
+  // ---------------------------------------------------------------------------
 
   const handleIndustryChange = (newIndustry: string) => {
     setFormData({ ...formData, industry: newIndustry })
@@ -378,113 +548,9 @@ export default function DomainContextPage() {
     })
   }
 
-  useEffect(() => {
-    loadDomainContext()
-  }, [])
-
-  const loadDomainContext = async () => {
-    setLoading(true)
-    try {
-      const response = await fetch('/api/domain-context')
-      if (response.status === 404) {
-        setExistingContext(null)
-      } else if (response.ok) {
-        const data = await response.json()
-        setExistingContext(data)
-        setFormData({
-          domain_summary: data.domain_summary,
-          industry: data.industry,
-          sub_domains: data.sub_domains || [],
-          target_users: data.target_users || [],
-          document_types: data.document_types || [],
-          common_acronyms: data.common_acronyms || {},
-          key_concepts: data.key_concepts || [],
-          context_priority: data.context_priority || 'medium',
-        })
-      }
-    } catch (error) {
-      console.error('Error loading domain context:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handlePreview = async () => {
-    setPreviewing(true)
-    try {
-      const response = await fetch('/api/domain-context/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setPreviewPrompt(data.llm_injection_prompt)
-        setPreviewTokens(data.estimated_tokens)
-        toast({ title: 'Apercu genere', status: 'success', duration: 2000, position: 'top' })
-      } else {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.detail || `Erreur serveur: ${response.status}`)
-      }
-    } catch (error: any) {
-      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 5000, position: 'top' })
-    } finally {
-      setPreviewing(false)
-    }
-  }
-
-  const handleSave = async () => {
-    if (!formData.domain_summary || !formData.industry) {
-      toast({
-        title: 'Champs requis manquants',
-        description: 'Le resume du domaine et l\'industrie sont obligatoires.',
-        status: 'warning',
-        duration: 3000,
-        position: 'top',
-      })
-      return
-    }
-
-    setSaving(true)
-    try {
-      const response = await fetch('/api/domain-context', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setExistingContext(data)
-        toast({ title: 'Contexte sauvegarde', status: 'success', duration: 3000, position: 'top' })
-      } else {
-        const error = await response.json()
-        throw new Error(error.detail || 'Erreur inconnue')
-      }
-    } catch (error: any) {
-      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 5000, position: 'top' })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleDelete = async () => {
-    try {
-      const response = await fetch('/api/domain-context', { method: 'DELETE' })
-      if (response.status === 204 || response.ok) {
-        setExistingContext(null)
-        setFormData({
-          domain_summary: '', industry: '', sub_domains: [], target_users: [],
-          document_types: [], common_acronyms: {}, key_concepts: [], context_priority: 'medium',
-        })
-        setPreviewPrompt('')
-        toast({ title: 'Contexte supprime', status: 'info', duration: 3000, position: 'top' })
-        onDeleteClose()
-      }
-    } catch (error) {
-      console.error('Error deleting:', error)
-    }
-  }
+  // ---------------------------------------------------------------------------
+  // Array / acronym helpers (preserved from v1)
+  // ---------------------------------------------------------------------------
 
   const addToArray = (field: keyof FormData, value: string) => {
     if (!value.trim()) return
@@ -514,6 +580,267 @@ export default function DomainContextPage() {
     delete newAcronyms[key]
     setFormData({ ...formData, common_acronyms: newAcronyms })
   }
+
+  // ---------------------------------------------------------------------------
+  // Axis policy helpers
+  // ---------------------------------------------------------------------------
+
+  const toggleExpectedAxis = (key: string) => {
+    setAxisPolicy(prev => {
+      const isChecked = prev.expected_axes.includes(key)
+      return {
+        ...prev,
+        expected_axes: isChecked
+          ? prev.expected_axes.filter(k => k !== key)
+          : [...prev.expected_axes, key],
+        excluded_axes: isChecked ? prev.excluded_axes : prev.excluded_axes.filter(k => k !== key),
+      }
+    })
+  }
+
+  const toggleExcludedAxis = (key: string) => {
+    setAxisPolicy(prev => {
+      const isChecked = prev.excluded_axes.includes(key)
+      return {
+        ...prev,
+        excluded_axes: isChecked
+          ? prev.excluded_axes.filter(k => k !== key)
+          : [...prev.excluded_axes, key],
+        expected_axes: isChecked ? prev.expected_axes : prev.expected_axes.filter(k => k !== key),
+      }
+    })
+  }
+
+  const addStripPrefix = (value: string) => {
+    if (!value.trim()) return
+    if (!axisPolicy.strip_prefixes.includes(value.trim())) {
+      setAxisPolicy(prev => ({ ...prev, strip_prefixes: [...prev.strip_prefixes, value.trim()] }))
+    }
+  }
+
+  const removeStripPrefix = (value: string) => {
+    setAxisPolicy(prev => ({ ...prev, strip_prefixes: prev.strip_prefixes.filter(p => p !== value) }))
+  }
+
+  const addPlausibilityOverride = (axis: string) => {
+    if (!axis || axisPolicy.plausibility_overrides[axis]) return
+    setAxisPolicy(prev => ({
+      ...prev,
+      plausibility_overrides: {
+        ...prev.plausibility_overrides,
+        [axis]: { reject_patterns: [], accept_patterns: [] },
+      },
+    }))
+    setNewOverrideAxis('')
+  }
+
+  const removePlausibilityOverride = (axis: string) => {
+    setAxisPolicy(prev => {
+      const updated = { ...prev.plausibility_overrides }
+      delete updated[axis]
+      return { ...prev, plausibility_overrides: updated }
+    })
+  }
+
+  const updateOverridePatterns = (axis: string, field: 'reject_patterns' | 'accept_patterns', text: string) => {
+    const patterns = text.split('\n').filter(line => line.trim() !== '')
+    setAxisPolicy(prev => ({
+      ...prev,
+      plausibility_overrides: {
+        ...prev.plausibility_overrides,
+        [axis]: {
+          ...prev.plausibility_overrides[axis],
+          [field]: patterns,
+        },
+      },
+    }))
+  }
+
+  // ---------------------------------------------------------------------------
+  // API calls
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    loadDomainContext()
+  }, [])
+
+  const loadDomainContext = async () => {
+    setLoading(true)
+    try {
+      const response = await fetch('/api/domain-context')
+      if (response.status === 404) {
+        setExistingContext(null)
+      } else if (response.ok) {
+        const data = await response.json()
+        setExistingContext(data)
+        setFormData({
+          domain_summary: data.domain_summary || '',
+          industry: data.industry || '',
+          sub_domains: data.sub_domains || [],
+          target_users: data.target_users || [],
+          document_types: data.document_types || [],
+          common_acronyms: data.common_acronyms || {},
+          key_concepts: data.key_concepts || [],
+          context_priority: data.context_priority || 'medium',
+          versioning_hints: data.versioning_hints || '',
+          identification_semantics: data.identification_semantics || '',
+          axis_reclassification_rules: data.axis_reclassification_rules || '',
+          axis_policy: data.axis_policy || '',
+        })
+        setAxisPolicy(parseAxisPolicy(data.axis_policy || ''))
+      }
+    } catch (error) {
+      console.error('Error loading domain context:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const buildPayload = useCallback((): FormData => {
+    const serialized = serializeAxisPolicy(axisPolicy)
+    return {
+      ...formData,
+      axis_policy: serialized,
+    }
+  }, [formData, axisPolicy])
+
+  const handlePreview = async () => {
+    setPreviewing(true)
+    try {
+      const payload = buildPayload()
+      const response = await fetch('/api/domain-context/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setPreviewPrompt(data.llm_injection_prompt)
+        setPreviewTokens(data.estimated_tokens)
+        toast({ title: 'Apercu genere', status: 'success', duration: 2000, position: 'top' })
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.detail || `Erreur serveur: ${response.status}`)
+      }
+    } catch (error: any) {
+      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 5000, position: 'top' })
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  const handleSave = async () => {
+    if (!formData.domain_summary || !formData.industry) {
+      toast({
+        title: 'Champs requis manquants',
+        description: 'Le resume du domaine et l\'industrie sont obligatoires.',
+        status: 'warning',
+        duration: 3000,
+        position: 'top',
+      })
+      return
+    }
+
+    if (formData.axis_reclassification_rules.trim()) {
+      const check = tryParseJson(formData.axis_reclassification_rules)
+      if (!check.valid) {
+        toast({
+          title: 'JSON invalide dans Rules Engine',
+          description: `Erreur: ${check.error}`,
+          status: 'error',
+          duration: 5000,
+          position: 'top',
+        })
+        return
+      }
+    }
+
+    setSaving(true)
+    try {
+      const payload = buildPayload()
+      const response = await fetch('/api/domain-context', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setExistingContext(data)
+        toast({ title: 'Contexte sauvegarde', status: 'success', duration: 3000, position: 'top' })
+      } else {
+        const error = await response.json()
+        throw new Error(error.detail || 'Erreur inconnue')
+      }
+    } catch (error: any) {
+      toast({ title: 'Erreur', description: error.message, status: 'error', duration: 5000, position: 'top' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    try {
+      const response = await fetch('/api/domain-context', { method: 'DELETE' })
+      if (response.status === 204 || response.ok) {
+        setExistingContext(null)
+        setFormData({ ...INITIAL_FORM_DATA })
+        setAxisPolicy({ ...DEFAULT_AXIS_POLICY })
+        setPreviewPrompt('')
+        toast({ title: 'Contexte supprime', status: 'info', duration: 3000, position: 'top' })
+        onDeleteClose()
+      }
+    } catch (error) {
+      console.error('Error deleting:', error)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Rules engine helpers
+  // ---------------------------------------------------------------------------
+
+  const insertRuleTemplate = () => {
+    const current = formData.axis_reclassification_rules.trim()
+    let newVal: string
+    if (!current) {
+      newVal = JSON.stringify([RULE_TEMPLATE], null, 2)
+    } else {
+      try {
+        const parsed = JSON.parse(current)
+        const arr = Array.isArray(parsed) ? parsed : [parsed]
+        arr.push({ ...RULE_TEMPLATE, rule_id: `new_rule_${arr.length + 1}` })
+        newVal = JSON.stringify(arr, null, 2)
+      } catch {
+        newVal = current + '\n' + JSON.stringify(RULE_TEMPLATE, null, 2)
+      }
+    }
+    setFormData({ ...formData, axis_reclassification_rules: newVal })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pipeline impact summary
+  // ---------------------------------------------------------------------------
+
+  const pipelineImpact = useMemo(() => {
+    const rulesCheck = tryParseJson(formData.axis_reclassification_rules)
+    const overridesCount = Object.keys(axisPolicy.plausibility_overrides).length
+    const errors: string[] = []
+    if (!rulesCheck.valid) errors.push('JSON invalide dans axis_reclassification_rules')
+    const overlap = axisPolicy.expected_axes.filter(a => axisPolicy.excluded_axes.includes(a))
+    if (overlap.length > 0) errors.push(`Axes en conflit expected/excluded: ${overlap.join(', ')}`)
+
+    return {
+      expectedCount: axisPolicy.expected_axes.length,
+      excludedCount: axisPolicy.excluded_axes.length,
+      rulesCount: rulesCheck.valid ? rulesCheck.count : 0,
+      overridesCount,
+      errors,
+    }
+  }, [formData.axis_reclassification_rules, axisPolicy])
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   if (loading) {
     return (
@@ -614,7 +941,9 @@ export default function DomainContextPage() {
           </Box>
         </MotionBox>
 
-        {/* Main Form */}
+        {/* ================================================================= */}
+        {/* SECTION 1 : Configuration Generale                                */}
+        {/* ================================================================= */}
         <MotionBox
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -703,7 +1032,7 @@ export default function DomainContextPage() {
                     onChange={(e) => setNewSubDomain(e.target.value)}
                     placeholder="Ajouter un sous-domaine"
                     {...inputStyles}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('sub_domains', newSubDomain); setNewSubDomain('') }}}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('sub_domains', newSubDomain); setNewSubDomain('') } }}
                   />
                   <Button onClick={() => { addToArray('sub_domains', newSubDomain); setNewSubDomain('') }} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
                     Ajouter
@@ -737,7 +1066,7 @@ export default function DomainContextPage() {
                     onChange={(e) => setNewKeyConcept(e.target.value)}
                     placeholder="Ajouter un concept"
                     {...inputStyles}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('key_concepts', newKeyConcept); setNewKeyConcept('') }}}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('key_concepts', newKeyConcept); setNewKeyConcept('') } }}
                   />
                   <Button onClick={() => { addToArray('key_concepts', newKeyConcept); setNewKeyConcept('') }} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
                     Ajouter
@@ -779,7 +1108,7 @@ export default function DomainContextPage() {
                     placeholder="Ex: Application Programming Interface"
                     flex={1}
                     {...inputStyles}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAcronym() }}}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAcronym() } }}
                   />
                   <Button onClick={addAcronym} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
                     Ajouter
@@ -837,7 +1166,7 @@ export default function DomainContextPage() {
                             onChange={(e) => setNewTargetUser(e.target.value)}
                             placeholder="Type d'utilisateur"
                             {...inputStyles}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('target_users', newTargetUser); setNewTargetUser('') }}}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('target_users', newTargetUser); setNewTargetUser('') } }}
                           />
                           <Button onClick={() => { addToArray('target_users', newTargetUser); setNewTargetUser('') }} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
                             Ajouter
@@ -871,7 +1200,7 @@ export default function DomainContextPage() {
                             onChange={(e) => setNewDocType(e.target.value)}
                             placeholder="Type de document"
                             {...inputStyles}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('document_types', newDocType); setNewDocType('') }}}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToArray('document_types', newDocType); setNewDocType('') } }}
                           />
                           <Button onClick={() => { addToArray('document_types', newDocType); setNewDocType('') }} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
                             Ajouter
@@ -896,11 +1225,430 @@ export default function DomainContextPage() {
           </SectionCard>
         </MotionBox>
 
-        {/* Preview Section */}
+        {/* ================================================================= */}
+        {/* SECTION 2 : Version & Axes                                        */}
+        {/* ================================================================= */}
+        <MotionBox
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.25 }}
+        >
+          <SectionCard title="Version & Axes" icon={FiSettings}>
+            <VStack spacing={6} align="stretch">
+              {/* Versioning Hints */}
+              <FormControl>
+                <FormLabel color="text.secondary" fontSize="sm">Versioning Hints</FormLabel>
+                <Textarea
+                  value={formData.versioning_hints}
+                  onChange={(e) => setFormData({ ...formData, versioning_hints: e.target.value })}
+                  placeholder="Decrivez les conventions de versionnage de votre domaine..."
+                  rows={3}
+                  maxLength={500}
+                  {...inputStyles}
+                />
+                <FormHelperText color="text.muted">
+                  Ex: Release = annee (2023), FPS = patch cumulatif, SP = support pack
+                  <br />
+                  {formData.versioning_hints.length}/500 caracteres
+                </FormHelperText>
+              </FormControl>
+
+              {/* Identification Semantics */}
+              <FormControl>
+                <FormLabel color="text.secondary" fontSize="sm">Identification Semantics</FormLabel>
+                <Textarea
+                  value={formData.identification_semantics}
+                  onChange={(e) => setFormData({ ...formData, identification_semantics: e.target.value })}
+                  placeholder={"Rule: <pattern> -> <interpretation>\nCounter-example: <pattern> -> NOT <this>"}
+                  rows={5}
+                  maxLength={1000}
+                  {...inputStyles}
+                />
+                <FormHelperText color="text.muted">
+                  Format recommande : Rule: &lt;pattern&gt; -&gt; &lt;interpretation&gt;. Counter-example: &lt;pattern&gt; -&gt; NOT &lt;this&gt;
+                  <br />
+                  {formData.identification_semantics.length}/1000 caracteres
+                </FormHelperText>
+              </FormControl>
+
+              <Divider borderColor="border.default" />
+
+              {/* Expected Axes */}
+              <FormControl>
+                <FormLabel color="text.secondary" fontSize="sm">Expected Axes</FormLabel>
+                <FormHelperText color="text.muted" mb={3}>
+                  Axes que le pipeline doit s'attendre a trouver dans les documents de ce domaine
+                </FormHelperText>
+                <SimpleGrid columns={{ base: 2, md: 3, lg: 4 }} spacing={2}>
+                  {NEUTRAL_AXIS_KEYS.map(axis => {
+                    const isExcluded = axisPolicy.excluded_axes.includes(axis.key)
+                    return (
+                      <Checkbox
+                        key={`expected-${axis.key}`}
+                        isChecked={axisPolicy.expected_axes.includes(axis.key)}
+                        isDisabled={isExcluded}
+                        onChange={() => toggleExpectedAxis(axis.key)}
+                        colorScheme="purple"
+                        size="sm"
+                        sx={{
+                          '.chakra-checkbox__label': { color: isExcluded ? 'text.muted' : 'text.secondary', fontSize: 'sm' },
+                          '.chakra-checkbox__control': { borderColor: 'border.default' },
+                        }}
+                      >
+                        {axis.label}
+                      </Checkbox>
+                    )
+                  })}
+                </SimpleGrid>
+              </FormControl>
+
+              {/* Excluded Axes */}
+              <FormControl>
+                <FormLabel color="text.secondary" fontSize="sm">Excluded Axes</FormLabel>
+                <FormHelperText color="text.muted" mb={3}>
+                  Axes a ignorer systematiquement pour ce domaine
+                </FormHelperText>
+                <SimpleGrid columns={{ base: 2, md: 3, lg: 4 }} spacing={2}>
+                  {NEUTRAL_AXIS_KEYS.map(axis => {
+                    const isExpected = axisPolicy.expected_axes.includes(axis.key)
+                    return (
+                      <Checkbox
+                        key={`excluded-${axis.key}`}
+                        isChecked={axisPolicy.excluded_axes.includes(axis.key)}
+                        isDisabled={isExpected}
+                        onChange={() => toggleExcludedAxis(axis.key)}
+                        colorScheme="red"
+                        size="sm"
+                        sx={{
+                          '.chakra-checkbox__label': { color: isExpected ? 'text.muted' : 'text.secondary', fontSize: 'sm' },
+                          '.chakra-checkbox__control': { borderColor: 'border.default' },
+                        }}
+                      >
+                        {axis.label}
+                      </Checkbox>
+                    )
+                  })}
+                </SimpleGrid>
+              </FormControl>
+
+              <Divider borderColor="border.default" />
+
+              {/* Strip Prefixes */}
+              <FormControl>
+                <FormLabel color="text.secondary" fontSize="sm">Strip Prefixes</FormLabel>
+                <FormHelperText color="text.muted" mb={3}>
+                  Prefixes a retirer automatiquement des valeurs d'axes (ex: "v", "V", "release-")
+                </FormHelperText>
+                <HStack mb={3}>
+                  <Input
+                    value={newStripPrefix}
+                    onChange={(e) => setNewStripPrefix(e.target.value)}
+                    placeholder="Ex: v, V, release-"
+                    {...inputStyles}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        addStripPrefix(newStripPrefix)
+                        setNewStripPrefix('')
+                      }
+                    }}
+                  />
+                  <Button onClick={() => { addStripPrefix(newStripPrefix); setNewStripPrefix('') }} bg="bg.tertiary" _hover={{ bg: 'bg.hover' }}>
+                    Ajouter
+                  </Button>
+                </HStack>
+                <Wrap>
+                  {axisPolicy.strip_prefixes.map(prefix => (
+                    <WrapItem key={prefix}>
+                      <Tag bg="rgba(245, 158, 11, 0.15)" color="yellow.400" borderRadius="full">
+                        <TagLabel>{`"${prefix}"`}</TagLabel>
+                        <TagCloseButton onClick={() => removeStripPrefix(prefix)} />
+                      </Tag>
+                    </WrapItem>
+                  ))}
+                </Wrap>
+              </FormControl>
+
+              {/* Year Range */}
+              <FormControl>
+                <FormLabel color="text.secondary" fontSize="sm">Year Range</FormLabel>
+                <FormHelperText color="text.muted" mb={3}>
+                  Plage d'annees considerees plausibles pour les axes temporels
+                </FormHelperText>
+                <HStack spacing={4}>
+                  <VStack align="start" spacing={1}>
+                    <Text fontSize="xs" color="text.muted">Annee minimum</Text>
+                    <NumberInput
+                      value={axisPolicy.year_range.min}
+                      onChange={(_, val) => setAxisPolicy(prev => ({
+                        ...prev,
+                        year_range: { ...prev.year_range, min: isNaN(val) ? 1990 : val },
+                      }))}
+                      min={1900}
+                      max={2100}
+                      size="sm"
+                    >
+                      <NumberInputField {...inputStyles} />
+                      <NumberInputStepper>
+                        <NumberIncrementStepper borderColor="border.default" color="text.muted" />
+                        <NumberDecrementStepper borderColor="border.default" color="text.muted" />
+                      </NumberInputStepper>
+                    </NumberInput>
+                  </VStack>
+                  <VStack align="start" spacing={1}>
+                    <Text fontSize="xs" color="text.muted">Max relative (+N ans)</Text>
+                    <NumberInput
+                      value={axisPolicy.year_range.max_relative}
+                      onChange={(_, val) => setAxisPolicy(prev => ({
+                        ...prev,
+                        year_range: { ...prev.year_range, max_relative: isNaN(val) ? 2 : val },
+                      }))}
+                      min={0}
+                      max={20}
+                      size="sm"
+                    >
+                      <NumberInputField {...inputStyles} />
+                      <NumberInputStepper>
+                        <NumberIncrementStepper borderColor="border.default" color="text.muted" />
+                        <NumberDecrementStepper borderColor="border.default" color="text.muted" />
+                      </NumberInputStepper>
+                    </NumberInput>
+                  </VStack>
+                </HStack>
+              </FormControl>
+
+              <Divider borderColor="border.default" />
+
+              {/* Plausibility Overrides */}
+              <FormControl>
+                <FormLabel color="text.secondary" fontSize="sm">Plausibility Overrides</FormLabel>
+                <FormHelperText color="text.muted" mb={3}>
+                  Patterns personnalises de rejet/acceptation par axe (regex, un par ligne)
+                </FormHelperText>
+
+                {/* Existing overrides */}
+                <VStack spacing={4} align="stretch" mb={Object.keys(axisPolicy.plausibility_overrides).length > 0 ? 4 : 0}>
+                  {Object.entries(axisPolicy.plausibility_overrides).map(([axis, override]) => (
+                    <Box
+                      key={axis}
+                      p={4}
+                      bg="bg.tertiary"
+                      border="1px solid"
+                      borderColor="border.default"
+                      rounded="lg"
+                    >
+                      <HStack justify="space-between" mb={3}>
+                        <HStack>
+                          <Badge colorScheme="purple" fontSize="xs">{axis}</Badge>
+                        </HStack>
+                        <IconButton
+                          aria-label={`Supprimer override ${axis}`}
+                          icon={<FiMinus />}
+                          size="xs"
+                          variant="ghost"
+                          color="red.400"
+                          onClick={() => removePlausibilityOverride(axis)}
+                          _hover={{ bg: 'rgba(239, 68, 68, 0.1)' }}
+                        />
+                      </HStack>
+                      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+                        <Box>
+                          <Text fontSize="xs" color="red.400" mb={1}>Reject patterns</Text>
+                          <Textarea
+                            value={(override.reject_patterns || []).join('\n')}
+                            onChange={(e) => updateOverridePatterns(axis, 'reject_patterns', e.target.value)}
+                            placeholder="Un pattern par ligne..."
+                            rows={3}
+                            fontSize="sm"
+                            fontFamily="mono"
+                            {...inputStyles}
+                          />
+                        </Box>
+                        <Box>
+                          <Text fontSize="xs" color="green.400" mb={1}>Accept patterns</Text>
+                          <Textarea
+                            value={(override.accept_patterns || []).join('\n')}
+                            onChange={(e) => updateOverridePatterns(axis, 'accept_patterns', e.target.value)}
+                            placeholder="Un pattern par ligne..."
+                            rows={3}
+                            fontSize="sm"
+                            fontFamily="mono"
+                            {...inputStyles}
+                          />
+                        </Box>
+                      </SimpleGrid>
+                    </Box>
+                  ))}
+                </VStack>
+
+                {/* Add new override */}
+                <HStack>
+                  <Select
+                    value={newOverrideAxis}
+                    onChange={(e) => setNewOverrideAxis(e.target.value)}
+                    placeholder="Selectionner un axe..."
+                    size="sm"
+                    {...inputStyles}
+                    sx={{ '> option': { bg: 'bg.secondary', color: 'text.primary' } }}
+                  >
+                    {NEUTRAL_AXIS_KEYS
+                      .filter(a => !axisPolicy.plausibility_overrides[a.key])
+                      .map(axis => (
+                        <option key={axis.key} value={axis.key}>{axis.label}</option>
+                      ))
+                    }
+                  </Select>
+                  <Button
+                    size="sm"
+                    leftIcon={<FiPlus />}
+                    onClick={() => addPlausibilityOverride(newOverrideAxis)}
+                    isDisabled={!newOverrideAxis}
+                    bg="bg.tertiary"
+                    _hover={{ bg: 'bg.hover' }}
+                  >
+                    Ajouter
+                  </Button>
+                </HStack>
+              </FormControl>
+            </VStack>
+          </SectionCard>
+        </MotionBox>
+
+        {/* ================================================================= */}
+        {/* SECTION 3 : Rules Engine                                          */}
+        {/* ================================================================= */}
         <MotionBox
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.3 }}
+        >
+          <SectionCard
+            title="Rules Engine"
+            icon={FiCode}
+            actions={
+              <HStack spacing={2}>
+                {formData.axis_reclassification_rules.trim() && (
+                  <Badge
+                    colorScheme={rulesJsonStatus.valid ? 'green' : 'red'}
+                    variant="subtle"
+                    fontSize="xs"
+                    px={2}
+                    py={0.5}
+                    rounded="full"
+                  >
+                    {rulesJsonStatus.valid
+                      ? `${rulesJsonStatus.count} regle${rulesJsonStatus.count !== 1 ? 's' : ''}`
+                      : 'JSON invalide'
+                    }
+                  </Badge>
+                )}
+              </HStack>
+            }
+          >
+            <VStack spacing={4} align="stretch">
+              <FormControl>
+                <FormLabel color="text.secondary" fontSize="sm">Axis Reclassification Rules (JSON)</FormLabel>
+                <Textarea
+                  value={formData.axis_reclassification_rules}
+                  onChange={(e) => setFormData({ ...formData, axis_reclassification_rules: e.target.value })}
+                  placeholder='[\n  {\n    "rule_id": "...",\n    "priority": 50,\n    "conditions": { ... },\n    "action": { "new_role": "..." }\n  }\n]'
+                  rows={12}
+                  maxLength={5000}
+                  fontFamily="mono"
+                  fontSize="sm"
+                  {...inputStyles}
+                  onBlur={() => setRulesJsonStatus(tryParseJson(formData.axis_reclassification_rules))}
+                />
+                <HStack justify="space-between" mt={2}>
+                  <FormHelperText color="text.muted">
+                    {formData.axis_reclassification_rules.length}/5000 caracteres
+                  </FormHelperText>
+                  {!rulesJsonStatus.valid && (
+                    <Text fontSize="xs" color="red.400">
+                      {rulesJsonStatus.error}
+                    </Text>
+                  )}
+                </HStack>
+              </FormControl>
+
+              {/* Add template button */}
+              <Button
+                size="sm"
+                leftIcon={<FiPlus />}
+                onClick={insertRuleTemplate}
+                bg="bg.tertiary"
+                color="text.secondary"
+                _hover={{ bg: 'bg.hover', color: 'text.primary' }}
+                alignSelf="flex-start"
+              >
+                Ajouter template de regle
+              </Button>
+
+              {/* Help accordion */}
+              <Accordion allowToggle>
+                <AccordionItem border="none">
+                  <AccordionButton px={0} _hover={{ bg: 'transparent' }}>
+                    <HStack>
+                      <Icon as={FiInfo} boxSize={3.5} color="text.muted" />
+                      <Text fontSize="sm" fontWeight="medium" color="text.muted">Aide - Structure d'une regle</Text>
+                    </HStack>
+                    <AccordionIcon color="text.muted" ml={2} />
+                  </AccordionButton>
+                  <AccordionPanel px={0} pt={2}>
+                    <Box
+                      p={4}
+                      bg="bg.tertiary"
+                      rounded="lg"
+                      border="1px solid"
+                      borderColor="border.default"
+                    >
+                      <VStack align="start" spacing={2}>
+                        <Text fontSize="sm" color="text.secondary">
+                          Chaque regle a la structure suivante :
+                        </Text>
+                        <Code
+                          p={3}
+                          bg="bg.primary"
+                          rounded="md"
+                          display="block"
+                          whiteSpace="pre-wrap"
+                          fontSize="xs"
+                          color="text.secondary"
+                          w="100%"
+                        >
+{`{
+  "rule_id": "identifiant_unique",
+  "priority": 50,              // 0-100, plus haut = prioritaire
+  "conditions": {
+    "value_pattern": "\\\\d{4}",  // regex sur la valeur
+    "current_role": "temporal",   // role actuel de l'axe
+    "title_contains_value": false // valeur presente dans le titre ?
+  },
+  "action": {
+    "new_role": "revision"        // nouveau role a assigner
+  }
+}`}
+                        </Code>
+                        <Text fontSize="xs" color="text.muted">
+                          Les regles sont evaluees dans l'ordre de priorite. La premiere condition matchee determine le nouveau role.
+                          Roles possibles : temporal, revision, identification, classification, spatial.
+                        </Text>
+                      </VStack>
+                    </Box>
+                  </AccordionPanel>
+                </AccordionItem>
+              </Accordion>
+            </VStack>
+          </SectionCard>
+        </MotionBox>
+
+        {/* ================================================================= */}
+        {/* SECTION 4 : Preview                                               */}
+        {/* ================================================================= */}
+        <MotionBox
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.35 }}
         >
           <SectionCard
             title="Apercu du prompt"
@@ -943,6 +1691,60 @@ export default function DomainContextPage() {
                 Cliquez sur "Generer" pour voir le prompt qui sera injecte dans les LLM.
               </Text>
             )}
+
+            {/* Pipeline Impact Summary */}
+            <Box
+              mt={4}
+              p={4}
+              bg="bg.tertiary"
+              rounded="lg"
+              border="1px solid"
+              borderColor="border.default"
+            >
+              <Text fontSize="sm" fontWeight="semibold" color="text.primary" mb={3}>
+                Impact pipeline
+              </Text>
+              <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
+                <VStack spacing={1}>
+                  <Text fontSize="2xl" fontWeight="bold" color="purple.400">
+                    {pipelineImpact.expectedCount}
+                  </Text>
+                  <Text fontSize="xs" color="text.muted" textAlign="center">Axes expected</Text>
+                </VStack>
+                <VStack spacing={1}>
+                  <Text fontSize="2xl" fontWeight="bold" color="red.400">
+                    {pipelineImpact.excludedCount}
+                  </Text>
+                  <Text fontSize="xs" color="text.muted" textAlign="center">Axes excluded</Text>
+                </VStack>
+                <VStack spacing={1}>
+                  <Text fontSize="2xl" fontWeight="bold" color="brand.400">
+                    {pipelineImpact.rulesCount}
+                  </Text>
+                  <Text fontSize="xs" color="text.muted" textAlign="center">Regles reclassification</Text>
+                </VStack>
+                <VStack spacing={1}>
+                  <Text fontSize="2xl" fontWeight="bold" color="yellow.400">
+                    {pipelineImpact.overridesCount}
+                  </Text>
+                  <Text fontSize="xs" color="text.muted" textAlign="center">Overrides plausibilite</Text>
+                </VStack>
+              </SimpleGrid>
+
+              {/* Errors */}
+              {pipelineImpact.errors.length > 0 && (
+                <Box mt={3} p={3} bg="rgba(239, 68, 68, 0.1)" rounded="md" border="1px solid" borderColor="rgba(239, 68, 68, 0.3)">
+                  <HStack align="start" spacing={2}>
+                    <Icon as={FiAlertTriangle} color="red.400" boxSize={4} mt={0.5} />
+                    <VStack align="start" spacing={1}>
+                      {pipelineImpact.errors.map((err, i) => (
+                        <Text key={i} fontSize="xs" color="red.400">{err}</Text>
+                      ))}
+                    </VStack>
+                  </HStack>
+                </Box>
+              )}
+            </Box>
           </SectionCard>
         </MotionBox>
 

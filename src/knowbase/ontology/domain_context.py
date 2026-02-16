@@ -118,6 +118,19 @@ class DomainContextProfile(BaseModel):
         max_length=5000,
     )
 
+    axis_policy: str = Field(
+        default="",
+        description=(
+            "JSON object defining axis policy for the ApplicabilityFrame pipeline. "
+            "Structure: {strip_prefixes: [str], canonicalization_enabled: bool, "
+            "expected_axes: [str], excluded_axes: [str], strict_expected: bool, "
+            "year_range: {min: int, max_relative: int}, "
+            "plausibility_overrides: {axis_key: {reject_patterns?: [regex], "
+            "accept_patterns?: [regex]}}}"
+        ),
+        max_length=5000,
+    )
+
     context_priority: Literal["low", "medium", "high"] = Field(
         default="medium",
         description="Priorité injection contexte dans prompts LLM"
@@ -182,6 +195,7 @@ class DomainContextProfile(BaseModel):
             "versioning_hints": self.versioning_hints,
             "identification_semantics": self.identification_semantics,
             "axis_reclassification_rules": self.axis_reclassification_rules,
+            "axis_policy": self.axis_policy,
             "context_priority": self.context_priority,
             "llm_injection_prompt": self.llm_injection_prompt,
             "created_at": self.created_at.isoformat(),
@@ -213,6 +227,7 @@ class DomainContextProfile(BaseModel):
             versioning_hints=props.get("versioning_hints", ""),
             identification_semantics=props.get("identification_semantics", ""),
             axis_reclassification_rules=props.get("axis_reclassification_rules", ""),
+            axis_policy=props.get("axis_policy", ""),
             context_priority=props.get("context_priority", "medium"),
             llm_injection_prompt=props["llm_injection_prompt"],
             created_at=datetime.fromisoformat(props["created_at"]),

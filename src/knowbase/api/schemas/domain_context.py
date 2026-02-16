@@ -83,6 +83,12 @@ class DomainContextCreate(BaseModel):
         description="JSON array of deterministic post-LLM reclassification rules for axis_values",
     )
 
+    axis_policy: str = Field(
+        default="",
+        max_length=5000,
+        description="JSON object defining axis policy for ApplicabilityFrame pipeline",
+    )
+
 
 class DomainContextResponse(BaseModel):
     """Schema réponse Domain Context."""
@@ -99,6 +105,7 @@ class DomainContextResponse(BaseModel):
     versioning_hints: str = Field(default="")
     identification_semantics: str = Field(default="")
     axis_reclassification_rules: str = Field(default="")
+    axis_policy: str = Field(default="")
     llm_injection_prompt: str = Field(..., description="Prompt généré pour injection LLM")
     created_at: datetime = Field(..., description="Date création")
     updated_at: datetime = Field(..., description="Date mise à jour")
@@ -119,6 +126,7 @@ class DomainContextPreviewRequest(BaseModel):
     versioning_hints: str = Field(default="", max_length=500)
     identification_semantics: str = Field(default="", max_length=1000)
     axis_reclassification_rules: str = Field(default="", max_length=5000)
+    axis_policy: str = Field(default="", max_length=5000)
 
 
 class DomainContextPreviewResponse(BaseModel):

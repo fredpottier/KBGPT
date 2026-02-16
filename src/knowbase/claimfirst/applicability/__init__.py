@@ -20,6 +20,7 @@ from knowbase.claimfirst.applicability.models import (
     MarkerCategory,
     MarkerHit,
     ValueCandidate,
+    compute_canonical_value,
 )
 from knowbase.claimfirst.applicability.evidence_unit_segmenter import (
     EvidenceUnitSegmenter,
@@ -39,6 +40,7 @@ __all__ = [
     "MarkerCategory",
     "MarkerHit",
     "ValueCandidate",
+    "compute_canonical_value",
     # Layers
     "EvidenceUnitSegmenter",
     "CandidateMiner",

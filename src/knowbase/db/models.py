@@ -1026,6 +1026,13 @@ class DomainContext(Base):
         comment="JSON array of deterministic post-LLM reclassification rules"
     )
 
+    axis_policy = Column(
+        Text,
+        nullable=True,
+        default="",
+        comment="JSON object defining axis policy for ApplicabilityFrame pipeline"
+    )
+
     # Timestamps
     created_at = Column(
         DateTime(timezone=True),

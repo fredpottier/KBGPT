@@ -11,8 +11,9 @@ Valide que le frame produit par le LLM (Layer C) est evidence-locked:
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Dict, List, Protocol, Set
+from typing import Dict, List, Optional, Protocol, Set
 
 from knowbase.claimfirst.applicability.models import (
     ApplicabilityFrame,
@@ -306,6 +307,181 @@ class MetricContextValidator:
 
 
 # ============================================================================
+# Validator 6: Plausibility (core invariants)
+# ============================================================================
+
+class PlausibilityValidator:
+    """
+    Filtres de plausibilité core (invariants de format uniquement).
+
+    Les bornes numériques (min_year, max_year) sont dans la policy
+    DomainContext (PolicyValidator). Ici on ne garde que les
+    invariants de format universels.
+    """
+
+    def validate(
+        self,
+        frame: ApplicabilityFrame,
+        units: List[EvidenceUnit],
+        profile: CandidateProfile,
+    ) -> ApplicabilityFrame:
+        import re
+
+        iso_date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+        kept = []
+        for field in frame.fields:
+            value = field.value_normalized.strip()
+            reject = False
+
+            # Invariant universel : lifecycle_status ≠ date ISO brute
+            if field.field_name == "lifecycle_status" and iso_date_re.match(value):
+                frame.validation_notes.append(
+                    f"Plausibility: REJECTED '{field.field_name}'='{value}' "
+                    f"— ISO date is not a status keyword"
+                )
+                reject = True
+
+            if not reject:
+                kept.append(field)
+
+        frame.fields = kept
+        return frame
+
+
+# ============================================================================
+# Validator 7: Policy (DomainContext-driven)
+# ============================================================================
+
+class PolicyValidator:
+    """
+    Applique les règles de policy du DomainContext aux champs du frame.
+
+    Comportement expected_axes :
+    - strict_expected=false (défaut) : axes hors expected reçoivent une note
+      mais ne sont PAS rejetés (soft boost pour le scoring futur)
+    - strict_expected=true : axes hors expected sont rejetés (hard filter)
+    - excluded_axes : TOUJOURS hard reject (indépendant de strict_expected)
+    """
+
+    def __init__(self, tenant_id: str = "default"):
+        self.tenant_id = tenant_id
+        self._policy: Optional[dict] = None
+
+    def _load_policy(self) -> dict:
+        if self._policy is not None:
+            return self._policy
+        try:
+            from knowbase.ontology.domain_context_store import get_domain_context_store
+            profile = get_domain_context_store().get_profile(self.tenant_id)
+            if profile and profile.axis_policy:
+                self._policy = json.loads(profile.axis_policy)
+            else:
+                self._policy = {}
+        except Exception:
+            self._policy = {}
+        return self._policy
+
+    def validate(
+        self,
+        frame: ApplicabilityFrame,
+        units: List[EvidenceUnit],
+        profile: CandidateProfile,
+    ) -> ApplicabilityFrame:
+        policy = self._load_policy()
+        if not policy:
+            return frame
+
+        expected = set(policy.get("expected_axes", []))
+        excluded = set(policy.get("excluded_axes", []))
+        strict_expected = policy.get("strict_expected", False)
+        year_range = policy.get("year_range", {})
+        overrides = policy.get("plausibility_overrides", {})
+
+        kept = []
+        for field in frame.fields:
+            # 1. excluded_axes → TOUJOURS hard reject
+            if field.field_name in excluded:
+                frame.validation_notes.append(
+                    f"Policy: REJECTED '{field.field_name}' — in excluded_axes"
+                )
+                continue
+
+            # 2. expected_axes → soft (note) ou hard (reject) selon strict_expected
+            if expected and field.field_name not in expected:
+                if strict_expected:
+                    frame.validation_notes.append(
+                        f"Policy: REJECTED '{field.field_name}' — not in expected_axes (strict mode)"
+                    )
+                    continue
+                else:
+                    frame.validation_notes.append(
+                        f"Policy: NOTE '{field.field_name}' not in expected_axes (soft mode, kept)"
+                    )
+
+            # 3. Year range plausibility (policy-driven)
+            if year_range:
+                import re as re_mod
+                import datetime
+                value_str = field.value_normalized.strip()
+                apply_year_check = False
+
+                if field.field_name == "year" or field.field_name.endswith("_year"):
+                    apply_year_check = True
+                elif field.field_name.endswith("_date"):
+                    if re_mod.match(r"^\d{4}(-\d{2})?(-\d{2})?$", value_str):
+                        apply_year_check = True
+
+                if apply_year_check:
+                    try:
+                        year_val = int(value_str[:4])
+                        min_year = year_range.get("min", 1970)
+                        max_relative = year_range.get("max_relative", 2)
+                        max_year = datetime.datetime.now().year + max_relative
+                        if year_val < min_year or year_val > max_year:
+                            frame.validation_notes.append(
+                                f"Policy: REJECTED '{field.field_name}'='{value_str}' "
+                                f"— year {year_val} outside [{min_year}, {max_year}]"
+                            )
+                            continue
+                    except (ValueError, IndexError):
+                        pass
+
+            # 4. Plausibility overrides (reject/accept patterns par axe)
+            axis_rules = overrides.get(field.field_name, {})
+            if axis_rules:
+                import re as re_mod
+                value = field.value_normalized.strip()
+                reject = False
+
+                for pattern in axis_rules.get("reject_patterns", []):
+                    if re_mod.match(pattern, value):
+                        frame.validation_notes.append(
+                            f"Policy: REJECTED '{field.field_name}'='{value}' "
+                            f"— matches reject_pattern '{pattern}'"
+                        )
+                        reject = True
+                        break
+
+                accept_patterns = axis_rules.get("accept_patterns", [])
+                if not reject and accept_patterns:
+                    if not any(re_mod.match(p, value) for p in accept_patterns):
+                        frame.validation_notes.append(
+                            f"Policy: REJECTED '{field.field_name}'='{value}' "
+                            f"— matches no accept_pattern"
+                        )
+                        reject = True
+
+                if reject:
+                    continue
+
+            kept.append(field)
+
+        frame.fields = kept
+        return frame
+
+
+# ============================================================================
 # Pipeline
 # ============================================================================
 
@@ -320,13 +496,15 @@ class FrameValidationPipeline:
     4. LexicalSanity → vérifie cohérence lexicale
     """
 
-    def __init__(self) -> None:
+    def __init__(self, tenant_id: str = "default") -> None:
         self.validators: List[FrameValidator] = [
             EvidenceIntegrityValidator(),
             NoEvidenceValidator(),
             ValueConsistencyValidator(),
             LexicalSanityValidator(),
+            PlausibilityValidator(),
             MetricContextValidator(),
+            PolicyValidator(tenant_id=tenant_id),
         ]
 
     def validate(
@@ -365,5 +543,7 @@ __all__ = [
     "NoEvidenceValidator",
     "ValueConsistencyValidator",
     "LexicalSanityValidator",
+    "PlausibilityValidator",
     "MetricContextValidator",
+    "PolicyValidator",
 ]

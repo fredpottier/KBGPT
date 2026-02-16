@@ -134,6 +134,37 @@ FRAME_BUILDER_PROMPT = """You are an evidence-locked metadata extractor. Your jo
 
 Respond with ONLY the JSON object, no markdown fences."""
 
+# ============================================================================
+# JSON Schema for structured output (vLLM / burst mode)
+# ============================================================================
+
+FRAME_BUILDER_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "fields": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "field_name": {"type": "string"},
+                    "value_normalized": {"type": "string"},
+                    "display_label": {"type": "string"},
+                    "evidence_unit_ids": {"type": "array", "items": {"type": "string"}},
+                    "candidate_ids": {"type": "array", "items": {"type": "string"}},
+                    "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                    "reasoning": {"type": "string"},
+                },
+                "required": ["field_name", "value_normalized", "display_label",
+                             "evidence_unit_ids", "candidate_ids", "confidence", "reasoning"],
+                "additionalProperties": False,
+            },
+        },
+        "unknowns": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["fields", "unknowns"],
+    "additionalProperties": False,
+}
+
 
 class FrameBuilder:
     """
@@ -380,6 +411,7 @@ class FrameBuilder:
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=2000,
+            json_schema=FRAME_BUILDER_SCHEMA,
         )
 
         logger.debug(
@@ -495,8 +527,17 @@ class FrameBuilder:
 
         # Construire les champs
         fields: List[FrameField] = []
-        valid_candidate_ids = {vc.candidate_id for vc in profile.value_candidates}
         valid_raw_values = {vc.raw_value.lower() for vc in profile.value_candidates}
+
+        # Index candidats par ID et par valeur (raw + canonical)
+        candidates_by_id: Dict[str, ValueCandidate] = {
+            vc.candidate_id: vc for vc in profile.value_candidates
+        }
+        canonical_to_candidates: Dict[str, List[str]] = {}
+        for vc in profile.value_candidates:
+            if vc.canonical_value:
+                key = vc.canonical_value.lower()
+                canonical_to_candidates.setdefault(key, []).append(vc.candidate_id)
 
         # field_names interdits (value_types bruts utilisés par erreur comme field_name)
         INVALID_FIELD_NAMES = {"numeric_identifier", "named_version", "unknown"}
@@ -513,22 +554,53 @@ class FrameBuilder:
                 )
                 continue
 
-            # Vérifier que la valeur existe dans les candidats
-            if value.lower() not in valid_raw_values:
+            value_lower = value.lower()
+            confidence_str = field_data.get("confidence", "medium")
+
+            # 1. Vérification primaire via candidate_ids (plus fiable que string matching)
+            llm_candidate_ids = field_data.get("candidate_ids", [])
+            valid_cids = [cid for cid in llm_candidate_ids if cid in candidates_by_id]
+
+            if valid_cids:
+                # Le LLM a bien identifié des candidats → rattachement confirmé
+                chosen_vc = candidates_by_id[valid_cids[0]]
+                if chosen_vc.canonical_value:
+                    value = chosen_vc.canonical_value
+                logger.debug(
+                    f"[OSMOSE:FrameBuilder] Value '{value}' anchored via candidate_ids {valid_cids}"
+                )
+            elif value_lower in valid_raw_values:
+                # Fallback : match exact sur raw_value
+                pass
+            elif value_lower in canonical_to_candidates:
+                # Fallback : match sur forme canonique
+                matched_cids = canonical_to_candidates[value_lower]
+                logger.debug(
+                    f"[OSMOSE:FrameBuilder] LLM canonical '{value}' matched candidates {matched_cids}"
+                )
+            else:
+                # Véritablement inventé → rejeter
                 logger.debug(
                     f"[OSMOSE:FrameBuilder] LLM invented value '{value}' "
                     f"not in candidates — skipping"
                 )
                 continue
 
-            confidence_str = field_data.get("confidence", "medium")
+            # ABSTAIN : confidence=low + pas de candidate_ids valides → skip
+            if confidence_str == "low" and not valid_cids:
+                logger.debug(
+                    f"[OSMOSE:FrameBuilder] ABSTAIN '{field_name}'='{value}' "
+                    f"— low confidence without candidate anchoring"
+                )
+                continue
+
             try:
                 confidence = FrameFieldConfidence(confidence_str)
             except ValueError:
                 confidence = FrameFieldConfidence.MEDIUM
 
             fields.append(FrameField(
-                field_name=field_data.get("field_name", "unknown"),
+                field_name=field_name,
                 value_normalized=value,
                 display_label=field_data.get("display_label"),
                 evidence_unit_ids=field_data.get("evidence_unit_ids", []),
