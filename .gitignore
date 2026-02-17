@@ -56,6 +56,8 @@ src/status/
 *.json
 # Keep openapi.json under src/knowbase/api
 !src/knowbase/api/openapi.json
+# Keep domain context config files
+!config/domain_context_*.json
 
 # Qdrant local data (if any)
 qdrant_data/
