@@ -19,6 +19,7 @@ from . import (
     concepts,  # Concepts API - Explain concepts (Phase 2 POC)
     insights,  # OSMOSE Insights - Découverte connaissances cachées (Phase 2.3)
     sessions,  # Memory Layer - Sessions de conversation (Phase 2.5)
+    backup,  # Backup & Restore - Sauvegarde/restauration complète
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "concepts",
     "insights",
     "sessions",
+    "backup",
 ]

@@ -419,6 +419,19 @@ export const api = {
       apiClient.post(`/sessions/${sessionId}/summary`, { format }),
   },
 
+  // Backup & Restore - Sauvegarde et restauration complète
+  backup: {
+    list: () => apiClient.get('/backup/list'),
+    getDetail: (name: string) => apiClient.get(`/backup/${name}`),
+    currentStats: () => apiClient.get('/backup/current-stats'),
+    create: (name: string, includeCache: boolean) =>
+      apiClient.post('/backup/create', { name, include_cache: includeCache }),
+    restore: (name: string, autoBackup: boolean) =>
+      apiClient.post('/backup/restore', { name, auto_backup: autoBackup }),
+    delete: (name: string) => apiClient.delete(`/backup/${name}`),
+    jobStatus: (jobId: string) => apiClient.get(`/backup/status/${jobId}`),
+  },
+
   // Verification - Text verification against Knowledge Graph
   verify: {
     // Analyze text and verify assertions

@@ -41,6 +41,7 @@ import {
   FiZap,
   FiSliders,
   FiCloud,
+  FiArchive,
 } from 'react-icons/fi'
 
 const MotionBox = motion(Box)
@@ -537,6 +538,13 @@ export default function AdminDashboard() {
                 href="/admin/visibility-profile"
                 color="purple"
                 delay={0.55}
+              />
+              <QuickActionButton
+                label="Backup & Restore"
+                icon={FiArchive}
+                href="/admin/backup"
+                color="green"
+                delay={0.58}
               />
               <QuickActionButton
                 label="Mode Burst"
