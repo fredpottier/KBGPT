@@ -285,7 +285,7 @@ class BurstConfig:
     embeddings_model: str = "intfloat/multilingual-e5-large"
 
     # vLLM Configuration pour AWQ
-    vllm_quantization: str = "awq_marlin"  # Kernels Marlin optimisés (~8x plus rapide que awq, nécessite volume mount /models)
+    vllm_quantization: str = "awq_marlin"  # Kernels Marlin optimisés (~8x plus rapide que awq)
     vllm_dtype: str = "half"  # FP16 pour inférence AWQ
     vllm_gpu_memory_utilization: float = 0.85  # Maximise le cache KV (TEI utilise peu de VRAM)
     vllm_max_model_len: int = 32768  # 32K context — Qwen3 14B natif

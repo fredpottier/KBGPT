@@ -41,7 +41,7 @@ Parameters:
     Type: String
     Default: "awq_marlin"
     AllowedValues: ["awq", "awq_marlin", "gptq", "squeezellm", "none"]
-    Description: Méthode de quantification (awq_marlin = kernels Marlin, ~8x plus rapide, nécessite volume mount /models)
+    Description: Méthode de quantification (awq_marlin = kernels Marlin optimisés, ~8x plus rapide)
 
   VllmDtype:
     Type: String
@@ -345,6 +345,18 @@ Resources:
                 nvidia-smi
 
                 # ============================================
+                # Désactiver les services systemd de l'AMI Golden
+                # (ils démarrent avec des paramètres obsolètes)
+                # ============================================
+                echo "Disabling AMI Golden systemd services..."
+                for svc in burst-vllm burst-embeddings burst-healthcheck; do
+                    systemctl stop $svc.service 2>/dev/null || true
+                    systemctl disable $svc.service 2>/dev/null || true
+                done
+                docker rm -f vllm embeddings 2>/dev/null || true
+                echo "AMI services disabled, containers cleaned"
+
+                # ============================================
                 # Start vLLM with AWQ quantization
                 # ============================================
                 echo "Starting vLLM server..."
@@ -392,29 +404,14 @@ Resources:
                     echo "  Chunked prefill: ENABLED (max_batched_tokens=$VLLM_MAX_NUM_BATCHED_TOKENS)"
                 fi
 
-                # Patch AWQ Marlin (bug vLLM v0.9.2 : user_quant="awq" non reconnu)
-                # Extrait awq_marlin.py, ajoute "or user_quant == 'awq'" pour forcer Marlin
-                mkdir -p /opt/burst/patches
-                if [ ! -f /opt/burst/patches/awq_marlin.py ]; then
-                    docker create --name vllm-temp vllm/vllm-openai:v0.9.2
-                    docker cp vllm-temp:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py /opt/burst/patches/awq_marlin.py
-                    docker rm vllm-temp
-                    python3 -c "
-p='/opt/burst/patches/awq_marlin.py'
-c=open(p).read()
-old='or user_quant == \"awq_marlin\")'
-new='or user_quant == \"awq_marlin\"\n                            or user_quant == \"awq\")'
-if old in c and 'or user_quant == \"awq\")' not in c:
-    open(p,'w').write(c.replace(old,new))
-    print('[BURST] Patched awq_marlin.py for Marlin activation')
-"
-                fi
+                # Attendre que la GPU soit libérée après arrêt des containers AMI
+                echo "Waiting for GPU memory cleanup..."
+                sleep 5
 
-                # Créer nouveau container avec modèle local + optimisations
+                # Créer container vLLM avec modèle local + AWQ Marlin
                 docker run -d --gpus all --restart unless-stopped \
                     -p $VLLM_PORT:8000 --name vllm \
                     -v $VLLM_MODEL_PATH:/model:ro \
-                    -v /opt/burst/patches/awq_marlin.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py:ro \
                     vllm/vllm-openai:v0.9.2 \
                     --model /model \
                     --quantization $VLLM_QUANTIZATION \
@@ -644,6 +641,14 @@ if old in c and 'or user_quant == \"awq\")' not in c:
 
                 nvidia-smi
 
+                # Désactiver les services systemd de l'AMI Golden
+                echo "Disabling AMI Golden systemd services..."
+                for svc in burst-vllm burst-embeddings burst-healthcheck; do
+                    systemctl stop $svc.service 2>/dev/null || true
+                    systemctl disable $svc.service 2>/dev/null || true
+                done
+                docker rm -f vllm embeddings 2>/dev/null || true
+
                 # ============================================
                 # Créer container vLLM avec modèle local (EBS)
                 # ============================================
@@ -659,28 +664,13 @@ if old in c and 'or user_quant == \"awq\")' not in c:
                     VLLM_EXTRA_ARGS="$VLLM_EXTRA_ARGS --enable-chunked-prefill --max-num-batched-tokens $VLLM_MAX_NUM_BATCHED_TOKENS"
                 fi
 
-                # Patch AWQ Marlin (bug vLLM v0.9.2)
-                mkdir -p /opt/burst/patches
-                if [ ! -f /opt/burst/patches/awq_marlin.py ]; then
-                    docker create --name vllm-temp vllm/vllm-openai:v0.9.2
-                    docker cp vllm-temp:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py /opt/burst/patches/awq_marlin.py
-                    docker rm vllm-temp
-                    python3 -c "
-p='/opt/burst/patches/awq_marlin.py'
-c=open(p).read()
-old='or user_quant == \"awq_marlin\")'
-new='or user_quant == \"awq_marlin\"\n                            or user_quant == \"awq\")'
-if old in c and 'or user_quant == \"awq\")' not in c:
-    open(p,'w').write(c.replace(old,new))
-    print('[BURST] Patched awq_marlin.py for Marlin activation')
-"
-                fi
+                # Attendre que la GPU soit libérée après arrêt des containers AMI
+                echo "Waiting for GPU memory cleanup..."
+                sleep 5
 
-                docker rm -f vllm 2>/dev/null || true
                 docker run -d --gpus all --restart unless-stopped \
                     -p $VLLM_PORT:8000 --name vllm \
                     -v $VLLM_MODEL_PATH:/model:ro \
-                    -v /opt/burst/patches/awq_marlin.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py:ro \
                     vllm/vllm-openai:v0.9.2 \
                     --model /model \
                     --quantization $VLLM_QUANTIZATION \
