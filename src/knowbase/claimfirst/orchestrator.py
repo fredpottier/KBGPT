@@ -236,9 +236,25 @@ class ClaimFirstOrchestrator:
             doc_title=doc_title,
         )
         if comparable_subject:
+            # Propager le doc_id au ComparableSubject
+            comparable_subject.add_doc_reference(doc_id)
+
+            # Mettre à jour le resolution_status du DocumentContext
+            cs_status = (
+                ResolutionStatus.RESOLVED
+                if comparable_subject.confidence >= 0.85
+                else ResolutionStatus.LOW_CONFIDENCE
+            )
+            doc_context.resolution_status = cs_status
+            doc_context.resolution_confidence = max(
+                doc_context.resolution_confidence,
+                comparable_subject.confidence,
+            )
+
             logger.info(
                 f"  → ComparableSubject: '{comparable_subject.canonical_name}' "
-                f"(confidence={comparable_subject.confidence:.2f})"
+                f"(confidence={comparable_subject.confidence:.2f}, "
+                f"status={cs_status.value})"
             )
         else:
             logger.info("  → ComparableSubject: abstained or not resolved")

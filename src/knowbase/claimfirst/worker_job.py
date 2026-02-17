@@ -189,6 +189,20 @@ def claimfirst_process_job(
             logger.error(f"[OSMOSE:ClaimFirst:Worker] Entity canonicalization failed: {e}")
             results["entities_merged"] = 0
 
+    # Phase 11 : Clustering cross-doc (après canonicalisation des entités)
+    if results["processed"] >= 2 and neo4j_driver:
+        try:
+            _update_state(redis_client, phase="CROSS_DOC_CLUSTERING")
+            logger.info("[OSMOSE:ClaimFirst:Worker] Phase 11: Cross-doc clustering...")
+            cluster_result = _cluster_cross_doc(neo4j_driver, tenant_id)
+            results["cross_doc_clusters"] = cluster_result.get("clusters_created", 0)
+            logger.info(
+                f"  → {cluster_result.get('clusters_created', 0)} cross-doc clusters created"
+            )
+        except Exception as e:
+            logger.error(f"[OSMOSE:ClaimFirst:Worker] Cross-doc clustering failed: {e}")
+            results["cross_doc_clusters"] = 0
+
     # Finalisation
     _update_state(
         redis_client,
@@ -487,6 +501,251 @@ def _canonicalize_entities_cross_doc(neo4j_driver, tenant_id: str) -> dict:
             "containment_merges": containment_merged,
             "total_merges": version_merged + containment_merged,
             "hubs_annotated": hubs_annotated,
+        }
+
+
+def _cluster_cross_doc(neo4j_driver, tenant_id: str) -> dict:
+    """
+    Clustering cross-document via Jaccard sur entités partagées.
+
+    Algorithme :
+    1. Charger claims avec entités depuis Neo4j
+    2. Index inversé entité → claims (entités dans 2+ docs uniquement)
+    3. Comparer pairwise cross-doc au sein de chaque groupe d'entité
+    4. Union-Find → clusters
+    5. Persister ClaimCluster + IN_CLUSTER
+
+    Pas de dépendance numpy — Jaccard + règles inline.
+    """
+    import re
+    import uuid
+    from collections import defaultdict
+
+    # --- Fonctions utilitaires inline (copiées de ClaimClusterer) ---
+
+    STOP_WORDS = {
+        "the", "a", "an", "is", "are", "was", "were", "be", "been",
+        "being", "have", "has", "had", "do", "does", "did", "will",
+        "would", "could", "should", "may", "might", "must", "shall",
+        "can", "need", "to", "of", "in", "for", "on", "with", "at",
+        "by", "from", "as", "into", "through", "during", "before",
+        "after", "above", "below", "between", "under", "again",
+        "further", "then", "once", "here", "there", "when", "where",
+        "why", "how", "all", "each", "few", "more", "most", "other",
+        "some", "such", "no", "nor", "not", "only", "own", "same",
+        "so", "than", "too", "very", "just", "and", "but", "if",
+        "or", "because", "until", "while", "this", "that", "these",
+        "those", "which", "who", "whom", "what", "whose",
+    }
+    STRONG_OBLIGATION = {"must", "shall", "required", "mandatory", "obligatory"}
+    WEAK_OBLIGATION = {"should", "recommended", "advisable"}
+    PERMISSION = {"may", "can", "allowed", "permitted", "optional"}
+    NEGATION_PATTERNS = [
+        re.compile(r"\bnot\b"), re.compile(r"\bno\b"),
+        re.compile(r"\bnever\b"), re.compile(r"\bnone\b"),
+        re.compile(r"\bcannot\b"), re.compile(r"\bcan't\b"),
+        re.compile(r"\bwon't\b"), re.compile(r"\bdon't\b"),
+        re.compile(r"\bwithout\b"), re.compile(r"\bexcept\b"),
+        re.compile(r"\bexclud"),
+    ]
+
+    def extract_key_tokens(text: str) -> set:
+        tokens = re.findall(r"\b[a-zA-Z]+\b", text.lower())
+        return {t for t in tokens if t not in STOP_WORDS and len(t) > 2}
+
+    def jaccard(s1: set, s2: set) -> float:
+        if not s1 or not s2:
+            return 0.0
+        return len(s1 & s2) / len(s1 | s2)
+
+    def extract_modality(text: str) -> str:
+        tl = text.lower()
+        for w in STRONG_OBLIGATION:
+            if re.search(rf"\b{w}\b", tl):
+                return "strong"
+        for w in WEAK_OBLIGATION:
+            if re.search(rf"\b{w}\b", tl):
+                return "weak"
+        for w in PERMISSION:
+            if re.search(rf"\b{w}\b", tl):
+                return "permission"
+        return "neutral"
+
+    def has_inverted_negation(text1: str, text2: str) -> bool:
+        def count_neg(text):
+            tl = text.lower()
+            return sum(1 for p in NEGATION_PATTERNS if p.search(tl))
+        return (count_neg(text1) > 0) != (count_neg(text2) > 0)
+
+    # --- Union-Find ---
+    uf_parent: dict = {}
+
+    def uf_find(x: str) -> str:
+        if x not in uf_parent:
+            uf_parent[x] = x
+        if uf_parent[x] != x:
+            uf_parent[x] = uf_find(uf_parent[x])
+        return uf_parent[x]
+
+    def uf_union(x: str, y: str) -> None:
+        px, py = uf_find(x), uf_find(y)
+        if px != py:
+            uf_parent[px] = py
+
+    MIN_JACCARD = 0.30
+    MAX_CLAIMS_PER_ENTITY = 200
+
+    with neo4j_driver.session() as session:
+        # 1. Charger claims avec entités
+        result = session.run(
+            """
+            MATCH (c:Claim {tenant_id: $tid})-[:ABOUT]->(e:Entity)
+            RETURN c.claim_id AS claim_id, c.doc_id AS doc_id,
+                   c.text AS text, c.confidence AS confidence,
+                   collect(e.normalized_name) AS entity_names
+            """,
+            tid=tenant_id,
+        )
+        claims_data = {}
+        entity_to_claims = defaultdict(set)
+        for r in result:
+            cid = r["claim_id"]
+            claims_data[cid] = {
+                "claim_id": cid,
+                "doc_id": r["doc_id"],
+                "text": r["text"] or "",
+                "confidence": r["confidence"] or 0.5,
+                "entity_names": r["entity_names"] or [],
+            }
+            for ename in r["entity_names"]:
+                entity_to_claims[ename].add(cid)
+
+        logger.info(f"  → {len(claims_data)} claims avec entités chargées")
+
+        # 2. Filtrer : entités dans 2+ docs, exclure hubs
+        cross_doc_groups = {}
+        for ename, cids in entity_to_claims.items():
+            doc_ids = {claims_data[cid]["doc_id"] for cid in cids if cid in claims_data}
+            if len(doc_ids) < 2:
+                continue
+            if len(cids) > MAX_CLAIMS_PER_ENTITY:
+                logger.debug(f"  Hub exclu: '{ename}' ({len(cids)} claims)")
+                continue
+            cross_doc_groups[ename] = cids
+
+        logger.info(f"  → {len(cross_doc_groups)} entités cross-doc candidates")
+
+        if not cross_doc_groups:
+            return {"clusters_created": 0, "pairs_validated": 0}
+
+        # 3. Pré-calculer tokens par claim
+        tokens_cache = {}
+        modality_cache = {}
+        for cid, cdata in claims_data.items():
+            tokens_cache[cid] = extract_key_tokens(cdata["text"])
+            modality_cache[cid] = extract_modality(cdata["text"])
+
+        # 4. Comparer pairwise cross-doc au sein de chaque groupe
+        pairs_validated = 0
+        for ename, cids in cross_doc_groups.items():
+            cids_list = sorted(cids)
+            for i, cid1 in enumerate(cids_list):
+                c1 = claims_data.get(cid1)
+                if not c1:
+                    continue
+                for cid2 in cids_list[i + 1:]:
+                    c2 = claims_data.get(cid2)
+                    if not c2:
+                        continue
+                    # Cross-doc uniquement
+                    if c1["doc_id"] == c2["doc_id"]:
+                        continue
+                    # Jaccard sur tokens
+                    j = jaccard(tokens_cache[cid1], tokens_cache[cid2])
+                    if j < MIN_JACCARD:
+                        continue
+                    # Même modalité
+                    if modality_cache[cid1] != modality_cache[cid2]:
+                        continue
+                    # Pas de négation inversée
+                    if has_inverted_negation(c1["text"], c2["text"]):
+                        continue
+                    # Validé → union
+                    uf_union(cid1, cid2)
+                    pairs_validated += 1
+
+        logger.info(f"  → {pairs_validated} paires cross-doc validées")
+
+        if pairs_validated == 0:
+            return {"clusters_created": 0, "pairs_validated": 0}
+
+        # 5. Grouper par racine Union-Find
+        groups = defaultdict(set)
+        for cid in uf_parent:
+            root = uf_find(cid)
+            groups[root].add(cid)
+
+        # Filtrer les groupes cross-doc (2+ docs)
+        cross_clusters = []
+        for root, cids in groups.items():
+            doc_ids = {claims_data[cid]["doc_id"] for cid in cids if cid in claims_data}
+            if len(doc_ids) < 2:
+                continue
+            cross_clusters.append((sorted(cids), sorted(doc_ids)))
+
+        logger.info(f"  → {len(cross_clusters)} clusters cross-doc formés")
+
+        # 6. Persister
+        clusters_created = 0
+        for cids, doc_ids in cross_clusters:
+            cluster_id = f"cluster_xd_{uuid.uuid4().hex[:12]}"
+            claim_objs = [claims_data[cid] for cid in cids if cid in claims_data]
+            if not claim_objs:
+                continue
+            best = max(claim_objs, key=lambda c: c["confidence"])
+            avg_conf = sum(c["confidence"] for c in claim_objs) / len(claim_objs)
+
+            # MERGE le ClaimCluster
+            session.run(
+                """
+                MERGE (cc:ClaimCluster {cluster_id: $cid, tenant_id: $tid})
+                SET cc.canonical_label = $label,
+                    cc.claim_count = $claim_count,
+                    cc.doc_count = $doc_count,
+                    cc.doc_ids = $doc_ids,
+                    cc.avg_confidence = $avg_conf,
+                    cc.cross_doc = true,
+                    cc.method = 'jaccard_cross_doc'
+                """,
+                cid=cluster_id,
+                tid=tenant_id,
+                label=best["text"][:100],
+                claim_count=len(cids),
+                doc_count=len(doc_ids),
+                doc_ids=doc_ids,
+                avg_conf=avg_conf,
+            )
+
+            # Créer les relations IN_CLUSTER
+            for claim_id in cids:
+                session.run(
+                    """
+                    MATCH (c:Claim {claim_id: $claim_id, tenant_id: $tid})
+                    MATCH (cc:ClaimCluster {cluster_id: $cluster_id, tenant_id: $tid})
+                    MERGE (c)-[:IN_CLUSTER]->(cc)
+                    """,
+                    claim_id=claim_id,
+                    tid=tenant_id,
+                    cluster_id=cluster_id,
+                )
+
+            clusters_created += 1
+
+        logger.info(f"  → {clusters_created} clusters cross-doc persistés")
+
+        return {
+            "clusters_created": clusters_created,
+            "pairs_validated": pairs_validated,
         }
 
 
