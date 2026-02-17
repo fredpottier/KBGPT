@@ -2,16 +2,17 @@
 FROM nvidia/cuda:12.0.0-base-ubuntu22.04
 
 # Installer Python 3.11
-RUN apt-get update && apt-get install -y --no-install-recommends \
+ENV TZ=Europe/Paris
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-dev \
     python3-pip \
+    tzdata \
     && ln -sf /usr/bin/python3.11 /usr/bin/python \
     && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
-
-ENV TZ=Europe/Paris
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
