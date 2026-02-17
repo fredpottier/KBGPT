@@ -147,9 +147,9 @@ def search_documents(
     graph_first_chunks = None
     graph_first_succeeded = False
 
-    # Lier use_graph_first à use_graph_context pour cohérence UX (fix 2026-01-23)
-    # Si l'utilisateur désactive "Knowledge Graph", on désactive aussi le routage structurel
-    effective_graph_first = use_graph_first and use_graph_context
+    # DÉSACTIVÉ: Graph-First dépend de CanonicalConcept + index concept_search (OSMOSE semantic)
+    # qui n'existent pas en mode ClaimFirst. Le KG traversal CHAINS_TO reste actif.
+    effective_graph_first = False
 
     if effective_graph_first:
         try:
@@ -362,61 +362,17 @@ def search_documents(
         except Exception as e:
             logger.warning(f"[SESSION-KG] Entity resolution failed (non-blocking): {e}")
 
-    # 🌊 OSMOSE: Enrichissement Knowledge Graph (Graph-Guided RAG)
+    # 🌊 OSMOSE: Enrichissement Knowledge Graph
     graph_context_text = ""
     graph_context_data = None
-
-    if use_graph_context and graph_enrichment_level != "none":
-        try:
-            from .graph_guided_search import (
-                get_graph_guided_service,
-                EnrichmentLevel
-            )
-
-            service = get_graph_guided_service()
-
-            # Mapper le niveau d'enrichissement
-            level_map = {
-                "none": EnrichmentLevel.NONE,
-                "light": EnrichmentLevel.LIGHT,
-                "standard": EnrichmentLevel.STANDARD,
-                "deep": EnrichmentLevel.DEEP,
-            }
-            enrichment_level = level_map.get(
-                graph_enrichment_level.lower(),
-                EnrichmentLevel.STANDARD
-            )
-
-            # Exécuter l'enrichissement KG de façon synchrone
-            loop = asyncio.new_event_loop()
-            try:
-                graph_context = loop.run_until_complete(
-                    service.build_graph_context(
-                        query=query,
-                        tenant_id=tenant_id,
-                        enrichment_level=enrichment_level
-                    )
-                )
-            finally:
-                loop.close()
-
-            # Formater le contexte pour le prompt LLM
-            graph_context_text = service.format_context_for_synthesis(graph_context)
-            graph_context_data = graph_context.to_dict()
-
-            logger.info(
-                f"[OSMOSE] Graph context: {len(graph_context.query_concepts)} concepts, "
-                f"{len(graph_context.related_concepts)} related, "
-                f"{graph_context.processing_time_ms:.1f}ms"
-            )
-
-        except Exception as e:
-            logger.warning(f"[OSMOSE] Graph enrichment failed (non-blocking): {e}")
-            # Continue sans enrichissement KG
+    # DÉSACTIVÉ: graph_guided_search dépend de CanonicalConcept + index concept_search
+    # + collection osmos_concepts (OSMOSE semantic pipeline) qui n'existent pas en mode
+    # ClaimFirst. L'enrichissement KG passe désormais uniquement par le KG traversal
+    # CHAINS_TO ci-dessous (Entity → Claim → CHAINS_TO → cross-doc).
 
     # 🔗 OSMOSE: Traversée multi-hop CHAINS_TO pour raisonnement transitif cross-document
     chain_signals = {}
-    if use_kg_traversal and use_graph_context:
+    if use_kg_traversal:
         try:
             logger.info(f"[OSMOSE] KG traversal starting for query: {query[:80]}...")
             kg_chains_text, kg_chain_doc_ids, chain_signals = _get_kg_traversal_context(query, tenant_id)
