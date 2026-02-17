@@ -410,7 +410,7 @@ class FrameBuilder:
             task_type=TaskType.METADATA_EXTRACTION,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=3000,
+            max_tokens=2000,
             json_schema=FRAME_BUILDER_SCHEMA,
         )
 
@@ -766,12 +766,14 @@ class FrameBuilder:
                     else:
                         kept.append(f)
 
-                # Fallback : si tous les release_id rejetés, tenter
-                # un numeric_identifier du titre comme release_id
+                # Fallback : si aucun release_id dans les champs gardés,
+                # tenter un numeric_identifier du titre comme release_id.
+                # Couvre 2 cas : (a) LLM a produit un release_id mais rejeté,
+                # (b) LLM n'a produit aucun release_id du tout.
                 has_release = any(
                     f.field_name in ("release_id", "version") for f in kept
                 )
-                if had_release_rejected and not has_release and profile:
+                if not has_release and profile:
                     fallback = self._fallback_title_numeric(profile)
                     if fallback:
                         kept.append(fallback)
