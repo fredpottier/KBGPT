@@ -397,7 +397,7 @@ class SubjectResolverV2:
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
             temperature=0.1,
-            max_tokens=2000,
+            max_tokens=1000,
         )
         return response
 

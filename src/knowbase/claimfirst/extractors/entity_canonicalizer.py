@@ -130,8 +130,8 @@ class EntityCanonicalizer:
         self,
         tenant_id: str = "default",
         min_entities_for_llm: int = 5,
-        batch_size: int = 100,
-        max_concurrent: int = 10,
+        batch_size: int = 50,
+        max_concurrent: int = 3,
     ):
         """
         Initialise le canonicalizer.
@@ -332,7 +332,7 @@ class EntityCanonicalizer:
                 task_type=TaskType.KNOWLEDGE_EXTRACTION,
                 messages=messages,
                 temperature=0.1,
-                max_tokens=4000,
+                max_tokens=1500,
             )
 
             batch_result = self._parse_response(response, names_batch)

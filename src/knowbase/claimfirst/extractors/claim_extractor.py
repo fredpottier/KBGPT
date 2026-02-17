@@ -243,7 +243,7 @@ def build_claim_extraction_prompt(
 
 
 # Nombre max d'appels LLM en parallèle (évite de surcharger vLLM/OpenAI)
-MAX_CONCURRENT_LLM_CALLS = 20
+MAX_CONCURRENT_LLM_CALLS = 10
 
 
 @dataclass
@@ -605,7 +605,7 @@ Reply ONLY with a JSON array, one entry per claim:
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
             temperature=0.1,
-            max_tokens=2000,
+            max_tokens=1500,
         )
 
         return response
@@ -703,7 +703,7 @@ Reply ONLY with a JSON array, one entry per claim:
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
             temperature=0.1,  # Déterministe
-            max_tokens=2000,
+            max_tokens=1500,
         )
 
         return response

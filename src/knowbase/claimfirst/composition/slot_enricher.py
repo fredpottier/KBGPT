@@ -75,7 +75,7 @@ def _normalize_predicate(raw_predicate: str) -> Optional[str]:
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 15
-MAX_CONCURRENT = 10
+MAX_CONCURRENT = 5
 
 SLOT_ENRICHMENT_PROMPT = """Extract structured triplets from claims. Return ONLY a JSON array, no extra text or explanation.
 
