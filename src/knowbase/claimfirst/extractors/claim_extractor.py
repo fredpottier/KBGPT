@@ -211,14 +211,15 @@ You MUST choose EXACTLY one predicate from this CLOSED list (12 predicates):
 - DO NOT copy the text. Point to unit_ids only.
 - If a unit does not contain a useful claim, IGNORE it.
 - The claim must be self-contained and understandable without reading the source unit.
-- Prefer abstention over invention. Prefer precision over quantity.
+- Extract every genuine claim. Only abstain if the unit is truly non-informative (title, label, boilerplate).
 - IMPORTANT: Write all claim_text in the SAME LANGUAGE as the source document units.
 
 ## Units to analyze
 
 {units_text}
 
-Return ONLY the JSON array, no explanation."""
+Return ONLY a JSON object: {{"claims": [...]}}
+No explanation, no markdown fences."""
 
 
 def build_claim_extraction_prompt(
@@ -315,6 +316,9 @@ class ClaimExtractor:
             "predicates_retried": 0,
             "predicates_dropped": 0,
             "sf_dropped_invalid_entity": 0,
+            "json_repaired": 0,
+            "json_parse_errors": 0,
+            "empty_responses": 0,
         }
 
     def extract(
@@ -605,7 +609,8 @@ Reply ONLY with a JSON array, one entry per claim:
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
             temperature=0.1,
-            max_tokens=1500,
+            max_tokens=2000,
+            response_format={"type": "json_object"},
         )
 
         return response
@@ -702,8 +707,9 @@ Reply ONLY with a JSON array, one entry per claim:
         response = router.complete(
             task_type=TaskType.KNOWLEDGE_EXTRACTION,
             messages=messages,
-            temperature=0.1,  # Déterministe
-            max_tokens=1500,
+            temperature=0.1,
+            max_tokens=2000,
+            response_format={"type": "json_object"},
         )
 
         return response
@@ -712,15 +718,16 @@ Reply ONLY with a JSON array, one entry per claim:
         """
         Parse la réponse JSON du LLM.
 
-        Gère les formats malformés et les erreurs.
+        Gère les formats malformés avec JSON repair en backstop.
         """
         if not response:
+            self.stats["empty_responses"] += 1
             return []
 
         # Nettoyer la réponse
         response = response.strip()
 
-        # Extraire le JSON si encapsulé
+        # Extraire le JSON si encapsulé dans markdown fences
         if "```json" in response:
             start = response.find("```json") + 7
             end = response.find("```", start)
@@ -749,8 +756,69 @@ Reply ONLY with a JSON array, one entry per claim:
                 return []
 
         except json.JSONDecodeError as e:
+            # Tentative de repair minimal
+            repaired = self._try_repair_json(response)
+            if repaired is not None:
+                self.stats["json_repaired"] += 1
+                return repaired
+            self.stats["json_parse_errors"] += 1
             logger.warning(f"[OSMOSE:ClaimExtractor] JSON parse error: {e}")
+            logger.debug(f"[OSMOSE:ClaimExtractor] Raw response (first 500): {response[:500]}")
             return []
+
+    def _try_repair_json(self, response: str) -> Optional[List[dict]]:
+        """
+        Repair minimal et déterministe du JSON malformé.
+
+        3 opérations safe :
+        1. Strip markdown fences
+        2. Extraire substring entre premier [{  et dernier }]
+        3. Retirer trailing commas
+
+        Returns None si le repair échoue (ABSTAIN).
+        """
+        import re
+
+        text = response.strip()
+
+        # 1. Strip markdown fences (déjà fait en amont mais au cas où)
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        text = text.strip()
+
+        # 2. Extraire substring entre premier [ ou { et dernier ] ou }
+        first_bracket = -1
+        for i, c in enumerate(text):
+            if c in '[{':
+                first_bracket = i
+                break
+        if first_bracket == -1:
+            return None
+
+        last_bracket = -1
+        for i in range(len(text) - 1, -1, -1):
+            if text[i] in ']}':
+                last_bracket = i
+                break
+        if last_bracket == -1 or last_bracket <= first_bracket:
+            return None
+
+        text = text[first_bracket:last_bracket + 1]
+
+        # 3. Retirer trailing commas avant ] ou }
+        text = re.sub(r',\s*([}\]])', r'\1', text)
+
+        try:
+            data = json.loads(text)
+            if isinstance(data, list):
+                return data
+            elif isinstance(data, dict):
+                if "claims" in data:
+                    return data["claims"]
+                return [data]
+            return None
+        except json.JSONDecodeError:
+            return None
 
     def _build_claim_with_predicate_check(
         self,
@@ -939,6 +1007,9 @@ Reply ONLY with a JSON array, one entry per claim:
             "predicates_retried": 0,
             "predicates_dropped": 0,
             "sf_dropped_invalid_entity": 0,
+            "json_repaired": 0,
+            "json_parse_errors": 0,
+            "empty_responses": 0,
         }
 
 

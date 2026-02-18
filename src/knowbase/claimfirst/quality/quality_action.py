@@ -38,6 +38,7 @@ class QualityVerdict:
     rewritten_text: Optional[str] = None
     split_claims: Optional[List[str]] = None
     resolved_text: Optional[str] = None
+    claim_id: Optional[str] = None  # V1.3.1: pour mapping correct verdict→claim
 
 
 __all__ = [

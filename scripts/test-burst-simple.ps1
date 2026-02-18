@@ -80,7 +80,7 @@ echo "=== OSMOSE Burst Init ==="
 date
 
 # Variables
-VLLM_MODEL="Qwen/Qwen3-14B-AWQ"
+VLLM_MODEL="Qwen/Qwen2.5-14B-Instruct-AWQ"
 EMBEDDINGS_MODEL="intfloat/multilingual-e5-large"
 
 # Start Docker (DLAMI has it pre-installed)
@@ -275,7 +275,7 @@ Write-Host ""
 
 # Wait for services
 Write-Host "[6/6] Waiting for vLLM + Embeddings (8-15 min for 14B model)..." -ForegroundColor Yellow
-Write-Host "       Model loading: Qwen/Qwen3-14B-AWQ" -ForegroundColor Gray
+Write-Host "       Model loading: Qwen/Qwen2.5-14B-Instruct-AWQ" -ForegroundColor Gray
 
 $HEALTH_URL = "http://${INSTANCE_IP}:8080/health"
 $VLLM_URL = "http://${INSTANCE_IP}:8000"
@@ -324,7 +324,7 @@ if ($ready) {
     # Test vLLM
     Write-Host "Testing vLLM API..." -ForegroundColor Yellow
     $testBody = @{
-        model = "Qwen/Qwen3-14B-AWQ"
+        model = "Qwen/Qwen2.5-14B-Instruct-AWQ"
         messages = @(
             @{ role = "user"; content = "Dis 'Bonjour OSMOSE' en une phrase." }
         )

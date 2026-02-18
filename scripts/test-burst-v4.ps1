@@ -47,7 +47,7 @@ if old in c and 'or user_quant == \"awq\")' not in c:
 "
 docker run -d --gpus all -p 8000:8000 --name vllm \
   -v /opt/burst/patches/awq_marlin.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py:ro \
-  vllm/vllm-openai:v0.9.2 --model Qwen/Qwen3-14B-AWQ --quantization awq_marlin --dtype half --gpu-memory-utilization 0.85 --max-model-len 32768 --reasoning-parser qwen3 --max-num-seqs 32 --trust-remote-code
+  vllm/vllm-openai:v0.9.2 --model Qwen/Qwen2.5-14B-Instruct-AWQ --quantization awq_marlin --dtype half --gpu-memory-utilization 0.85 --max-model-len 32768 --reasoning-parser qwen3 --max-num-seqs 32 --trust-remote-code
 docker run -d --gpus all -p 8001:80 --name emb ghcr.io/huggingface/text-embeddings-inference:1.5 --model-id intfloat/multilingual-e5-large
 python3 -c "
 from http.server import HTTPServer,BaseHTTPRequestHandler
@@ -152,7 +152,7 @@ if ($ready) {
 
     # Test API
     Write-Host "Testing vLLM API..." -ForegroundColor Yellow
-    $testBody = '{"model":"Qwen/Qwen3-14B-AWQ","messages":[{"role":"user","content":"Say: Hello OSMOSE!"}],"max_tokens":20}'
+    $testBody = '{"model":"Qwen/Qwen2.5-14B-Instruct-AWQ","messages":[{"role":"user","content":"Say: Hello OSMOSE!"}],"max_tokens":20}'
 
     try {
         $response = Invoke-RestMethod -Uri "http://${IP}:8000/v1/chat/completions" -Method POST -ContentType "application/json" -Body $testBody -TimeoutSec 60

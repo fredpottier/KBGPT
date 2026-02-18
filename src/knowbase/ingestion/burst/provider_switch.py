@@ -17,12 +17,16 @@ Date: 2025-12
 
 import json
 import logging
+import os
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
 # === Clés Redis pour l'état du burst (partagé entre tous les processus) ===
 REDIS_BURST_STATE_KEY = "osmose:burst:state"
+
+# === Fichier persistant sur le volume /data (survit aux rebuilds + évictions Redis) ===
+BURST_STATE_FILE = os.path.join(os.getenv("KNOWBASE_DATA_DIR", "/data"), ".burst_state.json")
 
 
 def _get_redis_client():
@@ -35,25 +39,60 @@ def _get_redis_client():
         return None
 
 
+def _save_burst_state_file(state: Dict[str, Any]) -> None:
+    """Sauvegarde l'état burst dans un fichier sur le volume /data (persiste aux rebuilds)."""
+    try:
+        with open(BURST_STATE_FILE, "w") as f:
+            json.dump(state, f)
+        logger.debug(f"[BURST:FILE] State saved to {BURST_STATE_FILE}")
+    except Exception as e:
+        logger.warning(f"[BURST:FILE] Failed to save state file: {e}")
+
+
+def _load_burst_state_file() -> Optional[Dict[str, Any]]:
+    """Charge l'état burst depuis le fichier persistant."""
+    try:
+        if os.path.exists(BURST_STATE_FILE):
+            with open(BURST_STATE_FILE, "r") as f:
+                state = json.load(f)
+            if state.get("active"):
+                return state
+    except Exception as e:
+        logger.debug(f"[BURST:FILE] Failed to load state file: {e}")
+    return None
+
+
+def _clear_burst_state_file() -> None:
+    """Supprime le fichier d'état burst."""
+    try:
+        if os.path.exists(BURST_STATE_FILE):
+            os.remove(BURST_STATE_FILE)
+            logger.debug(f"[BURST:FILE] State file removed")
+    except Exception as e:
+        logger.warning(f"[BURST:FILE] Failed to remove state file: {e}")
+
+
 def set_burst_state_in_redis(vllm_url: str, vllm_model: str, embeddings_url: str) -> bool:
     """
-    Stocke l'état du burst dans Redis pour partage inter-processus.
+    Stocke l'état du burst dans Redis ET dans un fichier persistant.
 
-    Cette fonction est appelée quand le burst est activé, permettant à tous les
-    processus (worker, app, etc.) de savoir que vLLM est disponible.
+    Double écriture : Redis (rapide, inter-process) + fichier /data (survit aux rebuilds).
     """
+    state = {
+        "active": True,
+        "vllm_url": vllm_url,
+        "vllm_model": vllm_model,
+        "embeddings_url": embeddings_url
+    }
+
+    # Toujours sauver dans le fichier (backup)
+    _save_burst_state_file(state)
+
     redis = _get_redis_client()
     if not redis:
         return False
 
     try:
-        state = {
-            "active": True,
-            "vllm_url": vllm_url,
-            "vllm_model": vllm_model,
-            "embeddings_url": embeddings_url
-        }
-        # RedisClient wraps the redis client, access via .client
         redis.client.set(REDIS_BURST_STATE_KEY, json.dumps(state))
         logger.info(f"[BURST:REDIS] State saved: vLLM={vllm_url}, model={vllm_model}")
         return True
@@ -64,14 +103,15 @@ def set_burst_state_in_redis(vllm_url: str, vllm_model: str, embeddings_url: str
 
 def clear_burst_state_in_redis() -> bool:
     """
-    Supprime l'état du burst dans Redis (désactivation).
+    Supprime l'état du burst dans Redis ET le fichier persistant.
     """
+    _clear_burst_state_file()
+
     redis = _get_redis_client()
     if not redis:
         return False
 
     try:
-        # RedisClient wraps the redis client, access via .client
         redis.client.delete(REDIS_BURST_STATE_KEY)
         logger.info("[BURST:REDIS] State cleared (burst deactivated)")
         return True
@@ -82,43 +122,84 @@ def clear_burst_state_in_redis() -> bool:
 
 def get_burst_state_from_redis() -> Optional[Dict[str, Any]]:
     """
-    Récupère l'état du burst depuis Redis.
+    Récupère l'état du burst depuis Redis, avec fallback fichier.
 
-    Utilisé par LLMRouter pour vérifier si vLLM est actif.
-
-    Returns:
-        Dict avec vllm_url, vllm_model, embeddings_url si actif, None sinon
+    Ordre : Redis (prioritaire) → fichier /data (fallback si Redis vide/évinçé).
+    Si le fichier fournit l'état, on le re-sauve dans Redis pour les prochains appels.
     """
     redis = _get_redis_client()
-    if not redis:
-        return None
+    if redis:
+        try:
+            data = redis.client.get(REDIS_BURST_STATE_KEY)
+            if data:
+                state = json.loads(data)
+                if state.get("active"):
+                    return state
+        except Exception as e:
+            logger.debug(f"[BURST:REDIS] Failed to get state: {e}")
 
+    # Fallback : fichier persistant
+    file_state = _load_burst_state_file()
+    if file_state:
+        logger.info(
+            f"[BURST:FILE] Restored from file (Redis empty): "
+            f"vLLM={file_state.get('vllm_url')}"
+        )
+        # Re-sauver dans Redis pour les appels suivants
+        if redis:
+            try:
+                redis.client.set(REDIS_BURST_STATE_KEY, json.dumps(file_state))
+                logger.info("[BURST:FILE] Re-saved to Redis from file backup")
+            except Exception:
+                pass
+        return file_state
+
+    return None
+
+
+def _detect_vllm_served_model(vllm_url: str, timeout: int = 5) -> Optional[str]:
+    """
+    Interroge le endpoint /v1/models pour obtenir le nom réel du modèle servi.
+
+    Ceci évite les erreurs 404 dues à un mismatch entre le nom configuré
+    (ex: "Qwen/Qwen2.5-14B-Instruct-AWQ") et le nom réellement servi (ex: "/model").
+    """
     try:
-        # RedisClient wraps the redis client, access via .client
-        data = redis.client.get(REDIS_BURST_STATE_KEY)
-        if data:
-            state = json.loads(data)
-            if state.get("active"):
-                return state
-        return None
+        import requests
+        resp = requests.get(f"{vllm_url.rstrip('/')}/v1/models", timeout=timeout)
+        if resp.ok:
+            data = resp.json()
+            models = data.get("data", [])
+            if models:
+                served_name = models[0].get("id")
+                logger.info(f"[BURST:DETECT] vLLM serves model as: '{served_name}'")
+                return served_name
     except Exception as e:
-        logger.debug(f"[BURST:REDIS] Failed to get state: {e}")
-        return None
+        logger.warning(f"[BURST:DETECT] Failed to detect served model: {e}")
+    return None
 
 
-def _convert_to_vllm_model_name(model_name: Optional[str]) -> str:
+def _convert_to_vllm_model_name(model_name: Optional[str], vllm_url: Optional[str] = None) -> str:
     """
     Retourne le nom du modèle tel que servi par vLLM.
 
-    Avec Golden AMI v9+, vLLM sert le modèle sous son nom HuggingFace natif
-    (ex: "Qwen/Qwen3-14B-AWQ"), pas sous le chemin volume Docker.
+    Stratégie (par priorité) :
+    1. Interroger /v1/models si vllm_url fourni (source de vérité)
+    2. Sinon, convertir le nom passé en paramètre
+    3. Défaut : "Qwen/Qwen2.5-14B-Instruct-AWQ"
     """
+    # Priorité 1 : détection automatique depuis l'instance vLLM
+    if vllm_url:
+        detected = _detect_vllm_served_model(vllm_url)
+        if detected:
+            return detected
+
     if not model_name:
-        return "Qwen/Qwen3-14B-AWQ"
+        return "Qwen/Qwen2.5-14B-Instruct-AWQ"
 
     # Si c'est un ancien chemin /models/, convertir vers le format HuggingFace
     if model_name.startswith("/models/"):
-        # "/models/Qwen--Qwen3-14B-AWQ" -> "Qwen/Qwen3-14B-AWQ"
+        # "/models/Qwen--Qwen2.5-14B-Instruct-AWQ" -> "Qwen/Qwen2.5-14B-Instruct-AWQ"
         stripped = model_name.replace("/models/", "", 1)
         return stripped.replace("--", "/", 1)
 
@@ -140,7 +221,7 @@ def activate_burst_providers(
     Args:
         vllm_url: URL du serveur vLLM (ex: http://ec2-xxx:8000)
         embeddings_url: URL du service embeddings (ex: http://ec2-xxx:8001)
-        vllm_model: Modèle vLLM à utiliser (défaut: Qwen/Qwen3-14B-AWQ)
+        vllm_model: Modèle vLLM à utiliser (défaut: Qwen/Qwen2.5-14B-Instruct-AWQ)
         dual_logging: Si True, garde OpenAI + appelle vLLM en parallèle pour comparaison
 
     Returns:
@@ -163,7 +244,7 @@ def activate_burst_providers(
         try:
             from knowbase.common.dual_llm_logger import DualLLMLogger
             dual_logger = DualLLMLogger.get_instance()
-            dual_logger.enable(vllm_url, vllm_model=_convert_to_vllm_model_name(vllm_model))
+            dual_logger.enable(vllm_url, vllm_model=_convert_to_vllm_model_name(vllm_model, vllm_url))
             result["dual_logging"] = True
             result["llm_router"] = True  # OpenAI reste actif
             logger.info(f"[BURST:SWITCH] 🔀 Dual-Logging enabled: OpenAI + vLLM ({vllm_url})")
@@ -174,8 +255,8 @@ def activate_burst_providers(
         # Mode normal: bascule complète vers vLLM
         try:
             llm_router = get_llm_router()
-            # Convertir le nom du modèle au format vLLM
-            vllm_model_name = _convert_to_vllm_model_name(vllm_model)
+            # Détecter le nom réel du modèle servi par vLLM
+            vllm_model_name = _convert_to_vllm_model_name(vllm_model, vllm_url)
             llm_router.enable_burst_mode(vllm_url, model=vllm_model_name)
             result["llm_router"] = True
             logger.info(f"[BURST:SWITCH] LLMRouter → {vllm_url} (model: {vllm_model_name})")
@@ -196,7 +277,7 @@ def activate_burst_providers(
     if result["llm_router"] and result["embedding_manager"]:
         logger.info("[BURST:SWITCH] ✅ All providers switched to EC2 Spot")
         # Stocker l'état dans Redis pour partage inter-processus
-        vllm_model_name = _convert_to_vllm_model_name(vllm_model)
+        vllm_model_name = _convert_to_vllm_model_name(vllm_model, vllm_url)
         redis_saved = set_burst_state_in_redis(vllm_url, vllm_model_name, embeddings_url)
         result["redis_state"] = redis_saved
         if redis_saved:

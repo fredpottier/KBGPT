@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from knowbase.claimfirst.quality.quality_action import QualityAction, QualityVerdict
@@ -124,10 +125,10 @@ class EvidenceRewriter:
                 detail=f"LLM rewrite failed, kept as-is: {e}",
             )
 
-        rewritten = response.strip()
+        rewritten = self._parse_rewrite_response(response)
 
         # ABSTAIN → BUCKET_NOT_CLAIMABLE
-        if rewritten.upper().startswith("ABSTAIN"):
+        if rewritten is None:
             self._stats["abstained"] += 1
             return QualityVerdict(
                 action=QualityAction.BUCKET_NOT_CLAIMABLE,
@@ -166,6 +167,43 @@ class EvidenceRewriter:
             detail=f"Rewritten from gray zone verif={verif_score:.3f}",
             rewritten_text=rewritten,
         )
+
+    @staticmethod
+    def _parse_rewrite_response(response: str) -> Optional[str]:
+        """Parse la réponse LLM de réécriture.
+
+        Retourne None si ABSTAIN, sinon le texte nettoyé.
+        Gère les patterns Qwen3 où le raisonnement fuite dans la réponse.
+        """
+        raw = response.strip()
+
+        # ABSTAIN détecté n'importe où dans la réponse
+        if re.search(r'\bABSTAIN\b', raw):
+            return None
+
+        # Couper tout après un marqueur de raisonnement LLM
+        cleaned = re.split(
+            r'\n\s*\*{0,2}\s*(?:Reasoning|Explanation|Note|Analysis|Response|Comment)[:\s*]',
+            raw, maxsplit=1, flags=re.IGNORECASE,
+        )[0].strip()
+
+        # Extraire après "Rewritten claim:" si présent
+        match = re.search(
+            r'(?:Rewritten|Revised)\s*claim[:\s]*["\']*(.+)',
+            cleaned, flags=re.IGNORECASE | re.DOTALL,
+        )
+        if match:
+            cleaned = match.group(1).strip()
+
+        # Retirer guillemets encadrants
+        cleaned = re.sub(r'^["\']{1,3}|["\']{1,3}$', '', cleaned).strip()
+
+        # Couper après double saut de ligne (souvent suivi d'explications)
+        parts = re.split(r'\n\s*\n', cleaned, maxsplit=1)
+        if parts and len(parts[0].strip()) > 20:
+            cleaned = parts[0].strip()
+
+        return cleaned
 
     def _build_prompt(self, verbatim: str) -> str:
         """Construit le prompt pour la réécriture evidence-locked."""

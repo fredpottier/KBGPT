@@ -42,7 +42,7 @@ exec > /var/log/burst-init.log 2>&1
 echo "=== OSMOSE Burst Init ==="
 date
 
-VLLM_MODEL="Qwen/Qwen3-14B-AWQ"
+VLLM_MODEL="Qwen/Qwen2.5-14B-Instruct-AWQ"
 EMBEDDINGS_MODEL="intfloat/multilingual-e5-large"
 
 systemctl start docker
@@ -217,7 +217,7 @@ if ($ready) {
 
     # Test
     Write-Host "[6/6] Testing vLLM..." -ForegroundColor Yellow
-    $body = '{"model":"Qwen/Qwen3-14B-AWQ","messages":[{"role":"user","content":"Dis Bonjour OSMOSE"}],"max_tokens":30}'
+    $body = '{"model":"Qwen/Qwen2.5-14B-Instruct-AWQ","messages":[{"role":"user","content":"Dis Bonjour OSMOSE"}],"max_tokens":30}'
     try {
         $r = Invoke-RestMethod -Uri "http://${INSTANCE_IP}:8000/v1/chat/completions" -Method POST -ContentType "application/json" -Body $body -TimeoutSec 60
         Write-Host "Response: $($r.choices[0].message.content)" -ForegroundColor Green

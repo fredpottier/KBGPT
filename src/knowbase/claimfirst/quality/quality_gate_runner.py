@@ -295,12 +295,11 @@ class QualityGateRunner:
         )
 
         # Construire un index claim_id → verdict
+        # V1.3.1: Utiliser verdict.claim_id au lieu de zip (évite désalignement)
         verdict_by_claim: Dict[str, QualityVerdict] = {}
-        for claim, verdict in zip(
-            [c for c in claims if self._verif_scores.get(c.claim_id, 0) > 0.88],
-            verdicts,
-        ):
-            verdict_by_claim[claim.claim_id] = verdict
+        for verdict in verdicts:
+            if verdict.claim_id:
+                verdict_by_claim[verdict.claim_id] = verdict
 
         # Appliquer les résolutions
         output = []

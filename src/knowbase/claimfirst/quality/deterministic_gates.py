@@ -63,7 +63,7 @@ def check_template_leak(claim: "Claim") -> Optional[QualityVerdict]:
     """
     Regex: {xxx}, [PLACEHOLDER], TODO, TBD → REJECT_TEMPLATE_LEAK.
 
-    Détecte les résidus de templates non résolus dans le texte.
+    Détecte les résidus de templates non résolus dans le texte ET la SF.
     """
     text = claim.text
     for pattern in TEMPLATE_PATTERNS:
@@ -74,6 +74,22 @@ def check_template_leak(claim: "Claim") -> Optional[QualityVerdict]:
                 scores={},
                 detail=f"Template leak detected: '{match.group()}'",
             )
+
+    # V1.3.1: Détecter les leaks dans structured_form (ex: "Name of the subject entity")
+    sf = claim.structured_form
+    if sf and isinstance(sf, dict):
+        for field_name in ("subject", "object"):
+            val = sf.get(field_name, "")
+            if isinstance(val, str) and re.search(
+                r'^Name of the|^Entity Name$|^Description|^Specific ',
+                val, re.IGNORECASE,
+            ):
+                # Ne pas rejeter la claim, juste supprimer la SF
+                return QualityVerdict(
+                    action=QualityAction.DISCARD_SF_MISALIGNED,
+                    scores={},
+                    detail=f"SF template leak in {field_name}: '{val}'",
+                )
 
     return None
 

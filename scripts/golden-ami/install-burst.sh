@@ -47,10 +47,10 @@ from huggingface_hub import snapshot_download
 import os
 
 # Modele LLM
-print("    Downloading Qwen/Qwen3-14B-AWQ...")
+print("    Downloading Qwen/Qwen2.5-14B-Instruct-AWQ...")
 snapshot_download(
-    "Qwen/Qwen3-14B-AWQ",
-    local_dir="/models/Qwen--Qwen3-14B-AWQ",
+    "Qwen/Qwen2.5-14B-Instruct-AWQ",
+    local_dir="/models/Qwen--Qwen2.5-14B-Instruct-AWQ",
     local_dir_use_symlinks=False
 )
 print("    Done!")

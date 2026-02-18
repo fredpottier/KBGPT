@@ -96,8 +96,9 @@ class LLMRouter:
         self._burst_endpoint: Optional[str] = None
         self._burst_vllm_client = None
         self._burst_async_vllm_client = None
-        self._burst_model: str = "Qwen/Qwen3-14B-AWQ"  # Nom réel du modèle (pour logs)
-        self._burst_vllm_served_model: str = "Qwen/Qwen3-14B-AWQ"  # Nom exposé par vLLM (served_model_name)
+        self._burst_model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ"  # Nom réel du modèle (pour logs)
+        self._burst_vllm_served_model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ"  # Nom exposé par vLLM (served_model_name)
+        self._vllm_max_context: int = 16384  # Limite contexte vLLM (16K Qwen2.5, 32K Qwen3)
 
         # === Gate Redis pour vLLM (partage inter-processus) ===
         self._redis_burst_cache: Optional[Dict[str, Any]] = None
@@ -204,7 +205,7 @@ class LLMRouter:
     # Mode Burst - Basculement dynamique vers EC2 Spot
     # =========================================================================
 
-    def enable_burst_mode(self, vllm_url: str, model: Optional[str] = None):
+    def enable_burst_mode(self, vllm_url: str, model: Optional[str] = None, max_context: Optional[int] = None):
         """
         Active le mode Burst : redirige les appels LLM vers EC2 Spot.
 
@@ -214,14 +215,23 @@ class LLMRouter:
 
         Args:
             vllm_url: URL du serveur vLLM (ex: http://ec2-xxx:8000)
-            model: Modèle vLLM à utiliser (défaut: Qwen/Qwen3-14B-AWQ)
+            model: Modèle vLLM à utiliser (défaut: Qwen/Qwen2.5-14B-Instruct-AWQ)
+            max_context: Limite de contexte vLLM (défaut: 16384 pour Qwen2.5, 32768 pour Qwen3)
         """
         from openai import OpenAI, AsyncOpenAI
 
         self._burst_mode = True
         self._burst_endpoint = vllm_url.rstrip("/")
-        self._burst_model = model or "Qwen/Qwen3-14B-AWQ"
+        self._burst_model = model or "Qwen/Qwen2.5-14B-Instruct-AWQ"
         self._burst_vllm_served_model = self._burst_model  # vLLM sert le modèle sous son vrai nom
+
+        # Contexte dynamique selon le modèle
+        if max_context:
+            self._vllm_max_context = max_context
+        elif self._is_qwen3:
+            self._vllm_max_context = 32768
+        else:
+            self._vllm_max_context = 16384
 
         # Créer clients vLLM dédiés au mode burst
         self._burst_vllm_client = OpenAI(
@@ -233,7 +243,7 @@ class LLMRouter:
             base_url=f"{self._burst_endpoint}/v1"
         )
 
-        logger.info(f"[LLM_ROUTER] 🚀 Burst mode ENABLED → {vllm_url} (model: {self._burst_model})")
+        logger.info(f"[LLM_ROUTER] 🚀 Burst mode ENABLED → {vllm_url} (model: {self._burst_model}, is_qwen3={self._is_qwen3})")
 
     def disable_burst_mode(self):
         """
@@ -262,6 +272,14 @@ class LLMRouter:
             "burst_model": self._burst_model if self._burst_mode else None,
             "client_ready": self._burst_vllm_client is not None
         }
+
+    @property
+    def _is_qwen3(self) -> bool:
+        """Détecte si le modèle burst actif est Qwen3."""
+        for name in (self._burst_vllm_served_model, self._burst_model):
+            if name and "qwen3" in name.lower():
+                return True
+        return False
 
     # =========================================================================
     # Gate Redis - Vérification dynamique vLLM (inter-processus)
@@ -400,8 +418,11 @@ class LLMRouter:
 
             self._burst_mode = True
             self._burst_endpoint = vllm_url.rstrip("/")
-            self._burst_model = vllm_model or "Qwen/Qwen3-14B-AWQ"
+            self._burst_model = vllm_model or "Qwen/Qwen2.5-14B-Instruct-AWQ"
             self._burst_vllm_served_model = self._burst_model  # vLLM sert le modèle sous son vrai nom
+
+            # Contexte dynamique selon le modèle détecté
+            self._vllm_max_context = 32768 if self._is_qwen3 else 16384
 
             self._burst_vllm_client = OpenAI(
                 api_key="EMPTY",
@@ -1148,13 +1169,13 @@ class LLMRouter:
         if not self._burst_vllm_client:
             raise RuntimeError("Burst mode client not initialized")
 
-        # Limite de contexte pour Qwen3-14B-AWQ
-        # vLLM max_model_len = 32768 tokens TOTAL (input + output)
+        # Limite de contexte dynamique (16K Qwen2.5, 32K Qwen3)
+        # vLLM max_model_len = TOTAL tokens (input + output)
         # On doit réserver max_tokens pour la completion + marge sécurité 20%
-        VLLM_MAX_CONTEXT = 32768  # Qwen3 14B supporte 32K natif
+        VLLM_MAX_CONTEXT = self._vllm_max_context
         SAFETY_MARGIN = 0.20  # 20% de marge car estimation tokens imprécise
         max_input_tokens = int((VLLM_MAX_CONTEXT - max_tokens) * (1 - SAFETY_MARGIN))
-        max_input_tokens = max(1000, min(max_input_tokens, 26000))  # Entre 1000 et 26000
+        max_input_tokens = max(1000, min(max_input_tokens, VLLM_MAX_CONTEXT - 2000))
 
         # Tronquer les messages si trop longs
         messages = self._truncate_messages_for_context(messages, max_input_tokens)
@@ -1162,38 +1183,30 @@ class LLMRouter:
         # Filtrer les paramètres internes
         api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference', 'json_schema', 'guided_json', 'enable_thinking']}
 
-        # === THINKING MODE (Qwen3) ===
-        # Qwen3 a le thinking ON par défaut dans son template, donc on doit
-        # explicitement envoyer enable_thinking=false pour chaque requête.
-        # Seules les tâches qui demandent explicitement enable_thinking=True l'activent.
-        #
-        # IMPORTANT: chat_template_kwargs est UNRELIABLE sous charge concurrente
-        # (bug vLLM batching). On utilise /nothink dans le user message comme
-        # fallback fiable — traité au niveau du template, pas des kwargs.
-        enable_thinking = kwargs.get('enable_thinking', False)
-        has_json_schema = bool(kwargs.get('json_schema') or kwargs.get('guided_json'))
+        # === THINKING MODE (Qwen3 uniquement) ===
+        # Qwen3 a le thinking ON par défaut, Qwen2.5 n'a pas de thinking mode.
+        # Le bloc ci-dessous ne s'active que si _is_qwen3 est True.
+        if self._is_qwen3:
+            enable_thinking = kwargs.get('enable_thinking', False)
+            has_json_schema = bool(kwargs.get('json_schema') or kwargs.get('guided_json'))
 
-        api_kwargs.setdefault('extra_body', {})
-        if enable_thinking and not has_json_schema:
-            # Thinking + classification/arbitrage → température modérée
-            api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": True}
-            if temperature < 0.6:
-                temperature = 0.6
-            logger.info(
-                f"[BURST:vLLM] Thinking mode ENABLED for {task_type.value} "
-                f"(parser=qwen3, temp={temperature})"
-            )
-        else:
-            # Thinking OFF (par défaut ou forcé pour JSON schema)
-            api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": False}
-            # Double sécurité : /nothink dans le dernier user message
-            # Fiable sous charge concurrente (contrairement à chat_template_kwargs seul)
-            messages = self._append_nothink_directive(messages)
-            if enable_thinking and has_json_schema:
-                logger.warning(
-                    f"[BURST:vLLM] Thinking mode SKIPPED for {task_type.value} "
-                    f"— incompatible avec JSON schema"
+            api_kwargs.setdefault('extra_body', {})
+            if enable_thinking and not has_json_schema:
+                api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": True}
+                if temperature < 0.6:
+                    temperature = 0.6
+                logger.info(
+                    f"[BURST:vLLM] Thinking mode ENABLED for {task_type.value} "
+                    f"(parser=qwen3, temp={temperature})"
                 )
+            else:
+                api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": False}
+                messages = self._append_nothink_directive(messages)
+                if enable_thinking and has_json_schema:
+                    logger.warning(
+                        f"[BURST:vLLM] Thinking mode SKIPPED for {task_type.value} "
+                        f"— incompatible avec JSON schema"
+                    )
 
         # === STRUCTURED OUTPUTS (Volet C) ===
         # Support pour vLLM JSON schema enforcement
@@ -1235,10 +1248,8 @@ class LLMRouter:
 
         content = response.choices[0].message.content or ""
 
-        # Strip <think> tags si présents (Qwen3 thinking mode)
-        # Le parser qwen3 dans vLLM v0.9.2 ne sépare pas toujours le thinking
-        # du content — le thinking peut apparaître dans content avec des tags <think>
-        if '<think>' in content:
+        # Strip <think> tags si présents (Qwen3 thinking mode uniquement)
+        if self._is_qwen3 and '<think>' in content:
             import re as _re
             think_match = _re.search(r'<think>(.*?)</think>', content, _re.DOTALL)
             if think_match:
@@ -1246,7 +1257,6 @@ class LLMRouter:
                 content = _re.sub(r'<think>.*?</think>', '', content, flags=_re.DOTALL).strip()
                 logger.info(f"[BURST:vLLM:THINKING] reasoning length: {len(reasoning_content)} chars, stripped from content")
             elif '<think>' in content and '</think>' not in content:
-                # Thinking tronqué (max_tokens atteint avant </think>)
                 think_start = content.index('<think>')
                 truncated_reasoning = content[think_start + 7:]
                 content = content[:think_start].strip()
@@ -1275,13 +1285,13 @@ class LLMRouter:
         if not self._burst_async_vllm_client:
             raise RuntimeError("Burst mode async client not initialized")
 
-        # Limite de contexte pour Qwen3-14B-AWQ
-        # vLLM max_model_len = 32768 tokens TOTAL (input + output)
+        # Limite de contexte dynamique (16K Qwen2.5, 32K Qwen3)
+        # vLLM max_model_len = TOTAL tokens (input + output)
         # On doit réserver max_tokens pour la completion + marge sécurité 20%
-        VLLM_MAX_CONTEXT = 32768  # Qwen3 14B supporte 32K natif
+        VLLM_MAX_CONTEXT = self._vllm_max_context
         SAFETY_MARGIN = 0.20  # 20% de marge car estimation tokens imprécise
         max_input_tokens = int((VLLM_MAX_CONTEXT - max_tokens) * (1 - SAFETY_MARGIN))
-        max_input_tokens = max(1000, min(max_input_tokens, 26000))  # Entre 1000 et 26000
+        max_input_tokens = max(1000, min(max_input_tokens, VLLM_MAX_CONTEXT - 2000))
 
         # Tronquer les messages si trop longs
         messages = self._truncate_messages_for_context(messages, max_input_tokens)
@@ -1289,36 +1299,29 @@ class LLMRouter:
         # Filtrer les paramètres internes
         api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference', 'json_schema', 'guided_json', 'enable_thinking']}
 
-        # === THINKING MODE (Qwen3) ===
-        # Qwen3 a le thinking ON par défaut dans son template, donc on doit
-        # explicitement envoyer enable_thinking=false pour chaque requête.
-        #
-        # IMPORTANT: chat_template_kwargs est UNRELIABLE sous charge concurrente
-        # (bug vLLM batching). On utilise /nothink dans le user message comme
-        # fallback fiable — traité au niveau du template, pas des kwargs.
-        enable_thinking = kwargs.get('enable_thinking', False)
-        has_json_schema = bool(kwargs.get('json_schema') or kwargs.get('guided_json'))
+        # === THINKING MODE (Qwen3 uniquement) ===
+        # Qwen3 a le thinking ON par défaut, Qwen2.5 n'a pas de thinking mode.
+        if self._is_qwen3:
+            enable_thinking = kwargs.get('enable_thinking', False)
+            has_json_schema = bool(kwargs.get('json_schema') or kwargs.get('guided_json'))
 
-        api_kwargs.setdefault('extra_body', {})
-        if enable_thinking and not has_json_schema:
-            api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": True}
-            if temperature < 0.6:
-                temperature = 0.6
-            logger.info(
-                f"[BURST:vLLM:ASYNC] Thinking mode ENABLED for {task_type.value} "
-                f"(parser=qwen3, temp={temperature})"
-            )
-        else:
-            # Thinking OFF (par défaut ou forcé pour JSON schema)
-            api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": False}
-            # Double sécurité : /nothink dans le dernier user message
-            # Fiable sous charge concurrente (contrairement à chat_template_kwargs seul)
-            messages = self._append_nothink_directive(messages)
-            if enable_thinking and has_json_schema:
-                logger.warning(
-                    f"[BURST:vLLM:ASYNC] Thinking mode SKIPPED for {task_type.value} "
-                    f"— incompatible avec JSON schema"
+            api_kwargs.setdefault('extra_body', {})
+            if enable_thinking and not has_json_schema:
+                api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": True}
+                if temperature < 0.6:
+                    temperature = 0.6
+                logger.info(
+                    f"[BURST:vLLM:ASYNC] Thinking mode ENABLED for {task_type.value} "
+                    f"(parser=qwen3, temp={temperature})"
                 )
+            else:
+                api_kwargs['extra_body']['chat_template_kwargs'] = {"enable_thinking": False}
+                messages = self._append_nothink_directive(messages)
+                if enable_thinking and has_json_schema:
+                    logger.warning(
+                        f"[BURST:vLLM:ASYNC] Thinking mode SKIPPED for {task_type.value} "
+                        f"— incompatible avec JSON schema"
+                    )
 
         # === STRUCTURED OUTPUTS (Volet C) ===
         # Support pour vLLM JSON schema enforcement
@@ -1358,8 +1361,8 @@ class LLMRouter:
 
         content = response.choices[0].message.content or ""
 
-        # Strip <think> tags si présents (Qwen3 thinking mode)
-        if '<think>' in content:
+        # Strip <think> tags si présents (Qwen3 thinking mode uniquement)
+        if self._is_qwen3 and '<think>' in content:
             import re as _re
             think_match = _re.search(r'<think>(.*?)</think>', content, _re.DOTALL)
             if think_match:
@@ -1367,7 +1370,6 @@ class LLMRouter:
                 content = _re.sub(r'<think>.*?</think>', '', content, flags=_re.DOTALL).strip()
                 logger.info(f"[BURST:vLLM:ASYNC:THINKING] reasoning length: {len(reasoning_content)} chars, stripped from content")
             elif '<think>' in content and '</think>' not in content:
-                # Thinking tronqué (max_tokens atteint avant </think>)
                 think_start = content.index('<think>')
                 truncated_reasoning = content[think_start + 7:]
                 content = content[:think_start].strip()

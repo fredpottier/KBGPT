@@ -156,6 +156,7 @@ class IndependenceResolver:
                 passage = passage_map.get(claim.passage_id)
                 passage_text = passage.text if passage else ""
                 verdict = await self._resolve_single(claim, passage_text)
+                verdict.claim_id = claim.claim_id  # V1.3.1: tag pour mapping correct
                 verdicts[idx] = verdict
 
         tasks = [_process_one(i, c) for i, c in enumerate(to_resolve)]
@@ -192,16 +193,10 @@ class IndependenceResolver:
                 detail=f"LLM resolution failed: {e}",
             )
 
-        resolved = response.strip()
-
-        # Nettoyer les préfixes LLM courants
-        resolved = re.sub(
-            r'^(?:Resolved|Rewritten)\s*(?:claim)?[:\s]*',
-            '', resolved, flags=re.IGNORECASE,
-        ).strip().strip('"').strip()
+        resolved, is_unchanged = self._parse_resolve_response(response)
 
         # UNCHANGED → pas d'anaphore détectée, garder tel quel
-        if resolved.upper().startswith("UNCHANGED"):
+        if is_unchanged:
             self._stats["skipped"] += 1
             return QualityVerdict(
                 action=QualityAction.PASS,
@@ -225,6 +220,57 @@ class IndependenceResolver:
             detail="Anaphora resolved with explicit subject",
             resolved_text=resolved,
         )
+
+    @staticmethod
+    def _parse_resolve_response(response: str) -> tuple:
+        """Parse la réponse LLM de résolution, retourne (text, is_unchanged).
+
+        Gère les patterns Qwen3 où le raisonnement fuite dans la réponse :
+        - Pattern A: claim + **Reasoning:** ... + **Response:** UNCHANGED
+        - Pattern B: claim + **UNCHANGED** + explanation
+        - Pattern C: claim + **Resolved claim:** UNCHANGED
+        - Pattern D: passage echo + Claim: + Resolved claim: + **Explanation:**
+        """
+        raw = response.strip()
+
+        # 1) UNCHANGED détecté n'importe où dans la réponse → claim est OK
+        if re.search(r'\bUNCHANGED\b', raw):
+            return "", True
+
+        # 2) Couper tout ce qui est après un marqueur de raisonnement LLM
+        #    (**, Reasoning, Explanation, Note, Analysis, Response, etc.)
+        cleaned = re.split(
+            r'\n\s*\*{0,2}\s*(?:Reasoning|Explanation|Note|Analysis|Response|Comment)[:\s*]',
+            raw, maxsplit=1, flags=re.IGNORECASE,
+        )[0].strip()
+
+        # 3) Si la réponse contient "Resolved claim:" → extraire ce qui suit
+        match = re.search(
+            r'(?:Resolved|Rewritten)\s*claim[:\s]*["\']*(.+)',
+            cleaned, flags=re.IGNORECASE | re.DOTALL,
+        )
+        if match:
+            cleaned = match.group(1).strip()
+
+        # 4) Nettoyer les préfixes LLM courants en début de ligne
+        cleaned = re.sub(
+            r'^(?:Resolved|Rewritten)\s*(?:claim)?[:\s]*',
+            '', cleaned, flags=re.IGNORECASE,
+        ).strip()
+
+        # 5) Retirer les guillemets encadrants (simples, doubles, triples)
+        cleaned = re.sub(r'^["\']{1,3}|["\']{1,3}$', '', cleaned).strip()
+
+        # 6) Couper après un saut de ligne double (souvent suivi d'explications)
+        #    Mais garder au moins la première phrase
+        parts = re.split(r'\n\s*\n', cleaned, maxsplit=1)
+        if parts:
+            candidate = parts[0].strip()
+            # Si la première partie est une claim valide (>20 chars), la prendre
+            if len(candidate) > 20:
+                cleaned = candidate
+
+        return cleaned, False
 
     def _build_prompt(self, claim_text: str, passage_text: str) -> str:
         """Construit le prompt pour la résolution d'indépendance."""

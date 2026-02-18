@@ -48,7 +48,7 @@ class DualLLMLogger:
     def __init__(self):
         self._enabled = False
         self._vllm_url: Optional[str] = None
-        self._vllm_model: str = "/models/Qwen--Qwen3-14B-AWQ"
+        self._vllm_model: str = "/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
         self._output_file: Optional[Path] = None
         self._vllm_client: Optional[OpenAI] = None
         self._async_vllm_client: Optional[AsyncOpenAI] = None
@@ -73,7 +73,7 @@ class DualLLMLogger:
         self,
         vllm_url: str,
         output_file: Optional[str] = None,
-        vllm_model: str = "/models/Qwen--Qwen3-14B-AWQ"
+        vllm_model: str = "/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
     ):
         """
         Active le dual-logging.

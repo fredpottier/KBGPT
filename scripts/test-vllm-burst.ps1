@@ -57,7 +57,7 @@ echo "Starting vLLM..."
 docker run -d --gpus all -p 8000:8000 --name vllm \
     -v /opt/burst/patches/awq_marlin.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py:ro \
     vllm/vllm-openai:v0.9.2 \
-    --model Qwen/Qwen3-14B-AWQ \
+    --model Qwen/Qwen2.5-14B-Instruct-AWQ \
     --quantization awq_marlin \
     --dtype half \
     --gpu-memory-utilization 0.85 \
@@ -135,7 +135,7 @@ try {
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host "  TEST vLLM BURST MODE" -ForegroundColor Cyan
     Write-Host "  Instance: $INSTANCE_TYPE" -ForegroundColor Cyan
-    Write-Host "  Model: Qwen/Qwen3-14B-AWQ" -ForegroundColor Cyan
+    Write-Host "  Model: Qwen/Qwen2.5-14B-Instruct-AWQ" -ForegroundColor Cyan
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host ""
 
@@ -219,7 +219,7 @@ try {
 
     $testPrompt = "Explique en 2 phrases ce qu'est SAP S/4HANA."
     $requestBody = @{
-        model = "Qwen/Qwen3-14B-AWQ"
+        model = "Qwen/Qwen2.5-14B-Instruct-AWQ"
         messages = @(
             @{ role = "user"; content = $testPrompt }
         )
@@ -247,7 +247,7 @@ try {
         $logEntry = @{
             timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
             instance_type = $INSTANCE_TYPE
-            model = "Qwen/Qwen3-14B-AWQ"
+            model = "Qwen/Qwen2.5-14B-Instruct-AWQ"
             prompt = $testPrompt
             response = $answer
             tokens = $tokens

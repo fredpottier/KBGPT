@@ -198,33 +198,48 @@ class AtomicitySplitter:
         return claim, sub_claims, verdict
 
     def _parse_response(self, response: str) -> List[str]:
-        """Parse la réponse LLM (JSON array ou lignes numérotées)."""
-        response = response.strip()
+        """Parse la réponse LLM (JSON array ou lignes numérotées).
 
-        # Essayer JSON array
-        try:
-            parsed = json.loads(response)
-            if isinstance(parsed, list):
-                return [str(item).strip() for item in parsed if str(item).strip()]
-        except (json.JSONDecodeError, TypeError):
-            pass
+        Gère les patterns Qwen3 où du raisonnement est ajouté après la réponse.
+        """
+        raw = response.strip()
+
+        # Couper tout après un marqueur de raisonnement LLM
+        cleaned = re.split(
+            r'\n\s*\*{0,2}\s*(?:Reasoning|Explanation|Note|Analysis|Response|Comment)[:\s*]',
+            raw, maxsplit=1, flags=re.IGNORECASE,
+        )[0].strip()
+
+        # Essayer JSON array — extraire le premier [...] trouvé
+        json_match = re.search(r'\[.*\]', cleaned, flags=re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group(0))
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            except (json.JSONDecodeError, TypeError):
+                pass
 
         # Essayer lignes numérotées (1. ..., 2. ..., etc.)
-        lines = response.split("\n")
+        lines = cleaned.split("\n")
         claims = []
         for line in lines:
             line = line.strip()
             # Retirer le numéro en début de ligne
-            cleaned = re.sub(r'^\d+[\.\)]\s*', '', line)
-            if cleaned and len(cleaned) >= 10:
-                claims.append(cleaned)
+            line_cleaned = re.sub(r'^\d+[\.\)]\s*', '', line)
+            # Retirer tirets/bullets
+            line_cleaned = re.sub(r'^[-•*]\s*', '', line_cleaned)
+            if line_cleaned and len(line_cleaned) >= 10:
+                # Retirer guillemets encadrants
+                line_cleaned = re.sub(r'^["\']+|["\']+$', '', line_cleaned).strip()
+                claims.append(line_cleaned)
 
         if claims:
             return claims
 
         # Fallback: retourner le texte entier comme une seule claim
-        if response and len(response) >= 10:
-            return [response]
+        if cleaned and len(cleaned) >= 10:
+            return [cleaned]
 
         return []
 
