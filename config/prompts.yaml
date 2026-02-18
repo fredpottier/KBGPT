@@ -621,3 +621,81 @@ verification_correct_text:
         {"original": "...", "corrected": "...", "reason": "..."}
       ]
     }
+
+# =============================================================================
+# QUALITY GATES (V1.3)
+# =============================================================================
+#
+# Prompts pour les gates qualité du pipeline ClaimFirst.
+# 3 sous-clés : evidence_rewriter, atomicity_splitter, independence_resolver
+#
+# =============================================================================
+
+quality_gates:
+  evidence_rewriter:
+    system: |
+      You are a technical documentation analyst. Your task is to rewrite a verbatim
+      excerpt as a single, precise, self-contained factual claim.
+      Rules:
+      - Use ONLY information present in the verbatim. Do NOT add interpretation.
+      - The claim must be a complete sentence.
+      - If the verbatim is not a claimable statement (navigation text, heading,
+        boilerplate, "for more information see...", table of contents entry),
+        respond with exactly: ABSTAIN
+    user: |
+      Rewrite the following verbatim excerpt as a single factual claim.
+      If not claimable, respond with: ABSTAIN
+
+      Verbatim:
+      """
+      {verbatim}
+      """
+
+      Rewritten claim:
+
+  atomicity_splitter:
+    system: |
+      You are a technical documentation analyst. Your task is to split compound
+      claims into atomic claims. Each atomic claim must state exactly ONE factual
+      assertion and be self-contained.
+      Rules:
+      - Return a JSON array of strings
+      - Each element = one atomic claim
+      - Preserve original meaning without adding information
+      - If already atomic, return a single-element array
+      - Maximum 4 atomic claims per split
+    user: |
+      Split the following compound claim into atomic claims.
+      Return a JSON array of strings.
+
+      Compound claim:
+      """
+      {claim_text}
+      """
+
+      Atomic claims (JSON array):
+
+  independence_resolver:
+    system: |
+      You are a technical documentation analyst. Your task is to resolve anaphoric
+      references in claims to make them self-contained.
+      Rules:
+      - Replace pronouns (it, they, this, these, its, their) with explicit referents
+      - Use the source passage to identify referents
+      - Do NOT change the claim's meaning
+      - If the claim is already self-contained (no anaphora), respond with: UNCHANGED
+    user: |
+      Resolve any anaphoric references in the claim using the source passage.
+      If no anaphora, respond with: UNCHANGED
+
+      Source passage:
+      """
+      {passage_text}
+      """
+
+      Claim:
+      """
+      {claim_text}
+      """
+
+      Resolved claim (or UNCHANGED):

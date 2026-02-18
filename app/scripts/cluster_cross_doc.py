@@ -69,6 +69,31 @@ NEGATION_PATTERNS = [
 MAX_CLAIMS_PER_ENTITY = 200
 
 
+def _score_claim_quality(claim: dict) -> float:
+    """
+    Score qualité pour champion selection (cross-doc).
+
+    Préfère claims vérifiées, structurées, connectées — pas verbeuses.
+    """
+    import json as _json
+
+    # Parse quality_scores si disponible
+    verif = 0.85  # défaut conservateur
+    quality_scores_json = claim.get("quality_scores_json")
+    if quality_scores_json:
+        try:
+            qs = _json.loads(quality_scores_json)
+            verif = qs.get("verif_score", 0.85)
+        except (ValueError, TypeError):
+            pass
+
+    has_sf = 1.0 if claim.get("structured_form_json") else 0.0
+    has_entities = 1.0 if claim.get("entity_count", 0) > 0 else 0.0
+    text_len = len(claim.get("text", ""))
+
+    return 100 * verif + 10 * has_sf + 5 * has_entities - 0.02 * text_len
+
+
 # ── Fonctions utilitaires ───────────────────────────────────────────────────
 
 def get_neo4j_driver():
@@ -176,6 +201,8 @@ def main():
                 MATCH (c:Claim {tenant_id: $tid})-[:ABOUT]->(e:Entity)
                 RETURN c.claim_id AS claim_id, c.doc_id AS doc_id,
                        c.text AS text, c.confidence AS confidence,
+                       c.structured_form_json AS structured_form_json,
+                       c.quality_scores_json AS quality_scores_json,
                        collect(e.normalized_name) AS entity_names
                 """,
                 tid=args.tenant,
@@ -190,6 +217,9 @@ def main():
                     "text": r["text"] or "",
                     "confidence": r["confidence"] or 0.5,
                     "entity_names": r["entity_names"] or [],
+                    "structured_form_json": r.get("structured_form_json"),
+                    "quality_scores_json": r.get("quality_scores_json"),
+                    "entity_count": len(r["entity_names"] or []),
                 }
                 for ename in r["entity_names"]:
                     entity_to_claims[ename].add(cid)
@@ -365,6 +395,49 @@ def main():
                 clusters_created += 1
 
             logger.info(f"  → {clusters_created} clusters cross-doc créés")
+
+            # 7. Champion selection — marquer le champion et les redundants
+            logger.info("\n[OSMOSE] Champion selection (quality-based scoring)...")
+            champions_marked = 0
+            redundants_marked = 0
+            for cids, cdocs in cross_clusters:
+                claim_objs = [claims_data[cid] for cid in cids if cid in claims_data]
+                if not claim_objs:
+                    continue
+
+                # Scorer chaque claim par qualité
+                scored = [(c, _score_claim_quality(c)) for c in claim_objs]
+                scored.sort(key=lambda x: x[1], reverse=True)
+                champion = scored[0][0]
+
+                # Marquer le champion
+                session.run(
+                    """
+                    MATCH (c:Claim {claim_id: $cid, tenant_id: $tid})
+                    SET c.is_champion = true
+                    """,
+                    cid=champion["claim_id"],
+                    tid=args.tenant,
+                )
+                champions_marked += 1
+
+                # Marquer les redundants
+                for c, _ in scored[1:]:
+                    session.run(
+                        """
+                        MATCH (c:Claim {claim_id: $cid, tenant_id: $tid})
+                        SET c.redundant = true, c.champion_claim_id = $champion_id
+                        """,
+                        cid=c["claim_id"],
+                        tid=args.tenant,
+                        champion_id=champion["claim_id"],
+                    )
+                    redundants_marked += 1
+
+            logger.info(
+                f"  → {champions_marked} champions marked, "
+                f"{redundants_marked} redundants marked"
+            )
 
             # Vérification finale
             final_result = session.run(

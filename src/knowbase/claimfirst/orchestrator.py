@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -293,6 +294,21 @@ class ClaimFirstOrchestrator:
         )
         logger.info(f"  → {len(claims)} claims extracted")
 
+        # Phase 1.4: Gate Vérifiabilité (AVANT dedup — claims déjà vérifiées)
+        skip_quality_gates = os.getenv("OSMOSE_SKIP_QUALITY_GATES", "false").lower() == "true"
+        gate_runner = None
+        if not skip_quality_gates:
+            logger.info("[OSMOSE:ClaimFirst] Phase 1.4: Verifiability gate...")
+            from knowbase.claimfirst.quality import QualityGateRunner
+            gate_runner = QualityGateRunner()
+            claims, verif_stats = gate_runner.run_verifiability_gate(claims)
+            logger.info(
+                f"  → {verif_stats['rejected_fabrication']} rejected, "
+                f"{verif_stats['rewritten_evidence']} rewritten, "
+                f"{verif_stats.get('bucket_not_claimable', 0)} not claimable, "
+                f"{verif_stats['total_output']}/{verif_stats['total_input']} kept"
+            )
+
         # Phase 1.5: Déduplication déterministe (texte exact + triplet S/P/O)
         logger.info("[OSMOSE:ClaimFirst] Phase 1.5: Deduplicating claims...")
         claims, dedup_stats = self._deduplicate_claims(claims)
@@ -311,6 +327,18 @@ class ClaimFirstOrchestrator:
             f"{quality_stats['filtered_boilerplate']} boilerplate, "
             f"{quality_stats['filtered_heading']} heading-like"
         )
+
+        # Phase 1.6b-c: Gates déterministes + Atomicity splitter
+        if not skip_quality_gates and gate_runner:
+            logger.info("[OSMOSE:ClaimFirst] Phase 1.6b-c: Deterministic gates + atomicity...")
+            claims, det_stats = gate_runner.run_deterministic_and_atomicity_gates(claims)
+            logger.info(
+                f"  → {det_stats['rejected_tautology']} tautology, "
+                f"{det_stats['rejected_template']} template leak, "
+                f"{det_stats['sf_discarded']} SF discarded, "
+                f"{det_stats['claims_split']} split → "
+                f"{det_stats['total_output']}/{det_stats['total_input']} after gates"
+            )
 
         # Phase 1.7: Slot enrichment (claims sans structured_form)
         claims_without_sf = [c for c in claims if not c.structured_form]
@@ -340,6 +368,18 @@ class ClaimFirstOrchestrator:
             claim_entity_map=claim_entity_map,
         )
         logger.info(f"  → {len(entities)} entities after canonicalization")
+
+        # Phase 2.6: Independence resolver (needs entities)
+        if not skip_quality_gates and gate_runner:
+            logger.info("[OSMOSE:ClaimFirst] Phase 2.6: Independence resolver...")
+            claims, indep_stats = gate_runner.run_independence_gate(
+                claims, claim_entity_map, passages, entities=entities,
+            )
+            logger.info(
+                f"  → {indep_stats.get('resolved', 0)} resolved, "
+                f"{indep_stats.get('bucketed', 0)} bucketed, "
+                f"{indep_stats['total_output']}/{indep_stats['total_input']} after independence"
+            )
 
         # Phase 3: Matcher les Facets
         logger.info("[OSMOSE:ClaimFirst] Phase 3: Matching facets...")

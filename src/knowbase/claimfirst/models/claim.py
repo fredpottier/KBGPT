@@ -204,6 +204,22 @@ class Claim(BaseModel):
         description="V1.2: Content-only fingerprint (no doc_id) for cross-doc matching"
     )
 
+    # V1.3: Quality gate fields
+    quality_status: Optional[str] = Field(
+        default=None,
+        description="V1.3: Quality gate action applied (QualityAction enum value)"
+    )
+
+    quality_scores: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="V1.3: Embedding-based quality scores {verif_score, sf_alignment, triviality}"
+    )
+
+    quality_reasons: Optional[List[str]] = Field(
+        default=None,
+        description="V1.3: Human-readable reasons for quality decision"
+    )
+
     @field_validator("text")
     @classmethod
     def validate_text_not_too_long(cls, v: str) -> str:
@@ -273,6 +289,13 @@ class Claim(BaseModel):
         # V1.1: Add structured_form as JSON string
         if self.structured_form:
             props["structured_form_json"] = json.dumps(self.structured_form)
+        # V1.3: Quality gate fields
+        if self.quality_status:
+            props["quality_status"] = self.quality_status
+        if self.quality_scores:
+            props["quality_scores_json"] = json.dumps(self.quality_scores)
+        if self.quality_reasons:
+            props["quality_reasons"] = self.quality_reasons
         return props
 
     @classmethod
@@ -290,6 +313,14 @@ class Claim(BaseModel):
         if record.get("structured_form_json"):
             try:
                 structured_form = json.loads(record["structured_form_json"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # V1.3: Parse quality_scores from JSON
+        quality_scores = None
+        if record.get("quality_scores_json"):
+            try:
+                quality_scores = json.loads(record["quality_scores_json"])
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -311,6 +342,9 @@ class Claim(BaseModel):
             else datetime.utcnow(),
             structured_form=structured_form,
             content_fingerprint=record.get("content_fingerprint"),
+            quality_status=record.get("quality_status"),
+            quality_scores=quality_scores,
+            quality_reasons=record.get("quality_reasons"),
         )
 
 

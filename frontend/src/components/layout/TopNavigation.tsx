@@ -34,6 +34,7 @@ import {
   FiTarget,
   FiCheckSquare,
   FiCpu,
+  FiArchive,
 } from 'react-icons/fi'
 
 // Configuration des menus
@@ -75,6 +76,7 @@ const navigationConfig = {
       { label: 'Claim-First', href: '/admin/claimfirst', icon: FiTarget },
       { label: 'Infrastructure GPU', href: '/admin/gpu', icon: FiCpu },
       { label: 'Mode Burst (Spot)', href: '/admin/burst', icon: FiCloud },
+      { label: 'Backup & Restore', href: '/admin/backup', icon: FiArchive },
       { label: 'Configuration', href: '/admin/settings', icon: FiSettings },
     ],
   },
