@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import time
+from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -411,6 +412,26 @@ class ClaimFirstOrchestrator:
             logger.info(
                 f"[OSMOSE:ClaimFirst] Phase 2.7: {pass_count} claims marquées PASS"
             )
+
+        # Phase 2.8: Dériver SubjectAnchors depuis les entités canonicalisées
+        logger.info("[OSMOSE:ClaimFirst] Phase 2.8: Deriving subjects from entities...")
+        entity_subjects, doc_context = self._derive_subjects_from_entities(
+            entities=entities,
+            claim_entity_map=claim_entity_map,
+            claims=claims,
+            doc_context=doc_context,
+            doc_id=doc_id,
+            tenant_id=tenant_id,
+            doc_title=doc_title,
+        )
+        if entity_subjects:
+            new_anchors = entity_subjects
+            logger.info(
+                f"  → {len(entity_subjects)} entity-derived subjects "
+                f"(replaced Phase 0.5 subjects)"
+            )
+        else:
+            logger.info("  → No entity-derived subjects, keeping Phase 0.5 fallback")
 
         # Phase 3: Matcher les Facets
         logger.info("[OSMOSE:ClaimFirst] Phase 3: Matching facets...")
@@ -1223,6 +1244,185 @@ class ClaimFirstOrchestrator:
                 # VALID → rien à faire
 
         return all_anchors
+
+    # ------------------------------------------------------------------
+    # Phase 2.8 — Dériver SubjectAnchors depuis entités canonicalisées
+    # ------------------------------------------------------------------
+
+    def _derive_subjects_from_entities(
+        self,
+        entities: List[Entity],
+        claim_entity_map: Dict[str, List[str]],
+        claims: List[Claim],
+        doc_context: DocumentContext,
+        doc_id: str,
+        tenant_id: str,
+        doc_title: Optional[str] = None,
+    ) -> Tuple[List[SubjectAnchor], DocumentContext]:
+        """
+        Phase 2.8 : dérive des SubjectAnchors depuis les entités canonicalisées.
+
+        Étapes :
+          A. Candidats coverage-based (seuils numériques, aucun filtre type/nom)
+          B. Evidence pack diversifié (3 snippets par candidat)
+          C. LLM arbiter "documentary subjectness" (1 appel batch)
+          D. Résolution via SubjectResolver.resolve_batch()
+          E. Mise à jour doc_context (conserve primary, remplace secondaires)
+
+        Returns:
+            (entity_anchors, doc_context) — liste vide si fallback Phase 0.5
+        """
+        from collections import Counter, defaultdict
+
+        MIN_ENTITY_CLAIMS = 8
+        MIN_ENTITY_COVERAGE = 0.03  # 3% des claims
+        MAX_CANDIDATES_FOR_LLM = 12
+        MAX_FINAL_SUBJECTS = 5
+
+        # --- Étape A : Candidats coverage-based ---
+        entity_claim_counts: Counter = Counter()
+        for claim_id, entity_ids in claim_entity_map.items():
+            for eid in entity_ids:
+                entity_claim_counts[eid] += 1
+
+        entity_by_id = {e.entity_id: e for e in entities}
+
+        total_claims = len(claims)
+        candidates = []
+        for entity_id, claim_count in entity_claim_counts.items():
+            entity = entity_by_id.get(entity_id)
+            if not entity:
+                continue
+            coverage = claim_count / total_claims if total_claims > 0 else 0
+            if claim_count >= MIN_ENTITY_CLAIMS and coverage >= MIN_ENTITY_COVERAGE:
+                candidates.append((entity, claim_count, coverage))
+
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        candidates = candidates[:MAX_CANDIDATES_FOR_LLM]
+
+        if not candidates:
+            logger.info("  → No entity candidates above thresholds")
+            return [], doc_context
+
+        # --- Étape B : Evidence pack diversifié ---
+        entity_to_claims: Dict[str, List[str]] = defaultdict(list)
+        for claim_id, entity_ids in claim_entity_map.items():
+            for eid in entity_ids:
+                entity_to_claims[eid].append(claim_id)
+
+        claim_by_id = {c.claim_id: c for c in claims}
+
+        def _pick_diverse_snippets(claim_ids: List[str], n: int = 3) -> List[str]:
+            valid = [cid for cid in claim_ids if cid in claim_by_id]
+            if len(valid) <= n:
+                return [claim_by_id[cid].text for cid in valid]
+            step = max(1, len(valid) // n)
+            picked = [valid[i * step] for i in range(n)]
+            return [claim_by_id[cid].text for cid in picked]
+
+        candidates_json = []
+        for entity, count, coverage in candidates:
+            snippets = _pick_diverse_snippets(entity_to_claims[entity.entity_id])
+            candidates_json.append({
+                "index": len(candidates_json) + 1,
+                "entity_name": entity.name,
+                "entity_type": entity.entity_type.value if hasattr(entity.entity_type, 'value') else str(entity.entity_type),
+                "claim_count": count,
+                "coverage_pct": round(coverage * 100, 1),
+                "evidence_snippets": snippets,
+            })
+
+        logger.info(f"  → {len(candidates_json)} entity candidates for LLM subjectness check")
+
+        # --- Étape C : LLM arbiter "documentary subjectness" ---
+        try:
+            from knowbase.common.llm_router import get_llm_router, TaskType
+
+            candidates_text = json.dumps(candidates_json, indent=2, ensure_ascii=False)
+            title_display = doc_title or doc_id
+
+            prompt = f"""You are classifying entity candidates as document subjects.
+A "subject" is a meaningful topic that this document is ABOUT — a useful pivot for navigation and retrieval.
+
+Document: "{title_display}"
+
+For each candidate below, evidence snippets from the document are provided.
+Judge ONLY based on the evidence — is this entity a central topic of the document, or just a mentioned term?
+
+Classify each as:
+- SUBJECT: a central topic of this document, useful for navigation
+- TOO_GENERIC: too broad or common to serve as a navigation pivot (e.g. "system", "data", "process", "role")
+- NOISE: not a meaningful topic
+
+Candidates:
+{candidates_text}
+
+Return JSON:
+{{"decisions": [{{"index": 1, "verdict": "SUBJECT", "reason": "..."}}]}}"""
+
+            router = get_llm_router()
+            response = router.complete(
+                task_type=TaskType.METADATA_EXTRACTION,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=1500,
+                response_format={"type": "json_object"},
+            ).strip()
+
+            data = json.loads(response)
+            decisions = data.get("decisions", [])
+
+        except Exception as e:
+            logger.warning(
+                f"[OSMOSE:ClaimFirst] Phase 2.8 LLM failed (fail-open): {e}"
+            )
+            return [], doc_context
+
+        # --- Étape D : Résolution via SubjectResolver ---
+        valid_names = []
+        for d in decisions:
+            idx = d.get("index")
+            verdict = d.get("verdict", "")
+            if isinstance(idx, int) and 1 <= idx <= len(candidates_json) and verdict == "SUBJECT":
+                valid_names.append(candidates_json[idx - 1]["entity_name"])
+        valid_names = valid_names[:MAX_FINAL_SUBJECTS]
+
+        if not valid_names:
+            logger.info("  → LLM classified no entities as SUBJECT")
+            return [], doc_context
+
+        logger.info(f"  → LLM selected {len(valid_names)} subjects: {valid_names}")
+
+        results = self.subject_resolver.resolve_batch(
+            raw_subjects=valid_names,
+            existing_anchors=self._subject_anchors,
+            doc_id=doc_id,
+        )
+
+        entity_anchors = []
+        for result in results:
+            if result.anchor:
+                entity_anchors.append(result.anchor)
+                if doc_id not in result.anchor.source_doc_ids:
+                    result.anchor.source_doc_ids.append(doc_id)
+                if result.match_type == "new" and result.anchor not in self._subject_anchors:
+                    self._subject_anchors.append(result.anchor)
+
+        # --- Étape E : Mise à jour doc_context ---
+        if entity_anchors:
+            # Vider les sujets secondaires de Phase 0.5
+            for old_sid in list(doc_context.subject_ids):
+                doc_context.remove_subject(old_sid)
+
+            # Ajouter les sujets dérivés des entités
+            for anchor in entity_anchors:
+                doc_context.add_subject(
+                    anchor.subject_id, ResolutionStatus.RESOLVED, 0.95
+                )
+
+            return entity_anchors, doc_context
+        else:
+            return [], doc_context
 
     def _llm_validate_subject_batch(
         self,
