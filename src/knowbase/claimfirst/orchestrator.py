@@ -28,6 +28,8 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+
 from knowbase.claimfirst.models.claim import Claim
 from knowbase.claimfirst.models.entity import Entity
 from knowbase.claimfirst.models.facet import Facet
@@ -631,8 +633,20 @@ class ClaimFirstOrchestrator:
         manager = get_embedding_manager()
         embeddings = manager.encode(texts)
 
-        # Créer les paires (SubChunk, embedding) et upserter
-        pairs = list(zip(sub_chunks, embeddings))
+        # Filtrer les zero vectors (textes trop longs skippés par TEI)
+        pairs = []
+        skipped = 0
+        for sc, emb in zip(sub_chunks, embeddings):
+            if np.any(emb != 0):
+                pairs.append((sc, emb))
+            else:
+                skipped += 1
+        if skipped > 0:
+            logger.warning(
+                f"[OSMOSE:ClaimFirst] Filtered {skipped} zero-vector embeddings "
+                f"(TEI 413 skips) — {len(pairs)} chunks will be indexed"
+            )
+
         ensure_layer_r_collection()
         n = upsert_layer_r(pairs, tenant_id=tenant_id)
 

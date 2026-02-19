@@ -268,26 +268,59 @@ class EmbeddingModelManager:
             response.raise_for_status()
             return np.array(response.json())
 
-        def _encode_with_split(batch: List[str], depth: int = 0) -> np.ndarray:
+        def _encode_with_split(batch: List[str], depth: int = 0) -> Optional[np.ndarray]:
             """
             Encode un batch, avec split adaptatif en cas de 413 Payload Too Large.
 
-            Si le endpoint refuse le payload (413), le batch est coupé en deux
-            et chaque moitié est retentée récursivement (jusqu'à depth=3).
+            Si le endpoint refuse le payload (413) :
+            - batch > 1 texte : split en deux et retry récursivement (pas de limite de depth)
+            - batch == 1 texte : truncation progressive (66%, 50%, 33%) puis skip
             """
             try:
                 return _post_embed(batch)
             except requests.exceptions.HTTPError as e:
-                if e.response is not None and e.response.status_code == 413 and depth < 3 and len(batch) > 1:
-                    mid = len(batch) // 2
-                    logger.warning(
-                        f"[EMBEDDINGS:BURST] 413 Payload Too Large ({len(batch)} texts, "
-                        f"~{sum(len(t) for t in batch)} chars) → split en 2 (depth={depth+1})"
-                    )
-                    left = _encode_with_split(batch[:mid], depth + 1)
-                    right = _encode_with_split(batch[mid:], depth + 1)
-                    return np.vstack([left, right])
+                if e.response is not None and e.response.status_code == 413:
+                    if len(batch) > 1:
+                        mid = len(batch) // 2
+                        logger.warning(
+                            f"[EMBEDDINGS:BURST] 413 Payload Too Large ({len(batch)} texts, "
+                            f"~{sum(len(t) for t in batch)} chars) → split en 2 (depth={depth+1})"
+                        )
+                        left = _encode_with_split(batch[:mid], depth + 1)
+                        right = _encode_with_split(batch[mid:], depth + 1)
+                        # Gérer les None (textes skippés)
+                        if left is None and right is None:
+                            return None
+                        if left is None:
+                            return right
+                        if right is None:
+                            return left
+                        return np.vstack([left, right])
+                    else:
+                        # Single text : truncation progressive
+                        text = batch[0]
+                        for pct in [66, 50, 33]:
+                            cut_len = int(len(text) * pct / 100)
+                            try:
+                                logger.warning(
+                                    f"[EMBEDDINGS:BURST] Single text 413 ({len(text)} chars) "
+                                    f"→ truncating to {pct}% ({cut_len} chars)"
+                                )
+                                return _post_embed([text[:cut_len]])
+                            except requests.exceptions.HTTPError as e2:
+                                if e2.response is not None and e2.response.status_code == 413:
+                                    continue
+                                raise
+                        # Toutes les truncations ont échoué — skip ce texte
+                        logger.error(
+                            f"[EMBEDDINGS:BURST] Text ({len(text)} chars) rejected by TEI "
+                            f"even at 33% — skipping"
+                        )
+                        return None
                 raise
+
+        # Dimension des embeddings (détectée depuis le premier batch réussi)
+        embedding_dim = [None]  # Mutable pour accès depuis closure
 
         def encode_batch_with_retry(batch_idx: int, batch: List[str]) -> tuple:
             """Encode un batch avec retry + split adaptatif en cas de 413."""
@@ -301,11 +334,27 @@ class EmbeddingModelManager:
             for attempt in range(max_retries):
                 try:
                     result = _encode_with_split(batch)
-                    # Success - reset consecutive failures
+                    if result is None:
+                        # Tous les textes du batch ont été skippés (413 irrésoluble)
+                        # Ne PAS compter comme échec systémique
+                        logger.warning(
+                            f"[EMBEDDINGS:BURST] Batch {batch_idx+1}: all {len(batch)} text(s) "
+                            f"skipped (too large for TEI)"
+                        )
+                        return batch_idx, None
+                    # Success - reset consecutive failures, capture dimension
                     consecutive_failures = 0
+                    if embedding_dim[0] is None and result.ndim >= 2:
+                        embedding_dim[0] = result.shape[1]
                     return batch_idx, result
                 except requests.exceptions.HTTPError as e:
-                    # 413 non-résolu après splits → échec définitif
+                    # 413 non-résolu : erreur déterministe, pas systémique
+                    # Ne PAS incrémenter le circuit breaker
+                    if e.response is not None and e.response.status_code == 413:
+                        logger.warning(
+                            f"[EMBEDDINGS:BURST] Batch {batch_idx+1}: 413 unresolved, skipping"
+                        )
+                        return batch_idx, None
                     last_error = e
                     break
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
@@ -318,7 +367,7 @@ class EmbeddingModelManager:
                         )
                         time.sleep(wait_time)
 
-            # All retries failed - increment consecutive failures
+            # All retries failed (non-413) - increment consecutive failures
             consecutive_failures += 1
             if consecutive_failures >= circuit_breaker_threshold:
                 circuit_broken = True
@@ -393,18 +442,35 @@ class EmbeddingModelManager:
                     logger.error(f"[EMBEDDINGS:BURST] Error on batch {batch_idx+1}: {e}")
                     raise
 
-        # Vérifier que tous les résultats sont présents
+        # Assembler les résultats — les batches None sont skippés (textes trop longs)
         valid_results = [r for r in results if r is not None]
-        if len(valid_results) != total_batches:
+        skipped_batches = sum(1 for r in results if r is None)
+
+        if not valid_results:
             raise RuntimeError(
-                f"[EMBEDDINGS:BURST] Incomplete: {len(valid_results)}/{total_batches} batches succeeded"
+                f"[EMBEDDINGS:BURST] All {total_batches} batches failed — no embeddings produced"
             )
 
-        embeddings = np.vstack(valid_results) if valid_results else np.array([])
+        if skipped_batches > 0:
+            # Remplacer les None par des zero vectors pour maintenir l'alignement index
+            dim = embedding_dim[0] or (valid_results[0].shape[1] if valid_results else 1024)
+            skipped_texts = 0
+            for i, r in enumerate(results):
+                if r is None:
+                    batch_len = len(batches[i])
+                    results[i] = np.zeros((batch_len, dim))
+                    skipped_texts += batch_len
+            logger.warning(
+                f"[EMBEDDINGS:BURST] {skipped_texts} texts skipped (413 too large) "
+                f"→ zero vectors substituted"
+            )
+
+        embeddings = np.vstack(results) if results else np.array([])
         elapsed = time.time() - start_time
         logger.info(
-            f"[EMBEDDINGS:BURST] ✅ Encoded {len(truncated)} texts → {embeddings.shape} "
+            f"[EMBEDDINGS:BURST] Encoded {len(truncated)} texts → {embeddings.shape} "
             f"in {elapsed:.1f}s ({len(truncated)/elapsed:.0f} texts/s)"
+            + (f" ({skipped_batches} batches skipped)" if skipped_batches else "")
         )
         return embeddings
 
