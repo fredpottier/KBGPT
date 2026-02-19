@@ -69,15 +69,13 @@ GROUPING RULES
 OUTPUT FORMAT
 ────────────────────────────────────────
 
-Return ONLY valid JSON with this structure:
+Return ONLY valid JSON with this COMPACT structure:
 {
   "entity_groups": [
     {
       "canonical_name": "The most official/complete name",
       "aliases": ["variant1", "variant2"],
-      "entity_type": "product|service|concept|actor|standard|feature|legal_term|other",
-      "confidence": 0.95,
-      "rationale": "Brief explanation (max 100 chars)"
+      "entity_type": "product|service|concept|actor|standard|feature|legal_term|other"
     }
   ],
   "ungrouped": ["entities that don't match any group"]
@@ -87,6 +85,7 @@ IMPORTANT:
 - Every input entity MUST appear exactly once (either as canonical_name, in aliases, or in ungrouped)
 - Do NOT invent entities not in the input
 - If unsure, keep entities separate (in ungrouped)
+- Be CONCISE: do NOT add fields beyond canonical_name, aliases, entity_type
 """
 
 USER_PROMPT_TEMPLATE = """Analyze these {count} entity names extracted from documents and group those that refer to the same thing:
@@ -130,7 +129,7 @@ class EntityCanonicalizer:
         self,
         tenant_id: str = "default",
         min_entities_for_llm: int = 5,
-        batch_size: int = 50,
+        batch_size: int = 30,
         max_concurrent: int = 3,
     ):
         """
@@ -332,7 +331,8 @@ class EntityCanonicalizer:
                 task_type=TaskType.KNOWLEDGE_EXTRACTION,
                 messages=messages,
                 temperature=0.1,
-                max_tokens=1500,
+                max_tokens=2500,
+                response_format={"type": "json_object"},
             )
 
             batch_result = self._parse_response(response, names_batch)
@@ -377,6 +377,20 @@ class EntityCanonicalizer:
 
         try:
             data = json.loads(json_match.group(0))
+        except json.JSONDecodeError:
+            # Tentative de repair — JSON probablement tronqué par max_tokens
+            data = self._try_repair_json(json_match.group(0))
+            if data is None:
+                logger.warning(
+                    f"[EntityCanonicalizer] JSON repair failed (len={len(response_text)})"
+                )
+                return None
+            logger.info(
+                f"[EntityCanonicalizer] JSON repaired successfully "
+                f"({len(data.get('entity_groups', []))} groups recovered)"
+            )
+
+        try:
             result = CanonicalizationResult(
                 entity_groups=[EntityGroup(**g) for g in data.get("entity_groups", [])],
                 ungrouped=data.get("ungrouped", []),
@@ -399,8 +413,55 @@ class EntityCanonicalizer:
 
             return result
 
-        except (json.JSONDecodeError, Exception) as e:
+        except Exception as e:
             logger.warning(f"[EntityCanonicalizer] Parse error: {e}")
+            return None
+
+    @staticmethod
+    def _try_repair_json(raw: str) -> Optional[Dict[str, Any]]:
+        """Tente de réparer un JSON tronqué par max_tokens.
+
+        Stratégie : trouver le dernier objet complet dans entity_groups,
+        tronquer le reste, fermer les structures ouvertes.
+        """
+        # Trouver la dernière accolade fermante complète dans un entity_group
+        # Pattern: }, suivi potentiellement d'espaces/newlines
+        last_complete = -1
+        brace_depth = 0
+        in_string = False
+        escape_next = False
+
+        for i, ch in enumerate(raw):
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\':
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == '{':
+                brace_depth += 1
+            elif ch == '}':
+                brace_depth -= 1
+                if brace_depth == 1:
+                    # On vient de fermer un objet au niveau 2 (un entity_group)
+                    last_complete = i
+
+        if last_complete <= 0:
+            return None
+
+        # Tronquer après le dernier groupe complet, fermer le JSON
+        truncated = raw[:last_complete + 1]
+        # Fermer entity_groups array + ungrouped vide + objet racine
+        truncated += '], "ungrouped": []}'
+
+        try:
+            return json.loads(truncated)
+        except json.JSONDecodeError:
             return None
 
     def _build_name_mapping(

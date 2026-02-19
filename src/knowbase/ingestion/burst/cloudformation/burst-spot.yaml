@@ -127,11 +127,11 @@ Parameters:
     Description: Subnet ID (vide = subnet par défaut)
 
   # === AMI ===
-  # AMI Golden OSMOSE v8 - vLLM v0.6.6.post1 + Qwen2.5-14B-Instruct-AWQ + TEI 89-1.6 GPU
+  # AMI Golden OSMOSE v8 - vLLM v0.6.6.post1 + TEI 1.5 (modèle téléchargé depuis HF au boot)
   AmiId:
     Type: String
     Default: "ami-05ec81177dc825d56"
-    Description: AMI ID (Golden v8 - vLLM v0.6.6 + Qwen2.5-14B-Instruct-AWQ + TEI 89-1.6 GPU, eu-central-1)
+    Description: AMI ID (Golden v8 - Docker + NVIDIA drivers, eu-central-1)
 
   # === SSH ===
   KeyName:
@@ -357,6 +357,26 @@ Resources:
                 echo "AMI services disabled, containers cleaned"
 
                 # ============================================
+                # Nettoyage disque — supprimer modèles/caches inutiles
+                # AMI v8 a Qwen3 + caches HF (~28GB) qu'on n'utilise plus
+                # ============================================
+                echo "[BURST] Disk cleanup — removing unused models..."
+                python3 << CLEANUP
+                import os, shutil
+                keep_model = "$VLLM_MODEL".replace("/", "--")
+                keep = {keep_model, "intfloat--multilingual-e5-large", "modules"}
+                for d in os.listdir("/models"):
+                    if d in keep:
+                        print(f"[BURST]   KEEP: /models/{d}")
+                    elif os.path.isdir(f"/models/{d}"):
+                        shutil.rmtree(f"/models/{d}")
+                        print(f"[BURST]   DELETE: /models/{d}")
+                CLEANUP
+                docker image prune -af 2>/dev/null || true
+                echo "[BURST] Disk after cleanup:"
+                df -h / | tail -1
+
+                # ============================================
                 # Start vLLM with AWQ quantization
                 # ============================================
                 echo "Starting vLLM server..."
@@ -382,13 +402,21 @@ Resources:
                 echo "vLLM args: $VLLM_ARGS"
 
                 # ============================================
-                # Créer container vLLM avec modèle local (EBS)
-                # Le modèle est déjà téléchargé dans /models sur l'AMI
+                # Créer container vLLM (cache local AMI ou download HuggingFace)
                 # ============================================
-                VLLM_MODEL_PATH="/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
+                VLLM_MODEL_PATH="/models/$(echo $VLLM_MODEL | sed 's|/|--|g')"
 
-                echo "Creating vLLM container with local model..."
-                echo "Model path: $VLLM_MODEL_PATH"
+                # Vérifier si le modèle est en cache local sur l'AMI
+                if [ -f "$VLLM_MODEL_PATH/config.json" ]; then
+                    echo "[BURST] Local model cache found at $VLLM_MODEL_PATH"
+                    VLLM_MODEL_ARG="/model"
+                    VLLM_MODEL_MOUNT="-v $VLLM_MODEL_PATH:/model:ro"
+                else
+                    echo "[BURST] No local cache at $VLLM_MODEL_PATH"
+                    echo "[BURST] vLLM will download from HuggingFace: $VLLM_MODEL"
+                    VLLM_MODEL_ARG="$VLLM_MODEL"
+                    VLLM_MODEL_MOUNT=""
+                fi
 
                 # Supprimer ancien container si existant
                 docker rm -f vllm 2>/dev/null || true
@@ -408,12 +436,44 @@ Resources:
                 echo "Waiting for GPU memory cleanup..."
                 sleep 5
 
-                # Créer container vLLM avec modèle local + AWQ Marlin
+                # ============================================
+                # Patch AWQ Marlin pour vLLM v0.6.6
+                # Le config.json de Qwen2.5 a quant_method="awq"
+                # mais vLLM v0.6.6 ne le reconnaît pas pour Marlin.
+                # Sans ce patch : 3.1 t/s. Avec : 26.3 t/s (8.5x)
+                # ============================================
+                AWQ_PATCH_DIR="/opt/burst/patches"
+                mkdir -p $AWQ_PATCH_DIR
+                VLLM_IMAGE="vllm/vllm-openai:v0.6.6.post1"
+                # Chemin Python dans vLLM v0.6.6.post1 (Python 3.12)
+                AWQ_MARLIN_PATH="/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py"
+
+                # Extraire, patcher, préparer le volume-mount
+                docker create --name vllm-patch-temp $VLLM_IMAGE 2>/dev/null
+                docker cp vllm-patch-temp:$AWQ_MARLIN_PATH $AWQ_PATCH_DIR/awq_marlin.py
+                docker rm vllm-patch-temp
+
+                python3 << 'AWQ_PATCH'
+                path = "/opt/burst/patches/awq_marlin.py"
+                with open(path) as f:
+                    code = f.read()
+                old = 'or user_quant == "awq_marlin")'
+                new = 'or user_quant == "awq_marlin"\n                            or user_quant == "awq")'
+                if old in code and 'or user_quant == "awq")' not in code:
+                    with open(path, 'w') as f:
+                        f.write(code.replace(old, new))
+                    print("[BURST] Patched awq_marlin.py for Marlin kernel activation")
+                else:
+                    print("[BURST] awq_marlin.py already patched or not needed")
+                AWQ_PATCH
+
+                # Créer container vLLM avec AWQ Marlin patch
                 docker run -d --gpus all --restart unless-stopped \
                     -p $VLLM_PORT:8000 --name vllm \
-                    -v $VLLM_MODEL_PATH:/model:ro \
-                    vllm/vllm-openai:v0.6.6.post1 \
-                    --model /model \
+                    $VLLM_MODEL_MOUNT \
+                    -v $AWQ_PATCH_DIR/awq_marlin.py:$AWQ_MARLIN_PATH:ro \
+                    $VLLM_IMAGE \
+                    --model $VLLM_MODEL_ARG \
                     --quantization $VLLM_QUANTIZATION \
                     --dtype $VLLM_DTYPE \
                     --gpu-memory-utilization $VLLM_GPU_MEM \
@@ -422,21 +482,31 @@ Resources:
                     --trust-remote-code \
                     $VLLM_EXTRA_ARGS
 
-                # Recréer container TEI avec paramètres configurables
-                # (remplace le container pré-créé dans l'AMI Golden)
-                TEI_MODEL_PATH="/models/intfloat--multilingual-e5-large"
+                # Recréer container TEI
+                TEI_MODEL_PATH="/models/$(echo $EMBEDDINGS_MODEL | sed 's|/|--|g')"
                 docker rm -f embeddings 2>/dev/null || true
 
-                echo "Creating TEI container (GPU 89-1.6)..."
+                # Vérifier si le modèle TEI est en cache local
+                if [ -d "$TEI_MODEL_PATH" ] && [ -f "$TEI_MODEL_PATH/config.json" ]; then
+                    echo "[BURST] TEI local cache found at $TEI_MODEL_PATH"
+                    TEI_MODEL_ARG="/data"
+                    TEI_MODEL_MOUNT="-v $TEI_MODEL_PATH:/data"
+                else
+                    echo "[BURST] TEI no local cache — will download: $EMBEDDINGS_MODEL"
+                    TEI_MODEL_ARG="$EMBEDDINGS_MODEL"
+                    TEI_MODEL_MOUNT=""
+                fi
+
+                echo "Creating TEI container (1.5)..."
                 echo "  payload-limit: $TEI_PAYLOAD_LIMIT"
                 echo "  max-client-batch-size: $TEI_MAX_CLIENT_BATCH_SIZE"
                 echo "  max-batch-tokens: $TEI_MAX_BATCH_TOKENS"
 
                 docker run -d --restart unless-stopped --gpus all \
                     -p $EMB_PORT:80 --name embeddings \
-                    -v $TEI_MODEL_PATH:/model:ro \
-                    ghcr.io/huggingface/text-embeddings-inference:89-1.6 \
-                    --model-id /model \
+                    $TEI_MODEL_MOUNT \
+                    ghcr.io/huggingface/text-embeddings-inference:1.5 \
+                    --model-id $TEI_MODEL_ARG \
                     --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
                     --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
                     --payload-limit $TEI_PAYLOAD_LIMIT \
@@ -649,10 +719,40 @@ Resources:
                 docker rm -f vllm embeddings 2>/dev/null || true
 
                 # ============================================
-                # Créer container vLLM avec modèle local (EBS)
+                # Nettoyage disque — supprimer modèles/caches inutiles
                 # ============================================
-                VLLM_MODEL_PATH="/models/Qwen--Qwen2.5-14B-Instruct-AWQ"
-                echo "Creating vLLM container with local model: $VLLM_MODEL_PATH"
+                echo "[BURST] Disk cleanup — removing unused models..."
+                python3 << CLEANUP
+                import os, shutil
+                keep_model = "$VLLM_MODEL".replace("/", "--")
+                keep = {keep_model, "intfloat--multilingual-e5-large", "modules"}
+                for d in os.listdir("/models"):
+                    if d in keep:
+                        print(f"[BURST]   KEEP: /models/{d}")
+                    elif os.path.isdir(f"/models/{d}"):
+                        shutil.rmtree(f"/models/{d}")
+                        print(f"[BURST]   DELETE: /models/{d}")
+                CLEANUP
+                docker image prune -af 2>/dev/null || true
+                echo "[BURST] Disk after cleanup:"
+                df -h / | tail -1
+
+                # ============================================
+                # Créer container vLLM (cache local AMI ou download HuggingFace)
+                # ============================================
+                VLLM_MODEL_PATH="/models/$(echo $VLLM_MODEL | sed 's|/|--|g')"
+
+                # Vérifier si le modèle est en cache local sur l'AMI
+                if [ -f "$VLLM_MODEL_PATH/config.json" ]; then
+                    echo "[BURST] Local model cache found at $VLLM_MODEL_PATH"
+                    VLLM_MODEL_ARG="/model"
+                    VLLM_MODEL_MOUNT="-v $VLLM_MODEL_PATH:/model:ro"
+                else
+                    echo "[BURST] No local cache at $VLLM_MODEL_PATH"
+                    echo "[BURST] vLLM will download from HuggingFace: $VLLM_MODEL"
+                    VLLM_MODEL_ARG="$VLLM_MODEL"
+                    VLLM_MODEL_MOUNT=""
+                fi
 
                 # Construire les arguments optionnels
                 VLLM_EXTRA_ARGS=""
@@ -667,11 +767,37 @@ Resources:
                 echo "Waiting for GPU memory cleanup..."
                 sleep 5
 
+                # Patch AWQ Marlin pour vLLM v0.6.6 (8.5x speedup)
+                AWQ_PATCH_DIR="/opt/burst/patches"
+                mkdir -p $AWQ_PATCH_DIR
+                VLLM_IMAGE="vllm/vllm-openai:v0.6.6.post1"
+                # Chemin Python dans vLLM v0.6.6.post1 (Python 3.12)
+                AWQ_MARLIN_PATH="/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/awq_marlin.py"
+
+                docker create --name vllm-patch-temp $VLLM_IMAGE 2>/dev/null
+                docker cp vllm-patch-temp:$AWQ_MARLIN_PATH $AWQ_PATCH_DIR/awq_marlin.py
+                docker rm vllm-patch-temp
+
+                python3 << 'AWQ_PATCH'
+                path = "/opt/burst/patches/awq_marlin.py"
+                with open(path) as f:
+                    code = f.read()
+                old = 'or user_quant == "awq_marlin")'
+                new = 'or user_quant == "awq_marlin"\n                            or user_quant == "awq")'
+                if old in code and 'or user_quant == "awq")' not in code:
+                    with open(path, 'w') as f:
+                        f.write(code.replace(old, new))
+                    print("[BURST] Patched awq_marlin.py for Marlin kernel activation")
+                else:
+                    print("[BURST] awq_marlin.py already patched or not needed")
+                AWQ_PATCH
+
                 docker run -d --gpus all --restart unless-stopped \
                     -p $VLLM_PORT:8000 --name vllm \
-                    -v $VLLM_MODEL_PATH:/model:ro \
-                    vllm/vllm-openai:v0.6.6.post1 \
-                    --model /model \
+                    $VLLM_MODEL_MOUNT \
+                    -v $AWQ_PATCH_DIR/awq_marlin.py:$AWQ_MARLIN_PATH:ro \
+                    $VLLM_IMAGE \
+                    --model $VLLM_MODEL_ARG \
                     --quantization $VLLM_QUANTIZATION \
                     --dtype $VLLM_DTYPE \
                     --gpu-memory-utilization $VLLM_GPU_MEM \
@@ -680,14 +806,28 @@ Resources:
                     --trust-remote-code \
                     $VLLM_EXTRA_ARGS
 
-                # Recréer container TEI avec paramètres configurables
-                TEI_MODEL_PATH="/models/intfloat--multilingual-e5-large"
+                # Recréer container TEI
+                TEI_MODEL_PATH="/models/$(echo $EMBEDDINGS_MODEL | sed 's|/|--|g')"
                 docker rm -f embeddings 2>/dev/null || true
+
+                # Vérifier si le modèle TEI est en cache local
+                if [ -d "$TEI_MODEL_PATH" ] && [ -f "$TEI_MODEL_PATH/config.json" ]; then
+                    echo "[BURST] TEI local cache found at $TEI_MODEL_PATH"
+                    TEI_MODEL_ARG="/data"
+                    TEI_MODEL_MOUNT="-v $TEI_MODEL_PATH:/data"
+                else
+                    echo "[BURST] TEI no local cache — will download: $EMBEDDINGS_MODEL"
+                    TEI_MODEL_ARG="$EMBEDDINGS_MODEL"
+                    TEI_MODEL_MOUNT=""
+                fi
+
+                echo "Creating TEI container (1.5)..."
+
                 docker run -d --restart unless-stopped --gpus all \
                     -p $EMB_PORT:80 --name embeddings \
-                    -v $TEI_MODEL_PATH:/model:ro \
-                    ghcr.io/huggingface/text-embeddings-inference:89-1.6 \
-                    --model-id /model \
+                    $TEI_MODEL_MOUNT \
+                    ghcr.io/huggingface/text-embeddings-inference:1.5 \
+                    --model-id $TEI_MODEL_ARG \
                     --max-client-batch-size $TEI_MAX_CLIENT_BATCH_SIZE \
                     --max-batch-tokens $TEI_MAX_BATCH_TOKENS \
                     --payload-limit $TEI_PAYLOAD_LIMIT \
