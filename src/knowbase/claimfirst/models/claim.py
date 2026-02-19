@@ -220,6 +220,22 @@ class Claim(BaseModel):
         description="V1.3: Human-readable reasons for quality decision"
     )
 
+    # V1.4: Champion/Redundant fields
+    is_champion: Optional[bool] = Field(
+        default=None,
+        description="V1.4: Best representative in cluster"
+    )
+
+    redundant: Optional[bool] = Field(
+        default=None,
+        description="V1.4: Redundant claim in cluster"
+    )
+
+    champion_claim_id: Optional[str] = Field(
+        default=None,
+        description="V1.4: ID of champion if redundant"
+    )
+
     @field_validator("text")
     @classmethod
     def validate_text_not_too_long(cls, v: str) -> str:
@@ -296,6 +312,13 @@ class Claim(BaseModel):
             props["quality_scores_json"] = json.dumps(self.quality_scores)
         if self.quality_reasons:
             props["quality_reasons"] = self.quality_reasons
+        # V1.4: Champion/Redundant fields
+        if self.is_champion is not None:
+            props["is_champion"] = self.is_champion
+        if self.redundant is not None:
+            props["redundant"] = self.redundant
+        if self.champion_claim_id:
+            props["champion_claim_id"] = self.champion_claim_id
         return props
 
     @classmethod
@@ -345,6 +368,9 @@ class Claim(BaseModel):
             quality_status=record.get("quality_status"),
             quality_scores=quality_scores,
             quality_reasons=record.get("quality_reasons"),
+            is_champion=record.get("is_champion"),
+            redundant=record.get("redundant"),
+            champion_claim_id=record.get("champion_claim_id"),
         )
 
 

@@ -324,6 +324,13 @@ class ClaimClusterer:
             # Choisir le label canonique (claim avec meilleure confiance)
             best_claim = max(cluster_claims, key=lambda c: c.confidence)
 
+            # V1.4 — Marquer champion et redundants
+            best_claim.is_champion = True
+            for c in cluster_claims:
+                if c.claim_id != best_claim.claim_id:
+                    c.redundant = True
+                    c.champion_claim_id = best_claim.claim_id
+
             # Documents uniques
             doc_ids = sorted(set(c.doc_id for c in cluster_claims))
 

@@ -123,6 +123,7 @@ class ClaimFirstSchema:
         "ABOUT_COMPARABLE",  # DocumentContext → ComparableSubject (INV-25) - sujet stable
         "POSSIBLE_EQUIVALENT",  # SubjectAnchor → SubjectAnchor (INV-9)
         "HAS_AXIS_VALUE",    # DocumentContext → ApplicabilityAxis (INV-26)
+        "SIMILAR_TO",        # Entity → Entity (V1.4: uncertain merge, soft-link)
     ]
 
     # Contraintes (unicité)
@@ -515,6 +516,11 @@ def get_cleanup_queries(tenant_id: str) -> List[str]:
         # Note: SUPPORTED_BY et FROM retirés (Chantier 0 Phase 1A)
         f"""
         MATCH (c:Claim {{tenant_id: '{tenant_id}'}})-[r:ABOUT|HAS_FACET|IN_CLUSTER|IN_DOCUMENT|CONTRADICTS|REFINES|QUALIFIES]->()
+        DELETE r
+        """,
+        # V1.4: SIMILAR_TO relations between entities
+        f"""
+        MATCH (e:Entity {{tenant_id: '{tenant_id}'}})-[r:SIMILAR_TO]->()
         DELETE r
         """,
         # INV-8/INV-9: Relations DocumentContext et SubjectAnchor

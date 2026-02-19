@@ -343,142 +343,99 @@ def _detect_cross_doc_chains(neo4j_driver, tenant_id: str) -> dict:
 
 def _canonicalize_entities_cross_doc(neo4j_driver, tenant_id: str) -> dict:
     """
-    Canonicalise les entités cross-document après import.
+    Canonicalise les entités cross-document via MergeArbiter.
 
-    Fusionne les variantes version et les containments,
-    puis annote les hubs.
+    Phase 10a: Gates déterministes (prefix-dedup, case-only, version strip)
+    Phase 10b: LLM Merge Arbiter (corpus-grounded)
+    Phase 10c: Orphan cleanup (hub annotation)
     """
-    from collections import defaultdict
-    from knowbase.claimfirst.models.entity import (
-        Entity,
-        strip_version_qualifier,
-        is_valid_entity_name,
-    )
+    from knowbase.claimfirst.extractors.merge_arbiter import MergeArbiter
 
     with neo4j_driver.session() as session:
-        # 1. Charger les entities
+        # 1. Charger entités + 1 claim excerpt par entité
         result = session.run(
             """
             MATCH (e:Entity {tenant_id: $tid})
             OPTIONAL MATCH (e)<-[:ABOUT]-(c:Claim)
-            WITH e, count(c) AS claim_count
+            WITH e, count(c) AS claim_count, collect(c.text)[0] AS sample_claim
             RETURN e.entity_id AS entity_id,
                    e.name AS name,
                    e.normalized_name AS normalized_name,
                    e.entity_type AS entity_type,
-                   claim_count
+                   claim_count,
+                   sample_claim
             """,
             tid=tenant_id,
         )
-        entities = [dict(record) for record in result]
+        entities = []
+        claim_contexts: Dict[str, str] = {}
+        for record in result:
+            e = dict(record)
+            entities.append(e)
+            if e.get("sample_claim"):
+                claim_contexts[e["entity_id"]] = e["sample_claim"]
+
         logger.info(f"  → {len(entities)} entities loaded")
 
         if not entities:
             return {"total_merges": 0, "hubs_annotated": 0}
 
-        # 2. Groupes version
-        groups: dict = defaultdict(list)
-        for e in entities:
-            base_name, version = strip_version_qualifier(e["name"])
-            base_normalized = Entity.normalize(base_name)
-            groups[base_normalized].append((e, version))
+        # 2. MergeArbiter resolve
+        arbiter = MergeArbiter(batch_size=15, max_concurrent=3)
+        merge_result = arbiter.resolve(entities, claim_contexts)
 
-        version_merged = 0
-        for base_norm, members in groups.items():
-            if len(members) <= 1:
-                continue
-            canonical = None
-            for m, version in members:
-                if version is None:
-                    canonical = m
-                    break
-            if canonical is None:
-                canonical = max([m for m, _ in members], key=lambda m: m["claim_count"])
+        # 3. Appliquer les merges déterministes + LLM
+        all_merges = merge_result.deterministic_merges + merge_result.llm_merges
+        total_merged = 0
+        for merge in all_merges:
+            for source_id in merge.source_ids:
+                session.run(
+                    """
+                    MATCH (source:Entity {entity_id: $source_id, tenant_id: $tid})
+                    MATCH (target:Entity {entity_id: $target_id, tenant_id: $tid})
+                    OPTIONAL MATCH (c:Claim)-[r:ABOUT]->(source)
+                    WITH source, target, collect(c) AS claims, collect(r) AS rels
+                    FOREACH (r IN rels | DELETE r)
+                    WITH source, target, claims
+                    UNWIND claims AS c
+                    MERGE (c)-[:ABOUT]->(target)
+                    WITH source, target
+                    SET target.aliases = CASE
+                        WHEN target.aliases IS NULL THEN [source.name]
+                        WHEN NOT source.name IN target.aliases THEN target.aliases + source.name
+                        ELSE target.aliases
+                    END
+                    WITH source, target
+                    DETACH DELETE source
+                    """,
+                    source_id=source_id,
+                    target_id=merge.target_id,
+                    tid=tenant_id,
+                )
+                total_merged += 1
 
-            for m, _ in members:
-                if m["entity_id"] != canonical["entity_id"]:
-                    session.run(
-                        """
-                        MATCH (source:Entity {entity_id: $source_id, tenant_id: $tid})
-                        MATCH (target:Entity {entity_id: $target_id, tenant_id: $tid})
-                        OPTIONAL MATCH (c:Claim)-[r:ABOUT]->(source)
-                        WITH source, target, collect(c) AS claims, collect(r) AS rels
-                        FOREACH (r IN rels | DELETE r)
-                        WITH source, target, claims
-                        UNWIND claims AS c
-                        MERGE (c)-[:ABOUT]->(target)
-                        WITH source, target
-                        SET target.aliases = CASE
-                            WHEN target.aliases IS NULL THEN [source.name]
-                            WHEN NOT source.name IN target.aliases THEN target.aliases + source.name
-                            ELSE target.aliases
-                        END
-                        WITH source, target
-                        DETACH DELETE source
-                        """,
-                        source_id=m["entity_id"],
-                        target_id=canonical["entity_id"],
-                        tid=tenant_id,
-                    )
-                    version_merged += 1
-
-        # 3. Containments
-        by_norm: dict = {}
-        for e in entities:
-            norm = e.get("normalized_name") or Entity.normalize(e["name"])
-            if norm not in by_norm:  # Garder le premier (certains ont pu être supprimés)
-                by_norm[norm] = e
-
-        parents_by_child: dict = defaultdict(list)
-        norms = sorted(by_norm.keys(), key=len)
-        for i, short_norm in enumerate(norms):
-            if len(short_norm) < 4:
-                continue
-            for long_norm in norms[i + 1:]:
-                words_long = long_norm.split()
-                words_short = short_norm.split()
-                extra_words = len(words_long) - len(words_short)
-                if extra_words > 2 or extra_words < 1:
-                    continue
-                if words_long[-len(words_short):] == words_short:
-                    parents_by_child[short_norm].append(long_norm)
-
-        containment_merged = 0
-        for child_norm, parent_norms in parents_by_child.items():
-            if len(parent_norms) != 1:
-                continue
-            source = by_norm.get(child_norm)
-            target = by_norm.get(parent_norms[0])
-            if not source or not target:
-                continue
-            if not is_valid_entity_name(source["name"]) or not is_valid_entity_name(target["name"]):
-                continue
+        # 4. Créer les relations SIMILAR_TO
+        similar_created = 0
+        for pair in merge_result.similar_pairs:
             session.run(
                 """
-                MATCH (source:Entity {entity_id: $source_id, tenant_id: $tid})
-                MATCH (target:Entity {entity_id: $target_id, tenant_id: $tid})
-                OPTIONAL MATCH (c:Claim)-[r:ABOUT]->(source)
-                WITH source, target, collect(c) AS claims, collect(r) AS rels
-                FOREACH (r IN rels | DELETE r)
-                WITH source, target, claims
-                UNWIND claims AS c
-                MERGE (c)-[:ABOUT]->(target)
-                WITH source, target
-                SET target.aliases = CASE
-                    WHEN target.aliases IS NULL THEN [source.name]
-                    WHEN NOT source.name IN target.aliases THEN target.aliases + source.name
-                    ELSE target.aliases
-                END
-                WITH source, target
-                DETACH DELETE source
+                MATCH (e1:Entity {entity_id: $id1, tenant_id: $tid})
+                MATCH (e2:Entity {entity_id: $id2, tenant_id: $tid})
+                MERGE (e1)-[r:SIMILAR_TO]->(e2)
+                SET r.confidence = $confidence,
+                    r.reason = $reason,
+                    r.evidence = $evidence
                 """,
-                source_id=source["entity_id"],
-                target_id=target["entity_id"],
+                id1=pair.entity_id_1,
+                id2=pair.entity_id_2,
                 tid=tenant_id,
+                confidence=pair.confidence,
+                reason=pair.reason,
+                evidence=pair.evidence,
             )
-            containment_merged += 1
+            similar_created += 1
 
-        # 4. Annoter les hubs
+        # 5. Annoter les hubs
         hub_result = session.run(
             """
             MATCH (e:Entity {tenant_id: $tid})<-[:ABOUT]-(c:Claim)
@@ -491,15 +448,18 @@ def _canonicalize_entities_cross_doc(neo4j_driver, tenant_id: str) -> dict:
         )
         hubs_annotated = hub_result.single()["hubs_annotated"]
 
+        stats = merge_result.stats
         logger.info(
-            f"  → {version_merged} version + {containment_merged} containment merges, "
-            f"{hubs_annotated} hubs"
+            f"  → {stats['prefix_dedup']} prefix + {stats['case_only']} case + "
+            f"{stats['version_strip']} version + {stats['llm_merge']} LLM merges, "
+            f"{similar_created} SIMILAR_TO, {hubs_annotated} hubs"
         )
 
         return {
-            "version_merges": version_merged,
-            "containment_merges": containment_merged,
-            "total_merges": version_merged + containment_merged,
+            "total_merges": total_merged,
+            "deterministic_merges": stats["prefix_dedup"] + stats["case_only"] + stats["version_strip"],
+            "llm_merges": stats["llm_merge"],
+            "similar_to_created": similar_created,
             "hubs_annotated": hubs_annotated,
         }
 
@@ -602,6 +562,8 @@ def _cluster_cross_doc(neo4j_driver, tenant_id: str) -> dict:
             MATCH (c:Claim {tenant_id: $tid})-[:ABOUT]->(e:Entity)
             RETURN c.claim_id AS claim_id, c.doc_id AS doc_id,
                    c.text AS text, c.confidence AS confidence,
+                   c.structured_form_json AS structured_form_json,
+                   c.quality_scores_json AS quality_scores_json,
                    collect(e.normalized_name) AS entity_names
             """,
             tid=tenant_id,
@@ -616,6 +578,8 @@ def _cluster_cross_doc(neo4j_driver, tenant_id: str) -> dict:
                 "text": r["text"] or "",
                 "confidence": r["confidence"] or 0.5,
                 "entity_names": r["entity_names"] or [],
+                "structured_form_json": r.get("structured_form_json"),
+                "quality_scores_json": r.get("quality_scores_json"),
             }
             for ename in r["entity_names"]:
                 entity_to_claims[ename].add(cid)
@@ -743,9 +707,65 @@ def _cluster_cross_doc(neo4j_driver, tenant_id: str) -> dict:
 
         logger.info(f"  → {clusters_created} clusters cross-doc persistés")
 
+        # 7. Champion/Redundant marking (quality-based scoring)
+        champions_marked = 0
+        redundants_marked = 0
+        for cids, doc_ids_cluster in cross_clusters:
+            claim_objs = [claims_data[cid] for cid in cids if cid in claims_data]
+            if not claim_objs:
+                continue
+
+            # Score: 100*verif + 10*has_sf + 5*entity_count - 0.02*text_len
+            def _score_quality(c: dict) -> float:
+                import json as _json
+                verif = 0.85
+                qs_json = c.get("quality_scores_json")
+                if qs_json:
+                    try:
+                        qs = _json.loads(qs_json)
+                        verif = qs.get("verif_score", 0.85)
+                    except (ValueError, TypeError):
+                        pass
+                has_sf = 1.0 if c.get("structured_form_json") else 0.0
+                entity_count = len(c.get("entity_names", []))
+                text_len = len(c.get("text", ""))
+                return 100 * verif + 10 * has_sf + 5 * entity_count - 0.02 * text_len
+
+            scored = [(c, _score_quality(c)) for c in claim_objs]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            champion = scored[0][0]
+
+            session.run(
+                """
+                MATCH (c:Claim {claim_id: $cid, tenant_id: $tid})
+                SET c.is_champion = true
+                """,
+                cid=champion["claim_id"],
+                tid=tenant_id,
+            )
+            champions_marked += 1
+
+            for c, _ in scored[1:]:
+                session.run(
+                    """
+                    MATCH (c:Claim {claim_id: $cid, tenant_id: $tid})
+                    SET c.redundant = true, c.champion_claim_id = $champion_id
+                    """,
+                    cid=c["claim_id"],
+                    tid=tenant_id,
+                    champion_id=champion["claim_id"],
+                )
+                redundants_marked += 1
+
+        logger.info(
+            f"  → {champions_marked} champions, {redundants_marked} redundants marked"
+        )
+
         return {
             "clusters_created": clusters_created,
             "pairs_validated": pairs_validated,
+            "champions_marked": champions_marked,
+            "redundants_marked": redundants_marked,
         }
 
 

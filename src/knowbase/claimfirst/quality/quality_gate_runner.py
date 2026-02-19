@@ -363,6 +363,23 @@ class QualityGateRunner:
             claim.quality_reasons = list(reasons)
 
     @staticmethod
+    def mark_pass_on_remaining(
+        claims: List["Claim"],
+        verif_scores: Dict[str, float],
+    ) -> int:
+        """Marque explicitement PASS sur les claims sans quality_status."""
+        marked = 0
+        for claim in claims:
+            if claim.quality_status is None:
+                claim.quality_status = "PASS"
+                score = verif_scores.get(claim.claim_id)
+                if score is not None:
+                    claim.quality_scores = claim.quality_scores or {}
+                    claim.quality_scores["verif_score"] = score
+                marked += 1
+        return marked
+
+    @staticmethod
     def _run_async(coro):
         """Exécute une coroutine async depuis un contexte sync."""
         try:

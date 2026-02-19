@@ -88,12 +88,12 @@ IMPORTANT:
 - Be CONCISE: do NOT add fields beyond canonical_name, aliases, entity_type
 """
 
-USER_PROMPT_TEMPLATE = """Analyze these {count} entity names extracted from documents and group those that refer to the same thing:
+USER_PROMPT_TEMPLATE = """Analyze these {count} entity names extracted from a document.
+For each entity, a representative claim excerpt and co-entities are shown for context.
 
-ENTITIES:
 {entities_json}
 
-Return the JSON grouping. Remember:
+Group entities that refer to the same real-world thing. Return the JSON grouping. Remember:
 - Group entities that are THE SAME thing (acronyms, abbreviations, spelling variants)
 - Keep entities SEPARATE if they are genuinely different things
 - Choose the most complete/official name as canonical
@@ -159,6 +159,7 @@ class EntityCanonicalizer:
         self,
         entities: List[Entity],
         claim_entity_map: Dict[str, List[str]],
+        claim_excerpts: Optional[Dict[str, str]] = None,
     ) -> Tuple[List[Entity], Dict[str, List[str]]]:
         """
         Canonicalise les entités et met à jour les mappings.
@@ -166,11 +167,13 @@ class EntityCanonicalizer:
         Args:
             entities: Entités brutes extraites
             claim_entity_map: Mapping claim_id → [entity_ids]
+            claim_excerpts: Optional mapping entity_name → claim excerpt for context
 
         Returns:
             Tuple (entities_canonicalized, claim_entity_map_updated)
         """
         self._stats["entities_input"] = len(entities)
+        self._claim_excerpts = claim_excerpts or {}
 
         if len(entities) < self.min_entities_for_llm:
             logger.info(
@@ -316,9 +319,22 @@ class EntityCanonicalizer:
 
         self._stats["llm_calls"] += 1
 
+        # Enrichir avec claim excerpts si disponibles
+        if hasattr(self, '_claim_excerpts') and self._claim_excerpts:
+            enriched = []
+            for name in names_batch:
+                entry = {"name": name}
+                excerpt = self._claim_excerpts.get(name, "")
+                if excerpt:
+                    entry["claim_excerpt"] = excerpt[:150]
+                enriched.append(entry)
+            entities_json = json.dumps(enriched, ensure_ascii=False, indent=2)
+        else:
+            entities_json = json.dumps(names_batch, ensure_ascii=False, indent=2)
+
         user_prompt = USER_PROMPT_TEMPLATE.format(
             count=len(names_batch),
-            entities_json=json.dumps(names_batch, ensure_ascii=False, indent=2),
+            entities_json=entities_json,
         )
 
         try:

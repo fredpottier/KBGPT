@@ -374,9 +374,20 @@ class ClaimFirstOrchestrator:
 
         # Phase 2.5: Canonicaliser les Entities (LLM-based fusion)
         logger.info("[OSMOSE:ClaimFirst] Phase 2.5: Canonicalizing entities...")
+        # Construire claim_excerpts : entity_name → premier claim text mentionnant l'entité
+        claim_excerpts: Dict[str, str] = {}
+        claim_by_id = {c.claim_id: c for c in claims}
+        for entity in entities:
+            for claim_id, entity_ids in claim_entity_map.items():
+                if entity.entity_id in entity_ids:
+                    claim = claim_by_id.get(claim_id)
+                    if claim:
+                        claim_excerpts[entity.name] = claim.text
+                        break
         entities, claim_entity_map = self.entity_canonicalizer.canonicalize(
             entities=entities,
             claim_entity_map=claim_entity_map,
+            claim_excerpts=claim_excerpts,
         )
         logger.info(f"  → {len(entities)} entities after canonicalization")
 
@@ -390,6 +401,15 @@ class ClaimFirstOrchestrator:
                 f"  → {indep_stats.get('resolved', 0)} resolved, "
                 f"{indep_stats.get('bucketed', 0)} bucketed, "
                 f"{indep_stats['total_output']}/{indep_stats['total_input']} after independence"
+            )
+
+        # Phase 2.7: Marquer PASS explicitement sur les claims restantes
+        if not skip_quality_gates and gate_runner:
+            pass_count = gate_runner.mark_pass_on_remaining(
+                claims, gate_runner._verif_scores
+            )
+            logger.info(
+                f"[OSMOSE:ClaimFirst] Phase 2.7: {pass_count} claims marquées PASS"
             )
 
         # Phase 3: Matcher les Facets
