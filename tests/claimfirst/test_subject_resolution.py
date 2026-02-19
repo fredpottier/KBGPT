@@ -15,7 +15,6 @@ from datetime import datetime
 from knowbase.claimfirst.models.subject_anchor import (
     SubjectAnchor,
     AliasSource,
-    SUBJECT_BLACKLIST,
     is_valid_subject_name,
 )
 from knowbase.claimfirst.models.document_context import (
@@ -311,23 +310,74 @@ class TestSubjectResolver:
 
 
 class TestIsValidSubjectName:
-    """Tests pour la fonction is_valid_subject_name (CORRECTIF 4)."""
-
-    def test_rejects_blacklist(self):
-        """Test rejet des termes dans la blacklist."""
-        for term in ["Overview", "Introduction", "Security", "Guide"]:
-            assert not is_valid_subject_name(term)
+    """Tests pour les gates structurelles de is_valid_subject_name."""
 
     def test_rejects_short_terms(self):
-        """Test rejet des termes trop courts."""
+        """Rejet des termes trop courts (<2 mots ET <10 chars)."""
         assert not is_valid_subject_name("API")
         assert not is_valid_subject_name("DB")
+        assert not is_valid_subject_name("SAP")
+
+    def test_rejects_too_few_alpha(self):
+        """Rejet si <5 caractères alphabétiques."""
+        assert not is_valid_subject_name("1234 5678")
+        assert not is_valid_subject_name("-- 12.3")
+
+    def test_rejects_too_many_words(self):
+        """Rejet des phrases >8 mots."""
+        assert not is_valid_subject_name(
+            "using this feature in lower releases of the product"
+        )
+        assert not is_valid_subject_name(
+            "this is a very long sentence that describes something in detail"
+        )
+
+    def test_rejects_too_many_chars(self):
+        """Rejet des noms >100 caractères."""
+        long_name = "SAP S/4HANA Cloud " + "x" * 90
+        assert not is_valid_subject_name(long_name)
+
+    def test_rejects_sentence_punctuation(self):
+        """Rejet si ponctuation de phrase (;!?)."""
+        assert not is_valid_subject_name("What is SAP HANA?")
+        assert not is_valid_subject_name("Feature A; Feature B")
+        assert not is_valid_subject_name("New feature available!")
+
+    def test_rejects_pipe_layout(self):
+        """Rejet des marqueurs layout (|)."""
+        assert not is_valid_subject_name("Column A | Column B")
+        assert not is_valid_subject_name("Header | Value")
+
+    def test_rejects_non_alphanum_start(self):
+        """Rejet si commence par non-alphanum (bullet tronquée)."""
+        assert not is_valid_subject_name("• Feature overview")
+        assert not is_valid_subject_name("- Data processing")
+        assert not is_valid_subject_name("* Important note")
+
+    def test_rejects_high_comma_ratio(self):
+        """Rejet si ratio virgules élevé (≥3 et ≥50% des mots)."""
+        assert not is_valid_subject_name("data, processing, agreement, requirements")
+        assert not is_valid_subject_name("one, two, three, four, five, six")
 
     def test_accepts_valid_subjects(self):
-        """Test acceptation des sujets valides."""
+        """Acceptation des sujets légitimes."""
         assert is_valid_subject_name("SAP S/4HANA")
         assert is_valid_subject_name("Microsoft Azure")
         assert is_valid_subject_name("GDPR Compliance")
+        assert is_valid_subject_name("Output Management for SAP S/4HANA")
+        assert is_valid_subject_name("Business Partner")
+        assert is_valid_subject_name("SAP S/4HANA Cloud")
+        assert is_valid_subject_name("Kubernetes")  # 1 mot mais >=10 chars
+
+    def test_accepts_single_long_word(self):
+        """Acceptation d'un mot unique >=10 chars."""
+        assert is_valid_subject_name("Kubernetes")
+        assert is_valid_subject_name("Elasticsearch")
+
+    def test_borderline_word_count(self):
+        """8 mots exactement → accepté, 9 mots → rejeté."""
+        assert is_valid_subject_name("one two three four five six seven eight")
+        assert not is_valid_subject_name("one two three four five six seven eight nine")
 
 
 class TestExtractBootstrapQualifiers:

@@ -355,31 +355,12 @@ class SubjectAnchor(BaseModel):
         )
 
 
-# Blacklist pour création de nouveaux sujets (CORRECTIF 4)
-SUBJECT_BLACKLIST = frozenset({
-    # Termes trop génériques (anglais)
-    "overview", "introduction", "security", "guide", "document",
-    "summary", "appendix", "chapter", "section", "table", "figure",
-    "general", "information", "data", "system", "service",
-    "content", "description", "details", "notes", "reference",
-    "documentation", "manual", "tutorial", "getting started",
-    "prerequisites", "requirements", "configuration", "setup",
-
-    # Termes trop génériques (français)
-    "aperçu", "introduction", "sécurité", "guide", "document",
-    "résumé", "annexe", "chapitre", "section", "tableau", "figure",
-    "général", "information", "données", "système", "service",
-    "contenu", "description", "détails", "notes", "référence",
-})
-
-
 def is_valid_subject_name(name: str) -> bool:
     """
-    CORRECTIF 4: Vérifie si un nom de sujet est valide pour création.
+    Vérifie si un nom de sujet est valide pour création.
 
-    Conditions:
-    - Pas dans la blacklist
-    - Longueur minimale (≥2 mots ou ≥10 chars)
+    Gates structurelles language-agnostic (coût zéro, pas de blacklist).
+    Le filtrage sémantique est délégué à la validation LLM post-hoc.
 
     Args:
         name: Nom à vérifier
@@ -388,19 +369,40 @@ def is_valid_subject_name(name: str) -> bool:
         True si le nom est valide pour créer un SubjectAnchor
     """
     normalized = name.lower().strip()
-
-    # Blacklist de termes génériques
-    if normalized in SUBJECT_BLACKLIST:
-        return False
-
-    # Longueur minimale
     words = normalized.split()
+
+    # 1. Trop court : <2 mots ET <10 chars
     if len(words) < 2 and len(normalized) < 10:
         return False
 
-    # Vérifier que ce n'est pas juste des caractères génériques
+    # 2. Pas assez de lettres
     alpha_chars = sum(1 for c in normalized if c.isalpha())
     if alpha_chars < 5:
+        return False
+
+    # 3. Trop long : >8 mots → probablement une phrase
+    if len(words) > 8:
+        return False
+
+    # 4. Trop long en chars : >100 chars → description
+    if len(normalized) > 100:
+        return False
+
+    # 5. Ponctuation de phrase : ; ! ? → pas un sujet
+    if any(c in normalized for c in ";!?"):
+        return False
+
+    # 6. Marqueurs layout : | (pipes de tableaux/headers)
+    if "|" in normalized:
+        return False
+
+    # 7. Commence par non-alphanum (bullet tronquée, symbole)
+    if normalized and not normalized[0].isalnum():
+        return False
+
+    # 8. Ratio virgules élevé → phrase descriptive
+    comma_count = normalized.count(",")
+    if comma_count >= 3 and comma_count >= len(words) // 2:
         return False
 
     return True
@@ -409,6 +411,5 @@ def is_valid_subject_name(name: str) -> bool:
 __all__ = [
     "SubjectAnchor",
     "AliasSource",
-    "SUBJECT_BLACKLIST",
     "is_valid_subject_name",
 ]

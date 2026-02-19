@@ -36,7 +36,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from knowbase.claimfirst.models.subject_anchor import (
     SubjectAnchor,
-    SUBJECT_BLACKLIST,
     is_valid_subject_name,
 )
 from knowbase.claimfirst.models.document_context import ResolutionStatus

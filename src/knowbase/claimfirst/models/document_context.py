@@ -222,6 +222,10 @@ class DocumentContext(BaseModel):
         else:
             self.resolution_confidence = confidence
 
+    def remove_subject(self, subject_id: str) -> None:
+        """Retire un sujet révoqué par validation LLM."""
+        self.subject_ids = [sid for sid in self.subject_ids if sid != subject_id]
+
     def set_qualifier(self, key: str, value: str, validated: bool = True) -> None:
         """
         Définit un qualificateur pour ce document.

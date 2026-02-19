@@ -208,6 +208,7 @@ class ClaimFirstOrchestrator:
 
         # Phase 0.5: Extraire DocumentContext et résoudre SubjectAnchors (INV-8, INV-9)
         logger.info("[OSMOSE:ClaimFirst] Phase 0.5: Extracting document context...")
+        existing_subject_ids = {a.subject_id for a in self._subject_anchors}
         doc_context, new_anchors = self._extract_document_context(
             doc_id=doc_id,
             tenant_id=tenant_id,
@@ -222,6 +223,14 @@ class ClaimFirstOrchestrator:
             f"{len(new_anchors)} new anchors, "
             f"status={doc_context.resolution_status.value}"
         )
+
+        # Phase 0.5b: Valider les nouveaux sujets via LLM (quality gate)
+        new_created = [a for a in new_anchors if a.subject_id not in existing_subject_ids]
+        if new_created:
+            new_anchors = self._validate_new_subjects_llm(
+                new_created, all_anchors=new_anchors,
+                doc_context=doc_context, doc_title=doc_title,
+            )
 
         # Enrichir doc_title depuis le primary_subject si absent du cache
         # Le primary_subject est extrait par le LLM et contient souvent le titre réel
@@ -1136,6 +1145,135 @@ class ClaimFirstOrchestrator:
                         self._subject_anchors.append(result.anchor)
 
         return context, new_anchors
+
+    def _validate_new_subjects_llm(
+        self,
+        new_subjects: List[SubjectAnchor],
+        all_anchors: List[SubjectAnchor],
+        doc_context: DocumentContext,
+        doc_title: Optional[str] = None,
+        batch_size: int = 30,
+    ) -> List[SubjectAnchor]:
+        """
+        Valide les nouveaux SubjectAnchors via LLM (3 classes).
+
+        - NOISE → revoke (retiré du cache + doc_context)
+        - UNCERTAIN → conservé, tagué pour audit
+        - VALID → conservé
+
+        Fail-open : si erreur LLM/parsing → ne rien révoquer + log erreur.
+        """
+        if not new_subjects:
+            return all_anchors
+
+        for i in range(0, len(new_subjects), batch_size):
+            batch = new_subjects[i:i + batch_size]
+            verdicts = self._llm_validate_subject_batch(
+                batch, doc_title=doc_title,
+                primary_subject=doc_context.primary_subject,
+            )
+            # Fail-open : si None → on garde tout
+            if verdicts is None:
+                continue
+
+            for j, anchor in enumerate(batch):
+                idx = j + 1  # index 1-based comme envoyé au LLM
+                entry = verdicts.get(idx)
+                if not entry:
+                    continue  # Index manquant → fail-open, on garde
+
+                verdict = entry.get("verdict", "VALID")
+                reason = entry.get("reason", "")
+
+                if verdict == "NOISE":
+                    # Révoquer du cache et du doc_context
+                    if anchor in self._subject_anchors:
+                        self._subject_anchors.remove(anchor)
+                    doc_context.remove_subject(anchor.subject_id)
+                    all_anchors = [a for a in all_anchors if a.subject_id != anchor.subject_id]
+                    logger.info(
+                        f"[OSMOSE:ClaimFirst] Subject revoked by LLM: "
+                        f"'{anchor.canonical_name}' (reason={reason})"
+                    )
+                elif verdict == "UNCERTAIN":
+                    logger.info(
+                        f"[OSMOSE:ClaimFirst] Subject uncertain (kept): "
+                        f"'{anchor.canonical_name}' (reason={reason})"
+                    )
+                # VALID → rien à faire
+
+        return all_anchors
+
+    def _llm_validate_subject_batch(
+        self,
+        anchors: List[SubjectAnchor],
+        doc_title: Optional[str] = None,
+        primary_subject: Optional[str] = None,
+    ) -> Optional[Dict[int, Dict]]:
+        """
+        1 appel LLM pour classifier N sujets en VALID/NOISE/UNCERTAIN.
+
+        Returns:
+            dict {index: {"verdict": "VALID|NOISE|UNCERTAIN", "reason": str}}
+            ou None si erreur (fail-open)
+        """
+        from knowbase.common.llm_router import get_llm_router, TaskType
+
+        subjects_text = "\n".join(
+            f"{i+1}. \"{a.canonical_name}\""
+            for i, a in enumerate(anchors)
+        )
+
+        ctx_lines = []
+        if doc_title:
+            ctx_lines.append(f"Document title: {doc_title}")
+        if primary_subject:
+            ctx_lines.append(f"Primary subject: {primary_subject}")
+        doc_ctx = "\n".join(ctx_lines) if ctx_lines else "No document context available."
+
+        prompt = f"""Classify each candidate subject name as VALID, NOISE, or UNCERTAIN.
+
+VALID = legitimate document subject (product name, technology, standard, concept, methodology, specification)
+NOISE = clearly NOT a subject (sentence fragment, action phrase, generic description, vague term)
+UNCERTAIN = ambiguous, could be either
+
+Document context:
+{doc_ctx}
+
+Candidate subjects:
+{subjects_text}
+
+Return JSON: {{"results": [{{"index": 1, "verdict": "VALID", "reason": "product name"}}]}}"""
+
+        router = get_llm_router()
+        try:
+            response = router.complete(
+                task_type=TaskType.METADATA_EXTRACTION,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=500,
+                response_format={"type": "json_object"},
+            ).strip()
+
+            data = json.loads(response)
+            results = data.get("results", [])
+
+            verdict_map: Dict[int, Dict] = {}
+            for entry in results:
+                idx = entry.get("index")
+                if isinstance(idx, int) and 1 <= idx <= len(anchors):
+                    verdict_map[idx] = {
+                        "verdict": entry.get("verdict", "VALID"),
+                        "reason": entry.get("reason", ""),
+                    }
+
+            return verdict_map
+
+        except Exception as e:
+            logger.warning(
+                f"[OSMOSE:ClaimFirst] Subject validation LLM failed (fail-open): {e}"
+            )
+            return None
 
     def _resolve_comparable_subject(
         self,

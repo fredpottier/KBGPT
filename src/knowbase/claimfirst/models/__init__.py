@@ -36,7 +36,6 @@ from knowbase.claimfirst.models.result import (
 from knowbase.claimfirst.models.subject_anchor import (
     SubjectAnchor,
     AliasSource,
-    SUBJECT_BLACKLIST,
     is_valid_subject_name,
 )
 from knowbase.claimfirst.models.document_context import (
@@ -108,7 +107,6 @@ __all__ = [
     # INV-9: Subject Resolution
     "SubjectAnchor",
     "AliasSource",
-    "SUBJECT_BLACKLIST",
     "is_valid_subject_name",
     # INV-8: Document Context
     "DocumentContext",
