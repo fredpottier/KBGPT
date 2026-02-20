@@ -117,6 +117,7 @@ class SubjectResolver:
         existing_anchors: List[SubjectAnchor],
         doc_id: Optional[str] = None,
         create_if_missing: bool = True,
+        skip_name_validation: bool = False,
     ) -> ResolverResult:
         """
         Résout un sujet brut vers un SubjectAnchor.
@@ -126,6 +127,8 @@ class SubjectResolver:
             existing_anchors: Liste des SubjectAnchor existants
             doc_id: Document source (pour provenance)
             create_if_missing: Si True, crée un nouveau sujet si non trouvé
+            skip_name_validation: Si True, bypasse is_valid_subject_name()
+                (pour sujets déjà validés par LLM, ex: Phase 2.8)
 
         Returns:
             ResolverResult avec (anchor, status, confidence)
@@ -186,7 +189,7 @@ class SubjectResolver:
 
         # 5. Rien trouvé → créer nouveau SubjectAnchor (AVEC FILTRE - CORRECTIF 4)
         if create_if_missing:
-            return self._create_new_anchor(raw_subject, doc_id)
+            return self._create_new_anchor(raw_subject, doc_id, skip_name_validation)
         else:
             return ResolverResult(
                 anchor=None,
@@ -347,6 +350,7 @@ class SubjectResolver:
         self,
         raw_subject: str,
         doc_id: Optional[str],
+        skip_name_validation: bool = False,
     ) -> ResolverResult:
         """
         Crée un nouveau SubjectAnchor avec filtrage (CORRECTIF 4).
@@ -359,11 +363,12 @@ class SubjectResolver:
         Args:
             raw_subject: Sujet brut
             doc_id: Document source
+            skip_name_validation: Bypasse is_valid_subject_name()
 
         Returns:
             ResolverResult avec nouveau anchor ou rejection
         """
-        if not is_valid_subject_name(raw_subject):
+        if not skip_name_validation and not is_valid_subject_name(raw_subject):
             self._stats["rejected"] += 1
             logger.debug(
                 f"[SubjectResolver] Rejected subject (invalid): '{raw_subject}'"
@@ -420,6 +425,7 @@ class SubjectResolver:
         raw_subjects: List[str],
         existing_anchors: List[SubjectAnchor],
         doc_id: Optional[str] = None,
+        skip_name_validation: bool = False,
     ) -> List[ResolverResult]:
         """
         Résout une liste de sujets bruts.
@@ -428,6 +434,8 @@ class SubjectResolver:
             raw_subjects: Sujets bruts à résoudre
             existing_anchors: Anchors existants
             doc_id: Document source
+            skip_name_validation: Bypasse is_valid_subject_name()
+                (pour sujets déjà validés par LLM, ex: Phase 2.8)
 
         Returns:
             Liste de ResolverResult
@@ -442,6 +450,7 @@ class SubjectResolver:
                 raw_subject=raw_subject,
                 existing_anchors=current_anchors,
                 doc_id=doc_id,
+                skip_name_validation=skip_name_validation,
             )
             results.append(result)
 

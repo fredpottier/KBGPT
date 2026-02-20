@@ -1351,7 +1351,7 @@ Judge ONLY based on the evidence — is this entity a central topic of the docum
 
 Classify each as:
 - SUBJECT: a central topic of this document, useful for navigation
-- TOO_GENERIC: too broad or common to serve as a navigation pivot (e.g. "system", "data", "process", "role")
+- TOO_GENERIC: too broad to serve as a navigation pivot. Includes: common nouns ("system", "data", "process", "role", "user"), the corpus owner or publisher name if it appears in every document, and umbrella terms so broad they match most documents in a collection
 - NOISE: not a meaningful topic
 
 Candidates:
@@ -1393,10 +1393,13 @@ Return JSON:
 
         logger.info(f"  → LLM selected {len(valid_names)} subjects: {valid_names}")
 
+        # Phase 2.8 subjects sont triple-validés (coverage + LLM + canon)
+        # → bypass is_valid_subject_name() qui rejetterait les noms courts
         results = self.subject_resolver.resolve_batch(
             raw_subjects=valid_names,
             existing_anchors=self._subject_anchors,
             doc_id=doc_id,
+            skip_name_validation=True,
         )
 
         entity_anchors = []

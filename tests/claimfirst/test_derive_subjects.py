@@ -140,7 +140,11 @@ def _set_llm_error(error):
 
 
 def _make_realistic_scenario(total_claims=200):
-    """6 entités avec coverages variées : 30, 20, 16, 14, 10, 3 claims."""
+    """6 entités avec coverages variées : 30, 20, 16, 14, 10, 3 claims.
+
+    Inclut des noms courts (ABAP, role) — Phase 2.8 bypasse la validation
+    structurelle car ces candidats sont LLM-validés.
+    """
     claims = [
         _make_claim(f"Claim text number {i} with enough length", claim_id=f"c_{i:03d}")
         for i in range(total_claims)
@@ -263,11 +267,14 @@ class TestEvidencePack:
 
 class TestLLMClassification:
     def test_subject_and_generic(self):
-        """SUBJECT gardés, TOO_GENERIC/NOISE exclus."""
+        """SUBJECT gardés, TOO_GENERIC/NOISE exclus. Noms courts passent grâce au bypass."""
         claims, entities, cem = _make_realistic_scenario(200)
         orch = _build_orchestrator()
         doc_context = _make_doc_context(subject_ids=["old_subject_1"])
 
+        # 5 candidats (tous passent coverage) :
+        # 1=SAP S/4HANA(30), 2=Personal Data(20), 3=ABAP(16),
+        # 4=role(14), 5=Authorization Concept(10)
         _set_llm_response({"decisions": [
             {"index": 1, "verdict": "SUBJECT", "reason": "central product"},
             {"index": 2, "verdict": "SUBJECT", "reason": "privacy concept"},
@@ -292,9 +299,10 @@ class TestLLMClassification:
         names = {a.canonical_name for a in anchors}
         assert names == {"SAP S/4HANA", "Personal Data", "ABAP"}
 
-        # resolve_batch reçoit uniquement les SUBJECT
-        raw = orch.subject_resolver.resolve_batch.call_args.kwargs["raw_subjects"]
-        assert set(raw) == {"SAP S/4HANA", "Personal Data", "ABAP"}
+        # resolve_batch reçoit les SUBJECT avec skip_name_validation=True
+        call_kwargs = orch.subject_resolver.resolve_batch.call_args.kwargs
+        assert set(call_kwargs["raw_subjects"]) == {"SAP S/4HANA", "Personal Data", "ABAP"}
+        assert call_kwargs["skip_name_validation"] is True
 
     def test_uses_canonical_entity_names(self):
         """Les noms envoyés au resolver sont les noms canoniques (post Phase 2.5)."""
@@ -381,6 +389,45 @@ class TestFallbacks:
             doc_context=_make_doc_context(), doc_id="doc_028", tenant_id="default",
         )
         assert anchors == []
+
+    def test_short_names_accepted_via_bypass(self):
+        """Noms courts (RISE, ERP) acceptés grâce au bypass validation Phase 2.8."""
+        claims = [_make_claim(f"Text {i} enough padding", claim_id=f"c_{i:03d}") for i in range(200)]
+        entities = [
+            _make_entity("RISE", "ent_rise"),
+            _make_entity("ERP", "ent_erp"),
+            _make_entity("SAP S/4HANA", "ent_s4"),
+        ]
+        cem = {}
+        for i in range(60):
+            ent_idx = i // 20
+            cem[f"c_{i:03d}"] = [entities[ent_idx].entity_id]
+
+        orch = _build_orchestrator()
+        _set_llm_response({"decisions": [
+            {"index": 1, "verdict": "SUBJECT", "reason": "SAP program"},
+            {"index": 2, "verdict": "SUBJECT", "reason": "enterprise resource planning"},
+            {"index": 3, "verdict": "SUBJECT", "reason": "main product"},
+        ]})
+        orch.subject_resolver.resolve_batch.return_value = [
+            ResolverResult(anchor=_make_anchor("RISE", "subj_rise"), status=ResolutionStatus.RESOLVED, confidence=0.95, match_type="new"),
+            ResolverResult(anchor=_make_anchor("ERP", "subj_erp"), status=ResolutionStatus.RESOLVED, confidence=0.95, match_type="new"),
+            ResolverResult(anchor=_make_anchor("SAP S/4HANA", "subj_s4"), status=ResolutionStatus.RESOLVED, confidence=0.95, match_type="new"),
+        ]
+
+        anchors, _ = orch._derive_subjects_from_entities(
+            entities=entities, claim_entity_map=cem, claims=claims,
+            doc_context=_make_doc_context(), doc_id="doc_028", tenant_id="default",
+        )
+
+        # Les 3 passent — noms courts inclus grâce au bypass
+        assert len(anchors) == 3
+        names = {a.canonical_name for a in anchors}
+        assert "RISE" in names
+        assert "ERP" in names
+        # skip_name_validation=True est passé au resolver
+        call_kwargs = orch.subject_resolver.resolve_batch.call_args.kwargs
+        assert call_kwargs["skip_name_validation"] is True
 
 
 class TestResolverDedup:
@@ -476,7 +523,7 @@ class TestLimits:
             for j in range(8)
         ]})
 
-        def fake_resolve(raw_subjects, existing_anchors, doc_id):
+        def fake_resolve(raw_subjects, existing_anchors, doc_id, **kwargs):
             return [
                 ResolverResult(
                     anchor=_make_anchor(name, f"subj_{i}"),
