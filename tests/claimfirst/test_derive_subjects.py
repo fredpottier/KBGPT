@@ -237,6 +237,62 @@ class TestCoverageFilter:
         assert len(self._run_filter(claims, entities, cem)) == 0
 
 
+class TestAdaptiveCoverage:
+    """Seuil adaptatif pour gros documents."""
+
+    def test_large_doc_lower_threshold(self):
+        """Avec 2000 claims, une entité à 15 claims (0.75%) passe le seuil adaptatif."""
+        claims = [_make_claim(f"Text {i} padding", claim_id=f"c_{i:04d}") for i in range(2000)]
+        entities = [_make_entity("Personal Data", "ent_pd")]
+        cem = {f"c_{i:04d}": ["ent_pd"] for i in range(15)}  # 15/2000 = 0.75%
+
+        orch = _build_orchestrator()
+        _set_llm_response({"decisions": [
+            {"index": 1, "verdict": "SUBJECT", "reason": "privacy concept"},
+        ]})
+        orch.subject_resolver.resolve_batch.return_value = [
+            ResolverResult(
+                anchor=_make_anchor("Personal Data", "subj_pd"),
+                status=ResolutionStatus.RESOLVED, confidence=0.95, match_type="new",
+            ),
+        ]
+
+        anchors, _ = orch._derive_subjects_from_entities(
+            entities=entities, claim_entity_map=cem, claims=claims,
+            doc_context=_make_doc_context(), doc_id="doc_028", tenant_id="default",
+        )
+        # 15 claims ≥ 8 (MIN_ENTITY_CLAIMS) et 0.75% ≥ 0.5% (floor) → passe
+        assert len(anchors) == 1
+        assert anchors[0].canonical_name == "Personal Data"
+
+    def test_large_doc_still_rejects_tiny(self):
+        """Avec 2000 claims, 5 claims ne passe ni le seuil absolu ni le floor."""
+        claims = [_make_claim(f"Text {i} padding", claim_id=f"c_{i:04d}") for i in range(2000)]
+        entities = [_make_entity("Minor Concept", "ent_minor")]
+        cem = {f"c_{i:04d}": ["ent_minor"] for i in range(5)}  # 5/2000 = 0.25%, <8 claims
+
+        orch = _build_orchestrator()
+        anchors, _ = orch._derive_subjects_from_entities(
+            entities=entities, claim_entity_map=cem, claims=claims,
+            doc_context=_make_doc_context(), doc_id="doc_028", tenant_id="default",
+        )
+        assert anchors == []
+
+    def test_small_doc_keeps_3pct_threshold(self):
+        """Avec 200 claims, le seuil adaptatif = max(8/200, 0.005) = 4% → plus strict."""
+        claims = [_make_claim(f"Text {i} padding", claim_id=f"c_{i:03d}") for i in range(200)]
+        entities = [_make_entity("Marginal Topic", "ent_mt")]
+        # 6 claims = 3% mais < 8 absolu → rejeté
+        cem = {f"c_{i:03d}": ["ent_mt"] for i in range(6)}
+
+        orch = _build_orchestrator()
+        anchors, _ = orch._derive_subjects_from_entities(
+            entities=entities, claim_entity_map=cem, claims=claims,
+            doc_context=_make_doc_context(), doc_id="doc_028", tenant_id="default",
+        )
+        assert anchors == []
+
+
 # ===================================================================
 # Tests Étape B — Evidence pack diversifié
 # ===================================================================

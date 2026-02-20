@@ -1275,7 +1275,8 @@ class ClaimFirstOrchestrator:
         from collections import Counter, defaultdict
 
         MIN_ENTITY_CLAIMS = 8
-        MIN_ENTITY_COVERAGE = 0.03  # 3% des claims
+        MIN_ENTITY_COVERAGE_SMALL = 0.03  # 3% pour petits docs
+        MIN_ENTITY_COVERAGE_FLOOR = 0.005  # 0.5% plancher pour gros docs
         MAX_CANDIDATES_FOR_LLM = 12
         MAX_FINAL_SUBJECTS = 5
 
@@ -1288,16 +1289,41 @@ class ClaimFirstOrchestrator:
         entity_by_id = {e.entity_id: e for e in entities}
 
         total_claims = len(claims)
+        # Seuil adaptatif : 3% pour petits docs, dégressif pour gros docs
+        # garantit que le seuil ne descend pas en-dessous de MIN_ENTITY_CLAIMS
+        if total_claims > 0:
+            min_coverage = max(
+                MIN_ENTITY_CLAIMS / total_claims,
+                MIN_ENTITY_COVERAGE_FLOOR,
+            )
+        else:
+            min_coverage = MIN_ENTITY_COVERAGE_SMALL
+        logger.debug(
+            f"  Phase 2.8: adaptive coverage threshold = {min_coverage:.3f} "
+            f"({min_coverage * 100:.1f}%) for {total_claims} claims"
+        )
+
         candidates = []
         for entity_id, claim_count in entity_claim_counts.items():
             entity = entity_by_id.get(entity_id)
             if not entity:
                 continue
             coverage = claim_count / total_claims if total_claims > 0 else 0
-            if claim_count >= MIN_ENTITY_CLAIMS and coverage >= MIN_ENTITY_COVERAGE:
+            if claim_count >= MIN_ENTITY_CLAIMS and coverage >= min_coverage:
                 candidates.append((entity, claim_count, coverage))
 
         candidates.sort(key=lambda x: x[1], reverse=True)
+
+        if logger.isEnabledFor(logging.DEBUG) and candidates:
+            top_display = candidates[:8]
+            logger.debug(
+                f"  Phase 2.8: top candidates: "
+                + ", ".join(
+                    f"'{e.name}'({cnt}, {cov:.1%})"
+                    for e, cnt, cov in top_display
+                )
+            )
+
         candidates = candidates[:MAX_CANDIDATES_FOR_LLM]
 
         if not candidates:
