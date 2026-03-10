@@ -16,6 +16,10 @@ Knowbase est une plateforme dockerisée de gestion et recherche intelligente de 
 #### 🗄️ **Stockage & Base de Données**
 - **Base Vectorielle** : **Qdrant v1.15.1** - Base de données vectorielle haute performance pour la recherche de similarité
 - **Collections Spécialisées** : **Collections dédiées Q/A RFP** - Séparation logique des données avec recherche cascade
+- **Knowledge Graph** : **Neo4j 5.26.0** - Base de données graphe pour relations sémantiques OSMOSE (ports 7474/7687)
+  - **Plugins** : APOC + Graph Data Science (GDS) Community
+  - **Mémoire** : Heap 2-4GB, PageCache 2GB (optimisé pour 45k+ nodes)
+- **Base Métadonnées** : **PostgreSQL 16 + pgvector** - Gestion sessions, utilisateurs, audit trail, historique imports
 - **Queue de Tâches** : **Redis 7.2** - Système de files d'attente avec persistance AOF pour l'orchestration asynchrone
 - **Historique d'Imports** : **Redis + Persistance** - Suivi complet des imports avec gestion de l'état en temps réel
 - **Stockage Fichiers** : Système de fichiers local avec organisation hiérarchique dans `/data`
@@ -38,8 +42,18 @@ Knowbase est une plateforme dockerisée de gestion et recherche intelligente de 
 
 #### 🐳 **Conteneurisation & Orchestration**
 - **Conteneurs** : **Docker** - Environnement isolé et reproductible pour chaque service
-- **Orchestration** : **Docker Compose** - Orchestration multi-services avec networking
-- **Volumes** : Persistance des données Qdrant et cache des modèles
+- **Orchestration** : **Docker Compose Multi-fichiers** - Architecture séparée infra/app/monitoring
+  - `docker-compose.infra.yml` : Infrastructure stateful (Qdrant, Redis, Neo4j, PostgreSQL)
+  - `docker-compose.yml` : Application stateless (API, Worker, Frontend, Folder-Watcher)
+  - `docker-compose.monitoring.yml` : Monitoring (Grafana, Loki, Promtail)
+- **GPU Support** : **NVIDIA GPU avec CUDA** - Accélération hardware pour worker d'ingestion
+  - Configuration : 1 GPU, CUDA_VISIBLE_DEVICES="0"
+  - PyTorch avec CUDA 12.0 pour RTX series
+  - Mémoire partagée 2GB (shm_size) pour chargement modèles PyTorch
+- **Folder Watcher** : **Service de surveillance automatique** - Ingestion automatique des documents
+  - Surveille `data/watch/` et copie vers `data/docs_in/` pour traitement
+  - Formats supportés : PDF, PPTX, Excel
+- **Volumes** : Persistance des données Qdrant, Neo4j, Redis, PostgreSQL et cache des modèles
 - **Networks** : Réseau Docker privé `knowbase_net` pour communication inter-services
 
 #### 📄 **Traitement de Documents**
@@ -136,6 +150,7 @@ knowbase/
 │   │   │   ├── excel_pipeline.py    # Traitement Excel Q/A pour collection RFP
 │   │   │   └── fill_excel_pipeline.py # Remplissage RFP avec recherche cascade
 │   │   ├── 📁 processors/           # Processeurs de contenu
+│   │   ├── folder_watcher.py        # Service de surveillance automatique (OSMOSE Phase 3)
 │   │   ├── 📁 queue/                # Orchestration RQ (Redis Queue)
 │   │   │   ├── dispatcher.py        # Distribution des tâches
 │   │   │   ├── worker.py            # Exécution des tâches
@@ -210,6 +225,20 @@ knowbase/
 - **Port** : 6379
 - **Usage** : Distribution asynchrone des tâches de traitement
 
+#### 🕸️ **knowbase-neo4j** (Knowledge Graph)
+- **Base de données graphe** : Relations sémantiques et Knowledge Graph OSMOSE
+- **Ports** : 7474 (Browser UI), 7687 (Bolt protocol)
+- **Credentials** : `neo4j / graphiti_neo4j_pass`
+- **Plugins** : APOC + Graph Data Science (GDS) Community
+- **Mémoire** : Heap 2-4GB, PageCache 2GB (optimisé pour 45k+ nodes)
+- **URL** : `http://localhost:7474`
+
+#### 🗄️ **knowbase-postgres** (Base Métadonnées)
+- **Base relationnelle** : Sessions, utilisateurs, audit trail, historique imports
+- **Port** : 5432
+- **Credentials** : `knowbase / knowbase_secure_pass`
+- **Extension** : pgvector pour recherche vectorielle
+
 #### 🚀 **knowbase-app** (Backend FastAPI)
 - **API principale** : Endpoints de recherche, ingestion et monitoring
 - **Port** : 8000 (configurable via `APP_PORT`)
@@ -221,6 +250,17 @@ knowbase/
 - **Traitement** : Exécution des pipelines d'ingestion en arrière-plan
 - **Queue** : Basé sur RQ (Redis Queue)
 - **Formats** : PPTX, PDF, Excel, DOCX avec OCR et extraction
+- **GPU Support** : Accélération NVIDIA CUDA (1 GPU, CUDA 12.0)
+  - PyTorch avec support CUDA pour embeddings et modèles ML
+  - Mémoire partagée 2GB (shm_size) pour chargement modèles
+  - Variable `CUDA_VISIBLE_DEVICES="0"` pour mapping GPU
+
+#### 👁️ **knowbase-watcher** (Folder Watcher)
+- **Surveillance automatique** : Ingestion automatique de documents
+- **Répertoire surveillé** : `data/watch/`
+- **Flux** : `watch/` → copie vers `docs_in/` → worker → `docs_done/`
+- **Formats supportés** : PDF, PPTX (.pptx/.ppt), Excel (.xlsx/.xls)
+- **Stabilisation** : Délai 2s avant traitement (attente fin copie)
 
 #### 🖥️ **knowbase-frontend** (Interface Next.js)
 - **Frontend Moderne** : Interface React avec TypeScript et Chakra UI
@@ -259,15 +299,52 @@ cp .env.example .env
 # Variables essentielles à configurer :
 # OPENAI_API_KEY=your-openai-key
 # ANTHROPIC_API_KEY=your-anthropic-key (optionnel, pour Claude)
+# NEO4J_PASSWORD=graphiti_neo4j_pass (ou votre mot de passe)
+# POSTGRES_PASSWORD=knowbase_secure_pass (ou votre mot de passe)
+
+# Variables optionnelles pour GPU :
+# CUDA_VISIBLE_DEVICES=0  (si vous avez un GPU NVIDIA)
+# GPU_UNLOAD_TIMEOUT_MINUTES=20  (timeout avant déchargement modèles GPU)
 ```
 
 ### Lancement des Services
-```bash
-# Construction et démarrage de tous les services
-docker-compose up --build
 
-# Démarrage en arrière-plan
-docker-compose up -d --build
+**⚠️ Méthode Recommandée** : Utiliser le script PowerShell `kw.ps1` pour gérer le projet :
+
+```powershell
+# Démarrage complet (infrastructure + application)
+./kw.ps1 start
+
+# Démarrage sélectif
+./kw.ps1 start infra        # Infrastructure seulement (Qdrant, Redis, Neo4j, PostgreSQL)
+./kw.ps1 start app          # Application seulement (API, Worker, Frontend, Watcher)
+
+# Arrêt
+./kw.ps1 stop               # Arrêter tout
+./kw.ps1 stop app           # Arrêter application seulement (garde l'infra)
+
+# Status et logs
+./kw.ps1 status             # Statut de tous les services
+./kw.ps1 logs app           # Logs du backend
+./kw.ps1 logs worker        # Logs du worker
+./kw.ps1 logs neo4j         # Logs Neo4j
+
+# Informations système
+./kw.ps1 info               # Affiche TOUTES les URLs + credentials
+
+# Backup & Restore
+./kw.ps1 backup <name>      # Backup complet (Neo4j, Qdrant, PostgreSQL, Redis, cache)
+./kw.ps1 restore <name>     # Restore complet
+```
+
+**Alternative** : Commandes Docker Compose manuelles (3 fichiers) :
+
+```bash
+# Architecture multi-fichiers (infra + app + monitoring)
+docker-compose -f docker-compose.infra.yml -f docker-compose.yml up -d
+
+# Ou via variable COMPOSE_FILE dans .env (déjà configurée)
+docker-compose up -d
 
 # Suivi des logs
 docker-compose logs -f
@@ -280,6 +357,10 @@ Une fois démarrés, les services sont accessibles via :
 - **📚 API Documentation** : `http://localhost:8000/docs` (Swagger UI)
 - **🖥️ Interface Streamlit 🟡 Legacy** : `http://localhost:8501` (Interface legacy)
 - **🔍 Base Qdrant** : `http://localhost:6333/dashboard`
+- **🕸️ Neo4j Browser** : `http://localhost:7474` (Credentials : `neo4j / graphiti_neo4j_pass`)
+- **🗄️ PostgreSQL** : `localhost:5432` (Credentials : `knowbase / knowbase_secure_pass`)
+
+**💡 Astuce** : Utilisez `./kw.ps1 info` pour afficher toutes les URLs et credentials en un coup d'œil.
 
 ## 🛠️ Utilisation
 
@@ -296,6 +377,16 @@ Une fois démarrés, les services sont accessibles via :
 1. Accédez à "RFP Excel" dans la navigation
 2. **Import Questions/Réponses** : Uploadez des fichiers Excel Q/A avec configuration des colonnes
 3. **Remplir RFP vide** : Uploadez des RFP vides pour remplissage automatique via recherche cascade
+
+#### Via Folder Watcher (Automatique)
+1. Déposez vos documents dans le répertoire `data/watch/`
+2. Le service détecte automatiquement les nouveaux fichiers (polling 5s)
+3. Formats supportés : PDF, PPTX (.pptx/.ppt), Excel (.xlsx/.xls)
+4. Traitement automatique : `watch/` → copie vers `docs_in/` → worker → `docs_done/`
+5. Fichiers temporaires (.tmp, ~) et cachés (.) sont ignorés
+6. Suivez le traitement dans l'interface Next.js "Suivi imports"
+
+**⚠️ Avantages** : Ingestion automatique sans interaction manuelle, idéal pour traitement par lots
 
 #### Via Interface Streamlit (🟡 Legacy)
 1. Accédez à `http://localhost:8501`
@@ -662,6 +753,12 @@ docker-compose exec qdrant cp -r /qdrant/storage /qdrant/backup
 - [x] **Gestion avancée des imports** - ✅ Historique, tracking, suppression complète
 - [x] **Workflows RFP Excel spécialisés** - ✅ Import Q/A et remplissage automatique
 - [x] **Collections dédiées Q/A** - ✅ Recherche cascade intelligente
+- [x] **Knowledge Graph Neo4j** - ✅ Relations sémantiques et graphe de connaissances (OSMOSE)
+- [x] **PostgreSQL + pgvector** - ✅ Base métadonnées et recherche vectorielle
+- [x] **Folder Watcher** - ✅ Surveillance automatique et ingestion (OSMOSE Phase 3)
+- [x] **Support GPU NVIDIA** - ✅ Accélération CUDA pour worker (PyTorch + CUDA 12.0)
+- [x] **Monitoring (Grafana + Loki)** - ✅ Observabilité et analyse des logs
+- [x] **Script de gestion kw.ps1** - ✅ Outil unifié start/stop/backup/restore
 - [ ] Centralisation complète du chargement des modèles ML
 - [ ] Système de claims pour la gestion d'incohérences
 
@@ -669,6 +766,7 @@ docker-compose exec qdrant cp -r /qdrant/storage /qdrant/backup
 - [ ] Support multi-tenant avec isolation des données
 - [ ] API de webhooks pour intégrations externes
 - [ ] Système de notifications push
+- [ ] Migration OCR vers OnnxTR (modèles lourds, meilleure précision)
 
 ### À Long Terme
 - [ ] IA conversationnelle intégrée (RAG avancé)
@@ -685,6 +783,8 @@ docker-compose exec qdrant cp -r /qdrant/storage /qdrant/backup
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.48+-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org/)
 [![Qdrant](https://img.shields.io/badge/Qdrant-1.15+-DC382D?logo=qdrant&logoColor=white)](https://qdrant.tech/)
+[![Neo4j](https://img.shields.io/badge/Neo4j-5.26-008CC1?logo=neo4j&logoColor=white)](https://neo4j.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7.2+-DC382D?logo=redis&logoColor=white)](https://redis.io/)
 
 ---
