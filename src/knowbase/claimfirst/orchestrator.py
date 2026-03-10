@@ -506,6 +506,11 @@ class ClaimFirstOrchestrator:
         relations.extend(chain_relations)
         logger.info(f"  → {len(chain_relations)} chains detected")
 
+        # Phase 6.6: Extraction QuestionSignatures (Level A — regex, zero-cost)
+        logger.info("[OSMOSE:ClaimFirst] Phase 6.6: Extracting QuestionSignatures...")
+        question_signatures = self._extract_question_signatures(claims, doc_id, tenant_id)
+        logger.info(f"  → {len(question_signatures)} QuestionSignatures extracted (Level A)")
+
         # Construire le résultat
         processing_time_ms = int((time.time() - start_time) * 1000)
         extractor_stats = self.claim_extractor.get_stats()
@@ -524,6 +529,7 @@ class ClaimFirstOrchestrator:
             facets=facets,
             clusters=clusters,
             relations=relations,
+            question_signatures=question_signatures,
             claim_passage_links=claim_passage_links,
             claim_entity_links=claim_entity_links,
             claim_facet_links=claim_facet_links,
@@ -538,7 +544,8 @@ class ClaimFirstOrchestrator:
             f"{result.claim_count} claims, "
             f"{result.entity_count} entities, "
             f"{result.facet_count} facets, "
-            f"{result.cluster_count} clusters in {processing_time_ms}ms"
+            f"{result.cluster_count} clusters, "
+            f"{result.qs_count} QS in {processing_time_ms}ms"
         )
 
         # Ligne résumé structurée logfmt — parsable par Loki pour dashboard Grafana
@@ -549,6 +556,7 @@ class ClaimFirstOrchestrator:
             f"entities={result.entity_count} "
             f"facets={result.facet_count} "
             f"clusters={result.cluster_count} "
+            f"qs={result.qs_count} "
             f"llm_calls={result.llm_calls} "
             f"llm_tokens={result.llm_tokens_used} "
             f"duration_ms={processing_time_ms}"
@@ -589,6 +597,7 @@ class ClaimFirstOrchestrator:
                     passages=result.passages,
                     doc_id=result.doc_id,
                     tenant_id=result.tenant_id,
+                    doc_context=result.doc_context,
                 )
                 result.qdrant_points_upserted = qdrant_count
                 logger.info(f"  → {qdrant_count} points upserted to Qdrant Layer R")
@@ -600,6 +609,33 @@ class ClaimFirstOrchestrator:
         return result
 
     # =========================================================================
+    # Phase 6.6: QuestionSignature extraction (Level A — regex, zero-cost)
+    # =========================================================================
+
+    def _extract_question_signatures(
+        self,
+        claims: List[Claim],
+        doc_id: str,
+        tenant_id: str,
+    ) -> list:
+        """
+        Extrait les QuestionSignatures Level A (regex) depuis les claims.
+
+        Zero-cost LLM — patterns déterministes uniquement.
+        """
+        from knowbase.claimfirst.extractors.question_signature_extractor import (
+            extract_question_signatures_level_a,
+        )
+
+        try:
+            return extract_question_signatures_level_a(claims, doc_id, tenant_id)
+        except Exception as e:
+            logger.warning(
+                f"[OSMOSE:ClaimFirst] QS extraction failed (non-blocking): {e}"
+            )
+            return []
+
+    # =========================================================================
     # Phase 8: Qdrant Layer R persistence
     # =========================================================================
 
@@ -608,6 +644,7 @@ class ClaimFirstOrchestrator:
         passages: List[Passage],
         doc_id: str,
         tenant_id: str,
+        doc_context: Optional[Any] = None,
     ) -> int:
         """
         Persiste les Passages ClaimFirst comme chunks vectoriels dans Qdrant Layer R.
@@ -698,7 +735,18 @@ class ClaimFirstOrchestrator:
             )
 
         ensure_layer_r_collection()
-        n = upsert_layer_r(pairs, tenant_id=tenant_id)
+
+        # Extraire axis_values du doc_context pour enrichir les chunks Qdrant (B.1)
+        doc_axis_map: dict[str, str] | None = None
+        if doc_context and hasattr(doc_context, 'axis_values') and doc_context.axis_values:
+            doc_axis_map = {}
+            for k, v in doc_context.axis_values.items():
+                if isinstance(v, dict) and v.get("scalar_value"):
+                    doc_axis_map[k] = v["scalar_value"]
+            if not doc_axis_map:
+                doc_axis_map = None
+
+        n = upsert_layer_r(pairs, tenant_id=tenant_id, doc_axis_values=doc_axis_map)
 
         return n
 

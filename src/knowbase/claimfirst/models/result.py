@@ -23,6 +23,7 @@ from knowbase.claimfirst.models.document_context import DocumentContext
 from knowbase.claimfirst.models.subject_anchor import SubjectAnchor
 from knowbase.claimfirst.models.applicability_axis import ApplicabilityAxis
 from knowbase.claimfirst.models.comparable_subject import ComparableSubject
+from knowbase.claimfirst.models.question_signature import QuestionSignature
 
 
 
@@ -304,6 +305,12 @@ class ClaimFirstResult(BaseModel):
         description="Relations entre claims"
     )
 
+    # QuestionSignatures (Phase C — Level A regex)
+    question_signatures: List[QuestionSignature] = Field(
+        default_factory=list,
+        description="QuestionSignatures extraites des claims (Level A regex)"
+    )
+
     # Liens (source_id, target_id)
     claim_passage_links: List[Tuple[str, str]] = Field(
         default_factory=list,
@@ -402,6 +409,11 @@ class ClaimFirstResult(BaseModel):
         return len(self.subject_anchors)
 
     @property
+    def qs_count(self) -> int:
+        """Nombre de QuestionSignatures extraites."""
+        return len(self.question_signatures)
+
+    @property
     def detected_axes_count(self) -> int:
         """Nombre d'axes d'applicabilité détectés."""
         return len(self.detected_axes)
@@ -445,6 +457,7 @@ class ClaimFirstResult(BaseModel):
                 "facets": self.facet_count,
                 "clusters": self.cluster_count,
                 "relations": self.relation_count,
+                "question_signatures": self.qs_count,
                 "subject_anchors": self.subject_anchor_count,
                 "detected_axes": self.detected_axes_count,
             },

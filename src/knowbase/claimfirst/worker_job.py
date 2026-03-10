@@ -203,6 +203,22 @@ def claimfirst_process_job(
             logger.error(f"[OSMOSE:ClaimFirst:Worker] Cross-doc clustering failed: {e}")
             results["cross_doc_clusters"] = 0
 
+    # Phase 12 : Comparaison cross-doc QuestionSignatures
+    if results["processed"] >= 2 and neo4j_driver:
+        try:
+            _update_state(redis_client, phase="QS_CROSS_DOC_COMPARISON")
+            logger.info("[OSMOSE:ClaimFirst:Worker] Phase 12: QS cross-doc comparison...")
+            qs_result = _compare_question_signatures_cross_doc(neo4j_driver, tenant_id)
+            results["qs_comparisons"] = qs_result.get("comparisons_persisted", 0)
+            logger.info(
+                f"  → {qs_result.get('comparisons_persisted', 0)} QS comparisons persisted "
+                f"({qs_result.get('evolutions', 0)} evolutions, "
+                f"{qs_result.get('contradictions', 0)} contradictions)"
+            )
+        except Exception as e:
+            logger.error(f"[OSMOSE:ClaimFirst:Worker] QS comparison failed: {e}")
+            results["qs_comparisons"] = 0
+
     # Finalisation
     _update_state(
         redis_client,
@@ -766,6 +782,92 @@ def _cluster_cross_doc(neo4j_driver, tenant_id: str) -> dict:
             "pairs_validated": pairs_validated,
             "champions_marked": champions_marked,
             "redundants_marked": redundants_marked,
+        }
+
+
+def _compare_question_signatures_cross_doc(neo4j_driver, tenant_id: str) -> dict:
+    """
+    Compare les QuestionSignatures cross-document.
+
+    Phase 12 : Charge toutes les QS depuis Neo4j, exécute compare_all(),
+    puis persiste les ComparisonResult comme relations QS_COMPARED.
+    """
+    from knowbase.claimfirst.models.question_signature import QuestionSignature
+    from knowbase.claimfirst.comparisons.qs_comparator import compare_all
+
+    with neo4j_driver.session() as session:
+        # 1. Charger toutes les QS
+        result = session.run(
+            """
+            MATCH (qs:QuestionSignature {tenant_id: $tid})
+            RETURN qs
+            """,
+            tid=tenant_id,
+        )
+        signatures = []
+        for record in result:
+            node = record["qs"]
+            try:
+                qs = QuestionSignature.from_neo4j_record(dict(node))
+                signatures.append(qs)
+            except Exception as e:
+                logger.debug(f"  Skipping QS: {e}")
+                continue
+
+        logger.info(f"  → {len(signatures)} QuestionSignatures loaded from Neo4j")
+
+        if len(signatures) < 2:
+            return {"comparisons_persisted": 0, "evolutions": 0, "contradictions": 0}
+
+        # 2. Comparer
+        comparisons = compare_all(signatures)
+        logger.info(f"  → {len(comparisons)} comparisons produced")
+
+        # 3. Persister les résultats comme relations
+        persisted = 0
+        type_counts = {"EVOLUTION": 0, "CONTRADICTION": 0, "CONVERGENCE": 0, "AGREEMENT": 0}
+
+        for comp in comparisons:
+            comp_type = comp.comparison_type.value
+            type_counts[comp_type] = type_counts.get(comp_type, 0) + 1
+
+            session.run(
+                """
+                MATCH (qs1:QuestionSignature {qs_id: $qs_a_id})
+                MATCH (qs2:QuestionSignature {qs_id: $qs_b_id})
+                MERGE (qs1)-[r:QS_COMPARED]->(qs2)
+                SET r.comparison_type = $comp_type,
+                    r.confidence = $confidence,
+                    r.explanation = $explanation,
+                    r.dimension_key = $dim_key,
+                    r.same_scope = $same_scope,
+                    r.value_a = $value_a,
+                    r.value_b = $value_b,
+                    r.direction = $direction,
+                    r.cross_doc = true
+                """,
+                qs_a_id=comp.qs_a_id,
+                qs_b_id=comp.qs_b_id,
+                comp_type=comp_type,
+                confidence=comp.confidence,
+                explanation=comp.explanation,
+                dim_key=comp.dimension_key,
+                same_scope=comp.same_scope,
+                value_a=comp.value_diff.value_a if comp.value_diff else None,
+                value_b=comp.value_diff.value_b if comp.value_diff else None,
+                direction=comp.value_diff.direction if comp.value_diff else None,
+            )
+            persisted += 1
+
+        logger.info(f"  → Type distribution: {type_counts}")
+
+        return {
+            "comparisons_persisted": persisted,
+            "evolutions": type_counts.get("EVOLUTION", 0),
+            "contradictions": type_counts.get("CONTRADICTION", 0),
+            "convergences": type_counts.get("CONVERGENCE", 0),
+            "agreements": type_counts.get("AGREEMENT", 0),
+            "total_qs": len(signatures),
         }
 
 

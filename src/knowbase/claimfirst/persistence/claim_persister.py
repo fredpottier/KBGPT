@@ -64,6 +64,7 @@ class ClaimPersister:
             "comparable_subjects_merged": 0,
             "axes_created": 0,
             "axis_value_relations_created": 0,
+            "qs_created": 0,
         }
 
     def persist(self, result: ClaimFirstResult) -> dict:
@@ -186,6 +187,12 @@ class ClaimPersister:
             for relation in result.relations:
                 self._persist_claim_relation(session, relation)
 
+            # 12. QuestionSignatures (Level A regex)
+            if result.question_signatures:
+                self._persist_question_signatures_batch(
+                    session, result.question_signatures
+                )
+
         logger.info(
             f"[OSMOSE:ClaimPersister] Persisted: "
             f"{self.stats['doc_contexts_created']} contexts, "
@@ -197,7 +204,8 @@ class ClaimPersister:
             f"{self.stats['entities_created']} entities, "
             f"{self.stats['facets_created']} facets, "
             f"{self.stats['clusters_created']} clusters, "
-            f"{self.stats['relations_created']} relations"
+            f"{self.stats['relations_created']} relations, "
+            f"{self.stats['qs_created']} QS"
         )
 
         return dict(self.stats)
@@ -844,6 +852,51 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
             props=props,
         )
         self.stats["relations_created"] += 1
+
+    def _persist_question_signatures_batch(
+        self,
+        session,
+        signatures: list,
+    ) -> None:
+        """
+        Persiste les QuestionSignatures en batch via UNWIND.
+
+        Crée les nœuds QuestionSignature + relation EXTRACTED_FROM vers la Claim source.
+        """
+        if not signatures:
+            return
+
+        batch = []
+        for qs in signatures:
+            props = qs.to_neo4j_properties()
+            # Filtrer les valeurs None (Neo4j n'aime pas)
+            props = {k: v for k, v in props.items() if v is not None}
+            # Convertir les listes en JSON string pour Neo4j (gating_signals)
+            if "gating_signals" in props and isinstance(props["gating_signals"], list):
+                import json
+                props["gating_signals"] = json.dumps(props["gating_signals"])
+            batch.append(props)
+
+        # 1. MERGE les nœuds QuestionSignature
+        session.run("""
+            UNWIND $batch AS item
+            MERGE (qs:QuestionSignature {qs_id: item.qs_id})
+            SET qs += item
+        """, batch=batch)
+
+        # 2. Créer les relations EXTRACTED_FROM vers les Claims
+        links = [{"qs_id": qs.qs_id, "claim_id": qs.claim_id} for qs in signatures]
+        session.run("""
+            UNWIND $links AS link
+            MATCH (qs:QuestionSignature {qs_id: link.qs_id})
+            MATCH (c:Claim {claim_id: link.claim_id})
+            MERGE (qs)-[:EXTRACTED_FROM]->(c)
+        """, links=links)
+
+        self.stats["qs_created"] += len(signatures)
+        logger.info(
+            f"[OSMOSE:ClaimPersister] {len(signatures)} QuestionSignatures persisted"
+        )
 
     # ──────────────────────────────────────────────────────────────
     # Batch persistence (UNWIND) — réduit ~90% des round-trips Neo4j
