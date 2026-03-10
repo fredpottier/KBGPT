@@ -32,6 +32,77 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# 0. Predicate Non-Exclusivity Classification
+# =============================================================================
+# Les prédicats non-exclusifs autorisent plusieurs objets différents pour le même
+# sujet : "X supports Y" ET "X supports Z" ne sont PAS contradictoires.
+# Seuls les prédicats exclusifs (une seule valeur possible) méritent l'arbitrage
+# LLM en cas de différence de valeurs.
+
+# Patterns regex — un match suffit pour classifier comme non-exclusif
+NON_EXCLUSIVE_PREDICATE_PATTERNS = [
+    r"\bsupports?\b",
+    r"\buses?\b",
+    r"\bintegrates?\s*with\b",
+    r"\bcompatible\s*with\b",
+    r"\bworks?\s*with\b",
+    r"\bhandles?\b",
+    r"\bprovides?\b",
+    r"\boffers?\b",
+    r"\bincludes?\b",
+    r"\bcontains?\b",
+    r"\benables?\b",
+    r"\ballows?\b",
+    r"\baccepts?\b",
+    r"\bcan\s+(?:use|run|handle|process)\b",
+    r"\bhas\s+(?:feature|capability|option|support)\b",
+]
+
+# Patterns exclusifs — si match, le prédicat est exclusif (une seule valeur correcte)
+EXCLUSIVE_PREDICATE_PATTERNS = [
+    r"\brequires?\b",
+    r"\bminimum\b",
+    r"\bmaximum\b",
+    r"\breplaces?\b",
+    r"\bsupersedes?\b",
+    r"\bdefault\s+(?:is|value)\b",
+    r"\bmust\s+be\b",
+    r"\bonly\s+(?:supports?|works?|runs?)\b",
+    r"\bend\s+of\s+(?:life|support|maintenance)\b",
+    r"\bdeprecated\b",
+]
+
+_NON_EXCL_RE = [re.compile(p, re.IGNORECASE) for p in NON_EXCLUSIVE_PREDICATE_PATTERNS]
+_EXCL_RE = [re.compile(p, re.IGNORECASE) for p in EXCLUSIVE_PREDICATE_PATTERNS]
+
+
+def is_non_exclusive_predicate(predicate: str) -> bool:
+    """
+    Classifie un prédicat comme exclusif ou non-exclusif.
+
+    Logique :
+    1. Si match exclusif → False (le prédicat est exclusif)
+    2. Si match non-exclusif → True (co-existence d'alternatives)
+    3. Sinon → True (fallback : pas de contradiction, conforme INV-6)
+    """
+    if not predicate:
+        return True  # Pas de prédicat → pas de contradiction
+
+    # Vérifier les exclusifs d'abord (priorité)
+    for pat in _EXCL_RE:
+        if pat.search(predicate):
+            return False
+
+    # Vérifier les non-exclusifs
+    for pat in _NON_EXCL_RE:
+        if pat.search(predicate):
+            return True
+
+    # Fallback : faux négatifs > faux positifs (INV-6, NS-3)
+    return True
+
+
+# =============================================================================
 # 1. ClaimKey — Modif A + GF-1 + GF-2
 # =============================================================================
 
@@ -334,6 +405,7 @@ def detect_value_contradictions(
         "pairs_in": 0,
         "no_sf": 0,
         "key_mismatch": 0,
+        "non_exclusive": 0,
         "gate_filtered": 0,
         "formal_compatible": 0,
         "incomparable": 0,
@@ -353,6 +425,23 @@ def detect_value_contradictions(
         # Gate 2: Comparable claim keys (GF-2: fallback entity overlap)
         if not have_comparable_claim_keys(c1, c2, entities_by_claim, entity_index):
             stats["key_mismatch"] += 1
+            continue
+
+        # Gate 2.5: Non-exclusivity gate — prédicats multi-valués → COMPATIBLE
+        predicate = sf1.get("predicate", "")
+        if is_non_exclusive_predicate(predicate):
+            stats["non_exclusive"] += 1
+            claim_id_1 = getattr(c1, "claim_id", "")
+            claim_id_2 = getattr(c2, "claim_id", "")
+            formal_results.append((
+                claim_id_1, claim_id_2,
+                ContradictionResult(
+                    ContradictionVerdict.COMPATIBLE,
+                    0.7,
+                    f"non-exclusive predicate '{predicate}': alternatives coexist",
+                    ValueType.UNTYPED,
+                ),
+            ))
             continue
 
         # Gate 3: ContextGate (callback, default=True)
@@ -394,4 +483,7 @@ __all__ = [
     "parse_value_frame",
     "compare_values",
     "detect_value_contradictions",
+    "is_non_exclusive_predicate",
+    "NON_EXCLUSIVE_PREDICATE_PATTERNS",
+    "EXCLUSIVE_PREDICATE_PATTERNS",
 ]

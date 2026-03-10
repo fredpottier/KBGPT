@@ -57,6 +57,16 @@ class SearchRequest(BaseModel):
         description="Activer les reponses instrumentees (Assertion-Centric UX)"
     )
 
+    # 🔄 OSMOSE Version/Release filtering (Phase B)
+    release_id: str | None = Field(
+        None,
+        description="Filtre par release/version (ex: '2023')"
+    )
+    use_latest: bool = Field(
+        default=True,
+        description="Préférer la version la plus récente si aucune release spécifiée"
+    )
+
     class Config:
         json_schema_extra = {
             "example": {

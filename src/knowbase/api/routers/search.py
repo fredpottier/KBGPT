@@ -65,6 +65,8 @@ def search(
         use_graph_first=request.use_graph_first,
         use_kg_traversal=request.use_kg_traversal,
         use_instrumented=request.use_instrumented,
+        release_id=request.release_id,
+        use_latest=request.use_latest,
     )
 
 

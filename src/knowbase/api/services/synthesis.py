@@ -43,7 +43,14 @@ SYNTHESIS_PROMPT = """Tu es un assistant expert qui aide les utilisateurs à tro
 
 8. Si des informations sont **contradictoires**, mentionne les deux versions avec leurs sources.
 
-9. Réponds en **français**.
+9. **Comparaisons cross-document (IMPORTANT)** : Si une section "Comparaisons cross-document (QuestionSignatures)" est fournie, elle contient des **faits comparables détectés automatiquement entre documents**. Tu DOIS :
+   - **Inclure une section dédiée** dans ta réponse (ex: "### Évolutions entre versions" ou "### Points de vigilance")
+   - Pour chaque **ÉVOLUTION** : expliquer clairement ce qui a changé, entre quels documents, et quel est l'impact
+   - Pour chaque **CONTRADICTION** : signaler la divergence avec les sources précises
+   - Pour chaque **ACCORD** : mentionner la confirmation cross-doc (renforce la fiabilité)
+   - **Ces données sont des faits vérifiés** extraits du Knowledge Graph — ne les ignore pas
+
+10. Réponds dans la **même langue que la question** de l'utilisateur.
 
 Réponse :"""
 

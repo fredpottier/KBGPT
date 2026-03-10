@@ -90,7 +90,6 @@ class LLMRouter:
         self._sagemaker_client = None
         self._vllm_client = None
         self._async_vllm_client = None
-
         # === Mode Burst ===
         self._burst_mode = False
         self._burst_endpoint: Optional[str] = None
@@ -198,6 +197,24 @@ class LLMRouter:
         else:
             providers["vllm"] = False
             logger.debug("✗ vLLM provider non configuré (VLLM_URL manquant)")
+
+        # Test Ollama (inférence locale)
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434").strip()
+        try:
+            if HTTPX_AVAILABLE:
+                with httpx.Client(timeout=3.0) as client:
+                    response = client.get(f"{ollama_url}/api/tags")
+                    if response.status_code == 200:
+                        providers["ollama"] = True
+                        logger.info(f"✓ Ollama provider disponible ({ollama_url})")
+                    else:
+                        providers["ollama"] = False
+                        logger.debug(f"✗ Ollama health check failed: {response.status_code}")
+            else:
+                providers["ollama"] = False
+        except Exception as e:
+            providers["ollama"] = False
+            logger.debug(f"✗ Ollama provider indisponible: {e}")
 
         return providers
 
@@ -513,6 +530,9 @@ class LLMRouter:
             return "anthropic"
         elif model in ["llama3.1:70b", "qwen2.5:32b", "qwen2.5:7b", "llava:34b", "phi3:3.8b"]:
             return "sagemaker"
+        # Ollama models (format "name:tag" sans "/" — ex: qwen3.5:9b-q8_0, gemma3:4b)
+        elif ":" in model and "/" not in model and not model.startswith(("gpt-", "o1-", "claude-")):
+            return "ollama"
         # vLLM models (Qwen, Llama served via vLLM on EC2)
         elif model.startswith(("Qwen/", "meta-llama/", "mistralai/")):
             return "vllm"
@@ -635,6 +655,8 @@ class LLMRouter:
                 return self._call_openai(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "anthropic":
                 return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "ollama":
+                return self._call_ollama(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "sagemaker":
                 return self._call_sagemaker(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "vllm":
@@ -761,6 +783,8 @@ class LLMRouter:
                 # TODO: Implémenter version async pour Anthropic si nécessaire
                 logger.warning("[LLM_ROUTER:ASYNC] Anthropic async not implemented, falling back to sync")
                 return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "ollama":
+                return await self._call_ollama_async(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "sagemaker":
                 # TODO: Implémenter version async pour SageMaker si nécessaire
                 logger.warning("[LLM_ROUTER:ASYNC] SageMaker async not implemented, falling back to sync")
@@ -1144,6 +1168,112 @@ class LLMRouter:
         except Exception as e:
             logger.error(f"[vLLM:ASYNC] Error calling {actual_model}: {e}")
             raise
+
+    # =========================================================================
+    # Méthodes Ollama - Inférence locale (API native /api/chat)
+    # =========================================================================
+    #
+    # IMPORTANT: On utilise l'API native Ollama (/api/chat) et NON l'API
+    # OpenAI-compatible (/v1). Raison: l'API /v1 d'Ollama ne supporte pas
+    # "think": false — le modèle Qwen3.5 produit du thinking caché dans un
+    # champ "reasoning", laissant "content" vide. Seule l'API native permet
+    # de désactiver le thinking proprement.
+
+    def _call_ollama(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        task_type: TaskType,
+        **kwargs
+    ) -> str:
+        """Appel vers Ollama via API native /api/chat (think: false)."""
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            }
+        }
+
+        if not HTTPX_AVAILABLE:
+            raise RuntimeError("httpx required for Ollama native API")
+
+        start = time.time()
+        with httpx.Client(timeout=120.0) as client:
+            response = client.post(f"{ollama_url}/api/chat", json=payload)
+            response.raise_for_status()
+
+        result = response.json()
+        content = result.get("message", {}).get("content", "")
+        elapsed = time.time() - start
+
+        # Métriques tokens (API native)
+        prompt_tokens = result.get("prompt_eval_count", 0)
+        completion_tokens = result.get("eval_count", 0)
+        total_tokens = prompt_tokens + completion_tokens
+        logger.info(
+            f"[TOKENS:OLLAMA] {model} - Input: {prompt_tokens}, Output: {completion_tokens}, "
+            f"Total: {total_tokens}, Time: {elapsed:.1f}s"
+        )
+
+        track_tokens(f"ollama/{model}", task_type.value, prompt_tokens, completion_tokens)
+
+        return content
+
+    async def _call_ollama_async(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        task_type: TaskType,
+        **kwargs
+    ) -> str:
+        """Appel async vers Ollama via API native /api/chat (think: false)."""
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            }
+        }
+
+        if not HTTPX_AVAILABLE:
+            raise RuntimeError("httpx required for Ollama native API")
+
+        start = time.time()
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(f"{ollama_url}/api/chat", json=payload)
+            response.raise_for_status()
+
+        result = response.json()
+        content = result.get("message", {}).get("content", "")
+        elapsed = time.time() - start
+
+        # Métriques tokens (API native)
+        prompt_tokens = result.get("prompt_eval_count", 0)
+        completion_tokens = result.get("eval_count", 0)
+        total_tokens = prompt_tokens + completion_tokens
+        logger.info(
+            f"[TOKENS:OLLAMA:ASYNC] {model} - Input: {prompt_tokens}, Output: {completion_tokens}, "
+            f"Total: {total_tokens}, Time: {elapsed:.1f}s"
+        )
+
+        track_tokens(f"ollama/{model}", task_type.value, prompt_tokens, completion_tokens)
+
+        return content
 
     # =========================================================================
     # Méthodes Burst Mode - Appels vers EC2 Spot vLLM

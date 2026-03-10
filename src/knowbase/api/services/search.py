@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 from qdrant_client import QdrantClient
@@ -57,6 +58,9 @@ def build_response_payload(result, public_url: str) -> dict[str, Any]:
         "slide_index": slide_index,
         "score": result.score,
         "slide_image_url": slide_image_url,
+        # Phase B: axis values pour filtrage version/release
+        "axis_release_id": payload.get("axis_release_id"),
+        "doc_id": payload.get("doc_id"),
     }
 
 
@@ -75,6 +79,8 @@ def search_documents(
     use_graph_first: bool = True,  # Activé par défaut pour utiliser Topics/COVERS (mode ANCHORED)
     use_kg_traversal: bool = True,  # 🔗 OSMOSE: Traversée multi-hop CHAINS_TO
     use_instrumented: bool = False,
+    release_id: str | None = None,  # 🔄 Phase B: Filtre par release
+    use_latest: bool = True,  # 🔄 Phase B: Boost latest version
 ) -> dict[str, Any]:
     """
     Recherche sémantique avec enrichissement Knowledge Graph (OSMOSE) et contexte conversationnel.
@@ -300,6 +306,12 @@ def search_documents(
                 FieldCondition(key="solution.main", match=MatchValue(value=solution))
             )
 
+        # 🔄 Phase B: Filtre par release_id (axis_release_id dans payload Qdrant)
+        if release_id:
+            must_conditions.append(
+                FieldCondition(key="axis_release_id", match=MatchValue(value=release_id))
+            )
+
         query_filter = Filter(
             must_not=must_not_conditions if must_not_conditions else None,
             must=must_conditions if must_conditions else None
@@ -438,6 +450,56 @@ def search_documents(
             import traceback
             logger.debug(f"[OSMOSE] KG traversal traceback: {traceback.format_exc()}")
 
+    # 🔄 Phase B.4: LatestSelector boost — préférer la version la plus récente
+    if use_latest and not release_id and reranked_chunks:
+        try:
+            # Extraire les release_ids distincts des chunks
+            release_ids_in_results = set()
+            for c in reranked_chunks:
+                rid = c.get("axis_release_id")
+                if rid:
+                    release_ids_in_results.add(rid)
+
+            if len(release_ids_in_results) >= 2:
+                # Tri numérique simple pour inférer l'ordre
+                sorted_releases = sorted(release_ids_in_results, key=lambda x: (
+                    # Essayer de parser comme nombre pour tri numérique
+                    float(x) if x.replace(".", "").replace("-", "").isdigit() else 0,
+                    x  # fallback alphabétique
+                ))
+                latest_release = sorted_releases[-1]
+
+                # Boost ×1.3 pour les chunks de la release la plus récente
+                boosted = 0
+                for c in reranked_chunks:
+                    if c.get("axis_release_id") == latest_release:
+                        c["score"] = c.get("score", 0) * 1.3
+                        boosted += 1
+
+                # Re-trier par score
+                reranked_chunks.sort(key=lambda c: c.get("score", 0), reverse=True)
+
+                if boosted:
+                    logger.info(
+                        f"[OSMOSE:LatestBoost] Boosted {boosted} chunks for latest release "
+                        f"'{latest_release}' (among {sorted_releases})"
+                    )
+        except Exception as e:
+            logger.warning(f"[OSMOSE:LatestBoost] Failed (non-blocking): {e}")
+
+    # 🔬 QS Cross-Doc: Enrichissement comparaisons cross-document
+    qs_crossdoc_text = ""
+    qs_crossdoc_data = []
+    try:
+        qs_crossdoc_text, qs_crossdoc_data = _get_qs_crossdoc_context(query, tenant_id)
+        if qs_crossdoc_text:
+            graph_context_text += "\n\n" + qs_crossdoc_text
+            logger.info(
+                f"[QS-CROSSDOC] Injected {len(qs_crossdoc_data)} comparisons into synthesis context"
+            )
+    except Exception as e:
+        logger.warning(f"[QS-CROSSDOC] Failed (non-blocking): {e}")
+
     # Extraire les signaux KG pour le calcul de confiance
     kg_signals = None
     if graph_context_data:
@@ -457,34 +519,27 @@ def search_documents(
         }
         logger.debug(f"[OSMOSE] KG signals for synthesis: {kg_signals}")
 
-    # Generate synthesized response using LLM (with optional KG and session context)
-    synthesis_result = synthesize_response(
-        query,
-        reranked_chunks,
-        graph_context_text,
-        session_context_text,
-        kg_signals,
-        chain_signals=chain_signals
-    )
-
-    response = {
-        "status": "success",
-        "results": reranked_chunks,
-        "synthesis": synthesis_result
-    }
-
-    # 🎯 OSMOSE Assertion-Centric: Construire la reponse instrumentee si demandee
+    # Generate synthesized response + instrumented answer in parallel (if both needed)
     if use_instrumented:
-        try:
-            from .instrumented_answer_builder import build_instrumented_answer
+        from .instrumented_answer_builder import build_instrumented_answer
 
-            # Extraire les relations KG confirmées pour booster la classification
-            kg_relations = graph_context_data.get("related_concepts", []) if graph_context_data else []
+        kg_relations = graph_context_data.get("related_concepts", []) if graph_context_data else []
 
-            instrumented_answer, build_metadata = build_instrumented_answer(
+        def _run_synthesis():
+            return synthesize_response(
+                query,
+                reranked_chunks,
+                graph_context_text,
+                session_context_text,
+                kg_signals,
+                chain_signals=chain_signals
+            )
+
+        def _run_instrumented():
+            return build_instrumented_answer(
                 question=query,
                 chunks=reranked_chunks,
-                language="fr",  # TODO: detecter la langue de la question
+                language="fr",
                 session_context=session_context_text,
                 retrieval_stats={
                     "candidates_considered": len(reranked_chunks),
@@ -495,22 +550,55 @@ def search_documents(
                 kg_relations=kg_relations,
             )
 
-            response["instrumented_answer"] = instrumented_answer.model_dump(by_alias=True)
-            response["instrumented_metadata"] = build_metadata
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            synthesis_future = executor.submit(_run_synthesis)
+            instrumented_future = executor.submit(_run_instrumented)
 
-            logger.info(
-                f"[OSMOSE:Instrumented] Built instrumented answer: "
-                f"{len(instrumented_answer.assertions)} assertions, "
-                f"FACT={instrumented_answer.truth_contract.facts_count}, "
-                f"INFERRED={instrumented_answer.truth_contract.inferred_count}, "
-                f"FRAGILE={instrumented_answer.truth_contract.fragile_count}, "
-                f"CONFLICT={instrumented_answer.truth_contract.conflict_count}"
-            )
+            synthesis_result = synthesis_future.result()
 
-        except Exception as e:
-            logger.warning(f"[OSMOSE:Instrumented] Failed to build instrumented answer (non-blocking): {e}")
-            import traceback
-            logger.debug(f"[OSMOSE:Instrumented] Traceback: {traceback.format_exc()}")
+            try:
+                instrumented_answer, build_metadata = instrumented_future.result()
+            except Exception as e:
+                logger.warning(f"[OSMOSE:Instrumented] Failed to build instrumented answer (non-blocking): {e}")
+                import traceback
+                logger.debug(f"[OSMOSE:Instrumented] Traceback: {traceback.format_exc()}")
+                instrumented_answer = None
+                build_metadata = None
+
+    else:
+        synthesis_result = synthesize_response(
+            query,
+            reranked_chunks,
+            graph_context_text,
+            session_context_text,
+            kg_signals,
+            chain_signals=chain_signals
+        )
+        instrumented_answer = None
+        build_metadata = None
+
+    response = {
+        "status": "success",
+        "results": reranked_chunks,
+        "synthesis": synthesis_result
+    }
+
+    if instrumented_answer is not None:
+        response["instrumented_answer"] = instrumented_answer.model_dump(by_alias=True)
+        response["instrumented_metadata"] = build_metadata
+
+        logger.info(
+            f"[OSMOSE:Instrumented] Built instrumented answer: "
+            f"{len(instrumented_answer.assertions)} assertions, "
+            f"FACT={instrumented_answer.truth_contract.facts_count}, "
+            f"INFERRED={instrumented_answer.truth_contract.inferred_count}, "
+            f"FRAGILE={instrumented_answer.truth_contract.fragile_count}, "
+            f"CONFLICT={instrumented_answer.truth_contract.conflict_count}"
+        )
+
+    # 🔬 QS Cross-Doc: Ajouter les comparaisons dans la réponse
+    if qs_crossdoc_data:
+        response["cross_doc_comparisons"] = qs_crossdoc_data
 
     # 🌊 ADR_GRAPH_FIRST Phase C: Ajouter le plan graph-first
     if graph_first_plan:
@@ -919,14 +1007,37 @@ def _get_kg_traversal_context(query: str, tenant_id: str) -> tuple[str, list[str
         auth=(settings.neo4j_user, settings.neo4j_password)
     )
 
+    # B.3: Requête SAME_CANON_AS pour expansion cross-doc via entités canoniques
+    canon_cypher = """
+    UNWIND $candidates AS candidate
+    MATCH (e:Entity {tenant_id: $tid})
+    WHERE toLower(e.normalized_name) CONTAINS toLower(candidate)
+       OR toLower(e.name) CONTAINS toLower(candidate)
+    WITH e, candidate ORDER BY size(e.name) DESC LIMIT 5
+    MATCH (e)-[:SAME_CANON_AS]->(ce:CanonicalEntity)
+          <-[:SAME_CANON_AS]-(e2:Entity)
+    WHERE e2 <> e
+    MATCH (c:Claim {tenant_id: $tid})-[:ABOUT]->(e2)
+    WHERE c.doc_id <> e.doc_id AND NOT coalesce(c.archived, false)
+    RETURN candidate,
+           ce.canonical_name AS canon_name,
+           collect(DISTINCT c.doc_id)[..5] AS related_doc_ids,
+           collect(DISTINCT {text: c.text, doc_id: c.doc_id, type: c.claim_type})[..8] AS related_claims
+    LIMIT 10
+    """
+
     try:
         with driver.session() as session:
             result = session.run(cypher, tid=tenant_id, candidates=candidates)
             records = [dict(r) for r in result]
+
+            # B.3: Exécuter la requête SAME_CANON_AS dans la même session
+            canon_result = session.run(canon_cypher, tid=tenant_id, candidates=candidates)
+            canon_records = [dict(r) for r in canon_result]
     finally:
         driver.close()
 
-    if not records:
+    if not records and not canon_records:
         return "", [], {}
 
     # 3. Filtrer : ne garder que les chaînes cross-doc (le vrai apport du KG)
@@ -938,7 +1049,7 @@ def _get_kg_traversal_context(query: str, tenant_id: str) -> tuple[str, list[str
             rec["_docs"] = docs_in_chain
             cross_doc_records.append(rec)
 
-    if not cross_doc_records:
+    if not cross_doc_records and not canon_records:
         return "", [], {}
 
     # Helper : doc_id → nom court lisible
@@ -991,6 +1102,29 @@ def _get_kg_traversal_context(query: str, tenant_id: str) -> tuple[str, list[str
             lines.append(f"{prefix} {text} *(source: {short_doc})*")
         lines.append("")
 
+    # B.3: Formater les résultats SAME_CANON_AS (entités canoniques cross-doc)
+    if canon_records:
+        lines.append("### Cross-doc (entités canoniques)\n")
+        for rec in canon_records:
+            canon_name = rec.get("canon_name", "?")
+            related_doc_ids = rec.get("related_doc_ids", [])
+            related_claims = rec.get("related_claims", [])
+
+            if not related_claims:
+                continue
+
+            lines.append(f"**{canon_name}** — {len(related_doc_ids)} documents liés")
+            for claim in related_claims[:5]:
+                text = claim.get("text", "").strip()
+                doc = claim.get("doc_id", "?")
+                short_doc = _short_doc_name(doc)
+                lines.append(f"  • {text} *(source: {short_doc})*")
+            lines.append("")
+
+            # Ajouter les doc_ids cross-doc au pool
+            for did in related_doc_ids:
+                all_chain_doc_ids.add(did)
+
     if not all_chain_doc_ids:
         return "", [], {}
 
@@ -1000,9 +1134,321 @@ def _get_kg_traversal_context(query: str, tenant_id: str) -> tuple[str, list[str
         "distinct_docs_count": len(all_chain_doc_ids),
         "max_hops": max(chain_hops_list) if chain_hops_list else 0,
         "avg_hops": sum(chain_hops_list) / len(chain_hops_list) if chain_hops_list else 0,
+        "canon_expansions": len(canon_records),
     }
 
     return "\n".join(lines), list(all_chain_doc_ids), chain_signals
+
+
+def _get_qs_crossdoc_context(query: str, tenant_id: str) -> tuple[str, list[dict]]:
+    """
+    Enrichissement QS Cross-Doc : trouve les QuestionSignatures pertinentes
+    pour la query et retourne les comparaisons cross-doc (évolution, contradiction, accord).
+
+    Stratégie :
+    1. Extraire les termes-clés de la query
+    2. Chercher les QuestionDimension dont la canonical_question matche
+    3. Pour chaque dimension trouvée, charger les QS associées
+    4. Comparer les paires et formater en markdown
+
+    Retourne:
+        - texte markdown pour injection dans le contexte LLM
+        - liste de dicts avec les comparaisons structurées (pour la réponse JSON)
+    """
+    import re
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+
+    try:
+        client = get_neo4j_client()
+    except Exception as e:
+        logger.warning(f"[QS-CROSSDOC] Neo4j client failed: {e}")
+        return "", []
+
+    # 1. Extraire les termes de recherche (mots significatifs 3+ chars)
+    stop_words = {
+        "les", "des", "une", "que", "pour", "dans", "par", "sur", "avec", "est",
+        "sont", "qui", "the", "for", "and", "with", "how", "what", "does", "which",
+        "quels", "quelles", "quel", "quelle", "comment", "quoi",
+    }
+    words = re.findall(r'\b[A-Za-z_/\-]{3,}\b', query)
+    search_terms = [w for w in words if w.lower() not in stop_words]
+
+    if not search_terms:
+        return "", []
+
+    # 2. Chercher les dimensions pertinentes via full-text sur canonical_question
+    #    + les QS liées avec leurs valeurs
+    search_pattern = "|".join(re.escape(t) for t in search_terms[:8])
+
+    cypher = """
+    MATCH (qd:QuestionDimension {tenant_id: $tid})
+    WHERE qd.status <> 'merged'
+    AND any(term IN $terms WHERE
+        toLower(qd.canonical_question) CONTAINS toLower(term)
+        OR toLower(qd.dimension_key) CONTAINS toLower(term)
+    )
+    WITH qd,
+         size([term IN $terms WHERE
+             toLower(qd.canonical_question) CONTAINS toLower(term)
+             OR toLower(qd.dimension_key) CONTAINS toLower(term)
+         ]) AS term_hits
+    ORDER BY term_hits DESC, qd.doc_count DESC
+    LIMIT 10
+    MATCH (qs:QuestionSignature {tenant_id: $tid, dimension_id: qd.dimension_id})
+    WHERE qs.confidence >= 0.6
+    WITH qd.dimension_key AS dimension_key,
+         qd.canonical_question AS canonical_question,
+         collect({
+             qs_id: qs.qs_id,
+             doc_id: qs.doc_id,
+             extracted_value: qs.extracted_value,
+             value_normalized: qs.value_normalized,
+             operator: qs.operator,
+             scope_anchor_label: qs.scope_anchor_label,
+             confidence: qs.confidence
+         }) AS signatures
+    RETURN dimension_key, canonical_question, signatures
+    ORDER BY size(signatures) DESC
+    """
+
+    try:
+        with client.driver.session(database=client.database) as session:
+            result = session.run(cypher, tid=tenant_id, terms=search_terms[:8])
+            records = [dict(r) for r in result]
+    except Exception as e:
+        logger.warning(f"[QS-CROSSDOC] Neo4j query failed: {e}")
+        return "", []
+
+    if not records:
+        return "", []
+
+    def _short_name(doc_id: str) -> str:
+        """Raccourcit un doc_id pour l'affichage."""
+        if not doc_id:
+            return "?"
+        name = doc_id.replace("_", " ")
+        return name[:50] + "…" if len(name) > 50 else name
+
+    # 3. Ranking de pertinence (top 5 comparaisons)
+    search_terms_lower = {t.lower() for t in search_terms}
+
+    def _rank_record(rec):
+        """Score de pertinence pour trier les dimensions."""
+        dim_key = rec["dimension_key"]
+        sigs = rec["signatures"]
+        # P1 : match terme exact dans dimension_key
+        key_match = 1 if any(t in dim_key.lower() for t in search_terms_lower) else 0
+        # P2 : nombre de QS
+        qs_count = len(sigs)
+        # P3 : confiance moyenne
+        confidences = [s.get("confidence", 0) or 0 for s in sigs]
+        avg_conf = sum(confidences) / len(confidences) if confidences else 0
+        return (key_match, qs_count, avg_conf)
+
+    records.sort(key=_rank_record, reverse=True)
+
+    # 4. Analyser les résultats : détecter évolutions, contradictions, accords
+    lines = [
+        "## Comparaisons cross-document (QuestionSignatures)\n",
+        "Cette section présente les **faits comparables** détectés entre documents. "
+        "Utilise ces données pour signaler les évolutions, contradictions ou confirmations "
+        "entre versions/documents.\n",
+    ]
+    comparisons_data = []
+    displayed_count = 0
+    MAX_DISPLAYED = 5
+
+    for rec in records:
+        dim_key = rec["dimension_key"]
+        canonical_q = rec["canonical_question"]
+        sigs = rec["signatures"]
+
+        if len(sigs) < 2:
+            continue
+
+        # Confiance moyenne pour affichage
+        confidences = [s.get("confidence", 0) or 0 for s in sigs]
+        avg_conf = int(100 * sum(confidences) / len(confidences)) if confidences else 0
+
+        # Grouper par scope d'abord pour ne comparer que des QS du même scope
+        by_scope = {}
+        for s in sigs:
+            scope = (s.get("scope_anchor_label") or "general").strip().lower()
+            by_scope.setdefault(scope, []).append(s)
+
+        # Analyser chaque groupe de scope séparément
+        scope_comparisons = []
+        for scope_key, scope_sigs in by_scope.items():
+            # Déduplique par (extracted_value, doc_id) pour éviter les doublons
+            seen = set()
+            deduped = []
+            for s in scope_sigs:
+                key = (
+                    (s.get("extracted_value") or "").strip().lower(),
+                    s.get("doc_id", ""),
+                )
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append(s)
+            scope_sigs = deduped
+
+            by_val = {}
+            for s in scope_sigs:
+                val = (s.get("value_normalized") or s.get("extracted_value") or "").strip().lower()
+                by_val.setdefault(val, []).append(s)
+
+            scope_docs = list({s["doc_id"] for s in scope_sigs if s.get("doc_id")})
+            scope_label = scope_sigs[0].get("scope_anchor_label") or "general"
+
+            if len(by_val) == 1 and len(scope_docs) >= 2:
+                # Même valeur, même scope, docs différents → ACCORD
+                val = list(by_val.keys())[0]
+                raw_val = scope_sigs[0].get("extracted_value", val)
+                scope_comparisons.append(("AGREEMENT", scope_label, raw_val, None, scope_docs))
+            elif len(by_val) >= 2 and len(scope_docs) >= 2:
+                # Valeurs différentes, même scope, docs différents → potentielle ÉVOLUTION
+                import re as _re
+                def _extract_year(doc_id: str) -> int:
+                    m = _re.search(r'20\d{2}', doc_id or "")
+                    return int(m.group()) if m else 9999
+
+                val_entries = []
+                for val, val_sigs_inner in by_val.items():
+                    docs = list({s["doc_id"] for s in val_sigs_inner if s.get("doc_id")})
+                    min_year = min(_extract_year(d) for d in docs) if docs else 9999
+                    raw_val = val_sigs_inner[0].get("extracted_value", val)
+                    val_entries.append((raw_val, docs, min_year))
+                val_entries.sort(key=lambda x: x[2])
+
+                # Vérifier que oldest et newest sont réellement différents
+                old_val_lower = val_entries[0][0].strip().lower() if val_entries[0][0] else ""
+                new_val_lower = val_entries[-1][0].strip().lower() if val_entries[-1][0] else ""
+                if old_val_lower != new_val_lower:
+                    scope_comparisons.append(("EVOLUTION", scope_label, val_entries[0], val_entries[-1], scope_docs))
+                else:
+                    # Mêmes valeurs brutes malgré normalisation différente → ACCORD
+                    raw_val = val_entries[0][0]
+                    scope_comparisons.append(("AGREEMENT", scope_label, raw_val, None, scope_docs))
+            elif len(by_val) >= 2 and len(scope_docs) == 1:
+                # Valeurs différentes, même scope, même doc → CONTRADICTION
+                vals = list({vs[0].get("extracted_value", v) for v, vs in by_val.items()})
+                if len(vals) >= 2:  # Skip si dédupliqué à 1 valeur
+                    scope_comparisons.append(("CONTRADICTION", scope_label, vals, None, scope_docs))
+
+        # Cross-scope : si toutes les valeurs identiques à travers scopes différents → ACCORD global
+        all_vals = set()
+        for s in sigs:
+            val = (s.get("value_normalized") or s.get("extracted_value") or "").strip().lower()
+            all_vals.add(val)
+        all_docs = list({s["doc_id"] for s in sigs if s.get("doc_id")})
+
+        if not scope_comparisons and len(all_vals) == 1 and len(all_docs) >= 2:
+            val = list(all_vals)[0]
+            raw_val = sigs[0].get("extracted_value", val)
+            if displayed_count < MAX_DISPLAYED:
+                doc_labels = [_short_name(d) for d in all_docs[:4]]
+                lines.append(f"**✓ ACCORD** — {canonical_q} (confiance: {avg_conf}%)")
+                lines.append(f"  Valeur : **{raw_val}** "
+                             f"(confirmé dans {len(all_docs)} documents : {', '.join(doc_labels)})")
+                lines.append("")
+                displayed_count += 1
+            comparisons_data.append({
+                "type": "AGREEMENT",
+                "dimension_key": dim_key,
+                "question": canonical_q,
+                "value": raw_val,
+                "doc_count": len(all_docs),
+                "docs": all_docs[:4],
+                "avg_confidence": avg_conf,
+            })
+            continue
+
+        if not scope_comparisons:
+            # Scopes différents, valeurs différentes — pas de comparaison fiable
+            continue
+
+        # Formatter les comparaisons par scope
+        for comp in scope_comparisons:
+            if displayed_count >= MAX_DISPLAYED:
+                break
+            comp_type = comp[0]
+            scope_label = comp[1]
+
+            if comp_type == "AGREEMENT":
+                raw_val, _, scope_docs = comp[2], comp[3], comp[4]
+                doc_labels = [_short_name(d) for d in scope_docs[:3]]
+                lines.append(f"**✓ ACCORD** — {canonical_q} (confiance: {avg_conf}%)")
+                lines.append(f"  Valeur : **{raw_val}** pour {scope_label} "
+                             f"(confirmé dans {len(scope_docs)} documents : {', '.join(doc_labels)})")
+                lines.append("")
+                displayed_count += 1
+                comparisons_data.append({
+                    "type": "AGREEMENT",
+                    "dimension_key": dim_key,
+                    "question": canonical_q,
+                    "scope": scope_label,
+                    "value": raw_val,
+                    "doc_count": len(scope_docs),
+                    "docs": scope_docs[:4],
+                    "avg_confidence": avg_conf,
+                })
+
+            elif comp_type == "EVOLUTION":
+                oldest, newest, scope_docs = comp[2], comp[3], comp[4]
+                old_val, old_docs, _ = oldest
+                new_val, new_docs, _ = newest
+                old_doc_str = ", ".join(_short_name(d) for d in old_docs[:2])
+                new_doc_str = ", ".join(_short_name(d) for d in new_docs[:2])
+                lines.append(f"**↗ ÉVOLUTION** — {canonical_q} (confiance: {avg_conf}%)")
+                lines.append(f"  Scope : {scope_label}")
+                lines.append(f"  AVANT : **{old_val}** — {old_doc_str}")
+                lines.append(f"  APRÈS : **{new_val}** — {new_doc_str}")
+                lines.append("")
+                displayed_count += 1
+                comparisons_data.append({
+                    "type": "EVOLUTION",
+                    "dimension_key": dim_key,
+                    "question": canonical_q,
+                    "scope": scope_label,
+                    "old_value": old_val,
+                    "new_value": new_val,
+                    "old_docs": old_docs[:3],
+                    "new_docs": new_docs[:3],
+                    "avg_confidence": avg_conf,
+                })
+
+            elif comp_type == "CONTRADICTION":
+                vals, _, scope_docs = comp[2], comp[3], comp[4]
+                doc_labels = [_short_name(d) for d in scope_docs[:3]]
+                lines.append(f"**⚠ CONTRADICTION** — {canonical_q} (confiance: {avg_conf}%)")
+                lines.append(f"  Scope : {scope_label}")
+                for v in vals[:4]:
+                    lines.append(f"  • **{v}** — {', '.join(doc_labels)}")
+                lines.append("")
+                displayed_count += 1
+                comparisons_data.append({
+                    "type": "CONTRADICTION",
+                    "dimension_key": dim_key,
+                    "question": canonical_q,
+                    "scope": scope_label,
+                    "values": vals[:4],
+                    "docs": scope_docs[:3],
+                    "avg_confidence": avg_conf,
+                })
+
+    if not comparisons_data:
+        return "", []
+
+    if len(comparisons_data) > MAX_DISPLAYED:
+        lines.append(f"_({len(comparisons_data) - MAX_DISPLAYED} comparaisons supplémentaires dans les données JSON)_\n")
+
+    logger.info(
+        f"[QS-CROSSDOC] Found {len(comparisons_data)} cross-doc comparisons "
+        f"(showing top {min(displayed_count, MAX_DISPLAYED)}) "
+        f"for query: {query[:60]}..."
+    )
+
+    return "\n".join(lines), comparisons_data
 
 
 __all__ = ["search_documents", "get_available_solutions", "TOP_K", "SCORE_THRESHOLD"]

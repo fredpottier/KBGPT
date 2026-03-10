@@ -13,14 +13,14 @@ task_models:
   metadata: "gpt-4o"
 
   # Résumés de textes longs (>10k tokens)
-  # NOTE: claude-3-haiku car quota OpenAI épuisé. Quand burst mode actif, vLLM Qwen3 14B prend la priorité.
-  long_summary: "claude-3-haiku-20240307"
+  # NOTE: Ollama local (qwen3.5:9b-q8_0) prioritaire quand disponible, sinon fallback cloud
+  long_summary: "qwen3.5:9b-q8_0"
 
   # Enrichissement de contenu court
-  enrichment: "claude-3-haiku-20240307"
+  enrichment: "qwen3.5:9b-q8_0"
 
   # Classification binaire rapide (oui/non, etc.)
-  classification: "gpt-4o-mini"
+  classification: "qwen3.5:9b-q8_0"
 
   # Canonicalisation de noms SAP
   canonicalization: "gpt-4o"
@@ -29,10 +29,10 @@ task_models:
   rfp_question_analysis: "gpt-4o"
 
   # Traduction de langue (tâche simple et peu coûteuse)
-  translation: "gpt-4o-mini"
+  translation: "qwen3.5:9b-q8_0"
 
   # Extraction de connaissance structurée (concepts, facts, entities, relations) depuis blocs sémantiques
-  knowledge_extraction: "gpt-4o-mini"
+  knowledge_extraction: "qwen3.5:9b-q8_0"
 
 # Paramètres par type de tâche (basés sur les valeurs historiques du code)
 task_parameters:
@@ -100,6 +100,11 @@ providers:
       - "claude-opus-4-20250514"
       - "claude-3-haiku-20240307"
 
+  ollama:
+    base_url_env: "OLLAMA_URL"        # Défaut: http://localhost:11434
+    models:
+      - "qwen3.5:9b-q8_0"            # Modèle installé localement (RTX 5080 Ti)
+
   sagemaker:
     aws_region: "us-east-1"  # Région AWS par défaut
     models:
@@ -121,16 +126,17 @@ fallback_strategy:
     - "gpt-4o-mini"
 
   long_summary:
+    - "qwen3.5:9b-q8_0"
     - "claude-3-haiku-20240307"
     - "gpt-4o-mini"
-    - "gpt-4o"
 
   enrichment:
+    - "qwen3.5:9b-q8_0"
     - "claude-3-haiku-20240307"
     - "gpt-4o-mini"
-    - "gpt-4o"
 
   classification:
+    - "qwen3.5:9b-q8_0"
     - "gpt-4o-mini"
     - "claude-3-haiku-20240307"
 
@@ -144,13 +150,14 @@ fallback_strategy:
     - "gpt-4o-mini"
 
   translation:
+    - "qwen3.5:9b-q8_0"
     - "gpt-4o-mini"
     - "claude-3-haiku-20240307"
 
   knowledge_extraction:
+    - "qwen3.5:9b-q8_0"
     - "gpt-4o-mini"
     - "gpt-4o"
-    - "claude-sonnet-4-20250514"
 
 # Configuration SageMaker Endpoints
 # À configurer selon vos déploiements AWS

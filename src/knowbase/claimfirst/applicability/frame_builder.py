@@ -115,6 +115,11 @@ FRAME_BUILDER_PROMPT = """You are an evidence-locked metadata extractor. Your jo
 13. Bare decimal numbers (type=version, e.g. "3.0", "3.1") without an explicit version keyword
     are AMBIGUOUS. Prefer named_version candidates (e.g. "Version 3.0") over bare decimals.
     If only bare decimals exist, set confidence to "low" and explain why in reasoning
+14. For release_id: Extract ONLY the PRIMARY release that THIS document is ABOUT.
+    The primary release is the one in the document title or subject line.
+    Do NOT extract releases merely MENTIONED in the body as comparisons or history.
+    Example: title "Simplification List Release 2023" mentioning 2020/2021/2022
+    in the body → release_id = "2023" ONLY.
 
 ## Output JSON Format
 {{
@@ -686,8 +691,13 @@ class FrameBuilder:
         unknowns = data.get("unknowns", [])
 
         # Déduplication : 1 seule valeur par field_name (le frame décrit UN document)
-        # Garder la meilleure : HIGH > MEDIUM > LOW, puis plus d'evidence_unit_ids
+        # Garder la meilleure : in_title > HIGH > MEDIUM > LOW, puis plus d'evidence_unit_ids
         _CONF_RANK = {FrameFieldConfidence.HIGH: 3, FrameFieldConfidence.MEDIUM: 2, FrameFieldConfidence.LOW: 1}
+
+        def _has_title_signal(f: FrameField) -> int:
+            """Bonus pour les candidats extraits du titre (Rule 14: primary release)."""
+            return 1 if any("in_title" in cid for cid in (f.candidate_ids or [])) else 0
+
         seen: Dict[str, FrameField] = {}
         dedup_count = 0
         for f in fields:
@@ -696,8 +706,8 @@ class FrameBuilder:
                 seen[f.field_name] = f
             else:
                 dedup_count += 1
-                f_rank = (_CONF_RANK.get(f.confidence, 0), len(f.evidence_unit_ids or []))
-                e_rank = (_CONF_RANK.get(existing.confidence, 0), len(existing.evidence_unit_ids or []))
+                f_rank = (_has_title_signal(f), _CONF_RANK.get(f.confidence, 0), len(f.evidence_unit_ids or []))
+                e_rank = (_has_title_signal(existing), _CONF_RANK.get(existing.confidence, 0), len(existing.evidence_unit_ids or []))
                 if f_rank > e_rank:
                     seen[f.field_name] = f
         fields = list(seen.values())

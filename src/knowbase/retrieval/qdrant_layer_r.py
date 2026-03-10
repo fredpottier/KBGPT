@@ -39,10 +39,11 @@ SCHEMA_VERSION = "v2_layer_r_1"
 
 
 def ensure_layer_r_collection() -> None:
-    """Crée la collection knowbase_chunks_v2 si elle n'existe pas."""
+    """Crée la collection knowbase_chunks_v2 si elle n'existe pas, + payload indexes."""
     client = get_qdrant_client()
     if client.collection_exists(COLLECTION_NAME):
         logger.debug(f"[OSMOSE:LayerR] Collection {COLLECTION_NAME} already exists")
+        ensure_axis_indexes()
         return
 
     client.create_collection(
@@ -53,12 +54,31 @@ def ensure_layer_r_collection() -> None:
         f"[OSMOSE:LayerR] Created collection {COLLECTION_NAME} "
         f"(size={VECTOR_SIZE}, distance={DISTANCE})"
     )
+    ensure_axis_indexes()
+
+
+def ensure_axis_indexes() -> None:
+    """Crée les payload indexes keyword sur axis_release_id et axis_version."""
+    from qdrant_client.models import PayloadSchemaType
+
+    client = get_qdrant_client()
+    for field_name in ("axis_release_id", "axis_version"):
+        try:
+            client.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name=field_name,
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+        except Exception:
+            # Index déjà existant — ignoré silencieusement
+            pass
 
 
 def upsert_layer_r(
     sub_chunks_with_embeddings: List[Tuple[SubChunk, np.ndarray]],
     tenant_id: str,
     batch_size: int = 0,
+    doc_axis_values: Optional[Dict[str, str]] = None,
 ) -> int:
     """
     Upsert idempotent des sub-chunks + embeddings dans Qdrant.
@@ -111,6 +131,9 @@ def upsert_layer_r(
                 # Payload versionné (migrations futures)
                 "schema_version": SCHEMA_VERSION,
                 "point_type": "sub_chunk",
+                # Axis values (B.1: filtrage par version/release)
+                "axis_release_id": doc_axis_values.get("release_id") if doc_axis_values else None,
+                "axis_version": doc_axis_values.get("version") if doc_axis_values else None,
             }
 
             points.append(PointStruct(
@@ -220,6 +243,8 @@ def search_layer_r(
             "page_no": hit.payload.get("page_no"),
             "schema_version": hit.payload.get("schema_version"),
             "anchored_informations": hit.payload.get("anchored_informations", []),
+            "axis_release_id": hit.payload.get("axis_release_id"),
+            "axis_version": hit.payload.get("axis_version"),
         }
         for hit in results
     ]
