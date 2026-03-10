@@ -22,6 +22,7 @@ from knowbase.claimfirst.clustering.value_contradicts import (
     parse_value_frame,
     compare_values,
     detect_value_contradictions,
+    is_non_exclusive_predicate,
 )
 from knowbase.claimfirst.models.entity import Entity
 
@@ -272,12 +273,12 @@ class TestFormalComparator:
         result = compare_values(vf1, vf2)
         assert result.verdict == ContradictionVerdict.NEED_LLM
 
-    def test_untyped_needs_llm(self):
-        """'supported' vs 'disabled' → NEED_LLM."""
+    def test_untyped_compatible_by_default(self):
+        """'supported' vs 'disabled' → COMPATIBLE (co-existing alternatives, non-exclusive)."""
         vf1 = ValueFrame(ValueType.UNTYPED, "supported", None, None)
         vf2 = ValueFrame(ValueType.UNTYPED, "disabled", None, None)
         result = compare_values(vf1, vf2)
-        assert result.verdict == ContradictionVerdict.NEED_LLM
+        assert result.verdict == ContradictionVerdict.COMPATIBLE
 
     def test_type_mismatch(self):
         """NUMBER vs VERSION → INCOMPARABLE."""
@@ -292,6 +293,74 @@ class TestFormalComparator:
         vf2 = ValueFrame(ValueType.NUMBER, "100", 100.0, None)
         result = compare_values(vf1, vf2)
         assert result.verdict == ContradictionVerdict.COMPATIBLE
+
+
+# =============================================================================
+# Tests Non-Exclusivity Gate
+# =============================================================================
+
+
+class TestNonExclusivityGate:
+
+    def test_supports_is_non_exclusive(self):
+        """'supports' → non-exclusif (un produit peut supporter N technologies)."""
+        assert is_non_exclusive_predicate("supports") is True
+        assert is_non_exclusive_predicate("supports TLS") is True
+
+    def test_uses_is_non_exclusive(self):
+        """'uses' → non-exclusif."""
+        assert is_non_exclusive_predicate("uses") is True
+        assert is_non_exclusive_predicate("use") is True
+
+    def test_integrates_with_is_non_exclusive(self):
+        """'integrates with' → non-exclusif."""
+        assert is_non_exclusive_predicate("integrates with") is True
+
+    def test_requires_is_exclusive(self):
+        """'requires' → exclusif (une seule valeur correcte)."""
+        assert is_non_exclusive_predicate("requires") is False
+        assert is_non_exclusive_predicate("requires minimum") is False
+
+    def test_minimum_is_exclusive(self):
+        """'minimum' → exclusif."""
+        assert is_non_exclusive_predicate("minimum version") is False
+
+    def test_replaces_is_exclusive(self):
+        """'replaces' → exclusif."""
+        assert is_non_exclusive_predicate("replaces") is False
+
+    def test_deprecated_is_exclusive(self):
+        """'deprecated' → exclusif."""
+        assert is_non_exclusive_predicate("deprecated since") is False
+
+    def test_unknown_predicate_is_non_exclusive(self):
+        """Prédicat inconnu → non-exclusif (fallback, INV-6: pas de faux positif)."""
+        assert is_non_exclusive_predicate("defines") is True
+        assert is_non_exclusive_predicate("has") is True
+
+    def test_empty_predicate_is_non_exclusive(self):
+        """Prédicat vide → non-exclusif."""
+        assert is_non_exclusive_predicate("") is True
+
+    def test_gate_filters_non_exclusive_in_detection(self):
+        """Prédicat 'supports' avec valeurs différentes → filtré par gate, pas envoyé au LLM."""
+        c1 = FakeClaim("c1", structured_form={"subject": "S/4HANA", "predicate": "supports", "object": "SAPscript"})
+        c2 = FakeClaim("c2", structured_form={"subject": "S/4HANA", "predicate": "supports", "object": "Smart Forms"})
+        formal, need_llm, stats = detect_value_contradictions([(c1, c2)])
+        assert len(need_llm) == 0
+        assert stats["non_exclusive"] == 1
+        # Le résultat formel enregistre un COMPATIBLE
+        assert len(formal) == 1
+        assert formal[0][2].verdict == ContradictionVerdict.COMPATIBLE
+
+    def test_gate_passes_exclusive_to_llm(self):
+        """Prédicat 'requires' avec valeurs différentes → passe au LLM."""
+        c1 = FakeClaim("c1", structured_form={"subject": "RAM", "predicate": "requires", "object": "4 GB"})
+        c2 = FakeClaim("c2", structured_form={"subject": "RAM", "predicate": "requires", "object": "8 GB"})
+        formal, need_llm, stats = detect_value_contradictions([(c1, c2)])
+        assert len(need_llm) == 1
+        assert stats["need_llm"] == 1
+        assert stats["non_exclusive"] == 0
 
 
 # =============================================================================
@@ -337,21 +406,21 @@ class TestIntegration:
 
     def test_end_to_end_entity_overlap_fallback(self):
         """ClaimKey diff mais entity overlap → passe (GF-2)."""
-        c1 = FakeClaim("c1", structured_form={"subject": "TLS", "predicate": "version", "object": "1.2"})
-        c2 = FakeClaim("c2", structured_form={"subject": "Transport Layer Security", "predicate": "version", "object": "1.3"})
+        c1 = FakeClaim("c1", structured_form={"subject": "TLS", "predicate": "requires minimum", "object": "1.2"})
+        c2 = FakeClaim("c2", structured_form={"subject": "Transport Layer Security", "predicate": "requires minimum", "object": "1.3"})
         entities_by_claim = {"c1": ["ent-tls"], "c2": ["ent-tls"]}
         formal, need_llm, stats = detect_value_contradictions(
             [(c1, c2)],
             entities_by_claim=entities_by_claim,
         )
-        # "1.2" and "1.3" are both VERSION → diff → NEED_LLM
+        # "1.2" and "1.3" are both VERSION → diff → NEED_LLM (predicate is exclusive)
         assert len(need_llm) == 1
         assert stats["need_llm"] == 1
 
     def test_context_gate_filters(self):
         """Gate retourne False → paire filtrée."""
-        c1 = FakeClaim("c1", structured_form={"subject": "TLS", "predicate": "version", "object": "1.2"})
-        c2 = FakeClaim("c2", structured_form={"subject": "TLS", "predicate": "version", "object": "1.3"})
+        c1 = FakeClaim("c1", structured_form={"subject": "TLS", "predicate": "requires minimum", "object": "1.2"})
+        c2 = FakeClaim("c2", structured_form={"subject": "TLS", "predicate": "requires minimum", "object": "1.3"})
         gate = lambda c1, c2: False
         formal, need_llm, stats = detect_value_contradictions(
             [(c1, c2)],
@@ -375,6 +444,7 @@ class TestStats:
         assert stats["pairs_in"] == 0
         assert stats["no_sf"] == 0
         assert stats["key_mismatch"] == 0
+        assert stats["non_exclusive"] == 0
         assert stats["gate_filtered"] == 0
         assert stats["formal_compatible"] == 0
         assert stats["incomparable"] == 0
@@ -383,15 +453,16 @@ class TestStats:
     def test_stats_with_mixed_batch(self):
         """Mélange de cas → stats cohérentes."""
         c_no_sf = FakeClaim("c0", structured_form=None)
-        c_tls_12 = FakeClaim("c1", structured_form={"subject": "TLS", "predicate": "version", "object": "1.2"})
-        c_tls_12b = FakeClaim("c1b", structured_form={"subject": "TLS", "predicate": "version", "object": "1.2"})
-        c_tls_13 = FakeClaim("c2", structured_form={"subject": "TLS", "predicate": "version", "object": "1.3"})
+        # Prédicat "requires" → exclusif → comparaison formelle
+        c_tls_12 = FakeClaim("c1", structured_form={"subject": "TLS", "predicate": "requires", "object": "1.2"})
+        c_tls_12b = FakeClaim("c1b", structured_form={"subject": "TLS", "predicate": "requires", "object": "1.2"})
+        c_tls_13 = FakeClaim("c2", structured_form={"subject": "TLS", "predicate": "requires", "object": "1.3"})
         c_http = FakeClaim("c3", structured_form={"subject": "HTTP", "predicate": "supports", "object": "yes"})
 
         pairs = [
             (c_no_sf, c_tls_12),       # no_sf
-            (c_tls_12, c_tls_12b),      # COMPATIBLE
-            (c_tls_12, c_tls_13),       # NEED_LLM (version diff)
+            (c_tls_12, c_tls_12b),      # COMPATIBLE (same value)
+            (c_tls_12, c_tls_13),       # NEED_LLM (version diff, exclusive predicate)
             (c_tls_12, c_http),         # key_mismatch (different subject)
         ]
 

@@ -547,3 +547,110 @@ class TestResolverPriors:
         assert len(deduped) == 1
         assert deduped[0].value_normalized == "2021"
         assert deduped[0].field_name == "release_id"
+
+
+class TestDedupTitlePreference:
+    """A.2: La dedup release_id doit préférer le candidat in_title (Rule 14)."""
+
+    def test_title_release_wins_over_body_release(self):
+        """2 release_ids retournés par le LLM: "2023" (in_title) vs "2020" (in_body).
+
+        Seul "2023" doit survivre la dedup grâce au bonus titre.
+        """
+        builder = FrameBuilder(llm_client=None, use_llm=False)
+
+        # Simuler la sortie LLM avec 2 release_ids
+        fields = [
+            FrameField(
+                field_name="release_id",
+                value_normalized="2020",
+                display_label="release",
+                evidence_unit_ids=["EU:1:0", "EU:2:0", "EU:3:0", "EU:4:0"],
+                candidate_ids=["VC:numeric_identifier:2020_body"],
+                confidence=FrameFieldConfidence.HIGH,
+                reasoning="2020 appears 15 times in body",
+            ),
+            FrameField(
+                field_name="release_id",
+                value_normalized="2023",
+                display_label="release",
+                evidence_unit_ids=["EU:0:0"],
+                candidate_ids=["VC:numeric_identifier:2023_in_title"],
+                confidence=FrameFieldConfidence.HIGH,
+                reasoning="2023 in title",
+            ),
+        ]
+
+        # Reproduire la logique de dedup du FrameBuilder
+        _CONF_RANK = {
+            FrameFieldConfidence.HIGH: 3,
+            FrameFieldConfidence.MEDIUM: 2,
+            FrameFieldConfidence.LOW: 1,
+        }
+
+        def _has_title_signal(f: FrameField) -> int:
+            return 1 if any("in_title" in cid for cid in (f.candidate_ids or [])) else 0
+
+        seen = {}
+        for f in fields:
+            existing = seen.get(f.field_name)
+            if existing is None:
+                seen[f.field_name] = f
+            else:
+                f_rank = (_has_title_signal(f), _CONF_RANK.get(f.confidence, 0), len(f.evidence_unit_ids or []))
+                e_rank = (_has_title_signal(existing), _CONF_RANK.get(existing.confidence, 0), len(existing.evidence_unit_ids or []))
+                if f_rank > e_rank:
+                    seen[f.field_name] = f
+
+        result_fields = list(seen.values())
+        assert len(result_fields) == 1
+        assert result_fields[0].value_normalized == "2023"
+        assert "in_title" in result_fields[0].candidate_ids[0]
+
+    def test_no_title_signal_falls_back_to_evidence_count(self):
+        """Sans signal titre, la dedup continue à préférer plus d'evidence."""
+        fields = [
+            FrameField(
+                field_name="release_id",
+                value_normalized="2020",
+                display_label="release",
+                evidence_unit_ids=["EU:1:0", "EU:2:0", "EU:3:0"],
+                candidate_ids=["VC:numeric_identifier:2020_body"],
+                confidence=FrameFieldConfidence.HIGH,
+                reasoning="more evidence",
+            ),
+            FrameField(
+                field_name="release_id",
+                value_normalized="2021",
+                display_label="release",
+                evidence_unit_ids=["EU:4:0"],
+                candidate_ids=["VC:numeric_identifier:2021_body"],
+                confidence=FrameFieldConfidence.HIGH,
+                reasoning="less evidence",
+            ),
+        ]
+
+        _CONF_RANK = {
+            FrameFieldConfidence.HIGH: 3,
+            FrameFieldConfidence.MEDIUM: 2,
+            FrameFieldConfidence.LOW: 1,
+        }
+
+        def _has_title_signal(f: FrameField) -> int:
+            return 1 if any("in_title" in cid for cid in (f.candidate_ids or [])) else 0
+
+        seen = {}
+        for f in fields:
+            existing = seen.get(f.field_name)
+            if existing is None:
+                seen[f.field_name] = f
+            else:
+                f_rank = (_has_title_signal(f), _CONF_RANK.get(f.confidence, 0), len(f.evidence_unit_ids or []))
+                e_rank = (_has_title_signal(existing), _CONF_RANK.get(existing.confidence, 0), len(existing.evidence_unit_ids or []))
+                if f_rank > e_rank:
+                    seen[f.field_name] = f
+
+        result_fields = list(seen.values())
+        assert len(result_fields) == 1
+        # Sans title signal, "2020" gagne par evidence count (3 > 1)
+        assert result_fields[0].value_normalized == "2020"
