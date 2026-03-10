@@ -82,11 +82,11 @@ const AutoResizeTextarea = forwardRef<HTMLTextAreaElement, AutoResizeTextareaPro
             background: 'transparent',
           },
           '&::-webkit-scrollbar-thumb': {
-            background: 'gray.300',
+            background: 'border.default',
             borderRadius: '2px',
           },
           '&::-webkit-scrollbar-thumb:hover': {
-            background: 'gray.400',
+            background: 'border.active',
           },
         }}
         {...props}
