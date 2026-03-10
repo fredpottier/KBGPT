@@ -108,6 +108,10 @@ def claimfirst_process_job(
         "errors": [],
     }
 
+    # Circuit breaker : arrêter si trop de docs consécutifs sans claims (vLLM down)
+    consecutive_empty = 0
+    MAX_CONSECUTIVE_EMPTY = 3  # 3 docs à 0 claims = vLLM probablement down
+
     for i, doc_id in enumerate(doc_ids):
         logger.info(
             f"[OSMOSE:ClaimFirst:Worker] === Document {i+1}/{len(doc_ids)}: {doc_id} ==="
@@ -154,10 +158,53 @@ def claimfirst_process_job(
                 f"{result.claim_count} claims, {result.entity_count} entities"
             )
 
+            # Circuit breaker : détecter docs vides consécutifs (vLLM down silencieux)
+            if result.claim_count == 0:
+                consecutive_empty += 1
+                if consecutive_empty >= MAX_CONSECUTIVE_EMPTY:
+                    remaining = doc_ids[i + 1:]
+                    logger.error(
+                        f"[OSMOSE:ClaimFirst:Worker] CIRCUIT BREAKER: "
+                        f"{consecutive_empty} documents consécutifs avec 0 claims. "
+                        f"vLLM probablement down. Arrêt du job. "
+                        f"{len(remaining)} documents restants non traités."
+                    )
+                    results["circuit_breaker"] = True
+                    results["remaining_doc_ids"] = remaining
+                    _update_state(
+                        redis_client,
+                        status="STOPPED_CIRCUIT_BREAKER",
+                        phase="VLLM_UNAVAILABLE",
+                        remaining=len(remaining),
+                    )
+                    break
+            else:
+                consecutive_empty = 0
+
         except Exception as e:
+            # Circuit breaker : arrêt immédiat si vLLM explicitement down
+            error_str = str(e)
+            if "vLLM" in error_str or "VLLMUnavailable" in type(e).__name__:
+                remaining = doc_ids[i + 1:]
+                logger.error(
+                    f"[OSMOSE:ClaimFirst:Worker] CIRCUIT BREAKER (vLLM error): {e}. "
+                    f"Arrêt du job. {len(remaining)} documents restants."
+                )
+                results["failed"] += 1
+                results["errors"].append(f"{doc_id}: {error_str}")
+                results["circuit_breaker"] = True
+                results["remaining_doc_ids"] = remaining
+                _update_state(
+                    redis_client,
+                    status="STOPPED_CIRCUIT_BREAKER",
+                    phase="VLLM_UNAVAILABLE",
+                    remaining=len(remaining),
+                )
+                break
+
             logger.error(f"[OSMOSE:ClaimFirst:Worker] Error processing {doc_id}: {e}")
             results["failed"] += 1
-            results["errors"].append(f"{doc_id}: {str(e)}")
+            results["errors"].append(f"{doc_id}: {error_str}")
 
     # Phase 9 : Détection cross-doc (après TOUS les documents)
     if results["processed"] >= 2 and neo4j_driver:
