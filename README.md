@@ -28,13 +28,12 @@ Knowbase est une plateforme dockerisée de gestion et recherche intelligente de 
 
 #### 🖥️ **Interface Utilisateur**
 - **Frontend Moderne** : **Next.js 14 + TypeScript** - Interface web réactive avec Chakra UI
-- **Dashboard Legacy** : **Streamlit 1.48+** - Interface web interactive pour la visualisation et recherche
+- **Dashboard 🟡 Legacy** : **Streamlit 1.48+** - Interface web interactive pour la visualisation et recherche (mode hérité)
 - **Visualisation** : **Pandas + Streamlit** - Tableaux de bord et graphiques pour l'analyse des données
 - **UI Components** : Composants React modernes avec gestion d'état avancée
 
 #### 🌐 **Exposition & Tunneling**
-- **Tunnel Public** : **Ngrok** - Exposition sécurisée de l'API locale via tunnel HTTPS
-- **Domaine Fixe** : Configuration de domaine personnalisé pour intégrations GPT
+- **Tunnel Public** : **Ngrok ❌ Désactivé** - Exposition sécurisée de l'API locale via tunnel HTTPS (désactivé)
 - **CORS** : Gestion des politiques de partage de ressources cross-origin
 
 #### 🐳 **Conteneurisation & Orchestration**
@@ -195,8 +194,7 @@ knowbase/
 ├── docker-compose.yml               # Orchestration des services
 ├── .env                             # Variables d'environnement
 ├── requirements.txt                 # Dépendances Python globales
-├── pytest.ini                      # Configuration des tests
-└── ngrok.yml                        # Configuration tunnel ngrok
+└── pytest.ini                      # Configuration des tests
 ```
 
 ### Services Conteneurisés
@@ -230,13 +228,13 @@ knowbase/
 - **Features** : Chat intelligent, gestion imports, workflows RFP Excel, interface admin
 - **Architecture** : App Router Next.js 14, composants modulaires, API routes
 
-#### 🖥️ **knowbase-ui** (Interface Streamlit - Legacy)
+#### 🖥️ **knowbase-ui** (Interface Streamlit 🟡 Legacy)
 - **Dashboard** : Visualisation des données indexées (mode hérité)
 - **Port** : 8501 (configurable via `APP_UI_PORT`)
 - **Features** : Recherche interactive, filtrage, statistiques
 
-#### 🌐 **knowbase-ngrok** (Tunnel Public)
-- **Exposition** : Tunnel sécurisé pour accès externe
+#### 🌐 **knowbase-ngrok** ❌ Désactivé
+- **Exposition** : Tunnel sécurisé pour accès externe (désactivé)
 - **Usage** : Intégration GPT personnalisé, webhooks
 - **Domain** : Configuration via `NGROK_DOMAIN`
 
@@ -261,8 +259,6 @@ cp .env.example .env
 # Variables essentielles à configurer :
 # OPENAI_API_KEY=your-openai-key
 # ANTHROPIC_API_KEY=your-anthropic-key (optionnel, pour Claude)
-# NGROK_AUTHTOKEN=your-ngrok-token (optionnel)
-# NGROK_DOMAIN=your-domain.ngrok.app (optionnel)
 ```
 
 ### Lancement des Services
@@ -282,9 +278,8 @@ Une fois démarrés, les services sont accessibles via :
 
 - **🌐 Frontend Moderne** : `http://localhost:3000` (Interface Next.js recommandée)
 - **📚 API Documentation** : `http://localhost:8000/docs` (Swagger UI)
-- **🖥️ Interface Streamlit** : `http://localhost:8501` (Interface legacy)
+- **🖥️ Interface Streamlit 🟡 Legacy** : `http://localhost:8501` (Interface legacy)
 - **🔍 Base Qdrant** : `http://localhost:6333/dashboard`
-- **🌐 Tunnel Ngrok** : Vérifiez les logs pour l'URL publique
 
 ## 🛠️ Utilisation
 
@@ -302,7 +297,7 @@ Une fois démarrés, les services sont accessibles via :
 2. **Import Questions/Réponses** : Uploadez des fichiers Excel Q/A avec configuration des colonnes
 3. **Remplir RFP vide** : Uploadez des RFP vides pour remplissage automatique via recherche cascade
 
-#### Via Interface Streamlit (Legacy)
+#### Via Interface Streamlit (🟡 Legacy)
 1. Accédez à `http://localhost:8501`
 2. Utilisez la section "Upload" pour déposer vos documents
 3. Suivez le statut de traitement dans l'interface
