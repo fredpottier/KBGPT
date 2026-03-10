@@ -14,6 +14,9 @@ Formats supportés:
     - PDF (.pdf)
     - PowerPoint (.pptx, .ppt)
     - Excel (.xlsx, .xls)
+    - Markdown (.md)
+    - HTML (.html, .htm)
+    - Word (.docx)
 """
 
 from __future__ import annotations
@@ -47,6 +50,10 @@ SUPPORTED_EXTENSIONS = {
     ".ppt": "pptx",
     ".xlsx": "excel",
     ".xls": "excel",
+    ".md": "md",
+    ".html": "html",
+    ".htm": "html",
+    ".docx": "docx",
 }
 
 # Délai avant traitement (pour s'assurer que le fichier est complètement copié)
@@ -92,6 +99,7 @@ def enqueue_file(file_path: Path) -> bool:
         enqueue_pdf_ingestion,
         enqueue_pptx_ingestion,
         enqueue_excel_ingestion,
+        enqueue_document_v2,
     )
     from knowbase.api.services.import_history_redis import get_redis_import_history_service
 
@@ -139,6 +147,13 @@ def enqueue_file(file_path: Path) -> bool:
                 file_path=file_str,
             )
             logger.info(f"Excel ajouté à la queue: {file_path.name} (job_id={job_id})")
+
+        elif file_type in ("md", "html", "docx"):
+            enqueue_document_v2(
+                job_id=job_id,
+                file_path=file_str,
+            )
+            logger.info(f"{file_type.upper()} ajouté à la queue: {file_path.name} (job_id={job_id})")
 
         return True
 

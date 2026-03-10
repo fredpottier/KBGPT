@@ -739,7 +739,7 @@ async def prepare_batch(
                 )
 
             document_paths = list(pending_dir.glob("*"))
-            document_paths = [p for p in document_paths if p.is_file() and p.suffix.lower() in [".pdf", ".pptx", ".docx", ".xlsx"]]
+            document_paths = [p for p in document_paths if p.is_file() and p.suffix.lower() in [".pdf", ".pptx", ".docx", ".xlsx", ".md", ".html", ".htm"]]
 
         if not document_paths:
             return PrepareBatchResponse(
@@ -965,8 +965,8 @@ async def process_batch(
                         logger.info(f"[BURST] Processing: {doc_path.name} (concurrency: {MAX_CONCURRENT_DOCS})")
 
                         # Pipeline V2 unifié (Docling + Vision Gating V4 + OSMOSE)
-                        # Supporte: .pdf, .pptx, .docx, .xlsx
-                        if suffix in [".pdf", ".pptx", ".docx", ".xlsx"]:
+                        # Supporte: .pdf, .pptx, .docx, .xlsx, .md, .html
+                        if suffix in [".pdf", ".pptx", ".docx", ".xlsx", ".md", ".html", ".htm"]:
                             result = await asyncio.to_thread(
                                 lambda p=str(doc_path): ingest_document_v2_job(file_path=p)
                             )

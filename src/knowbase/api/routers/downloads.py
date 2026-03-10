@@ -131,7 +131,7 @@ async def download_import_file(
             base_dir = settings.docs_in_dir
 
         # Essayer de trouver le fichier avec différentes extensions
-        extensions = [".xlsx", ".xls", ".pdf", ".pptx", ".docx"]
+        extensions = [".xlsx", ".xls", ".pdf", ".pptx", ".docx", ".md", ".html", ".htm"]
         file_path = None
 
         for ext in extensions:
@@ -150,7 +150,10 @@ async def download_import_file(
             ".xls": "application/vnd.ms-excel",
             ".pdf": "application/pdf",
             ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".md": "text/markdown",
+            ".html": "text/html",
+            ".htm": "text/html"
         }
 
         file_extension = file_path.suffix.lower()

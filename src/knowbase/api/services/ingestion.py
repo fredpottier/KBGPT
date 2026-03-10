@@ -208,7 +208,7 @@ def handle_dispatch(
         docs_in.mkdir(parents=True, exist_ok=True)
 
         document_kind = document_type.lower()
-        if document_kind not in {"pptx", "pdf", "xlsx"}:
+        if document_kind not in {"pptx", "pdf", "xlsx", "md", "html", "docx"}:
             return {"error": f"Unsupported document_type: {document_type}"}
 
         saved_path = docs_in / f"{uid}.{document_kind}"
@@ -254,6 +254,13 @@ def handle_dispatch(
                 file_path=str(saved_path),
                 document_type_id=doc_type_for_pipeline,
                 use_vision=use_vision,
+            )
+        elif document_kind in ("md", "html", "docx"):
+            from knowbase.ingestion.queue.dispatcher import enqueue_document_v2
+            job = enqueue_document_v2(
+                job_id=uid,
+                file_path=str(saved_path),
+                document_type_id=doc_type_for_pipeline,
             )
         else:
             job = enqueue_excel_ingestion(
