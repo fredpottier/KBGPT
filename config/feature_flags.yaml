@@ -187,7 +187,7 @@ extraction_v2:
     vision_required: 0.60
     vision_recommended: 0.40
 
-  supported_formats: ["pdf", "pptx", "docx", "xlsx"]
+  supported_formats: ["pdf", "pptx", "docx", "xlsx", "md", "html"]
 
   cache:
     enabled: true

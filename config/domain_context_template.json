@@ -1,0 +1,33 @@
+{
+  "tenant_id": "default",
+  "domain_summary": "REMPLIR_ICI - Résumé concis du domaine métier en 1-2 phrases (ex: 'Enterprise software ecosystem focused on ERP, cloud infrastructure, and business transformation solutions')",
+  "industry": "REMPLIR_ICI - Industrie principale (ex: 'enterprise_software', 'pharmaceutical', 'consulting', 'finance')",
+  "sub_domains": [
+    "REMPLIR_ICI - Liste des sous-domaines spécifiques",
+    "Exemples: 'ERP', 'Cloud Infrastructure', 'Analytics', 'Human Capital Management'",
+    "Maximum 20 entrées"
+  ],
+  "target_users": [
+    "REMPLIR_ICI - Profils utilisateurs cibles",
+    "Exemples: 'consultants', 'solution_architects', 'IT_managers', 'business_analysts'",
+    "Maximum 10 entrées"
+  ],
+  "document_types": [
+    "REMPLIR_ICI - Types de documents traités",
+    "Exemples: 'technical', 'architecture', 'functional', 'marketing', 'training'",
+    "Maximum 10 entrées"
+  ],
+  "common_acronyms": {
+    "EXEMPLE_1": "Expansion complète de l'acronyme 1",
+    "EXEMPLE_2": "Expansion complète de l'acronyme 2",
+    "NOTE": "Maximum 50 acronymes - Les plus courants dans vos documents"
+  },
+  "key_concepts": [
+    "REMPLIR_ICI - Liste des concepts clés du domaine",
+    "Exemples: 'Enterprise Resource Planning', 'Cloud Computing', 'Digital Transformation'",
+    "Maximum 20 concepts",
+    "Utiliser les noms complets canoniques (pas d'acronymes)"
+  ],
+  "context_priority": "medium",
+  "llm_injection_prompt": "REMPLIR_ICI - Prompt d'injection pour LLM (20-2000 caractères). Exemple: 'You are analyzing enterprise software documentation with focus on cloud solutions, ERP systems, and business transformation. Common vendors include major software companies. Documents contain technical architecture, solution guides, and implementation best practices.'"
+}

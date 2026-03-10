@@ -632,23 +632,25 @@ export default function DomainContextPage() {
 
   const applyAllSuggestions = () => {
     if (!currentPreset) return
+    // Déterminer si on change d'industrie (preset différent du contexte existant)
+    const isIndustrySwitch = existingContext && existingContext.industry !== formData.industry
     setFormData({
       ...formData,
-      domain_summary: formData.domain_summary || currentPreset.descriptionPlaceholder,
-      sub_domains: [...new Set([...formData.sub_domains, ...currentPreset.subDomainsSuggestions])],
-      key_concepts: [...new Set([...formData.key_concepts, ...currentPreset.keyConceptsSuggestions])],
-      target_users: [...new Set([...formData.target_users, ...currentPreset.targetUsersSuggestions])],
-      document_types: [...new Set([...formData.document_types, ...currentPreset.documentTypesSuggestions])],
-      common_acronyms: { ...currentPreset.acronymsSuggestions, ...formData.common_acronyms },
-      versioning_hints: formData.versioning_hints || currentPreset.versioningHints || '',
-      identification_semantics: formData.identification_semantics || currentPreset.identificationSemantics || '',
-      axis_reclassification_rules: formData.axis_reclassification_rules || currentPreset.axisReclassificationRules || '',
+      domain_summary: isIndustrySwitch ? currentPreset.descriptionPlaceholder : (formData.domain_summary || currentPreset.descriptionPlaceholder),
+      sub_domains: isIndustrySwitch ? [...currentPreset.subDomainsSuggestions] : [...new Set([...formData.sub_domains, ...currentPreset.subDomainsSuggestions])],
+      key_concepts: isIndustrySwitch ? [...currentPreset.keyConceptsSuggestions] : [...new Set([...formData.key_concepts, ...currentPreset.keyConceptsSuggestions])],
+      target_users: isIndustrySwitch ? [...currentPreset.targetUsersSuggestions] : [...new Set([...formData.target_users, ...currentPreset.targetUsersSuggestions])],
+      document_types: isIndustrySwitch ? [...currentPreset.documentTypesSuggestions] : [...new Set([...formData.document_types, ...currentPreset.documentTypesSuggestions])],
+      common_acronyms: isIndustrySwitch ? { ...currentPreset.acronymsSuggestions } : { ...currentPreset.acronymsSuggestions, ...formData.common_acronyms },
+      versioning_hints: isIndustrySwitch ? (currentPreset.versioningHints || '') : (formData.versioning_hints || currentPreset.versioningHints || ''),
+      identification_semantics: isIndustrySwitch ? (currentPreset.identificationSemantics || '') : (formData.identification_semantics || currentPreset.identificationSemantics || ''),
+      axis_reclassification_rules: isIndustrySwitch ? (currentPreset.axisReclassificationRules || '') : (formData.axis_reclassification_rules || currentPreset.axisReclassificationRules || ''),
     })
-    // Apply axis policy preset if available and current is default
+    // Apply axis policy preset if available (force on industry switch)
     if (currentPreset.axisPolicy) {
       setAxisPolicy(prev => {
         const isDefault = prev.expected_axes.length === 0 && prev.excluded_axes.length === 0 && prev.strip_prefixes.length === 0
-        return isDefault ? { ...currentPreset.axisPolicy! } : prev
+        return (isIndustrySwitch || isDefault) ? { ...currentPreset.axisPolicy! } : prev
       })
     }
   }
