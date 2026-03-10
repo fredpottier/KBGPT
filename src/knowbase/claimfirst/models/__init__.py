@@ -69,6 +69,36 @@ from knowbase.claimfirst.models.context_comparability import (
 from knowbase.claimfirst.models.comparable_subject import (
     ComparableSubject,
 )
+# CanonicalEntity (Couche 1 — Cross-Doc Entity Canonicalization)
+from knowbase.claimfirst.models.canonical_entity import (
+    CanonicalEntity,
+)
+# QuestionSignature (Phase C2a — Implicit factual questions)
+from knowbase.claimfirst.models.question_signature import (
+    QuestionSignature,
+    QSValueType,
+    QSExtractionLevel,
+    QSExtractionMethod,
+)
+# QuestionDimension (QS Cross-Doc v1 — Dimension registry)
+from knowbase.claimfirst.models.question_dimension import (
+    QuestionDimension,
+)
+# ResolvedScope (QS Cross-Doc v1 — Scope de comparabilité)
+from knowbase.claimfirst.models.resolved_scope import (
+    ScopeAxis,
+    ResolvedScope,
+)
+# ComparabilityVerdict (QS Cross-Doc v1 — Verdict de comparabilité)
+from knowbase.claimfirst.models.comparability_verdict import (
+    ComparabilityLevel,
+    ComparabilityVerdict,
+    are_comparable,
+)
+# QSCandidate (QS Cross-Doc v1 — Objet intermédiaire)
+from knowbase.claimfirst.models.qs_candidate import (
+    QSCandidate,
+)
 # SubjectResolver v2 output models
 from knowbase.claimfirst.models.subject_resolver_output import (
     DiscriminatingRole,
@@ -142,4 +172,22 @@ __all__ = [
     "ClassifiedCandidate",
     "AbstainInfo",
     "SubjectResolverOutput",
+    # CanonicalEntity (Couche 1 — Cross-Doc)
+    "CanonicalEntity",
+    # QuestionSignature (Phase C2a)
+    "QuestionSignature",
+    "QSValueType",
+    "QSExtractionLevel",
+    "QSExtractionMethod",
+    # QuestionDimension (QS Cross-Doc v1)
+    "QuestionDimension",
+    # ResolvedScope (QS Cross-Doc v1)
+    "ScopeAxis",
+    "ResolvedScope",
+    # ComparabilityVerdict (QS Cross-Doc v1)
+    "ComparabilityLevel",
+    "ComparabilityVerdict",
+    "are_comparable",
+    # QSCandidate (QS Cross-Doc v1)
+    "QSCandidate",
 ]
