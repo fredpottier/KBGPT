@@ -347,12 +347,30 @@ class LLMRouter:
                     # vLLM actif et healthy
                     logger.debug(f"[LLM_ROUTER:GATE] vLLM healthy: {vllm_url}")
                 else:
-                    # vLLM configuré mais DOWN - NE PAS désactiver automatiquement
-                    # Le code appelant décidera quoi faire (suspendre, retenter, etc.)
-                    logger.warning(
-                        f"[LLM_ROUTER:GATE] vLLM configured but DOWN: {vllm_url}. "
-                        f"Burst mode remains active, caller should handle suspension."
-                    )
+                    # vLLM configuré mais DOWN — vérifier si l'instance Spot a été réclamée
+                    spot_terminated = self._check_spot_instance_terminated(vllm_url)
+                    if spot_terminated:
+                        # Instance définitivement terminée → purger le burst state
+                        logger.error(
+                            f"[LLM_ROUTER:GATE] EC2 Spot instance TERMINATED for {vllm_url}. "
+                            f"Purging burst state."
+                        )
+                        try:
+                            from knowbase.ingestion.burst.provider_switch import clear_burst_state_in_redis
+                            clear_burst_state_in_redis()
+                        except Exception as purge_err:
+                            logger.error(f"[LLM_ROUTER:GATE] Failed to purge burst state: {purge_err}")
+                        state["healthy"] = False
+                        state["active"] = False
+                        state["spot_terminated"] = True
+                        self._redis_burst_cache = state
+                        self._redis_burst_cache_time = now
+                        return state
+                    else:
+                        logger.warning(
+                            f"[LLM_ROUTER:GATE] vLLM configured but DOWN: {vllm_url}. "
+                            f"Instance still exists — may recover. Raising for job suspension."
+                        )
 
                 self._redis_burst_cache = state
                 self._redis_burst_cache_time = now
@@ -410,6 +428,92 @@ class LLMRouter:
         except Exception as e:
             logger.warning(f"[LLM_ROUTER:GATE] vLLM health check error: {e}")
             self._vllm_health_cache[vllm_url] = (False, now)
+            return False
+
+    def _check_spot_instance_terminated(self, vllm_url: str) -> bool:
+        """
+        Vérifie via AWS CLI si l'instance Spot associée au vLLM a été terminée.
+
+        Extrait l'IP du vllm_url, cherche l'instance EC2 correspondante,
+        et retourne True si elle est dans l'état 'terminated' ou introuvable.
+
+        Cache de 60 secondes pour éviter de spammer l'API AWS.
+        """
+        import re
+        import subprocess
+
+        if not hasattr(self, "_spot_check_cache"):
+            self._spot_check_cache: Dict[str, tuple] = {}
+
+        now = time.time()
+        spot_check_ttl = 60.0
+
+        if vllm_url in self._spot_check_cache:
+            is_terminated, check_time = self._spot_check_cache[vllm_url]
+            if now - check_time < spot_check_ttl:
+                return is_terminated
+
+        # Extraire l'IP du vllm_url
+        ip_match = re.search(r"(\d+\.\d+\.\d+\.\d+)", vllm_url)
+        if not ip_match:
+            self._spot_check_cache[vllm_url] = (False, now)
+            return False
+
+        ip = ip_match.group(1)
+
+        try:
+            result = subprocess.run(
+                [
+                    "aws", "ec2", "describe-instances",
+                    "--region", "eu-central-1",
+                    "--filters", f"Name=ip-address,Values={ip}",
+                    "--query", "Reservations[].Instances[].State.Name",
+                    "--output", "text",
+                ],
+                capture_output=True, text=True, timeout=10,
+            )
+
+            state_text = result.stdout.strip()
+
+            if not state_text:
+                # Aucune instance trouvée avec cette IP → probablement terminée et IP libérée
+                # Chercher par IP privée aussi
+                result2 = subprocess.run(
+                    [
+                        "aws", "ec2", "describe-instances",
+                        "--region", "eu-central-1",
+                        "--filters",
+                        "Name=instance-state-name,Values=running,stopped,stopping,pending",
+                        "Name=network-interface.association.public-ip,Values=" + ip,
+                        "--query", "Reservations[].Instances[].State.Name",
+                        "--output", "text",
+                    ],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if not result2.stdout.strip():
+                    logger.warning(
+                        f"[LLM_ROUTER:SPOT] No EC2 instance found for IP {ip} — "
+                        f"Spot instance likely terminated/reclaimed."
+                    )
+                    self._spot_check_cache[vllm_url] = (True, now)
+                    return True
+
+            if state_text in ("terminated", "shutting-down"):
+                logger.warning(
+                    f"[LLM_ROUTER:SPOT] EC2 instance at {ip} is '{state_text}' — "
+                    f"Spot reclaimed by AWS."
+                )
+                self._spot_check_cache[vllm_url] = (True, now)
+                return True
+
+            # Instance existe mais dans un autre état (stopped, running, etc.)
+            logger.info(f"[LLM_ROUTER:SPOT] EC2 instance at {ip} state='{state_text}'")
+            self._spot_check_cache[vllm_url] = (False, now)
+            return False
+
+        except Exception as e:
+            logger.debug(f"[LLM_ROUTER:SPOT] AWS CLI check failed: {e}")
+            self._spot_check_cache[vllm_url] = (False, now)
             return False
 
     def _ensure_burst_client_for_redis_state(self, state: Dict[str, Any]) -> bool:
@@ -799,14 +903,27 @@ class LLMRouter:
 
             # IMPORTANT: Pas de fallback OpenAI si burst mode actif
             # On laisse l'erreur remonter pour que le job puisse être suspendu/repris
-            if self._burst_mode:
+            # Vérifier AUSSI Redis (pas seulement le flag mémoire locale)
+            # car après un restart de conteneur, _burst_mode est False en mémoire
+            # mais la clé Redis osmose:burst:state peut encore être active.
+            redis_burst_active = False
+            if not self._burst_mode:
+                try:
+                    from knowbase.ingestion.burst.provider_switch import get_burst_state_from_redis
+                    rs = get_burst_state_from_redis()
+                    redis_burst_active = bool(rs and rs.get("active"))
+                except Exception:
+                    pass
+
+            if self._burst_mode or redis_burst_active:
                 logger.error(
                     f"[LLM_ROUTER:ASYNC:BURST] ❌ vLLM call failed, NO fallback to OpenAI. "
+                    f"(local_burst={self._burst_mode}, redis_burst={redis_burst_active}) "
                     f"Error: {e}"
                 )
                 raise
 
-            # Fallback d'urgence UNIQUEMENT si pas en burst mode
+            # Fallback d'urgence UNIQUEMENT si pas en burst mode (ni local ni Redis)
             default_model = self._config.get("default_model", "gpt-4o")
             if model != default_model:
                 logger.info(f"[LLM_ROUTER:ASYNC] Fallback emergency to {default_model}")
