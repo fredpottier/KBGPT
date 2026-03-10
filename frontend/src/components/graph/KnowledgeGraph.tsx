@@ -376,12 +376,12 @@ export default function KnowledgeGraph({
   // Pas de données
   if (nodes.length === 0) {
     return (
-      <Center h="full" w="full" bg="gray.50" borderRadius="md">
+      <Center h="full" w="full" bg="bg.primary" borderRadius="md">
         <VStack spacing={2}>
-          <Text color="gray.500" fontSize="sm">
+          <Text color="text.secondary" fontSize="sm">
             Aucun concept à afficher
           </Text>
-          <Text color="gray.400" fontSize="xs">
+          <Text color="text.muted" fontSize="xs">
             Le graphe apparaîtra après votre première question
           </Text>
         </VStack>
