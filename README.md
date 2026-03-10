@@ -1,95 +1,124 @@
-# Knowbase - SAP Knowledge Management System
+# Knowbase - SAP Knowledge Management System ✅
 
-Knowbase est une plateforme dockerisée de gestion et recherche intelligente de documents SAP, utilisant des technologies d'Intelligence Artificielle pour l'indexation, la structuration et l'interrogation de bases de connaissances multi-formats.
+**Plateforme dockerisée de gestion et recherche intelligente de documents SAP**, utilisant des technologies d'Intelligence Artificielle pour l'indexation, la structuration et l'interrogation de bases de connaissances multi-formats.
 
-## 🎯 Contexte Fonctionnel
+---
+
+## 📋 Table des Matières
+
+- [🎯 Contexte Fonctionnel](#-contexte-fonctionnel)
+  - [Stack Technique & Outils](#stack-technique--outils)
+  - [Formats de Documents Supportés](#formats-de-documents-supportés)
+  - [Capacités de Recherche Avancées](#capacités-de-recherche-avancées)
+- [🏗️ Architecture du Projet](#️-architecture-du-projet)
+  - [Structure des Répertoires](#structure-des-répertoires)
+  - [Services Conteneurisés](#services-conteneurisés)
+- [🚀 Démarrage du Projet](#-démarrage-du-projet)
+  - [Prérequis](#prérequis)
+  - [Configuration](#configuration)
+  - [Lancement des Services](#lancement-des-services)
+  - [Accès aux Services](#accès-aux-services)
+- [🛠️ Utilisation](#️-utilisation)
+  - [Ingestion de Documents](#ingestion-de-documents)
+  - [Recherche de Documents](#recherche-de-documents)
+- [🧪 Tests et Qualité](#-tests-et-qualité)
+- [🐛 Debug et Développement](#-debug-et-développement)
+- [🧠 Système LLM Multi-Provider](#-système-llm-multi-provider-)
+- [🔧 Administration et Maintenance](#-administration-et-maintenance)
+- [🎯 Roadmap et Évolutions](#-roadmap-et-évolutions)
+- [📊 Badges & Métriques](#-badges--métriques)
+- [👥 Contribution](#-contribution)
+
+---
+
+## 🎯 Contexte Fonctionnel ✅
 
 ### Stack Technique & Outils
 
 #### 🧠 **Intelligence Artificielle & Machine Learning**
-- **Embeddings** : `intfloat/multilingual-e5-base` - Modèle multilingue HuggingFace pour la vectorisation sémantique de 768 dimensions
-- **ReRanker** : `cross-encoder/ms-marco-MiniLM-L-6-v2` - Cross-encoder pour l'optimisation et le reranking des résultats de recherche
-- **LLM Router** : **Système multi-provider intelligent** - Routage automatique entre OpenAI (GPT-4o, GPT-4o-mini) et Anthropic (Claude-3.5-Sonnet, Claude-3.5-Haiku)
-- **Configuration LLM** : **YAML centralisé** - Sélection dynamique des modèles par type de tâche avec paramètres optimisés (température, max_tokens)
-- **Cache Modèles** : **HuggingFace Hub** - Téléchargement et mise en cache locale des modèles ML
+- ✅ **Embeddings** : `intfloat/multilingual-e5-base` - Modèle multilingue HuggingFace pour la vectorisation sémantique de 768 dimensions
+- ✅ **ReRanker** : `cross-encoder/ms-marco-MiniLM-L-6-v2` - Cross-encoder pour l'optimisation et le reranking des résultats de recherche
+- ✅ **LLM Router** : **Système multi-provider intelligent** - Routage automatique entre OpenAI (GPT-4o, GPT-4o-mini) et Anthropic (Claude-3.5-Sonnet, Claude-3.5-Haiku)
+- ✅ **Configuration LLM** : **YAML centralisé** - Sélection dynamique des modèles par type de tâche avec paramètres optimisés (température, max_tokens)
+- ✅ **Cache Modèles** : **HuggingFace Hub** - Téléchargement et mise en cache locale des modèles ML
 
 #### 🗄️ **Stockage & Base de Données**
-- **Base Vectorielle** : **Qdrant v1.15.1** - Base de données vectorielle haute performance pour la recherche de similarité
-- **Collections Spécialisées** : **Collections dédiées Q/A RFP** - Séparation logique des données avec recherche cascade
-- **Knowledge Graph** : **Neo4j 5.26.0** - Base de données graphe pour relations sémantiques OSMOSE (ports 7474/7687)
+- ✅ **Base Vectorielle** : **Qdrant v1.15.1** - Base de données vectorielle haute performance pour la recherche de similarité
+- ✅ **Collections Spécialisées** : **Collections dédiées Q/A RFP** - Séparation logique des données avec recherche cascade
+- ✅ **Knowledge Graph** : **Neo4j 5.26.0** - Base de données graphe pour relations sémantiques OSMOSE (ports 7474/7687)
   - **Plugins** : APOC + Graph Data Science (GDS) Community
   - **Mémoire** : Heap 2-4GB, PageCache 2GB (optimisé pour 45k+ nodes)
-- **Base Métadonnées** : **PostgreSQL 16 + pgvector** - Gestion sessions, utilisateurs, audit trail, historique imports
-- **Queue de Tâches** : **Redis 7.2** - Système de files d'attente avec persistance AOF pour l'orchestration asynchrone
-- **Historique d'Imports** : **Redis + Persistance** - Suivi complet des imports avec gestion de l'état en temps réel
-- **Stockage Fichiers** : Système de fichiers local avec organisation hiérarchique dans `/data`
+- ✅ **Base Métadonnées** : **PostgreSQL 16 + pgvector** - Gestion sessions, utilisateurs, audit trail, historique imports
+- ✅ **Queue de Tâches** : **Redis 7.2** - Système de files d'attente avec persistance AOF pour l'orchestration asynchrone
+- ✅ **Historique d'Imports** : **Redis + Persistance** - Suivi complet des imports avec gestion de l'état en temps réel
+- ✅ **Stockage Fichiers** : Système de fichiers local avec organisation hiérarchique dans `/data`
 
 #### 🚀 **Backend & API**
-- **Framework API** : **FastAPI 0.110+** - Framework Python moderne avec auto-documentation OpenAPI/Swagger
-- **Serveur ASGI** : **Uvicorn** - Serveur ASGI haute performance pour applications asynchrones
-- **Queue Worker** : **RQ (Redis Queue)** - Traitement asynchrone des tâches d'ingestion en arrière-plan
-- **Validation** : **Pydantic 2.8+** - Validation des données et sérialisation avec type hints
+- ✅ **Framework API** : **FastAPI 0.110+** - Framework Python moderne avec auto-documentation OpenAPI/Swagger
+- ✅ **Serveur ASGI** : **Uvicorn** - Serveur ASGI haute performance pour applications asynchrones
+- ✅ **Queue Worker** : **RQ (Redis Queue)** - Traitement asynchrone des tâches d'ingestion en arrière-plan
+- ✅ **Validation** : **Pydantic 2.8+** - Validation des données et sérialisation avec type hints
 
 #### 🖥️ **Interface Utilisateur**
-- **Frontend Moderne** : **Next.js 14 + TypeScript** - Interface web réactive avec Chakra UI
-- **Dashboard 🟡 Legacy** : **Streamlit 1.48+** - Interface web interactive pour la visualisation et recherche (mode hérité)
-- **Visualisation** : **Pandas + Streamlit** - Tableaux de bord et graphiques pour l'analyse des données
-- **UI Components** : Composants React modernes avec gestion d'état avancée
+- ✅ **Frontend Moderne** : **Next.js 14 + TypeScript** - Interface web réactive avec Chakra UI
+- 🟡 **Dashboard Legacy** : **Streamlit 1.48+** - Interface web interactive pour la visualisation et recherche (mode maintenance)
+- ✅ **Visualisation** : **Pandas + Streamlit** - Tableaux de bord et graphiques pour l'analyse des données
+- ✅ **UI Components** : Composants React modernes avec gestion d'état avancée
 
 #### 🌐 **Exposition & Tunneling**
-- **Tunnel Public** : **Ngrok ❌ Désactivé** - Exposition sécurisée de l'API locale via tunnel HTTPS (désactivé)
-- **CORS** : Gestion des politiques de partage de ressources cross-origin
+- ❌ **Tunnel Public** : **Ngrok** - Exposition sécurisée de l'API locale via tunnel HTTPS (désactivé)
+- ✅ **CORS** : Gestion des politiques de partage de ressources cross-origin
 
 #### 🐳 **Conteneurisation & Orchestration**
-- **Conteneurs** : **Docker** - Environnement isolé et reproductible pour chaque service
-- **Orchestration** : **Docker Compose Multi-fichiers** - Architecture séparée infra/app/monitoring
+- ✅ **Conteneurs** : **Docker** - Environnement isolé et reproductible pour chaque service
+- ✅ **Orchestration** : **Docker Compose Multi-fichiers** - Architecture séparée infra/app/monitoring
   - `docker-compose.infra.yml` : Infrastructure stateful (Qdrant, Redis, Neo4j, PostgreSQL)
   - `docker-compose.yml` : Application stateless (API, Worker, Frontend, Folder-Watcher)
   - `docker-compose.monitoring.yml` : Monitoring (Grafana, Loki, Promtail)
-- **GPU Support** : **NVIDIA GPU avec CUDA** - Accélération hardware pour worker d'ingestion
+- ✅ **GPU Support** : **NVIDIA GPU avec CUDA** - Accélération hardware pour worker d'ingestion
   - Configuration : 1 GPU, CUDA_VISIBLE_DEVICES="0"
   - PyTorch avec CUDA 12.0 pour RTX series
   - Mémoire partagée 2GB (shm_size) pour chargement modèles PyTorch
-- **Folder Watcher** : **Service de surveillance automatique** - Ingestion automatique des documents
+- ✅ **Folder Watcher** : **Service de surveillance automatique** - Ingestion automatique des documents
   - Surveille `data/watch/` et copie vers `data/docs_in/` pour traitement
   - Formats supportés : PDF, PPTX, Excel
-- **Volumes** : Persistance des données Qdrant, Neo4j, Redis, PostgreSQL et cache des modèles
-- **Networks** : Réseau Docker privé `knowbase_net` pour communication inter-services
+- ✅ **Volumes** : Persistance des données Qdrant, Neo4j, Redis, PostgreSQL et cache des modèles
+- ✅ **Networks** : Réseau Docker privé `knowbase_net` pour communication inter-services
 
 #### 📄 **Traitement de Documents**
-- **PDF** : **Poppler-utils** + **PyPDF2** - Extraction de texte et conversion PDF vers images
-- **PowerPoint** : **python-pptx** - Analyse et extraction de contenu des présentations
-- **Excel** : **Pandas + Openpyxl** - Traitement des données tabulaires et métadonnées
-- **OCR** : **Tesseract** - Reconnaissance optique de caractères pour images et PDF scannés
-- **Images** : **Pillow** - Génération de vignettes et manipulation d'images
+- ✅ **PDF** : **Poppler-utils** + **PyPDF2** - Extraction de texte et conversion PDF vers images
+- ✅ **PowerPoint** : **python-pptx** - Analyse et extraction de contenu des présentations
+- ✅ **Excel** : **Pandas + Openpyxl** - Traitement des données tabulaires et métadonnées
+- ✅ **OCR** : **Tesseract** - Reconnaissance optique de caractères pour images et PDF scannés
+- ✅ **Images** : **Pillow** - Génération de vignettes et manipulation d'images
 
 #### 🧪 **Tests & Qualité**
-- **Framework de Tests** : **Pytest 7.4+** - Tests unitaires et d'intégration
-- **Mocking** : **Pytest-mock** - Simulation des dépendances externes
-- **Couverture** : **Coverage.py** - Mesure de la couverture de code
-- **Client HTTP** : **HTTPX** - Tests des endpoints FastAPI en mode asynchrone
+- ✅ **Framework de Tests** : **Pytest 7.4+** - Tests unitaires et d'intégration
+- ✅ **Mocking** : **Pytest-mock** - Simulation des dépendances externes
+- ✅ **Couverture** : **Coverage.py** - Mesure de la couverture de code
+- ✅ **Client HTTP** : **HTTPX** - Tests des endpoints FastAPI en mode asynchrone
 
 #### ⚙️ **Configuration & Logging**
-- **Variables d'Environnement** : **Pydantic Settings** - Gestion centralisée de la configuration
-- **Logging** : **Loguru** - Système de logs structurés avec rotation automatique
-- **Configuration** : **YAML** - Fichiers de configuration pour prompts et paramètres
+- ✅ **Variables d'Environnement** : **Pydantic Settings** - Gestion centralisée de la configuration
+- ✅ **Logging** : **Loguru** - Système de logs structurés avec rotation automatique
+- ✅ **Configuration** : **YAML** - Fichiers de configuration pour prompts et paramètres
 
 ### Formats de Documents Supportés
-- **Présentations** : PowerPoint (.pptx) avec extraction de texte, métadonnées et génération de vignettes
-- **Documents** : PDF avec OCR intégré et extraction de contenu structuré
-- **Tableurs** : Excel (.xlsx/.xls) avec traitement des données tabulaires et formules
-- **Texte** : Formats Word (.docx) et fichiers texte brut (.txt, .md)
+- ✅ **Présentations** : PowerPoint (.pptx) avec extraction de texte, métadonnées et génération de vignettes
+- ✅ **Documents** : PDF avec OCR intégré et extraction de contenu structuré
+- ✅ **Tableurs** : Excel (.xlsx/.xls) avec traitement des données tabulaires et formules
+- ✅ **Texte** : Formats Word (.docx) et fichiers texte brut (.txt, .md)
 
 ### Capacités de Recherche Avancées
-- **Recherche Sémantique** : Basée sur la similarité cosinus des embeddings vectoriels avec Qdrant
-- **Recherche Cascade Intelligente** : Q/A RFP prioritaire (seuil 0.85) puis base de connaissances générale (seuil 0.70)
-- **Collections Spécialisées** : Séparation Q/A RFP et base de connaissances pour une pertinence optimisée
-- **Filtrage Multi-Critères** : Par solution SAP, type de document, dates, auteurs, métadonnées personnalisées
-- **ReRanking Intelligent** : Optimisation de la pertinence avec modèles cross-encoder
-- **API RESTful** : Interface programmatique complète avec documentation Swagger automatique
-- **Recherche Hybride** : Combinaison recherche vectorielle + filtres traditionnels pour une précision maximale
+- ✅ **Recherche Sémantique** : Basée sur la similarité cosinus des embeddings vectoriels avec Qdrant
+- ✅ **Recherche Cascade Intelligente** : Q/A RFP prioritaire (seuil 0.85) puis base de connaissances générale (seuil 0.70)
+- ✅ **Collections Spécialisées** : Séparation Q/A RFP et base de connaissances pour une pertinence optimisée
+- ✅ **Filtrage Multi-Critères** : Par solution SAP, type de document, dates, auteurs, métadonnées personnalisées
+- ✅ **ReRanking Intelligent** : Optimisation de la pertinence avec modèles cross-encoder
+- ✅ **API RESTful** : Interface programmatique complète avec documentation Swagger automatique
+- ✅ **Recherche Hybride** : Combinaison recherche vectorielle + filtres traditionnels pour une précision maximale
 
-## 🏗️ Architecture du Projet
+## 🏗️ Architecture du Projet ✅
 
 ### Structure des Répertoires
 
@@ -214,40 +243,40 @@ knowbase/
 
 ### Services Conteneurisés
 
-#### 🔍 **knowbase-qdrant**
-- **Base vectorielle** : Stockage et recherche de vecteurs d'embeddings
+#### ✅ **knowbase-qdrant** (Base Vectorielle)
+- **Fonction** : Stockage et recherche de vecteurs d'embeddings
 - **Port** : 6333
 - **Volume** : `qdrant_data` pour la persistance
 - **Configuration** : Stockage optimisé pour les performances
 
-#### 📊 **knowbase-redis**
-- **Queue de tâches** : Orchestration des pipelines d'ingestion
+#### ✅ **knowbase-redis** (Queue de Tâches)
+- **Fonction** : Orchestration des pipelines d'ingestion
 - **Port** : 6379
 - **Usage** : Distribution asynchrone des tâches de traitement
 
-#### 🕸️ **knowbase-neo4j** (Knowledge Graph)
-- **Base de données graphe** : Relations sémantiques et Knowledge Graph OSMOSE
+#### ✅ **knowbase-neo4j** (Knowledge Graph)
+- **Fonction** : Relations sémantiques et Knowledge Graph OSMOSE
 - **Ports** : 7474 (Browser UI), 7687 (Bolt protocol)
 - **Credentials** : `neo4j / graphiti_neo4j_pass`
 - **Plugins** : APOC + Graph Data Science (GDS) Community
 - **Mémoire** : Heap 2-4GB, PageCache 2GB (optimisé pour 45k+ nodes)
 - **URL** : `http://localhost:7474`
 
-#### 🗄️ **knowbase-postgres** (Base Métadonnées)
-- **Base relationnelle** : Sessions, utilisateurs, audit trail, historique imports
+#### ✅ **knowbase-postgres** (Base Métadonnées)
+- **Fonction** : Sessions, utilisateurs, audit trail, historique imports
 - **Port** : 5432
 - **Credentials** : `knowbase / knowbase_secure_pass`
 - **Extension** : pgvector pour recherche vectorielle
 
-#### 🚀 **knowbase-app** (Backend FastAPI)
-- **API principale** : Endpoints de recherche, ingestion et monitoring
+#### ✅ **knowbase-app** (Backend FastAPI)
+- **Fonction** : API principale avec endpoints de recherche, ingestion et monitoring
 - **Port** : 8000 (configurable via `APP_PORT`)
 - **Features** : Auto-documentation Swagger, CORS, gestion d'erreurs
 - **Nouvelles API** : Historique d'imports, suppression complète, endpoints RFP Excel
 - **Volumes** : Code source, données runtime (`/data`)
 
-#### 👨‍💻 **knowbase-worker** (Processeur d'ingestion)
-- **Traitement** : Exécution des pipelines d'ingestion en arrière-plan
+#### ✅ **knowbase-worker** (Processeur d'Ingestion)
+- **Fonction** : Exécution des pipelines d'ingestion en arrière-plan
 - **Queue** : Basé sur RQ (Redis Queue)
 - **Formats** : PPTX, PDF, Excel, DOCX avec OCR et extraction
 - **GPU Support** : Accélération NVIDIA CUDA (1 GPU, CUDA 12.0)
@@ -255,30 +284,32 @@ knowbase/
   - Mémoire partagée 2GB (shm_size) pour chargement modèles
   - Variable `CUDA_VISIBLE_DEVICES="0"` pour mapping GPU
 
-#### 👁️ **knowbase-watcher** (Folder Watcher)
-- **Surveillance automatique** : Ingestion automatique de documents
+#### ✅ **knowbase-watcher** (Surveillance Automatique)
+- **Fonction** : Ingestion automatique de documents
 - **Répertoire surveillé** : `data/watch/`
 - **Flux** : `watch/` → copie vers `docs_in/` → worker → `docs_done/`
 - **Formats supportés** : PDF, PPTX (.pptx/.ppt), Excel (.xlsx/.xls)
 - **Stabilisation** : Délai 2s avant traitement (attente fin copie)
 
-#### 🖥️ **knowbase-frontend** (Interface Next.js)
-- **Frontend Moderne** : Interface React avec TypeScript et Chakra UI
+#### ✅ **knowbase-frontend** (Interface Next.js)
+- **Fonction** : Interface React moderne avec TypeScript et Chakra UI
 - **Port** : 3000 (configurable via `FRONTEND_PORT`)
 - **Features** : Chat intelligent, gestion imports, workflows RFP Excel, interface admin
 - **Architecture** : App Router Next.js 14, composants modulaires, API routes
 
-#### 🖥️ **knowbase-ui** (Interface Streamlit 🟡 Legacy)
-- **Dashboard** : Visualisation des données indexées (mode hérité)
+#### 🟡 **knowbase-ui** (Interface Streamlit Legacy)
+- **Fonction** : Visualisation des données indexées (mode maintenance)
 - **Port** : 8501 (configurable via `APP_UI_PORT`)
 - **Features** : Recherche interactive, filtrage, statistiques
+- **Statut** : Remplacé par knowbase-frontend, maintenu pour compatibilité
 
-#### 🌐 **knowbase-ngrok** ❌ Désactivé
-- **Exposition** : Tunnel sécurisé pour accès externe (désactivé)
+#### ❌ **knowbase-ngrok** (Tunnel Public - Désactivé)
+- **Fonction** : Tunnel sécurisé pour accès externe
 - **Usage** : Intégration GPT personnalisé, webhooks
 - **Domain** : Configuration via `NGROK_DOMAIN`
+- **Statut** : Service désactivé
 
-## 🚀 Démarrage du Projet
+## 🚀 Démarrage du Projet ✅
 
 ### Prérequis
 ```bash
@@ -351,49 +382,47 @@ docker-compose logs -f
 ```
 
 ### Accès aux Services
+
 Une fois démarrés, les services sont accessibles via :
 
-- **🌐 Frontend Moderne** : `http://localhost:3000` (Interface Next.js recommandée)
-- **📚 API Documentation** : `http://localhost:8000/docs` (Swagger UI)
-- **🖥️ Interface Streamlit 🟡 Legacy** : `http://localhost:8501` (Interface legacy)
-- **🔍 Base Qdrant** : `http://localhost:6333/dashboard`
-- **🕸️ Neo4j Browser** : `http://localhost:7474` (Credentials : `neo4j / graphiti_neo4j_pass`)
-- **🗄️ PostgreSQL** : `localhost:5432` (Credentials : `knowbase / knowbase_secure_pass`)
+| Service | URL | Statut | Credentials |
+|---------|-----|--------|-------------|
+| **Frontend Next.js** | `http://localhost:3000` | ✅ Recommandé | - |
+| **API Swagger** | `http://localhost:8000/docs` | ✅ Production | - |
+| **Streamlit UI** | `http://localhost:8501` | 🟡 Legacy | - |
+| **Qdrant Dashboard** | `http://localhost:6333/dashboard` | ✅ Production | - |
+| **Neo4j Browser** | `http://localhost:7474` | ✅ Production | `neo4j / graphiti_neo4j_pass` |
+| **PostgreSQL** | `localhost:5432` | ✅ Production | `knowbase / knowbase_secure_pass` |
 
 **💡 Astuce** : Utilisez `./kw.ps1 info` pour afficher toutes les URLs et credentials en un coup d'œil.
 
-## 🛠️ Utilisation
+## 🛠️ Utilisation ✅
 
 ### Ingestion de Documents
 
-#### Via Interface Next.js (Recommandée)
+#### ✅ Via Interface Next.js (Recommandée)
 1. Accédez à `http://localhost:3000`
-2. Naviguez vers "Documents" → "Import fichier"
+2. Naviguez vers **"Documents"** → **"Import fichier"**
 3. Utilisez le drag-and-drop pour déposer vos documents
-4. Suivez le statut de traitement en temps réel dans "Suivi imports"
+4. Suivez le statut de traitement en temps réel dans **"Suivi imports"**
 5. Gérez les imports avec possibilité de suppression complète
 
-#### Via Workflows RFP Excel Spécialisés
-1. Accédez à "RFP Excel" dans la navigation
-2. **Import Questions/Réponses** : Uploadez des fichiers Excel Q/A avec configuration des colonnes
-3. **Remplir RFP vide** : Uploadez des RFP vides pour remplissage automatique via recherche cascade
+**Workflows RFP Excel Spécialisés** :
+- **Import Questions/Réponses** : Uploadez des fichiers Excel Q/A avec configuration des colonnes
+- **Remplir RFP vide** : Uploadez des RFP vides pour remplissage automatique via recherche cascade
 
-#### Via Folder Watcher (Automatique)
-1. Déposez vos documents dans le répertoire `data/watch/`
-2. Le service détecte automatiquement les nouveaux fichiers (polling 5s)
-3. Formats supportés : PDF, PPTX (.pptx/.ppt), Excel (.xlsx/.xls)
-4. Traitement automatique : `watch/` → copie vers `docs_in/` → worker → `docs_done/`
-5. Fichiers temporaires (.tmp, ~) et cachés (.) sont ignorés
-6. Suivez le traitement dans l'interface Next.js "Suivi imports"
+#### ✅ Via Folder Watcher (Automatique)
+**Avantage** : Ingestion automatique sans interaction manuelle, idéal pour traitement par lots
 
-**⚠️ Avantages** : Ingestion automatique sans interaction manuelle, idéal pour traitement par lots
+1. Déposez vos documents dans `data/watch/`
+2. Détection automatique (polling 5s)
+3. Formats : PDF, PPTX (.pptx/.ppt), Excel (.xlsx/.xls)
+4. Flux : `watch/` → `docs_in/` → worker → `docs_done/`
+5. Suivi dans l'interface Next.js "Suivi imports"
 
-#### Via Interface Streamlit (🟡 Legacy)
-1. Accédez à `http://localhost:8501`
-2. Utilisez la section "Upload" pour déposer vos documents
-3. Suivez le statut de traitement dans l'interface
+**Note** : Fichiers temporaires (.tmp, ~) et cachés (.) sont ignorés
 
-#### Via API
+#### ✅ Via API
 ```bash
 # Upload d'un document
 curl -X POST "http://localhost:8000/ingest" \
@@ -401,20 +430,31 @@ curl -X POST "http://localhost:8000/ingest" \
      -d '{"file_path": "/data/docs_in/document.pptx", "document_type": "technical"}'
 ```
 
-#### Via CLI (dans le conteneur)
+#### ✅ Via CLI (dans le conteneur)
 ```bash
 # Entrer dans le conteneur
 docker-compose exec app bash
 
-# Utiliser les utilitaires CLI
+# Utilitaires disponibles
 python -m knowbase.ingestion.cli.test_search_qdrant --query "S/4HANA implementation"
 python -m knowbase.ingestion.cli.purge_collection --collection knowbase
 python -m knowbase.ingestion.cli.generate_thumbnails --docs-in /data/docs_in
 ```
 
+#### 🟡 Via Interface Streamlit (Legacy)
+1. Accédez à `http://localhost:8501`
+2. Section "Upload" pour déposer vos documents
+3. Suivi du statut de traitement dans l'interface
+
 ### Recherche de Documents
 
-#### Via API
+#### ✅ Via Interface Next.js (Recommandée)
+- Interface de chat intelligent avec recherche sémantique
+- Filtrage multi-critères : solution SAP, type de document, dates
+- Visualisation des résultats avec scores de pertinence
+- Recherche cascade intelligente (Q/A RFP → base générale)
+
+#### ✅ Via API
 ```bash
 # Recherche sémantique
 curl -X POST "http://localhost:8000/search" \
@@ -426,12 +466,12 @@ curl -X POST "http://localhost:8000/search" \
      }'
 ```
 
-#### Via Interface
-- Interface de recherche intuitive dans Streamlit
+#### 🟡 Via Interface Streamlit (Legacy)
+- Interface de recherche interactive
 - Filtrage par solution SAP, type de document
-- Visualisation des résultats avec scores de pertinence
+- Tableaux de bord et statistiques
 
-## 🧪 Tests et Qualité
+## 🧪 Tests et Qualité ✅
 
 ### Exécution des Tests
 ```bash
@@ -448,17 +488,17 @@ docker-compose exec app pytest tests/ingestion/ -k "test_pptx"
 
 ### Qualité du Code
 ```bash
-# Linting
+# Linting (Ruff)
 docker-compose exec app ruff check src/
 
-# Formatage
+# Formatage automatique
 docker-compose exec app ruff format src/
 
-# Vérification des types
+# Vérification des types (MyPy)
 docker-compose exec app mypy src/
 ```
 
-## 🐛 Debug et Développement
+## 🐛 Debug et Développement ✅
 
 ### Debug Sélectif des Services
 
@@ -591,7 +631,7 @@ DEBUG_WORKER=true
 - ✅ Vérifier les path mappings VS Code pour la résolution de fichiers
 - ⚠️ Éviter `DEBUG_APP=true` et `DEBUG_WORKER=true` simultanément sauf besoin spécifique
 
-## 🧠 Système LLM Multi-Provider
+## 🧠 Système LLM Multi-Provider ✅
 
 Knowbase utilise un système intelligent de routage LLM qui optimise automatiquement les coûts et performances selon le type de tâche.
 
@@ -713,19 +753,21 @@ Chaque appel LLM est tracé avec :
 }
 ```
 
-## 🔧 Administration et Maintenance
+## 🔧 Administration et Maintenance ✅
 
 ### Monitoring
 ```bash
 # Statut des services
-docker-compose ps
+docker-compose ps                        # Vue globale
+./kw.ps1 status                         # Détails par service
 
 # Logs en temps réel
-docker-compose logs -f app
-docker-compose logs -f worker
+docker-compose logs -f app               # Backend API
+docker-compose logs -f worker            # Worker d'ingestion
+./kw.ps1 logs app                       # Alternative via script
 
 # Statut système via API
-curl http://localhost:8000/status
+curl http://localhost:8000/status        # Santé globale
 ```
 
 ### Nettoyage
@@ -733,45 +775,51 @@ curl http://localhost:8000/status
 # Purge d'une collection Qdrant
 python -m knowbase.ingestion.cli.purge_collection --collection knowbase --yes
 
-# Nettoyage des logs
+# Nettoyage des logs (> 7 jours)
 docker-compose exec app find /data/logs -name "*.log" -mtime +7 -delete
 ```
 
-### Sauvegarde
+### Sauvegarde & Restauration
 ```bash
-# Sauvegarde des données
-docker-compose exec app tar -czf /data/backup-$(date +%Y%m%d).tar.gz /data
+# Sauvegarde complète via script (recommandé)
+./kw.ps1 backup <nom_sauvegarde>        # Backup Neo4j, Qdrant, PostgreSQL, Redis
 
-# Sauvegarde Qdrant
+# Restauration complète
+./kw.ps1 restore <nom_sauvegarde>       # Restore depuis backup
+
+# Sauvegarde manuelle (alternative)
+docker-compose exec app tar -czf /data/backup-$(date +%Y%m%d).tar.gz /data
 docker-compose exec qdrant cp -r /qdrant/storage /qdrant/backup
 ```
 
 ## 🎯 Roadmap et Évolutions
 
-### À Court Terme
-- [x] **Interface web moderne (Next.js + TypeScript)** - ✅ Implémentée avec Chakra UI
-- [x] **Gestion avancée des imports** - ✅ Historique, tracking, suppression complète
-- [x] **Workflows RFP Excel spécialisés** - ✅ Import Q/A et remplissage automatique
-- [x] **Collections dédiées Q/A** - ✅ Recherche cascade intelligente
-- [x] **Knowledge Graph Neo4j** - ✅ Relations sémantiques et graphe de connaissances (OSMOSE)
-- [x] **PostgreSQL + pgvector** - ✅ Base métadonnées et recherche vectorielle
-- [x] **Folder Watcher** - ✅ Surveillance automatique et ingestion (OSMOSE Phase 3)
-- [x] **Support GPU NVIDIA** - ✅ Accélération CUDA pour worker (PyTorch + CUDA 12.0)
-- [x] **Monitoring (Grafana + Loki)** - ✅ Observabilité et analyse des logs
-- [x] **Script de gestion kw.ps1** - ✅ Outil unifié start/stop/backup/restore
-- [ ] Centralisation complète du chargement des modèles ML
-- [ ] Système de claims pour la gestion d'incohérences
+### ✅ Implémenté (Court Terme)
+- ✅ **Interface web moderne (Next.js + TypeScript)** - Interface complète avec Chakra UI
+- ✅ **Gestion avancée des imports** - Historique, tracking, suppression complète
+- ✅ **Workflows RFP Excel spécialisés** - Import Q/A et remplissage automatique
+- ✅ **Collections dédiées Q/A** - Recherche cascade intelligente
+- ✅ **Knowledge Graph Neo4j** - Relations sémantiques et graphe de connaissances (OSMOSE)
+- ✅ **PostgreSQL + pgvector** - Base métadonnées et recherche vectorielle
+- ✅ **Folder Watcher** - Surveillance automatique et ingestion (OSMOSE Phase 3)
+- ✅ **Support GPU NVIDIA** - Accélération CUDA pour worker (PyTorch + CUDA 12.0)
+- ✅ **Monitoring (Grafana + Loki)** - Observabilité et analyse des logs
+- ✅ **Script de gestion kw.ps1** - Outil unifié start/stop/backup/restore
 
-### À Moyen Terme
-- [ ] Support multi-tenant avec isolation des données
-- [ ] API de webhooks pour intégrations externes
-- [ ] Système de notifications push
-- [ ] Migration OCR vers OnnxTR (modèles lourds, meilleure précision)
+### 🟡 Court Terme (En Cours)
+- 🟡 **Centralisation complète du chargement des modèles ML** - Optimisation en cours
+- 🟡 **Système de claims pour la gestion d'incohérences** - Développement en cours
 
-### À Long Terme
-- [ ] IA conversationnelle intégrée (RAG avancé)
-- [ ] Analytics et métriques d'usage avancées
-- [ ] Déploiement cloud-native (Kubernetes)
+### 🔜 Moyen Terme (Planifié)
+- 🔜 **Support multi-tenant** - Isolation complète des données par organisation
+- 🔜 **API de webhooks** - Intégrations externes et notifications événementielles
+- 🔜 **Système de notifications push** - Alertes temps réel
+- 🔜 **Migration OCR vers OnnxTR** - Amélioration précision avec modèles lourds
+
+### 🔜 Long Terme (Vision)
+- 🔜 **IA conversationnelle intégrée** - RAG avancé avec dialogue contextuel
+- 🔜 **Analytics et métriques d'usage** - Tableaux de bord insights utilisateur
+- 🔜 **Déploiement cloud-native** - Architecture Kubernetes scalable
 
 ## 📊 Badges & Métriques
 
