@@ -35,6 +35,7 @@ import {
   FiCheckSquare,
   FiCpu,
   FiArchive,
+  FiBook,
 } from 'react-icons/fi'
 
 // Configuration des menus
@@ -55,6 +56,12 @@ const navigationConfig = {
     label: 'Vérifier',
     href: '/verify',
     icon: FiCheckSquare,
+    isDropdown: false,
+  },
+  wiki: {
+    label: 'Wiki',
+    href: '/wiki',
+    icon: FiBook,
     isDropdown: false,
   },
   documents: {
@@ -199,6 +206,7 @@ export default function TopNavigation() {
     if (section === 'chat') return pathname?.startsWith('/chat')
     if (section === 'compare') return pathname?.startsWith('/compare')
     if (section === 'verify') return pathname?.startsWith('/verify')
+    if (section === 'wiki') return pathname?.startsWith('/wiki')
     if (section === 'documents') return pathname?.startsWith('/documents')
     if (section === 'admin') return pathname?.startsWith('/admin')
     return false
@@ -259,6 +267,15 @@ export default function TopNavigation() {
           >
             <Icon as={navigationConfig.verify.icon} />
             <Text>{navigationConfig.verify.label}</Text>
+          </NavLink>
+
+          {/* Wiki - lien direct */}
+          <NavLink
+            href={navigationConfig.wiki.href!}
+            isActive={isActiveSection('wiki')}
+          >
+            <Icon as={navigationConfig.wiki.icon} />
+            <Text>{navigationConfig.wiki.label}</Text>
           </NavLink>
 
           {/* Documents - dropdown */}

@@ -558,9 +558,15 @@ class EvidencePackBuilder:
             unit_id = claim_to_unit.get(to_id, to_id)
             axis_groups[axis_val].append((unit_id, change_type))
 
-        # Construire la timeline
+        # Construire la timeline (exclure les steps sans axis_value réelle)
         timeline: List[TemporalStep] = []
         for axis_val in sorted(axis_groups.keys()):
+            if axis_val == "unknown":
+                logger.info(
+                    f"[OSMOSE:EvidencePackBuilder] Temporal step 'unknown' ignoré "
+                    f"({len(axis_groups[axis_val])} chains sans scope temporel)"
+                )
+                continue
             entries = axis_groups[axis_val]
             unit_ids = [e[0] for e in entries]
             # Prendre le change_type dominant

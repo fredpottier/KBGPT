@@ -26,7 +26,7 @@ from knowbase.wiki.models import (
 logger = logging.getLogger("[OSMOSE] constrained_generator")
 
 MAX_EVIDENCE_CHARS = 6000
-MAX_TOKENS = 2000
+MAX_TOKENS = 3000
 
 
 DEFAULT_LANGUAGE = "français"
@@ -80,6 +80,7 @@ class ConstrainedGenerator:
     ) -> GeneratedSection:
         """Génère une section via LLM."""
         evidence_json = self._build_evidence_json(section.unit_ids, pack, section)
+        source_context = self._build_source_context(pack)
 
         # Lazy imports
         from knowbase.common.llm_router import complete_metadata_extraction
@@ -99,6 +100,7 @@ class ConstrainedGenerator:
             concept_name=pack.concept.canonical_name,
             generation_instructions=section.generation_instructions,
             evidence_json=evidence_json,
+            source_context=source_context,
             language=lang,
         )
 
@@ -126,6 +128,31 @@ class ConstrainedGenerator:
                 citations_used=[],
                 confidence=0.0,
                 gaps=[f"Erreur de génération : {str(e)}"],
+            )
+
+    def _build_source_context(self, pack: EvidencePack) -> str:
+        """Construit un contexte sur la diversité des sources pour le prompt."""
+        src_count = len(pack.source_index)
+        total_units = sum(s.unit_count for s in pack.source_index)
+
+        if src_count == 1:
+            src = pack.source_index[0]
+            return (
+                f"SOURCE CONTEXT: All {total_units} evidence units come from a SINGLE document: "
+                f"\"{src.doc_title or src.doc_id}\" ({src.doc_type or 'unknown type'}). "
+                f"Acknowledge this limited perspective naturally in your writing. "
+                f"Note in gaps what other document types would strengthen the coverage."
+            )
+        elif src_count <= 3:
+            titles = [f"\"{s.doc_title or s.doc_id}\" ({s.unit_count} units)" for s in pack.source_index]
+            return (
+                f"SOURCE CONTEXT: Evidence comes from {src_count} documents: "
+                f"{', '.join(titles)}. Cross-reference perspectives when possible."
+            )
+        else:
+            return (
+                f"SOURCE CONTEXT: Evidence is well-distributed across {src_count} documents "
+                f"({total_units} total units). Synthesize across sources for a comprehensive view."
             )
 
     def _generate_sources_section(self, pack: EvidencePack) -> GeneratedSection:
@@ -382,6 +409,44 @@ class ConstrainedGenerator:
             filtered.append(g)
         return filtered
 
+    @staticmethod
+    def _strip_repeated_title(content: str, title: str) -> str:
+        """Retire le titre de section si le LLM l'a répété en début de contenu."""
+        stripped = content.lstrip()
+        # Patterns : "## Titre", "**Titre**", "Titre\n", "# Titre"
+        for prefix in [
+            f"## {title}",
+            f"# {title}",
+            f"**{title}**",
+            title,
+        ]:
+            if stripped.lower().startswith(prefix.lower()):
+                stripped = stripped[len(prefix):].lstrip(" \t\n:-")
+                break
+        return stripped
+
+    @staticmethod
+    def _clean_unknown_citations(content: str) -> str:
+        """Retire les citations contenant 'unknown' comme unit_id."""
+        # [doc_title, unknown] → [doc_title]
+        content = re.sub(r'\[([^,\]]+),\s*unknown\]', r'[\1]', content)
+        return content
+
+    @staticmethod
+    def _clean_unit_ids_from_citations(content: str) -> str:
+        """Retire les unit_ids des citations pour le rendu lisible.
+
+        [doc_title, eu_abc123] → [doc_title]
+        [doc_title, eu_abc123, eu_def456] → [doc_title]
+        """
+        # Multi unit_ids: [doc_title, eu_xxx, eu_yyy, ...]
+        content = re.sub(
+            r'\[([^,\]]+?)(?:,\s*eu_[a-f0-9]+)+\]',
+            r'[\1]',
+            content,
+        )
+        return content
+
     def render_markdown(self, article: GeneratedArticle) -> str:
         """Produit le rendu Markdown final de l'article."""
         lines = [
@@ -398,7 +463,10 @@ class ConstrainedGenerator:
         for section in article.sections:
             lines.append(f"## {section.title}")
             lines.append("")
-            lines.append(section.content)
+            content = self._strip_repeated_title(section.content, section.title)
+            content = self._clean_unknown_citations(content)
+            content = self._clean_unit_ids_from_citations(content)
+            lines.append(content)
             lines.append("")
 
         if article.all_gaps:

@@ -442,4 +442,16 @@ export const api = {
     correct: (text: string, assertions: any[], tenantId: string = 'default') =>
       apiClient.post('/verify/correct', { text, assertions, tenant_id: tenantId }),
   },
+
+  // Wiki Generation Console - Phase 3 Concept Assembly Engine
+  wiki: {
+    generate: (conceptName: string, language: string = 'français', force: boolean = false) =>
+      apiClient.post('/wiki/generate', { concept_name: conceptName, language, force }),
+    status: (jobId: string) =>
+      apiClient.get(`/wiki/status/${jobId}`),
+    article: (jobId: string) =>
+      apiClient.get(`/wiki/article/${jobId}`),
+    searchConcepts: (query: string, limit: number = 10) =>
+      apiClient.get(`/wiki/concepts/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+  },
 }

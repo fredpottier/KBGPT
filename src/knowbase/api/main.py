@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu, backup
+from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu, backup, wiki
 # Pipeline V2 - Stratified Reading Model
 from knowbase.stratified.api import router as stratified_v2_router
 # MVP V1 - Challenge de Texte (Usage B)
@@ -269,6 +269,9 @@ def create_app() -> FastAPI:
 
     # 💾 OSMOSE Backup & Restore - Sauvegarde et restauration complète
     app.include_router(backup.router, prefix="/api")  # Endpoints: /api/backup/list, /api/backup/create, etc.
+
+    # 📚 OSMOSE Wiki — Generation Console (Phase 3 Concept Assembly Engine)
+    app.include_router(wiki.router)  # Endpoints: /api/wiki/generate, /api/wiki/status, /api/wiki/article, /api/wiki/concepts/search
 
     return app
 

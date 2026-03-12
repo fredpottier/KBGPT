@@ -25,20 +25,43 @@ logger = logging.getLogger("[OSMOSE] section_planner")
 
 SECTION_INSTRUCTIONS = {
     "overview": (
-        "Synthétise en 2-3 paragraphes les points essentiels du concept. "
-        "Commence par une définition si disponible. Cite chaque source."
+        "En 2-3 paragraphes, présente le CONTEXTE et l'IMPORTANCE du concept : "
+        "pourquoi il apparaît dans le corpus, quel rôle il joue, quels enjeux il soulève. "
+        "NE PAS définir le concept ici (une section Définition existe pour ça). "
+        "Concentre-toi sur la vue d'ensemble : contexte, portée, impact."
     ),
     "definition": (
-        "Rédige une définition précise basée sur les sources documentaires. "
-        "Si plusieurs définitions existent, présente-les toutes avec leurs sources."
+        "Donne la DÉFINITION PRÉCISE du concept telle qu'elle ressort des sources. "
+        "Si plusieurs définitions ou acceptions existent, présente-les en expliquant "
+        "leurs nuances. NE PAS répéter le contexte ou l'importance (déjà couvert "
+        "dans la Vue d'ensemble). Reste factuel et concis."
     ),
     "key_properties": (
-        "Liste et explique les caractéristiques principales du concept. "
-        "Chaque caractéristique doit être sourcée."
+        "Identifie les caractéristiques STRUCTURANTES du concept — les principes, "
+        "mécanismes ou propriétés qui définissent son fonctionnement. "
+        "Regroupe les détails similaires plutôt que de lister chaque fait séparément. "
+        "Évite les détails d'implémentation très spécifiques (noms de champs, IDs techniques) "
+        "sauf s'ils illustrent un principe important."
     ),
     "obligations": (
-        "Présente les obligations et prescriptions de manière structurée. "
-        "Distingue les obligations (must/shall) des permissions (may/can)."
+        "Présente les obligations et prescriptions avec une STRUCTURE CLAIRE. "
+        "Use this Markdown format:\n"
+        "1. Start with a SHORT introductory sentence summarizing the regulatory landscape.\n"
+        "2. Then organize into THEMATIC SUB-GROUPS using **bold headings** followed by bullet lists:\n"
+        "   **Thème 1 — Titre court**\n"
+        "   - Obligation ou prescription [source, unit_id]\n"
+        "   - Autre point [source, unit_id]\n\n"
+        "   **Thème 2 — Titre court**\n"
+        "   - ...\n"
+        "3. Within each group, distinguish clearly:\n"
+        "   - 🔴 Obligations (must/shall) — use firm language\n"
+        "   - 🟡 Recommendations (should/recommended) — use nuanced language\n"
+        "   - 🟢 Permissions (may/can) — indicate optional nature\n"
+        "4. Do NOT write a wall of prose. Use bullet points for each individual prescription.\n"
+        "5. IMPORTANT: Focus on GENERAL PRINCIPLES and high-level rules, not low-level "
+        "implementation details. If multiple evidence units describe similar specific procedures, "
+        "synthesize them into a single bullet that captures the underlying rule or principle. "
+        "Only mention specific technical details if they illustrate a broader concept."
     ),
     "temporal": (
         "Décris l'évolution chronologique du concept. "
@@ -57,8 +80,9 @@ SECTION_INSTRUCTIONS = {
         "domaines et contextes identifiés dans les sources."
     ),
     "related": (
-        "Présente les concepts liés et leur relation avec le concept principal. "
-        "Indique le nombre de co-occurrences pour chaque lien."
+        "Explique comment les concepts liés se rattachent au concept principal. "
+        "Pour chaque relation, explique la NATURE du lien (est utilisé par, dépend de, "
+        "est un sous-concept de...) plutôt que de simplement compter les co-occurrences."
     ),
     "sources": "",  # Déterministe, pas d'instructions LLM
 }
@@ -105,26 +129,35 @@ class SectionPlanner:
             sections.append(self._make_section("sources", [], is_deterministic=True))
             return self._build_plan(pack, sections, assigned_ids)
 
-        # ── definition ──
-        def_ids = [u.unit_id for u in units if u.rhetorical_role == "definition"]
+        # ── definition (exclure les units déjà dans overview pour éviter la redondance) ──
+        def_ids = [
+            u.unit_id for u in units
+            if u.rhetorical_role == "definition" and u.unit_id not in assigned_ids
+        ]
         if def_ids:
             sections.append(self._make_section("definition", def_ids))
             assigned_ids.update(def_ids)
 
-        # ── key_properties ──
-        prop_ids = [
-            u.unit_id for u in units
-            if u.rhetorical_role in ("mention", "context")
-        ]
+        # ── key_properties (top units par weight, pas tous) ──
+        prop_units = sorted(
+            [u for u in units if u.rhetorical_role in ("mention", "context")],
+            key=lambda u: u.weight,
+            reverse=True,
+        )
+        MAX_KEY_PROPS = 15
+        prop_ids = [u.unit_id for u in prop_units[:MAX_KEY_PROPS]]
         if len(prop_ids) >= 5:
             sections.append(self._make_section("key_properties", prop_ids))
             assigned_ids.update(prop_ids)
 
-        # ── obligations ──
-        oblig_ids = [
-            u.unit_id for u in units
-            if u.claim_type in ("PRESCRIPTIVE", "PERMISSIVE")
-        ]
+        # ── obligations (top units par weight, pas tous) ──
+        oblig_units = sorted(
+            [u for u in units if u.claim_type in ("PRESCRIPTIVE", "PERMISSIVE")],
+            key=lambda u: u.weight,
+            reverse=True,
+        )
+        MAX_OBLIGATIONS = 12
+        oblig_ids = [u.unit_id for u in oblig_units[:MAX_OBLIGATIONS]]
         if oblig_ids:
             sections.append(self._make_section("obligations", oblig_ids))
             assigned_ids.update(oblig_ids)
