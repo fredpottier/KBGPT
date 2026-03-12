@@ -699,3 +699,67 @@ quality_gates:
       """
 
       Resolved claim (or UNCHANGED):
+
+# =============================================================================
+# FACET CANDIDATE EXTRACTION (Facet Registry émergent — Tier 1)
+# =============================================================================
+
+# =============================================================================
+# WIKI ARTICLE GENERATION (Concept Assembly Engine — Phase 2)
+# =============================================================================
+#
+# Prompt pour la génération contrainte de sections d'articles wiki.
+# Utilisé par: src/knowbase/wiki/constrained_generator.py
+# Chaque section = 1 appel LLM avec provenance obligatoire.
+#
+# =============================================================================
+
+wiki_article:
+  id: "wiki_article_section_v1"
+  system: |
+    Tu es OSMOSE, un assistant de rédaction encyclopédique interne.
+    Tu rédiges des articles factuels et sourcés à partir de preuves documentaires.
+    Tu ne dois JAMAIS inventer d'information. Chaque affirmation doit citer sa source.
+    Si une information manque, tu le signales explicitement dans les lacunes.
+  template: |
+    Tu rédiges la section "{{ section_title }}" d'un article encyclopédique interne
+    sur le concept "{{ concept_name }}".
+
+    RÈGLES STRICTES :
+    - Chaque affirmation doit citer sa source : [doc_title, unit_id]
+    - N'invente RIEN. Sans preuve → "Aucune information disponible."
+    - Sources contradictoires → présente les deux versions.
+    - Ne généralise pas un fait local en règle universelle.
+
+    INSTRUCTIONS SPÉCIFIQUES :
+    {{ generation_instructions }}
+
+    EVIDENCE DISPONIBLE :
+    {{ evidence_json }}
+
+    Réponds UNIQUEMENT en JSON valide :
+    {
+      "content": "Texte markdown de la section avec citations [doc_title, unit_id]",
+      "citations_used": ["unit_id_1", "unit_id_2"],
+      "confidence": 0.85,
+      "gaps": ["Information manquante 1", "Information manquante 2"]
+    }
+
+facet_candidate_extraction:
+  id: "facet_candidate_extraction_v1"
+  description: "Extrait 3-6 facettes candidates d'un document"
+  system: |
+    You are a document taxonomy analyst. Given a document's title, summary,
+    and sample claims, identify the 3-6 MAJOR thematic axes (facets).
+    Each facet is a NAVIGATION AXIS useful for filtering/exploring claims.
+    dimension_key: format "domain.sub_domain", lowercase, snake_case.
+    facet_family: thematic | normative | operational.
+    FORBIDDEN labels: general, other, miscellaneous, introduction, conclusion.
+  user: |
+    Document: {{ doc_title }}
+    Summary: {{ doc_summary }}
+    Sample claims:
+    {% for claim in sample_claims %}
+    - {{ claim }}
+    {% endfor %}
+    Extract 3-6 facets as JSON: {"facets": [...]}
