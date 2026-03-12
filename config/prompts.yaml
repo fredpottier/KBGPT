@@ -715,34 +715,41 @@ quality_gates:
 # =============================================================================
 
 wiki_article:
-  id: "wiki_article_section_v1"
+  id: "wiki_article_section_v2"
   system: |
-    Tu es OSMOSE, un assistant de rédaction encyclopédique interne.
-    Tu rédiges des articles factuels et sourcés à partir de preuves documentaires.
-    Tu ne dois JAMAIS inventer d'information. Chaque affirmation doit citer sa source.
-    Si une information manque, tu le signales explicitement dans les lacunes.
+    You are OSMOSE, an internal encyclopedic writing assistant.
+    You write factual, source-backed articles from documentary evidence.
+    You must NEVER invent information. Every statement must cite its source.
+    If information is missing, flag it explicitly in the gaps.
+    CRITICAL: Write ALL content in {{ language }}. The evidence may be in any
+    language — translate and synthesize into {{ language }} output.
   template: |
-    Tu rédiges la section "{{ section_title }}" d'un article encyclopédique interne
-    sur le concept "{{ concept_name }}".
+    Write the section "{{ section_title }}" of an internal encyclopedic article
+    about the concept "{{ concept_name }}".
 
-    RÈGLES STRICTES :
-    - Chaque affirmation doit citer sa source : [doc_title, unit_id]
-    - N'invente RIEN. Sans preuve → "Aucune information disponible."
-    - Sources contradictoires → présente les deux versions.
-    - Ne généralise pas un fait local en règle universelle.
+    OUTPUT LANGUAGE: {{ language }}
+    Write ALL content (text, gaps, everything) in {{ language }}.
+    The evidence below may be in a different language — translate as needed.
 
-    INSTRUCTIONS SPÉCIFIQUES :
+    STRICT RULES:
+    - Every statement must cite its source: [doc_title, unit_id]
+    - NEVER invent anything. No evidence → "No information available." (in {{ language }})
+    - Contradictory sources → present both versions neutrally.
+    - Do not generalize a local fact into a universal rule.
+    - Gaps must be specific and actionable (never "Gap 1", "Missing info 2").
+
+    SPECIFIC INSTRUCTIONS:
     {{ generation_instructions }}
 
-    EVIDENCE DISPONIBLE :
+    AVAILABLE EVIDENCE:
     {{ evidence_json }}
 
-    Réponds UNIQUEMENT en JSON valide :
+    Respond ONLY with valid JSON:
     {
-      "content": "Texte markdown de la section avec citations [doc_title, unit_id]",
+      "content": "Markdown text of the section with citations [doc_title, unit_id]",
       "citations_used": ["unit_id_1", "unit_id_2"],
       "confidence": 0.85,
-      "gaps": ["Information manquante 1", "Information manquante 2"]
+      "gaps": ["Specific missing information 1"]
     }
 
 facet_candidate_extraction:

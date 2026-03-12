@@ -29,8 +29,14 @@ MAX_EVIDENCE_CHARS = 6000
 MAX_TOKENS = 2000
 
 
+DEFAULT_LANGUAGE = "français"
+
+
 class ConstrainedGenerator:
     """Génère un article wiki contraint par les preuves d'un EvidencePack."""
+
+    def __init__(self, language: str = DEFAULT_LANGUAGE):
+        self._language = language
 
     def generate(self, pack: EvidencePack, plan: ArticlePlan) -> GeneratedArticle:
         """Génère l'article complet, section par section."""
@@ -82,15 +88,18 @@ class ConstrainedGenerator:
         # Charger et rendre le prompt depuis prompts.yaml
         registry = load_prompts()
         wiki_cfg = registry.get("wiki_article", {})
-        system_msg = wiki_cfg.get("system", "Tu es OSMOSE, un assistant de rédaction encyclopédique.")
+        system_tpl = wiki_cfg.get("system", "You are OSMOSE. Write in {{ language }}.")
         template = wiki_cfg.get("template", "")
 
+        lang = self._language
+        system_msg = render_prompt(system_tpl, language=lang)
         user_prompt = render_prompt(
             template,
             section_title=section.title,
             concept_name=pack.concept.canonical_name,
             generation_instructions=section.generation_instructions,
             evidence_json=evidence_json,
+            language=lang,
         )
 
         messages = [
@@ -379,6 +388,7 @@ class ConstrainedGenerator:
             f"# {article.concept_name}",
             "",
             f"*Article généré par OSMOSE — {article.generated_at} "
+            f"| Langue : {self._language} "
             f"| Confiance moyenne : {article.average_confidence * 100:.0f}%*",
             "",
             "---",

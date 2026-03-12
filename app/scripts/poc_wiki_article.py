@@ -55,6 +55,7 @@ def process_pack(
     pack_path: str,
     output_dir: str,
     plan_only: bool,
+    language: str = "français",
 ) -> dict:
     """Traite un evidence pack : plan + génération article."""
     from knowbase.wiki.models import EvidencePack
@@ -99,7 +100,7 @@ def process_pack(
     # Étape 2 : Génération
     from knowbase.wiki.constrained_generator import ConstrainedGenerator
 
-    generator = ConstrainedGenerator()
+    generator = ConstrainedGenerator(language=language)
     article = generator.generate(pack, plan)
 
     # Sauvegarder JSON
@@ -151,6 +152,12 @@ def main():
         action="store_true",
         help="Planification seule, sans appel LLM",
     )
+    parser.add_argument(
+        "--language",
+        type=str,
+        default="français",
+        help="Langue de génération de l'article (défaut : français). Ex: english, italiano, deutsch",
+    )
     args = parser.parse_args()
 
     output_dir = args.output_dir
@@ -159,6 +166,7 @@ def main():
     logger.info("=" * 60)
     logger.info("POC WIKI ARTICLE — Concept Assembly Engine Phase 2")
     logger.info(f"Mode : {'plan-only' if args.plan_only else 'complet (plan + LLM)'}")
+    logger.info(f"Langue : {args.language}")
     logger.info("=" * 60)
 
     try:
@@ -179,7 +187,7 @@ def main():
 
         start = time.time()
         try:
-            stats = process_pack(pack_path, output_dir, args.plan_only)
+            stats = process_pack(pack_path, output_dir, args.plan_only, args.language)
             stats["elapsed"] = round(time.time() - start, 1)
             stats["status"] = "OK"
             results.append(stats)
