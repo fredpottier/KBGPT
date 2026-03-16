@@ -1,0 +1,4 @@
+fastapi>=0.104.0
+uvicorn>=0.24.0
+spacy>=3.7.0
+scispacy>=0.5.4

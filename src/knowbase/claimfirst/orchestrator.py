@@ -33,7 +33,9 @@ import numpy as np
 
 from knowbase.claimfirst.models.claim import Claim
 from knowbase.claimfirst.models.entity import Entity
-from knowbase.claimfirst.models.facet import Facet
+from knowbase.claimfirst.models.facet import Facet, FacetLifecycle
+from knowbase.claimfirst.extractors.facet_candidate_extractor import FacetCandidateExtractor
+from knowbase.claimfirst.linkers.facet_registry import FacetRegistry
 from knowbase.claimfirst.models.passage import Passage
 from knowbase.claimfirst.models.result import ClaimFirstResult, ClaimCluster
 from knowbase.claimfirst.models.subject_anchor import SubjectAnchor
@@ -89,6 +91,7 @@ class ClaimFirstOrchestrator:
         embeddings_client: Any = None,
         tenant_id: str = "default",
         persist_enabled: bool = True,
+        facet_registry: Optional["FacetRegistry"] = None,
     ):
         """
         Initialise l'orchestrateur.
@@ -99,6 +102,7 @@ class ClaimFirstOrchestrator:
             embeddings_client: Client embeddings pour clustering (optionnel)
             tenant_id: Tenant ID
             persist_enabled: Si True, persiste les résultats
+            facet_registry: Registre de facettes partagé (optionnel, créé sinon)
         """
         self.llm_client = llm_client
         self.neo4j_driver = neo4j_driver
@@ -148,6 +152,8 @@ class ClaimFirstOrchestrator:
         self.passage_linker = PassageLinker()
         self.entity_linker = EntityLinker()
         self.facet_matcher = FacetMatcher()
+        self.facet_extractor = FacetCandidateExtractor()
+        self.facet_registry = facet_registry or FacetRegistry(tenant_id)
         self.claim_clusterer = ClaimClusterer()
         self.relation_detector = RelationDetector()
         self.chain_detector = ChainDetector()
@@ -433,13 +439,27 @@ class ClaimFirstOrchestrator:
         else:
             logger.info("  → No entity-derived subjects, keeping Phase 0.5 fallback")
 
-        # Phase 3: Matcher les Facets
+        # Phase 2.9: Facet Candidate Extraction (1 LLM call per doc)
+        logger.info("[OSMOSE:ClaimFirst] Phase 2.9: Extracting facet candidates...")
+        facet_candidates = self.facet_extractor.extract(
+            doc_context=doc_context,
+            claims=claims,
+            doc_title=doc_title,
+        )
+        self.facet_registry.register_candidates(facet_candidates)
+        doc_facet_ids = [c.dimension_key for c in facet_candidates]
+        logger.info(f"  → {len(facet_candidates)} facet candidates extracted")
+
+        # Phase 3: Facet Assignment (déterministe, 4 signaux)
         logger.info("[OSMOSE:ClaimFirst] Phase 3: Matching facets...")
+        validated_facets = self.facet_registry.get_validated_facets()
         facets, claim_facet_links = self.facet_matcher.match(
             claims=claims,
             tenant_id=tenant_id,
+            validated_facets=validated_facets,
+            doc_facet_ids=doc_facet_ids,
         )
-        logger.info(f"  → {len(facets)} facets matched")
+        logger.info(f"  → {len(facets)} facets, {len(claim_facet_links)} links")
 
         # Phase 4: Linking
         logger.info("[OSMOSE:ClaimFirst] Phase 4: Linking...")
@@ -462,6 +482,26 @@ class ClaimFirstOrchestrator:
             f"{len(claim_entity_links)} entity links, "
             f"{len(claim_facet_links)} facet links"
         )
+
+        # Phase 4.5: Domain Pack Enrichment (si packs actifs)
+        logger.info("[OSMOSE:ClaimFirst] Phase 4.5: Domain Pack enrichment...")
+        pack_new_entities, pack_new_links, pack_link_methods = (
+            self._run_domain_pack_enrichment(
+                claims=claims,
+                entities=entities,
+                claim_entity_links=claim_entity_links,
+                tenant_id=tenant_id,
+            )
+        )
+        if pack_new_entities:
+            entities.extend(pack_new_entities)
+            claim_entity_links.extend(pack_new_links)
+            logger.info(
+                f"  → {len(pack_new_entities)} new entities, "
+                f"{len(pack_new_links)} new ABOUT links from domain packs"
+            )
+        else:
+            logger.info("  → No domain packs active or no new entities")
 
         # Phase 5: Clustering (si plusieurs claims)
         logger.info("[OSMOSE:ClaimFirst] Phase 5: Clustering...")
@@ -534,6 +574,7 @@ class ClaimFirstOrchestrator:
             claim_entity_links=claim_entity_links,
             claim_facet_links=claim_facet_links,
             claim_cluster_links=claim_cluster_links,
+            claim_entity_link_methods=pack_link_methods,
             processing_time_ms=processing_time_ms,
             llm_calls=extractor_stats.get("llm_calls", 0),
             llm_tokens_used=extractor_stats.get("tokens_used", 0),
@@ -1829,6 +1870,8 @@ Return JSON: {{"results": [{{"index": 1, "verdict": "VALID", "reason": "product 
             "entity_canonicalizer": self.entity_canonicalizer.get_stats(),
             "passage_linker": self.passage_linker.get_stats(),
             "entity_linker": self.entity_linker.get_stats(),
+            "facet_extractor": self.facet_extractor.get_stats(),
+            "facet_registry": self.facet_registry.get_stats(),
             "facet_matcher": self.facet_matcher.get_stats(),
             "claim_clusterer": self.claim_clusterer.get_stats(),
             "relation_detector": self.relation_detector.get_stats(),
@@ -1858,6 +1901,200 @@ Return JSON: {{"results": [{{"index": 1, "verdict": "VALID", "reason": "product 
         self.slot_enricher.reset_stats()
         if self.persister:
             self.persister.reset_stats()
+
+
+    # =========================================================================
+    # Phase 4.5 — Domain Pack Enrichment
+    # =========================================================================
+
+    def _run_domain_pack_enrichment(
+        self,
+        claims: List[Claim],
+        entities: List[Entity],
+        claim_entity_links: List[Tuple[str, str]],
+        tenant_id: str,
+    ) -> Tuple[List[Entity], List[Tuple[str, str]], Dict[Tuple[str, str], str]]:
+        """
+        Enrichissement via Domain Packs actifs (Phase 4.5).
+
+        INV-PACK: Le pack augmente le recall. Le core garde le monopole de la décision.
+        INV-PERSIST: Aucun artefact pack persiste sans passage par les gates core.
+        INV-CONFLICT: Conflit inter-pack → marque ambigu, review admin.
+
+        Returns:
+            (new_entities, new_links, link_methods)
+        """
+        from knowbase.domain_packs.registry import get_pack_registry
+        from knowbase.claimfirst.models.entity import is_valid_entity_name, Entity as EntityModel, EntityType
+
+        registry = get_pack_registry()
+        active_packs = registry.get_active_packs(tenant_id)
+
+        if not active_packs:
+            return [], [], {}
+
+        # Identifier les claims isolées (sans relation ABOUT)
+        claims_with_entity = {cid for cid, _ in claim_entity_links}
+        isolated_claims = [c for c in claims if c.claim_id not in claims_with_entity]
+
+        if not isolated_claims:
+            logger.info("  → No isolated claims to enrich")
+            return [], [], {}
+
+        logger.info(f"  → {len(isolated_claims)} isolated claims, {len(active_packs)} active pack(s)")
+
+        # Charger le domain context
+        domain_context = None
+        try:
+            from knowbase.ontology.domain_context_store import get_domain_context_store
+            domain_context = get_domain_context_store().get_profile(tenant_id)
+        except Exception as e:
+            logger.warning(f"  → Cannot load domain context: {e}")
+
+        existing_norms = {e.normalized_name for e in entities}
+        all_new_entities: List[Entity] = []
+        all_new_links: List[Tuple[str, str]] = []
+        link_methods: Dict[Tuple[str, str], str] = {}
+
+        # Tracking pour détection conflits inter-pack
+        # {normalized_name: (entity_type, pack_name)}
+        entity_type_by_pack: Dict[str, List[Tuple[EntityType, str]]] = defaultdict(list)
+
+        for pack in active_packs:
+            pack_stoplist = set(
+                EntityModel.normalize(s) for s in pack.get_entity_stoplist()
+            )
+
+            for extractor in pack.get_entity_extractors():
+                try:
+                    new_entities, candidate_map = extractor.extract(
+                        claims=isolated_claims,
+                        existing_entities=entities + all_new_entities,
+                        domain_context=domain_context,
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"  → Extractor error in pack '{pack.name}': {e}"
+                    )
+                    continue
+
+                # Gate core (INV-PERSIST)
+                for entity in new_entities:
+                    norm = entity.normalized_name
+
+                    # Stoplist domaine
+                    if norm in pack_stoplist:
+                        continue
+
+                    # is_valid_entity_name avec relaxation NER
+                    if not is_valid_entity_name(entity.name, ner_sourced=True):
+                        continue
+
+                    # Dedup vs existant
+                    if norm in existing_norms:
+                        continue
+
+                    # Tag source
+                    object.__setattr__(entity, "source_pack", pack.name)
+
+                    # Track pour conflits inter-pack
+                    entity_type_by_pack[norm].append(
+                        (entity.entity_type, pack.name)
+                    )
+
+                    all_new_entities.append(entity)
+                    existing_norms.add(norm)
+
+                # Créer les liens ABOUT pour les candidats validés
+                valid_entity_ids = {e.entity_id for e in all_new_entities}
+                for claim_id, entity_ids in candidate_map.items():
+                    for eid in entity_ids:
+                        if eid in valid_entity_ids:
+                            link = (claim_id, eid)
+                            all_new_links.append(link)
+                            link_methods[link] = f"domain_pack:{pack.name}"
+
+            # Linker core sur les claims isolées + nouvelles entités du pack
+            pack_entities = [
+                e for e in all_new_entities if e.source_pack == pack.name
+            ]
+            if pack_entities:
+                extra_links = self.entity_linker.link(
+                    claims=isolated_claims,
+                    entities=pack_entities,
+                )
+                for link in extra_links:
+                    if link not in all_new_links:
+                        all_new_links.append(link)
+                        link_methods[link] = f"domain_pack:{pack.name}"
+
+        # Détection conflits inter-pack (INV-CONFLICT)
+        for norm, type_pack_list in entity_type_by_pack.items():
+            if len(type_pack_list) > 1:
+                types = {t for t, _ in type_pack_list}
+                if len(types) > 1:
+                    packs_involved = [p for _, p in type_pack_list]
+                    logger.warning(
+                        f"  → CONFLICT: '{norm}' has conflicting types "
+                        f"from packs {packs_involved}: {types}"
+                    )
+                    # Retirer l'entité conflictuelle
+                    all_new_entities = [
+                        e for e in all_new_entities
+                        if e.normalized_name != norm
+                    ]
+                    # Retirer les liens associés
+                    conflicting_ids = {
+                        e.entity_id for e in all_new_entities
+                        if e.normalized_name == norm
+                    }
+                    all_new_links = [
+                        (cid, eid) for cid, eid in all_new_links
+                        if eid not in conflicting_ids
+                    ]
+                    # Créer une action hygiene PROPOSED
+                    try:
+                        self._create_conflict_hygiene_action(
+                            norm, type_pack_list, tenant_id
+                        )
+                    except Exception as e:
+                        logger.error(f"  → Error creating conflict action: {e}")
+
+        return all_new_entities, all_new_links, link_methods
+
+    def _create_conflict_hygiene_action(
+        self,
+        normalized_name: str,
+        type_pack_list: List[Tuple],
+        tenant_id: str,
+    ) -> None:
+        """Crée un noeud HygieneAction pour un conflit inter-pack."""
+        try:
+            from knowbase.hygiene.models import HygieneAction, ActionType, ActionStatus
+            import uuid
+
+            action = HygieneAction(
+                action_id=str(uuid.uuid4()),
+                action_type=ActionType.MERGE_CANONICAL,
+                status=ActionStatus.PROPOSED,
+                layer=4,
+                tenant_id=tenant_id,
+                after_state={
+                    "conflicting_packs": [p for _, p in type_pack_list],
+                    "candidate_types": [t.value for t, _ in type_pack_list],
+                    "normalized_name": normalized_name,
+                    "source": "domain_pack_conflict",
+                },
+                description=(
+                    f"Conflit inter-pack: '{normalized_name}' typé différemment "
+                    f"par {len(type_pack_list)} packs"
+                ),
+            )
+            logger.info(
+                f"  → Created hygiene action for conflict: {normalized_name}"
+            )
+        except ImportError:
+            logger.debug("  → Hygiene module not available for conflict action")
 
 
 __all__ = [

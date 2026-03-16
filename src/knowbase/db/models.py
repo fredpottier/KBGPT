@@ -1033,6 +1033,14 @@ class DomainContext(Base):
         comment="JSON object defining axis policy for ApplicabilityFrame pipeline"
     )
 
+    # Domain Packs — liste des packs actifs (JSON array)
+    active_packs = Column(
+        Text,
+        nullable=True,
+        default="[]",
+        comment="JSON array des noms de packs actifs pour ce tenant"
+    )
+
     # Timestamps
     created_at = Column(
         DateTime(timezone=True),

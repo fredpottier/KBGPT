@@ -115,6 +115,11 @@ class Entity(BaseModel):
         description="Nombre de mentions dans les claims"
     )
 
+    source_pack: Optional[str] = Field(
+        default=None,
+        description="Nom du Domain Pack ayant créé cette entité (None = core)"
+    )
+
     def model_post_init(self, __context) -> None:
         """Calcule le nom normalisé après initialisation si non fourni."""
         if not self.normalized_name and self.name:
@@ -163,7 +168,7 @@ class Entity(BaseModel):
 
     def to_neo4j_properties(self) -> dict:
         """Convertit en propriétés pour Neo4j."""
-        return {
+        props = {
             "entity_id": self.entity_id,
             "tenant_id": self.tenant_id,
             "name": self.name,
@@ -173,6 +178,9 @@ class Entity(BaseModel):
             "source_doc_ids": self.source_doc_ids if self.source_doc_ids else None,
             "mention_count": self.mention_count,
         }
+        if self.source_pack:
+            props["source_pack"] = self.source_pack
+        return props
 
     @classmethod
     def from_neo4j_record(cls, record: dict) -> "Entity":
@@ -186,6 +194,7 @@ class Entity(BaseModel):
             normalized_name=record.get("normalized_name", ""),
             source_doc_ids=record.get("source_doc_ids") or [],
             mention_count=record.get("mention_count", 1),
+            source_pack=record.get("source_pack"),
         )
 
 
@@ -260,6 +269,12 @@ ENTITY_STOPLIST = frozenset({
     # (passent le filtre acronyme ^[A-Z]{2,5}$ mais ne sont pas des acronymes)
     "as", "new", "up", "non", "map", "fix", "key", "end",
     "add", "top", "per", "via", "due", "own", "old",
+    # Chiffres romains (passent ^[A-Z]{2,5}$ mais ne sont pas des entités)
+    "ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii",
+    # Acronymes 2-chars ambigus (aucun sens métier connu dans aucune langue)
+    # NB: on garde les acronymes qui PEUVENT être valides (DM=Diabetes Mellitus,
+    # PM=Post-Mortem, BC=Breast Cancer, etc.)
+    "nt", "fn", "cg", "bv", "ck", "zo", "nc", "iu",
 
     # Termes déictiques et articles (NE JAMAIS être des entités)
     "this", "that", "these", "those",
@@ -348,7 +363,7 @@ _FUNCTION_WORDS = frozenset({
 })
 
 
-def is_valid_entity_name(name: str) -> bool:
+def is_valid_entity_name(name: str, ner_sourced: bool = False) -> bool:
     """
     Vérifie si un nom d'entité est valide.
 
@@ -361,6 +376,9 @@ def is_valid_entity_name(name: str) -> bool:
 
     Args:
         name: Nom à vérifier
+        ner_sourced: Si True, relaxe le check pour les entités venant d'un NER
+                     spécialisé (le modèle a déjà validé que c'est une entité).
+                     Concrètement : les noms lowercase-first sont acceptés.
 
     Returns:
         True si le nom est valide pour être une entité

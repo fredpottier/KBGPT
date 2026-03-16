@@ -90,8 +90,8 @@ class DomainContextProfile(BaseModel):
 
     versioning_hints: str = Field(
         default="",
-        description="Conventions de versioning spécifiques au domaine (texte libre, max 500 chars)",
-        max_length=500,
+        description="Conventions de versioning spécifiques au domaine (texte libre)",
+        max_length=1000,
     )
 
     identification_semantics: str = Field(
@@ -129,6 +129,20 @@ class DomainContextProfile(BaseModel):
             "accept_patterns?: [regex]}}}"
         ),
         max_length=5000,
+    )
+
+    hygiene_entity_stoplist: str = Field(
+        default="",
+        description=(
+            "JSON array of domain-specific entity names to suppress during KG Hygiene. "
+            "Example: [\"SPSS\", \"PubMed\", \"Cochrane\"] for biomedical domain."
+        ),
+        max_length=5000,
+    )
+
+    active_packs: List[str] = Field(
+        default_factory=list,
+        description="Noms des Domain Packs actifs pour ce tenant"
     )
 
     context_priority: Literal["low", "medium", "high"] = Field(
@@ -196,8 +210,10 @@ class DomainContextProfile(BaseModel):
             "identification_semantics": self.identification_semantics,
             "axis_reclassification_rules": self.axis_reclassification_rules,
             "axis_policy": self.axis_policy,
+            "hygiene_entity_stoplist": self.hygiene_entity_stoplist,
             "context_priority": self.context_priority,
             "llm_injection_prompt": self.llm_injection_prompt,
+            "active_packs": json.dumps(self.active_packs),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat()
         }
@@ -228,8 +244,10 @@ class DomainContextProfile(BaseModel):
             identification_semantics=props.get("identification_semantics", ""),
             axis_reclassification_rules=props.get("axis_reclassification_rules", ""),
             axis_policy=props.get("axis_policy", ""),
+            hygiene_entity_stoplist=props.get("hygiene_entity_stoplist", ""),
             context_priority=props.get("context_priority", "medium"),
             llm_injection_prompt=props["llm_injection_prompt"],
+            active_packs=json.loads(props.get("active_packs", "[]")),
             created_at=datetime.fromisoformat(props["created_at"]),
             updated_at=datetime.fromisoformat(props["updated_at"])
         )

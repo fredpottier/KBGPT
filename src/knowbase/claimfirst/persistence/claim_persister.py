@@ -8,7 +8,7 @@ Persiste tous les artefacts du pipeline:
 - Entities
 - Facets
 - ClaimClusters
-- Relations (SUPPORTED_BY, ABOUT, HAS_FACET, IN_CLUSTER, etc.)
+- Relations (SUPPORTED_BY, ABOUT, BELONGS_TO_FACET, IN_CLUSTER, etc.)
 
 Utilise MERGE pour l'idempotence.
 """
@@ -29,6 +29,8 @@ from knowbase.claimfirst.models.document_context import DocumentContext
 from knowbase.claimfirst.models.subject_anchor import SubjectAnchor
 from knowbase.claimfirst.models.applicability_axis import ApplicabilityAxis
 from knowbase.claimfirst.models.comparable_subject import ComparableSubject
+from knowbase.claimfirst.models.canonical_entity import CanonicalEntity
+from knowbase.claimfirst.models.entity import EntityType
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,8 @@ class ClaimPersister:
             "axes_created": 0,
             "axis_value_relations_created": 0,
             "qs_created": 0,
+            "canonical_entities_created": 0,
+            "same_canon_as_created": 0,
         }
 
     def persist(self, result: ClaimFirstResult) -> dict:
@@ -175,9 +179,15 @@ class ClaimPersister:
                 self._persist_supported_by_batch(session, result.claim_passage_links)
 
             # 8. Relations Claim → Entity (ABOUT) (batch UNWIND)
-            self._persist_about_batch(session, result.claim_entity_links)
+            self._persist_about_batch(
+                session, result.claim_entity_links,
+                link_methods=result.claim_entity_link_methods or None,
+            )
 
-            # 9. Relations Claim → Facet (HAS_FACET) (batch UNWIND)
+            # 8b. CanonicalEntity + SAME_CANON_AS (post-entités, post-ABOUT)
+            self._persist_canonical_links(session, result.entities)
+
+            # 9. Relations Claim → Facet (BELONGS_TO_FACET) (batch UNWIND)
             self._persist_has_facet_batch(session, result.claim_facet_links)
 
             # 10. Relations Claim → Cluster (IN_CLUSTER) (batch UNWIND)
@@ -205,7 +215,9 @@ class ClaimPersister:
             f"{self.stats['facets_created']} facets, "
             f"{self.stats['clusters_created']} clusters, "
             f"{self.stats['relations_created']} relations, "
-            f"{self.stats['qs_created']} QS"
+            f"{self.stats['qs_created']} QS, "
+            f"{self.stats['canonical_entities_created']} canon, "
+            f"{self.stats['same_canon_as_created']} SAME_CANON_AS"
         )
 
         return dict(self.stats)
@@ -806,11 +818,11 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         claim_id: str,
         facet_id: str,
     ) -> None:
-        """Crée la relation Claim -[:HAS_FACET]-> Facet."""
+        """Crée la relation Claim -[:BELONGS_TO_FACET]-> Facet."""
         query = """
         MATCH (c:Claim {claim_id: $claim_id})
         MATCH (f:Facet {facet_id: $facet_id})
-        MERGE (c)-[:HAS_FACET]->(f)
+        MERGE (c)-[:BELONGS_TO_FACET]->(f)
         """
         session.run(query, claim_id=claim_id, facet_id=facet_id)
         self.stats["relations_created"] += 1
@@ -960,11 +972,104 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         """, batch=batch)
         self.stats["entities_created"] += len(entities)
 
+    def _persist_canonical_links(self, session, entities: List[Entity]) -> None:
+        """
+        Crée les CanonicalEntity et relations SAME_CANON_AS pour les entités
+        qui ont des aliases (= résultat de canonicalisation intra-document).
+
+        Pour chaque entité avec aliases :
+        1. MERGE un CanonicalEntity (ID déterministe)
+        2. MERGE SAME_CANON_AS de l'entité principale → CanonicalEntity
+        3. Trouver les Entity Neo4j dont le nom est dans les aliases → les lier aussi
+
+        Les Entity existantes ne sont PAS modifiées — le CanonicalEntity est
+        un nœud pivot additionnel (conforme aux ADR OSMOSE).
+        """
+        if not entities:
+            return
+
+        entities_with_aliases = [e for e in entities if e.aliases]
+        if not entities_with_aliases:
+            return
+
+        for entity in entities_with_aliases:
+            canonical_name = entity.name
+            tenant_id = entity.tenant_id
+            ce_id = CanonicalEntity.make_id(tenant_id, canonical_name)
+
+            # 1. MERGE CanonicalEntity
+            session.run("""
+                MERGE (ce:CanonicalEntity {canonical_entity_id: $ce_id})
+                ON CREATE SET
+                    ce.canonical_name = $canonical_name,
+                    ce.tenant_id = $tenant_id,
+                    ce.entity_type = $entity_type,
+                    ce.method = 'pipeline_canonicalize',
+                    ce.created_at = datetime()
+                ON MATCH SET
+                    ce.canonical_name = $canonical_name,
+                    ce.entity_type = $entity_type
+            """,
+                ce_id=ce_id,
+                canonical_name=canonical_name,
+                tenant_id=tenant_id,
+                entity_type=entity.entity_type.value
+                if hasattr(entity.entity_type, "value")
+                else str(entity.entity_type),
+            )
+            self.stats["canonical_entities_created"] += 1
+
+            # 2. Lier l'entité principale → CanonicalEntity
+            session.run("""
+                MATCH (e:Entity {normalized_name: $norm_name, tenant_id: $tenant_id})
+                MATCH (ce:CanonicalEntity {canonical_entity_id: $ce_id})
+                MERGE (e)-[r:SAME_CANON_AS]->(ce)
+                ON CREATE SET r.method = 'pipeline_primary', r.confidence = 1.0,
+                              r.created_at = datetime()
+            """,
+                norm_name=entity.normalized_name,
+                tenant_id=tenant_id,
+                ce_id=ce_id,
+            )
+            self.stats["same_canon_as_created"] += 1
+
+            # 3. Trouver les Entity dont le nom matche un alias → les lier
+            alias_normalized = [Entity.normalize(a) for a in entity.aliases if a]
+            alias_normalized = [a for a in alias_normalized if a and a != entity.normalized_name]
+            if alias_normalized:
+                result = session.run("""
+                    MATCH (e:Entity)
+                    WHERE e.normalized_name IN $alias_names AND e.tenant_id = $tenant_id
+                    MATCH (ce:CanonicalEntity {canonical_entity_id: $ce_id})
+                    MERGE (e)-[r:SAME_CANON_AS]->(ce)
+                    ON CREATE SET r.method = 'pipeline_alias', r.confidence = 0.90,
+                                  r.created_at = datetime()
+                    RETURN count(r) AS linked
+                """,
+                    alias_names=alias_normalized,
+                    tenant_id=tenant_id,
+                    ce_id=ce_id,
+                )
+                record = result.single()
+                if record and record["linked"]:
+                    self.stats["same_canon_as_created"] += record["linked"]
+
+        logger.info(
+            f"[OSMOSE:ClaimPersister] Canonical links: "
+            f"{self.stats['canonical_entities_created']} CE, "
+            f"{self.stats['same_canon_as_created']} SAME_CANON_AS"
+        )
+
     def _persist_facets_batch(self, session, facets: List[Facet]) -> None:
         """Persiste les Facets en batch via UNWIND."""
         if not facets:
             return
-        batch = [f.to_neo4j_properties() for f in facets]
+        batch = []
+        for f in facets:
+            props = f.to_neo4j_properties()
+            # Filtrer les valeurs None (Neo4j n'aime pas)
+            props = {k: v for k, v in props.items() if v is not None}
+            batch.append(props)
         session.run("""
             UNWIND $batch AS item
             MERGE (f:Facet {facet_id: item.facet_id})
@@ -1023,16 +1128,32 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         self,
         session,
         links: List[Tuple[str, str]],
+        link_methods: Optional[Dict] = None,
     ) -> None:
-        """Crée les relations Claim → Entity (ABOUT) en batch."""
+        """Crée les relations Claim → Entity (ABOUT) en batch.
+
+        Args:
+            links: Liste de tuples (claim_id, entity_id)
+            link_methods: Optionnel, dict {(claim_id, entity_id): method_string}
+                          pour tagger la relation ABOUT avec sa source
+        """
         if not links:
             return
-        batch = [{"claim_id": cid, "entity_id": eid} for cid, eid in links]
+        batch = []
+        for cid, eid in links:
+            item = {"claim_id": cid, "entity_id": eid}
+            if link_methods:
+                method = link_methods.get((cid, eid))
+                if method:
+                    item["method"] = method
+            batch.append(item)
+
         session.run("""
             UNWIND $batch AS item
             MATCH (c:Claim {claim_id: item.claim_id})
             MATCH (e:Entity {entity_id: item.entity_id})
-            MERGE (c)-[:ABOUT]->(e)
+            MERGE (c)-[r:ABOUT]->(e)
+            ON CREATE SET r.method = CASE WHEN item.method IS NOT NULL THEN item.method ELSE 'core' END
         """, batch=batch)
         self.stats["relations_created"] += len(links)
 
@@ -1041,15 +1162,24 @@ Réponds UNIQUEMENT par "SAME" ou "DIFFERENT"."""
         session,
         links: List[Tuple[str, str]],
     ) -> None:
-        """Crée les relations Claim → Facet (HAS_FACET) en batch."""
+        """Crée les relations Claim → Facet (BELONGS_TO_FACET) en batch.
+
+        Rétrocompatible : accepte les tuples (claim_id, facet_id).
+        """
         if not links:
             return
-        batch = [{"claim_id": cid, "facet_id": fid} for cid, fid in links]
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+        batch = [
+            {"claim_id": cid, "facet_id": fid, "assigned_at": now_iso}
+            for cid, fid in links
+        ]
         session.run("""
             UNWIND $batch AS item
             MATCH (c:Claim {claim_id: item.claim_id})
             MATCH (f:Facet {facet_id: item.facet_id})
-            MERGE (c)-[:HAS_FACET]->(f)
+            MERGE (c)-[r:BELONGS_TO_FACET]->(f)
+            SET r.assigned_at = item.assigned_at
         """, batch=batch)
         self.stats["relations_created"] += len(links)
 

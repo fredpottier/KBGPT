@@ -443,8 +443,9 @@ export const api = {
       apiClient.post('/verify/correct', { text, assertions, tenant_id: tenantId }),
   },
 
-  // Wiki Generation Console - Phase 3 Concept Assembly Engine
+  // Wiki — Generation Console (Phase 3) + Knowledge Atlas (Phase 4)
   wiki: {
+    // Phase 3 — Génération
     generate: (conceptName: string, language: string = 'français', force: boolean = false) =>
       apiClient.post('/wiki/generate', { concept_name: conceptName, language, force }),
     status: (jobId: string) =>
@@ -453,5 +454,142 @@ export const api = {
       apiClient.get(`/wiki/article/${jobId}`),
     searchConcepts: (query: string, limit: number = 10) =>
       apiClient.get(`/wiki/concepts/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+
+    // Phase 4 — Knowledge Atlas
+    home: () =>
+      apiClient.get('/wiki/home'),
+    listArticles: (params?: {
+      limit?: number
+      offset?: number
+      category?: string
+      search?: string
+      tier?: number
+    }) => {
+      const queryParams = new URLSearchParams()
+      if (params?.limit) queryParams.append('limit', params.limit.toString())
+      if (params?.offset) queryParams.append('offset', params.offset.toString())
+      if (params?.category) queryParams.append('category', params.category)
+      if (params?.search) queryParams.append('search', params.search)
+      if (params?.tier) queryParams.append('tier', params.tier.toString())
+      const query = queryParams.toString()
+      return apiClient.get(`/wiki/articles${query ? `?${query}` : ''}`)
+    },
+    getArticle: (slug: string) =>
+      apiClient.get(`/wiki/articles/${encodeURIComponent(slug)}`),
+    articleClaims: (slug: string, limit: number = 10) =>
+      apiClient.get(`/wiki/articles/${encodeURIComponent(slug)}/claims?limit=${limit}`),
+    categories: () =>
+      apiClient.get('/wiki/categories'),
+    deleteArticle: (slug: string) =>
+      apiClient.delete(`/wiki/articles/${encodeURIComponent(slug)}`),
+
+    // Admin — Scoring & Batch Generation
+    adminScoring: (tenantId: string = 'default') =>
+      apiClient.get(`/wiki/admin/scoring?tenant_id=${encodeURIComponent(tenantId)}`),
+    batchGenerate: (params: {
+      max_tier?: number
+      max_articles?: number
+      language?: string
+      skip_existing?: boolean
+    }) =>
+      apiClient.post('/wiki/admin/batch-generate', params),
+    batchStatus: (batchId: string) =>
+      apiClient.get(`/wiki/admin/batch-status/${encodeURIComponent(batchId)}`),
+
+    // Admin — Concept Linking
+    batchLink: (params?: { force?: boolean; max_concurrent?: number }) =>
+      apiClient.post('/wiki/admin/batch-link', params || {}),
+    getLinkStatus: () =>
+      apiClient.get('/wiki/admin/link-status'),
+  },
+
+  // KG Hygiene — Nettoyage autonome + Rollback
+  hygiene: {
+    run: (params: {
+      dry_run?: boolean
+      layers?: number[]
+      scope?: string
+      scope_params?: Record<string, unknown>
+      auto_apply_threshold?: number
+    }) =>
+      apiClient.post('/admin/kg-hygiene/run', params),
+    runStatus: (batchId: string) =>
+      apiClient.get(`/admin/kg-hygiene/run-status/${encodeURIComponent(batchId)}`),
+    actions: (params?: {
+      status?: string
+      layer?: number
+      action_type?: string
+      batch_id?: string
+      limit?: number
+      offset?: number
+    }) => {
+      const queryParams = new URLSearchParams()
+      if (params?.status) queryParams.append('status', params.status)
+      if (params?.layer) queryParams.append('layer', params.layer.toString())
+      if (params?.action_type) queryParams.append('action_type', params.action_type)
+      if (params?.batch_id) queryParams.append('batch_id', params.batch_id)
+      if (params?.limit) queryParams.append('limit', params.limit.toString())
+      if (params?.offset) queryParams.append('offset', params.offset.toString())
+      const query = queryParams.toString()
+      return apiClient.get(`/admin/kg-hygiene/actions${query ? `?${query}` : ''}`)
+    },
+    actionDetail: (actionId: string) =>
+      apiClient.get(`/admin/kg-hygiene/actions/${actionId}`),
+    rollback: (actionId: string) =>
+      apiClient.post(`/admin/kg-hygiene/actions/${actionId}/rollback`, {}),
+    reject: (actionId: string) =>
+      apiClient.post(`/admin/kg-hygiene/actions/${actionId}/reject`, {}),
+    approve: (actionId: string) =>
+      apiClient.post(`/admin/kg-hygiene/actions/${actionId}/approve`, {}),
+    rollbackBatch: (batchId: string) =>
+      apiClient.post(`/admin/kg-hygiene/rollback-batch?batch_id=${encodeURIComponent(batchId)}`, {}),
+    stats: () =>
+      apiClient.get('/admin/kg-hygiene/stats'),
+  },
+
+  // Domain Packs — Packages NER autonomes (sidecar containers)
+  domainPacks: {
+    list: () =>
+      apiClient.get('/admin/domain-packs/'),
+    upload: (file: File) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      return apiClient.post('/admin/domain-packs/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 600000,  // 10 min pour le build
+      })
+    },
+    install: (packName: string) =>
+      apiClient.post(`/admin/domain-packs/install/${encodeURIComponent(packName)}`, {}, {
+        timeout: 600000,
+      }),
+    uninstall: (packName: string) =>
+      apiClient.post('/admin/domain-packs/uninstall', { pack_name: packName }),
+    activate: (packName: string, tenantId: string = 'default') =>
+      apiClient.post('/admin/domain-packs/activate', { pack_name: packName, tenant_id: tenantId }, {
+        timeout: 120000,
+      }),
+    deactivate: (packName: string, tenantId: string = 'default') =>
+      apiClient.post('/admin/domain-packs/deactivate', { pack_name: packName, tenant_id: tenantId }),
+    reprocess: (packName: string, tenantId: string = 'default') =>
+      apiClient.post('/admin/domain-packs/reprocess', { pack_name: packName, tenant_id: tenantId }),
+    reprocessStatus: () =>
+      apiClient.get('/admin/domain-packs/reprocess-status'),
+    stats: (packName: string) =>
+      apiClient.get(`/admin/domain-packs/stats/${encodeURIComponent(packName)}`),
+    defaults: (packName: string) =>
+      apiClient.get(`/admin/domain-packs/defaults/${encodeURIComponent(packName)}`),
+  },
+
+  // Post-Import — Pipeline enrichissement qualité KG
+  postImport: {
+    steps: () =>
+      apiClient.get('/admin/post-import/steps'),
+    status: () =>
+      apiClient.get('/admin/post-import/status'),
+    run: (steps: string[], tenantId: string = 'default') =>
+      apiClient.post('/admin/post-import/run', { steps, tenant_id: tenantId }, {
+        timeout: 1800000,  // 30 min max
+      }),
   },
 }

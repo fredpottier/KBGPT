@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from knowbase.api.dependencies import configure_logging, get_settings, warm_clients
-from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu, backup, wiki
+from knowbase.api.routers import ingest, search, status, imports, solutions, downloads, token_analysis, facts, ontology, entities, entity_types, jobs, document_types, admin, auth, documents, concepts, domain_context, insights, sessions, claims, entity_resolution, burst, navigation, analytics, markers, claimfirst, verify, gpu, backup, wiki, kg_hygiene, domain_packs, post_import
 # Pipeline V2 - Stratified Reading Model
 from knowbase.stratified.api import router as stratified_v2_router
 # MVP V1 - Challenge de Texte (Usage B)
@@ -272,6 +272,15 @@ def create_app() -> FastAPI:
 
     # 📚 OSMOSE Wiki — Generation Console (Phase 3 Concept Assembly Engine)
     app.include_router(wiki.router)  # Endpoints: /api/wiki/generate, /api/wiki/status, /api/wiki/article, /api/wiki/concepts/search
+
+    # 🧹 OSMOSE KG Hygiene — Nettoyage autonome + Rollback
+    app.include_router(kg_hygiene.router)  # Endpoints: /api/admin/kg-hygiene/run, /actions, /stats, etc.
+
+    # 📦 OSMOSE Domain Packs — Packages métier activables (NER spécialisé)
+    app.include_router(domain_packs.router)  # Endpoints: /api/admin/domain-packs/
+
+    # 🔄 OSMOSE Post-Import — Pipeline enrichissement qualité KG
+    app.include_router(post_import.router)  # Endpoints: /api/admin/post-import/
 
     return app
 

@@ -332,6 +332,12 @@ class ClaimFirstResult(BaseModel):
         description="Liens Claim → Cluster (IN_CLUSTER)"
     )
 
+    # Métadonnées liens ABOUT (source domain pack)
+    claim_entity_link_methods: Dict[Tuple[str, str], str] = Field(
+        default_factory=dict,
+        description="Méthode de création des liens ABOUT: {(claim_id, entity_id): method}"
+    )
+
     # Statistiques
     processing_time_ms: int = Field(
         default=0,
