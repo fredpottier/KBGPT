@@ -22,7 +22,10 @@ from knowbase.claimfirst.models.entity import (
 )
 from knowbase.claimfirst.models.facet import (
     Facet,
+    FacetFamily,
     FacetKind,
+    FacetLifecycle,
+    get_seed_facets,
 )
 from knowbase.claimfirst.models.passage import (
     Passage,
@@ -126,7 +129,10 @@ __all__ = [
     "is_valid_entity_name",
     # Facet
     "Facet",
+    "FacetFamily",
     "FacetKind",
+    "FacetLifecycle",
+    "get_seed_facets",
     # Passage
     "Passage",
     # Result

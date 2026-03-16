@@ -71,6 +71,7 @@ import {
   FiCode,
   FiPlus,
   FiMinus,
+  FiFilter,
 } from 'react-icons/fi'
 
 const MotionBox = motion(Box)
@@ -93,6 +94,7 @@ interface DomainContext {
   identification_semantics: string
   axis_reclassification_rules: string
   axis_policy: string
+  hygiene_entity_stoplist: string
   llm_injection_prompt: string
   created_at: string
   updated_at: string
@@ -111,6 +113,7 @@ interface FormData {
   identification_semantics: string
   axis_reclassification_rules: string
   axis_policy: string
+  hygiene_entity_stoplist: string
 }
 
 interface AxisPolicyState {
@@ -177,6 +180,7 @@ const INITIAL_FORM_DATA: FormData = {
   identification_semantics: '',
   axis_reclassification_rules: '',
   axis_policy: '',
+  hygiene_entity_stoplist: '',
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +198,7 @@ const INDUSTRY_OPTIONS = [
   { value: 'retail', label: 'Retail / Commerce' },
   { value: 'manufacturing', label: 'Industrie / Manufacturing' },
   { value: 'sap_ecosystem', label: 'SAP Ecosystem' },
+  { value: 'cloud_infrastructure', label: 'Cloud Infrastructure / Kubernetes' },
   { value: 'technology', label: 'Technologie / IT' },
   { value: 'energy', label: 'Energie' },
   { value: 'logistics', label: 'Logistique / Transport' },
@@ -215,6 +220,8 @@ interface IndustryPreset {
   identificationSemantics?: string
   axisReclassificationRules?: string
   axisPolicy?: AxisPolicyState
+  // KG Hygiene stoplist (optional)
+  hygieneEntityStoplist?: string[]
 }
 
 const INDUSTRY_PRESETS: Record<string, IndustryPreset> = {
@@ -310,12 +317,171 @@ const INDUSTRY_PRESETS: Record<string, IndustryPreset> = {
     documentTypesSuggestions: ['Comptes-rendus medicaux', 'Protocoles de soins', 'Ordonnances'],
   },
   pharma_clinical: {
-    descriptionPlaceholder: "Organization specializing in pharmaceutical industry and clinical research...",
-    subDomainsSuggestions: ['R&D', 'Affaires reglementaires', 'Pharmacovigilance', 'Production', 'Qualite', 'Oncologie', 'Cardiologie'],
-    keyConceptsSuggestions: ['Autorisation de Mise sur le Marche', 'Phase clinique', 'Endpoint primaire', 'Population ITT', 'Randomisation'],
-    acronymsSuggestions: { 'AMM': 'Autorisation de Mise sur le Marche', 'ICH': 'International Council for Harmonisation', 'OS': 'Overall Survival' },
-    targetUsersSuggestions: ['Chercheurs', 'Affaires reglementaires', 'Clinical Research Associates', 'Biostatisticiens'],
-    documentTypesSuggestions: ['Protocoles d\'essai', 'Clinical Study Reports', 'Dossiers AMM'],
+    descriptionPlaceholder: "Base de connaissances biomedical et recherche clinique couvrant l'immunotherapie (checkpoint inhibitors PD-1/PD-L1), les biomarqueurs infectieux (procalcitonine, CRP), l'edition genomique (CRISPR/Cas9), le microbiome intestinal et ses implications therapeutiques. Corpus d'articles scientifiques (reviews, meta-analyses, essais cliniques) provenant de PubMed Central, couvrant les interactions entre ces domaines (microbiome et reponse immunotherapie, CRISPR et knockout PD-1, dysbiose et sepsis).",
+    subDomainsSuggestions: [
+      'Immunotherapie & Checkpoint Inhibitors',
+      'Biomarqueurs infectieux (PCT, CRP)',
+      'Edition genomique CRISPR/Cas9',
+      'Microbiome intestinal',
+      'Oncologie',
+      'Sepsis & Soins intensifs',
+      'Therapie genique',
+      'Pharmacovigilance',
+      'Essais cliniques',
+      'Transplantation fecale (FMT)',
+      'Axe cerveau-intestin',
+      'CAR-T & Therapie cellulaire',
+      'Antibiotic stewardship',
+      'Metagenomique & Multi-omics',
+    ],
+    keyConceptsSuggestions: [
+      'Checkpoint inhibitor',
+      'PD-1',
+      'PD-L1',
+      'Pembrolizumab',
+      'Nivolumab',
+      'Procalcitonin',
+      'C-reactive protein',
+      'CRISPR/Cas9',
+      'Guide RNA',
+      'Off-target effects',
+      'Gut microbiome',
+      'Dysbiosis',
+      'Fecal microbiota transplantation',
+      'Overall survival',
+      'Progression-free survival',
+      'Objective response rate',
+      'Sickle cell disease',
+      'Beta-thalassemia',
+      'Sepsis',
+      'Antibiotic resistance',
+      'Randomized controlled trial',
+      'Meta-analysis',
+      'Gut-brain axis',
+      'Akkermansia muciniphila',
+      'Lipid nanoparticle',
+      'CAR-T cell',
+      'Tumor microenvironment',
+      'Immune-related adverse events',
+    ],
+    acronymsSuggestions: {
+      'PCT': 'Procalcitonin',
+      'CRP': 'C-Reactive Protein',
+      'PD-1': 'Programmed Death-1 receptor',
+      'PD-L1': 'Programmed Death-Ligand 1',
+      'CTLA-4': 'Cytotoxic T-Lymphocyte Associated protein 4',
+      'ICI': 'Immune Checkpoint Inhibitor',
+      'irAE': 'Immune-Related Adverse Event',
+      'OS': 'Overall Survival',
+      'PFS': 'Progression-Free Survival',
+      'ORR': 'Objective Response Rate',
+      'CR': 'Complete Response',
+      'PR': 'Partial Response',
+      'HR': 'Hazard Ratio',
+      'CI': 'Confidence Interval',
+      'ITT': 'Intention To Treat',
+      'RCT': 'Randomized Controlled Trial',
+      'FMT': 'Fecal Microbiota Transplantation',
+      'CRISPR': 'Clustered Regularly Interspaced Short Palindromic Repeats',
+      'Cas9': 'CRISPR-Associated Protein 9',
+      'sgRNA': 'Single Guide RNA',
+      'PAM': 'Protospacer Adjacent Motif',
+      'AAV': 'Adeno-Associated Virus',
+      'LNP': 'Lipid Nanoparticle',
+      'CAR-T': 'Chimeric Antigen Receptor T-cell',
+      'NSCLC': 'Non-Small Cell Lung Cancer',
+      'HCC': 'Hepatocellular Carcinoma',
+      'CRC': 'Colorectal Cancer',
+      'RCC': 'Renal Cell Carcinoma',
+      'ICU': 'Intensive Care Unit',
+      'LRTI': 'Lower Respiratory Tract Infection',
+      'AMS': 'Antimicrobial Stewardship',
+      'MDR': 'Multi-Drug Resistant',
+      'IBD': 'Inflammatory Bowel Disease',
+      'IBS': 'Irritable Bowel Syndrome',
+      'GBA': 'Gut-Brain Axis',
+      'SCFA': 'Short-Chain Fatty Acids',
+      'NGS': 'Next-Generation Sequencing',
+      'WES': 'Whole Exome Sequencing',
+      'TMB': 'Tumor Mutational Burden',
+      'MSI': 'Microsatellite Instability',
+      'FDA': 'Food and Drug Administration',
+      'EMA': 'European Medicines Agency',
+    },
+    targetUsersSuggestions: [
+      'Chercheurs cliniciens',
+      'Oncologues',
+      'Infectiologues',
+      'Intensivistes',
+      'Gastroenterologues',
+      'Biologistes moleculaires',
+      'Biostatisticiens',
+      'Pharmacologues',
+      'Affaires reglementaires',
+      'Clinical Research Associates',
+    ],
+    documentTypesSuggestions: [
+      'Systematic Reviews',
+      'Meta-analyses',
+      'Randomized Controlled Trials',
+      'Clinical Study Reports',
+      'Review Articles',
+      'Consensus Statements',
+      'Clinical Practice Guidelines',
+      'Case Reports',
+      'Observational Studies',
+    ],
+    versioningHints: "Biomedical research does not use software-style versioning. Key temporal axes: (1) trial_phase: Phase I, Phase II, Phase III, Phase IV — sequential clinical development stages. (2) FDA/EMA approval dates — regulatory milestones. (3) Publication year — temporal ordering of evidence. (4) Drug generation: first-generation (ipilimumab), second-generation (pembrolizumab, nivolumab) checkpoint inhibitors. (5) CRISPR tool generation: Cas9, Cas12, Cas13, base editors, prime editors. Documents are identified by PMC ID, DOI, or PubMed ID.",
+    identificationSemantics: 'Rule: "Phase I", "Phase II", "Phase III", "Phase 1", "Phase 2", "Phase 3" -> trial_phase (clinical development stage).\nRule: "approved in YYYY" or "FDA-approved" with year -> approval_year.\nRule: Dosage patterns like "200mg", "2mg/kg", "10mg/kg q2w" -> dosage (treatment parameter, NOT version).\nRule: PCT threshold values "0.25 ng/mL", "0.5 ug/L", ">0.1" -> biomarker_threshold.\nRule: Survival durations "median OS 12.5 months", "PFS 6.3 months" -> clinical_outcome.\nRule: "NCT" followed by digits (e.g. NCT02362594) -> clinical_trial_id.\nRule: "PMC" followed by digits -> article_id.\nCounter-example: percentages in statistical context ("95% CI", "p < 0.05") -> statistical_measure, NOT version.\nCounter-example: patient counts ("n=120", "N=456") -> sample_size, NOT version.',
+    axisReclassificationRules: JSON.stringify([
+      {
+        rule_id: 'trial_phase_not_version',
+        priority: 100,
+        description: 'Phase I/II/III/IV is a clinical trial phase, not a software version',
+        conditions: {
+          value_pattern: '^(Phase\\s+)?[IV]{1,3}$|^[1-4]$',
+          current_role: 'revision',
+          rationale_contains_any: ['phase', 'trial', 'clinical', 'study'],
+        },
+        action: { new_role: 'trial_phase', confidence_override: 0.95 },
+      },
+      {
+        rule_id: 'dosage_not_version',
+        priority: 90,
+        description: 'Drug dosage (mg, mg/kg, ug/L) is not a version number',
+        conditions: {
+          value_pattern: '\\d+\\s*(mg|ug|ng|g|mL|kg|IU)',
+          current_role: 'revision',
+        },
+        action: { new_role: 'dosage', confidence_override: 0.9 },
+      },
+      {
+        rule_id: 'biomarker_threshold_not_version',
+        priority: 85,
+        description: 'Biomarker thresholds (0.25 ng/mL, 0.5 ug/L) are clinical values',
+        conditions: {
+          value_pattern: '^[<>]?\\d+\\.?\\d*$',
+          rationale_contains_any: ['threshold', 'cutoff', 'cut-off', 'ng/mL', 'ug/L', 'procalcitonin', 'PCT', 'CRP'],
+        },
+        action: { new_role: 'biomarker_threshold', confidence_override: 0.95 },
+      },
+    ], null, 2),
+    axisPolicy: {
+      strip_prefixes: ['Phase', 'v', 'Version'],
+      canonicalization_enabled: true,
+      expected_axes: ['trial_phase', 'approval_year', 'drug_generation'],
+      excluded_axes: ['release_id', 'version', 'edition', 'api_version'],
+      strict_expected: false,
+      year_range: { min: 1990, max_relative: 2 },
+      plausibility_overrides: {
+        trial_phase: {
+          accept_patterns: ['^(Phase\\s+)?[IV]{1,3}$', '^[1-4]$'],
+        },
+        dosage: {
+          reject_patterns: ['^\\d{4}$'],
+        },
+      },
+    },
   },
   finance: {
     descriptionPlaceholder: "Institution financiere gerant des operations bancaires...",
@@ -431,6 +597,137 @@ const INDUSTRY_PRESETS: Record<string, IndustryPreset> = {
       plausibility_overrides: {
         lifecycle_status: {
           reject_patterns: ['^\\d{4}-\\d{2}-\\d{2}$'],
+        },
+      },
+    },
+  },
+  cloud_infrastructure: {
+    descriptionPlaceholder: "Kubernetes container orchestration platform documentation covering architecture, networking, storage, security, workloads, and cluster administration across multiple release versions (1.25, 1.29, 1.33).",
+    subDomainsSuggestions: [
+      'Container Orchestration',
+      'Cloud Native Infrastructure',
+      'Cluster Networking',
+      'Container Security',
+      'Storage Orchestration',
+      'Workload Management',
+      'API Server & Control Plane',
+      'Service Mesh & Ingress',
+      'Observability & Monitoring',
+      'Scheduling & Resource Management',
+    ],
+    keyConceptsSuggestions: [
+      'Pod',
+      'Deployment',
+      'StatefulSet',
+      'DaemonSet',
+      'Service',
+      'Ingress',
+      'NetworkPolicy',
+      'PersistentVolume',
+      'StorageClass',
+      'RBAC',
+      'Pod Security Standards',
+      'Feature Gates',
+      'Container Runtime',
+      'Control Plane',
+      'kube-apiserver',
+      'Scheduler',
+      'Namespace',
+      'ConfigMap',
+      'Secret',
+      'Node',
+      'kubelet',
+    ],
+    acronymsSuggestions: {
+      'K8s': 'Kubernetes',
+      'CRI': 'Container Runtime Interface',
+      'CNI': 'Container Network Interface',
+      'CSI': 'Container Storage Interface',
+      'PV': 'Persistent Volume',
+      'PVC': 'Persistent Volume Claim',
+      'RBAC': 'Role-Based Access Control',
+      'PSA': 'Pod Security Admission',
+      'PSP': 'Pod Security Policy (deprecated)',
+      'PSS': 'Pod Security Standards',
+      'HPA': 'Horizontal Pod Autoscaler',
+      'VPA': 'Vertical Pod Autoscaler',
+      'CRD': 'Custom Resource Definition',
+      'etcd': 'Distributed key-value store for cluster state',
+      'DRA': 'Dynamic Resource Allocation',
+      'GA': 'Generally Available (stable feature)',
+      'OCI': 'Open Container Initiative',
+      'PDB': 'Pod Disruption Budget',
+      'QoS': 'Quality of Service',
+      'CIDR': 'Classless Inter-Domain Routing',
+      'SA': 'Service Account',
+      'OIDC': 'OpenID Connect',
+      'mTLS': 'Mutual TLS',
+      'NFS': 'Network File System',
+      'SIG': 'Special Interest Group',
+    },
+    targetUsersSuggestions: [
+      'Platform Engineers',
+      'DevOps Engineers',
+      'Cloud Architects',
+      'SRE Engineers',
+      'Kubernetes Administrators',
+      'Application Developers',
+      'Security Engineers',
+    ],
+    documentTypesSuggestions: [
+      'Conceptual Documentation',
+      'Task Guides (How-to)',
+      'Tutorials',
+      'Reference Documentation',
+      'Setup & Installation Guides',
+      'Best Practices',
+      'Troubleshooting Guides',
+    ],
+    versioningHints: "Kubernetes uses semantic versioning: major.minor.patch (e.g. 1.33.0). Feature lifecycle: Alpha (disabled by default, may be removed) -> Beta (enabled by default, API may change) -> GA/Stable (always enabled, API stable). Feature Gates control alpha/beta features via --feature-gates flag. API versions follow: v1alpha1 -> v1beta1 -> v1 progression. Documents are versioned per K8s release branch (release-1.25, release-1.29, release-1.33).",
+    identificationSemantics: 'Rule: "v1.XX" or "1.XX" after "Kubernetes" or "release" -> release_id (Kubernetes version).\nRule: "v1", "v1beta1", "v1alpha1" in apiVersion field or API group context -> api_version (NOT release_id).\nRule: Feature gate name in PascalCase (e.g. "PodSecurity", "ReadWriteOncePod") -> feature_name.\nRule: "alpha", "beta", "stable", "GA" after "since" or "in" with version -> feature_maturity_level.\nCounter-example: "v1" alone in YAML apiVersion -> api_version, NOT Kubernetes release 1.0.\nCounter-example: version numbers in image tags (nginx:1.19) -> NOT Kubernetes release_id.',
+    axisReclassificationRules: JSON.stringify([
+      {
+        rule_id: 'k8s_api_version_not_release',
+        priority: 10,
+        description: 'API version (v1, v1beta1) in API context is not a K8s release',
+        conditions: {
+          value_pattern: '^v1(alpha|beta)?\\d*$',
+          rationale_contains_any: ['apiVersion', 'API group', 'API version'],
+        },
+        action: { new_role: 'api_version', confidence_override: 0.95 },
+      },
+      {
+        rule_id: 'k8s_feature_gate_name',
+        priority: 20,
+        description: 'PascalCase identifiers near feature gate context are feature names',
+        conditions: {
+          value_pattern: '^[A-Z][a-zA-Z]+$',
+          rationale_contains_any: ['feature gate', 'FeatureGate', '--feature-gates'],
+        },
+        action: { new_role: 'feature_gate', confidence_override: 0.9 },
+      },
+      {
+        rule_id: 'k8s_release_version',
+        priority: 5,
+        description: 'Version pattern 1.XX near Kubernetes context is a release_id',
+        conditions: {
+          value_pattern: '^v?1\\.\\d{1,2}(\\.\\d+)?$',
+          rationale_contains_any: ['Kubernetes', 'release', 'version', 'introduced', 'deprecated', 'since'],
+        },
+        action: { new_role: 'release_id', confidence_boost: 0.1 },
+      },
+    ], null, 2),
+    axisPolicy: {
+      strip_prefixes: ['kubernetes/', 'k8s/'],
+      canonicalization_enabled: true,
+      expected_axes: ['product', 'release_id', 'component', 'feature_gate'],
+      excluded_axes: ['year'],
+      strict_expected: false,
+      year_range: { min: 2015, max_relative: 2 },
+      plausibility_overrides: {
+        release_id: {
+          accept_patterns: ['^1\\.\\d{1,2}$', '^v1\\.\\d{1,2}$'],
+          reject_patterns: ['^v?[2-9]\\.', '^\\d{4}$'],
         },
       },
     },
@@ -814,6 +1111,7 @@ export default function DomainContextPage() {
           identification_semantics: data.identification_semantics || '',
           axis_reclassification_rules: data.axis_reclassification_rules || '',
           axis_policy: data.axis_policy || '',
+          hygiene_entity_stoplist: data.hygiene_entity_stoplist || '',
         })
         setAxisPolicy(parseAxisPolicy(data.axis_policy || ''))
       }
@@ -829,6 +1127,7 @@ export default function DomainContextPage() {
     return {
       ...formData,
       axis_policy: serialized,
+      hygiene_entity_stoplist: formData.hygiene_entity_stoplist || '',
     }
   }, [formData, axisPolicy])
 
@@ -1806,6 +2105,40 @@ export default function DomainContextPage() {
                   </AccordionPanel>
                 </AccordionItem>
               </Accordion>
+            </VStack>
+          </SectionCard>
+        </MotionBox>
+
+        {/* ================================================================= */}
+        {/* SECTION 3b : KG Hygiene Stoplist                                  */}
+        {/* ================================================================= */}
+        <MotionBox
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.33 }}
+        >
+          <SectionCard title="KG Hygiene — Stoplist" icon={FiFilter}>
+            <VStack spacing={4} align="stretch">
+              <FormControl>
+                <FormLabel fontSize="sm" color="text.secondary">
+                  Entites domain-specific a supprimer
+                </FormLabel>
+                <Textarea
+                  value={formData.hygiene_entity_stoplist}
+                  onChange={(e) => setFormData({ ...formData, hygiene_entity_stoplist: e.target.value })}
+                  placeholder='["SPSS", "PubMed", "Cochrane", "EndNote"]'
+                  size="sm"
+                  rows={3}
+                  fontFamily="mono"
+                  bg="bg.tertiary"
+                  borderColor="border.default"
+                  _focus={{ borderColor: 'teal.400' }}
+                />
+                <FormHelperText fontSize="xs" color="text.muted">
+                  JSON array de noms d'entites hors-domaine. Le KG Hygiene Layer 1 les supprimera automatiquement.
+                  Ex: outils, bases de donnees, institutions non pertinentes pour votre domaine.
+                </FormHelperText>
+              </FormControl>
             </VStack>
           </SectionCard>
         </MotionBox>

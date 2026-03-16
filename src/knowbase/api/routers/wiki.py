@@ -1,10 +1,10 @@
 """
-Router Wiki Generation Console — Phase 3 du Concept Assembly Engine.
+Router Wiki — Knowledge Atlas (Phase 4) + Generation Console (Phase 3).
 
-Expose le pipeline ConceptResolver → EvidencePackBuilder → SectionPlanner →
-ConstrainedGenerator via une API REST asynchrone avec BackgroundTasks.
+Phase 3 : ConceptResolver → EvidencePackBuilder → SectionPlanner → ConstrainedGenerator
+Phase 4 : Persistence Neo4j + navigation Atlas + intelligence visuelle
 
-⚠️ Job store en mémoire (POC only) — perdu au restart.
+⚠️ Job store en mémoire (POC) — perdu au restart. Articles persistés en Neo4j.
 """
 
 from __future__ import annotations
@@ -13,19 +13,41 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from knowbase.api.dependencies import get_tenant_id
 from knowbase.api.schemas.wiki import (
+    WikiArticleDetail,
+    WikiArticleListItem,
+    WikiArticleListResponse,
     WikiArticleResponse,
+    WikiBatchGenerateRequest,
+    WikiBatchJobItem,
+    WikiBatchLinkRequest,
+    WikiBatchLinkStatus,
+    WikiBatchStatus,
+    WikiCategoriesResponse,
+    WikiCategoryItem,
+    WikiClaimItem,
+    WikiClaimsResponse,
     WikiConceptResult,
     WikiConceptSearchResponse,
+    WikiCorpusStats,
+    WikiDomainArticle,
+    WikiDomainContext,
     WikiGenerateRequest,
     WikiGenerateResponse,
+    WikiHomeResponse,
     WikiJobStatus,
+    WikiKnowledgeDomain,
+    WikiLinkingJobItem,
+    WikiRecentArticle,
     WikiResolutionInfo,
+    WikiScoredConcept,
+    WikiScoringResponse,
+    WikiSourceDetail,
 )
 
 logger = logging.getLogger("[OSMOSE] wiki_router")
@@ -47,6 +69,7 @@ class WikiJobState:
     markdown: Optional[str] = None
     article_data: Optional[dict] = None
     resolution_info: Optional[dict] = None
+    article_slug: Optional[str] = None
     created_at: str = ""
     completed_at: Optional[str] = None
 
@@ -74,7 +97,7 @@ def _is_reusable(job: WikiJobState) -> bool:
     return False
 
 
-# ── Endpoints ────────────────────────────────────────────────────────────
+# ── Phase 3 — Endpoints Génération ──────────────────────────────────────
 
 
 @router.post(
@@ -98,6 +121,7 @@ async def generate_article(
                 job_id=job.job_id,
                 status=job.status,
                 message=f"Job existant réutilisé (statut: {job.status})",
+                article_slug=job.article_slug,
             )
 
     job_id = str(uuid.uuid4())
@@ -136,13 +160,14 @@ async def get_job_status(job_id: str) -> WikiJobStatus:
         status=job.status,
         progress=job.progress,
         error=job.error,
+        article_slug=job.article_slug,
     )
 
 
 @router.get(
     "/article/{job_id}",
     response_model=WikiArticleResponse,
-    summary="Récupérer l'article wiki généré",
+    summary="Récupérer l'article wiki généré (par job_id)",
 )
 async def get_article(job_id: str) -> WikiArticleResponse:
     job = _wiki_jobs.get(job_id)
@@ -182,6 +207,7 @@ async def get_article(job_id: str) -> WikiArticleResponse:
             ambiguity_notes=resolution.get("ambiguity_notes", []),
         ),
         generated_at=data.get("generated_at", ""),
+        article_slug=job.article_slug,
     )
 
 
@@ -195,10 +221,6 @@ async def search_concepts(
     limit: int = Query(default=10, ge=1, le=50),
     tenant_id: str = Depends(get_tenant_id),
 ) -> WikiConceptSearchResponse:
-    """Recherche lexicale CONTAINS sur les entités Neo4j.
-
-    ⚠️ Fallback POC — à remplacer par le Concept Matching Engine.
-    """
     from knowbase.common.clients.neo4j_client import get_neo4j_client
 
     neo4j_client = get_neo4j_client()
@@ -226,13 +248,427 @@ async def search_concepts(
     return WikiConceptSearchResponse(results=results, total=len(results))
 
 
+# ── Phase 4 — Endpoints Knowledge Atlas ─────────────────────────────────
+
+
+def _get_persister():
+    """Lazy import du WikiArticlePersister."""
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.wiki.persistence import WikiArticlePersister
+
+    return WikiArticlePersister(get_neo4j_client().driver)
+
+
+@router.get(
+    "/home",
+    response_model=WikiHomeResponse,
+    summary="Homepage Atlas (stats + Tier 1 + récents + gaps)",
+)
+async def get_home(
+    tenant_id: str = Depends(get_tenant_id),
+) -> WikiHomeResponse:
+    persister = _get_persister()
+    data = persister.get_home_data(tenant_id)
+
+    # Charger le domain context depuis PostgreSQL
+    domain_ctx = None
+    try:
+        from knowbase.ontology.domain_context_store import DomainContextStore
+
+        store = DomainContextStore()
+        profile = store.get(tenant_id)
+        if profile:
+            domain_ctx = WikiDomainContext(
+                domain_summary=profile.domain_summary or "",
+                industry=profile.industry or "",
+                sub_domains=profile.sub_domains or [],
+                key_concepts=profile.key_concepts or [],
+                target_users=profile.target_users or [],
+            )
+    except Exception as e:
+        logger.warning("Impossible de charger le domain context: %s", e)
+
+    return WikiHomeResponse(
+        corpus_stats=WikiCorpusStats(**data["corpus_stats"]),
+        domain_context=domain_ctx,
+        knowledge_domains=[
+            WikiKnowledgeDomain(
+                name=d["name"],
+                domain_key=d["domain_key"],
+                question=d.get("question") or "",
+                doc_count=d.get("doc_count", 0),
+                sub_domains=d.get("sub_domains", []),
+                articles=[WikiDomainArticle(**a) for a in d.get("articles", [])],
+                article_count=d.get("article_count", 0),
+            )
+            for d in data["knowledge_domains"]
+        ],
+        recent_articles=[WikiRecentArticle(**a) for a in data["recent_articles"]],
+    )
+
+
+@router.get(
+    "/articles",
+    response_model=WikiArticleListResponse,
+    summary="Liste paginée des articles wiki",
+)
+async def list_articles(
+    limit: int = Query(default=20, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+    category: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None),
+    tier: Optional[int] = Query(default=None, ge=1, le=3),
+    tenant_id: str = Depends(get_tenant_id),
+) -> WikiArticleListResponse:
+    persister = _get_persister()
+    data = persister.list_articles(
+        tenant_id=tenant_id,
+        category=category,
+        search=search,
+        tier=tier,
+        limit=limit,
+        offset=offset,
+    )
+
+    articles = [WikiArticleListItem(**a) for a in data["articles"]]
+    return WikiArticleListResponse(
+        articles=articles,
+        total=data["total"],
+        limit=data["limit"],
+        offset=data["offset"],
+    )
+
+
+@router.get(
+    "/articles/{slug}",
+    response_model=WikiArticleDetail,
+    summary="Article complet par slug",
+)
+async def get_article_by_slug(
+    slug: str,
+    tenant_id: str = Depends(get_tenant_id),
+) -> WikiArticleDetail:
+    persister = _get_persister()
+    data = persister.get_by_slug(slug, tenant_id)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"Article '{slug}' introuvable")
+
+    # Convertir source_details en WikiSourceDetail
+    source_details = []
+    raw_sources = data.get("source_details") or []
+    if isinstance(raw_sources, list):
+        for s in raw_sources:
+            if isinstance(s, dict):
+                source_details.append(WikiSourceDetail(**s))
+
+    related_concepts = data.get("related_concepts") or []
+
+    return WikiArticleDetail(
+        slug=data.get("slug", slug),
+        title=data.get("title", slug),
+        tenant_id=data.get("tenant_id", tenant_id),
+        language=data.get("language", "français"),
+        entity_type=data.get("entity_type", "concept"),
+        category_key=data.get("category_key", "other"),
+        markdown=data.get("markdown", ""),
+        linked_markdown=data.get("linked_markdown"),
+        outgoing_links=data.get("outgoing_links", []),
+        linked_at=data.get("linked_at"),
+        sections_count=data.get("sections_count", 0),
+        total_citations=data.get("total_citations", 0),
+        generation_confidence=data.get("generation_confidence", 0.0),
+        all_gaps=data.get("all_gaps", []),
+        source_count=data.get("source_count", 0),
+        unit_count=data.get("unit_count", 0),
+        source_details=source_details,
+        related_concepts=related_concepts,
+        resolution_method=data.get("resolution_method", "unknown"),
+        resolution_confidence=data.get("resolution_confidence", 0.0),
+        importance_score=data.get("importance_score", 0.0),
+        importance_tier=data.get("importance_tier", 3),
+        status=data.get("status", "published"),
+        created_at=data.get("created_at"),
+        updated_at=data.get("updated_at"),
+    )
+
+
+@router.get(
+    "/articles/{slug}/claims",
+    response_model=WikiClaimsResponse,
+    summary="Claims liés à un article (drill-down)",
+)
+async def get_article_claims(
+    slug: str,
+    limit: int = Query(default=10, ge=1, le=50),
+    tenant_id: str = Depends(get_tenant_id),
+) -> WikiClaimsResponse:
+    persister = _get_persister()
+    claims_data = persister.get_article_claims(slug, tenant_id, limit=limit)
+    claims = [WikiClaimItem(**c) for c in claims_data]
+    return WikiClaimsResponse(claims=claims, total=len(claims))
+
+
+@router.get(
+    "/categories",
+    response_model=WikiCategoriesResponse,
+    summary="Catégories avec nombre d'articles",
+)
+async def get_categories(
+    tenant_id: str = Depends(get_tenant_id),
+) -> WikiCategoriesResponse:
+    persister = _get_persister()
+    cats = persister.get_categories(tenant_id)
+    return WikiCategoriesResponse(
+        categories=[WikiCategoryItem(**c) for c in cats]
+    )
+
+
+@router.delete(
+    "/articles/{slug}",
+    summary="Supprimer un article wiki",
+)
+async def delete_article(
+    slug: str,
+    tenant_id: str = Depends(get_tenant_id),
+) -> dict:
+    persister = _get_persister()
+    deleted = persister.delete_article(slug, tenant_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Article '{slug}' introuvable")
+    return {"deleted": True, "slug": slug}
+
+
+# ── Admin : Scoring & Batch Generation ──────────────────────────────────
+
+# Batch state en mémoire (POC)
+_batch_states: Dict[str, WikiBatchStatus] = {}
+
+
+# ── Admin : Concept Linking ────────────────────────────────────────────
+
+_link_batch_states: Dict[str, WikiBatchLinkStatus] = {}
+
+
+@router.post(
+    "/admin/batch-link",
+    response_model=WikiBatchLinkStatus,
+    summary="Lancer le linking batch sur tout le corpus (admin)",
+)
+async def batch_link(
+    request: WikiBatchLinkRequest,
+    background_tasks: BackgroundTasks,
+    tenant_id: str = Depends(get_tenant_id),
+) -> WikiBatchLinkStatus:
+    """Lance le linking batch des articles : injection de liens inter-concepts par LLM."""
+    persister = _get_persister()
+
+    # Lister les articles à linker
+    articles_data = persister.list_articles(tenant_id, limit=5000)
+    all_articles = articles_data.get("articles", [])
+
+    slugs_to_link = []
+    for a in all_articles:
+        slug = a.get("slug", "")
+        if not slug:
+            continue
+        if not request.force:
+            full = persister.get_by_slug(slug, tenant_id)
+            if full and full.get("linked_markdown"):
+                continue
+        slugs_to_link.append(a)
+
+    batch_id = str(uuid.uuid4())
+    jobs = [
+        WikiLinkingJobItem(
+            slug=a.get("slug", ""),
+            title=a.get("title", ""),
+            status="queued",
+        )
+        for a in slugs_to_link
+    ]
+
+    batch = WikiBatchLinkStatus(
+        batch_id=batch_id,
+        status="running" if jobs else "completed",
+        total=len(jobs),
+        jobs=jobs,
+    )
+    _link_batch_states[batch_id] = batch
+
+    if jobs:
+        background_tasks.add_task(
+            _run_batch_linking, batch_id, tenant_id, request.max_concurrent, request.force
+        )
+        logger.info(
+            f"[OSMOSE:Wiki:Linking] Batch {batch_id} lancé : {len(jobs)} articles"
+        )
+
+    return batch
+
+
+@router.get(
+    "/admin/link-status",
+    response_model=WikiBatchLinkStatus,
+    summary="Statut du linking batch en cours",
+)
+async def get_link_status() -> WikiBatchLinkStatus:
+    """Retourne le statut du dernier batch de linking."""
+    if not _link_batch_states:
+        raise HTTPException(status_code=404, detail="Aucun batch de linking en cours")
+    # Retourner le plus récent
+    batch_id = list(_link_batch_states.keys())[-1]
+    return _link_batch_states[batch_id]
+
+
+@router.get(
+    "/admin/scoring",
+    response_model=WikiScoringResponse,
+    summary="Scoring d'importance de tous les concepts (admin)",
+)
+async def get_scoring(
+    tenant_id: str = Depends(get_tenant_id),
+) -> WikiScoringResponse:
+    """Calcule et retourne le scoring d'importance de tous les concepts."""
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.wiki.importance_scorer import ImportanceScorer
+
+    neo4j_client = get_neo4j_client()
+    scorer = ImportanceScorer(neo4j_client.driver)
+    scored = scorer.score_all_concepts(tenant_id)
+
+    # Vérifier quels concepts ont déjà un article
+    persister = _get_persister()
+    existing_slugs = set()
+    slug_map: Dict[str, str] = {}
+    articles_data = persister.list_articles(tenant_id, limit=1000)
+    for a in articles_data.get("articles", []):
+        title_lower = a.get("title", "").lower()
+        existing_slugs.add(title_lower)
+        slug_map[title_lower] = a.get("slug", "")
+
+    concepts = []
+    for s in scored:
+        name_lower = s.entity_name.lower()
+        has_article = name_lower in existing_slugs
+        concepts.append(
+            WikiScoredConcept(
+                entity_name=s.entity_name,
+                entity_type=s.entity_type,
+                entity_id=s.entity_id,
+                claim_count=s.claim_count,
+                doc_count=s.doc_count,
+                graph_degree=s.graph_degree,
+                importance_score=s.importance_score,
+                importance_tier=s.importance_tier,
+                has_article=has_article,
+                article_slug=slug_map.get(name_lower),
+            )
+        )
+
+    return WikiScoringResponse(
+        concepts=concepts,
+        total=len(concepts),
+        tier1_count=sum(1 for c in concepts if c.importance_tier == 1),
+        tier2_count=sum(1 for c in concepts if c.importance_tier == 2),
+        tier3_count=sum(1 for c in concepts if c.importance_tier == 3),
+        articles_count=sum(1 for c in concepts if c.has_article),
+    )
+
+
+@router.post(
+    "/admin/batch-generate",
+    response_model=WikiBatchStatus,
+    summary="Lancer la génération batch d'articles (admin)",
+)
+async def batch_generate(
+    request: WikiBatchGenerateRequest,
+    background_tasks: BackgroundTasks,
+    tenant_id: str = Depends(get_tenant_id),
+) -> WikiBatchStatus:
+    """Lance la génération batch des articles pour les concepts Tier 1..max_tier."""
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.wiki.importance_scorer import ImportanceScorer
+
+    neo4j_client = get_neo4j_client()
+    scorer = ImportanceScorer(neo4j_client.driver)
+    scored = scorer.score_all_concepts(tenant_id)
+
+    # Filtrer par tier
+    candidates = [s for s in scored if s.importance_tier <= request.max_tier]
+
+    # Vérifier articles existants
+    if request.skip_existing:
+        persister = _get_persister()
+        articles_data = persister.list_articles(tenant_id, limit=1000)
+        existing_titles = {a.get("title", "").lower() for a in articles_data.get("articles", [])}
+        candidates = [c for c in candidates if c.entity_name.lower() not in existing_titles]
+
+    # Limiter
+    candidates = candidates[: request.max_articles]
+
+    if not candidates:
+        batch_id = str(uuid.uuid4())
+        return WikiBatchStatus(
+            batch_id=batch_id,
+            status="completed",
+            total=0,
+            language=request.language,
+        )
+
+    # Créer le batch
+    batch_id = str(uuid.uuid4())
+    jobs = [
+        WikiBatchJobItem(
+            concept_name=c.entity_name,
+            entity_type=c.entity_type,
+            importance_tier=c.importance_tier,
+            status="queued",
+        )
+        for c in candidates
+    ]
+
+    batch = WikiBatchStatus(
+        batch_id=batch_id,
+        status="running",
+        total=len(jobs),
+        queued=len(jobs),
+        language=request.language,
+        jobs=jobs,
+    )
+    _batch_states[batch_id] = batch
+
+    # Lancer en background
+    background_tasks.add_task(
+        _run_batch_generation, batch_id, request.language, tenant_id
+    )
+
+    logger.info(
+        f"[OSMOSE:Wiki] Batch {batch_id} lancé : {len(jobs)} articles "
+        f"(tier<={request.max_tier}, lang={request.language})"
+    )
+
+    return batch
+
+
+@router.get(
+    "/admin/batch-status/{batch_id}",
+    response_model=WikiBatchStatus,
+    summary="Statut d'un batch de génération",
+)
+async def get_batch_status(batch_id: str) -> WikiBatchStatus:
+    batch = _batch_states.get(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail=f"Batch '{batch_id}' introuvable")
+    return batch
+
+
 # ── Pipeline background ─────────────────────────────────────────────────
 
 
 def _run_wiki_pipeline(
     job_id: str, concept_name: str, language: str, tenant_id: str
 ) -> None:
-    """Exécute le pipeline wiki complet en arrière-plan."""
+    """Exécute le pipeline wiki complet en arrière-plan + persistence Neo4j."""
     job = _wiki_jobs[job_id]
     try:
         job.status = "running"
@@ -290,6 +726,111 @@ def _run_wiki_pipeline(
         else:
             terminal_status = "completed"
 
+        # 6. Persistence Neo4j (non-bloquant pour le statut du job)
+        job.progress = "Persistence de l'article..."
+        article_slug = plan.slug
+        try:
+            from knowbase.wiki.persistence import WikiArticlePersister
+            from knowbase.wiki.importance_scorer import ImportanceScorer, compute_importance
+
+            persister = WikiArticlePersister(neo4j_client.driver)
+
+            # Calcul de l'importance pour cette entité
+            scorer = ImportanceScorer(neo4j_client.driver)
+            all_scored = scorer.score_all_concepts(tenant_id)
+            scored_map = {s.entity_name.lower(): s for s in all_scored}
+            entity_scored = scored_map.get(resolved.canonical_name.lower())
+
+            importance_score = entity_scored.importance_score if entity_scored else compute_importance(
+                resolved.claim_count, len(resolved.doc_ids), 0
+            )
+            importance_tier = entity_scored.importance_tier if entity_scored else 3
+
+            # Construire source_details depuis le pack
+            source_details = [
+                {
+                    "doc_id": s.doc_id,
+                    "doc_title": s.doc_title,
+                    "doc_type": s.doc_type,
+                    "unit_count": s.unit_count,
+                    "contribution_pct": round(s.contribution_pct, 1),
+                }
+                for s in pack.source_index
+            ]
+
+            # Construire related_concepts (co-occurrence) + enrichir depuis le markdown
+            related_concepts_data = [
+                {
+                    "entity_name": rc.entity_name,
+                    "entity_type": rc.entity_type,
+                    "co_occurrence_count": rc.co_occurrence_count,
+                }
+                for rc in pack.related_concepts[:8]
+            ]
+            related_concepts_data = persister.enrich_related_from_markdown(
+                markdown=markdown,
+                existing_related=related_concepts_data,
+                concept_name=resolved.canonical_name,
+                tenant_id=tenant_id,
+            )
+
+            persister.save_article(
+                slug=article_slug,
+                title=resolved.canonical_name,
+                tenant_id=tenant_id,
+                entity_type=resolved.entity_type,
+                language=language,
+                markdown=markdown,
+                sections_count=len(article.sections),
+                total_citations=article.total_citations,
+                generation_confidence=round(confidence, 3),
+                all_gaps=article.all_gaps,
+                source_count=len(pack.source_index),
+                unit_count=len(pack.units),
+                source_details=source_details,
+                resolution_method=resolved.resolution_method,
+                resolution_confidence=resolved.resolution_confidence,
+                importance_score=importance_score,
+                importance_tier=importance_tier,
+                entity_ids=resolved.entity_ids,
+                related_concepts=related_concepts_data,
+            )
+
+            job.article_slug = article_slug
+            logger.info(
+                f"[OSMOSE:Wiki] Article '{article_slug}' persisté en Neo4j "
+                f"(tier={importance_tier})"
+            )
+
+            # V2 : Linking incrémental — linker ce nouvel article + re-linker les impactés
+            job.progress = "Linking incrémental..."
+            try:
+                from knowbase.wiki.concept_linker import ConceptLinker
+
+                linker = ConceptLinker(neo4j_client.driver, tenant_id)
+                link_summary = linker.link_incrementally(article_slug)
+
+                new_result = link_summary.get("new_article")
+                impacted = link_summary.get("impacted", [])
+                link_count = new_result.link_count if new_result and new_result.success else 0
+
+                logger.info(
+                    f"[OSMOSE:Wiki] Linking incrémental pour '{article_slug}' : "
+                    f"{link_count} liens, {len(impacted)} articles re-linkés"
+                )
+            except Exception as link_err:
+                # Le linking incrémental est best-effort — ne bloque pas la génération
+                logger.warning(
+                    f"[OSMOSE:Wiki] Linking incrémental échoué pour '{article_slug}': {link_err}"
+                )
+
+        except Exception as persist_err:
+            # La persistence échoue silencieusement — l'article est toujours disponible via job_id
+            logger.error(
+                f"[OSMOSE:Wiki] Erreur persistence pour '{concept_name}': {persist_err}",
+                exc_info=True,
+            )
+
         job.status = terminal_status
         job.markdown = markdown
         job.article_data = {
@@ -317,7 +858,209 @@ def _run_wiki_pipeline(
         logger.warning(f"[OSMOSE:Wiki] Concept introuvable : {e}")
 
     except Exception as e:
+        # Propager VLLMUnavailableError pour que le batch puisse s'arrêter
+        from knowbase.common.llm_router import VLLMUnavailableError
+        if isinstance(e, VLLMUnavailableError):
+            job.status = "failed"
+            job.error = "vLLM indisponible"
+            job.progress = None
+            logger.error(f"[OSMOSE:Wiki] vLLM down — pipeline arrêté pour '{concept_name}'")
+            raise  # remonter au batch
+
         job.status = "failed"
         job.error = f"Erreur interne : {str(e)}"
         job.progress = None
         logger.error(f"[OSMOSE:Wiki] Erreur pipeline pour '{concept_name}': {e}", exc_info=True)
+
+
+def _run_batch_generation(batch_id: str, language: str, tenant_id: str) -> None:
+    """Exécute la génération batch séquentielle des articles wiki."""
+    from knowbase.common.llm_router import VLLMUnavailableError
+
+    batch = _batch_states[batch_id]
+
+    for i, batch_job in enumerate(batch.jobs):
+        concept_name = batch_job.concept_name
+        batch_job.status = "running"
+        batch.running = sum(1 for j in batch.jobs if j.status == "running")
+        batch.queued = sum(1 for j in batch.jobs if j.status == "queued")
+
+        logger.info(
+            f"[OSMOSE:Wiki:Batch] [{i + 1}/{batch.total}] Génération '{concept_name}'..."
+        )
+
+        # Créer un job unitaire et exécuter le pipeline
+        job_id = str(uuid.uuid4())
+        job = WikiJobState(
+            job_id=job_id,
+            concept_name=concept_name,
+            language=language,
+            tenant_id=tenant_id,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        _wiki_jobs[job_id] = job
+        batch_job.job_id = job_id
+
+        try:
+            _run_wiki_pipeline(job_id, concept_name, language, tenant_id)
+
+            if job.status in ("completed", "completed_with_warnings"):
+                batch_job.status = "completed"
+                batch_job.article_slug = job.article_slug
+                batch.completed += 1
+            else:
+                batch_job.status = "failed"
+                batch_job.error = job.error
+                batch.failed += 1
+
+        except VLLMUnavailableError:
+            # vLLM down — arrêter tout le batch proprement
+            batch_job.status = "failed"
+            batch_job.error = "vLLM indisponible"
+            batch.failed += 1
+
+            # Marquer tous les jobs restants comme annulés
+            for remaining_job in batch.jobs[i + 1:]:
+                remaining_job.status = "cancelled"
+
+            batch.running = 0
+            batch.queued = 0
+            batch.status = "suspended"
+
+            cancelled_count = len(batch.jobs) - (i + 1)
+            logger.error(
+                f"[OSMOSE:Wiki:Batch] vLLM DOWN — batch {batch_id} suspendu "
+                f"après {batch.completed} OK, {batch.failed} échecs. "
+                f"{cancelled_count} articles annulés."
+            )
+            return
+
+        except Exception as e:
+            batch_job.status = "failed"
+            batch_job.error = str(e)
+            batch.failed += 1
+            logger.error(f"[OSMOSE:Wiki:Batch] Erreur '{concept_name}': {e}")
+
+        batch.running = sum(1 for j in batch.jobs if j.status == "running")
+        batch.queued = sum(1 for j in batch.jobs if j.status == "queued")
+
+    # Terminé
+    batch.running = 0
+    batch.queued = 0
+    if batch.failed > 0:
+        batch.status = "completed_with_errors"
+    else:
+        batch.status = "completed"
+
+    logger.info(
+        f"[OSMOSE:Wiki:Batch] Batch {batch_id} terminé : "
+        f"{batch.completed} OK, {batch.failed} échecs sur {batch.total}"
+    )
+
+
+def _run_batch_linking(
+    batch_id: str, tenant_id: str, max_concurrent: int, force: bool
+) -> None:
+    """Exécute le linking batch séquentiel des articles wiki."""
+    import asyncio
+
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.common.llm_router import VLLMUnavailableError
+    from knowbase.wiki.concept_linker import (
+        ConceptCandidateSelector,
+        ConceptLinker,
+        ConceptRegistryBuilder,
+    )
+    from knowbase.wiki.persistence import WikiArticlePersister
+
+    batch = _link_batch_states[batch_id]
+    neo4j_client = get_neo4j_client()
+    persister = WikiArticlePersister(neo4j_client.driver)
+    linker = ConceptLinker(neo4j_client.driver, tenant_id)
+    selector = ConceptCandidateSelector()
+
+    # Construire le registre une seule fois
+    registry = ConceptRegistryBuilder.build_from_neo4j(neo4j_client.driver, tenant_id)
+
+    if not registry:
+        batch.status = "completed"
+        logger.warning("[OSMOSE:Wiki:Linking] Registre vide — rien à linker")
+        return
+
+    for i, job in enumerate(batch.jobs):
+        slug = job.slug
+        job.status = "running"
+
+        logger.info(
+            f"[OSMOSE:Wiki:Linking] [{i + 1}/{batch.total}] Linking '{slug}'..."
+        )
+
+        article = persister.get_by_slug(slug, tenant_id)
+        if not article or not article.get("markdown"):
+            job.status = "skipped"
+            batch.skipped += 1
+            continue
+
+        markdown = article["markdown"]
+        candidates = selector.select_candidates(markdown, registry, slug)
+        job.candidates_count = len(candidates)
+
+        try:
+            # Exécuter l'appel async dans un event loop
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(
+                    linker.link_article(slug, markdown, candidates)
+                )
+            finally:
+                loop.close()
+
+            if result.success:
+                persister.update_linked_markdown(
+                    slug=slug,
+                    tenant_id=tenant_id,
+                    linked_markdown=result.linked_markdown,
+                    outgoing_links=result.outgoing_links,
+                    linking_metadata={
+                        "registry_size": len(registry),
+                        "candidates_count": len(candidates),
+                        "unresolved_mentions": result.unresolved_mentions,
+                        "ambiguous_mentions": result.ambiguous_mentions,
+                    },
+                )
+                job.status = "completed"
+                job.link_count = result.link_count
+                batch.completed += 1
+            else:
+                job.status = "failed"
+                job.error = result.error
+                batch.failed += 1
+
+        except VLLMUnavailableError:
+            job.status = "failed"
+            job.error = "vLLM indisponible"
+            batch.failed += 1
+
+            for remaining_job in batch.jobs[i + 1:]:
+                remaining_job.status = "cancelled"
+
+            batch.status = "suspended"
+            logger.error(
+                f"[OSMOSE:Wiki:Linking] vLLM DOWN — batch {batch_id} suspendu "
+                f"après {batch.completed} OK. "
+                f"{len(batch.jobs) - (i + 1)} articles annulés."
+            )
+            return
+
+        except Exception as e:
+            job.status = "failed"
+            job.error = str(e)
+            batch.failed += 1
+            logger.error(f"[OSMOSE:Wiki:Linking] Erreur '{slug}': {e}")
+
+    batch.status = "completed"
+    logger.info(
+        f"[OSMOSE:Wiki:Linking] Batch {batch_id} terminé : "
+        f"{batch.completed} OK, {batch.failed} échecs, "
+        f"{batch.skipped} ignorés sur {batch.total}"
+    )

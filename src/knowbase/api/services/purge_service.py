@@ -21,12 +21,14 @@ NEO4J_PRESERVED_LABELS = frozenset({
     "OntologyEntity",
     "OntologyAlias",
     "DomainContextProfile",
+    "HygieneAction",
 })
 
 # Préfixes de constraints à PRÉSERVER
 NEO4J_PRESERVED_CONSTRAINT_PREFIXES = (
     "ont_",           # OntologyEntity, OntologyAlias
     "domain_context", # DomainContextProfile
+    "hygiene_",       # HygieneAction
 )
 
 
@@ -669,6 +671,32 @@ class PurgeService:
                         logger.warning(f"    ⚠ Module claimfirst non disponible: {e}")
                     except Exception as e:
                         logger.warning(f"    ⚠ Erreur schéma Claim-First: {e}")
+
+                    # --- Wiki Atlas (Phase 4) ---
+                    logger.info("  - Création schéma Wiki Atlas (Phase 4)...")
+                    WIKI_CONSTRAINTS = [
+                        ("wiki_article_slug", "CREATE CONSTRAINT wiki_article_slug IF NOT EXISTS FOR (wa:WikiArticle) REQUIRE (wa.tenant_id, wa.slug) IS UNIQUE"),
+                        ("wiki_category_key", "CREATE CONSTRAINT wiki_category_key IF NOT EXISTS FOR (wc:WikiCategory) REQUIRE (wc.tenant_id, wc.category_key) IS UNIQUE"),
+                    ]
+                    WIKI_INDEXES = [
+                        ("wa_tenant_status_idx", "CREATE INDEX wa_tenant_status_idx IF NOT EXISTS FOR (wa:WikiArticle) ON (wa.tenant_id, wa.status)"),
+                        ("wa_category_idx", "CREATE INDEX wa_category_idx IF NOT EXISTS FOR (wa:WikiArticle) ON (wa.tenant_id, wa.category_key)"),
+                        ("wa_importance_idx", "CREATE INDEX wa_importance_idx IF NOT EXISTS FOR (wa:WikiArticle) ON (wa.tenant_id, wa.importance_tier)"),
+                        ("wa_title_idx", "CREATE INDEX wa_title_idx IF NOT EXISTS FOR (wa:WikiArticle) ON (wa.tenant_id, wa.title)"),
+                    ]
+                    for name, query in WIKI_CONSTRAINTS:
+                        try:
+                            session.run(query)
+                            constraints_created += 1
+                        except Exception as e:
+                            logger.warning(f"    ⚠ Wiki constraint {name}: {e}")
+                    for name, query in WIKI_INDEXES:
+                        try:
+                            session.run(query)
+                            indexes_created += 1
+                        except Exception as e:
+                            logger.warning(f"    ⚠ Wiki index {name}: {e}")
+                    logger.info(f"    ✓ Wiki Atlas: {len(WIKI_CONSTRAINTS)} contraintes, {len(WIKI_INDEXES)} index")
 
                 logger.info(
                     f"✅ Schéma Neo4j recréé: {constraints_created} contraintes, "

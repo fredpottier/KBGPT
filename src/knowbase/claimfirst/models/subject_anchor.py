@@ -81,8 +81,8 @@ class SubjectAnchor(BaseModel):
 
     canonical_name: str = Field(
         ...,
-        min_length=3,
-        description="Nom de référence du sujet"
+        min_length=2,
+        description="Nom de référence du sujet (min 2 chars pour acronymes: AI, ML, IT...)"
     )
 
     # Aliases typés par source (INV-9)

@@ -72,6 +72,9 @@ const FileDropzone = ({ onFileSelect, selectedFile, isUploading }: FileUploadPro
       'application/vnd.ms-powerpoint': ['.ppt'],
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
       'application/vnd.ms-excel': ['.xls'],
+      'text/markdown': ['.md'],
+      'text/html': ['.html', '.htm'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
     },
     multiple: false,
     maxSize: 200 * 1024 * 1024,
@@ -348,11 +351,15 @@ export default function ImportPage() {
   const toast = useToast()
   const router = useRouter()
 
-  const getFileType = (file: File): 'pptx' | 'pdf' | 'xlsx' => {
+  const getFileType = (file: File): string => {
     const extension = file.name.split('.').pop()?.toLowerCase()
     if (extension === 'pdf') return 'pdf'
     if (extension === 'pptx' || extension === 'ppt') return 'pptx'
-    return 'xlsx'
+    if (extension === 'xlsx' || extension === 'xls') return 'xlsx'
+    if (extension === 'md') return 'md'
+    if (extension === 'html' || extension === 'htm') return 'html'
+    if (extension === 'docx') return 'docx'
+    return 'pdf'
   }
 
   const uploadMutation = useMutation({

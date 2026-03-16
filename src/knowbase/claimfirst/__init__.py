@@ -53,7 +53,9 @@ from knowbase.claimfirst.models import (
     EntityType,
     # Facet
     Facet,
+    FacetFamily,
     FacetKind,
+    FacetLifecycle,
     # Passage
     Passage,
     # Result
@@ -79,7 +81,9 @@ __all__ = [
     "Entity",
     "EntityType",
     "Facet",
+    "FacetFamily",
     "FacetKind",
+    "FacetLifecycle",
     "Passage",
     "ClaimCluster",
     "ClaimRelation",

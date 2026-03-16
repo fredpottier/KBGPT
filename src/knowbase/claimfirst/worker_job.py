@@ -64,22 +64,38 @@ def claimfirst_process_job(
         Statistiques de traitement
     """
     from knowbase.claimfirst.orchestrator import ClaimFirstOrchestrator
+    from knowbase.claimfirst.linkers.facet_registry import FacetRegistry
     from knowbase.stratified.pass0.cache_loader import load_pass0_from_cache, list_cached_documents
     from knowbase.claimfirst.extractors.claim_extractor import MockLLMClient
 
     # Initialisation
     redis_client = _get_redis_client()
+
+    # Récupérer le job_id RQ
+    from rq import get_current_job
+    rq_job = get_current_job()
+    rq_job_id = rq_job.id if rq_job else "unknown"
+
+    job_started_at = time.time()
+
     _update_state(
         redis_client,
         status="STARTING",
+        job_id=rq_job_id,
         total_documents=len(doc_ids),
         processed=0,
+        failed=0,
+        skipped=0,
+        total_claims=0,
+        total_entities=0,
         current_document="",
+        current_filename="",
         phase="INIT",
+        started_at=job_started_at,
     )
 
     logger.info(
-        f"[OSMOSE:ClaimFirst:Worker] Starting job for {len(doc_ids)} documents, "
+        f"[OSMOSE:ClaimFirst:Worker] Starting job {rq_job_id} for {len(doc_ids)} documents, "
         f"tenant={tenant_id}"
     )
 
@@ -87,16 +103,22 @@ def claimfirst_process_job(
     llm_client = _get_llm_client()
     neo4j_driver = _get_neo4j_driver()
 
+    # Instancier FacetRegistry partagé entre tous les documents
+    facet_registry = FacetRegistry(tenant_id)
+    facet_registry.load_from_neo4j(neo4j_driver)
+
     # Créer l'orchestrateur
     orchestrator = ClaimFirstOrchestrator(
         llm_client=llm_client,
         neo4j_driver=neo4j_driver,
         tenant_id=tenant_id,
         persist_enabled=True,
+        facet_registry=facet_registry,
     )
 
-    # Mapper doc_id → cache_path
+    # Mapper doc_id → cache_path et doc_id → filename lisible
     cache_map = _build_cache_map(cache_dir)
+    filename_map = _build_filename_map(doc_ids)
 
     # Traiter chaque document
     results = {
@@ -110,18 +132,27 @@ def claimfirst_process_job(
 
     # Circuit breaker : arrêter si trop de docs consécutifs sans claims (vLLM down)
     consecutive_empty = 0
-    MAX_CONSECUTIVE_EMPTY = 3  # 3 docs à 0 claims = vLLM probablement down
+    MAX_CONSECUTIVE_EMPTY = 10  # 10 docs à 0 claims + vLLM health check avant arrêt
+
+    # Persistence incrémentale des facets (crash-resilient)
+    FACET_PERSIST_INTERVAL = 10  # Persister les facets toutes les N docs
 
     for i, doc_id in enumerate(doc_ids):
+        filename = filename_map.get(doc_id, doc_id[:40])
         logger.info(
-            f"[OSMOSE:ClaimFirst:Worker] === Document {i+1}/{len(doc_ids)}: {doc_id} ==="
+            f"[OSMOSE:ClaimFirst:Worker] === Document {i+1}/{len(doc_ids)}: {filename} ==="
         )
         try:
             _update_state(
                 redis_client,
                 status="PROCESSING",
                 current_document=doc_id,
+                current_filename=filename,
                 processed=i,
+                failed=results["failed"],
+                skipped=results["skipped"],
+                total_claims=results["total_claims"],
+                total_entities=results["total_entities"],
                 phase="LOADING",
             )
 
@@ -130,6 +161,8 @@ def claimfirst_process_job(
             if not cache_path:
                 logger.warning(f"[OSMOSE:ClaimFirst:Worker] No cache for {doc_id}, skipping")
                 results["skipped"] += 1
+                _update_state(redis_client, skipped=results["skipped"],
+                              errors=json.dumps(results["errors"]))
                 continue
 
             # Charger depuis le cache
@@ -137,7 +170,9 @@ def claimfirst_process_job(
             if not cache_result.success:
                 logger.error(f"[OSMOSE:ClaimFirst:Worker] Failed to load cache for {doc_id}")
                 results["failed"] += 1
-                results["errors"].append(f"{doc_id}: cache load failed")
+                results["errors"].append(f"{filename}: cache load failed")
+                _update_state(redis_client, failed=results["failed"],
+                              errors=json.dumps(results["errors"]))
                 continue
 
             # Traiter
@@ -153,31 +188,83 @@ def claimfirst_process_job(
             results["total_claims"] += result.claim_count
             results["total_entities"] += result.entity_count
 
+            _update_state(
+                redis_client,
+                processed=results["processed"],
+                total_claims=results["total_claims"],
+                total_entities=results["total_entities"],
+                phase="PERSISTED",
+            )
+
             logger.info(
                 f"[OSMOSE:ClaimFirst:Worker] Processed {doc_id}: "
                 f"{result.claim_count} claims, {result.entity_count} entities"
             )
 
+            # Persistence incrémentale des facets (crash-resilient)
+            if (results["processed"] % FACET_PERSIST_INTERVAL == 0
+                    and neo4j_driver and results["processed"] > 0):
+                try:
+                    fp = facet_registry.persist_to_neo4j(neo4j_driver)
+                    if fp > 0:
+                        logger.info(
+                            f"[OSMOSE:ClaimFirst:Worker] Incremental facet persist: "
+                            f"{fp} facets saved (checkpoint at doc {results['processed']})"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"[OSMOSE:ClaimFirst:Worker] Incremental facet persist failed: {e}"
+                    )
+
             # Circuit breaker : détecter docs vides consécutifs (vLLM down silencieux)
             if result.claim_count == 0:
                 consecutive_empty += 1
                 if consecutive_empty >= MAX_CONSECUTIVE_EMPTY:
-                    remaining = doc_ids[i + 1:]
-                    logger.error(
-                        f"[OSMOSE:ClaimFirst:Worker] CIRCUIT BREAKER: "
-                        f"{consecutive_empty} documents consécutifs avec 0 claims. "
-                        f"vLLM probablement down. Arrêt du job. "
-                        f"{len(remaining)} documents restants non traités."
-                    )
-                    results["circuit_breaker"] = True
-                    results["remaining_doc_ids"] = remaining
-                    _update_state(
-                        redis_client,
-                        status="STOPPED_CIRCUIT_BREAKER",
-                        phase="VLLM_UNAVAILABLE",
-                        remaining=len(remaining),
-                    )
-                    break
+                    # Vérifier si vLLM est réellement down avant de couper
+                    vllm_actually_down = False
+                    try:
+                        import httpx
+                        burst_state = redis_client.get("osmose:burst:state")
+                        if burst_state:
+                            import json as _json
+                            bs = _json.loads(burst_state)
+                            vllm_url = bs.get("vllm_url", "")
+                            if vllm_url:
+                                resp = httpx.get(f"{vllm_url}/v1/models", timeout=5.0)
+                                vllm_actually_down = resp.status_code != 200
+                    except Exception:
+                        vllm_actually_down = True
+
+                    if vllm_actually_down:
+                        remaining = doc_ids[i + 1:]
+                        logger.error(
+                            f"[OSMOSE:ClaimFirst:Worker] CIRCUIT BREAKER: "
+                            f"{consecutive_empty} documents consécutifs avec 0 claims "
+                            f"ET vLLM confirmé down. Arrêt du job. "
+                            f"{len(remaining)} documents restants non traités."
+                        )
+                        # Persister les facets avant arrêt
+                        if neo4j_driver:
+                            try:
+                                fp = facet_registry.persist_to_neo4j(neo4j_driver)
+                                logger.info(f"[OSMOSE:ClaimFirst:Worker] Emergency facet persist: {fp} facets saved before circuit breaker")
+                            except Exception:
+                                pass
+                        results["circuit_breaker"] = True
+                        results["remaining_doc_ids"] = remaining
+                        _update_state(
+                            redis_client,
+                            status="STOPPED_CIRCUIT_BREAKER",
+                            phase="VLLM_UNAVAILABLE",
+                            remaining=len(remaining),
+                        )
+                        break
+                    else:
+                        logger.warning(
+                            f"[OSMOSE:ClaimFirst:Worker] {consecutive_empty} docs "
+                            f"consécutifs à 0 claims mais vLLM OK — on continue."
+                        )
+                        consecutive_empty = 0
             else:
                 consecutive_empty = 0
 
@@ -190,6 +277,13 @@ def claimfirst_process_job(
                     f"[OSMOSE:ClaimFirst:Worker] CIRCUIT BREAKER (vLLM error): {e}. "
                     f"Arrêt du job. {len(remaining)} documents restants."
                 )
+                # Persister les facets avant arrêt
+                if neo4j_driver:
+                    try:
+                        fp = facet_registry.persist_to_neo4j(neo4j_driver)
+                        logger.info(f"[OSMOSE:ClaimFirst:Worker] Emergency facet persist: {fp} facets saved before circuit breaker")
+                    except Exception:
+                        pass
                 results["failed"] += 1
                 results["errors"].append(f"{doc_id}: {error_str}")
                 results["circuit_breaker"] = True
@@ -199,12 +293,39 @@ def claimfirst_process_job(
                     status="STOPPED_CIRCUIT_BREAKER",
                     phase="VLLM_UNAVAILABLE",
                     remaining=len(remaining),
+                    failed=results["failed"],
+                    errors=json.dumps(results["errors"]),
                 )
                 break
 
             logger.error(f"[OSMOSE:ClaimFirst:Worker] Error processing {doc_id}: {e}")
             results["failed"] += 1
-            results["errors"].append(f"{doc_id}: {error_str}")
+            results["errors"].append(f"{filename}: {error_str}")
+            _update_state(redis_client, failed=results["failed"],
+                          errors=json.dumps(results["errors"]))
+
+    # Phase 8.5 : Persister le FacetRegistry (après TOUS les documents)
+    if neo4j_driver:
+        try:
+            facets_persisted = facet_registry.persist_to_neo4j(neo4j_driver)
+            results["facets_persisted"] = facets_persisted
+            near_dups = facet_registry.get_near_duplicate_queue()
+            if near_dups:
+                logger.info(
+                    f"[OSMOSE:ClaimFirst:Worker] FacetRegistry: {len(near_dups)} "
+                    f"near-duplicates détectés (review manuelle requise)"
+                )
+                for k1, k2, score in near_dups[:10]:
+                    logger.info(f"  → '{k1}' ≈ '{k2}' (score={score:.2f})")
+            reg_stats = facet_registry.get_stats()
+            logger.info(
+                f"[OSMOSE:ClaimFirst:Worker] FacetRegistry: "
+                f"{reg_stats['total']} total, "
+                f"{reg_stats['by_lifecycle']} lifecycle, "
+                f"{facets_persisted} persisted"
+            )
+        except Exception as e:
+            logger.error(f"[OSMOSE:ClaimFirst:Worker] FacetRegistry persist failed: {e}")
 
     # Phase 9 : Détection cross-doc (après TOUS les documents)
     if results["processed"] >= 2 and neo4j_driver:
@@ -266,13 +387,43 @@ def claimfirst_process_job(
             logger.error(f"[OSMOSE:ClaimFirst:Worker] QS comparison failed: {e}")
             results["qs_comparisons"] = 0
 
+    # Phase 13 : KG Hygiene Layer 1 (post-ingestion, scope = document_set)
+    if results["processed"] >= 1 and neo4j_driver:
+        try:
+            _update_state(redis_client, phase="KG_HYGIENE_L1")
+            logger.info("[OSMOSE:ClaimFirst:Worker] Phase 13: KG Hygiene L1...")
+            from knowbase.hygiene.engine import HygieneEngine
+            from knowbase.hygiene.models import HygieneRunScope
+            hygiene = HygieneEngine(neo4j_driver, tenant_id)
+            hygiene_result = hygiene.run(
+                dry_run=False,
+                layers=[1],
+                scope=HygieneRunScope.DOCUMENT_SET,
+                scope_params={"doc_ids": list(doc_ids)},
+            )
+            results["hygiene_l1"] = hygiene_result.total_actions
+            logger.info(
+                f"  → {hygiene_result.total_actions} hygiene actions "
+                f"({hygiene_result.applied} applied, {hygiene_result.proposed} proposed)"
+            )
+        except Exception as e:
+            logger.error(f"[OSMOSE:ClaimFirst:Worker] KG Hygiene L1 failed: {e}")
+            results["hygiene_l1"] = 0
+
     # Finalisation
+    elapsed = time.time() - job_started_at
     _update_state(
         redis_client,
         status="COMPLETED",
         processed=results["processed"],
         failed=results["failed"],
+        skipped=results["skipped"],
+        total_claims=results["total_claims"],
+        total_entities=results["total_entities"],
+        current_document="",
+        current_filename="",
         phase="DONE",
+        elapsed_seconds=int(elapsed),
     )
 
     logger.info(
@@ -955,6 +1106,27 @@ def _get_neo4j_driver():
     except Exception as e:
         logger.error(f"[OSMOSE:ClaimFirst:Worker] Failed to connect to Neo4j: {e}")
         return None
+
+
+def _build_filename_map(doc_ids: List[str]) -> Dict[str, str]:
+    """
+    Construit un mapping doc_id → filename lisible.
+
+    Extrait le nom humain depuis le doc_id (format: 004_SAP-016_nom_fichier_hashcourt).
+    """
+    import re
+    filename_map = {}
+    for doc_id in doc_ids:
+        # doc_id format: "004_SAP-016_Name_Of_File_hashcourt"
+        # Retirer le hash court final (8 chars hex après le dernier _)
+        cleaned = re.sub(r'_[0-9a-f]{8,12}$', '', doc_id)
+        # Remplacer les underscores par des espaces pour lisibilité
+        cleaned = cleaned.replace('_', ' ')
+        # Tronquer si trop long
+        if len(cleaned) > 60:
+            cleaned = cleaned[:57] + "..."
+        filename_map[doc_id] = cleaned
+    return filename_map
 
 
 def _build_cache_map(cache_dir: str) -> Dict[str, str]:

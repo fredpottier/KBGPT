@@ -390,7 +390,9 @@ docs: mettre à jour documentation API
 
 # Redémarrage
 ./kw.ps1 restart            # Redémarre tout
-./kw.ps1 restart app        # Redémarre uniquement application
+./kw.ps1 restart api        # ⚡ Redémarre App+Frontend SANS toucher le worker (safe pendant import)
+./kw.ps1 restart frontend   # Redémarre uniquement le frontend
+./kw.ps1 restart app        # Redémarre App+Worker+Frontend (ATTENTION: tue le worker)
 
 # Status et logs
 ./kw.ps1 status             # Affiche statut de tous les services

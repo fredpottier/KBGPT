@@ -67,6 +67,7 @@ class ClaimFirstStatusResponse(BaseModel):
     job_running: bool = False
     current_job_id: Optional[str] = None
     current_phase: Optional[str] = None
+    worker_state: Optional[Dict[str, Any]] = None
 
 
 class ClaimFirstJobRequest(BaseModel):
@@ -87,11 +88,17 @@ class ClaimFirstJobResponse(BaseModel):
     status: str
     phase: Optional[str] = None
     current_document: Optional[str] = None
+    current_filename: Optional[str] = None
     processed: int = 0
+    failed: int = 0
+    skipped: int = 0
     total: int = 0
+    total_claims: int = 0
+    total_entities: int = 0
     errors: List[str] = []
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
+    elapsed_seconds: Optional[int] = None
 
 
 class AvailableDocument(BaseModel):
@@ -291,14 +298,28 @@ async def get_claimfirst_status(
             cache_files.extend(cache_dir.glob("*.v5cache.json"))
             response.documents_available = len(cache_files)
 
-    # Get job status
+    # Get job status from Redis
     try:
         from knowbase.ingestion.queue.dispatcher import get_claimfirst_status
         job_status = get_claimfirst_status()
         if job_status:
-            response.job_running = job_status.get("status") == "running"
-            response.current_job_id = job_status.get("job_id")
+            response.job_running = job_status.get("status") in ("running", "PROCESSING", "STARTING")
+            response.current_job_id = job_status.get("job_id") or (
+                # Fallback : pseudo-ID si le job tourne sans job_id (recovery après crash)
+                f"claimfirst_active" if response.job_running else None
+            )
             response.current_phase = job_status.get("phase")
+            # Enrichir avec les données Redis brutes pour affichage direct
+            if response.job_running:
+                response.worker_state = {
+                    "processed": int(job_status.get("processed", 0)),
+                    "total_documents": int(job_status.get("total_documents", 0)),
+                    "total_claims": int(job_status.get("total_claims", 0)),
+                    "total_entities": int(job_status.get("total_entities", 0)),
+                    "current_filename": job_status.get("current_filename", ""),
+                    "phase": job_status.get("phase", ""),
+                    "failed": int(job_status.get("failed", 0)),
+                }
     except Exception:
         pass
 
@@ -519,15 +540,36 @@ async def get_claimfirst_job(
     if status and status.get("job_id") == job_id:
         response.phase = status.get("phase")
         response.current_document = status.get("current_document")
-        response.processed = status.get("processed", 0)
-        response.total = status.get("total", 0)
-        response.errors = status.get("errors", [])
+        response.current_filename = status.get("current_filename")
+        response.processed = int(status.get("processed", 0))
+        response.failed = int(status.get("failed", 0))
+        response.skipped = int(status.get("skipped", 0))
+        response.total = int(status.get("total_documents", status.get("total", 0)))
+        response.total_claims = int(status.get("total_claims", 0))
+        response.total_entities = int(status.get("total_entities", 0))
+        if status.get("elapsed_seconds"):
+            response.elapsed_seconds = int(status["elapsed_seconds"])
+
+        # Errors sont stockés comme liste JSON dans Redis
+        errors_raw = status.get("errors")
+        if errors_raw:
+            try:
+                import json
+                response.errors = json.loads(errors_raw) if isinstance(errors_raw, str) else []
+            except (json.JSONDecodeError, TypeError):
+                response.errors = []
 
     # Timestamps
     if job.started_at:
         response.started_at = job.started_at.isoformat()
     if job.ended_at:
         response.completed_at = job.ended_at.isoformat()
+
+    # Calculer elapsed si le job est en cours et started_at disponible
+    if not response.elapsed_seconds and job.started_at and not job.ended_at:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        response.elapsed_seconds = int((now - job.started_at).total_seconds())
 
     return response
 

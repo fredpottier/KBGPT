@@ -25,7 +25,6 @@ import {
   Tbody,
   Tr,
   Thead,
-  Link,
   Icon,
   Flex,
   useToast,
@@ -46,6 +45,10 @@ import {
   FiTarget,
   FiXCircle,
   FiArchive,
+  FiClock,
+  FiZap,
+  FiStopCircle,
+  FiLoader,
 } from 'react-icons/fi'
 import { useAuth } from '@/contexts/AuthContext'
 import { apiClient } from '@/lib/api'
@@ -74,6 +77,15 @@ interface ClaimFirstStatus {
   job_running: boolean
   current_job_id: string | null
   current_phase: string | null
+  worker_state?: {
+    processed: number
+    total_documents: number
+    total_claims: number
+    total_entities: number
+    current_filename: string
+    phase: string
+    failed: number
+  } | null
 }
 
 interface ArchiveResult {
@@ -122,11 +134,17 @@ interface JobStatus {
   status: string
   phase: string | null
   current_document: string | null
+  current_filename: string | null
   processed: number
+  failed: number
+  skipped: number
   total: number
+  total_claims: number
+  total_entities: number
   errors: string[]
   started_at: string | null
   completed_at: string | null
+  elapsed_seconds: number | null
 }
 
 // Metric card (same style as enrichment-v2)
@@ -221,9 +239,26 @@ export default function ClaimFirstPage() {
         setStatus(statusRes.data)
 
         if (statusRes.data.current_job_id) {
+          // Essayer de charger le job RQ
           const jobRes = await apiClient.get<JobStatus>(`/claimfirst/jobs/${statusRes.data.current_job_id}`)
           if (jobRes.success && jobRes.data) {
             setCurrentJob(jobRes.data)
+          } else if (statusRes.data.worker_state && statusRes.data.job_running) {
+            // Fallback : construire un JobStatus depuis worker_state (job RQ perdu après restart)
+            const ws = statusRes.data.worker_state
+            setCurrentJob({
+              job_id: statusRes.data.current_job_id,
+              status: 'started',
+              phase: ws.phase || statusRes.data.current_phase || 'PROCESSING',
+              current_filename: ws.current_filename || '',
+              processed: ws.processed,
+              total: ws.total_documents,
+              total_claims: ws.total_claims,
+              total_entities: ws.total_entities,
+              failed: ws.failed,
+              errors: [],
+              skipped: 0,
+            } as JobStatus)
           }
         } else {
           setCurrentJob(null)
@@ -571,11 +606,6 @@ export default function ClaimFirstPage() {
         </HStack>
         <HStack spacing={2}>
           <Badge colorScheme="purple" variant="subtle">V3</Badge>
-          <Link href="/admin/enrichment-v2" _hover={{ textDecor: 'none' }}>
-            <Badge colorScheme="gray" variant="outline" cursor="pointer">
-              Pipeline V2 →
-            </Badge>
-          </Link>
           <IconButton
             aria-label="Refresh"
             icon={<FiRefreshCw />}
@@ -845,8 +875,8 @@ export default function ClaimFirstPage() {
             </Flex>
             <Text fontSize="xs" color="#64748b" mb={2}>
               Fusionne les entités dupliquées cross-document : variantes version
-              (&quot;S/4HANA 2023&quot; → &quot;S/4HANA&quot;) et containments
-              (&quot;S4HANA&quot; ⊂ &quot;SAP S4HANA&quot;).
+              (&quot;Product 2023&quot; → &quot;Product&quot;) et containments
+              (&quot;Module X&quot; ⊂ &quot;Platform Module X&quot;).
               Exécuté automatiquement après l{"'"}import, ou manuellement ici.
             </Text>
             {canonResult && (
@@ -914,84 +944,263 @@ export default function ClaimFirstPage() {
             )}
           </Box>
 
-          {/* Current Job Status */}
-          {currentJob && (
+          {/* Current Job Status — Panneau de suivi enrichi */}
+          {currentJob && (() => {
+            const isRunning = currentJob.status === 'started' || currentJob.status === 'queued'
+            const isFinished = currentJob.status === 'finished'
+            const isFailed = currentJob.status === 'failed'
+            const isCircuitBreaker = currentJob.phase === 'VLLM_UNAVAILABLE'
+            const progressPct = currentJob.total > 0
+              ? Math.round((currentJob.processed / currentJob.total) * 100)
+              : 0
+            const elapsed = currentJob.elapsed_seconds || 0
+            const avgPerDoc = currentJob.processed > 0 ? elapsed / currentJob.processed : 0
+            const remaining = currentJob.total - currentJob.processed - currentJob.failed - currentJob.skipped
+            const eta = avgPerDoc > 0 && remaining > 0 ? Math.round(avgPerDoc * remaining) : 0
+
+            const formatDuration = (s: number) => {
+              if (s < 60) return `${s}s`
+              if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
+              return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+            }
+
+            const phaseLabels: Record<string, { label: string; color: string }> = {
+              'INIT': { label: 'Initialisation', color: 'gray' },
+              'LOADING': { label: 'Chargement', color: 'blue' },
+              'EXTRACTING': { label: 'Extraction LLM', color: 'purple' },
+              'PERSISTED': { label: 'Persisté', color: 'green' },
+              'CROSS_DOC_CHAINS': { label: 'Chaînes cross-doc', color: 'cyan' },
+              'CANONICALIZE_ENTITIES': { label: 'Canonicalisation', color: 'teal' },
+              'CROSS_DOC_CLUSTERING': { label: 'Clustering cross-doc', color: 'orange' },
+              'QS_CROSS_DOC_COMPARISON': { label: 'Comparaison QS', color: 'pink' },
+              'DONE': { label: 'Terminé', color: 'green' },
+              'VLLM_UNAVAILABLE': { label: 'vLLM indisponible', color: 'red' },
+            }
+
+            const currentPhase = currentJob.phase ? phaseLabels[currentJob.phase] || { label: currentJob.phase, color: 'gray' } : null
+
+            return (
             <Box
-              bg="#1e293b"
+              bg="#0f172a"
               border="2px solid"
               borderColor={
-                currentJob.status === 'finished' ? 'green.600' :
-                currentJob.status === 'failed' ? 'red.600' :
+                isCircuitBreaker ? 'red.500' :
+                isFinished ? 'green.600' :
+                isFailed ? 'red.600' :
                 'blue.600'
               }
               rounded="xl"
-              p={4}
+              p={0}
               mb={4}
+              overflow="hidden"
             >
-              <Flex justify="space-between" align="center" mb={3}>
-                <HStack spacing={2}>
-                  <Icon as={FiActivity} color={
-                    currentJob.status === 'finished' ? 'green.400' :
-                    currentJob.status === 'failed' ? 'red.400' :
-                    'blue.400'
-                  } />
-                  <Text fontWeight="semibold" color="#f1f5f9">Job en cours</Text>
-                </HStack>
-                <Badge
-                  colorScheme={
-                    currentJob.status === 'finished' ? 'green' :
-                    currentJob.status === 'failed' ? 'red' :
-                    currentJob.status === 'queued' ? 'yellow' :
-                    'blue'
-                  }
-                >
-                  {currentJob.status}
-                </Badge>
-              </Flex>
+              {/* Header */}
+              <Box
+                bg={
+                  isCircuitBreaker ? 'red.900' :
+                  isFinished ? 'green.900' :
+                  isFailed ? 'red.900' :
+                  'blue.900'
+                }
+                px={4} py={3}
+              >
+                <Flex justify="space-between" align="center">
+                  <HStack spacing={3}>
+                    <Icon
+                      as={
+                        isCircuitBreaker ? FiStopCircle :
+                        isFinished ? FiCheckCircle :
+                        isFailed ? FiXCircle :
+                        FiLoader
+                      }
+                      color={
+                        isCircuitBreaker ? 'red.300' :
+                        isFinished ? 'green.300' :
+                        isFailed ? 'red.300' :
+                        'blue.300'
+                      }
+                      boxSize={5}
+                    />
+                    <Box>
+                      <Text fontWeight="bold" color="#f1f5f9" fontSize="md">
+                        {isCircuitBreaker ? 'Circuit Breaker activé' :
+                         isFinished ? 'Traitement terminé' :
+                         isFailed ? 'Traitement échoué' :
+                         'Traitement en cours'}
+                      </Text>
+                      <Text fontSize="xs" color="#94a3b8">
+                        Job {currentJob.job_id}
+                      </Text>
+                    </Box>
+                  </HStack>
+                  <HStack spacing={2}>
+                    {currentPhase && (
+                      <Badge colorScheme={currentPhase.color} variant="solid" fontSize="xs">
+                        {currentPhase.label}
+                      </Badge>
+                    )}
+                    {elapsed > 0 && (
+                      <HStack spacing={1}>
+                        <Icon as={FiClock} color="#64748b" boxSize={3} />
+                        <Text fontSize="xs" color="#94a3b8">{formatDuration(elapsed)}</Text>
+                      </HStack>
+                    )}
+                  </HStack>
+                </Flex>
+              </Box>
 
-              <VStack align="stretch" spacing={3}>
-                <HStack justify="space-between">
-                  <Text fontSize="sm" color="#94a3b8">
-                    ID: <code style={{ color: '#f1f5f9' }}>{currentJob.job_id}</code>
-                  </Text>
-                  {currentJob.phase && (
-                    <Badge colorScheme="purple" variant="subtle">{currentJob.phase}</Badge>
+              <Box px={4} py={3}>
+                <VStack align="stretch" spacing={3}>
+
+                  {/* Document en cours */}
+                  {isRunning && currentJob.current_filename && (
+                    <Box bg="#1e293b" rounded="lg" px={3} py={2} border="1px solid" borderColor="#334155">
+                      <HStack spacing={2}>
+                        <Icon as={FiFileText} color="blue.400" boxSize={4} />
+                        <Box flex={1} minW={0}>
+                          <Text fontSize="xs" color="#64748b">Document en cours</Text>
+                          <Text fontSize="sm" color="#e2e8f0" fontWeight="medium" isTruncated>
+                            {currentJob.current_filename}
+                          </Text>
+                        </Box>
+                      </HStack>
+                    </Box>
                   )}
-                </HStack>
 
-                {currentJob.current_document && (
-                  <Text fontSize="sm" color="#64748b">
-                    Document: {currentJob.current_document}
-                  </Text>
-                )}
-
-                <Box>
-                  <Flex justify="space-between" mb={1}>
-                    <Text fontSize="xs" color="#64748b">Progression</Text>
-                    <Text fontSize="xs" color="#94a3b8">{currentJob.processed} / {currentJob.total}</Text>
-                  </Flex>
-                  <Progress
-                    value={currentJob.total > 0 ? (currentJob.processed / currentJob.total) * 100 : 0}
-                    colorScheme="purple"
-                    bg="#334155"
-                    borderRadius="full"
-                    size="sm"
-                  />
-                </Box>
-
-                {currentJob.errors.length > 0 && (
-                  <Box bg="red.900" border="1px solid" borderColor="red.700" rounded="md" p={2}>
-                    <Text fontSize="xs" color="red.300" fontWeight="semibold">
-                      {currentJob.errors.length} erreur(s)
-                    </Text>
-                    {currentJob.errors.slice(0, 2).map((err, i) => (
-                      <Text key={i} fontSize="xs" color="red.400">{err}</Text>
-                    ))}
+                  {/* Barre de progression */}
+                  <Box>
+                    <Flex justify="space-between" mb={1} align="baseline">
+                      <HStack spacing={2}>
+                        <Text fontSize="sm" fontWeight="semibold" color="#f1f5f9">
+                          {progressPct}%
+                        </Text>
+                        <Text fontSize="xs" color="#64748b">
+                          ({currentJob.processed} / {currentJob.total} documents)
+                        </Text>
+                      </HStack>
+                      {isRunning && eta > 0 && (
+                        <Text fontSize="xs" color="#94a3b8">
+                          ETA: ~{formatDuration(eta)}
+                        </Text>
+                      )}
+                    </Flex>
+                    <Progress
+                      value={progressPct}
+                      colorScheme={isCircuitBreaker ? 'red' : isFinished ? 'green' : 'purple'}
+                      bg="#334155"
+                      borderRadius="full"
+                      size="md"
+                      hasStripe={isRunning}
+                      isAnimated={isRunning}
+                    />
                   </Box>
-                )}
-              </VStack>
+
+                  {/* Métriques temps réel */}
+                  <SimpleGrid columns={{ base: 2, md: 5 }} gap={2}>
+                    <Box bg="#1e293b" rounded="md" px={3} py={2} textAlign="center">
+                      <Text fontSize="lg" fontWeight="bold" color="green.400">
+                        {currentJob.total_claims.toLocaleString()}
+                      </Text>
+                      <Text fontSize="xs" color="#64748b">Claims</Text>
+                    </Box>
+                    <Box bg="#1e293b" rounded="md" px={3} py={2} textAlign="center">
+                      <Text fontSize="lg" fontWeight="bold" color="blue.400">
+                        {currentJob.total_entities.toLocaleString()}
+                      </Text>
+                      <Text fontSize="xs" color="#64748b">Entités</Text>
+                    </Box>
+                    <Box bg="#1e293b" rounded="md" px={3} py={2} textAlign="center">
+                      <Text fontSize="lg" fontWeight="bold" color="#f1f5f9">
+                        {currentJob.processed}
+                      </Text>
+                      <Text fontSize="xs" color="#64748b">Traités</Text>
+                    </Box>
+                    <Box bg="#1e293b" rounded="md" px={3} py={2} textAlign="center">
+                      <Text fontSize="lg" fontWeight="bold" color={currentJob.failed > 0 ? 'red.400' : '#64748b'}>
+                        {currentJob.failed}
+                      </Text>
+                      <Text fontSize="xs" color="#64748b">Erreurs</Text>
+                    </Box>
+                    <Box bg="#1e293b" rounded="md" px={3} py={2} textAlign="center">
+                      <Text fontSize="lg" fontWeight="bold" color={currentJob.skipped > 0 ? 'yellow.400' : '#64748b'}>
+                        {currentJob.skipped}
+                      </Text>
+                      <Text fontSize="xs" color="#64748b">Ignorés</Text>
+                    </Box>
+                  </SimpleGrid>
+
+                  {/* Throughput */}
+                  {elapsed > 0 && currentJob.processed > 0 && (
+                    <HStack spacing={4} justify="center">
+                      <HStack spacing={1}>
+                        <Icon as={FiZap} color="yellow.400" boxSize={3} />
+                        <Text fontSize="xs" color="#94a3b8">
+                          {formatDuration(Math.round(avgPerDoc))}/doc
+                        </Text>
+                      </HStack>
+                      <Text fontSize="xs" color="#475569">|</Text>
+                      <Text fontSize="xs" color="#94a3b8">
+                        {(currentJob.total_claims / (elapsed / 60)).toFixed(1)} claims/min
+                      </Text>
+                      <Text fontSize="xs" color="#475569">|</Text>
+                      <Text fontSize="xs" color="#94a3b8">
+                        ~{Math.round(currentJob.total_claims / currentJob.processed)} claims/doc
+                      </Text>
+                    </HStack>
+                  )}
+
+                  {/* Circuit breaker alert */}
+                  {isCircuitBreaker && (
+                    <Box bg="red.900" border="1px solid" borderColor="red.600" rounded="md" p={3}>
+                      <HStack spacing={2} mb={1}>
+                        <Icon as={FiStopCircle} color="red.300" boxSize={4} />
+                        <Text fontSize="sm" color="red.200" fontWeight="semibold">
+                          Circuit Breaker - vLLM indisponible
+                        </Text>
+                      </HStack>
+                      <Text fontSize="xs" color="red.300">
+                        Le traitement a été arrêté car le vLLM ne répond plus.
+                        {remaining > 0 && ` ${remaining} documents restants non traités.`}
+                      </Text>
+                    </Box>
+                  )}
+
+                  {/* Erreurs */}
+                  {currentJob.errors.length > 0 && !isCircuitBreaker && (
+                    <Box bg="red.900" border="1px solid" borderColor="red.700" rounded="md" p={2}>
+                      <Text fontSize="xs" color="red.300" fontWeight="semibold" mb={1}>
+                        {currentJob.errors.length} erreur(s)
+                      </Text>
+                      {currentJob.errors.slice(0, 3).map((err, i) => (
+                        <Text key={i} fontSize="xs" color="red.400" isTruncated>{err}</Text>
+                      ))}
+                      {currentJob.errors.length > 3 && (
+                        <Text fontSize="xs" color="red.500" mt={1}>
+                          ... et {currentJob.errors.length - 3} autres
+                        </Text>
+                      )}
+                    </Box>
+                  )}
+
+                  {/* Résumé final */}
+                  {isFinished && elapsed > 0 && (
+                    <Box bg="green.900" border="1px solid" borderColor="green.700" rounded="md" p={3}>
+                      <Text fontSize="sm" color="green.200" fontWeight="semibold" mb={1}>
+                        Traitement terminé en {formatDuration(elapsed)}
+                      </Text>
+                      <Text fontSize="xs" color="green.300">
+                        {currentJob.processed} documents traités
+                        {' → '}{currentJob.total_claims.toLocaleString()} claims,{' '}
+                        {currentJob.total_entities.toLocaleString()} entités extraites.
+                        {currentJob.processed > 0 && ` Moyenne: ${formatDuration(Math.round(avgPerDoc))}/doc.`}
+                      </Text>
+                    </Box>
+                  )}
+                </VStack>
+              </Box>
             </Box>
-          )}
+            )
+          })()}
 
           {/* Documents Selection */}
           <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4}>

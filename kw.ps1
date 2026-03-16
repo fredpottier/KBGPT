@@ -36,9 +36,14 @@ function Show-Help {
     Write-Host "=======================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Commandes:" -ForegroundColor Yellow
-    Write-Host "  start [infra|app|monitoring|all]    Demarrer les services (defaut: all)" -ForegroundColor White
-    Write-Host "  stop [infra|app|monitoring|all]     Arreter les services (defaut: all)" -ForegroundColor White
-    Write-Host "  restart [infra|app|monitoring|all]  Redemarrer les services (defaut: all)" -ForegroundColor White
+    Write-Host "  start [infra|app|frontend|api|monitoring|all]    Demarrer les services (defaut: all)" -ForegroundColor White
+    Write-Host "  stop [infra|app|frontend|api|monitoring|all]     Arreter les services (defaut: all)" -ForegroundColor White
+    Write-Host "  restart [infra|app|frontend|api|monitoring|all]  Redemarrer les services (defaut: all)" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Targets specifiques:" -ForegroundColor Gray
+    Write-Host "    app        = App + Worker + Frontend + UI (ATTENTION: tue le worker)" -ForegroundColor Gray
+    Write-Host "    api        = App + Frontend seulement (worker preserve)" -ForegroundColor Gray
+    Write-Host "    frontend   = Frontend seulement" -ForegroundColor Gray
     Write-Host "  status                   Afficher statut des services" -ForegroundColor White
     Write-Host "  logs <service>           Voir logs (ex: app, worker, neo4j)" -ForegroundColor White
     Write-Host "  info                     Afficher URLs et credentials" -ForegroundColor White
@@ -145,8 +150,16 @@ function Start-Services {
             docker-compose -f $INFRA_FILE up -d
         }
         "app" {
-            Write-Host "   Application uniquement (App, Worker, Frontend, UI)" -ForegroundColor Gray
+            Write-Host "   Application complete (App, Worker, Frontend, UI)" -ForegroundColor Gray
             docker-compose -f $APP_FILE up -d
+        }
+        "api" {
+            Write-Host "   API + Frontend seulement (worker preserve)" -ForegroundColor Yellow
+            docker-compose -f $APP_FILE up -d --no-deps app frontend
+        }
+        "frontend" {
+            Write-Host "   Frontend seulement" -ForegroundColor Yellow
+            docker-compose -f $APP_FILE up -d --no-deps frontend
         }
         "monitoring" {
             Write-Host "   Monitoring uniquement (Grafana, Loki, Promtail)" -ForegroundColor Gray
@@ -188,8 +201,20 @@ function Stop-Services {
             docker-compose -f $INFRA_FILE down
         }
         "app" {
-            Write-Host "   Application uniquement" -ForegroundColor Gray
+            Write-Host "   Application complete (App, Worker, Frontend, UI)" -ForegroundColor Gray
             docker-compose -f $APP_FILE down
+        }
+        "api" {
+            Write-Host "   API + Frontend seulement (worker preserve)" -ForegroundColor Yellow
+            docker-compose -f $APP_FILE stop app frontend
+            docker-compose -f $APP_FILE rm -f app frontend
+            docker-compose -f $APP_FILE build app frontend
+        }
+        "frontend" {
+            Write-Host "   Frontend seulement" -ForegroundColor Yellow
+            docker-compose -f $APP_FILE stop frontend
+            docker-compose -f $APP_FILE rm -f frontend
+            docker-compose -f $APP_FILE build frontend
         }
         "monitoring" {
             Write-Host "   Monitoring uniquement" -ForegroundColor Gray

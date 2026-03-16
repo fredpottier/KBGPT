@@ -42,6 +42,7 @@ import {
   FiSliders,
   FiCloud,
   FiArchive,
+  FiFilter,
 } from 'react-icons/fi'
 
 const MotionBox = motion(Box)
@@ -533,11 +534,11 @@ export default function AdminDashboard() {
                 delay={0.5}
               />
               <QuickActionButton
-                label="Profil Visibilite"
-                icon={FiSliders}
-                href="/admin/visibility-profile"
-                color="purple"
-                delay={0.55}
+                label="KG Hygiene"
+                icon={FiFilter}
+                href="/admin/kg-hygiene"
+                color="teal"
+                delay={0.56}
               />
               <QuickActionButton
                 label="Backup & Restore"

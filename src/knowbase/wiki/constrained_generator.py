@@ -120,6 +120,10 @@ class ConstrainedGenerator:
             return validated
 
         except Exception as e:
+            # Si vLLM est down, propager l'erreur pour stopper le pipeline
+            from knowbase.common.llm_router import VLLMUnavailableError
+            if isinstance(e, VLLMUnavailableError):
+                raise
             logger.error(f"Erreur génération section '{section.section_type}': {e}")
             return GeneratedSection(
                 section_type=section.section_type,
@@ -398,6 +402,13 @@ class ConstrainedGenerator:
             r"^[Mm]issing info(rmation)?\s*\d*$",
             r"^N/?A$",
             r"^\.\.\.$",
+            r"(?i)^il n.y a pas d.informations",
+            r"(?i)^aucune information",
+            r"(?i)^no .*information.* available",
+            r"(?i)^additional (sources?|documents?|details?) (would|could|might)",
+            r"(?i)^more (details?|information|sources?) (would|could|are) (be )?(needed|helpful|useful)",
+            r"(?i)^l.absence d",
+            r"(?i)^there (is|are) no .* (available|provided|included)",
         ]
         filtered = []
         for gap in gaps:

@@ -65,7 +65,7 @@ class DomainContextCreate(BaseModel):
 
     versioning_hints: str = Field(
         default="",
-        max_length=500,
+        max_length=1000,
         description="Conventions de versioning spécifiques au domaine (texte libre)",
         json_schema_extra={"example": "FPS01 < FPS02 < FPS03 are ordered Feature Pack Stacks."}
     )
@@ -89,6 +89,13 @@ class DomainContextCreate(BaseModel):
         description="JSON object defining axis policy for ApplicabilityFrame pipeline",
     )
 
+    hygiene_entity_stoplist: str = Field(
+        default="",
+        max_length=5000,
+        description="JSON array de noms d'entités domain-specific à supprimer par KG Hygiene",
+        json_schema_extra={"example": '["SPSS", "PubMed", "Cochrane"]'},
+    )
+
 
 class DomainContextResponse(BaseModel):
     """Schema réponse Domain Context."""
@@ -106,6 +113,7 @@ class DomainContextResponse(BaseModel):
     identification_semantics: str = Field(default="")
     axis_reclassification_rules: str = Field(default="")
     axis_policy: str = Field(default="")
+    hygiene_entity_stoplist: str = Field(default="")
     llm_injection_prompt: str = Field(..., description="Prompt généré pour injection LLM")
     created_at: datetime = Field(..., description="Date création")
     updated_at: datetime = Field(..., description="Date mise à jour")
@@ -123,10 +131,11 @@ class DomainContextPreviewRequest(BaseModel):
     common_acronyms: Dict[str, str] = Field(default_factory=dict)
     key_concepts: List[str] = Field(default_factory=list)
     context_priority: Literal["low", "medium", "high"] = Field(default="medium")
-    versioning_hints: str = Field(default="", max_length=500)
+    versioning_hints: str = Field(default="", max_length=1000)
     identification_semantics: str = Field(default="", max_length=1000)
     axis_reclassification_rules: str = Field(default="", max_length=5000)
     axis_policy: str = Field(default="", max_length=5000)
+    hygiene_entity_stoplist: str = Field(default="", max_length=5000)
 
 
 class DomainContextPreviewResponse(BaseModel):

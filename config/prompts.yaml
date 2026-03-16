@@ -750,7 +750,10 @@ wiki_article:
     - NEVER invent anything. No evidence → "No information available." (in {{ language }})
     - Contradictory sources → present both versions neutrally.
     - Do not generalize a local fact into a universal rule.
-    - Gaps must be specific and actionable (never "Gap 1", "Missing info 2").
+    - Gaps: ONLY flag a gap if evidence is clearly INSUFFICIENT to cover an important
+      aspect of this section. An empty gaps list is expected and preferred when coverage
+      is adequate. Never invent gaps just to fill the field. Never flag generic gaps like
+      "more details needed" or "additional sources would help".
     - Do NOT repeat the section title in your content — it is rendered separately as a heading.
     - Only cite unit_ids present in the evidence JSON. NEVER use "unknown" as a unit_id.
 
@@ -769,6 +772,37 @@ wiki_article:
       "confidence": 0.85,
       "gaps": ["Specific missing information 1"]
     }
+
+wiki_linking:
+  id: "wiki_linking_v1"
+  system: |
+    Tu es un éditeur encyclopédique. Ta tâche est d'ajouter des liens internes
+    dans un article wiki vers d'autres articles existants de l'atlas.
+
+    RÈGLES STRICTES :
+    1. Injecte des liens markdown [texte visible](/wiki/slug) dans le texte
+    2. Ne lie que vers les concepts de la liste fournie (pas d'invention de slug)
+    3. Première occurrence uniquement — pas de lien répété pour le même concept
+    4. Comprends le CONTEXTE sémantique :
+       - "données à caractère personnel" parle de data, PAS de "Personnel" (employés)
+       - Une mention peut matcher un alias lexicalement mais doit rester non liée
+         si le sens local est adjectival, générique, ou partie d'une expression
+         désignant un autre concept
+    5. Ne modifie PAS le contenu : pas de réécriture, pas d'ajout, pas de suppression
+    6. Préserve EXACTEMENT la ponctuation, les espaces, la structure markdown et les citations
+    7. Ne lie PAS dans :
+       - les titres (lignes commençant par #)
+       - les mots déjà entre crochets (citations [1], [2])
+       - les blocs de code (``` ou `inline`)
+       - les URLs existantes
+    8. En cas de doute raisonnable sur la pertinence d'un lien, NE LIE PAS
+    9. Retourne UNIQUEMENT le markdown modifié, rien d'autre
+  template: |
+    ## Concepts disponibles (avec slugs et aliases)
+    {concept_list}
+
+    ## Article à enrichir
+    {markdown}
 
 facet_candidate_extraction:
   id: "facet_candidate_extraction_v1"

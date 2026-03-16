@@ -36,6 +36,8 @@ import {
   FiCpu,
   FiArchive,
   FiBook,
+  FiEdit,
+  FiFilter,
 } from 'react-icons/fi'
 
 // Configuration des menus
@@ -59,10 +61,13 @@ const navigationConfig = {
     isDropdown: false,
   },
   wiki: {
-    label: 'Wiki',
-    href: '/wiki',
-    icon: FiBook,
-    isDropdown: false,
+    label: 'Atlas',
+    icon: FiGlobe,
+    isDropdown: true,
+    items: [
+      { label: 'Accueil', href: '/wiki', icon: FiHome },
+      { label: 'Articles', href: '/wiki/articles', icon: FiBook },
+    ],
   },
   documents: {
     label: 'Documents',
@@ -76,16 +81,7 @@ const navigationConfig = {
   admin: {
     label: 'Administration',
     icon: FiSettings,
-    isDropdown: true,
-    items: [
-      { label: 'Dashboard', href: '/admin', icon: FiHome },
-      { label: 'Domain Context', href: '/admin/domain-context', icon: FiGlobe },
-      { label: 'Claim-First', href: '/admin/claimfirst', icon: FiTarget },
-      { label: 'Infrastructure GPU', href: '/admin/gpu', icon: FiCpu },
-      { label: 'Mode Burst (Spot)', href: '/admin/burst', icon: FiCloud },
-      { label: 'Backup & Restore', href: '/admin/backup', icon: FiArchive },
-      { label: 'Configuration', href: '/admin/settings', icon: FiSettings },
-    ],
+    href: '/admin',
   },
 }
 
@@ -269,14 +265,13 @@ export default function TopNavigation() {
             <Text>{navigationConfig.verify.label}</Text>
           </NavLink>
 
-          {/* Wiki - lien direct */}
-          <NavLink
-            href={navigationConfig.wiki.href!}
+          {/* Wiki - dropdown */}
+          <NavDropdown
+            label={navigationConfig.wiki.label}
+            icon={navigationConfig.wiki.icon}
+            items={navigationConfig.wiki.items!}
             isActive={isActiveSection('wiki')}
-          >
-            <Icon as={navigationConfig.wiki.icon} />
-            <Text>{navigationConfig.wiki.label}</Text>
-          </NavLink>
+          />
 
           {/* Documents - dropdown */}
           <NavDropdown
@@ -286,11 +281,11 @@ export default function TopNavigation() {
             isActive={isActiveSection('documents')}
           />
 
-          {/* Administration - dropdown */}
-          <NavDropdown
+          {/* Administration - lien direct (sidebar dans /admin) */}
+          <NavLink
             label={navigationConfig.admin.label}
+            href="/admin"
             icon={navigationConfig.admin.icon}
-            items={navigationConfig.admin.items!}
             isActive={isActiveSection('admin')}
           />
         </HStack>
