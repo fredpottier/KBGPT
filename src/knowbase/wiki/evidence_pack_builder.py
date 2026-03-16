@@ -222,6 +222,7 @@ class EvidencePackBuilder:
         RETURN c.claim_id AS claim_id, c.text AS text, c.doc_id AS doc_id,
                c.claim_type AS claim_type, c.structured_form AS structured_form,
                c.confidence AS confidence,
+               c.chunk_ids AS chunk_ids,
                is_qualifier,
                collect(DISTINCT f.domain) AS facet_domains
         """
@@ -248,6 +249,8 @@ class EvidencePackBuilder:
                 scope = scope_cache.get(r["doc_id"], ScopeSignature())
                 facets = [d for d in (r["facet_domains"] or []) if d]
 
+                chunk_ids = r.get("chunk_ids") or []
+
                 unit = EvidenceUnit(
                     unit_id=f"eu_{uuid.uuid4().hex[:8]}",
                     source_type="claim",
@@ -260,6 +263,7 @@ class EvidencePackBuilder:
                     scope_signature=scope,
                     weight=1.0,
                     facet_domains=facets,
+                    chunk_id=chunk_ids[0] if chunk_ids else None,
                 )
                 units.append(unit)
 

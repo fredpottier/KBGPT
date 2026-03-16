@@ -18,35 +18,43 @@ logger = logging.getLogger(__name__)
 
 
 # Prompt for splitting text into assertions
-SPLIT_ASSERTIONS_PROMPT = """You are a text analyzer. Your task is to identify each verifiable ASSERTION or FACT in the given text.
+SPLIT_ASSERTIONS_PROMPT = """You are a text analyzer. Extract EVERY verifiable statement from the text.
 
-An assertion is a sentence or part of a sentence that:
-- States something factual (characteristics, numbers, features, dates, names, etc.)
-- Can be true or false
-- Can be verified against a documentary source
+A verifiable statement is ANY sentence that:
+- States a fact, a claim, a definition, a property, a number, a date
+- Makes a positive or NEGATIVE assertion ("X has no effect on Y" IS a verifiable statement)
+- Describes what something IS or DOES ("X is a biomarker used for..." IS verifiable)
+- Can potentially be confirmed or contradicted by a documentary source
+
+INCLUDE:
+- Definitions ("X is a biomarker used for Y")
+- Negations ("X has no impact on Y")
+- Generalizations ("X is used in primary care")
+- Numerical claims ("the rate was 15%")
+- Causal claims ("X reduces Y")
 
 DO NOT include:
 - Questions
-- Purely subjective opinions ("it's good", "I think that...")
-- Logical connectors alone ("therefore", "however", etc.)
-- Sentences with no factual content
+- Pure subjective opinions without factual basis
 
-IMPORTANT: Limit yourself to a maximum of 20 assertions to avoid overly long analysis.
+CRITICAL: Extract EVERY sentence that contains factual content. Err on the side of including too many rather than too few. Each sentence in the text is likely a separate assertion.
+
+Maximum 20 assertions.
 
 Return a JSON array with for each assertion:
-- text: the exact text of the assertion (as it appears in the original text)
-- start: start position in the original text (character index, starting at 0)
-- end: end position in the original text (character index)
+- text: the EXACT text as it appears in the original (copy-paste, do not rephrase)
+- start: start character index (0-based)
+- end: end character index
 
 Text to analyze:
 \"\"\"
 {text}
 \"\"\"
 
-Return ONLY the JSON array, with no surrounding text. Expected format:
+Return ONLY the JSON array:
 [
-  {{"text": "The product was released in 2020.", "start": 0, "end": 33}},
-  {{"text": "It supports up to 100 users.", "start": 35, "end": 62}}
+  {{"text": "exact sentence from text", "start": 0, "end": 45}},
+  {{"text": "another exact sentence", "start": 47, "end": 80}}
 ]"""
 
 
@@ -148,12 +156,79 @@ class AssertionSplitter:
                     # Can't find position, skip or use fuzzy match
                     logger.debug(f"[ASSERTION_SPLITTER] Could not locate assertion: {text[:50]}...")
 
+        # Compléter avec les phrases manquantes (le LLM peut en rater)
+        validated = self._fill_missing_sentences(validated, original_text)
+
         # Limit to 20 assertions
         if len(validated) > 20:
             logger.info(f"[ASSERTION_SPLITTER] Limiting from {len(validated)} to 20 assertions")
             validated = validated[:20]
 
         return validated
+
+    def _fill_missing_sentences(
+        self,
+        assertions: List[Dict[str, Any]],
+        original_text: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Complète les assertions avec les phrases du texte original
+        que le LLM a ratées.
+
+        Le LLM peut considérer certaines phrases comme "non vérifiables"
+        (définitions, négations, généralités) alors qu'elles le sont.
+        """
+        # Découper le texte en phrases
+        sentences = re.split(r'(?<=[.!?])\s+', original_text)
+
+        # Positions déjà couvertes par les assertions LLM
+        covered_ranges = [(a["start"], a["end"]) for a in assertions]
+
+        def is_covered(start: int, end: int) -> bool:
+            for cs, ce in covered_ranges:
+                # Overlap significatif (>50% de la phrase)
+                overlap = min(end, ce) - max(start, cs)
+                if overlap > (end - start) * 0.5:
+                    return True
+            return False
+
+        # Trouver les phrases manquantes
+        added = 0
+        current_pos = 0
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) < 20:
+                current_pos = original_text.find(sentence, current_pos)
+                if current_pos >= 0:
+                    current_pos += len(sentence)
+                continue
+
+            start = original_text.find(sentence, current_pos)
+            if start < 0:
+                continue
+
+            end = start + len(sentence)
+
+            if not is_covered(start, end):
+                assertions.append({
+                    "text": sentence,
+                    "start": start,
+                    "end": end,
+                })
+                covered_ranges.append((start, end))
+                added += 1
+
+            current_pos = end
+
+        if added > 0:
+            # Re-trier par position
+            assertions.sort(key=lambda a: a["start"])
+            logger.info(
+                f"[ASSERTION_SPLITTER] Added {added} missing sentences "
+                f"(total: {len(assertions)})"
+            )
+
+        return assertions
 
     def _fallback_split(self, text: str) -> List[Dict[str, Any]]:
         """

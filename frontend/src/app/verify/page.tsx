@@ -104,45 +104,102 @@ function EvidenceTooltip({ assertion }: { assertion: Assertion }) {
     ? [...assertion.evidence].sort((a, b) => b.confidence - a.confidence)[0]
     : null
   const otherCount = assertion.evidence.length - 1
-  // Compteur de documents sources uniques
   const uniqueDocs = new Set(assertion.evidence.map(e => e.sourceDoc)).size
 
+  // Nettoyer le texte de la preuve : tronquer, retirer les artefacts tabulaires
+  const cleanEvidenceText = (text: string): string => {
+    if (!text) return ''
+    // Retirer le préfixe [FACTUAL], [VALEUR ALTERNATIVE] etc.
+    let cleaned = text.replace(/^\[[\w\s]+\]\s*/i, '')
+    // Retirer les sauts de ligne multiples et les tabulations (résidus de tableaux)
+    cleaned = cleaned.replace(/[\t]+/g, ' ').replace(/\n{2,}/g, ' ').replace(/\s{3,}/g, ' ')
+    // Si ça ressemble à un tableau (beaucoup de chiffres séparés par des espaces), tronquer
+    const numberDensity = (cleaned.match(/\d+[.,]?\d*/g) || []).length / cleaned.split(' ').length
+    if (numberDensity > 0.4 && cleaned.length > 150) {
+      // Garder la première phrase significative
+      const firstSentence = cleaned.match(/^[^.!?]+[.!?]/)
+      if (firstSentence) return firstSentence[0]
+    }
+    // Tronquer à 200 chars
+    if (cleaned.length > 200) return cleaned.slice(0, 200) + '…'
+    return cleaned
+  }
+
+  // Extraire un nom de document lisible depuis le doc_id
+  const cleanDocName = (docId: string): string => {
+    if (!docId) return 'Source inconnue'
+    // PMC1234567_title_of_the_article_hash → Title Of The Article
+    const parts = docId.split('_')
+    if (parts.length > 2) {
+      return parts.slice(1, -1).join(' ').replace(/\b\w/g, c => c.toUpperCase()).slice(0, 60)
+    }
+    return docId.slice(0, 60)
+  }
+
+  // Libellé du verdict
+  const verdictLabel: Record<string, string> = {
+    confirmed: 'Cette affirmation est confirmée par le corpus',
+    contradicted: 'Cette affirmation est contredite par le corpus',
+    incomplete: 'Information partielle — détails manquants',
+    fallback: 'Trouvé dans les documents mais pas dans les claims vérifiées',
+    unknown: 'Aucune information trouvée dans le corpus',
+  }
+
   return (
-    <VStack align="stretch" spacing={2} p={3} maxW="420px">
-      <HStack justify="space-between">
-        <Badge colorScheme={config.colorScheme} fontSize="xs" px={2} py={0.5}>
-          <HStack spacing={1}>
-            <Icon as={config.icon} boxSize={3} />
-            <Text>{config.label}</Text>
-          </HStack>
-        </Badge>
-        <Text fontSize="xs" color="text.muted">
-          {Math.round(assertion.confidence * 100)}% confiance
+    <VStack align="stretch" spacing={2} p={3} maxW="380px">
+      {/* Verdict clair */}
+      <HStack spacing={2}>
+        <Icon as={config.icon} boxSize={4} color={`${config.colorScheme}.400`} />
+        <Text fontSize="sm" fontWeight="semibold" color="text.primary">
+          {config.label}
+        </Text>
+        <Text fontSize="xs" color="text.muted" ml="auto">
+          {Math.round(assertion.confidence * 100)}%
         </Text>
       </HStack>
 
+      <Text fontSize="xs" color="text.secondary" lineHeight="1.4">
+        {verdictLabel[assertion.status] || ''}
+      </Text>
+
       {bestEvidence ? (
-        <VStack align="stretch" spacing={2}>
-          {/* Preuve principale */}
+        <VStack align="stretch" spacing={1.5}>
+          {/* Citation source — nettoyée */}
           <Box
-            p={3}
+            p={2.5}
             bg="bg.primary"
             rounded="md"
-            border="1px solid"
-            borderColor="border.default"
+            borderLeft="3px solid"
+            borderLeftColor={`${config.colorScheme}.400`}
           >
-            <Text color="text.primary" fontSize="sm" lineHeight="1.5" mb={2}>
-              {bestEvidence.text}
+            <Text color="text.primary" fontSize="xs" lineHeight="1.5" fontStyle="italic">
+              « {cleanEvidenceText(bestEvidence.text)} »
             </Text>
-            <HStack spacing={2} color="text.muted" fontSize="xs">
-              <Icon as={FiFile} boxSize={3} flexShrink={0} />
-              <Text noOfLines={1}>{bestEvidence.sourceDoc}</Text>
-            </HStack>
           </Box>
 
-          {/* Compteur des autres sources */}
+          {/* Contradictions connues */}
+          {(bestEvidence as any).comparison_details?.contradictions && (
+            <Box p={2} bg="red.900" rounded="md" borderLeft="2px solid" borderLeftColor="red.400">
+              <Text fontSize="xs" color="red.200" fontWeight="semibold" mb={1}>
+                Contradiction connue dans le corpus :
+              </Text>
+              <Text fontSize="xs" color="red.100" fontStyle="italic">
+                {(bestEvidence as any).comparison_details.contradictions}
+              </Text>
+            </Box>
+          )}
+
+          {/* Source document */}
+          <HStack spacing={1.5} color="text.muted" fontSize="xs">
+            <Icon as={FiFile} boxSize={3} flexShrink={0} />
+            <Text noOfLines={1} title={bestEvidence.sourceDoc}>
+              {cleanDocName(bestEvidence.sourceDoc)}
+            </Text>
+          </HStack>
+
+          {/* Autres sources */}
           {otherCount > 0 && (
-            <Text fontSize="xs" color="text.muted" textAlign="center">
+            <Text fontSize="xs" color="text.muted">
               + {otherCount} autre{otherCount > 1 ? 's' : ''} source{otherCount > 1 ? 's' : ''}
               {uniqueDocs > 1 && ` (${uniqueDocs} documents)`}
             </Text>
@@ -150,7 +207,7 @@ function EvidenceTooltip({ assertion }: { assertion: Assertion }) {
         </VStack>
       ) : (
         <Text fontSize="xs" color="text.muted" fontStyle="italic">
-          Aucune source trouvée
+          Aucune source trouvée dans le corpus
         </Text>
       )}
     </VStack>

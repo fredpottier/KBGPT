@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 # Prompt for comparing assertion to claims
-COMPARE_CLAIM_PROMPT = """You are comparing a user ASSERTION against documented CLAIMS from a trusted knowledge base.
+COMPARE_CLAIM_PROMPT = """You compare a user ASSERTION against documented CLAIMS from a trusted knowledge base.
 
 ASSERTION to verify:
 "{assertion}"
@@ -54,39 +54,39 @@ ASSERTION to verify:
 CLAIMS found in knowledge base (trusted sources):
 {claims_text}
 
-Determine the relationship between the assertion and the claims:
+Determine the relationship:
 
-**CONTRADICTS** - Use this status when:
-- The assertion states a DIFFERENT VALUE than the claims for the SAME property
-- Numbers, dates, percentages, quantities DO NOT match
-- Examples of contradictions:
-  - "X is 50%" vs claim "X is 75%" → CONTRADICTS (different percentage)
-  - "X is 99.5%" vs claim "X is 99.7% to 99.9%" → CONTRADICTS (99.5% is NOT in range 99.7-99.9%)
-  - "launched in 2020" vs claim "launched in 2018" → CONTRADICTS
+**SUPPORTS** — The assertion is CORRECT based on the claims:
+- The assertion says the same thing as a claim (exact or simplified)
+- The assertion is a correct SUMMARY of a claim (less detail is OK)
+- The assertion's values MATCH claim values (exact or approximate)
+- Examples:
+  - Assertion: "PCT < 0.25 indicates low infection risk" vs Claim: "PCT < 0.25 has been suggested as optimal cut-off to rule out infection (NPV 81%)" → SUPPORTS (assertion is a correct simplification)
+  - Assertion: "X reduces duration by 24%" vs Claim: "X reduces duration by more than 24%" → SUPPORTS
+  - Assertion: "Drug X treats melanoma" vs Claim: "Drug X is used for metastatic melanoma" → SUPPORTS
 
-**SUPPORTS** - Use this status when:
-- The assertion value MATCHES the claim value (exact or equivalent)
-- The assertion covers ALL the values/options mentioned in claims
-- Examples of support:
-  - "X is 50" vs claim "X is 50" → SUPPORTS
-  - "X is 75 to 80%" vs claim "X is 75% to 80%" → SUPPORTS (same range)
-  - "X is 0 or 30" vs claim "X can be 0 or 30" → SUPPORTS (all options mentioned)
-  - "X supports A, B, C" vs claim "X supports A, B, and C" → SUPPORTS
+**CONTRADICTS** — The assertion is WRONG based on the claims:
+- The assertion states the OPPOSITE of what claims say
+- A numerical value is clearly DIFFERENT (not a rounding or simplification)
+- The assertion negates what the claim affirms (or vice versa)
+- Examples:
+  - Assertion: "X has no effect" vs Claim: "X significantly reduces Y" → CONTRADICTS
+  - Assertion: "X peaks at 24 hours" vs Claim: "X peaks at 6 hours" → CONTRADICTS
+  - Assertion: "X is 50%" vs Claim: "X is 75%" → CONTRADICTS
 
-**PARTIAL** - Use this status when:
-- The assertion states ONE value, but claims show MULTIPLE valid values
-- The assertion is missing some valid alternatives mentioned in claims
-- Examples of partial:
-  - "X is 30" vs claim "X is 0 or 30" → PARTIAL (missing the 0 option)
-  - "X supports A" vs claim "X supports A, B, and C" → PARTIAL (missing B and C)
+**PARTIAL** — The assertion is INCOMPLETE:
+- Correct but missing important alternatives or conditions
+- Examples:
+  - Assertion: "X is 30" vs Claim: "X is 0 or 30 depending on config" → PARTIAL
 
 CRITICAL RULES:
-1. If assertion value MATCHES claim value exactly or equivalently = SUPPORTS
-2. If assertion covers ALL values/options from claims = SUPPORTS
-3. If assertion has ONE value but claims have MULTIPLE = PARTIAL
-4. If assertion value is DIFFERENT from claim value = CONTRADICTS
+1. An assertion that SIMPLIFIES a claim (fewer details) = SUPPORTS, not CONTRADICTS
+2. An assertion that OMITS extra information from a claim = SUPPORTS, not PARTIAL
+3. Only mark CONTRADICTS when the core meaning is OPPOSITE or values clearly differ
+4. When in doubt between SUPPORTS and CONTRADICTS, choose SUPPORTS
+5. Compare the MEANING, not the exact wording
 
-Return ONLY a JSON object (no surrounding text):
+Return ONLY a JSON object:
 {{
   "relationship": "SUPPORTS" or "CONTRADICTS" or "PARTIAL",
   "confidence": 0.0 to 1.0,
@@ -149,40 +149,36 @@ class EvidenceMatcher:
             return [], VerificationStatus.UNKNOWN, 0.0
 
         try:
-            # 1. Get embedding for assertion
+            # 1. Get embedding for assertion (cross-lingual e5-large)
             embedding = await self._get_embedding(assertion_text)
             if not embedding:
                 logger.warning("[EVIDENCE_MATCHER] Failed to get embedding")
                 return [], VerificationStatus.UNKNOWN, 0.0
 
-            # 2. Search claims in Neo4j
-            claims = await self._search_claims_neo4j(assertion_text, embedding)
+            # 2. PRIMARY: Neo4j vector search sur claims (cross-langue natif)
+            claims = await self._search_claims_vector_neo4j(assertion_text, embedding)
+
+            if not claims:
+                # Fallback keyword si vector index pas encore construit
+                claims = await self._search_claims_neo4j(assertion_text, embedding)
 
             if claims:
-                logger.debug(f"[EVIDENCE_MATCHER] Found {len(claims)} claims in Neo4j")
-                return await self._analyze_claims(assertion_text, claims)
+                logger.debug(f"[EVIDENCE_MATCHER] Found {len(claims)} claims")
+                evidence, status, confidence = await self._analyze_claims(assertion_text, claims)
 
-            # 3. Fallback: search chunks in Qdrant
-            chunks = await self._search_qdrant(embedding)
-
-            if chunks:
-                logger.debug(f"[EVIDENCE_MATCHER] Fallback to Qdrant: {len(chunks)} chunks")
-                evidence = [
-                    Evidence(
-                        type="chunk",
-                        text=chunk.get("text", "")[:500],  # Truncate
-                        source_doc=chunk.get("source_file", "unknown"),
-                        source_page=chunk.get("page"),
-                        source_section=chunk.get("section"),
-                        confidence=chunk.get("score", 0.5),
-                        relationship="partial"
+                # 2b. Incohérence par absence : UNIQUEMENT si aucune confirmation
+                # ni contradiction directe n'a été trouvée.
+                if status.value in ("unknown", "fallback"):
+                    absence_check = await self._check_absence_incoherence(
+                        assertion_text, claims
                     )
-                    for chunk in chunks
-                ]
-                max_score = max(c.get("score", 0) for c in chunks)
-                return evidence, VerificationStatus.FALLBACK, max_score
+                    if absence_check:
+                        alt_evidence, alt_status, alt_confidence = absence_check
+                        return alt_evidence + evidence, alt_status, max(alt_confidence, confidence)
 
-            # 4. Nothing found
+                return evidence, status, confidence
+
+            # 3. Nothing found
             return [], VerificationStatus.UNKNOWN, 0.0
 
         except Exception as e:
@@ -326,6 +322,213 @@ class EvidenceMatcher:
 
         return unique
 
+    async def _search_claims_vector_neo4j(
+        self,
+        text: str,
+        embedding: List[float],
+    ) -> List[Dict[str, Any]]:
+        """
+        Phase 3 — Recherche vectorielle directe sur les claims Neo4j.
+
+        Utilise le vector index 'claim_embedding' pour trouver les claims
+        les plus similaires sémantiquement. Cross-langue natif grâce à e5-large.
+        Enrichit avec les contradictions et entités en une seule requête.
+        """
+        if not self.neo4j_client.driver:
+            return []
+
+        try:
+            database = getattr(self.neo4j_client, 'database', 'neo4j')
+
+            query = """
+            CALL db.index.vector.queryNodes('claim_embedding', $k, $embedding)
+            YIELD node AS c, score
+            WHERE score > $threshold AND c.tenant_id = $tenant_id
+            OPTIONAL MATCH (c)-[contra:CONTRADICTS]-(other:Claim)
+            OPTIONAL MATCH (c)-[:ABOUT]->(e:Entity)
+            WITH c, score,
+                 collect(DISTINCT {text: other.text, doc_id: other.doc_id})[..3] AS contradictions,
+                 collect(DISTINCT e.name)[..5] AS entity_names
+            RETURN
+                c.claim_id AS claim_id,
+                c.claim_type AS claim_type,
+                c.text AS value,
+                c.confidence AS confidence,
+                'VALIDATED' AS maturity,
+                c.doc_id AS doc_id,
+                c.verbatim_quote AS verbatim_quote,
+                c.chunk_ids AS chunk_ids,
+                score AS total_score,
+                contradictions,
+                entity_names
+            ORDER BY score DESC
+            LIMIT $limit
+            """
+
+            with self.neo4j_client.driver.session(database=database) as session:
+                result = session.run(query, {
+                    "tenant_id": self.tenant_id,
+                    "embedding": embedding,
+                    "k": 15,
+                    "threshold": 0.65,
+                    "limit": self.NEO4J_CLAIM_LIMIT,
+                })
+                claims = [dict(record) for record in result]
+
+            if claims:
+                logger.info(
+                    f"[EVIDENCE_MATCHER] Vector search found {len(claims)} claims "
+                    f"(best score: {claims[0]['total_score']:.3f})"
+                )
+
+                # Enrichir avec le contexte chunk si disponible
+                for claim in claims:
+                    chunk_ids = claim.get("chunk_ids") or []
+                    if chunk_ids:
+                        chunk_text = await self._get_chunk_text(chunk_ids[0])
+                        if chunk_text:
+                            claim["chunk_context"] = chunk_text
+
+            return claims
+
+        except Exception as e:
+            if "no such index" in str(e).lower() or "index not found" in str(e).lower():
+                logger.debug(
+                    "[EVIDENCE_MATCHER] Vector index not available, "
+                    "falling back to keyword search"
+                )
+            else:
+                logger.warning(f"[EVIDENCE_MATCHER] Vector search error: {e}")
+            return []
+
+    async def _get_chunk_text(self, chunk_id: str) -> Optional[str]:
+        """Récupère le texte d'un chunk depuis Qdrant par son chunk_id."""
+        try:
+            import requests
+            qdrant_url = self.settings.qdrant_url
+            collection = self.settings.qdrant_collection
+
+            resp = requests.post(
+                f"{qdrant_url}/collections/{collection}/points/scroll",
+                json={
+                    "limit": 1,
+                    "with_payload": ["text"],
+                    "with_vector": False,
+                    "filter": {
+                        "must": [
+                            {"key": "chunk_id", "match": {"value": chunk_id}}
+                        ]
+                    },
+                },
+                timeout=5,
+            )
+            data = resp.json().get("result", {})
+            points = data.get("points", [])
+            if points:
+                return points[0].get("payload", {}).get("text", "")
+        except Exception as e:
+            logger.debug(f"[EVIDENCE_MATCHER] Chunk fetch error: {e}")
+        return None
+
+    async def _search_claims_semantic(
+        self,
+        text: str,
+        embedding: List[float],
+    ) -> List[Dict[str, Any]]:
+        """
+        Recherche sémantique cross-langue : embedding assertion → Qdrant → claims Neo4j.
+
+        Utilise les embeddings multilingues (e5-large) qui gèrent FR→EN.
+        Retrouve les chunks Qdrant les plus proches, puis remonte aux claims Neo4j
+        via le doc_id et le texte.
+        """
+        try:
+            # 1. Recherche sémantique dans Qdrant (collection knowbase)
+            collection = self.settings.qdrant_collection
+            results = search_with_tenant_filter(
+                collection_name=collection,
+                query_vector=embedding,
+                tenant_id=self.tenant_id,
+                limit=15,
+                score_threshold=0.65,
+            )
+
+            if not results:
+                return []
+
+            # 2. Extraire les textes des chunks trouvés
+            chunk_texts = []
+            for hit in results:
+                payload = hit.get("payload", {})
+                chunk_text = payload.get("text", payload.get("content", ""))
+                if chunk_text:
+                    chunk_texts.append(chunk_text[:200])
+
+            if not chunk_texts:
+                return []
+
+            # 3. Chercher les claims Neo4j correspondantes via fulltext ou keyword match
+            database = getattr(self.neo4j_client, 'database', 'neo4j')
+            claims = []
+
+            with self.neo4j_client.driver.session(database=database) as session:
+                # Extraire des keywords anglais depuis les chunks Qdrant
+                # (les chunks sont en anglais = langue des claims)
+                all_words = " ".join(chunk_texts).lower()
+                english_keywords = list(set(
+                    w.strip(".,;:!?\"'()[]")
+                    for w in all_words.split()
+                    if len(w) >= 4 and w.lower() not in {
+                        "the", "and", "was", "were", "been", "have", "has",
+                        "that", "this", "with", "from", "they", "their",
+                        "which", "than", "more", "also", "into", "about",
+                        "between", "during", "after", "before", "other",
+                    }
+                ))[:12]
+
+                if not english_keywords:
+                    return []
+
+                logger.debug(
+                    f"[EVIDENCE_MATCHER] Semantic search → English keywords: {english_keywords[:6]}"
+                )
+
+                result = session.run(
+                    """
+                    MATCH (c:Claim {tenant_id: $tenant_id})
+                    WHERE any(kw IN $keywords WHERE toLower(c.text) CONTAINS toLower(kw))
+                    WITH c,
+                         size([kw IN $keywords WHERE toLower(c.text) CONTAINS toLower(kw)]) AS kw_score
+                    RETURN
+                        c.claim_id AS claim_id,
+                        c.claim_type AS claim_type,
+                        c.text AS value,
+                        c.confidence AS confidence,
+                        'VALIDATED' AS maturity,
+                        c.doc_id AS doc_id,
+                        c.verbatim_quote AS verbatim_quote,
+                        kw_score AS total_score
+                    ORDER BY kw_score DESC
+                    LIMIT $limit
+                    """,
+                    tenant_id=self.tenant_id,
+                    keywords=english_keywords,
+                    limit=self.NEO4J_CLAIM_LIMIT,
+                )
+                claims = [dict(record) for record in result]
+
+            if claims:
+                logger.info(
+                    f"[EVIDENCE_MATCHER] Semantic search found {len(claims)} claims "
+                    f"(via Qdrant→keywords pivot)"
+                )
+
+            return claims
+
+        except Exception as e:
+            logger.warning(f"[EVIDENCE_MATCHER] Semantic search error: {e}")
+            return []
+
     async def _search_qdrant(self, embedding: List[float]) -> List[Dict[str, Any]]:
         """Search for similar chunks in Qdrant."""
         try:
@@ -385,7 +588,19 @@ class EvidenceMatcher:
             # 2. If structured form (not TEXT_VALUE), try deterministic comparison
             if assertion_form and assertion_form.form_type != ClaimFormType.TEXT_VALUE:
                 logger.debug(f"[EVIDENCE_MATCHER] Deterministic comparison for: {assertion_form.form_type.value}")
-                return await self._deterministic_compare(assertion_form, claims)
+                det_evidence, det_status, det_confidence = await self._deterministic_compare(assertion_form, claims)
+
+                # Escalader vers le LLM quand le déterministe n'est pas sûr.
+                # Le comparateur déterministe échoue souvent en cross-langue
+                # (compare les premiers mots FR vs EN → PROPERTY_MISMATCH).
+                if det_status.value in ("contradicted", "unknown", "incomplete") and det_confidence < 0.9:
+                    logger.debug(
+                        f"[EVIDENCE_MATCHER] Deterministic verdict={det_status.value} "
+                        f"conf={det_confidence:.2f}, escalating to LLM"
+                    )
+                    return await self._llm_compare(assertion, claims)
+
+                return det_evidence, det_status, det_confidence
             else:
                 logger.debug("[EVIDENCE_MATCHER] TEXT_VALUE form, using LLM fallback")
 
@@ -698,3 +913,110 @@ class EvidenceMatcher:
             return {"relationship": "CONTRADICTS", "confidence": 0.7}
         else:
             return {"relationship": "PARTIAL", "confidence": 0.5}
+
+    async def _check_absence_incoherence(
+        self,
+        assertion_text: str,
+        found_claims: List[Dict[str, Any]],
+    ) -> Optional[Tuple[List[Any], Any, float]]:
+        """
+        Détecte les incohérences par absence.
+
+        Si l'assertion contient une valeur numérique (seuil, pourcentage, durée...)
+        et que le KG contient des claims sur le même sujet avec des valeurs DIFFÉRENTES
+        mais AUCUNE qui confirme la valeur assertée → signaler.
+
+        Returns:
+            None si pas d'incohérence, sinon (evidence, status, confidence)
+        """
+        import re
+
+        Evidence, VerificationStatus = _get_verification_schemas()
+
+        # 1. Extraire les valeurs numériques de l'assertion
+        # Patterns: "50 mg/L", "95%", "0.25 ng/mL", "10 mois", "2 heures"
+        num_patterns = re.findall(
+            r'(\d+[.,]?\d*)\s*(%|mg/[dL]|ng/m[lL]|μg/[lL]|mg/L|pg/mL|mois|months?'
+            r'|jours?|days?|heures?|hours?|min(?:utes?)?|semaines?|weeks?)',
+            assertion_text, re.IGNORECASE
+        )
+
+        if not num_patterns:
+            return None
+
+        # 2. Extraire le sujet (mots-clés non numériques autour de la valeur)
+        assertion_lower = assertion_text.lower()
+
+        # 3. Chercher dans les claims trouvées des valeurs numériques alternatives
+        assertion_values = set()
+        for val, unit in num_patterns:
+            assertion_values.add(val.replace(",", "."))
+
+        alternative_values = []
+        for claim in found_claims:
+            claim_text = claim.get("value", "") or claim.get("verbatim_quote", "") or ""
+            if not claim_text:
+                continue
+
+            # Extraire les valeurs numériques des claims
+            claim_nums = re.findall(
+                r'(\d+[.,]?\d*)\s*(%|mg/[dL]|ng/m[lL]|μg/[lL]|mg/L|pg/mL|mois|months?'
+                r'|jours?|days?|heures?|hours?|min(?:utes?)?|semaines?|weeks?)',
+                claim_text, re.IGNORECASE
+            )
+
+            for val, unit in claim_nums:
+                normalized_val = val.replace(",", ".")
+                if normalized_val not in assertion_values:
+                    alternative_values.append({
+                        "value": f"{val} {unit}",
+                        "claim_text": claim_text[:200],
+                        "claim_id": claim.get("claim_id", ""),
+                        "doc_id": claim.get("doc_id", ""),
+                    })
+
+        if not alternative_values:
+            return None
+
+        # 4. Dédupliquer par valeur
+        seen_values = set()
+        unique_alternatives = []
+        for alt in alternative_values:
+            if alt["value"] not in seen_values:
+                seen_values.add(alt["value"])
+                unique_alternatives.append(alt)
+
+        if not unique_alternatives:
+            return None
+
+        # 5. Construire l'évidence d'incohérence par absence
+        alt_values_str = ", ".join(a["value"] for a in unique_alternatives[:5])
+        asserted_values_str = ", ".join(f"{v} {u}" for v, u in num_patterns)
+
+        logger.info(
+            f"[EVIDENCE_MATCHER] Absence incoherence detected: "
+            f"assertion='{asserted_values_str}', "
+            f"KG alternatives='{alt_values_str}'"
+        )
+
+        evidence = []
+        for alt in unique_alternatives[:5]:
+            evidence.append(Evidence(
+                type="claim",
+                text=f"[VALEUR ALTERNATIVE] {alt['claim_text']}",
+                source_doc=alt.get("doc_id", ""),
+                confidence=0.7,
+                relationship="contradicts",
+                comparison_details={
+                    "reason_code": "ABSENCE_INCOHERENCE",
+                    "reason_message": (
+                        f"La valeur assertée ({asserted_values_str}) n'apparaît dans aucune claim du KG. "
+                        f"Valeurs alternatives trouvées : {alt_values_str}"
+                    ),
+                    "deterministic": True,
+                    "asserted_value": asserted_values_str,
+                    "alternative_values": alt_values_str,
+                }
+            ))
+
+        return evidence, VerificationStatus.CONTRADICTED, 0.65

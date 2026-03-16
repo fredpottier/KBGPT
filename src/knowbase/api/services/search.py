@@ -64,6 +64,77 @@ def build_response_payload(result, public_url: str) -> dict[str, Any]:
     }
 
 
+def _search_claims_vector(
+    query: str,
+    tenant_id: str = "default",
+    top_k: int = 10,
+) -> List[Dict[str, Any]]:
+    """
+    Phase 4 Bridge — Recherche vectorielle sur les claims Neo4j.
+
+    Utilisé comme alternative au RAG Qdrant en mode TEXT_ONLY.
+    Retourne des résultats au format chunk (compatible avec le reste du pipeline).
+    """
+    try:
+        from knowbase.common.clients.embeddings import EmbeddingModelManager
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+
+        # Encoder la question
+        emb_manager = EmbeddingModelManager()
+        model = emb_manager.get_model()
+        embedding = model.encode(f"query: {query}", normalize_embeddings=True).tolist()
+
+        # Vector search Neo4j
+        client = get_neo4j_client()
+        with client.driver.session(database=client.database) as session:
+            result = session.run(
+                """
+                CALL db.index.vector.queryNodes('claim_embedding', $k, $embedding)
+                YIELD node AS c, score
+                WHERE score > 0.65 AND c.tenant_id = $tenant_id
+                OPTIONAL MATCH (c)-[contra:CONTRADICTS]-(other:Claim)
+                OPTIONAL MATCH (c)-[:ABOUT]->(e:Entity)
+                WITH c, score,
+                     collect(DISTINCT other.text)[..2] AS contradiction_texts,
+                     collect(DISTINCT e.name)[..5] AS entity_names
+                RETURN
+                    c.claim_id AS chunk_id,
+                    c.text AS text,
+                    c.doc_id AS source_file,
+                    c.verbatim_quote AS verbatim_quote,
+                    score,
+                    contradiction_texts,
+                    entity_names,
+                    c.chunk_ids AS chunk_ids
+                ORDER BY score DESC
+                LIMIT $k
+                """,
+                tenant_id=tenant_id,
+                embedding=embedding,
+                k=top_k,
+            )
+
+            claims = []
+            for r in result:
+                # Format compatible avec les chunks existants
+                claim_chunk = {
+                    "text": r["verbatim_quote"] or r["text"],
+                    "source_file": r["source_file"] or "",
+                    "score": r["score"],
+                    "claim_id": r["chunk_id"],
+                    "entity_names": r["entity_names"],
+                    "contradiction_texts": r["contradiction_texts"],
+                    "source_type": "claim_vector",  # Marqueur pour distinguer du RAG
+                }
+                claims.append(claim_chunk)
+
+            return claims
+
+    except Exception as e:
+        logger.warning(f"[SEARCH] Claims vector search error: {e}")
+        return []
+
+
 def search_documents(
     *,
     question: str,
@@ -202,6 +273,25 @@ def search_documents(
                             f"[GRAPH-FIRST] Mode {graph_first_plan.mode.value}: "
                             f"{len(graph_first_chunks)} chunks from {filter_count} {filter_type}"
                         )
+
+            if not graph_first_succeeded:
+                # Phase 4 Bridge: en mode TEXT_ONLY, chercher d'abord dans les claims
+                # par vector search Neo4j au lieu du RAG Qdrant aveugle.
+                try:
+                    claim_results = _search_claims_vector(
+                        query=enriched_query,
+                        tenant_id=tenant_id,
+                        top_k=TOP_K,
+                    )
+                    if claim_results:
+                        graph_first_chunks = claim_results
+                        graph_first_succeeded = True
+                        logger.info(
+                            f"[GRAPH-FIRST] TEXT_ONLY → claims vector search: "
+                            f"{len(claim_results)} claims found"
+                        )
+                except Exception as e:
+                    logger.debug(f"[GRAPH-FIRST] Claims vector search failed: {e}")
 
             if not graph_first_succeeded:
                 logger.info(

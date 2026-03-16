@@ -63,6 +63,14 @@ class EvidenceUnit(BaseModel):
         default_factory=list,
         description="Flags de diagnostic (dominant_doc, low_definitionality, etc.)",
     )
+    chunk_context: Optional[str] = Field(
+        default=None,
+        description="Contexte verbatim long du chunk source (paragraphe complet)",
+    )
+    chunk_id: Optional[str] = Field(
+        default=None,
+        description="ID du chunk source dans Qdrant (via pont claim↔chunk)",
+    )
 
 
 class TemporalStep(BaseModel):
