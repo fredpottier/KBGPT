@@ -98,6 +98,7 @@ const typeColor: Record<string, string> = {
   SUPPRESS_ENTITY: 'red',
   HARD_DELETE_ENTITY: 'red',
   MERGE_CANONICAL: 'purple',
+  MERGE_ENTITY: 'purple',
   SUPPRESS_AXIS: 'blue',
   MERGE_AXIS: 'blue',
 }
@@ -743,6 +744,29 @@ export default function KGHygienePage() {
                                       </Badge>
                                     </Text>
                                   )}
+                                </VStack>
+                              )
+                            }
+
+                            if (action.action_type === 'MERGE_ENTITY') {
+                              const sourceName = (before?.source_name || action.target_node_id) as string
+                              const targetName = (before?.target_name || '?') as string
+                              const sourceClaims = (before?.source_claim_count || 0) as number
+                              const targetClaims = (before?.target_claim_count || 0) as number
+                              return (
+                                <VStack align="start" spacing={1}>
+                                  <HStack spacing={1} flexWrap="wrap">
+                                    <Badge colorScheme="red" variant="subtle" fontSize="xs">
+                                      {sourceName}
+                                    </Badge>
+                                    <Text fontSize="xs" color="text.muted">→</Text>
+                                    <Badge colorScheme="green" variant="subtle" fontSize="xs">
+                                      {targetName}
+                                    </Badge>
+                                  </HStack>
+                                  <Text fontSize="xs" color="text.muted">
+                                    {sourceClaims} claims → fusion dans {targetClaims} claims
+                                  </Text>
                                 </VStack>
                               )
                             }
