@@ -68,8 +68,25 @@ SECTION_INSTRUCTIONS = {
         "Pour chaque étape, indique ce qui a changé et pourquoi si connu."
     ),
     "contradictions": (
-        "Présente de manière neutre les contradictions détectées. "
-        "Cite les deux versions. N'arbitre pas entre les sources."
+        "Présente les contradictions détectées de manière structurée et pédagogique.\n\n"
+        "RÈGLES DE FORMAT:\n"
+        "1. Traite chaque contradiction SÉPARÉMENT avec un sous-titre **gras** décrivant le point de divergence.\n"
+        "2. Pour chaque contradiction, si un terme technique ou une métrique apparaît, "
+        "EXPLIQUE-LE brièvement en 1 phrase pour un lecteur non-spécialiste.\n"
+        "3. Puis présente les deux valeurs en vis-à-vis avec leurs sources.\n"
+        "4. Termine par une phrase d'interprétation neutre (pourquoi cette divergence peut exister : "
+        "périmètres différents, méthodes de mesure, contextes, périodes, etc.).\n"
+        "5. N'arbitre JAMAIS entre les sources. Reste factuel.\n\n"
+        "STRUCTURE par contradiction:\n"
+        "**[Point de divergence en langage clair]**\n\n"
+        "[Si nécessaire, explication du terme/métrique clé]. Selon [Source A], [valeur A]. "
+        "En revanche, [Source B] rapporte [valeur B]. "
+        "[Hypothèse neutre sur l'origine de la divergence.]\n\n"
+        "ADAPTER LE TON selon le type de tension fourni dans le JSON des conflits :\n"
+        "- value_conflict : 'Les sources divergent sur ce point...'\n"
+        "- scope_conflict : 'Cette valeur varie selon le contexte...'\n"
+        "- temporal_conflict : 'La recommandation a évolué...'\n"
+        "- complementary : 'Ces résultats éclairent des aspects différents...'\n"
     ),
     "tensions": (
         "Ton prudent : 'il semble que...', 'divergence potentielle'. "
@@ -94,7 +111,7 @@ SECTION_TITLES = {
     "key_properties": "Caractéristiques principales",
     "obligations": "Obligations et prescriptions",
     "temporal": "Évolution temporelle",
-    "contradictions": "Contradictions détectées",
+    "contradictions": "Points de débat",
     "tensions": "Tensions à confirmer",
     "scope": "Portée et applicabilité",
     "related": "Concepts liés",
@@ -171,12 +188,15 @@ class SectionPlanner:
                 sections.append(self._make_section("temporal", temporal_ids))
                 assigned_ids.update(temporal_ids)
 
-        # ── contradictions ──
-        if pack.confirmed_conflicts:
+        # ── contradictions (filtrées par show_in_article) ──
+        article_conflicts = [
+            c for c in pack.confirmed_conflicts
+            if c.show_in_article and c.tension_level != "none"
+        ]
+        if article_conflicts:
             conflict_ids = []
-            for c in pack.confirmed_conflicts:
+            for c in article_conflicts:
                 conflict_ids.extend([c.unit_id_a, c.unit_id_b])
-            # Garder uniquement les IDs existants
             conflict_ids = [uid for uid in conflict_ids if uid in unit_index]
             if conflict_ids:
                 sections.append(self._make_section("contradictions", conflict_ids))

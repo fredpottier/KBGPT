@@ -21,6 +21,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from knowbase.wiki.diffusion_flags import derive_diffusion_flags as _derive_diffusion_flags
+
 from knowbase.wiki.models import (
     CandidateTension,
     ConfirmedConflict,
@@ -106,7 +108,19 @@ class EvidencePackBuilder:
         temporal = self._step4_temporal(concept, tenant_id, all_units)
 
         # Étape 5 : Contradictions
-        conflicts, tensions = self._step5_contradictions(claims_raw, concept, tenant_id)
+        # Construire le mapping claim_id → unit_id pour les claims du pack
+        claim_to_unit: Dict[str, str] = {
+            u.source_id: u.unit_id for u in all_units if u.source_type == "claim"
+        }
+        conflicts, tensions, external_units = self._step5_contradictions(
+            claims_raw, concept, tenant_id, claim_to_unit
+        )
+        # Ajouter les units externes au pack (claims hors pack référencés par les contradictions)
+        if external_units:
+            all_units.extend(external_units)
+            logger.info(
+                f"[OSMOSE:EvidencePackBuilder] Étape 5 : {len(external_units)} units externes ajoutés"
+            )
 
         # Étape 6 : Concepts liés
         related = self._step6_related(concept, tenant_id, all_units)
@@ -589,87 +603,137 @@ class EvidencePackBuilder:
 
         return TemporalEvolution(axis_name="temporal_scope", timeline=timeline)
 
-    # ── Étape 5 : Contradictions ─────────────────────────────────────────
+    # ── Étape 5 : Contradictions (lecture Neo4j) ─────────────────────────
 
     def _step5_contradictions(
         self,
         claims_raw: List[dict],
         concept: ResolvedConcept,
         tenant_id: str,
-    ) -> Tuple[List[ConfirmedConflict], List[CandidateTension]]:
-        """Détecte les contradictions entre claims via detect_value_contradictions."""
-        if len(claims_raw) < 2:
-            return [], []
+        claim_to_unit: Dict[str, str] = None,
+    ) -> Tuple[List[ConfirmedConflict], List[CandidateTension], List[EvidenceUnit]]:
+        """Lit les relations CONTRADICTS persistées dans Neo4j au lieu de re-détecter.
 
-        try:
-            from knowbase.claimfirst.clustering.value_contradicts import (
-                detect_value_contradictions,
-            )
-        except ImportError:
-            logger.warning(
-                "[OSMOSE:EvidencePackBuilder] value_contradicts non disponible"
-            )
-            return [], []
+        Returns:
+            (confirmed_conflicts, candidate_tensions, external_units)
+            external_units: EvidenceUnits créés pour les claims hors pack référencés
+        """
+        claim_ids = [c["claim_id"] for c in claims_raw if c.get("claim_id")]
+        if not claim_ids:
+            return [], [], []
 
-        # Construire les paires de claims (objets simples avec les attributs requis)
-        class _ClaimStub:
-            def __init__(self, d: dict):
-                self.claim_id = d["claim_id"]
-                self.text = d["text"]
-                self.claim_type = d["claim_type"]
-                self.doc_id = d["doc_id"]
-                sf = d.get("structured_form")
-                if isinstance(sf, str):
-                    import json
-                    try:
-                        sf = json.loads(sf)
-                    except (json.JSONDecodeError, TypeError):
-                        sf = {}
-                self.structured_form = sf or {}
+        claim_to_unit = claim_to_unit or {}
 
-        stubs = [_ClaimStub(c) for c in claims_raw]
-        pairs = []
-        for i in range(len(stubs)):
-            for j in range(i + 1, len(stubs)):
-                pairs.append((stubs[i], stubs[j]))
+        # Requête : contradictions internes + externes proches (au moins 1 claim dans le pack)
+        # Inclure le texte des claims pour créer des units externes si nécessaire
+        query = """
+        MATCH (c1:Claim)-[r:CONTRADICTS]->(c2:Claim)
+        WHERE (c1.claim_id IN $claim_ids OR c2.claim_id IN $claim_ids)
+              AND c1.tenant_id = $tenant_id
+        RETURN c1.claim_id AS id_a, c2.claim_id AS id_b,
+               c1.text AS text_a, c2.text AS text_b,
+               c1.doc_id AS doc_id_a, c2.doc_id AS doc_id_b,
+               r.tension_nature AS tension_nature,
+               r.tension_level AS tension_level,
+               r.explanation AS explanation,
+               r.show_in_article AS show_in_article,
+               r.show_in_chat AS show_in_chat
+        """
 
-        if not pairs:
-            return [], []
-
-        formal_results, need_llm_pairs, stats = detect_value_contradictions(
-            claim_pairs=pairs
-        )
-        logger.info(
-            f"[OSMOSE:EvidencePackBuilder] Contradictions : {stats}"
-        )
-
-        # Séparer confirmed (INCOMPATIBLE) et candidate (NEED_LLM)
-        # Note : detect_value_contradictions retourne COMPATIBLE ou INCOMPARABLE,
-        # jamais directement INCOMPATIBLE. Les NEED_LLM sont les tensions.
+        claim_id_set = set(claim_ids)
+        seen_pairs: Set[Tuple[str, str]] = set()
         conflicts: List[ConfirmedConflict] = []
-        for cid1, cid2, result in formal_results:
-            if result.verdict.value == "incomparable":
+        tensions: List[CandidateTension] = []
+        external_units: List[EvidenceUnit] = []
+        external_unit_map: Dict[str, str] = {}  # claim_id → unit_id pour les externes
+
+        with self._driver.session() as session:
+            result = session.run(query, claim_ids=claim_ids, tenant_id=tenant_id)
+            for r in result:
+                id_a = r["id_a"]
+                id_b = r["id_b"]
+
+                # Déduplier (relation directionnelle mais contradiction symétrique)
+                pair_key = tuple(sorted([id_a, id_b]))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+
+                tension_nature = r.get("tension_nature")
+                tension_level = r.get("tension_level")
+
+                # Exclure les faux positifs (tension_level == "none")
+                if tension_level == "none":
+                    continue
+
+                is_external = not (id_a in claim_id_set and id_b in claim_id_set)
+
+                # Déduire les flags de diffusion depuis la classification
+                show_in_article, show_in_chat = _derive_diffusion_flags(
+                    tension_nature, tension_level
+                )
+                # Utiliser les flags Neo4j s'ils existent (override)
+                if r.get("show_in_article") is not None:
+                    show_in_article = r["show_in_article"]
+                if r.get("show_in_chat") is not None:
+                    show_in_chat = r["show_in_chat"]
+
+                # Mapper claim_ids vers unit_ids — créer des units externes si nécessaire
+                unit_a = claim_to_unit.get(id_a)
+                unit_b = claim_to_unit.get(id_b)
+
+                if not unit_a:
+                    unit_a = external_unit_map.get(id_a)
+                    if not unit_a:
+                        unit_a = f"eu_{uuid.uuid4().hex[:8]}"
+                        external_unit_map[id_a] = unit_a
+                        external_units.append(EvidenceUnit(
+                            unit_id=unit_a,
+                            source_type="claim",
+                            source_id=id_a,
+                            text=r.get("text_a") or "",
+                            doc_id=r.get("doc_id_a") or "",
+                            rhetorical_role="context",
+                            weight=0.5,
+                            diagnostic_flags=["external_contradiction"],
+                        ))
+
+                if not unit_b:
+                    unit_b = external_unit_map.get(id_b)
+                    if not unit_b:
+                        unit_b = f"eu_{uuid.uuid4().hex[:8]}"
+                        external_unit_map[id_b] = unit_b
+                        external_units.append(EvidenceUnit(
+                            unit_id=unit_b,
+                            source_type="claim",
+                            source_id=id_b,
+                            text=r.get("text_b") or "",
+                            doc_id=r.get("doc_id_b") or "",
+                            rhetorical_role="context",
+                            weight=0.5,
+                            diagnostic_flags=["external_contradiction"],
+                        ))
+
                 conflicts.append(
                     ConfirmedConflict(
-                        unit_id_a=cid1,
-                        unit_id_b=cid2,
-                        conflict_type="INCOMPATIBLE",
-                        description=result.basis,
+                        unit_id_a=unit_a,
+                        unit_id_b=unit_b,
+                        conflict_type="CONTRADICTS",
+                        description=r.get("explanation") or "",
+                        is_external=is_external,
+                        tension_nature=tension_nature,
+                        tension_level=tension_level,
+                        explanation=r.get("explanation"),
+                        show_in_article=show_in_article,
+                        show_in_chat=show_in_chat,
                     )
                 )
 
-        tensions: List[CandidateTension] = []
-        for c1, c2 in need_llm_pairs:
-            tensions.append(
-                CandidateTension(
-                    unit_id_a=c1.claim_id,
-                    unit_id_b=c2.claim_id,
-                    tension_type="NEED_LLM",
-                    description="Tension possible — nécessite arbitrage humain ou LLM",
-                )
-            )
-
-        return conflicts, tensions
+        logger.info(
+            f"[OSMOSE:EvidencePackBuilder] Contradictions Neo4j : "
+            f"{len(conflicts)} confirmées, {len(external_units)} units externes"
+        )
+        return conflicts, tensions, external_units
 
     # ── Étape 6 : Concepts liés ──────────────────────────────────────────
 

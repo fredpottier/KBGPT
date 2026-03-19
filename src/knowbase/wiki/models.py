@@ -97,6 +97,24 @@ class ConfirmedConflict(BaseModel):
     unit_id_b: str
     conflict_type: str = Field(default="INCOMPATIBLE")
     description: str = Field(default="")
+    is_external: bool = Field(
+        default=False, description="True si une des claims n'est pas dans le pack courant"
+    )
+    # Classification (optionnel — rempli si Phase B exécutée)
+    tension_nature: Optional[str] = Field(
+        default=None,
+        description="value_conflict | scope_conflict | temporal_conflict | methodological | complementary | unknown",
+    )
+    tension_level: Optional[str] = Field(
+        default=None,
+        description="hard | soft | none | unknown",
+    )
+    explanation: Optional[str] = Field(
+        default=None, description="Explication factuelle courte du classifieur"
+    )
+    # Flags de diffusion (déduits par code, pas par LLM)
+    show_in_article: bool = Field(default=True)
+    show_in_chat: bool = Field(default=False)
 
 
 class CandidateTension(BaseModel):

@@ -191,13 +191,17 @@ class ConstrainedGenerator:
         evidence: Dict = {"units": []}
 
         for u in selected:
-            evidence["units"].append({
+            unit_entry: Dict = {
                 "unit_id": u.unit_id,
                 "text": u.text,
                 "doc_title": u.doc_title,
                 "rhetorical_role": u.rhetorical_role,
                 "claim_type": u.claim_type,
-            })
+            }
+            # Bridge Phase 5: enrichir avec le contexte verbatim long du chunk source
+            if u.chunk_context:
+                unit_entry["context"] = u.chunk_context[:500]
+            evidence["units"].append(unit_entry)
 
         # Enrichissement contextuel par type de section
         if section.section_type == "contradictions" and pack.confirmed_conflicts:
@@ -207,8 +211,12 @@ class ConstrainedGenerator:
                     "unit_b": c.unit_id_b,
                     "type": c.conflict_type,
                     "description": c.description,
+                    "tension_nature": c.tension_nature,
+                    "tension_level": c.tension_level,
+                    "explanation": c.explanation or "",
                 }
                 for c in pack.confirmed_conflicts
+                if c.show_in_article and c.tension_level != "none"
             ]
 
         if section.section_type == "tensions" and pack.candidate_tensions:
@@ -266,6 +274,7 @@ class ConstrainedGenerator:
                     "doc_title": u.doc_title,
                     "rhetorical_role": u.rhetorical_role,
                     "claim_type": u.claim_type,
+                    **({"context": u.chunk_context[:500]} if u.chunk_context else {}),
                 }
                 for u in truncated_units
             ]
@@ -311,13 +320,16 @@ class ConstrainedGenerator:
         truncated_units = []
         current_len = 200  # Marge pour le contexte additionnel
         for u in ordered:
-            entry = json.dumps({
+            entry_dict: Dict = {
                 "unit_id": u.unit_id,
                 "text": u.text,
                 "doc_title": u.doc_title,
                 "rhetorical_role": u.rhetorical_role,
                 "claim_type": u.claim_type,
-            }, ensure_ascii=False)
+            }
+            if u.chunk_context:
+                entry_dict["context"] = u.chunk_context[:500]
+            entry = json.dumps(entry_dict, ensure_ascii=False)
             if current_len + len(entry) > MAX_EVIDENCE_CHARS:
                 break
             truncated_units.append(u)
