@@ -12,6 +12,37 @@ from knowbase.config.settings import get_settings
 router = APIRouter()
 
 
+@router.get("/corpus-features")
+def get_corpus_features(
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Retourne les features actives du corpus (pour conditionner la navigation)."""
+    has_versioning = False
+    try:
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+
+        client = get_neo4j_client()
+        with client.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (c:Claim {tenant_id: $tid})
+                WHERE c.axis_release_id IS NOT NULL OR c.axis_version IS NOT NULL
+                RETURN count(c) > 0 AS has_versioning
+                LIMIT 1
+                """,
+                tid=tenant_id,
+            ).single()
+            if result:
+                has_versioning = result["has_versioning"]
+    except Exception:
+        pass
+
+    return {
+        "has_versioning": has_versioning,
+        "has_compare": has_versioning,
+    }
+
+
 @router.post("/search")
 def search(
     request: SearchRequest,

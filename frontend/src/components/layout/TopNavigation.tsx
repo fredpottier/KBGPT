@@ -18,6 +18,7 @@ import {
   Image,
 } from '@chakra-ui/react'
 import { ChevronDownIcon } from '@chakra-ui/icons'
+import { useState, useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import NextLink from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
@@ -189,6 +190,22 @@ export default function TopNavigation() {
   const pathname = usePathname()
   const router = useRouter()
   const { user, isAuthenticated, logout } = useAuth()
+  const [hasCompare, setHasCompare] = useState(false)
+
+  // Charger les features du corpus pour conditionner la navigation
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const token = localStorage.getItem('auth_token')
+    if (!token) return
+    fetch('/api/corpus-features', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data) setHasCompare(!!data.has_compare)
+      })
+      .catch(() => {})
+  }, [isAuthenticated])
 
   const handleLogout = () => {
     logout()
@@ -247,14 +264,16 @@ export default function TopNavigation() {
             <Text>{navigationConfig.chat.label}</Text>
           </NavLink>
 
-          {/* Compare - lien direct */}
-          <NavLink
-            href={navigationConfig.compare.href!}
-            isActive={isActiveSection('compare')}
-          >
-            <Icon as={navigationConfig.compare.icon} />
-            <Text>{navigationConfig.compare.label}</Text>
-          </NavLink>
+          {/* Compare - conditionné à la présence de versioning dans le corpus */}
+          {hasCompare && (
+            <NavLink
+              href={navigationConfig.compare.href!}
+              isActive={isActiveSection('compare')}
+            >
+              <Icon as={navigationConfig.compare.icon} />
+              <Text>{navigationConfig.compare.label}</Text>
+            </NavLink>
+          )}
 
           {/* Verify - lien direct */}
           <NavLink
@@ -265,7 +284,7 @@ export default function TopNavigation() {
             <Text>{navigationConfig.verify.label}</Text>
           </NavLink>
 
-          {/* Wiki - dropdown */}
+          {/* Atlas - dropdown */}
           <NavDropdown
             label={navigationConfig.wiki.label}
             icon={navigationConfig.wiki.icon}
