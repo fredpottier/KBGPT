@@ -503,6 +503,11 @@ class ClaimFirstOrchestrator:
         else:
             logger.info("  → No domain packs active or no new entities")
 
+        # Phase 4.6: Canonical Alias Resolution (renommer les entités via aliases domain pack)
+        renamed_count = self._resolve_canonical_aliases(entities, tenant_id)
+        if renamed_count > 0:
+            logger.info(f"  → {renamed_count} entités renommées via canonical aliases")
+
         # Phase 5: Clustering (si plusieurs claims)
         logger.info("[OSMOSE:ClaimFirst] Phase 5: Clustering...")
         clusters: List[ClaimCluster] = []
@@ -2095,6 +2100,60 @@ Return JSON: {{"results": [{{"index": 1, "verdict": "VALID", "reason": "product 
             )
         except ImportError:
             logger.debug("  → Hygiene module not available for conflict action")
+
+
+    def _resolve_canonical_aliases(
+        self,
+        entities: "List",
+        tenant_id: str,
+    ) -> int:
+        """Phase 4.6 — Résout les aliases canoniques des domain packs actifs.
+
+        Si une entité porte un nom qui est un alias connu (ex: "RISE with SAP"),
+        elle est renommée vers le nom canonique (ex: "SAP S/4HANA Cloud Private Edition").
+        Cela évite de créer des doublons que l'hygiène devrait ensuite fusionner.
+        """
+        from knowbase.domain_packs.registry import get_pack_registry
+
+        registry = get_pack_registry()
+        active_packs = registry.get_active_packs(tenant_id)
+
+        if not active_packs:
+            return 0
+
+        # Construire la table d'aliases consolidée (tous packs confondus)
+        all_aliases: Dict[str, str] = {}
+        for pack in active_packs:
+            defaults = pack._load_defaults_json()
+            raw_aliases = defaults.get("canonical_aliases", {})
+            for alias, canonical in raw_aliases.items():
+                all_aliases[alias.lower()] = canonical
+
+        if not all_aliases:
+            return 0
+
+        renamed = 0
+        seen_canonicals: Dict[str, "Entity"] = {}
+
+        for entity in entities:
+            canonical = all_aliases.get(entity.name.lower())
+            if not canonical:
+                # Essayer aussi avec le normalized_name
+                canonical = all_aliases.get(entity.normalized_name)
+            if not canonical:
+                continue
+            if canonical.lower() == entity.name.lower():
+                continue  # déjà le bon nom
+
+            old_name = entity.name
+            entity.name = canonical
+            entity.normalized_name = canonical.lower().strip()
+            renamed += 1
+            logger.debug(
+                f"  → Alias resolved: '{old_name}' => '{canonical}'"
+            )
+
+        return renamed
 
 
 __all__ = [
