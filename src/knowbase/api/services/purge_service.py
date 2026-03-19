@@ -17,11 +17,12 @@ settings = get_settings()
 logger = setup_logging(settings.logs_dir, "purge_service.log")
 
 # Labels Neo4j à PRÉSERVER (configuration)
+# Note : HygieneAction n'est PAS préservé — les décisions d'hygiène sont liées
+# au corpus courant et deviennent obsolètes après une purge complète.
 NEO4J_PRESERVED_LABELS = frozenset({
     "OntologyEntity",
     "OntologyAlias",
     "DomainContextProfile",
-    "HygieneAction",
 })
 
 # Préfixes de constraints à PRÉSERVER
