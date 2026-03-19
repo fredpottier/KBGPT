@@ -211,6 +211,14 @@ def _discover_packs(registry: PackRegistry) -> None:
     except Exception as e:
         logger.warning(f"[PackRegistry] Error loading biomedical pack: {e}")
 
+    try:
+        from knowbase.domain_packs.enterprise_sap import EnterpriseSapPack
+        registry.register(EnterpriseSapPack())
+    except ImportError:
+        logger.debug("[PackRegistry] Enterprise SAP pack not available")
+    except Exception as e:
+        logger.warning(f"[PackRegistry] Error loading enterprise_sap pack: {e}")
+
     # 2. Packs installés via upload (dans data/packs/)
     try:
         from knowbase.domain_packs.pack_manager import get_pack_manager
