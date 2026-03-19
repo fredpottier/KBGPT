@@ -19,6 +19,7 @@ import {
 } from '@chakra-ui/react'
 import { AttachmentIcon } from '@chakra-ui/icons'
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import { api } from '@/lib/api'
@@ -532,6 +533,8 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const toast = useToast()
   const queryClient = useQueryClient()
+  const searchParams = useSearchParams()
+  const hasAutoSentRef = useRef(false)
 
   const {
     isOpen: isConceptPanelOpen,
@@ -573,6 +576,16 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  // 🌊 Atlas Convergence: Support ?q= query param pour pre-remplissage
+  // Pré-remplit le champ input SANS envoyer — l'utilisateur peut modifier avant d'envoyer
+  useEffect(() => {
+    const q = searchParams?.get('q')
+    if (q && !hasAutoSentRef.current && messages.length === 0) {
+      hasAutoSentRef.current = true
+      setInput(q)
+    }
+  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const formatSearchResults = (results: any[]): string => {
     if (!results || results.length === 0) {

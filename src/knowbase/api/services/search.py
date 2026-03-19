@@ -902,21 +902,28 @@ def search_documents(
     # Cela donne une fausse impression de couverture incomplète.
     # À réactiver si on implémente une détection automatique des catégories
     # basée sur le contenu réel du Knowledge Graph.
-    #
-    # try:
-    #     from .coverage_map_service import build_coverage_map_sync
-    #     query_concepts = graph_context_data.get("query_concepts", []) if graph_context_data else []
-    #     kg_relations = graph_context_data.get("related_concepts", []) if graph_context_data else []
-    #     coverage_map = build_coverage_map_sync(
-    #         query=query,
-    #         query_concepts=query_concepts,
-    #         kg_relations=kg_relations,
-    #         tenant_id=tenant_id,
-    #     )
-    #     response["coverage_map"] = coverage_map.to_dict()
-    #     logger.info(f"[ANSWER-PROOF] Coverage map: {coverage_map.covered_count}/{coverage_map.total_relevant} domains")
-    # except Exception as e:
-    #     logger.warning(f"[ANSWER-PROOF] Coverage map failed (non-blocking): {e}")
+
+    # 🌊 Atlas Convergence: Chat ↔ Atlas — articles liés + insight hints
+    try:
+        related_articles = _find_related_articles(query, reranked_chunks, tenant_id)
+        if related_articles:
+            response["related_articles"] = related_articles
+            logger.info(
+                f"[ATLAS] Related articles: {len(related_articles)} found "
+                f"({', '.join(a['slug'] for a in related_articles)})"
+            )
+
+        insight_hints = _generate_insight_hints(
+            query, reranked_chunks, related_articles, tenant_id
+        )
+        if insight_hints:
+            response["insight_hints"] = insight_hints
+            logger.info(
+                f"[ATLAS] Insight hints: {len(insight_hints)} generated "
+                f"(types: {', '.join(h['type'] for h in insight_hints)})"
+            )
+    except Exception as e:
+        logger.warning(f"[ATLAS] Convergence failed (non-blocking): {e}")
 
     return response
 
@@ -982,6 +989,276 @@ def get_available_solutions(
 
     # Retourner la liste triée
     return sorted(list(solutions))
+
+
+def _find_related_articles(
+    question: str,
+    reranked_chunks: list[dict[str, Any]],
+    tenant_id: str = "default",
+) -> list[dict[str, Any]]:
+    """
+    Atlas Convergence — Trouve les articles Wiki liés aux entités de la réponse.
+
+    Extrait les entity_names depuis les claims/chunks retournés, puis cherche
+    les WikiArticle correspondants dans Neo4j. Applique un boost contextuel
+    basé sur la présence dans la question et le nombre de claims.
+    """
+    try:
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+
+        # Collecter les entity_names depuis les chunks (claims vector search)
+        entity_names_set: set[str] = set()
+        entity_mention_count: dict[str, int] = {}
+        for chunk in reranked_chunks:
+            names = chunk.get("entity_names", [])
+            if isinstance(names, list):
+                for name in names:
+                    if name:
+                        entity_names_set.add(name)
+                        entity_mention_count[name] = entity_mention_count.get(name, 0) + 1
+
+        # Fallback : si aucun entity_name dans les chunks (path Qdrant/hybrid),
+        # chercher les entités directement depuis les termes de la question
+        if not entity_names_set:
+            client = get_neo4j_client()
+            with client.driver.session(database=client.database) as session:
+                # Extraire les mots significatifs de la question (> 3 chars)
+                question_terms = [
+                    w for w in question.lower().split()
+                    if len(w) > 3 and w not in {"dans", "avec", "pour", "quoi", "quel", "quels",
+                        "quelle", "quelles", "comment", "corpus", "sait", "sont", "cette", "entre"}
+                ]
+                if not question_terms:
+                    return []
+                # Chercher les entités dont le nom contient un terme de la question
+                q_result = session.run(
+                    """
+                    MATCH (wa:WikiArticle {tenant_id: $tid, status: 'published'})-[:ABOUT]->(e:Entity)
+                    WHERE any(term IN $terms WHERE toLower(e.name) CONTAINS term)
+                    RETURN wa.slug AS slug, wa.title AS title,
+                           wa.importance_tier AS importance_tier,
+                           wa.importance_score AS importance_score,
+                           e.name AS matched_entity
+                    ORDER BY wa.importance_score DESC
+                    LIMIT 5
+                    """,
+                    tid=tenant_id,
+                    terms=question_terms,
+                )
+                articles = []
+                seen_slugs: set[str] = set()
+                for r in q_result:
+                    slug = r["slug"]
+                    if slug in seen_slugs:
+                        continue
+                    seen_slugs.add(slug)
+                    articles.append({
+                        "slug": slug,
+                        "title": r["title"],
+                        "importance_tier": r["importance_tier"] or 3,
+                        "matched_entity": r["matched_entity"] or "",
+                        "is_recommended": len(articles) == 0,
+                    })
+                return articles[:3]
+
+        entity_names = list(entity_names_set)
+        # Normaliser pour matching flexible
+        normalized_names = [n.lower().replace(" ", "_") for n in entity_names]
+
+        client = get_neo4j_client()
+        with client.driver.session(database=client.database) as session:
+            result = session.run(
+                """
+                MATCH (wa:WikiArticle {tenant_id: $tid, status: 'published'})-[:ABOUT]->(e:Entity)
+                WHERE e.name IN $entity_names OR e.normalized_name IN $normalized_names
+                RETURN wa.slug AS slug, wa.title AS title,
+                       wa.importance_tier AS importance_tier,
+                       wa.importance_score AS importance_score,
+                       e.name AS matched_entity
+                ORDER BY wa.importance_score DESC
+                LIMIT 5
+                """,
+                tid=tenant_id,
+                entity_names=entity_names,
+                normalized_names=normalized_names,
+            )
+
+            articles = []
+            seen_slugs: set[str] = set()
+            question_lower = question.lower()
+
+            for record in result:
+                slug = record["slug"]
+                if slug in seen_slugs:
+                    continue
+                seen_slugs.add(slug)
+
+                matched = record["matched_entity"] or ""
+                # Boost contextuel
+                boost = 0.0
+                if matched.lower() in question_lower:
+                    boost += 2.0
+                boost += min(entity_mention_count.get(matched, 0), 3)
+
+                articles.append({
+                    "slug": slug,
+                    "title": record["title"],
+                    "importance_tier": record["importance_tier"] or 3,
+                    "matched_entity": matched,
+                    "importance_score": (record["importance_score"] or 0) + boost,
+                    "is_recommended": False,
+                })
+
+            # Trier par score total et limiter à 3
+            articles.sort(key=lambda a: a["importance_score"], reverse=True)
+            articles = articles[:3]
+
+            # Marquer le premier comme recommandé
+            if articles:
+                articles[0]["is_recommended"] = True
+
+            # Nettoyer le champ de tri interne
+            for a in articles:
+                del a["importance_score"]
+
+            return articles
+
+    except Exception as e:
+        logger.warning(f"[ATLAS] Related articles lookup failed (non-blocking): {e}")
+        return []
+
+
+def _generate_insight_hints(
+    question: str,
+    reranked_chunks: list[dict[str, Any]],
+    related_articles: list[dict[str, Any]],
+    tenant_id: str = "default",
+) -> list[dict[str, Any]]:
+    """
+    Atlas Convergence — Génère des insight hints proactifs.
+
+    Types d'insights :
+    1. Contradictions entre claims
+    2. Concept structurant (tier 1-2 avec article)
+    3. Concepts liés non mentionnés dans la question
+    4. Couverture faible (< 2 sources)
+    """
+    hints: list[dict[str, Any]] = []
+
+    # Collecter claim_ids et entity_names
+    claim_ids = [c.get("claim_id") for c in reranked_chunks if c.get("claim_id")]
+    entity_names = set()
+    for chunk in reranked_chunks:
+        names = chunk.get("entity_names", [])
+        if isinstance(names, list):
+            for n in names:
+                if n:
+                    entity_names.add(n)
+
+    question_lower = question.lower()
+    question_entities = {n for n in entity_names if n.lower() in question_lower}
+
+    # --- 1. Contradictions (filtrées par show_in_chat) ---
+    if claim_ids:
+        try:
+            from knowbase.common.clients.neo4j_client import get_neo4j_client
+            client = get_neo4j_client()
+            with client.driver.session(database=client.database) as session:
+                result = session.run(
+                    """
+                    MATCH (c:Claim)-[r:CONTRADICTS]-(other:Claim)
+                    WHERE c.claim_id IN $claim_ids
+                      AND (r.show_in_chat = true OR r.show_in_chat IS NULL)
+                      AND (r.tension_level IS NULL OR r.tension_level <> 'none')
+                    RETURN c.text AS text_a, other.text AS text_b,
+                           c.doc_id AS doc_a, other.doc_id AS doc_b,
+                           r.tension_nature AS tension_nature,
+                           r.tension_level AS tension_level
+                    LIMIT 3
+                    """,
+                    claim_ids=claim_ids,
+                )
+                for record in result:
+                    text_a = (record["text_a"] or "")[:120]
+                    text_b = (record["text_b"] or "")[:120]
+                    tension_nature = record.get("tension_nature")
+
+                    # Adapter le message selon le type de tension
+                    if tension_nature == "scope_conflict":
+                        msg = f"Cette valeur varie selon le contexte : « {text_a} » vs « {text_b} »"
+                        hint_type = "context_nuance"
+                    elif tension_nature == "temporal_conflict":
+                        msg = f"La recommandation a évolué : « {text_a} » vs « {text_b} »"
+                        hint_type = "contradiction"
+                    else:
+                        msg = f"Attention, des études divergent sur ce point : « {text_a} » vs « {text_b} »"
+                        hint_type = "contradiction"
+
+                    hints.append({
+                        "type": hint_type,
+                        "message": msg,
+                        "priority": 1,
+                    })
+        except Exception as e:
+            logger.debug(f"[ATLAS:Insights] Contradiction check failed: {e}")
+
+    # --- 2. Concept structurant (article tier 1-2) ---
+    for art in related_articles:
+        tier = art.get("importance_tier", 3)
+        if tier <= 2:
+            hints.append({
+                "type": "structuring_concept",
+                "message": f"Vous devriez aussi regarder {art['title']} — ce concept est central dans ce sujet",
+                "priority": 2,
+                "action_label": f"Lire l'article {art['title']}",
+                "action_href": f"/wiki/{art['slug']}",
+            })
+            break  # Un seul suffit
+
+    # --- 3. Concepts liés non mentionnés ---
+    if claim_ids:
+        try:
+            from knowbase.common.clients.neo4j_client import get_neo4j_client
+            client = get_neo4j_client()
+            with client.driver.session(database=client.database) as session:
+                result = session.run(
+                    """
+                    MATCH (c:Claim)-[:ABOUT]->(e1:Entity), (c)-[:ABOUT]->(e2:Entity)
+                    WHERE c.claim_id IN $claim_ids AND NOT e2.name IN $question_entities
+                    WITH e2.name AS name, count(c) AS co_count
+                    WHERE co_count >= 2
+                    RETURN name, co_count ORDER BY co_count DESC LIMIT 3
+                    """,
+                    claim_ids=claim_ids,
+                    question_entities=list(question_entities),
+                )
+                for record in result:
+                    name = record["name"]
+                    hints.append({
+                        "type": "related_concept",
+                        "message": f"Le concept {name} est fortement lié et pourrait compléter votre analyse",
+                        "priority": 3,
+                    })
+        except Exception as e:
+            logger.debug(f"[ATLAS:Insights] Related concepts check failed: {e}")
+
+    # --- 4. Couverture faible ---
+    doc_ids = set()
+    for chunk in reranked_chunks:
+        doc_id = chunk.get("source_file") or chunk.get("doc_id")
+        if doc_id:
+            doc_ids.add(doc_id)
+
+    if len(doc_ids) < 2:
+        hints.append({
+            "type": "low_coverage",
+            "message": f"Ce point ne repose que sur {len(doc_ids)} source — à vérifier",
+            "priority": 3,
+        })
+
+    # Trier par priorité et limiter à 3
+    hints.sort(key=lambda h: h["priority"])
+    return hints[:3]
 
 
 def _get_kg_traversal_context(query: str, tenant_id: str) -> tuple[str, list[str], dict]:
