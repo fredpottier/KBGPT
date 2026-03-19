@@ -31,7 +31,9 @@ import {
   Center,
   Tooltip,
   IconButton,
+  Link,
 } from '@chakra-ui/react'
+import NextLink from 'next/link'
 import {
   FiPlay,
   FiRefreshCw,
@@ -49,6 +51,7 @@ import {
   FiZap,
   FiStopCircle,
   FiLoader,
+  FiExternalLink,
 } from 'react-icons/fi'
 import { useAuth } from '@/contexts/AuthContext'
 import { apiClient } from '@/lib/api'
@@ -654,295 +657,28 @@ export default function ClaimFirstPage() {
             </SimpleGrid>
           </Box>
 
-          {/* Archive Isolated Claims — Chantier 0 Phase 1B */}
+          {/* Lien vers Post-Import (les actions ont été déplacées) */}
           <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4} mb={4}>
-            <Flex justify="space-between" align="center" mb={3}>
+            <Flex justify="space-between" align="center">
               <HStack spacing={2}>
-                <Icon as={FiArchive} color="yellow.400" boxSize={4} />
+                <Icon as={FiRefreshCw} color="brand.400" boxSize={4} />
                 <Text fontSize="sm" fontWeight="semibold" color="#f1f5f9">
-                  Archivage claims isolées
+                  Opérations post-import
                 </Text>
-                <Badge colorScheme="yellow" variant="subtle" fontSize="xs">Post-import</Badge>
+                <Text fontSize="xs" color="#64748b">
+                  Canonicalisation, chaînes cross-doc, archivage, facettes, contradictions...
+                </Text>
               </HStack>
-              <HStack spacing={2}>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  colorScheme="yellow"
-                  onClick={handleArchiveDryRun}
-                  isLoading={archiveLoading}
-                  leftIcon={<Icon as={FiActivity} />}
-                >
-                  Analyser
+              <Link as={NextLink} href="/admin/post-import">
+                <Button size="sm" colorScheme="brand" variant="outline" leftIcon={<FiExternalLink />}>
+                  Ouvrir
                 </Button>
-                <Button
-                  size="xs"
-                  colorScheme="yellow"
-                  onClick={handleArchiveExecute}
-                  isLoading={archiveLoading}
-                  isDisabled={!archiveResult || archiveResult.mode === 'execute'}
-                  leftIcon={<Icon as={FiArchive} />}
-                >
-                  Archiver
-                </Button>
-              </HStack>
+              </Link>
             </Flex>
-            <Text fontSize="xs" color="#64748b" mb={2}>
-              Marque les claims sans structured_form et sans relations (CHAINS_TO, ABOUT, REFINES...) comme archivées.
-              Elles sont exclues du query engine mais conservées dans le graphe.
-            </Text>
-            {archiveResult && (
-              <Box
-                bg={archiveResult.mode === 'execute' ? 'green.900' : '#0f172a'}
-                border="1px solid"
-                borderColor={archiveResult.mode === 'execute' ? 'green.700' : '#334155'}
-                rounded="md"
-                p={3}
-                mt={2}
-              >
-                <HStack spacing={4} flexWrap="wrap">
-                  <VStack spacing={0} align="start">
-                    <Text fontSize="xs" color="#64748b">Claims totales</Text>
-                    <Text fontSize="sm" fontWeight="bold" color="#f1f5f9">
-                      {archiveResult.total_claims?.toLocaleString()}
-                    </Text>
-                  </VStack>
-                  {archiveResult.mode === 'dry-run' ? (
-                    <>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Isolées détectées</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="yellow.300">
-                          {archiveResult.isolated_count?.toLocaleString()} ({archiveResult.isolated_percentage}%)
-                        </Text>
-                      </VStack>
-                    </>
-                  ) : (
-                    <>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Nouvellement archivées</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="green.300">
-                          {archiveResult.newly_archived?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Total archivées</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="green.300">
-                          {archiveResult.total_archived?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                    </>
-                  )}
-                </HStack>
-                <Text fontSize="xs" color="#94a3b8" mt={2}>{archiveResult.message}</Text>
-              </Box>
-            )}
           </Box>
 
-          {/* Cross-Doc Chain Detection */}
-          <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4} mb={4}>
-            <Flex justify="space-between" align="center" mb={3}>
-              <HStack spacing={2}>
-                <Icon as={FiLink2} color="blue.400" boxSize={4} />
-                <Text fontSize="sm" fontWeight="semibold" color="#f1f5f9">
-                  Chaînes cross-document
-                </Text>
-                <Badge colorScheme="blue" variant="subtle" fontSize="xs">Post-import</Badge>
-              </HStack>
-              <HStack spacing={2}>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  colorScheme="blue"
-                  onClick={handleCrossDocDryRun}
-                  isLoading={crossDocLoading}
-                  leftIcon={<Icon as={FiActivity} />}
-                >
-                  Analyser
-                </Button>
-                <Button
-                  size="xs"
-                  colorScheme="blue"
-                  onClick={handleCrossDocExecute}
-                  isLoading={crossDocLoading}
-                  isDisabled={!crossDocResult || crossDocResult.mode === 'execute' || (crossDocResult.chains_detected ?? 0) === 0}
-                  leftIcon={<Icon as={FiLink2} />}
-                >
-                  Créer les chaînes
-                </Button>
-              </HStack>
-            </Flex>
-            <Text fontSize="xs" color="#64748b" mb={2}>
-              Détecte les ponts sémantiques entre documents via les entités S/P/O partagées (object→subject).
-              Exécuté automatiquement après l{"'"}import, ou manuellement ici.
-            </Text>
-            {crossDocResult && (
-              <Box
-                bg={crossDocResult.mode === 'execute' ? 'green.900' : '#0f172a'}
-                border="1px solid"
-                borderColor={crossDocResult.mode === 'execute' ? 'green.700' : '#334155'}
-                rounded="md"
-                p={3}
-                mt={2}
-              >
-                <HStack spacing={4} flexWrap="wrap">
-                  <VStack spacing={0} align="start">
-                    <Text fontSize="xs" color="#64748b">Claims S/P/O</Text>
-                    <Text fontSize="sm" fontWeight="bold" color="#f1f5f9">
-                      {crossDocResult.claims_with_sf?.toLocaleString()}
-                    </Text>
-                  </VStack>
-                  <VStack spacing={0} align="start">
-                    <Text fontSize="xs" color="#64748b">Documents</Text>
-                    <Text fontSize="sm" fontWeight="bold" color="#f1f5f9">
-                      {crossDocResult.documents}
-                    </Text>
-                  </VStack>
-                  {crossDocResult.mode === 'dry-run' ? (
-                    <>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Chaînes détectées</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="blue.300">
-                          {crossDocResult.chains_detected?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Cross-doc existantes</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="#94a3b8">
-                          {crossDocResult.existing_cross?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                    </>
-                  ) : (
-                    <>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Chaînes créées</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="green.300">
-                          {crossDocResult.chains_persisted?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Total cross-doc</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="green.300">
-                          {crossDocResult.total_cross_doc?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Total intra-doc</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="#94a3b8">
-                          {crossDocResult.total_intra_doc?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                    </>
-                  )}
-                </HStack>
-                <Text fontSize="xs" color="#94a3b8" mt={2}>{crossDocResult.message}</Text>
-              </Box>
-            )}
-          </Box>
+          {/* Actions post-import déplacées vers /admin/post-import */}
 
-          {/* Entity Canonicalization */}
-          <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4} mb={4}>
-            <Flex justify="space-between" align="center" mb={3}>
-              <HStack spacing={2}>
-                <Icon as={FiTarget} color="purple.400" boxSize={4} />
-                <Text fontSize="sm" fontWeight="semibold" color="#f1f5f9">
-                  Canonicalisation des entités
-                </Text>
-                <Badge colorScheme="purple" variant="subtle" fontSize="xs">Post-import</Badge>
-              </HStack>
-              <HStack spacing={2}>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  colorScheme="purple"
-                  onClick={handleCanonDryRun}
-                  isLoading={canonLoading}
-                  leftIcon={<Icon as={FiActivity} />}
-                >
-                  Analyser
-                </Button>
-                <Button
-                  size="xs"
-                  colorScheme="purple"
-                  onClick={handleCanonExecute}
-                  isLoading={canonLoading}
-                  isDisabled={!canonResult || canonResult.mode === 'execute' || (canonResult.total_merges ?? 0) === 0}
-                  leftIcon={<Icon as={FiTarget} />}
-                >
-                  Fusionner
-                </Button>
-              </HStack>
-            </Flex>
-            <Text fontSize="xs" color="#64748b" mb={2}>
-              Fusionne les entités dupliquées cross-document : variantes version
-              (&quot;Product 2023&quot; → &quot;Product&quot;) et containments
-              (&quot;Module X&quot; ⊂ &quot;Platform Module X&quot;).
-              Exécuté automatiquement après l{"'"}import, ou manuellement ici.
-            </Text>
-            {canonResult && (
-              <Box
-                bg={canonResult.mode === 'execute' ? 'green.900' : '#0f172a'}
-                border="1px solid"
-                borderColor={canonResult.mode === 'execute' ? 'green.700' : '#334155'}
-                rounded="md"
-                p={3}
-                mt={2}
-              >
-                <HStack spacing={4} flexWrap="wrap">
-                  <VStack spacing={0} align="start">
-                    <Text fontSize="xs" color="#64748b">Entités initiales</Text>
-                    <Text fontSize="sm" fontWeight="bold" color="#f1f5f9">
-                      {canonResult.entities_initial?.toLocaleString()}
-                    </Text>
-                  </VStack>
-                  {canonResult.mode === 'dry-run' ? (
-                    <>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Fusions version</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="purple.300">
-                          {canonResult.version_merges?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Fusions containment</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="purple.300">
-                          {canonResult.containment_merges?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Total fusions</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="purple.300">
-                          {canonResult.total_merges?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                    </>
-                  ) : (
-                    <>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Fusionnées</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="green.300">
-                          {canonResult.total_merges?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Entités restantes</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="green.300">
-                          {canonResult.entities_after?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                      <VStack spacing={0} align="start">
-                        <Text fontSize="xs" color="#64748b">Hubs annotés</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="#94a3b8">
-                          {canonResult.hubs_annotated?.toLocaleString()}
-                        </Text>
-                      </VStack>
-                    </>
-                  )}
-                </HStack>
-                <Text fontSize="xs" color="#94a3b8" mt={2}>{canonResult.message}</Text>
-              </Box>
-            )}
-          </Box>
 
           {/* Current Job Status — Panneau de suivi enrichi */}
           {currentJob && (() => {
@@ -1171,12 +907,23 @@ export default function ClaimFirstPage() {
                       <Text fontSize="xs" color="red.300" fontWeight="semibold" mb={1}>
                         {currentJob.errors.length} erreur(s)
                       </Text>
-                      {currentJob.errors.slice(0, 3).map((err, i) => (
-                        <Text key={i} fontSize="xs" color="red.400" isTruncated>{err}</Text>
-                      ))}
-                      {currentJob.errors.length > 3 && (
+                      {currentJob.errors.slice(0, 5).map((err, i) => {
+                        // Parser "filename: error message"
+                        const colonIdx = err.indexOf(': ')
+                        const docName = colonIdx > 0 ? err.slice(0, colonIdx).trim() : ''
+                        const errMsg = colonIdx > 0 ? err.slice(colonIdx + 2).trim() : err
+                        return (
+                          <Box key={i} mb={1} pl={2} borderLeft="2px solid" borderLeftColor="red.600">
+                            {docName && (
+                              <Text fontSize="xs" color="red.200" fontWeight="medium">{docName}</Text>
+                            )}
+                            <Text fontSize="xs" color="red.400">{errMsg}</Text>
+                          </Box>
+                        )
+                      })}
+                      {currentJob.errors.length > 5 && (
                         <Text fontSize="xs" color="red.500" mt={1}>
-                          ... et {currentJob.errors.length - 3} autres
+                          ... et {currentJob.errors.length - 5} autres
                         </Text>
                       )}
                     </Box>

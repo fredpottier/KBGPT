@@ -257,6 +257,23 @@ export interface CoverageMap {
   message?: string
 }
 
+// 🌊 Atlas Convergence: Related Articles & Insight Hints
+export interface RelatedArticle {
+  slug: string
+  title: string
+  importance_tier: number
+  matched_entity: string
+  is_recommended: boolean
+}
+
+export interface InsightHint {
+  type: 'contradiction' | 'low_coverage' | 'related_concept' | 'structuring_concept'
+  message: string
+  priority: number
+  action_label?: string
+  action_href?: string
+}
+
 export interface SearchResponse {
   status: 'success' | 'no_results'
   results: SearchChunk[]
@@ -276,4 +293,7 @@ export interface SearchResponse {
   coverage_map?: CoverageMap
   // 🎯 OSMOSE Assertion-Centric: Réponse instrumentée
   instrumented_answer?: import('./instrumented').InstrumentedAnswer
+  // 🌊 Atlas Convergence: Chat ↔ Atlas
+  related_articles?: RelatedArticle[]
+  insight_hints?: InsightHint[]
 }

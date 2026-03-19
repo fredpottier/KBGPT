@@ -458,6 +458,8 @@ export const api = {
     // Phase 4 — Knowledge Atlas
     home: () =>
       apiClient.get('/wiki/home'),
+    domain: (facetKey: string) =>
+      apiClient.get(`/wiki/domain/${encodeURIComponent(facetKey)}`),
     listArticles: (params?: {
       limit?: number
       offset?: number

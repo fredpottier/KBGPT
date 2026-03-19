@@ -20,6 +20,9 @@ import {
   HStack,
   Badge,
   Tooltip,
+  Link,
+  Wrap,
+  WrapItem,
 } from '@chakra-ui/react'
 import {
   SearchResponse,
@@ -29,6 +32,8 @@ import {
   KnowledgeProofSummary,
   ReasoningTrace,
   CoverageMap,
+  RelatedArticle,
+  InsightHint,
 } from '@/types/api'
 import type { InstrumentedAnswer } from '@/types/instrumented'
 import { useState } from 'react'
@@ -40,6 +45,7 @@ import ReasoningTracePanel from '../chat/ReasoningTracePanel'
 import CoverageMapPanel from '../chat/CoverageMapPanel'
 import { InstrumentedAnswerDisplay } from '../chat'
 import type { GraphData, ProofGraph } from '@/types/graph'
+import NextLink from 'next/link'
 import {
   FiAlertTriangle,
   FiFileText,
@@ -47,6 +53,10 @@ import {
   FiAlertCircle,
   FiXCircle,
   FiHelpCircle,
+  FiCompass,
+  FiStar,
+  FiLink,
+  FiAlertOctagon,
 } from 'react-icons/fi'
 
 interface SearchResultDisplayProps {
@@ -141,6 +151,16 @@ export default function SearchResultDisplay({
           explorationIntelligence={explorationIntelligence}
           onSearch={onSearch}
         />
+      )}
+
+      {/* 🌊 Atlas Convergence: Explorer ce sujet */}
+      {searchResult.related_articles && searchResult.related_articles.length > 0 && (
+        <RelatedArticlesBlock articles={searchResult.related_articles} />
+      )}
+
+      {/* 🌊 Atlas Convergence: Insight Hints */}
+      {searchResult.insight_hints && searchResult.insight_hints.length > 0 && (
+        <InsightHintsBlock hints={searchResult.insight_hints} />
       )}
 
       {/* 🎯 OSMOSE Assertion-Centric: Preuves détaillées (sous la synthèse) */}
@@ -264,6 +284,140 @@ export default function SearchResultDisplay({
         </ModalContent>
       </Modal>
     </VStack>
+  )
+}
+
+// 🌊 Atlas Convergence: Bloc "Explorer ce sujet"
+const TIER_BADGE: Record<number, { label: string; color: string }> = {
+  1: { label: 'Portail', color: 'purple' },
+  2: { label: 'Principal', color: 'blue' },
+  3: { label: 'Specifique', color: 'gray' },
+}
+
+function RelatedArticlesBlock({ articles }: { articles: RelatedArticle[] }) {
+  return (
+    <Box
+      p={4}
+      bg="rgba(99, 102, 241, 0.06)"
+      borderRadius="lg"
+      border="1px solid"
+      borderColor="rgba(99, 102, 241, 0.2)"
+    >
+      <HStack spacing={2} mb={3}>
+        <Icon as={FiCompass} boxSize={4} color="brand.400" />
+        <Text fontSize="sm" fontWeight="semibold" color="brand.400">
+          Explorer ce sujet
+        </Text>
+      </HStack>
+      <Wrap spacing={2}>
+        {articles.map((article) => {
+          const tier = TIER_BADGE[article.importance_tier] || TIER_BADGE[3]
+          return (
+            <WrapItem key={article.slug}>
+              <Link
+                as={NextLink}
+                href={`/wiki/${article.slug}`}
+                _hover={{ textDecoration: 'none' }}
+              >
+                <HStack
+                  spacing={2}
+                  px={3}
+                  py={2}
+                  bg="bg.secondary"
+                  rounded="lg"
+                  border="1px solid"
+                  borderColor={article.is_recommended ? 'brand.500' : 'border.default'}
+                  cursor="pointer"
+                  transition="all 0.2s"
+                  _hover={{
+                    borderColor: 'brand.500',
+                    bg: 'bg.tertiary',
+                    transform: 'translateY(-1px)',
+                    boxShadow: '0 2px 8px rgba(99, 102, 241, 0.15)',
+                  }}
+                >
+                  {article.is_recommended && (
+                    <Icon as={FiStar} boxSize={3.5} color="yellow.400" />
+                  )}
+                  <Text fontSize="sm" color="text.primary" fontWeight="medium">
+                    {article.title}
+                  </Text>
+                  <Badge colorScheme={tier.color} fontSize="2xs" variant="subtle">
+                    {tier.label}
+                  </Badge>
+                </HStack>
+              </Link>
+            </WrapItem>
+          )
+        })}
+      </Wrap>
+      {articles.some(a => a.is_recommended) && (
+        <Text fontSize="2xs" color="text.muted" mt={2}>
+          <Icon as={FiStar} boxSize={2.5} color="yellow.400" /> A lire en priorite
+        </Text>
+      )}
+    </Box>
+  )
+}
+
+// 🌊 Atlas Convergence: Bloc "A savoir" (Insight Hints)
+const INSIGHT_ICON: Record<string, any> = {
+  contradiction: FiAlertOctagon,
+  structuring_concept: FiCompass,
+  related_concept: FiLink,
+  low_coverage: FiAlertCircle,
+}
+
+const INSIGHT_COLOR: Record<string, string> = {
+  contradiction: 'orange.400',
+  structuring_concept: 'brand.400',
+  related_concept: 'cyan.400',
+  low_coverage: 'yellow.400',
+}
+
+function InsightHintsBlock({ hints }: { hints: InsightHint[] }) {
+  return (
+    <Box
+      p={4}
+      bg="rgba(251, 191, 36, 0.04)"
+      borderRadius="lg"
+      border="1px solid"
+      borderColor="rgba(251, 191, 36, 0.15)"
+    >
+      <HStack spacing={2} mb={3}>
+        <Icon as={FiAlertCircle} boxSize={4} color="yellow.400" />
+        <Text fontSize="sm" fontWeight="semibold" color="yellow.400">
+          A savoir
+        </Text>
+      </HStack>
+      <VStack spacing={2} align="stretch">
+        {hints.map((hint, i) => {
+          const IconComp = INSIGHT_ICON[hint.type] || FiAlertCircle
+          const color = INSIGHT_COLOR[hint.type] || 'text.muted'
+          return (
+            <HStack key={i} spacing={3} align="start">
+              <Icon as={IconComp} boxSize={4} color={color} mt={0.5} flexShrink={0} />
+              <VStack align="start" spacing={0.5}>
+                <Text fontSize="sm" color="text.secondary" lineHeight="short">
+                  {hint.message}
+                </Text>
+                {hint.action_label && hint.action_href && (
+                  <Link
+                    as={NextLink}
+                    href={hint.action_href}
+                    fontSize="xs"
+                    color="brand.400"
+                    _hover={{ textDecoration: 'underline' }}
+                  >
+                    {hint.action_label}
+                  </Link>
+                )}
+              </VStack>
+            </HStack>
+          )
+        })}
+      </VStack>
+    </Box>
   )
 }
 

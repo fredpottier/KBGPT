@@ -30,6 +30,7 @@ interface StepInfo {
   estimated_duration: string
   requires_llm: boolean
   requires_pack: boolean
+  estimated_minutes: number | null
 }
 
 interface StepResult {
@@ -221,6 +222,16 @@ export default function PostImportPage() {
             >
               Exécuter ({selectedSteps.size})
             </Button>
+            {selectedSteps.size > 0 && (() => {
+              const totalMin = steps
+                .filter(s => selectedSteps.has(s.id))
+                .reduce((sum, s) => sum + (s.estimated_minutes || 0), 0)
+              return totalMin > 0 ? (
+                <Text fontSize="xs" color="brand.300">
+                  ~{totalMin < 1 ? '<1' : Math.round(totalMin)} min estimées
+                </Text>
+              ) : null
+            })()}
           </HStack>
         </HStack>
         <Text color="text.secondary" maxW="700px">
@@ -353,7 +364,11 @@ export default function PostImportPage() {
                 {/* Duration estimate */}
                 <HStack spacing={1} flexShrink={0}>
                   <Icon as={FiClock} color="text.muted" boxSize={3} />
-                  <Text fontSize="xs" color="text.muted">{step.estimated_duration}</Text>
+                  <Text fontSize="xs" color={step.estimated_minutes ? "brand.300" : "text.muted"}>
+                    {step.estimated_minutes
+                      ? `~${step.estimated_minutes < 1 ? '<1' : step.estimated_minutes} min`
+                      : step.estimated_duration}
+                  </Text>
                 </HStack>
               </HStack>
             </Box>

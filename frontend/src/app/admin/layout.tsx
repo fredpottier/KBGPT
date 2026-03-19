@@ -77,7 +77,7 @@ const ADMIN_SECTIONS: SidebarSection[] = [
     icon: FiBookOpen,
     color: 'purple',
     items: [
-      { label: 'Wiki Generator', href: '/admin/wiki-generator', icon: FiEdit },
+      { label: 'Générateur Atlas', href: '/admin/wiki-generator', icon: FiEdit },
     ],
   },
 ]
