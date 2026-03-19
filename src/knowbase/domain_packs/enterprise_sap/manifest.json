@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "enterprise_sap",
+  "display_name": "SAP Enterprise",
+  "description": "NER zero-shot pour la documentation SAP Enterprise. Detecte les produits, modules, services et plateformes SAP via GLiNER (gliner_medium-v2.1) + gazetteer 200+ produits.",
+  "version": "1.0.0",
+  "author": "OSMOSE",
+  "min_core_version": "2.0.0",
+
+  "container": {
+    "port": 9101,
+    "health_endpoint": "/health",
+    "extract_endpoint": "/extract",
+    "memory_limit": "1g",
+    "build_args": {}
+  },
+
+  "provides": {
+    "entity_types": ["SAP_PRODUCT", "SAP_MODULE", "SAP_SERVICE", "SAP_PLATFORM", "TECHNOLOGY_STANDARD", "CERTIFICATION"],
+    "ner_model": "urchade/gliner_medium-v2.1",
+    "ner_model_size_mb": 209
+  }
+}
