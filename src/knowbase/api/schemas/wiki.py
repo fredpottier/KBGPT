@@ -141,6 +141,8 @@ class WikiArticleDetail(BaseModel):
     status: str = "published"
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    reading_path: List[WikiReadingPathItem] = Field(default_factory=list)
+    linked_articles: List[WikiLinkedArticle] = Field(default_factory=list)
 
 
 class WikiCorpusStats(BaseModel):
@@ -203,13 +205,169 @@ class WikiDomainContext(BaseModel):
     target_users: List[str] = Field(default_factory=list)
 
 
+class WikiTier1Concept(BaseModel):
+    """Concept structurant Tier 1 pour la homepage."""
+
+    name: str
+    entity_type: str = "concept"
+    importance_score: float = 0.0
+    has_article: bool = False
+    slug: Optional[str] = None
+
+
+class WikiBlindSpot(BaseModel):
+    """Zone à surveiller dans le corpus."""
+
+    type: str  # high_contradictions | value_contradiction | scope_variation | low_coverage | missing_article
+    domain: str
+    detail: str
+    severity: str = "warning"  # warning | info
+
+
+class WikiCorpusNarrativeEntityType(BaseModel):
+    """Type d'entité avec compteur."""
+
+    type: str
+    count: int = 0
+
+
+class WikiCorpusNarrativeEntity(BaseModel):
+    """Entité top du corpus."""
+
+    name: str
+    claim_count: int = 0
+    has_article: bool = False
+    slug: Optional[str] = None
+
+
+class WikiCorpusNarrativeDocType(BaseModel):
+    """Type de document dans la distribution."""
+
+    type: str
+    count: int = 0
+
+
+class WikiCorpusNarrative(BaseModel):
+    """Données structurées pour le récit narratif du corpus."""
+
+    top_entity_types: List[WikiCorpusNarrativeEntityType] = Field(default_factory=list)
+    top_entities: List[WikiCorpusNarrativeEntity] = Field(default_factory=list)
+    doc_type_distribution: List[WikiCorpusNarrativeDocType] = Field(default_factory=list)
+    entity_count_with_articles: int = 0
+    entity_count_without_articles: int = 0
+
+
+class WikiStartHere(BaseModel):
+    """Article Tier 1 pour la section 'Commencer par'."""
+
+    slug: str
+    title: str
+    importance_score: float = 0.0
+
+
 class WikiHomeResponse(BaseModel):
     """Réponse pour la homepage Atlas."""
 
     corpus_stats: WikiCorpusStats
     domain_context: Optional[WikiDomainContext] = None
+    corpus_narrative: Optional[WikiCorpusNarrative] = None
     knowledge_domains: List[WikiKnowledgeDomain] = Field(default_factory=list)
     recent_articles: List[WikiRecentArticle] = Field(default_factory=list)
+    tier1_concepts: List[WikiTier1Concept] = Field(default_factory=list)
+    blind_spots: List[WikiBlindSpot] = Field(default_factory=list)
+    start_here: List[WikiStartHere] = Field(default_factory=list)
+    contradiction_count: int = 0
+
+
+class WikiReadingPathItem(BaseModel):
+    """Element du reading path d'un article."""
+
+    slug: str
+    title: str
+    importance_tier: int = 3
+    concept_name: str = ""
+
+
+class WikiLinkedArticle(BaseModel):
+    """Article lié (voisinage sémantique)."""
+
+    slug: str
+    title: str
+    importance_tier: int = 3
+    shared_concepts: int = 0
+
+
+class WikiDomainConcept(BaseModel):
+    """Concept dans un domaine/facette."""
+
+    name: str
+    entity_type: str = "concept"
+    claim_count: int = 0
+    doc_count: int = 0
+    article_slug: Optional[str] = None
+    article_title: Optional[str] = None
+    tier: Optional[int] = None
+
+
+class WikiDomainArticleDetail(BaseModel):
+    """Article dans un domaine/facette (avec relevance)."""
+
+    slug: str
+    title: str
+    importance_tier: int = 3
+    importance_score: float = 0.0
+    confidence: float = 0.0
+    relevance: int = 0
+
+
+class WikiDomainDocument(BaseModel):
+    """Document contributeur d'un domaine."""
+
+    doc_id: str
+    claim_count: int = 0
+
+
+class WikiDomainStats(BaseModel):
+    """Statistiques d'un domaine."""
+
+    total_claims: int = 0
+    doc_count: int = 0
+    contradiction_count: int = 0
+    article_count: int = 0
+    gap_count: int = 0
+
+
+class WikiDomainGap(BaseModel):
+    """Concept sans article dans un domaine."""
+
+    name: str
+    entity_type: str = "concept"
+    claim_count: int = 0
+
+
+class WikiDomainQuestion(BaseModel):
+    """Question fréquente suggérée pour un domaine."""
+
+    question: str
+    concept: str
+
+
+class WikiDomainPageResponse(BaseModel):
+    """Réponse pour la page d'un domaine/facette."""
+
+    facet_id: str
+    name: str
+    kind: str = "domain"
+    lifecycle: str = "validated"
+    doc_count: int = 0
+    question: str = ""
+    domain_key: str = ""
+    top_concepts: List[WikiDomainConcept] = Field(default_factory=list)
+    articles: List[WikiDomainArticleDetail] = Field(default_factory=list)
+    documents: List[WikiDomainDocument] = Field(default_factory=list)
+    stats: WikiDomainStats = Field(default_factory=WikiDomainStats)
+    gaps: List[WikiDomainGap] = Field(default_factory=list)
+    suggested_questions: List[WikiDomainQuestion] = Field(default_factory=list)
 
 
 class WikiClaimItem(BaseModel):

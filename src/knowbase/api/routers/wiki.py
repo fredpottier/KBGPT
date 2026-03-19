@@ -28,12 +28,17 @@ from knowbase.api.schemas.wiki import (
     WikiBatchLinkRequest,
     WikiBatchLinkStatus,
     WikiBatchStatus,
+    WikiBlindSpot,
     WikiCategoriesResponse,
     WikiCategoryItem,
     WikiClaimItem,
     WikiClaimsResponse,
     WikiConceptResult,
     WikiConceptSearchResponse,
+    WikiCorpusNarrative,
+    WikiCorpusNarrativeDocType,
+    WikiCorpusNarrativeEntity,
+    WikiCorpusNarrativeEntityType,
     WikiCorpusStats,
     WikiDomainArticle,
     WikiDomainContext,
@@ -47,7 +52,18 @@ from knowbase.api.schemas.wiki import (
     WikiResolutionInfo,
     WikiScoredConcept,
     WikiScoringResponse,
+    WikiDomainArticleDetail,
+    WikiDomainConcept,
+    WikiDomainDocument,
+    WikiDomainGap,
+    WikiDomainPageResponse,
+    WikiDomainQuestion,
+    WikiDomainStats,
+    WikiLinkedArticle,
+    WikiReadingPathItem,
     WikiSourceDetail,
+    WikiStartHere,
+    WikiTier1Concept,
 )
 
 logger = logging.getLogger("[OSMOSE] wiki_router")
@@ -276,7 +292,7 @@ async def get_home(
         from knowbase.ontology.domain_context_store import DomainContextStore
 
         store = DomainContextStore()
-        profile = store.get(tenant_id)
+        profile = store.get_profile(tenant_id)
         if profile:
             domain_ctx = WikiDomainContext(
                 domain_summary=profile.domain_summary or "",
@@ -288,9 +304,26 @@ async def get_home(
     except Exception as e:
         logger.warning("Impossible de charger le domain context: %s", e)
 
+    # Construire le corpus narrative
+    raw_narrative = data.get("corpus_narrative", {})
+    corpus_narrative = WikiCorpusNarrative(
+        top_entity_types=[
+            WikiCorpusNarrativeEntityType(**t) for t in raw_narrative.get("top_entity_types", [])
+        ],
+        top_entities=[
+            WikiCorpusNarrativeEntity(**e) for e in raw_narrative.get("top_entities", [])
+        ],
+        doc_type_distribution=[
+            WikiCorpusNarrativeDocType(**d) for d in raw_narrative.get("doc_type_distribution", [])
+        ],
+        entity_count_with_articles=raw_narrative.get("entity_count_with_articles", 0),
+        entity_count_without_articles=raw_narrative.get("entity_count_without_articles", 0),
+    )
+
     return WikiHomeResponse(
         corpus_stats=WikiCorpusStats(**data["corpus_stats"]),
         domain_context=domain_ctx,
+        corpus_narrative=corpus_narrative,
         knowledge_domains=[
             WikiKnowledgeDomain(
                 name=d["name"],
@@ -304,6 +337,41 @@ async def get_home(
             for d in data["knowledge_domains"]
         ],
         recent_articles=[WikiRecentArticle(**a) for a in data["recent_articles"]],
+        tier1_concepts=[WikiTier1Concept(**c) for c in data.get("tier1_concepts", [])],
+        blind_spots=[WikiBlindSpot(**s) for s in data.get("blind_spots", [])],
+        start_here=[WikiStartHere(**s) for s in data.get("start_here", [])],
+        contradiction_count=data.get("contradiction_count", 0),
+    )
+
+
+@router.get(
+    "/domain/{facet_key}",
+    response_model=WikiDomainPageResponse,
+    summary="Page domaine/facette — concepts, articles, documents, gaps, questions",
+)
+async def get_domain_page(
+    facet_key: str,
+    tenant_id: str = Depends(get_tenant_id),
+) -> WikiDomainPageResponse:
+    persister = _get_persister()
+    data = persister.get_domain_data(facet_key, tenant_id)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"Domaine '{facet_key}' introuvable")
+
+    return WikiDomainPageResponse(
+        facet_id=data["facet_id"],
+        name=data["name"],
+        kind=data["kind"],
+        lifecycle=data["lifecycle"],
+        doc_count=data["doc_count"],
+        question=data["question"],
+        domain_key=data["domain_key"],
+        top_concepts=[WikiDomainConcept(**c) for c in data["top_concepts"]],
+        articles=[WikiDomainArticleDetail(**a) for a in data["articles"]],
+        documents=[WikiDomainDocument(**d) for d in data["documents"]],
+        stats=WikiDomainStats(**data["stats"]),
+        gaps=[WikiDomainGap(**g) for g in data["gaps"]],
+        suggested_questions=[WikiDomainQuestion(**q) for q in data["suggested_questions"]],
     )
 
 
@@ -363,6 +431,21 @@ async def get_article_by_slug(
 
     related_concepts = data.get("related_concepts") or []
 
+    # Reading path + linked articles (non-blocking)
+    reading_path = []
+    linked_articles = []
+    try:
+        reading_path = [
+            WikiReadingPathItem(**rp)
+            for rp in persister.get_reading_path(slug, tenant_id)
+        ]
+        linked_articles = [
+            WikiLinkedArticle(**la)
+            for la in persister.get_linked_articles(slug, tenant_id)
+        ]
+    except Exception as e:
+        logger.warning(f"Reading path/linked articles failed (non-blocking): {e}")
+
     return WikiArticleDetail(
         slug=data.get("slug", slug),
         title=data.get("title", slug),
@@ -389,6 +472,8 @@ async def get_article_by_slug(
         status=data.get("status", "published"),
         created_at=data.get("created_at"),
         updated_at=data.get("updated_at"),
+        reading_path=reading_path,
+        linked_articles=linked_articles,
     )
 
 
@@ -436,6 +521,68 @@ async def delete_article(
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Article '{slug}' introuvable")
     return {"deleted": True, "slug": slug}
+
+
+@router.post(
+    "/admin/regenerate-summary",
+    summary="Regénère le résumé éditorial du corpus via LLM (admin)",
+)
+async def regenerate_corpus_summary(
+    tenant_id: str = Depends(get_tenant_id),
+) -> dict:
+    """Regénère domain_summary à partir des données structurées du corpus."""
+    persister = _get_persister()
+    data = persister.get_home_data(tenant_id)
+    narrative = data.get("corpus_narrative", {})
+    stats = data.get("corpus_stats", {})
+    domains = data.get("knowledge_domains", [])
+
+    # Construire le contexte pour le LLM
+    top_entities = [e["name"] for e in narrative.get("top_entities", [])[:8]]
+    doc_types = [d["type"] for d in narrative.get("doc_type_distribution", [])[:5]]
+    domain_names = [d["name"] for d in domains[:6]]
+
+    prompt = f"""Tu es un rédacteur éditorial pour un Atlas de connaissances.
+Écris un résumé de 2-3 phrases décrivant le contenu de ce corpus documentaire.
+Le résumé doit être informatif, professionnel, et donner envie d'explorer les articles.
+Pas de formule de politesse, pas de "bienvenue", va droit au sujet.
+
+Données du corpus :
+- {stats.get('total_documents', 0)} documents sources
+- {stats.get('total_claims', 0)} faits extraits
+- {stats.get('total_articles', 0)} articles de synthèse
+- Types de documents : {', '.join(doc_types) if doc_types else 'non spécifié'}
+- Concepts les plus documentés : {', '.join(top_entities) if top_entities else 'non spécifié'}
+- Domaines thématiques : {', '.join(domain_names) if domain_names else 'non spécifié'}
+
+Résumé (en français, 2-3 phrases max) :"""
+
+    try:
+        from knowbase.common.llm_router import get_llm_router, TaskType
+
+        router = get_llm_router()
+        summary = router.complete(prompt, task=TaskType.SHORT_ENRICHMENT)
+        summary = summary.strip().strip('"').strip()
+
+        if len(summary) < 30:
+            raise ValueError(f"Résumé trop court: {summary}")
+
+        # Persister dans le DomainContextProfile
+        from knowbase.ontology.domain_context_store import DomainContextStore
+
+        store = DomainContextStore()
+        profile = store.get_profile(tenant_id)
+        if profile:
+            profile.domain_summary = summary
+            store.save_profile(profile)
+            logger.info(f"[ATLAS] domain_summary regénéré ({len(summary)} chars)")
+            return {"success": True, "domain_summary": summary}
+        else:
+            raise HTTPException(status_code=404, detail="Aucun DomainContextProfile pour ce tenant")
+
+    except Exception as e:
+        logger.error(f"[ATLAS] Erreur regénération résumé: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Admin : Scoring & Batch Generation ──────────────────────────────────
@@ -536,20 +683,26 @@ async def get_scoring(
     scorer = ImportanceScorer(neo4j_client.driver)
     scored = scorer.score_all_concepts(tenant_id)
 
-    # Vérifier quels concepts ont déjà un article
-    persister = _get_persister()
-    existing_slugs = set()
-    slug_map: Dict[str, str] = {}
-    articles_data = persister.list_articles(tenant_id, limit=1000)
-    for a in articles_data.get("articles", []):
-        title_lower = a.get("title", "").lower()
-        existing_slugs.add(title_lower)
-        slug_map[title_lower] = a.get("slug", "")
+    # Vérifier quels concepts ont déjà un article (via relation ABOUT, pas par titre)
+    entity_article_map: Dict[str, str] = {}
+    try:
+        with neo4j_client.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (wa:WikiArticle {tenant_id: $tid, status: 'published'})-[:ABOUT]->(e:Entity)
+                RETURN e.entity_id AS entity_id, wa.slug AS slug
+                """,
+                tid=tenant_id,
+            )
+            for r in result:
+                entity_article_map[r["entity_id"]] = r["slug"]
+    except Exception as e:
+        logger.warning(f"Could not load entity→article mapping: {e}")
 
     concepts = []
     for s in scored:
-        name_lower = s.entity_name.lower()
-        has_article = name_lower in existing_slugs
+        slug = entity_article_map.get(s.entity_id)
+        has_article = slug is not None
         concepts.append(
             WikiScoredConcept(
                 entity_name=s.entity_name,
@@ -561,7 +714,7 @@ async def get_scoring(
                 importance_score=s.importance_score,
                 importance_tier=s.importance_tier,
                 has_article=has_article,
-                article_slug=slug_map.get(name_lower),
+                article_slug=slug,
             )
         )
 
@@ -596,12 +749,25 @@ async def batch_generate(
     # Filtrer par tier
     candidates = [s for s in scored if s.importance_tier <= request.max_tier]
 
-    # Vérifier articles existants
+    # Vérifier articles existants (via relation ABOUT, pas par titre)
     if request.skip_existing:
-        persister = _get_persister()
-        articles_data = persister.list_articles(tenant_id, limit=1000)
-        existing_titles = {a.get("title", "").lower() for a in articles_data.get("articles", [])}
-        candidates = [c for c in candidates if c.entity_name.lower() not in existing_titles]
+        existing_entity_ids: set = set()
+        try:
+            with neo4j_client.driver.session() as session:
+                result = session.run(
+                    """
+                    MATCH (wa:WikiArticle {tenant_id: $tid, status: 'published'})-[:ABOUT]->(e:Entity)
+                    RETURN e.entity_id AS entity_id
+                    """,
+                    tid=tenant_id,
+                )
+                existing_entity_ids = {r["entity_id"] for r in result}
+        except Exception as e:
+            logger.warning(f"Could not load existing article entities: {e}")
+        candidates = [c for c in candidates if c.entity_id not in existing_entity_ids]
+
+    # Stratégie "toile" — prioriser les concepts connectés aux articles existants
+    candidates = scorer.compute_web_priority(candidates, tenant_id)
 
     # Limiter
     candidates = candidates[: request.max_articles]
@@ -956,6 +1122,61 @@ def _run_batch_generation(batch_id: str, language: str, tenant_id: str) -> None:
         f"[OSMOSE:Wiki:Batch] Batch {batch_id} terminé : "
         f"{batch.completed} OK, {batch.failed} échecs sur {batch.total}"
     )
+
+    # Regénérer le résumé éditorial du corpus après un batch réussi
+    if batch.completed > 0:
+        try:
+            _regenerate_summary_sync(tenant_id)
+        except Exception as e:
+            logger.warning(f"[OSMOSE:Wiki:Batch] Résumé éditorial non regénéré: {e}")
+
+
+def _regenerate_summary_sync(tenant_id: str) -> None:
+    """Regénère le domain_summary via LLM (appel synchrone pour background tasks)."""
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.wiki.persistence import WikiArticlePersister
+
+    neo4j_client = get_neo4j_client()
+    persister = WikiArticlePersister(neo4j_client.driver)
+    data = persister.get_home_data(tenant_id)
+    narrative = data.get("corpus_narrative", {})
+    stats = data.get("corpus_stats", {})
+    domains = data.get("knowledge_domains", [])
+
+    top_entities = [e["name"] for e in narrative.get("top_entities", [])[:8]]
+    doc_types = [d["type"] for d in narrative.get("doc_type_distribution", [])[:5]]
+    domain_names = [d["name"] for d in domains[:6]]
+
+    prompt = f"""Tu es un rédacteur éditorial pour un Atlas de connaissances.
+Écris un résumé de 2-3 phrases décrivant le contenu de ce corpus documentaire.
+Le résumé doit être informatif, professionnel, et donner envie d'explorer les articles.
+Pas de formule de politesse, pas de "bienvenue", va droit au sujet.
+
+Données du corpus :
+- {stats.get('total_documents', 0)} documents sources
+- {stats.get('total_claims', 0)} faits extraits
+- {stats.get('total_articles', 0)} articles de synthèse
+- Types de documents : {', '.join(doc_types) if doc_types else 'non spécifié'}
+- Concepts les plus documentés : {', '.join(top_entities) if top_entities else 'non spécifié'}
+- Domaines thématiques : {', '.join(domain_names) if domain_names else 'non spécifié'}
+
+Résumé (en français, 2-3 phrases max) :"""
+
+    from knowbase.common.llm_router import get_llm_router, TaskType
+
+    router_llm = get_llm_router()
+    summary = router_llm.complete(prompt, task=TaskType.SHORT_ENRICHMENT)
+    summary = summary.strip().strip('"').strip()
+
+    if len(summary) >= 30:
+        from knowbase.ontology.domain_context_store import DomainContextStore
+
+        store = DomainContextStore()
+        profile = store.get_profile(tenant_id)
+        if profile:
+            profile.domain_summary = summary
+            store.save_profile(profile)
+            logger.info(f"[ATLAS] domain_summary auto-regénéré ({len(summary)} chars)")
 
 
 def _run_batch_linking(
