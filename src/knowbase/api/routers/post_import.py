@@ -46,6 +46,7 @@ class StepInfo(BaseModel):
     estimated_duration: str
     requires_llm: bool = False
     requires_pack: bool = False
+    estimated_minutes: Optional[float] = None  # Estimation dynamique basée sur le volume
 
 
 class PipelineRequest(BaseModel):
@@ -144,6 +145,13 @@ STEPS = [
         order=8,
         estimated_duration="1 - 3min",
     ),
+    StepInfo(
+        id="archive_isolated",
+        name="Archivage claims isolées",
+        description="Marque les claims sans structured_form et sans relations (ABOUT, CHAINS_TO, REFINES...) comme archivées. Elles restent dans le KG mais sont exclues des recherches.",
+        order=9,
+        estimated_duration="10 - 30s",
+    ),
 ]
 
 STEPS_BY_ID = {s.id: s for s in STEPS}
@@ -156,8 +164,26 @@ STEPS_BY_ID = {s.id: s for s in STEPS}
 
 @router.get("/steps", response_model=List[StepInfo])
 async def list_steps():
-    """Liste les étapes disponibles."""
-    return sorted(STEPS, key=lambda s: s.order)
+    """Liste les étapes avec estimation dynamique basée sur le volume Neo4j."""
+    steps = sorted(STEPS, key=lambda s: s.order)
+
+    # Charger le volume actuel + benchmarks historiques
+    try:
+        volume = _get_kg_volume()
+        benchmarks = _get_step_benchmarks()
+
+        for step in steps:
+            bench = benchmarks.get(step.id)
+            if bench and bench.get("duration_s") and bench.get("volume"):
+                # Règle de trois : durée proportionnelle au volume
+                ratio = volume / bench["volume"] if bench["volume"] > 0 else 1.0
+                estimated_s = bench["duration_s"] * ratio
+                step.estimated_minutes = round(estimated_s / 60, 1)
+                step.estimated_duration = _format_duration(estimated_s)
+    except Exception:
+        pass  # Garder les estimations statiques
+
+    return steps
 
 
 @router.get("/status", response_model=PipelineStatusResponse)
@@ -270,6 +296,14 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
                 "details": details or {},
             })
             logger.info(f"[PostImport] {step_name} terminé en {duration}s")
+
+            # Sauvegarder le benchmark pour estimation future
+            try:
+                volume = _get_kg_volume()
+                _save_step_benchmark(step_id, duration, volume)
+            except Exception:
+                pass
+
         except Exception as e:
             duration = round(time.time() - step_start, 1)
             logger.error(f"[PostImport] Erreur {step_id}: {e}")
@@ -319,6 +353,8 @@ def _execute_step(step_id: str, tenant_id: str) -> dict:
         return _run_claim_embeddings(tenant_id)
     elif step_id == "claim_chunk_bridge":
         return _run_claim_chunk_bridge(tenant_id)
+    elif step_id == "archive_isolated":
+        return _run_archive_isolated(tenant_id)
     else:
         raise ValueError(f"Étape inconnue: {step_id}")
 
@@ -858,6 +894,72 @@ def _run_claim_chunk_bridge(tenant_id: str) -> dict:
     return stats
 
 
+def _run_archive_isolated(tenant_id: str) -> dict:
+    """Archive les claims isolées (sans SF, sans relations)."""
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    driver = get_neo4j_client().driver
+
+    with driver.session() as session:
+        # Compter total
+        total = session.run(
+            "MATCH (c:Claim {tenant_id: $tid}) RETURN count(c) as c",
+            tid=tenant_id,
+        ).single()["c"]
+
+        # Identifier les isolées
+        result = session.run(
+            """
+            MATCH (c:Claim {tenant_id: $tid})
+            WHERE c.structured_form_json IS NULL
+              AND (c.archived IS NULL OR c.archived = false)
+              AND NOT EXISTS { (c)-[:CHAINS_TO]->() }
+              AND NOT EXISTS { ()-[:CHAINS_TO]->(c) }
+              AND NOT EXISTS { (c)-[:ABOUT]->() }
+              AND NOT EXISTS { (c)-[:REFINES]->() }
+              AND NOT EXISTS { ()-[:REFINES]->(c) }
+              AND NOT EXISTS { (c)-[:QUALIFIES]->() }
+              AND NOT EXISTS { ()-[:QUALIFIES]->(c) }
+              AND NOT EXISTS { (c)-[:CONTRADICTS]->() }
+              AND NOT EXISTS { ()-[:CONTRADICTS]->(c) }
+            RETURN c.claim_id AS claim_id
+            """,
+            tid=tenant_id,
+        )
+        isolated_ids = [r["claim_id"] for r in result]
+
+        if not isolated_ids:
+            return {"total_claims": total, "newly_archived": 0, "message": "Aucune claim isolée"}
+
+        # Archiver par batch
+        archived = 0
+        for i in range(0, len(isolated_ids), 500):
+            batch = isolated_ids[i:i + 500]
+            r = session.run(
+                """
+                UNWIND $ids AS cid
+                MATCH (c:Claim {claim_id: cid, tenant_id: $tid})
+                SET c.archived = true,
+                    c.archived_at = datetime(),
+                    c.archived_reason = 'isolated_claim_post_import'
+                RETURN count(c) AS archived
+                """,
+                ids=batch, tid=tenant_id,
+            )
+            archived += r.single()["archived"]
+
+        total_archived = session.run(
+            "MATCH (c:Claim {tenant_id: $tid, archived: true}) RETURN count(c) as c",
+            tid=tenant_id,
+        ).single()["c"]
+
+    return {
+        "total_claims": total,
+        "newly_archived": archived,
+        "total_archived": total_archived,
+        "isolated_percentage": round(100 * len(isolated_ids) / total, 1) if total else 0,
+    }
+
+
 def _run_domain_pack_reprocess(tenant_id: str) -> dict:
     from knowbase.domain_packs.reprocess_job import run_reprocess
     from knowbase.domain_packs.registry import get_pack_registry
@@ -885,6 +987,71 @@ def _run_domain_pack_reprocess(tenant_id: str) -> dict:
 # ============================================================================
 # State management (Redis)
 # ============================================================================
+
+
+# ============================================================================
+# Estimation dynamique
+# ============================================================================
+
+REDIS_BENCHMARK_KEY = "osmose:post_import:benchmarks"
+
+
+def _get_kg_volume() -> int:
+    """Retourne le nombre de claims dans le KG (indicateur de volume)."""
+    try:
+        from knowbase.common.clients.neo4j_client import get_neo4j_client
+        client = get_neo4j_client()
+        with client.driver.session(database=client.database) as session:
+            result = session.run(
+                "MATCH (c:Claim {tenant_id: 'default'}) RETURN count(c) as cnt"
+            )
+            return result.single()["cnt"]
+    except Exception:
+        return 0
+
+
+def _get_step_benchmarks() -> dict:
+    """Charge les benchmarks historiques depuis Redis."""
+    try:
+        from knowbase.common.clients.redis_client import get_redis_client
+        rc = get_redis_client()
+        raw = rc.client.get(REDIS_BENCHMARK_KEY)
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_step_benchmark(step_id: str, duration_s: float, volume: int) -> None:
+    """Sauvegarde le benchmark d'une étape après exécution."""
+    try:
+        from knowbase.common.clients.redis_client import get_redis_client
+        rc = get_redis_client()
+        raw = rc.client.get(REDIS_BENCHMARK_KEY)
+        benchmarks = json.loads(raw) if raw else {}
+        benchmarks[step_id] = {
+            "duration_s": round(duration_s, 1),
+            "volume": volume,
+            "run_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        rc.client.set(REDIS_BENCHMARK_KEY, json.dumps(benchmarks))
+    except Exception:
+        pass
+
+
+def _format_duration(seconds: float) -> str:
+    """Formate une durée en texte lisible."""
+    if seconds < 60:
+        return f"~{int(seconds)}s"
+    elif seconds < 3600:
+        mins = seconds / 60
+        if mins < 2:
+            return f"~{mins:.1f} min"
+        return f"~{int(mins)} min"
+    else:
+        hours = seconds / 3600
+        return f"~{hours:.1f}h"
 
 
 def _update_state(

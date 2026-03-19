@@ -79,6 +79,16 @@ _NEVER_MIX = {"actor"}
 # ---------------------------------------------------------------------------
 
 import re
+import unicodedata
+
+
+def _strip_diacritics(s: str) -> str:
+    """Retire les accents/diacritiques : pré-éclampsie → pre-eclampsie."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s)
+        if unicodedata.category(c) != "Mn"
+    )
+
 
 def _normalize(name: str) -> str:
     """Normalise un nom d'entité (identique à Entity.normalize)."""
@@ -88,6 +98,64 @@ def _normalize(name: str) -> str:
     normalized = re.sub(r"[^\w\s\-]", "", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized
+
+
+def _extract_stem(name: str) -> str:
+    """
+    Extrait un 'stem' normalisé pour regrouper les variantes d'un même concept.
+
+    Exemples :
+    - "sFlt-1" → "sflt1"
+    - "sFLT1 family of proteins" → "sflt1"
+    - "sFlt-1/PlGF ratio" → "sflt1plgf"
+    - "Pre-eclampsia" → "preeclampsia"
+    - "PAPP-A levels" → "pappa"
+
+    Stratégie : strip diacritiques, normaliser, retirer les mots-suffixes/préfixes
+    génériques, retirer ponctuation, normaliser terminaisons cross-langue.
+    """
+    s = _strip_diacritics(name.lower().strip())
+
+    # Retirer les acronymes entre parenthèses en fin de nom : "Preeclampsia (PE)" → "Preeclampsia"
+    s = re.sub(r"\s*\([A-Za-z]{1,6}\)\s*$", "", s)
+
+    # Retirer les suffixes génériques courants
+    suffix_noise = [
+        "levels", "level", "values", "value", "ratio", "ratios",
+        "test", "tests", "assay", "assays", "measurements", "measurement",
+        "family of proteins", "family", "proteins", "protein",
+        "concentration", "concentrations", "serum", "plasma",
+        "cut-off", "cut-offs", "cutoff", "cutoffs",
+    ]
+    for suffix in suffix_noise:
+        if s.endswith(" " + suffix):
+            s = s[: -(len(suffix) + 1)].strip()
+
+    # Retirer les préfixes génériques
+    prefix_noise = [
+        "elevated", "increased", "decreased", "high", "low",
+        "total", "mean", "median", "circulating",
+    ]
+    words = s.split()
+    if words and words[0] in prefix_noise:
+        s = " ".join(words[1:])
+
+    # Normaliser les séparateurs en espaces
+    s = re.sub(r"[-\u2010\u2013\u2014/]", " ", s)
+
+    # Retirer les mots de liaison
+    link_words = {"to", "of", "and", "the", "in", "for", "on", "with", "by"}
+    s = " ".join(w for w in s.split() if w not in link_words)
+
+    # Retirer ponctuation et espaces → stem compact
+    s = re.sub(r"[^a-z0-9]", "", s)
+
+    # Normaliser les terminaisons cross-langue
+    # -ie (FR) → -ia (EN) : preeclampsie → preeclampsia
+    if s.endswith("ie") and len(s) > 5:
+        s = s[:-2] + "ia"
+
+    return s
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +280,34 @@ def build_candidate_edges(
             if not _types_compatible(e["entity_type"], target["entity_type"]):
                 continue
             _add_edge(e["entity_id"], target_id, "prefix_dedup", 0.90)
+
+    # --- Méthode C : Stem Normalization Match (confiance 0.85) ---
+    # Regroupe les variantes orthographiques et les entités avec suffixes génériques
+    # Ex: "sFlt-1" ↔ "sFLT1", "Pre-eclampsia" ↔ "Preeclampsia",
+    #     "PAPP-A" ↔ "PAPP-A levels", "sFlt-1/PlGF" ↔ "sFlt-1/PlGF ratio"
+    stem_index: Dict[str, List[str]] = {}
+    for e in entities:
+        stem = _extract_stem(e["name"])
+        if stem and len(stem) >= 3:
+            if stem not in stem_index:
+                stem_index[stem] = []
+            stem_index[stem].append(e["entity_id"])
+
+    for stem, eids in stem_index.items():
+        if len(eids) < 2:
+            continue
+        # Lier toutes les paires du groupe stem
+        for i, eid1 in enumerate(eids):
+            e1 = entities_by_id.get(eid1)
+            if not e1:
+                continue
+            for eid2 in eids[i + 1:]:
+                e2 = entities_by_id.get(eid2)
+                if not e2:
+                    continue
+                if not _types_compatible(e1["entity_type"], e2["entity_type"]):
+                    continue
+                _add_edge(eid1, eid2, "stem_normalization", 0.85)
 
     return edges
 
@@ -783,6 +879,150 @@ def persist_to_neo4j(
 
 
 # ---------------------------------------------------------------------------
+# Phase 9 — Fusion des CanonicalEntity dupliqués
+# ---------------------------------------------------------------------------
+
+def merge_duplicate_canonicals(session, tenant_id: str, dry_run: bool = True) -> int:
+    """
+    Détecte et fusionne les CanonicalEntity qui représentent le même concept.
+
+    Utilise _extract_stem() sur les canonical_name pour détecter les doublons.
+    Pour chaque groupe de canonicals avec le même stem :
+    1. Élit le meilleur (le plus de claims liées)
+    2. Re-pointe toutes les SAME_CANON_AS des perdants vers le gagnant
+    3. Supprime les CanonicalEntity perdants
+
+    Gère aussi les Entity orphelines qui partagent le même stem qu'un canonical existant.
+
+    Returns:
+        Nombre de canonicals fusionnés
+    """
+    # 1. Charger tous les CanonicalEntity + Entity orphelines avec stem
+    result = session.run(
+        """
+        MATCH (ce:CanonicalEntity {tenant_id: $tid})
+        OPTIONAL MATCH (e:Entity)-[:SAME_CANON_AS]->(ce)
+        OPTIONAL MATCH (c:Claim)-[:ABOUT]->(e)
+        WITH ce, count(DISTINCT e) AS entity_count, count(DISTINCT c) AS total_claims
+        RETURN ce.canonical_entity_id AS ce_id,
+               ce.canonical_name AS name,
+               entity_count,
+               total_claims
+        """,
+        tid=tenant_id,
+    )
+
+    canonicals = []
+    for r in result:
+        stem = _extract_stem(r["name"])
+        canonicals.append({
+            "ce_id": r["ce_id"],
+            "name": r["name"],
+            "stem": stem,
+            "entity_count": r["entity_count"],
+            "total_claims": r["total_claims"],
+        })
+
+    # 2. Grouper par stem
+    stem_groups: Dict[str, List[dict]] = {}
+    for ce in canonicals:
+        if ce["stem"] and len(ce["stem"]) >= 3:
+            stem_groups.setdefault(ce["stem"], []).append(ce)
+
+    # 3. Aussi intégrer les Entity orphelines qui matchent un stem de canonical
+    orphan_result = session.run(
+        """
+        MATCH (e:Entity {tenant_id: $tid})
+        WHERE NOT (e)-[:SAME_CANON_AS]->(:CanonicalEntity)
+        OPTIONAL MATCH (c:Claim)-[:ABOUT]->(e)
+        WITH e, count(c) AS claim_count
+        WHERE claim_count > 0
+        RETURN e.entity_id AS eid, e.name AS name, claim_count
+        """,
+        tid=tenant_id,
+    )
+
+    orphans_linked = 0
+    for r in orphan_result:
+        stem = _extract_stem(r["name"])
+        if stem in stem_groups:
+            # Cette orpheline devrait être liée au canonical de ce stem
+            group = stem_groups[stem]
+            # Choisir le meilleur canonical du groupe
+            best_ce = max(group, key=lambda x: x["total_claims"])
+            if not dry_run:
+                session.run(
+                    """
+                    MATCH (e:Entity {entity_id: $eid})
+                    MATCH (ce:CanonicalEntity {canonical_entity_id: $ce_id})
+                    MERGE (e)-[r:SAME_CANON_AS]->(ce)
+                    SET r.method = 'stem_merge',
+                        r.confidence = 0.85,
+                        r.created_at = datetime()
+                    """,
+                    eid=r["eid"],
+                    ce_id=best_ce["ce_id"],
+                )
+            orphans_linked += 1
+            logger.info(
+                f"  Orphan '{r['name']}' ({r['claim_count']} claims) "
+                f"→ canonical '{best_ce['name']}'"
+            )
+
+    # 4. Fusionner les groupes de canonicals dupliqués
+    merged_count = 0
+    duplicate_groups = {stem: group for stem, group in stem_groups.items() if len(group) > 1}
+
+    for stem, group in duplicate_groups.items():
+        # Élire le gagnant : le plus de claims, puis le plus d'entités
+        group.sort(key=lambda x: (x["total_claims"], x["entity_count"]), reverse=True)
+        winner = group[0]
+        losers = group[1:]
+
+        logger.info(
+            f"  Merge canonical group [{stem}]: "
+            f"winner='{winner['name']}' ({winner['total_claims']} claims), "
+            f"absorbing {len(losers)} canonical(s): "
+            f"{[l['name'] for l in losers]}"
+        )
+
+        if not dry_run:
+            for loser in losers:
+                # Re-pointer toutes les SAME_CANON_AS du loser vers le winner
+                session.run(
+                    """
+                    MATCH (e:Entity)-[r:SAME_CANON_AS]->(ce_old:CanonicalEntity {canonical_entity_id: $loser_id})
+                    MATCH (ce_new:CanonicalEntity {canonical_entity_id: $winner_id})
+                    MERGE (e)-[r2:SAME_CANON_AS]->(ce_new)
+                    SET r2.method = coalesce(r.method, 'stem_merge'),
+                        r2.confidence = coalesce(r.confidence, 0.85),
+                        r2.created_at = datetime()
+                    DELETE r
+                    """,
+                    loser_id=loser["ce_id"],
+                    winner_id=winner["ce_id"],
+                )
+
+                # Supprimer le canonical perdant
+                session.run(
+                    """
+                    MATCH (ce:CanonicalEntity {canonical_entity_id: $loser_id})
+                    DETACH DELETE ce
+                    """,
+                    loser_id=loser["ce_id"],
+                )
+                merged_count += 1
+
+    logger.info(
+        f"[OSMOSE] Phase 9 — {'[DRY-RUN] ' if dry_run else ''}"
+        f"{len(duplicate_groups)} groupes de canonicals dupliqués, "
+        f"{merged_count} canonicals fusionnés, "
+        f"{orphans_linked} orphelines rattachées"
+    )
+    return merged_count
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -895,12 +1135,22 @@ def main():
                 logger.info(f"  → {len(final_groups)} CanonicalEntity seraient créés")
                 total_rels = sum(len(g["entity_ids"]) for g in final_groups)
                 logger.info(f"  → {total_rels} relations SAME_CANON_AS seraient créées")
-                logger.info("  → Relancer avec --execute pour appliquer.")
+
+                # Phase 9 dry-run : montrer les fusions de canonicals qui seraient faites
+                logger.info(f"\n[OSMOSE] Phase 9 — Fusion des canonicals dupliqués (dry-run)...")
+                merge_duplicate_canonicals(session, args.tenant, dry_run=True)
+
+                logger.info(f"\n  → Relancer avec --execute pour appliquer.")
                 logger.info(f"{'='*60}")
                 return
 
             logger.info(f"\n[OSMOSE] Phase 8 — Persistance Neo4j...")
             persist_to_neo4j(session, final_groups, entities_by_id, edges, args.tenant)
+
+            # Phase 9 — Fusion des CanonicalEntity dupliqués + rattachement orphelines
+            logger.info(f"\n[OSMOSE] Phase 9 — Fusion des canonicals dupliqués...")
+            merge_duplicate_canonicals(session, args.tenant, dry_run=False)
+
             logger.info("\n[OSMOSE] Pass C1.1 terminé avec succès.")
 
     finally:

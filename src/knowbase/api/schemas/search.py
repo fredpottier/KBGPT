@@ -78,4 +78,22 @@ class SearchRequest(BaseModel):
         }
 
 
-__all__ = ["SearchRequest"]
+class RelatedArticle(BaseModel):
+    """Article Atlas lié à la réponse search."""
+    slug: str
+    title: str
+    importance_tier: int
+    matched_entity: str
+    is_recommended: bool = False
+
+
+class InsightHint(BaseModel):
+    """Insight proactif pour guider l'utilisateur."""
+    type: str = Field(..., description="contradiction | low_coverage | related_concept | structuring_concept")
+    message: str
+    priority: int = Field(..., description="1=highest")
+    action_label: str | None = None
+    action_href: str | None = None
+
+
+__all__ = ["SearchRequest", "RelatedArticle", "InsightHint"]

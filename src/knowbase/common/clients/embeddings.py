@@ -151,6 +151,13 @@ class EmbeddingModelManager:
         Returns:
             Embeddings numpy array
         """
+        # === Auto-détection Burst depuis Redis ===
+        # Si le burst n'est pas activé en mémoire, vérifier Redis
+        # (le burst peut avoir été activé par le script StreamDeck
+        # ou une autre instance après le démarrage du worker)
+        if not self._burst_mode:
+            self._check_burst_from_redis()
+
         # === Mode Burst : utiliser le service distant ===
         if self._burst_mode and self._burst_endpoint:
             return self._encode_remote(sentences)
@@ -578,6 +585,37 @@ class EmbeddingModelManager:
     # =========================================================================
     # Mode Burst - Basculement vers EC2 Spot
     # =========================================================================
+
+    def _check_burst_from_redis(self):
+        """
+        Vérifie si un burst est actif dans Redis et switch automatiquement.
+
+        Appelé à chaque encode() quand le burst n'est pas activé en mémoire.
+        Rate-limité à 1 check toutes les 30 secondes pour ne pas surcharger Redis.
+        """
+        now = time.time()
+        if hasattr(self, '_last_burst_check') and now - self._last_burst_check < 30:
+            return
+        self._last_burst_check = now
+
+        try:
+            from knowbase.ingestion.burst.provider_switch import get_burst_state_from_redis
+            state = get_burst_state_from_redis()
+            if state and state.get("active") and state.get("embeddings_url"):
+                embeddings_url = state["embeddings_url"]
+                # Vérifier que le TEI est accessible avant de switch
+                import requests
+                try:
+                    resp = requests.get(f"{embeddings_url}/health", timeout=3)
+                    if resp.status_code == 200:
+                        logger.info(
+                            f"[EMBEDDINGS] Auto-detected burst from Redis → {embeddings_url}"
+                        )
+                        self.enable_burst_mode(embeddings_url)
+                except Exception:
+                    pass  # TEI pas accessible, rester en local
+        except Exception:
+            pass
 
     def enable_burst_mode(self, embeddings_url: str, timeout: int = 60):
         """

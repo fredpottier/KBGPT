@@ -62,6 +62,16 @@ def _load_burst_state_file() -> Optional[Dict[str, Any]]:
     return None
 
 
+def _quick_health_check(vllm_url: str, timeout: int = 3) -> bool:
+    """Health check rapide avant de restaurer un état burst depuis le fichier."""
+    try:
+        import requests
+        resp = requests.get(f"{vllm_url.rstrip('/')}/health", timeout=timeout)
+        return resp.ok
+    except Exception:
+        return False
+
+
 def _clear_burst_state_file() -> None:
     """Supprime le fichier d'état burst."""
     try:
@@ -138,21 +148,30 @@ def get_burst_state_from_redis() -> Optional[Dict[str, Any]]:
         except Exception as e:
             logger.debug(f"[BURST:REDIS] Failed to get state: {e}")
 
-    # Fallback : fichier persistant
+    # Fallback : fichier persistant — mais vérifier d'abord que l'instance est joignable
     file_state = _load_burst_state_file()
     if file_state:
-        logger.info(
-            f"[BURST:FILE] Restored from file (Redis empty): "
-            f"vLLM={file_state.get('vllm_url')}"
-        )
-        # Re-sauver dans Redis pour les appels suivants
-        if redis:
-            try:
-                redis.client.set(REDIS_BURST_STATE_KEY, json.dumps(file_state))
-                logger.info("[BURST:FILE] Re-saved to Redis from file backup")
-            except Exception:
-                pass
-        return file_state
+        vllm_url = file_state.get("vllm_url")
+        if vllm_url and _quick_health_check(vllm_url):
+            logger.info(
+                f"[BURST:FILE] Restored from file (Redis empty): "
+                f"vLLM={vllm_url} — health OK"
+            )
+            # Re-sauver dans Redis pour les appels suivants
+            if redis:
+                try:
+                    redis.client.set(REDIS_BURST_STATE_KEY, json.dumps(file_state))
+                    logger.info("[BURST:FILE] Re-saved to Redis from file backup")
+                except Exception:
+                    pass
+            return file_state
+        else:
+            # Instance unreachable — purger le fichier stale
+            logger.warning(
+                f"[BURST:FILE] File state found but vLLM unreachable ({vllm_url}). "
+                f"Purging stale file."
+            )
+            _clear_burst_state_file()
 
     return None
 

@@ -103,6 +103,7 @@ class LLMRouter:
         self._redis_burst_cache: Optional[Dict[str, Any]] = None
         self._redis_burst_cache_time: float = 0
         self._redis_burst_cache_ttl: float = 5.0  # Cache TTL en secondes
+        self._vllm_first_down_time: Dict[str, float] = {}  # url → timestamp première détection down
 
         # Configuration dynamique
         self._config = self._load_config(config_path)
@@ -347,13 +348,13 @@ class LLMRouter:
                     # vLLM actif et healthy
                     logger.debug(f"[LLM_ROUTER:GATE] vLLM healthy: {vllm_url}")
                 else:
-                    # vLLM configuré mais DOWN — vérifier si l'instance Spot a été réclamée
-                    spot_terminated = self._check_spot_instance_terminated(vllm_url)
-                    if spot_terminated:
-                        # Instance définitivement terminée → purger le burst state
+                    # vLLM configuré mais DOWN — vérifier depuis combien de temps
+                    down_duration = self._get_vllm_down_duration(vllm_url)
+
+                    if down_duration > 180:  # > 3 minutes unreachable → considérer comme mort
                         logger.error(
-                            f"[LLM_ROUTER:GATE] EC2 Spot instance TERMINATED for {vllm_url}. "
-                            f"Purging burst state."
+                            f"[LLM_ROUTER:GATE] vLLM unreachable for {down_duration:.0f}s at {vllm_url}. "
+                            f"Instance considered dead — purging burst state."
                         )
                         try:
                             from knowbase.ingestion.burst.provider_switch import clear_burst_state_in_redis
@@ -362,14 +363,16 @@ class LLMRouter:
                             logger.error(f"[LLM_ROUTER:GATE] Failed to purge burst state: {purge_err}")
                         state["healthy"] = False
                         state["active"] = False
-                        state["spot_terminated"] = True
+                        state["auto_purged"] = True
                         self._redis_burst_cache = state
                         self._redis_burst_cache_time = now
+                        # Reset le down tracker
+                        self._vllm_first_down_time.pop(vllm_url, None)
                         return state
                     else:
                         logger.warning(
-                            f"[LLM_ROUTER:GATE] vLLM configured but DOWN: {vllm_url}. "
-                            f"Instance still exists — may recover. Raising for job suspension."
+                            f"[LLM_ROUTER:GATE] vLLM configured but DOWN for {down_duration:.0f}s: {vllm_url}. "
+                            f"May recover — raising for job suspension."
                         )
 
                 self._redis_burst_cache = state
@@ -420,6 +423,8 @@ class LLMRouter:
 
             if is_healthy:
                 logger.debug(f"[LLM_ROUTER:GATE] vLLM health OK: {vllm_url}")
+                # Reset le down tracker si vLLM est de nouveau up
+                self._vllm_first_down_time.pop(vllm_url, None)
             else:
                 logger.warning(f"[LLM_ROUTER:GATE] vLLM health FAILED: {vllm_url}")
 
@@ -429,6 +434,18 @@ class LLMRouter:
             logger.warning(f"[LLM_ROUTER:GATE] vLLM health check error: {e}")
             self._vllm_health_cache[vllm_url] = (False, now)
             return False
+
+    def _get_vllm_down_duration(self, vllm_url: str) -> float:
+        """
+        Retourne depuis combien de secondes vLLM est détecté comme down.
+
+        Utilise un tracker simple : enregistre le timestamp de la première détection
+        down, et retourne la durée écoulée. Reset quand vLLM redevient healthy.
+        """
+        now = time.time()
+        if vllm_url not in self._vllm_first_down_time:
+            self._vllm_first_down_time[vllm_url] = now
+        return now - self._vllm_first_down_time[vllm_url]
 
     def _check_spot_instance_terminated(self, vllm_url: str) -> bool:
         """
