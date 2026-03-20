@@ -32,6 +32,7 @@ interface PackInfo {
   version: string
   priority: number
   is_active: boolean
+  is_builtin: boolean
   container_state: string  // not_installed | installed | active | error
   entity_types: string[]
   ner_model: string
@@ -347,7 +348,7 @@ export default function DomainPacksPage() {
                     </HStack>
                   )}
 
-                  {/* Uninstall */}
+                  {/* Uninstall — désinstalle le container (pack reste dans la liste si builtin) */}
                   {pack.container_state !== 'not_installed' && !pack.is_active && (
                     <Button
                       size="xs" variant="ghost" colorScheme="red"
@@ -358,6 +359,20 @@ export default function DomainPacksPage() {
                       isLoading={isLoading('uninstall')}
                     >
                       Désinstaller
+                    </Button>
+                  )}
+
+                  {/* Supprimer — uniquement pour les packs uploadés, quand désinstallé */}
+                  {!pack.is_builtin && pack.container_state === 'not_installed' && (
+                    <Button
+                      size="xs" variant="ghost" colorScheme="red"
+                      leftIcon={<FiTrash2 />}
+                      onClick={() => doAction('delete', pack.name,
+                        () => api.domainPacks.uninstall(pack.name)
+                      )}
+                      isLoading={isLoading('delete')}
+                    >
+                      Supprimer definitivement
                     </Button>
                   )}
                 </VStack>

@@ -89,6 +89,7 @@ async def list_packs(
             version=pack.version,
             priority=pack.priority,
             is_active=is_active,
+            is_builtin=registry.is_builtin(pack.name),
             container_state=container_state,
             entity_types=entity_types,
             ner_model=ner_model,

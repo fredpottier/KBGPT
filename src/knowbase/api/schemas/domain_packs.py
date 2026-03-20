@@ -13,6 +13,7 @@ class PackInfo(BaseModel):
     version: str
     priority: int
     is_active: bool = False
+    is_builtin: bool = False
     container_state: str = "not_installed"
     entity_types: List[str] = Field(default_factory=list)
     ner_model: str = ""

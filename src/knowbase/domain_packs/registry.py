@@ -30,18 +30,25 @@ class PackRegistry:
 
     def __init__(self):
         self._packs: Dict[str, DomainPack] = {}
+        self._builtin_names: set = set()
 
-    def register(self, pack: DomainPack) -> None:
+    def register(self, pack: DomainPack, builtin: bool = False) -> None:
         """Enregistre un pack dans le registre."""
         if pack.name in self._packs:
             logger.warning(
                 f"[PackRegistry] Pack '{pack.name}' already registered, replacing"
             )
         self._packs[pack.name] = pack
+        if builtin:
+            self._builtin_names.add(pack.name)
         logger.info(
             f"[PackRegistry] Registered pack '{pack.name}' v{pack.version} "
-            f"(priority={pack.priority})"
+            f"(priority={pack.priority}, builtin={builtin})"
         )
+
+    def is_builtin(self, pack_name: str) -> bool:
+        """Retourne True si le pack est intégré au code source."""
+        return pack_name in self._builtin_names
 
     def get_pack(self, name: str) -> Optional[DomainPack]:
         """Récupère un pack par son nom."""
@@ -205,7 +212,7 @@ def _discover_packs(registry: PackRegistry) -> None:
     # 1. Packs intégrés (dans le code source)
     try:
         from knowbase.domain_packs.biomedical import BiomedicalPack
-        registry.register(BiomedicalPack())
+        registry.register(BiomedicalPack(), builtin=True)
     except ImportError:
         logger.debug("[PackRegistry] Biomedical pack not available")
     except Exception as e:
@@ -213,7 +220,7 @@ def _discover_packs(registry: PackRegistry) -> None:
 
     try:
         from knowbase.domain_packs.enterprise_sap import EnterpriseSapPack
-        registry.register(EnterpriseSapPack())
+        registry.register(EnterpriseSapPack(), builtin=True)
     except ImportError:
         logger.debug("[PackRegistry] Enterprise SAP pack not available")
     except Exception as e:
