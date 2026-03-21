@@ -190,16 +190,22 @@ async def extract(request: ExtractRequest):
             )
 
         # 2. Gazetteer force-include : produits SAP non detectes par GLiNER
+        #    Match mot entier uniquement (pas de substring "ase" dans "based")
+        import re as _re
         for product in GAZETTEER_SET:
-            if product in text_lower and product not in seen_spans:
-                # Retrouver la casse originale dans le texte
-                start_pos = text_lower.find(product)
-                original_name = text[start_pos:start_pos + len(product)]
+            if product not in seen_spans and len(product) >= 3:
+                # Pour les termes courts (<= 4 chars), exiger un match mot entier strict
+                # Pour les termes plus longs, un match mot entier suffit
+                pattern = r'\b' + _re.escape(product) + r'\b'
+                match = _re.search(pattern, text_lower)
+                if match:
+                    start_pos = match.start()
+                    original_name = text[start_pos:start_pos + len(product)]
 
-                _add_entity(
-                    product, original_name, "SAP_PRODUCT", claim_id,
-                    existing_norms, new_entities, existing_matches,
-                )
+                    _add_entity(
+                        product, original_name, "SAP_PRODUCT", claim_id,
+                        existing_norms, new_entities, existing_matches,
+                    )
 
     elapsed_ms = int((time.time() - start_time) * 1000)
 
