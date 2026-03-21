@@ -62,6 +62,8 @@ export default function PostImportPage() {
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [currentStep, setCurrentStep] = useState<string | null>(null)
+  const [stepProgress, setStepProgress] = useState<number>(0)
+  const [stepDetail, setStepDetail] = useState<string>('')
   const [completedSteps, setCompletedSteps] = useState<string[]>([])
   const [results, setResults] = useState<PipelineResult | null>(null)
   const toast = useToast()
@@ -107,6 +109,8 @@ export default function PostImportPage() {
         const res = await api.postImport.status()
         const data = res.data
         if (data.current_step) setCurrentStep(data.current_step)
+        setStepProgress(data.step_progress || 0)
+        setStepDetail(data.step_detail || '')
         if (data.completed_steps) setCompletedSteps(data.completed_steps || [])
         if (!data.running && data.results && data.results.length > 0) {
           setRunning(false)
@@ -334,6 +338,28 @@ export default function PostImportPage() {
                       {step.description}
                     </Text>
 
+                    {/* Step progress (pendant l'exécution) */}
+                    {status === 'running' && (
+                      <Box mt={2} w="full">
+                        <HStack justify="space-between" mb={1}>
+                          <Text fontSize="xs" color="brand.300" fontWeight="500">
+                            {stepDetail || 'En cours...'}
+                          </Text>
+                          <Text fontSize="xs" color="brand.300" fontWeight="600">
+                            {Math.round(stepProgress)}%
+                          </Text>
+                        </HStack>
+                        <Progress
+                          value={stepProgress}
+                          size="xs"
+                          colorScheme="brand"
+                          rounded="full"
+                          hasStripe
+                          isAnimated
+                        />
+                      </Box>
+                    )}
+
                     {/* Result details */}
                     {result && (
                       <Box mt={2} p={3} bg="bg.tertiary" rounded="md" w="full">
@@ -376,24 +402,94 @@ export default function PostImportPage() {
         })}
       </VStack>
 
-      {/* Final summary */}
+      {/* Final summary — tableau recapitulatif */}
       {results && (
-        <Box mt={6} p={5} bg="bg.secondary" rounded="xl" border="1px solid" borderColor="border.default">
-          <HStack justify="space-between">
+        <Box mt={6} bg="bg.secondary" rounded="xl" border="1px solid" borderColor="border.default" overflow="hidden">
+          <HStack justify="space-between" px={5} py={3} bg="rgba(99, 102, 241, 0.06)" borderBottom="1px solid" borderColor="border.default">
+            <HStack spacing={3}>
+              <Icon as={FiCheck} color="green.400" />
+              <Text fontWeight="600" color="text.primary">Recapitulatif du pipeline</Text>
+            </HStack>
             <HStack spacing={4}>
-              <Badge colorScheme="green" fontSize="md" px={3} py={1}>
-                {results.success_count} réussies
+              <Badge colorScheme="green" fontSize="sm" px={3} py={1}>
+                {results.success_count} reussie{results.success_count > 1 ? 's' : ''}
               </Badge>
               {results.error_count > 0 && (
-                <Badge colorScheme="red" fontSize="md" px={3} py={1}>
-                  {results.error_count} erreurs
+                <Badge colorScheme="red" fontSize="sm" px={3} py={1}>
+                  {results.error_count} erreur{results.error_count > 1 ? 's' : ''}
                 </Badge>
               )}
+              <Text fontSize="sm" color="text.muted">
+                {Math.round(results.total_duration_s)}s au total
+              </Text>
             </HStack>
-            <Text color="text.muted">
-              Durée totale : {results.total_duration_s}s
-            </Text>
           </HStack>
+
+          <VStack spacing={0} align="stretch" divider={<Divider borderColor="border.default" />}>
+            {results.steps.map((result) => {
+              const step = steps.find(s => s.id === result.step_id)
+              const StepIcon = STEP_ICONS[result.step_id] || FiRefreshCw
+              const details = result.details || {}
+              const detailEntries = Object.entries(details).filter(
+                ([k]) => !['success', 'status', 'error'].includes(k)
+              )
+
+              return (
+                <Box key={result.step_id} px={5} py={3}>
+                  <HStack justify="space-between" mb={detailEntries.length > 0 ? 2 : 0}>
+                    <HStack spacing={3}>
+                      <Icon
+                        as={result.status === 'success' ? FiCheck : FiX}
+                        color={result.status === 'success' ? 'green.400' : 'red.400'}
+                        boxSize={4}
+                      />
+                      <Icon as={StepIcon} color="brand.400" boxSize={4} />
+                      <Text fontSize="sm" fontWeight="500" color="text.primary">
+                        {step?.name || result.step_id}
+                      </Text>
+                    </HStack>
+                    <HStack spacing={3}>
+                      <Text fontSize="xs" color="text.muted">
+                        {result.duration_s < 1 ? '<1' : Math.round(result.duration_s)}s
+                      </Text>
+                      <Badge
+                        colorScheme={result.status === 'success' ? 'green' : 'red'}
+                        variant="subtle"
+                        fontSize="xs"
+                      >
+                        {result.status === 'success' ? 'OK' : 'Erreur'}
+                      </Badge>
+                    </HStack>
+                  </HStack>
+
+                  {/* Message */}
+                  <Text fontSize="xs" color="text.secondary" ml={10} mb={detailEntries.length > 0 ? 2 : 0}>
+                    {result.message}
+                  </Text>
+
+                  {/* Detail metrics in a clean grid */}
+                  {detailEntries.length > 0 && (
+                    <HStack spacing={4} ml={10} flexWrap="wrap">
+                      {detailEntries.map(([key, value]) => {
+                        // Formatter les cles pour la lisibilite
+                        const label = key
+                          .replace(/_/g, ' ')
+                          .replace(/\b\w/g, c => c.toUpperCase())
+                        return (
+                          <HStack key={key} spacing={1}>
+                            <Text fontSize="xs" color="text.muted">{label}:</Text>
+                            <Text fontSize="xs" fontWeight="600" color="brand.300">
+                              {typeof value === 'number' ? value.toLocaleString() : String(value)}
+                            </Text>
+                          </HStack>
+                        )
+                      })}
+                    </HStack>
+                  )}
+                </Box>
+              )
+            })}
+          </VStack>
         </Box>
       )}
     </Box>

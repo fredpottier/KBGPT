@@ -25,6 +25,9 @@ import {
   FiPackage,
   FiBookOpen,
   FiEdit,
+  FiBarChart2,
+  FiAlertTriangle,
+  FiActivity,
 } from 'react-icons/fi'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
@@ -70,6 +73,16 @@ const ADMIN_SECTIONS: SidebarSection[] = [
       { label: 'Post-Import', href: '/admin/post-import', icon: FiShare2 },
       { label: 'KG Hygiene', href: '/admin/kg-hygiene', icon: FiFilter },
       { label: 'Domain Packs', href: '/admin/domain-packs', icon: FiPackage },
+    ],
+  },
+  {
+    title: 'Analyse',
+    icon: FiActivity,
+    color: 'cyan',
+    items: [
+      { label: 'Corpus Intelligence', href: '/admin/corpus-intelligence', icon: FiBarChart2 },
+      { label: 'Contradictions', href: '/admin/contradictions', icon: FiAlertTriangle },
+      { label: 'Audit Corpus', href: '/admin/corpus-audit', icon: FiActivity },
     ],
   },
   {

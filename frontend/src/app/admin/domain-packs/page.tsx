@@ -43,6 +43,8 @@ interface PackStats {
   pack_name: string
   entities_created: number
   claims_linked: number
+  aliases_resolved: number
+  gazetteer_matches: number
   coverage_after: number | null
 }
 
@@ -261,16 +263,30 @@ export default function DomainPacksPage() {
                 {pack.is_active && packStats && (
                   <SimpleGrid columns={2} spacing={3} mb={4}>
                     <Stat size="sm">
-                      <StatLabel fontSize="xs" color="text.muted">Entités créées</StatLabel>
+                      <StatLabel fontSize="xs" color="text.muted">Entites creees</StatLabel>
                       <StatNumber fontSize="lg" color="brand.400">
                         {packStats.entities_created.toLocaleString()}
                       </StatNumber>
                     </Stat>
                     <Stat size="sm">
-                      <StatLabel fontSize="xs" color="text.muted">Claims liées</StatLabel>
+                      <StatLabel fontSize="xs" color="text.muted">Claims liees</StatLabel>
                       <StatNumber fontSize="lg" color="green.400">
                         {packStats.claims_linked.toLocaleString()}
                       </StatNumber>
+                    </Stat>
+                    <Stat size="sm">
+                      <StatLabel fontSize="xs" color="text.muted">Aliases resolus</StatLabel>
+                      <StatNumber fontSize="lg" color="orange.400">
+                        {(packStats.aliases_resolved || 0).toLocaleString()}
+                      </StatNumber>
+                      <StatHelpText fontSize="xs">entites renommees (ex: BTP → SAP Business Technology Platform)</StatHelpText>
+                    </Stat>
+                    <Stat size="sm">
+                      <StatLabel fontSize="xs" color="text.muted">Gazetteer matchs</StatLabel>
+                      <StatNumber fontSize="lg" color="purple.400">
+                        {(packStats.gazetteer_matches || 0).toLocaleString()}
+                      </StatNumber>
+                      <StatHelpText fontSize="xs">entites reconnues dans le gazetteer</StatHelpText>
                     </Stat>
                     {packStats.coverage_after != null && (
                       <Stat size="sm" gridColumn="span 2">
