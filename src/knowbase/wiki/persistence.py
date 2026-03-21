@@ -457,7 +457,7 @@ class WikiArticlePersister:
         # 3. Articles par domaine racine (via le chemin WikiArticle→Entity←Claim→Facet)
         articles_query = """
         MATCH (wa:WikiArticle {tenant_id: $tenant_id, status: 'published'})
-              -[:ABOUT]->(e:Entity)<-[:ABOUT]-(c:Claim)-[:HAS_FACET]->(f:Facet)
+              -[:ABOUT]->(e:Entity)<-[:ABOUT]-(c:Claim)-[:BELONGS_TO_FACET]->(f:Facet)
         WHERE f.facet_kind = 'domain' AND f.domain = f.domain_root
         WITH f.domain AS domain_key, wa.slug AS slug, wa.title AS title,
              wa.importance_tier AS tier, count(DISTINCT c) AS relevance
@@ -535,7 +535,7 @@ class WikiArticlePersister:
             # 2. Top 10 concepts du domaine
             concepts_result = session.run(
                 """
-                MATCH (c:Claim {tenant_id: $tid})-[:HAS_FACET]->(f:Facet {facet_id: $fid}),
+                MATCH (c:Claim {tenant_id: $tid})-[:BELONGS_TO_FACET]->(f:Facet {facet_id: $fid}),
                       (c)-[:ABOUT]->(e:Entity)
                 WITH e, count(DISTINCT c) AS claim_count, count(DISTINCT c.doc_id) AS doc_count
                 OPTIONAL MATCH (wa:WikiArticle {tenant_id: $tid, status: 'published'})-[:ABOUT]->(e)
@@ -564,7 +564,7 @@ class WikiArticlePersister:
             articles_result = session.run(
                 """
                 MATCH (wa:WikiArticle {tenant_id: $tid, status: 'published'})-[:ABOUT]->(e:Entity),
-                      (c:Claim {tenant_id: $tid})-[:ABOUT]->(e), (c)-[:HAS_FACET]->(f:Facet {facet_id: $fid})
+                      (c:Claim {tenant_id: $tid})-[:ABOUT]->(e), (c)-[:BELONGS_TO_FACET]->(f:Facet {facet_id: $fid})
                 WITH wa, count(DISTINCT c) AS relevance
                 RETURN wa.slug AS slug, wa.title AS title,
                        wa.importance_tier AS importance_tier,
@@ -590,7 +590,7 @@ class WikiArticlePersister:
             # 4. Documents contributeurs
             docs_result = session.run(
                 """
-                MATCH (c:Claim {tenant_id: $tid})-[:HAS_FACET]->(f:Facet {facet_id: $fid})
+                MATCH (c:Claim {tenant_id: $tid})-[:BELONGS_TO_FACET]->(f:Facet {facet_id: $fid})
                 WITH c.doc_id AS doc_id, count(c) AS claim_count
                 RETURN doc_id, claim_count
                 ORDER BY claim_count DESC LIMIT 10
@@ -605,7 +605,7 @@ class WikiArticlePersister:
             # 5. Stats du domaine
             stats_result = session.run(
                 """
-                MATCH (c:Claim {tenant_id: $tid})-[:HAS_FACET]->(f:Facet {facet_id: $fid})
+                MATCH (c:Claim {tenant_id: $tid})-[:BELONGS_TO_FACET]->(f:Facet {facet_id: $fid})
                 WITH count(c) AS total_claims, count(DISTINCT c.doc_id) AS doc_count
                 RETURN total_claims, doc_count
                 """,
@@ -614,7 +614,7 @@ class WikiArticlePersister:
 
             contradiction_result = session.run(
                 """
-                MATCH (c1:Claim {tenant_id: $tid})-[:HAS_FACET]->(f:Facet {facet_id: $fid}),
+                MATCH (c1:Claim {tenant_id: $tid})-[:BELONGS_TO_FACET]->(f:Facet {facet_id: $fid}),
                       (c1)-[:CONTRADICTS]-(c2:Claim)
                 RETURN count(DISTINCT c1) AS cnt
                 """,
@@ -624,7 +624,7 @@ class WikiArticlePersister:
             # 6. Gaps — concepts sans article
             gaps_result = session.run(
                 """
-                MATCH (c:Claim {tenant_id: $tid})-[:HAS_FACET]->(f:Facet {facet_id: $fid}),
+                MATCH (c:Claim {tenant_id: $tid})-[:BELONGS_TO_FACET]->(f:Facet {facet_id: $fid}),
                       (c)-[:ABOUT]->(e:Entity)
                 WHERE NOT exists {
                     MATCH (wa:WikiArticle {tenant_id: $tid})-[:ABOUT]->(e)
@@ -824,7 +824,7 @@ class WikiArticlePersister:
             try:
                 result = session.run(
                     """
-                    MATCH (c1:Claim {tenant_id: $tid})-[:HAS_FACET]->(f:Facet),
+                    MATCH (c1:Claim {tenant_id: $tid})-[:BELONGS_TO_FACET]->(f:Facet),
                           (c1)-[r:CONTRADICTS]-(c2:Claim)
                     WHERE r.tension_level IS NULL OR r.tension_level <> 'none'
                     WITH f.facet_name AS domain,

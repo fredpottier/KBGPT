@@ -19,7 +19,7 @@ Règles:
    - Le contexte est un cadre de lecture, pas une vérité positive
 
 3. Vocabulaire distinct: Facet ≠ ApplicabilityQualifier
-   - Facet (HAS_FACET) = axe de navigation thématique
+   - Facet (BELONGS_TO_FACET) = axe de navigation thématique
    - ApplicabilityQualifier = discriminant de scope
 
 4. À la requête, on cherche des claims APPLICABLES dans un contexte

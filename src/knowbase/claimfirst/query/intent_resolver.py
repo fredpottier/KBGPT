@@ -407,7 +407,7 @@ class IntentResolver:
                     WITH cluster, max_score, matching_claims, count(c) as total_claims
                     OPTIONAL MATCH (c:Claim)-[:IN_CLUSTER]->(cluster)
                     OPTIONAL MATCH (c)-[:ABOUT]->(e:Entity)
-                    OPTIONAL MATCH (c)-[:HAS_FACET]->(f:Facet)
+                    OPTIONAL MATCH (c)-[:BELONGS_TO_FACET]->(f:Facet)
                     WITH cluster, max_score, matching_claims, total_claims,
                          collect(DISTINCT e.name)[0..5] as entities,
                          collect(DISTINCT f.name)[0..3] as facets,

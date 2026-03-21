@@ -47,27 +47,47 @@ class FacetCandidate:
     source_doc_id: str = ""
 
 
-SYSTEM_PROMPT = """You are a document taxonomy analyst. Given a document's title, summary, and sample claims,
-identify the 3-6 MAJOR thematic axes (facets) that this document covers.
+SYSTEM_PROMPT = """You are a knowledge graph taxonomy analyst. Your job is to classify a document
+into CROSS-CUTTING DIMENSIONS that are reusable across many documents in a corpus.
+
+CRITICAL: You are NOT summarizing this document. You are identifying which UNIVERSAL DIMENSIONS
+this document contributes to. Think of dimensions as permanent categories in a library catalog,
+not as descriptions of individual books.
+
+GOOD dimensions (reusable across many documents):
+- "Security" — any document touching authentication, authorization, encryption, access control
+- "Compliance" — any document touching regulations, data protection, privacy, audit
+- "Configuration" — any document touching system setup, parameters, customizing
+- "Deployment & Migration" — any document touching installation, upgrade, conversion
+- "Operations" — any document touching monitoring, performance, troubleshooting
+- "Integration" — any document touching APIs, interfaces, data exchange
+- "Infrastructure" — any document touching hardware, cloud, system requirements
+- "Data Management" — any document touching data quality, migration, archiving
+- "Business Functionality" — any document touching business processes, features, capabilities
+
+BAD dimensions (too document-specific, NOT reusable):
+- "SAP S/4HANA Cloud Private Edition Overview" — this is a document title, not a dimension
+- "SAP S/4HANA 2023 Features" — this is version-specific, not a dimension
+- "Conversion Guide Steps" — this is a document section, not a dimension
 
 RULES:
-1. Each facet is a NAVIGATION AXIS — a topic dimension useful for filtering/exploring claims
-2. dimension_key: format "domain.sub_domain", lowercase, snake_case, max 3 levels
-3. facet_family: choose from "thematic" (what the doc is about), "normative" (compliance/obligations), "operational" (ops/SLA/procedures)
-4. keywords: 3-5 specific keywords for this facet
-5. FORBIDDEN labels: general, other, miscellaneous, introduction, conclusion, summary, overview, appendix
-6. FORBIDDEN: purely rhetorical facets (structure-related, not content-related)
-7. Return 3-6 facets, no more, no fewer
-8. confidence: 0.0-1.0 based on how clearly the facet appears in the document
+1. Each facet must be a UNIVERSAL DIMENSION applicable to multiple documents
+2. dimension_key: format "domain.sub_domain", lowercase, snake_case, max 2 levels
+3. facet_family: "thematic" (content topic), "normative" (compliance/obligations), "operational" (ops/procedures)
+4. keywords: 5-10 MULTI-WORD keywords for matching claims to this facet (e.g. "access control" not just "access")
+5. FORBIDDEN: document titles, product names, version numbers as facet names
+6. FORBIDDEN: general/other/miscellaneous/introduction/conclusion/summary/overview
+7. Return 3-6 facets, each representing a DIFFERENT dimension
+8. confidence: 0.0-1.0 based on how strongly this dimension appears
 
 Respond in JSON:
 {
   "facets": [
     {
-      "canonical_name": "Data Protection Compliance",
-      "dimension_key": "compliance.data_protection",
+      "canonical_name": "Security",
+      "dimension_key": "security",
       "facet_family": "normative",
-      "keywords": ["gdpr", "data protection", "privacy", "personal data", "consent"],
+      "keywords": ["authentication", "authorization", "access control", "encryption", "security policy", "user roles", "identity management", "password policy"],
       "confidence": 0.95
     }
   ]
@@ -93,7 +113,8 @@ Document summary:
 Sample claims from this document:
 {claims_text if claims_text else "(no claims available)"}
 
-Extract the 3-6 major thematic facets of this document."""
+Classify this document into 3-6 UNIVERSAL cross-cutting dimensions.
+Remember: dimensions must be reusable across many documents (like "Security", "Compliance", "Operations"), NOT specific to this document."""
 
 
 def _normalize_dimension_key(raw: str) -> str:
@@ -173,10 +194,10 @@ def _parse_llm_response(
             confidence = 0.8
         confidence = max(0.0, min(1.0, float(confidence)))
 
-        # Valider keywords
+        # Valider keywords — garder jusqu'à 10, préférer les multi-mots
         if not isinstance(keywords, list):
             keywords = []
-        keywords = [str(k).strip().lower() for k in keywords if k][:5]
+        keywords = [str(k).strip().lower() for k in keywords if k][:10]
 
         # Dédup par dimension_key
         if dim_key in seen_keys:

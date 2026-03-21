@@ -129,8 +129,8 @@ class FacetMatcher:
         self,
         claim: Claim,
         validated_facets: List[Facet],
-        min_keywords: int = 2,
-        min_ratio: float = 0.10,
+        min_keywords: int = 1,
+        min_ratio: float = 0.05,
     ) -> List[Tuple[str, float, str]]:
         """
         Mode post-import : matching par keywords uniquement.
@@ -139,11 +139,15 @@ class FacetMatcher:
         Requiert au moins min_keywords matchés ET un ratio min.
         Multi-facet : une claim peut être liée à plusieurs facettes.
 
+        Stratégie de scoring :
+        - Keywords multi-mots ("data protection") comptent double
+        - Seuil adaptatif : 1 keyword suffit s'il est multi-mots
+
         Args:
             claim: Claim à matcher
             validated_facets: Facettes validées
-            min_keywords: Nombre minimum de keywords matchés (défaut: 2)
-            min_ratio: Ratio minimum matched/total keywords (défaut: 0.15)
+            min_keywords: Nombre minimum de keywords matchés (défaut: 1)
+            min_ratio: Ratio minimum matched/total keywords (défaut: 0.05)
 
         Returns:
             Liste de (facet_id, score, signals)
@@ -158,11 +162,20 @@ class FacetMatcher:
                 continue
 
             matched = 0
+            matched_multiword = 0
             for kw in facet.keywords:
-                if kw.lower() in claim_text_lower:
+                kw_lower = kw.lower()
+                if kw_lower in claim_text_lower:
                     matched += 1
+                    if " " in kw_lower:
+                        matched_multiword += 1
 
             if matched < min_keywords:
+                continue
+
+            # Un seul keyword mono-mot est trop faible — exiger 2+
+            # sauf si c'est un keyword multi-mots (plus discriminant)
+            if matched == 1 and matched_multiword == 0:
                 continue
 
             ratio = matched / len(facet.keywords)

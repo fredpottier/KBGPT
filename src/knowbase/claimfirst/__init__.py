@@ -26,7 +26,7 @@ Architecture (CHEMIN CANONIQUE - INV-8 CORRECTIF 6 + PATCH C):
     └─[:FROM]─ Passage (= DocItem avec verbatim, contient units U1, U2...)
                └─[:SUPPORTED_BY]─ Claim (CENTRAL, doc_id fixe, unit_ids = preuve)
                                   ├─[:ABOUT]─ Entity (ancre navigation, pas de role V1)
-                                  ├─[:HAS_FACET]─ Facet (axe navigation THÉMATIQUE)
+                                  ├─[:BELONGS_TO_FACET]─ Facet (axe navigation THÉMATIQUE)
                                   ├─[:IN_CLUSTER]─ ClaimCluster (agrégation inter-docs)
                                   └─[:CONTRADICTS|REFINES|QUALIFIES]─ Claim
 

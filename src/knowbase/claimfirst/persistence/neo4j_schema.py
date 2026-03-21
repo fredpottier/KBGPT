@@ -16,7 +16,7 @@ Architecture (CHEMIN CANONIQUE - INV-8 CORRECTIF 6 + PATCH C + CHANTIER 0):
 
     # Relations additionnelles
     (Claim)-[:ABOUT]->(Entity)            # Claim parle de Entity (pas de role V1)
-    (Claim)-[:HAS_FACET]->(Facet)         # Claim catégorisée par Facet
+    (Claim)-[:BELONGS_TO_FACET]->(Facet)         # Claim catégorisée par Facet
     (Claim)-[:IN_CLUSTER]->(ClaimCluster) # Claim membre de Cluster
     (Claim)-[:CONTRADICTS]->(Claim)       # Claims incompatibles
     (Claim)-[:REFINES]->(Claim)           # Claim A précise Claim B
@@ -112,7 +112,7 @@ class ClaimFirstSchema:
     # Note: FROM et SUPPORTED_BY retirés (Chantier 0 Phase 1A)
     RELATION_TYPES = [
         "ABOUT",             # Claim → Entity (pas de role V1, INV-4)
-        "HAS_FACET",         # Claim → Facet
+        "BELONGS_TO_FACET",         # Claim → Facet
         "IN_CLUSTER",        # Claim → ClaimCluster
         "IN_DOCUMENT",       # Claim → Document (SHORTCUT UNIQUE - INV-8 PATCH C)
         "CONTRADICTS",       # Claim → Claim
@@ -515,7 +515,7 @@ def get_cleanup_queries(tenant_id: str) -> List[str]:
         # Supprimer les relations d'abord
         # Note: SUPPORTED_BY et FROM retirés (Chantier 0 Phase 1A)
         f"""
-        MATCH (c:Claim {{tenant_id: '{tenant_id}'}})-[r:ABOUT|HAS_FACET|IN_CLUSTER|IN_DOCUMENT|CONTRADICTS|REFINES|QUALIFIES]->()
+        MATCH (c:Claim {{tenant_id: '{tenant_id}'}})-[r:ABOUT|BELONGS_TO_FACET|IN_CLUSTER|IN_DOCUMENT|CONTRADICTS|REFINES|QUALIFIES]->()
         DELETE r
         """,
         # V1.4: SIMILAR_TO relations between entities

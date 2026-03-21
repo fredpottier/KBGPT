@@ -324,7 +324,7 @@ class ClaimFirstResult(BaseModel):
 
     claim_facet_links: List[Tuple[str, str]] = Field(
         default_factory=list,
-        description="Liens Claim → Facet (HAS_FACET)"
+        description="Liens Claim → Facet (BELONGS_TO_FACET)"
     )
 
     claim_cluster_links: List[Tuple[str, str]] = Field(

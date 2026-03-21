@@ -263,7 +263,7 @@ async def get_claimfirst_status(
             # Relation counts (SUPPORTED_BY retiré — Chantier 0 Phase 1A)
             rel_queries = {
                 "about": "MATCH (:Claim)-[r:ABOUT]->(:EntityClaimFirst) RETURN count(r) as c",
-                "has_facet": "MATCH (:Claim)-[r:HAS_FACET]->(:Facet) RETURN count(r) as c",
+                "has_facet": "MATCH (:Claim)-[r:BELONGS_TO_FACET]->(:Facet) RETURN count(r) as c",
                 "in_cluster": "MATCH (:Claim)-[r:IN_CLUSTER]->(:ClaimCluster) RETURN count(r) as c",
                 "contradicts": "MATCH (:Claim)-[r:CONTRADICTS]->(:Claim) RETURN count(r) as c",
                 "refines": "MATCH (:Claim)-[r:REFINES]->(:Claim) RETURN count(r) as c",
@@ -656,7 +656,7 @@ async def get_claimfirst_stats(
                     response.node_counts[label] = 0
 
             # Relation counts (SUPPORTED_BY retiré — Chantier 0 Phase 1A)
-            rel_types = ["ABOUT", "HAS_FACET", "IN_CLUSTER",
+            rel_types = ["ABOUT", "BELONGS_TO_FACET", "IN_CLUSTER",
                         "CONTRADICTS", "REFINES", "QUALIFIES"]
             for rel_type in rel_types:
                 query = f"MATCH ()-[r:{rel_type}]->() RETURN count(r) as c"
