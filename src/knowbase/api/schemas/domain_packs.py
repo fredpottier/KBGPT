@@ -45,6 +45,8 @@ class PackStatsResponse(BaseModel):
     pack_name: str
     entities_created: int = 0
     claims_linked: int = 0
+    aliases_resolved: int = 0
+    gazetteer_matches: int = 0
     coverage_before: Optional[float] = None
     coverage_after: Optional[float] = None
 
