@@ -21,8 +21,9 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 
+from knowbase.api.dependencies import get_tenant_id
 from knowbase.api.schemas.domain_packs import (
     PackInfo,
     PackListResponse,
@@ -46,7 +47,7 @@ router = APIRouter(
 
 @router.get("/", response_model=PackListResponse)
 async def list_packs(
-    x_tenant_id: str = Header(default="default", alias="X-Tenant-ID"),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """Liste tous les packs disponibles avec leur état."""
     from knowbase.domain_packs.registry import get_pack_registry
@@ -60,7 +61,7 @@ async def list_packs(
     active_count = 0
 
     for pack in all_packs:
-        is_active = registry.is_active(pack.name, x_tenant_id)
+        is_active = registry.is_active(pack.name, tenant_id)
         if is_active:
             active_count += 1
 
@@ -199,13 +200,13 @@ async def uninstall_pack(request: PackActivateRequest):
 @router.post("/activate", response_model=PackActivateResponse)
 async def activate_pack(
     request: PackActivateRequest,
-    x_tenant_id: str = Header(default="default", alias="X-Tenant-ID"),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """Active un pack (start container + persist DB)."""
     from knowbase.domain_packs.registry import get_pack_registry
     from knowbase.domain_packs.pack_manager import get_pack_manager
 
-    tenant_id = request.tenant_id or x_tenant_id
+    tenant_id = request.tenant_id or tenant_id
     registry = get_pack_registry()
 
     pack = registry.get_pack(request.pack_name)
@@ -235,13 +236,13 @@ async def activate_pack(
 @router.post("/deactivate", response_model=PackActivateResponse)
 async def deactivate_pack(
     request: PackActivateRequest,
-    x_tenant_id: str = Header(default="default", alias="X-Tenant-ID"),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """Désactive un pack (stop container + persist DB)."""
     from knowbase.domain_packs.registry import get_pack_registry
     from knowbase.domain_packs.pack_manager import get_pack_manager
 
-    tenant_id = request.tenant_id or x_tenant_id
+    tenant_id = request.tenant_id or tenant_id
     registry = get_pack_registry()
 
     success = registry.deactivate(request.pack_name, tenant_id)
@@ -269,12 +270,12 @@ async def deactivate_pack(
 @router.post("/reprocess", response_model=ReprocessResponse)
 async def reprocess_pack(
     request: ReprocessRequest,
-    x_tenant_id: str = Header(default="default", alias="X-Tenant-ID"),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """Lance le reprocessing rétroactif via RQ job."""
     from knowbase.domain_packs.registry import get_pack_registry
 
-    tenant_id = request.tenant_id or x_tenant_id
+    tenant_id = request.tenant_id or tenant_id
     registry = get_pack_registry()
 
     pack = registry.get_pack(request.pack_name)
@@ -295,7 +296,7 @@ async def reprocess_pack(
 
 @router.get("/reprocess-status", response_model=ReprocessStatusResponse)
 async def reprocess_status(
-    x_tenant_id: str = Header(default="default", alias="X-Tenant-ID"),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """Status du reprocessing en cours."""
     import json
@@ -303,7 +304,7 @@ async def reprocess_status(
     try:
         from knowbase.common.clients.redis_client import get_redis_client
         rc = get_redis_client()
-        state_key = f"osmose:domain_pack:reprocess:state:{x_tenant_id}"
+        state_key = f"osmose:domain_pack:reprocess:state:{tenant_id}"
         raw = rc.client.get(state_key)
         if raw:
             data = json.loads(raw)
@@ -322,7 +323,7 @@ async def reprocess_status(
 @router.get("/stats/{pack_name}", response_model=PackStatsResponse)
 async def pack_stats(
     pack_name: str,
-    x_tenant_id: str = Header(default="default", alias="X-Tenant-ID"),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """Stats Neo4j pour un pack."""
     from knowbase.domain_packs.registry import get_pack_registry
@@ -335,26 +336,73 @@ async def pack_stats(
         from knowbase.common.clients.neo4j_client import get_neo4j_client
         driver = get_neo4j_client().driver
 
+        # Charger les aliases du pack pour compter les matchs
+        pack = registry.get_pack(pack_name)
+        pack_aliases = {}
+        gazetteer_terms = set()
+        if pack:
+            defaults = pack._load_defaults_json()
+            pack_aliases = {
+                alias.lower(): canonical
+                for alias, canonical in defaults.get("canonical_aliases", {}).items()
+            }
+            gazetteer_terms = {
+                t.lower() for t in defaults.get("product_gazetteer", [])
+            }
+
         with driver.session() as session:
+            # Entités créées par le pack
             r1 = session.run(
                 "MATCH (e:Entity {tenant_id: $t, source_pack: $p}) RETURN count(e) as n",
-                t=x_tenant_id, p=pack_name,
+                t=tenant_id, p=pack_name,
             )
             entities_created = r1.single()["n"]
 
+            # Claims linkées par le pack
             r2 = session.run(
                 "MATCH (c:Claim {tenant_id: $t})-[r:ABOUT]->(e:Entity) "
                 "WHERE r.method = $m RETURN count(DISTINCT c) as n",
-                t=x_tenant_id, m=f"domain_pack:{pack_name}",
+                t=tenant_id, m=f"domain_pack:{pack_name}",
             )
             claims_linked = r2.single()["n"]
 
+            # Aliases résolus : entités dont le nom est un canonical ET qui ont des aliases
+            aliases_resolved = 0
+            if pack_aliases:
+                canonical_names = list(set(pack_aliases.values()))
+                r_aliases = session.run(
+                    """
+                    MATCH (e:Entity {tenant_id: $t})
+                    WHERE e.aliases IS NOT NULL AND size(e.aliases) > 0
+                      AND e.name IN $canonicals
+                    RETURN count(e) as n
+                    """,
+                    t=tenant_id,
+                    canonicals=canonical_names,
+                )
+                aliases_resolved = r_aliases.single()["n"]
+
+            # Entités matchant le gazetteer
+            gazetteer_matches = 0
+            if gazetteer_terms:
+                r_gaz = session.run(
+                    """
+                    MATCH (e:Entity {tenant_id: $t})
+                    WHERE toLower(e.name) IN $terms
+                    RETURN count(e) as n
+                    """,
+                    t=tenant_id,
+                    terms=list(gazetteer_terms)[:500],
+                )
+                gazetteer_matches = r_gaz.single()["n"]
+
+            # Couverture globale
             r3 = session.run(
                 "MATCH (c:Claim {tenant_id: $t}) WITH count(c) as total "
                 "MATCH (c2:Claim {tenant_id: $t})-[:ABOUT]->(:Entity) "
                 "WITH total, count(DISTINCT c2) as linked "
                 "RETURN CASE WHEN total > 0 THEN toFloat(linked)/total ELSE 0.0 END as cov",
-                t=x_tenant_id,
+                t=tenant_id,
             )
             coverage = r3.single()["cov"]
 
@@ -362,6 +410,8 @@ async def pack_stats(
             pack_name=pack_name,
             entities_created=entities_created,
             claims_linked=claims_linked,
+            aliases_resolved=aliases_resolved,
+            gazetteer_matches=gazetteer_matches,
             coverage_after=coverage,
         )
     except Exception as e:

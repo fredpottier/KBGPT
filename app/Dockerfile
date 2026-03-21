@@ -88,9 +88,17 @@ COPY app/entrypoint-worker.sh /app/entrypoint-worker.sh
 RUN chmod +x /app/entrypoint-worker.sh
 RUN mkdir -p /app/config
 
+# Créer un utilisateur non-root pour l'exécution
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+RUN chown -R appuser:appuser /app
+RUN mkdir -p /data && chown -R appuser:appuser /data
+
 ENV HF_HOME=/data/models
 ENV KNOWBASE_DATA_DIR=/data
 ENV PYTHONPATH="/app:/app/src"
+
+# Passer en utilisateur non-root
+USER appuser
 
 EXPOSE 8000
 

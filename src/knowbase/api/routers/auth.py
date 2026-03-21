@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from knowbase.api.dependencies import get_current_user
+from knowbase.api.dependencies import get_current_user, require_admin
 from knowbase.api.schemas.auth import (
     LoginRequest,
     RefreshTokenRequest,
@@ -201,13 +201,11 @@ def get_current_user_info(
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(
     user_data: UserCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    admin: dict = Depends(require_admin),
 ) -> UserResponse:
     """
-    Crée un nouvel utilisateur (inscription).
-
-    ⚠️ En production, cet endpoint devrait être protégé (admin only)
-    ou désactivé selon la politique d'inscription.
+    Crée un nouvel utilisateur (admin only).
 
     Args:
         user_data: Données utilisateur

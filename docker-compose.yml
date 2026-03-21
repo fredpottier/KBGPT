@@ -65,7 +65,7 @@ services:
       - ./config:/app/config
       - ./tests:/app/tests
       - ./poc:/app/poc
-      - /var/run/docker.sock:/var/run/docker.sock  # Domain Packs — pilotage containers sidecar
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Domain Packs — lecture seule (build via docker API)
     networks:
       - knowbase_net
     working_dir: /app

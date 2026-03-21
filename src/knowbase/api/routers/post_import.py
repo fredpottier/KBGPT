@@ -22,8 +22,10 @@ import os
 import time
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+
+from knowbase.api.dependencies import get_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,8 @@ class PipelineStatusResponse(BaseModel):
     running: bool = False
     current_step: Optional[str] = None
     current_step_name: Optional[str] = None
+    step_progress: float = 0.0  # 0-100, progression de l'étape en cours
+    step_detail: str = ""  # ex: "142/500 paires évaluées"
     completed_steps: List[str] = Field(default_factory=list)
     total_steps: int = 0
     progress: float = 0.0
@@ -89,7 +93,7 @@ STEPS = [
     StepInfo(
         id="canonicalize",
         name="Canonicalisation entités",
-        description="Regroupe les variantes d'une même entité (ex: PCT / Procalcitonin) sous une CanonicalEntity unique.",
+        description="Regroupe les variantes d'une meme entite sous une CanonicalEntity unique via LLM (ex: acronymes, noms courts, variantes orthographiques).",
         order=1,
         estimated_duration="1 - 5min",
     ),
@@ -126,7 +130,7 @@ STEPS = [
     StepInfo(
         id="domain_pack_reprocess",
         name="Domain Pack reprocess",
-        description="Soumet les claims isolées (sans entité) au NER spécialisé du Domain Pack actif pour enrichir la couverture.",
+        description="Soumet toutes les claims au NER specialise du Domain Pack actif pour detecter les entites domaine, et resout les aliases canoniques sur les entites existantes.",
         order=6,
         estimated_duration="30s - 2min",
         requires_pack=True,
@@ -188,13 +192,13 @@ async def list_steps():
 
 @router.get("/status", response_model=PipelineStatusResponse)
 async def pipeline_status(
-    x_tenant_id: str = Header(default="default", alias="X-Tenant-ID"),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """État du pipeline en cours d'exécution."""
     try:
         from knowbase.common.clients.redis_client import get_redis_client
         rc = get_redis_client()
-        raw = rc.client.get(f"osmose:post_import:state:{x_tenant_id}")
+        raw = rc.client.get(f"osmose:post_import:state:{tenant_id}")
         if raw:
             data = json.loads(raw)
             return PipelineStatusResponse(**data)
@@ -207,10 +211,10 @@ async def pipeline_status(
 @router.post("/run", response_model=PipelineStartResponse)
 async def run_pipeline(
     request: PipelineRequest,
-    x_tenant_id: str = Header(default="default", alias="X-Tenant-ID"),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """Lance le pipeline en arrière-plan via RQ."""
-    tenant_id = request.tenant_id or x_tenant_id
+    tenant_id = request.tenant_id or tenant_id
 
     for step_id in request.steps:
         if step_id not in STEPS_BY_ID:
@@ -247,13 +251,13 @@ async def run_pipeline(
 
 @router.post("/cancel")
 async def cancel_pipeline(
-    x_tenant_id: str = Header(default="default", alias="X-Tenant-ID"),
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """Annule le pipeline en cours (marque comme terminé dans Redis)."""
     try:
         from knowbase.common.clients.redis_client import get_redis_client
         rc = get_redis_client()
-        rc.client.delete(f"osmose:post_import:state:{x_tenant_id}")
+        rc.client.delete(f"osmose:post_import:state:{tenant_id}")
         return {"success": True, "message": "Pipeline annulé"}
     except Exception as e:
         return {"success": False, "message": str(e)}
@@ -276,17 +280,32 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
         step_name = step_info.name if step_info else step_id
         logger.info(f"[PostImport] Exécution : {step_name}")
 
+        completed_so_far = [r["step_id"] for r in results if r["status"] == "success"]
+
+        # Callback de progression pour l'étape en cours
+        def on_step_progress(pct: float, detail: str = ""):
+            _update_state(
+                tenant_id, running=True, all_steps=steps,
+                completed=completed_so_far,
+                current_step=step_id,
+                current_step_name=step_name,
+                results=results,
+                step_progress=pct,
+                step_detail=detail,
+            )
+
         _update_state(
             tenant_id, running=True, all_steps=steps,
-            completed=[r["step_id"] for r in results if r["status"] == "success"],
+            completed=completed_so_far,
             current_step=step_id,
             current_step_name=step_name,
             results=results,
+            step_progress=0.0,
         )
 
         step_start = time.time()
         try:
-            details = _execute_step(step_id, tenant_id)
+            details = _execute_step(step_id, tenant_id, on_step_progress)
             duration = round(time.time() - step_start, 1)
             results.append({
                 "step_id": step_id,
@@ -336,46 +355,57 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
 # ============================================================================
 
 
-def _execute_step(step_id: str, tenant_id: str) -> dict:
+def _execute_step(step_id: str, tenant_id: str, on_progress=None) -> dict:
+    noop = lambda pct, detail="": None
+    progress = on_progress or noop
     if step_id == "canonicalize":
-        return _run_canonicalize(tenant_id)
+        return _run_canonicalize(tenant_id, progress)
     elif step_id == "facets":
-        return _run_facets(tenant_id)
+        return _run_facets(tenant_id, progress)
     elif step_id == "cluster_cross_doc":
-        return _run_cluster_cross_doc(tenant_id)
+        return _run_cluster_cross_doc(tenant_id, progress)
     elif step_id == "chains_cross_doc":
-        return _run_chains_cross_doc(tenant_id)
+        return _run_chains_cross_doc(tenant_id, progress)
     elif step_id == "detect_contradictions":
-        return _run_detect_contradictions(tenant_id)
+        return _run_detect_contradictions(tenant_id, progress)
     elif step_id == "domain_pack_reprocess":
-        return _run_domain_pack_reprocess(tenant_id)
+        return _run_domain_pack_reprocess(tenant_id, progress)
     elif step_id == "claim_embeddings":
-        return _run_claim_embeddings(tenant_id)
+        return _run_claim_embeddings(tenant_id, progress)
     elif step_id == "claim_chunk_bridge":
-        return _run_claim_chunk_bridge(tenant_id)
+        return _run_claim_chunk_bridge(tenant_id, progress)
     elif step_id == "archive_isolated":
         return _run_archive_isolated(tenant_id)
     else:
         raise ValueError(f"Étape inconnue: {step_id}")
 
 
-def _run_canonicalize(tenant_id: str) -> dict:
+def _run_canonicalize(tenant_id: str, progress=None) -> dict:
+    _p = progress or (lambda pct, detail="": None)
     from knowbase.common.clients.neo4j_client import get_neo4j_client
     driver = get_neo4j_client().driver
 
+    _p(5, "Comptage des entites canoniques existantes...")
     with driver.session() as session:
         before = session.run(
             "MATCH (ce:CanonicalEntity) RETURN count(ce) as cnt"
         ).single()["cnt"]
+        total_entities = session.run(
+            "MATCH (e:Entity {tenant_id: $tid}) RETURN count(e) as cnt",
+            tid=tenant_id,
+        ).single()["cnt"]
 
+    _p(10, f"Canonicalisation de {total_entities} entites...")
     from knowbase.claimfirst.worker_job import _canonicalize_entities_cross_doc
     result = _canonicalize_entities_cross_doc(driver, tenant_id)
 
+    _p(95, "Comptage final...")
     with driver.session() as session:
         after = session.run(
             "MATCH (ce:CanonicalEntity) RETURN count(ce) as cnt"
         ).single()["cnt"]
 
+    _p(100, f"{after - before} nouveaux canoniques crees")
     return {
         "canonical_before": before,
         "canonical_after": after,
@@ -384,7 +414,7 @@ def _run_canonicalize(tenant_id: str) -> dict:
     }
 
 
-def _run_facets(tenant_id: str) -> dict:
+def _run_facets(tenant_id: str, progress=None) -> dict:
     import subprocess
     result = subprocess.run(
         ["python", "scripts/rebuild_facets.py", "--execute", "--purge-old",
@@ -414,7 +444,7 @@ def _run_facets(tenant_id: str) -> dict:
     return stats
 
 
-def _run_cluster_cross_doc(tenant_id: str) -> dict:
+def _run_cluster_cross_doc(tenant_id: str, progress=None) -> dict:
     from knowbase.common.clients.neo4j_client import get_neo4j_client
     driver = get_neo4j_client().driver
 
@@ -422,7 +452,7 @@ def _run_cluster_cross_doc(tenant_id: str) -> dict:
     return _cluster_cross_doc(driver, tenant_id)
 
 
-def _run_chains_cross_doc(tenant_id: str) -> dict:
+def _run_chains_cross_doc(tenant_id: str, progress=None) -> dict:
     from knowbase.common.clients.neo4j_client import get_neo4j_client
     driver = get_neo4j_client().driver
 
@@ -509,12 +539,13 @@ def _run_chains_cross_doc(tenant_id: str) -> dict:
     return {"chains_detected": len(links), "chains_persisted": persisted}
 
 
-def _run_detect_contradictions(tenant_id: str) -> dict:
+def _run_detect_contradictions(tenant_id: str, progress=None) -> dict:
     """
     Détection de contradictions cross-doc en 2 phases :
     Phase A : Formelle (claims avec S/P/O structuré)
     Phase B : LLM directe (claims sans S/P/O, au sein des clusters cross-doc)
     """
+    _p = progress or (lambda pct, detail="": None)
     from knowbase.common.clients.neo4j_client import get_neo4j_client
     from knowbase.claimfirst.models.claim import Claim
     from knowbase.claimfirst.clustering.relation_detector import RelationDetector
@@ -522,6 +553,7 @@ def _run_detect_contradictions(tenant_id: str) -> dict:
     from collections import defaultdict
 
     driver = get_neo4j_client().driver
+    _p(5, "Chargement des clusters cross-document...")
 
     # Compter les relations existantes
     with driver.session() as session:
@@ -572,7 +604,10 @@ def _run_detect_contradictions(tenant_id: str) -> dict:
         f"dans {len(cluster_claim_ids)} clusters cross-doc"
     )
 
+    _p(15, f"{len(claims_by_id)} claims dans {len(cluster_claim_ids)} clusters")
+
     if not claims_by_id:
+        _p(100, "Aucun cluster cross-doc")
         return {"message": "Aucun cluster cross-doc trouvé", "pairs_analyzed": 0}
 
     # ========================================================================
@@ -597,6 +632,7 @@ def _run_detect_contradictions(tenant_id: str) -> dict:
                 claim_ids=sf_cids, canonical_label="",
             ))
 
+    _p(20, f"Phase A: analyse formelle de {len(formal_claims)} claims...")
     formal_relations = []
     if formal_claims and formal_clusters:
         detector = RelationDetector(min_confidence=0.7)
@@ -615,6 +651,7 @@ def _run_detect_contradictions(tenant_id: str) -> dict:
     MAX_PAIRS_PER_CLUSTER = 50
 
     cross_doc_pairs = []
+    skipped_identical = 0
     for cluster_id, cids in cluster_claim_ids.items():
         cluster_pairs = []
         for i, cid1 in enumerate(cids):
@@ -627,6 +664,21 @@ def _run_detect_contradictions(tenant_id: str) -> dict:
                     continue
                 if len(c1["text"]) < 30 or len(c2["text"]) < 30:
                     continue
+                # Gate : textes identiques ou quasi-identiques → pas une contradiction
+                # mais une confirmation cross-doc (versions du meme doc, copie, etc.)
+                t1 = c1["text"].lower().strip()
+                t2 = c2["text"].lower().strip()
+                if t1 == t2:
+                    skipped_identical += 1
+                    continue
+                # Jaccard sur tokens — si > 0.9, trop similaires pour etre en contradiction
+                words1 = set(t1.split())
+                words2 = set(t2.split())
+                if words1 and words2:
+                    jaccard = len(words1 & words2) / len(words1 | words2)
+                    if jaccard > 0.9:
+                        skipped_identical += 1
+                        continue
                 cluster_pairs.append((c1, c2))
 
         # Échantillonner si trop de paires dans ce cluster
@@ -636,12 +688,14 @@ def _run_detect_contradictions(tenant_id: str) -> dict:
 
     logger.info(
         f"[PostImport:Contradictions] Phase B (LLM): "
-        f"{len(cross_doc_pairs)} paires cross-doc à analyser"
+        f"{len(cross_doc_pairs)} paires cross-doc à analyser "
+        f"({skipped_identical} paires identiques/quasi-identiques filtrées)"
     )
 
+    _p(35, f"Phase B: {len(cross_doc_pairs)} paires a analyser via LLM...")
     llm_relations = []
     if cross_doc_pairs:
-        llm_relations = _llm_batch_compare(cross_doc_pairs, tenant_id)
+        llm_relations = _llm_batch_compare(cross_doc_pairs, tenant_id, on_progress=_p)
         logger.info(
             f"[PostImport:Contradictions] Phase B: "
             f"{len(llm_relations)} relations trouvées"
@@ -650,6 +704,7 @@ def _run_detect_contradictions(tenant_id: str) -> dict:
     # ========================================================================
     # Persistance
     # ========================================================================
+    _p(90, f"Persistance de {len(formal_relations) + len(llm_relations)} relations...")
     all_relations = formal_relations + llm_relations
 
     CYPHER_BY_TYPE = {
@@ -753,21 +808,25 @@ def _llm_batch_compare(
     tenant_id: str,
     batch_size: int = 10,
     max_workers: int = 5,
+    on_progress=None,
 ) -> list:
     """Compare des paires de claims via LLM en batch, parallélisé."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    _p = on_progress or (lambda pct, detail="": None)
 
     # Découper en batches
     batches = []
     for batch_start in range(0, len(pairs), batch_size):
         batches.append(pairs[batch_start:batch_start + batch_size])
 
+    total_batches = len(batches)
     logger.info(
-        f"[PostImport:Contradictions] {len(batches)} batches LLM "
+        f"[PostImport:Contradictions] {total_batches} batches LLM "
         f"({max_workers} workers parallèles)"
     )
 
     all_results = []
+    completed_count = 0
 
     def process_batch(batch):
         return _call_llm_compare_batch(batch)
@@ -783,6 +842,9 @@ def _llm_batch_compare(
                 all_results.extend(batch_results)
             except Exception as e:
                 logger.warning(f"[PostImport:Contradictions] Batch future error: {e}")
+            completed_count += 1
+            pct = 35 + (completed_count / total_batches) * 55  # 35% → 90%
+            _p(pct, f"Phase B: {completed_count}/{total_batches} batches ({len(all_results)} relations)")
 
     return all_results
 
@@ -843,8 +905,10 @@ def _call_llm_compare_batch(batch: list) -> list:
     return results
 
 
-def _run_claim_embeddings(tenant_id: str) -> dict:
+def _run_claim_embeddings(tenant_id: str, progress=None) -> dict:
     """Génère les embeddings sur les claims via script."""
+    _p = progress or (lambda pct, detail="": None)
+    _p(5, "Generation des embeddings en cours...")
     import subprocess
     result = subprocess.run(
         ["python", "scripts/backfill_claim_embeddings.py",
@@ -869,8 +933,10 @@ def _run_claim_embeddings(tenant_id: str) -> dict:
     return stats
 
 
-def _run_claim_chunk_bridge(tenant_id: str) -> dict:
+def _run_claim_chunk_bridge(tenant_id: str, progress=None) -> dict:
     """Bridge claims↔chunks via script."""
+    _p = progress or (lambda pct, detail="": None)
+    _p(5, "Construction des liens claims-chunks...")
     import subprocess
     result = subprocess.run(
         ["python", "scripts/backfill_claim_chunk_bridge.py",
@@ -960,7 +1026,7 @@ def _run_archive_isolated(tenant_id: str) -> dict:
     }
 
 
-def _run_domain_pack_reprocess(tenant_id: str) -> dict:
+def _run_domain_pack_reprocess(tenant_id: str, progress=None) -> dict:
     from knowbase.domain_packs.reprocess_job import run_reprocess
     from knowbase.domain_packs.registry import get_pack_registry
 
@@ -1062,6 +1128,8 @@ def _update_state(
     current_step: str = None,
     current_step_name: str = None,
     results: List[dict] = None,
+    step_progress: float = 0.0,
+    step_detail: str = "",
 ) -> None:
     try:
         from knowbase.common.clients.redis_client import get_redis_client
@@ -1070,6 +1138,8 @@ def _update_state(
             "running": running,
             "current_step": current_step,
             "current_step_name": current_step_name,
+            "step_progress": step_progress,
+            "step_detail": step_detail,
             "completed_steps": completed,
             "total_steps": len(all_steps),
             "progress": len(completed) / len(all_steps) if all_steps else 0,
