@@ -69,7 +69,7 @@ def judge_provenance(question: str, answer: str, ground_truth: dict) -> Dict:
     expected_doc = ground_truth.get("doc_id", "")
     verbatim = ground_truth.get("verbatim_quote", "")
 
-    prompt = f"""Evalue cette reponse sur 4 criteres (score 0-1 chacun).
+    prompt = f"""Evalue cette reponse sur plusieurs criteres.
 
 Question: {question}
 
@@ -81,13 +81,19 @@ Information attendue (ground truth):
 - Document source: {expected_doc}
 - Citation verbatim: {verbatim[:300]}
 
+IMPORTANT pour l'evaluation :
+- Le fait attendu EXISTE dans le corpus. Donc une bonne reponse DOIT le mentionner (meme paraphrase).
+- Si le systeme dit "je ne sais pas" alors que le fait existe, c'est une ERREUR (false_idk).
+- factual_correctness = la reponse contient-elle le sens du fait attendu, meme reformule ?
+
 Evalue en JSON:
 {{
   "factual_correctness": 0.0-1.0,  // La reponse contient-elle le fait attendu (meme paraphrase) ?
   "citation_present": true/false,   // La reponse cite-t-elle des sources [Source N] ?
   "correct_source_cited": true/false, // Le bon document est-il cite ?
   "answer_relevant": true/false,    // La reponse repond-elle a la question ?
-  "says_idk_correctly": true/false, // Si pas d'info, le systeme dit-il "je ne sais pas" ?
+  "says_idk_when_info_exists": true/false, // Le systeme dit-il "je ne sais pas" ALORS QUE le fait existe ? (= ERREUR)
+  "answers_correctly": true/false,  // Le systeme repond-il correctement avec le fait attendu ?
   "reasoning": "explication courte"
 }}"""
 
@@ -295,7 +301,8 @@ def aggregate_judgments(judgments: List[Dict], task: str) -> Dict[str, Any]:
         scores["citation_present_rate"] = _bool_rate(judgments, "citation_present")
         scores["correct_source_rate"] = _bool_rate(judgments, "correct_source_cited")
         scores["answer_relevant_rate"] = _bool_rate(judgments, "answer_relevant")
-        scores["idk_correct_rate"] = _bool_rate(judgments, "says_idk_correctly")
+        scores["answers_correctly_rate"] = _bool_rate(judgments, "answers_correctly")
+        scores["false_idk_rate"] = _bool_rate(judgments, "says_idk_when_info_exists")  # plus bas = mieux
 
     elif task in ("T2_contradictions", "T2"):
         scores["both_sides_surfaced_rate"] = _bool_rate(judgments, "surfaces_both_sides")
