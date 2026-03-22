@@ -28,9 +28,9 @@ questions:
 
 models:
   embedding: "intfloat/multilingual-e5-large"
-  synthesis_primary: "gpt-4o"
+  synthesis_primary: "gpt-4o-mini"
   synthesis_claude: "claude-sonnet-4-20250514"
-  evaluation: "gpt-4o"
+  evaluation: "gpt-4o-mini"
   temperature: 0
   max_answer_tokens: 1500
 
