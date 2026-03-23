@@ -61,6 +61,8 @@ def build_response_payload(result, public_url: str) -> dict[str, Any]:
         # Phase B: axis values pour filtrage version/release
         "axis_release_id": payload.get("axis_release_id"),
         "doc_id": payload.get("doc_id"),
+        # Proposition A: chunk_id pour matching exact avec les claims KG
+        "chunk_id": payload.get("chunk_id"),
     }
 
 
@@ -92,10 +94,13 @@ def _search_claims_vector(
                 CALL db.index.vector.queryNodes('claim_embedding', $k, $embedding)
                 YIELD node AS c, score
                 WHERE score > 0.65 AND c.tenant_id = $tenant_id
-                OPTIONAL MATCH (c)-[contra:CONTRADICTS]-(other:Claim)
+                OPTIONAL MATCH (c)-[tension:CONTRADICTS|REFINES|QUALIFIES]-(other:Claim)
                 OPTIONAL MATCH (c)-[:ABOUT]->(e:Entity)
                 WITH c, score,
-                     collect(DISTINCT other.text)[..2] AS contradiction_texts,
+                     collect(DISTINCT CASE WHEN type(tension) = 'CONTRADICTS' THEN '⚠ CONTRADICTION: ' + coalesce(other.text, '')
+                                           WHEN type(tension) = 'REFINES' THEN '↻ REFINES: ' + coalesce(other.text, '')
+                                           WHEN type(tension) = 'QUALIFIES' THEN '≈ QUALIFIES: ' + coalesce(other.text, '')
+                                           END)[..3] AS contradiction_texts,
                      collect(DISTINCT e.name)[..5] AS entity_names
                 RETURN
                     c.claim_id AS chunk_id,
@@ -116,7 +121,6 @@ def _search_claims_vector(
 
             claims = []
             for r in result:
-                # Format compatible avec les chunks existants
                 claim_chunk = {
                     "text": r["verbatim_quote"] or r["text"],
                     "source_file": r["source_file"] or "",
@@ -124,7 +128,8 @@ def _search_claims_vector(
                     "claim_id": r["chunk_id"],
                     "entity_names": r["entity_names"],
                     "contradiction_texts": r["contradiction_texts"],
-                    "source_type": "claim_vector",  # Marqueur pour distinguer du RAG
+                    "chunk_ids": r["chunk_ids"] or [],  # Pont vers Qdrant
+                    "source_type": "claim_vector",
                 }
                 claims.append(claim_chunk)
 
@@ -133,6 +138,319 @@ def _search_claims_vector(
     except Exception as e:
         logger.warning(f"[SEARCH] Claims vector search error: {e}")
         return []
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# QuestionDimension matching — cache embeddings + cosine similarity
+# ═══════════════════════════════════════════════════════════════════════
+
+def _embed_query(text: str) -> list[float] | None:
+    """Embed un texte via le meme modele multilingue que le corpus."""
+    try:
+        from knowbase.common.clients.embeddings import EmbeddingModelManager
+        emb_manager = EmbeddingModelManager()
+        model = emb_manager.get_model()
+        return model.encode(f"query: {text}", normalize_embeddings=True).tolist()
+    except Exception:
+        # Fallback TEI burst via Redis state
+        try:
+            import os, json
+            import redis
+            tei_url = os.environ.get("TEI_URL", "")
+            if not tei_url:
+                r = redis.from_url(os.environ.get("REDIS_URL", "redis://redis:6379/0"))
+                state = r.get("osmose:burst:state")
+                if state:
+                    tei_url = json.loads(state).get("embeddings_url", "")
+            if tei_url:
+                import requests as _req
+                resp = _req.post(f"{tei_url}/embed", json={"inputs": f"query: {text}"}, timeout=5)
+                if resp.status_code == 200:
+                    return resp.json()[0]
+        except Exception:
+            pass
+    return None
+
+
+def _search_via_question_dimensions(
+    query: str,
+    tenant_id: str,
+    qdrant_client: "QdrantClient",
+    collection_name: str,
+    max_results: int = 10,
+) -> List[Dict]:
+    """Niveau 1 — QuestionDimension routing.
+
+    Resout la question utilisateur vers une QuestionDimension (question factuelle
+    canonique), puis traverse QD → QuestionSignature → Claim → chunk_ids.
+
+    C'est le differenciateur OSMOSIS : au lieu de chercher des chunks par similarite
+    vectorielle, on identifie d'abord QUELLE QUESTION FACTUELLE est posee, puis on
+    recupere les reponses extraites de chaque document avec leurs preuves.
+
+    Retourne des chunks Qdrant enrichis des metadonnees KG.
+    """
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+
+    client = get_neo4j_client()
+
+    with client.driver.session(database=client.database) as session:
+        # Matching semantique multilingue via vector index Neo4j
+        # Meme modele d'embedding que le corpus (multilingual-e5-large)
+        query_embedding = _embed_query(query)
+        if query_embedding is None:
+            return []
+
+        # Vector search sur les QuestionDimensions (index qd_embedding)
+        # puis traversee QD → QS → Claim en une seule requete
+        result = session.run(
+            """
+            CALL db.index.vector.queryNodes('qd_embedding', $top_k, $embedding)
+            YIELD node AS qd, score
+            WHERE score > $threshold AND qd.tenant_id = $tenant_id
+
+            // Traverser QD → QS → Claim
+            MATCH (qs:QuestionSignature)-[:ANSWERS]->(qd)
+            MATCH (c:Claim {claim_id: qs.claim_id, tenant_id: $tenant_id})
+            OPTIONAL MATCH (c)-[:ABOUT]->(e:Entity)
+            OPTIONAL MATCH (c)-[tension:CONTRADICTS|REFINES|QUALIFIES]-(other:Claim)
+
+            RETURN
+                qd.dimension_key AS dimension_key,
+                qd.canonical_question AS canonical_question,
+                score AS similarity,
+                qs.extracted_value AS extracted_value,
+                qs.doc_id AS doc_id,
+                c.claim_id AS claim_id,
+                c.text AS claim_text,
+                c.verbatim_quote AS verbatim,
+                c.chunk_ids AS chunk_ids,
+                collect(DISTINCT e.name)[..5] AS entity_names,
+                collect(DISTINCT CASE
+                    WHEN type(tension) = 'CONTRADICTS' THEN 'CONTRADICTION: ' + coalesce(other.text, '')
+                    WHEN type(tension) = 'REFINES' THEN 'REFINES: ' + coalesce(other.text, '')
+                    WHEN type(tension) = 'QUALIFIES' THEN 'QUALIFIES: ' + coalesce(other.text, '')
+                END)[..3] AS contradiction_texts
+            ORDER BY score DESC, qs.confidence DESC
+            LIMIT $max_results
+            """,
+            embedding=query_embedding,
+            top_k=5,
+            threshold=0.75,
+            tenant_id=tenant_id,
+            max_results=max_results,
+        )
+
+        qd_claims = [dict(r) for r in result]
+
+    if not qd_claims:
+        return []
+
+    logger.info(
+        f"[KG-ROUTING:QD] Matched {len(qd_claims)} QS for dimensions: "
+        f"{set(c['dimension_key'] for c in qd_claims)}"
+    )
+
+    # Construire les claims avec chunk_ids pour _fetch_chunks_for_claims
+    claims_for_fetch = []
+    for qdc in qd_claims:
+        claims_for_fetch.append({
+            "text": qdc["verbatim"] or qdc["claim_text"],
+            "source_file": qdc["doc_id"],
+            "score": qdc["similarity"],
+            "claim_id": qdc["claim_id"],
+            "entity_names": qdc["entity_names"],
+            "contradiction_texts": [t for t in qdc["contradiction_texts"] if t],
+            "chunk_ids": qdc["chunk_ids"] or [],
+            "source_type": "question_dimension",
+            # Metadonnees QD specifiques
+            "dimension_key": qdc["dimension_key"],
+            "canonical_question": qdc["canonical_question"],
+            "extracted_value": qdc["extracted_value"],
+        })
+
+    # Fetch les chunks Qdrant pointes par ces claims
+    chunks = _fetch_chunks_for_claims(
+        qdrant_client=qdrant_client,
+        claims=claims_for_fetch,
+        collection_name=collection_name,
+    )
+
+    # Enrichir chaque chunk avec les metadonnees QD
+    for chunk in chunks:
+        chunk["source_type"] = "question_dimension"
+
+    return chunks
+
+
+def _fetch_chunks_for_claims(
+    qdrant_client: "QdrantClient",
+    claims: List[Dict],
+    collection_name: str,
+) -> List[Dict]:
+    """Claim→Chunk retrieval : recupere les chunks Qdrant exacts pointes par les claims KG.
+
+    Chaque claim a un champ chunk_ids (ex: ["default:DOC_ID:#/texts/44"]) qui pointe
+    directement vers le payload chunk_id dans Qdrant. On fetch ces chunks specifiques
+    au lieu de faire un vector search aveugle.
+
+    Retourne des chunks au format standard, enrichis des metadonnees KG du claim parent.
+    """
+    # Collecter tous les chunk_ids uniques
+    chunk_id_to_claim: Dict[str, Dict] = {}
+    for claim in claims:
+        for cid in claim.get("chunk_ids", []):
+            if cid and cid not in chunk_id_to_claim:
+                chunk_id_to_claim[cid] = claim
+
+    if not chunk_id_to_claim:
+        return []
+
+    chunk_ids_list = list(chunk_id_to_claim.keys())
+
+    # Fetch en batches (Qdrant scroll avec MatchAny)
+    fetched_chunks = []
+    BATCH_SIZE = 50
+    for i in range(0, len(chunk_ids_list), BATCH_SIZE):
+        batch = chunk_ids_list[i:i + BATCH_SIZE]
+        try:
+            scroll_result = qdrant_client.scroll(
+                collection_name=collection_name,
+                scroll_filter=Filter(must=[
+                    FieldCondition(key="chunk_id", match=MatchAny(any=batch))
+                ]),
+                limit=len(batch),
+                with_payload=True,
+                with_vectors=False,
+            )
+            points = scroll_result[0] if scroll_result else []
+
+            for point in points:
+                payload = point.payload or {}
+                cid = payload.get("chunk_id", "")
+                parent_claim = chunk_id_to_claim.get(cid, {})
+
+                chunk = {
+                    "text": payload.get("text", ""),
+                    "source_file": payload.get("doc_id", ""),
+                    "doc_id": payload.get("doc_id", ""),
+                    "score": parent_claim.get("score", 0.8),  # Score du claim parent
+                    "chunk_id": cid,
+                    "page_no": payload.get("page_no"),
+                    "slide_index": payload.get("slide_index"),
+                    "claim_id": parent_claim.get("claim_id", ""),
+                    "claim_text": parent_claim.get("text", ""),
+                    "entity_names": parent_claim.get("entity_names", []),
+                    "contradiction_texts": [t for t in parent_claim.get("contradiction_texts", []) if t],
+                    "source_type": "kg_claim_chunk",  # Marqueur : chunk retrouve via KG
+                }
+                fetched_chunks.append(chunk)
+
+        except Exception as e:
+            logger.warning(f"[KG-BRIDGE] Qdrant scroll batch failed: {e}")
+
+    logger.info(
+        f"[KG-BRIDGE] Claim→Chunk fetch: {len(fetched_chunks)} chunks from "
+        f"{len(chunk_ids_list)} claim chunk_ids ({len(claims)} claims)"
+    )
+    return fetched_chunks
+
+
+def _enrich_chunks_with_kg(
+    chunks: List[Dict],
+    kg_claims: List[Dict],
+    enrichment_map: Dict[str, Dict],
+) -> None:
+    """Proposition A — Enrichit les chunks Qdrant avec les metadonnees KG.
+
+    Strategie double :
+    1. Lookup EXACT par chunk_id : le claim pointe directement vers ce chunk via chunk_ids
+    2. Fallback par doc_id : si pas de match exact, prendre le meilleur claim du meme doc
+
+    Injecte : entity_names, contradiction_texts (REFINES/QUALIFIES/CONTRADICTS), source_type
+    """
+    # Index 1 : claims par chunk_id (matching exact)
+    claims_by_chunk_id: Dict[str, Dict] = {}
+    for claim in kg_claims:
+        for cid in claim.get("chunk_ids", []):
+            if cid and cid not in claims_by_chunk_id:
+                claims_by_chunk_id[cid] = claim
+
+    # Index 2 : claims par doc_id (fallback)
+    claims_by_doc: Dict[str, List[Dict]] = {}
+    for claim in kg_claims:
+        doc = claim.get("source_file", "")
+        if doc:
+            claims_by_doc.setdefault(doc, []).append(claim)
+
+    enriched_count = 0
+    tension_count = 0
+    exact_match_count = 0
+
+    for chunk in chunks:
+        chunk_id = chunk.get("chunk_id", "")
+        chunk_doc = chunk.get("doc_id") or chunk.get("source_file", "")
+
+        best_claim = None
+
+        # 1. Match EXACT par chunk_id (le claim pointe vers CE chunk)
+        if chunk_id and chunk_id in claims_by_chunk_id:
+            best_claim = claims_by_chunk_id[chunk_id]
+            exact_match_count += 1
+
+        # 2. Fallback par doc_id
+        if not best_claim:
+            doc_claims = claims_by_doc.get(chunk_doc, [])
+            if not doc_claims:
+                for doc_key, doc_cl in claims_by_doc.items():
+                    if doc_key and chunk_doc and (doc_key in chunk_doc or chunk_doc in doc_key):
+                        doc_claims = doc_cl
+                        break
+            if doc_claims:
+                best_claim = max(doc_claims, key=lambda c: c.get("score", 0))
+
+        if not best_claim:
+            continue
+
+        # Injecter les enrichissements KG
+        entities = best_claim.get("entity_names", [])
+        tensions = [t for t in best_claim.get("contradiction_texts", []) if t]
+
+        if entities or tensions:
+            chunk["entity_names"] = entities
+            chunk["contradiction_texts"] = tensions
+            chunk["source_type"] = "kg_enriched"
+            enriched_count += 1
+            if tensions:
+                tension_count += 1
+
+    # Collecter TOUTES les entites et tensions de tous les claims KG
+    all_entities = set()
+    all_tensions = []
+    for claim in kg_claims:
+        for e in claim.get("entity_names", []):
+            if e:
+                all_entities.add(e)
+        for t in claim.get("contradiction_texts", []):
+            if t and t not in all_tensions:
+                all_tensions.append(t)
+
+    # Stocker les enrichissements globaux sur le premier chunk (sera lu par le post-processing)
+    if chunks and (all_entities or all_tensions):
+        if "_kg_global" not in chunks[0]:
+            chunks[0]["_kg_global"] = {
+                "all_entity_names": list(all_entities)[:20],
+                "all_tensions": all_tensions[:10],
+                "enriched_chunks": enriched_count,
+                "tension_chunks": tension_count,
+            }
+
+    if enriched_count > 0:
+        logger.info(
+            f"[KG-ENRICH] Enriched {enriched_count}/{len(chunks)} chunks "
+            f"(exact={exact_match_count}, fallback={enriched_count - exact_match_count}, "
+            f"tensions={tension_count}, entities={len(all_entities)})"
+        )
 
 
 def search_documents(
@@ -224,9 +542,47 @@ def search_documents(
     graph_first_chunks = None
     graph_first_succeeded = False
 
-    # DÉSACTIVÉ: Graph-First dépend de CanonicalConcept + index concept_search (OSMOSE semantic)
-    # qui n'existent pas en mode ClaimFirst. Le KG traversal CHAINS_TO reste actif.
+    # DÉSACTIVÉ: Graph-First complet dépend de CanonicalConcept + index concept_search (OSMOSE semantic)
+    # qui n'existent pas en mode ClaimFirst.
     effective_graph_first = False
+
+    # ═══════════════════════════════════════════════════════════════════
+    # PROPOSITION A — KG-Enriched Qdrant
+    #
+    # Qdrant choisit les preuves (memes chunks que le RAG).
+    # Le KG choisit le contexte d'interpretation (entites, tensions, QD).
+    #
+    # Le search Qdrant reste IDENTIQUE au RAG. On enrichit APRES.
+    # OSMOSIS ne peut PAS etre pire que le RAG dans cette configuration.
+    # ═══════════════════════════════════════════════════════════════════
+    kg_claim_results = []
+    kg_enrichment_map = {}
+
+    if use_graph_context:
+        try:
+            kg_claim_results = _search_claims_vector(
+                query=enriched_query,
+                tenant_id=tenant_id,
+                top_k=TOP_K,
+            )
+            if kg_claim_results:
+                # Construire le mapping pour enrichissement post-Qdrant
+                for claim in kg_claim_results:
+                    cid = claim.get("claim_id", "")
+                    kg_enrichment_map[cid] = {
+                        "entity_names": claim.get("entity_names", []),
+                        "contradiction_texts": [t for t in claim.get("contradiction_texts", []) if t],
+                        "source_file": claim.get("source_file", ""),
+                        "claim_text": claim.get("text", ""),
+                        "score": claim.get("score", 0),
+                    }
+                logger.info(
+                    f"[KG-ENRICH] Claims found: {len(kg_claim_results)}, "
+                    f"with entities: {sum(1 for c in kg_claim_results if c.get('entity_names'))}, "
+                    f"with tensions: {sum(1 for c in kg_claim_results if any(t for t in c.get('contradiction_texts', []) if t))}"
+                )
+        except Exception as e:
+            logger.warning(f"[KG-ENRICH] Claims search failed (non-blocking): {e}")
 
     if effective_graph_first:
         try:
@@ -427,6 +783,12 @@ def search_documents(
 
         # Apply reranking to improve relevance ordering
         reranked_chunks = rerank_chunks(query, response_chunks, top_k=TOP_K)
+
+    # PROPOSITION A — Enrichissement KG post-Qdrant
+    # Les chunks Qdrant sont IDENTIQUES au RAG. On enrichit avec le KG.
+    # Qdrant choisit les preuves. Le KG choisit le contexte d'interpretation.
+    if kg_claim_results and reranked_chunks:
+        _enrich_chunks_with_kg(reranked_chunks, kg_claim_results, kg_enrichment_map)
 
     # 🧠 Session Entity Resolution: Si session active, chercher chunks via KG
     # pour les entités mentionnées dans le contexte de conversation
@@ -1018,47 +1380,73 @@ def _find_related_articles(
                         entity_mention_count[name] = entity_mention_count.get(name, 0) + 1
 
         # Fallback : si aucun entity_name dans les chunks (path Qdrant/hybrid),
-        # chercher les entités directement depuis les termes de la question
+        # chercher les articles directement depuis la question
         if not entity_names_set:
             client = get_neo4j_client()
             with client.driver.session(database=client.database) as session:
-                # Extraire les mots significatifs de la question (> 3 chars)
-                question_terms = [
-                    w for w in question.lower().split()
-                    if len(w) > 3 and w not in {"dans", "avec", "pour", "quoi", "quel", "quels",
-                        "quelle", "quelles", "comment", "corpus", "sait", "sont", "cette", "entre"}
-                ]
-                if not question_terms:
-                    return []
-                # Chercher les entités dont le nom contient un terme de la question
-                q_result = session.run(
+                # Stratégie 1 : match par titre d'article (le plus précis)
+                # Chercher si la question contient un titre d'article connu
+                title_result = session.run(
                     """
-                    MATCH (wa:WikiArticle {tenant_id: $tid, status: 'published'})-[:ABOUT]->(e:Entity)
-                    WHERE any(term IN $terms WHERE toLower(e.name) CONTAINS term)
+                    MATCH (wa:WikiArticle {tenant_id: $tid, status: 'published'})
+                    WHERE toLower($question) CONTAINS toLower(wa.title)
                     RETURN wa.slug AS slug, wa.title AS title,
                            wa.importance_tier AS importance_tier,
                            wa.importance_score AS importance_score,
-                           e.name AS matched_entity
-                    ORDER BY wa.importance_score DESC
-                    LIMIT 5
+                           wa.title AS matched_entity
+                    ORDER BY size(wa.title) DESC, wa.importance_score DESC
+                    LIMIT 3
                     """,
                     tid=tenant_id,
-                    terms=question_terms,
+                    question=question.lower(),
                 )
                 articles = []
                 seen_slugs: set[str] = set()
-                for r in q_result:
+                for r in title_result:
                     slug = r["slug"]
-                    if slug in seen_slugs:
-                        continue
-                    seen_slugs.add(slug)
-                    articles.append({
-                        "slug": slug,
-                        "title": r["title"],
-                        "importance_tier": r["importance_tier"] or 3,
-                        "matched_entity": r["matched_entity"] or "",
-                        "is_recommended": len(articles) == 0,
-                    })
+                    if slug not in seen_slugs:
+                        seen_slugs.add(slug)
+                        articles.append({
+                            "slug": slug,
+                            "title": r["title"],
+                            "importance_tier": r["importance_tier"] or 3,
+                            "matched_entity": r["matched_entity"] or "",
+                            "is_recommended": len(articles) == 0,
+                        })
+
+                if articles:
+                    return articles[:3]
+
+                # Stratégie 2 : match par nom d'entité (fallback)
+                # Chercher les entités dont le nom apparaît dans la question
+                entity_result = session.run(
+                    """
+                    MATCH (wa:WikiArticle {tenant_id: $tid, status: 'published'})-[:ABOUT]->(e:Entity)
+                    WHERE toLower($question) CONTAINS toLower(e.name)
+                      AND size(e.name) >= 5
+                    WITH wa, e, size(e.name) AS name_len
+                    ORDER BY name_len DESC, wa.importance_score DESC
+                    RETURN DISTINCT wa.slug AS slug, wa.title AS title,
+                           wa.importance_tier AS importance_tier,
+                           wa.importance_score AS importance_score,
+                           e.name AS matched_entity
+                    LIMIT 5
+                    """,
+                    tid=tenant_id,
+                    question=question.lower(),
+                )
+                for r in entity_result:
+                    slug = r["slug"]
+                    if slug not in seen_slugs:
+                        seen_slugs.add(slug)
+                        articles.append({
+                            "slug": slug,
+                            "title": r["title"],
+                            "importance_tier": r["importance_tier"] or 3,
+                            "matched_entity": r["matched_entity"] or "",
+                            "is_recommended": len(articles) == 0,
+                        })
+
                 return articles[:3]
 
         entity_names = list(entity_names_set)
@@ -1166,38 +1554,54 @@ def _generate_insight_hints(
             with client.driver.session(database=client.database) as session:
                 result = session.run(
                     """
-                    MATCH (c:Claim)-[r:CONTRADICTS]-(other:Claim)
+                    MATCH (c:Claim)-[r:CONTRADICTS|REFINES|QUALIFIES]-(other:Claim)
                     WHERE c.claim_id IN $claim_ids
                       AND (r.show_in_chat = true OR r.show_in_chat IS NULL)
                       AND (r.tension_level IS NULL OR r.tension_level <> 'none')
                     RETURN c.text AS text_a, other.text AS text_b,
                            c.doc_id AS doc_a, other.doc_id AS doc_b,
+                           type(r) AS relation_type,
                            r.tension_nature AS tension_nature,
                            r.tension_level AS tension_level
-                    LIMIT 3
+                    LIMIT 5
                     """,
                     claim_ids=claim_ids,
                 )
                 for record in result:
                     text_a = (record["text_a"] or "")[:120]
                     text_b = (record["text_b"] or "")[:120]
+                    doc_a = (record.get("doc_a") or "")
+                    doc_b = (record.get("doc_b") or "")
+                    relation_type = record.get("relation_type", "CONTRADICTS")
                     tension_nature = record.get("tension_nature")
 
-                    # Adapter le message selon le type de tension
-                    if tension_nature == "scope_conflict":
+                    # Adapter le message selon le type de relation
+                    if relation_type == "REFINES":
+                        msg = f"Ce point est precise par un autre document : « {text_a} » → « {text_b} »"
+                        hint_type = "evolution"
+                    elif relation_type == "QUALIFIES":
+                        msg = f"Ce point est nuance par un autre document : « {text_a} » vs « {text_b} »"
+                        hint_type = "context_nuance"
+                    elif tension_nature == "scope_conflict":
                         msg = f"Cette valeur varie selon le contexte : « {text_a} » vs « {text_b} »"
                         hint_type = "context_nuance"
                     elif tension_nature == "temporal_conflict":
                         msg = f"La recommandation a évolué : « {text_a} » vs « {text_b} »"
                         hint_type = "contradiction"
                     else:
-                        msg = f"Attention, des études divergent sur ce point : « {text_a} » vs « {text_b} »"
+                        msg = f"Attention, des documents divergent sur ce point : « {text_a} » vs « {text_b} »"
                         hint_type = "contradiction"
+
+                    # Ajouter les sources si dispo
+                    if doc_a and doc_b and doc_a != doc_b:
+                        short_a = doc_a.split("_")[1] if "_" in doc_a else doc_a[:30]
+                        short_b = doc_b.split("_")[1] if "_" in doc_b else doc_b[:30]
+                        msg += f" (sources: {short_a} / {short_b})"
 
                     hints.append({
                         "type": hint_type,
                         "message": msg,
-                        "priority": 1,
+                        "priority": 1 if relation_type == "CONTRADICTS" else 2,
                     })
         except Exception as e:
             logger.debug(f"[ATLAS:Insights] Contradiction check failed: {e}")

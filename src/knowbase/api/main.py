@@ -283,6 +283,9 @@ def create_app() -> FastAPI:
     # 🔄 OSMOSE Post-Import — Pipeline enrichissement qualité KG
     app.include_router(post_import.router)  # Endpoints: /api/admin/post-import/
 
+    from knowbase.api.routers import benchmarks
+    app.include_router(benchmarks.router)  # Endpoints: /api/benchmarks
+
     return app
 
 
