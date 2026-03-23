@@ -6,7 +6,7 @@
  */
 
 import { extendTheme, type ThemeConfig } from '@chakra-ui/react'
-import { palette, typography, radii, shadows, transitions, zIndices } from './tokens'
+import { palette, paletteLight, typography, radii, shadows, transitions, zIndices } from './tokens'
 
 // Configuration du mode couleur
 const config: ThemeConfig = {
@@ -14,60 +14,35 @@ const config: ThemeConfig = {
   useSystemColorMode: false,
 }
 
-// Couleurs Chakra mappées depuis les tokens
+// Couleurs Chakra statiques (non-semantic — marches brand, accent, gray)
 const colors = {
-  // Fond principal
-  bg: {
-    primary: palette.dark[900],
-    secondary: palette.dark[800],
-    tertiary: palette.dark[700],
-    hover: palette.dark[600],
-    active: palette.dark[500],
-  },
-
-  // Surfaces (cartes, modals, etc.)
-  surface: {
-    default: palette.dark[700],
-    raised: palette.dark[600],
-    overlay: palette.dark[800],
-  },
-
-  // Borders
-  border: {
-    default: palette.dark[400],
-    muted: palette.dark[500],
-    active: palette.accent.primary,
-  },
-
-  // Textes
-  text: palette.text,
 
   // Brand/Accent (remplace l'ancien "brand")
   brand: {
     50: palette.accent.glow,
-    100: '#e0e7ff',
-    200: '#c7d2fe',
-    300: '#a5b4fc',
-    400: '#818cf8',
+    100: '#dbeafe',
+    200: '#bfdbfe',
+    300: '#93c5fd',
+    400: '#7B9AFF',
     500: palette.accent.primary,
     600: palette.accent.primaryMuted,
-    700: '#4338ca',
-    800: '#3730a3',
-    900: '#312e81',
+    700: '#3B5FC7',
+    800: '#2D4A9E',
+    900: '#1E3A7A',
   },
 
-  // Accent secondaire (cyan)
+  // Accent secondaire (deep teal)
   accent: {
-    50: '#ecfeff',
-    100: '#cffafe',
-    200: '#a5f3fc',
-    300: '#67e8f9',
-    400: palette.accent.secondary,
-    500: '#06b6d4',
-    600: '#0891b2',
-    700: '#0e7490',
-    800: '#155e75',
-    900: '#164e63',
+    50: '#f0fdfa',
+    100: '#ccfbf1',
+    200: '#99f6e4',
+    300: '#5eead4',
+    400: '#2dd4bf',
+    500: palette.accent.secondary,
+    600: palette.accent.secondaryMuted,
+    700: '#0F766E',
+    800: '#115E59',
+    900: '#134E4A',
   },
 
   // Sémantiques
@@ -96,6 +71,30 @@ const colors = {
     700: palette.dark[700],
     800: palette.dark[800],
     900: palette.dark[900],
+  },
+}
+
+// Semantic tokens — réagissent automatiquement au colorMode dark/light
+const semanticTokens = {
+  colors: {
+    'bg.primary': { default: paletteLight.dark[900], _dark: palette.dark[900] },
+    'bg.secondary': { default: paletteLight.dark[800], _dark: palette.dark[800] },
+    'bg.tertiary': { default: paletteLight.dark[700], _dark: palette.dark[700] },
+    'bg.hover': { default: paletteLight.dark[600], _dark: palette.dark[600] },
+    'bg.active': { default: paletteLight.dark[500], _dark: palette.dark[500] },
+
+    'surface.default': { default: paletteLight.dark[700], _dark: palette.dark[700] },
+    'surface.raised': { default: paletteLight.dark[600], _dark: palette.dark[600] },
+    'surface.overlay': { default: paletteLight.dark[800], _dark: palette.dark[800] },
+
+    'border.default': { default: paletteLight.dark[400], _dark: palette.dark[400] },
+    'border.muted': { default: paletteLight.dark[500], _dark: palette.dark[500] },
+    'border.active': { default: palette.accent.primary, _dark: palette.accent.primary },
+
+    'text.primary': { default: paletteLight.text.primary, _dark: palette.text.primary },
+    'text.secondary': { default: paletteLight.text.secondary, _dark: palette.text.secondary },
+    'text.muted': { default: paletteLight.text.muted, _dark: palette.text.muted },
+    'text.inverse': { default: paletteLight.text.inverse, _dark: palette.text.inverse },
   },
 }
 
@@ -422,6 +421,7 @@ const components = {
 export const darkTheme = extendTheme({
   config,
   colors,
+  semanticTokens,
   styles,
   components,
   fonts: typography.fonts,

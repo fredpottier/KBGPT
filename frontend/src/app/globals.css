@@ -1,4 +1,4 @@
-/* OSMOS - Dark Elegance Theme */
+/* OSMOSIS - Design System */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* Reset et base */
@@ -10,36 +10,51 @@
   box-sizing: border-box;
 }
 
-/* Variables CSS pour le thème */
-:root {
-  /* Couleurs de fond */
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #12121a;
-  --bg-tertiary: #1a1a2e;
-  --bg-hover: #252538;
+/* ═══ DARK MODE (default) ═══ */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
 
-  /* Textes */
+  --bg-primary: #111118;
+  --bg-secondary: #171724;
+  --bg-tertiary: #1e1e32;
+  --bg-hover: #2a2a40;
+
   --text-primary: #f4f4f5;
   --text-secondary: #a1a1aa;
-  --text-muted: #71717a;
+  --text-muted: #8b8b95;
 
-  /* Accents */
-  --accent-primary: #6366f1;
-  --accent-secondary: #22d3ee;
-  --accent-glow: rgba(99, 102, 241, 0.15);
+  --accent-primary: #5B7FFF;
+  --accent-secondary: #0D9488;
+  --accent-glow: rgba(91, 127, 255, 0.15);
 
-  /* Borders */
-  --border-default: #3d3d5c;
-  --border-active: #6366f1;
+  --border-default: #454570;
+  --border-active: #5B7FFF;
 
-  /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-spring: 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-html {
-  color-scheme: dark;
+/* ═══ LIGHT MODE ═══ */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fb;
+  --bg-tertiary: #f1f3f5;
+  --bg-hover: #e5e7eb;
+
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+
+  --accent-primary: #4A6AE5;
+  --accent-secondary: #0F766E;
+  --accent-glow: rgba(74, 106, 229, 0.12);
+
+  --border-default: #d1d5db;
+  --border-active: #4A6AE5;
 }
 
 body {
@@ -49,6 +64,7 @@ body {
   background: var(--bg-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Scrollbar custom */
@@ -101,55 +117,18 @@ pre {
 
 /* Animations globales */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes pulse-glow {
-  0%, 100% {
-    box-shadow: 0 0 20px var(--accent-glow);
-  }
-  50% {
-    box-shadow: 0 0 30px var(--accent-glow), 0 0 40px var(--accent-glow);
-  }
-}
-
-/* Classes utilitaires */
-.animate-fade-in {
-  animation: fadeIn 0.3s ease-out;
-}
-
-.animate-slide-in {
-  animation: slideIn 0.3s ease-out;
-}
-
-.animate-float {
-  animation: float 3s ease-in-out infinite;
-}
-
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-.animate-bounce-dot {
-  animation: bounceDot 1s ease-in-out infinite;
+  0%, 100% { box-shadow: 0 0 20px var(--accent-glow); }
+  50% { box-shadow: 0 0 30px var(--accent-glow), 0 0 40px var(--accent-glow); }
 }
 
 @keyframes float {
@@ -162,19 +141,25 @@ pre {
   50% { transform: translateY(-4px); opacity: 1; }
 }
 
-.glow {
-  box-shadow: 0 0 20px var(--accent-glow);
-}
+/* Classes utilitaires */
+.animate-fade-in { animation: fadeIn 0.3s ease-out; }
+.animate-slide-in { animation: slideIn 0.3s ease-out; }
+.animate-float { animation: float 3s ease-in-out infinite; }
+.animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+.animate-bounce-dot { animation: bounceDot 1s ease-in-out infinite; }
 
-.glow-strong {
-  box-shadow: 0 0 30px var(--accent-glow), 0 0 60px var(--accent-glow);
-}
+.glow { box-shadow: 0 0 20px var(--accent-glow); }
+.glow-strong { box-shadow: 0 0 30px var(--accent-glow), 0 0 60px var(--accent-glow); }
 
 /* Glass effect */
 .glass {
-  background: rgba(26, 26, 46, 0.8);
+  background: rgba(30, 30, 50, 0.8);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-default);
+}
+
+[data-theme="light"] .glass {
+  background: rgba(255, 255, 255, 0.85);
 }
 
 /* Gradient text */

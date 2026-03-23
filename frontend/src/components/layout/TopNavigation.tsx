@@ -22,6 +22,7 @@ import { useState, useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import NextLink from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
+import ThemeToggle from '@/components/layout/ThemeToggle'
 import {
   FiMessageSquare,
   FiFolder,
@@ -105,16 +106,16 @@ const NavLink = ({ href, children, isActive }: NavLinkProps) => {
       gap={2}
       _hover={{
         textDecoration: 'none',
-        bg: isActive ? undefined : 'bg.hover',
-        bgGradient: isActive ? 'linear(to-r, #3730A3, #0E7490)' : undefined,
+        bg: isActive ? undefined : 'var(--bg-hover)',
+        bgGradient: isActive ? 'linear(to-r, brand.700, accent.700)' : undefined,
         transform: 'translateY(-1px)',
       }}
       bg={isActive ? undefined : 'transparent'}
-      bgGradient={isActive ? 'linear(to-r, #4338CA, #0891B2)' : undefined}
-      color={isActive ? 'white' : 'text.secondary'}
+      bgGradient={isActive ? 'linear(to-r, brand.600, accent.600)' : undefined}
+      color={isActive ? 'white' : 'var(--text-secondary)'}
       fontWeight={isActive ? 'semibold' : 'medium'}
       transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
-      boxShadow={isActive ? '0 0 15px rgba(67, 56, 202, 0.4)' : 'none'}
+      boxShadow={isActive ? '0 0 15px var(--accent-glow)' : 'none'}
     >
       {children}
     </Link>
@@ -139,14 +140,14 @@ const NavDropdown = ({ label, icon, items, isActive }: NavDropdownProps) => {
         py={2}
         rounded="lg"
         bg={isActive ? undefined : 'transparent'}
-        bgGradient={isActive ? 'linear(to-r, #4338CA, #0891B2)' : undefined}
-        color={isActive ? 'white' : 'text.secondary'}
+        bgGradient={isActive ? 'linear(to-r, brand.600, accent.600)' : undefined}
+        color={isActive ? 'white' : 'var(--text-secondary)'}
         fontWeight={isActive ? 'semibold' : 'medium'}
         transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
-        boxShadow={isActive ? '0 0 15px rgba(67, 56, 202, 0.4)' : 'none'}
+        boxShadow={isActive ? '0 0 15px var(--accent-glow)' : 'none'}
         _hover={{
-          bg: isActive ? undefined : 'bg.hover',
-          bgGradient: isActive ? 'linear(to-r, #3730A3, #0E7490)' : undefined,
+          bg: isActive ? undefined : 'var(--bg-hover)',
+          bgGradient: isActive ? 'linear(to-r, brand.700, accent.700)' : undefined,
           transform: 'translateY(-1px)',
         }}
       >
@@ -300,18 +301,13 @@ export default function TopNavigation() {
             isActive={isActiveSection('documents')}
           />
 
-          {/* Administration - lien direct (sidebar dans /admin) */}
-          <NavLink
-            label={navigationConfig.admin.label}
-            href="/admin"
-            icon={navigationConfig.admin.icon}
-            isActive={isActiveSection('admin')}
-          />
+          {/* Administration supprimé de la top nav — accessible via le menu utilisateur */}
         </HStack>
 
-        {/* Right side - User menu */}
+        {/* Right side - Theme toggle + User menu */}
         {isAuthenticated ? (
           <HStack spacing={3}>
+            <ThemeToggle />
             <Menu>
               <MenuButton
                 px={2}

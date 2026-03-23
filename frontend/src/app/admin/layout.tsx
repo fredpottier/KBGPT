@@ -8,6 +8,14 @@ import {
   VStack,
   Text,
   Icon,
+  IconButton,
+  Drawer,
+  DrawerOverlay,
+  DrawerContent,
+  DrawerCloseButton,
+  DrawerBody,
+  useDisclosure,
+  useBreakpointValue,
 } from '@chakra-ui/react'
 import {
   FiHome,
@@ -28,6 +36,7 @@ import {
   FiBarChart2,
   FiAlertTriangle,
   FiActivity,
+  FiMenu,
 } from 'react-icons/fi'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
@@ -83,6 +92,7 @@ const ADMIN_SECTIONS: SidebarSection[] = [
       { label: 'Corpus Intelligence', href: '/admin/corpus-intelligence', icon: FiBarChart2 },
       { label: 'Contradictions', href: '/admin/contradictions', icon: FiAlertTriangle },
       { label: 'Audit Corpus', href: '/admin/corpus-audit', icon: FiActivity },
+      { label: 'Benchmarks', href: '/admin/benchmarks', icon: FiBarChart2 },
     ],
   },
   {
@@ -95,7 +105,7 @@ const ADMIN_SECTIONS: SidebarSection[] = [
   },
 ]
 
-function AdminSidebar() {
+function SidebarContent({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname()
 
   const isActive = (href: string) => {
@@ -104,29 +114,18 @@ function AdminSidebar() {
   }
 
   return (
-    <Box
-      w="240px"
-      minH="calc(100vh - 64px)"
-      bg="bg.secondary"
-      borderRight="1px solid"
-      borderColor="border.default"
-      py={4}
-      position="sticky"
-      top="64px"
-      overflowY="auto"
-      flexShrink={0}
-    >
+    <Box py={4}>
       {/* Dashboard link */}
       <Box px={3} mb={4}>
-        <Link href="/admin">
+        <Link href="/admin" onClick={onClose}>
           <HStack
             px={3}
             py={2}
             rounded="lg"
             cursor="pointer"
-            bg={isActive('/admin') ? 'rgba(99, 102, 241, 0.15)' : 'transparent'}
-            color={isActive('/admin') ? 'brand.400' : 'text.secondary'}
-            _hover={{ bg: 'bg.hover', color: 'text.primary' }}
+            bg={isActive('/admin') ? 'var(--accent-glow)' : 'transparent'}
+            color={isActive('/admin') ? 'brand.400' : 'var(--text-secondary)'}
+            _hover={{ bg: 'var(--bg-hover)', color: 'var(--text-primary)' }}
             transition="all 0.15s"
           >
             <Icon as={FiHome} boxSize={4} />
@@ -145,7 +144,7 @@ function AdminSidebar() {
             <Text
               fontSize="xs"
               fontWeight="semibold"
-              color="text.muted"
+              color="var(--text-muted)"
               textTransform="uppercase"
               letterSpacing="wider"
             >
@@ -154,15 +153,15 @@ function AdminSidebar() {
           </HStack>
           <VStack spacing={0} align="stretch" px={3}>
             {section.items.map((item) => (
-              <Link key={item.href} href={item.href}>
+              <Link key={item.href} href={item.href} onClick={onClose}>
                 <HStack
                   px={3}
                   py={1.5}
                   rounded="lg"
                   cursor="pointer"
-                  bg={isActive(item.href) ? 'rgba(99, 102, 241, 0.15)' : 'transparent'}
-                  color={isActive(item.href) ? 'brand.400' : 'text.secondary'}
-                  _hover={{ bg: 'bg.hover', color: 'text.primary' }}
+                  bg={isActive(item.href) ? 'var(--accent-glow)' : 'transparent'}
+                  color={isActive(item.href) ? 'brand.400' : 'var(--text-secondary)'}
+                  _hover={{ bg: 'var(--bg-hover)', color: 'var(--text-primary)' }}
                   transition="all 0.15s"
                   borderLeft={isActive(item.href) ? '2px solid' : '2px solid transparent'}
                   borderColor={isActive(item.href) ? 'brand.400' : 'transparent'}
@@ -186,10 +185,57 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode
 }) {
+  const { isOpen, onOpen, onClose } = useDisclosure()
+  const isMobile = useBreakpointValue({ base: true, lg: false })
+
   return (
     <ProtectedRoute requireRole="admin">
       <HStack align="start" spacing={0}>
-        <AdminSidebar />
+        {/* Desktop sidebar */}
+        {!isMobile && (
+          <Box
+            w="240px"
+            minH="calc(100vh - 64px)"
+            bg="var(--bg-secondary)"
+            borderRight="1px solid"
+            borderColor="var(--border-default)"
+            position="sticky"
+            top="64px"
+            overflowY="auto"
+            flexShrink={0}
+          >
+            <SidebarContent />
+          </Box>
+        )}
+
+        {/* Mobile hamburger */}
+        {isMobile && (
+          <IconButton
+            aria-label="Menu admin"
+            icon={<FiMenu />}
+            variant="ghost"
+            position="fixed"
+            top="72px"
+            left={2}
+            zIndex={10}
+            onClick={onOpen}
+            color="var(--text-muted)"
+            _hover={{ color: 'var(--text-primary)' }}
+          />
+        )}
+
+        {/* Mobile drawer */}
+        <Drawer isOpen={isOpen} placement="left" onClose={onClose}>
+          <DrawerOverlay />
+          <DrawerContent bg="var(--bg-secondary)" maxW="260px" mt="64px">
+            <DrawerCloseButton color="var(--text-muted)" />
+            <DrawerBody p={0}>
+              <SidebarContent onClose={onClose} />
+            </DrawerBody>
+          </DrawerContent>
+        </Drawer>
+
+        {/* Main content */}
         <Box flex={1} p={6} minH="calc(100vh - 64px)" overflowX="hidden">
           {children}
         </Box>

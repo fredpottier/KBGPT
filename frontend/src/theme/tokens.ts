@@ -5,38 +5,38 @@
  * Ces tokens sont utilisés par les thèmes dark et light.
  */
 
-// Palette de base "Dark Elegance"
+// Palette de base "Dark Elegance" — charcoal (pas near-black) pour confort visuel
 export const palette = {
-  // Fonds
+  // Fonds — remontés pour réduire la fatigue visuelle (charcoal > near-black)
   dark: {
-    900: '#0a0a0f',    // Fond principal
-    800: '#12121a',    // Fond élevé
-    700: '#1a1a2e',    // Surfaces/cartes
-    600: '#252538',    // Surfaces hover
-    500: '#2f2f45',    // Borders actives
-    400: '#3d3d5c',    // Borders
+    900: '#111118',    // Fond principal (was #0a0a0f — trop noir)
+    800: '#171724',    // Fond élevé (was #12121a)
+    700: '#1e1e32',    // Surfaces/cartes (was #1a1a2e)
+    600: '#2a2a40',    // Surfaces hover (was #252538)
+    500: '#35355a',    // Borders actives (was #2f2f45)
+    400: '#454570',    // Borders (was #3d3d5c)
   },
 
-  // Textes
+  // Textes — muted remonté pour WCAG AA (4.5:1 minimum)
   text: {
     primary: '#f4f4f5',      // Texte principal
     secondary: '#a1a1aa',    // Texte secondaire
-    muted: '#71717a',        // Texte atténué
+    muted: '#8b8b95',        // Texte atténué (was #71717a — 3.2:1, now ~5.2:1)
     inverse: '#18181b',      // Texte sur fond clair
   },
 
-  // Accents - Bleu/Cyan (style Linear/Raycast)
+  // Accents - Blue-slate (plus credible enterprise) + Teal secondaire
   accent: {
-    primary: '#6366f1',      // Indigo principal
-    primaryHover: '#818cf8', // Indigo hover
-    primaryMuted: '#4f46e5', // Indigo sombre
+    primary: '#5B7FFF',      // Blue-slate (was #6366f1 indigo — trop SaaS générique)
+    primaryHover: '#7B9AFF', // Blue-slate hover
+    primaryMuted: '#4A6AE5', // Blue-slate sombre
 
-    secondary: '#22d3ee',    // Cyan lumineux
-    secondaryHover: '#67e8f9',
-    secondaryMuted: '#06b6d4',
+    secondary: '#0D9488',    // Deep teal (was #22d3ee cyan — trop flashy)
+    secondaryHover: '#14B8A6',
+    secondaryMuted: '#0F766E',
 
-    glow: 'rgba(99, 102, 241, 0.15)', // Glow effect
-    glowStrong: 'rgba(99, 102, 241, 0.3)',
+    glow: 'rgba(91, 127, 255, 0.15)', // Glow effect
+    glowStrong: 'rgba(91, 127, 255, 0.3)',
   },
 
   // Sémantiques
@@ -59,30 +59,30 @@ export const palette = {
   },
 }
 
-// Palette Light mode
+// Palette Light mode — clean, professionnelle, pas fade
 export const paletteLight = {
   dark: {
     900: '#ffffff',
-    800: '#fafafa',
-    700: '#f4f4f5',
-    600: '#e4e4e7',
-    500: '#d4d4d8',
-    400: '#a1a1aa',
+    800: '#f8f9fb',
+    700: '#f1f3f5',
+    600: '#e5e7eb',
+    500: '#d1d5db',
+    400: '#9ca3af',
   },
 
   text: {
-    primary: '#18181b',
-    secondary: '#52525b',
-    muted: '#71717a',
+    primary: '#111827',
+    secondary: '#4b5563',
+    muted: '#6b7280',
     inverse: '#f4f4f5',
   },
 
-  accent: palette.accent, // Mêmes accents
+  accent: palette.accent, // Mêmes accents blue-slate
   semantic: palette.semantic,
 
   overlay: {
     light: 'rgba(0, 0, 0, 0.02)',
-    medium: 'rgba(0, 0, 0, 0.05)',
+    medium: 'rgba(0, 0, 0, 0.06)',
     dark: 'rgba(0, 0, 0, 0.3)',
   },
 }
