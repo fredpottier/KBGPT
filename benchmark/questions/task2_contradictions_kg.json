@@ -1,0 +1,236 @@
+{
+  "metadata": {
+    "task": "T2",
+    "source": "kg_derived",
+    "corpus": "SAP Enterprise Documentation",
+    "count": 25,
+    "generated_at": "2026-03-23T21:30:00Z",
+    "note": "Questions KG v3 — testent la detection de tensions cross-doc (REFINES, QUALIFIES, evolutions). Basees sur les 252 tensions cross-doc verifiees dans le KG."
+  },
+  "questions": [
+    {"question_id": "T2_KG_0000", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "L'authentification par certificats X.509 est-elle decrite de la meme maniere dans les Security Guides 2022 et 2023 ?",
+     "ground_truth": {
+       "claim1": {"text": "User authentication using X.509 client certificates is performed on the Web server", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+       "claim2": {"text": "User authentication is performed on the Web server using the Secure Sockets Layer", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+       "tension_nature": "evolution"
+     },
+     "grading_rules": {"must_surface_both_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]}},
+
+    {"question_id": "T2_KG_0001", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Les autorisations E-Recruiting sont-elles documentees de facon coherente entre les deux Security Guides ?",
+     "ground_truth": {
+       "claim1": {"text": "P_RCF_POOL is an authorization object that specifies within SAP E-Recruiting which data overviews", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+       "claim2": {"text": "Authorization object specifies which SAP E-Recruiting application a user can call", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]}},
+
+    {"question_id": "T2_KG_0002", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "L'objet d'archivage RDBAA_FRP est-il documente de la meme maniere dans les deux Security Guides ?",
+     "ground_truth": {
+       "claim1": {"text": "You use the archiving object RDBAA_FRP to archive final results that are stored in the results database", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+       "claim2": {"text": "You use the archiving object RDBAA_FRP to archive final results stored in the results database", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]}},
+
+    {"question_id": "T2_KG_0003", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Le BAdI HRASR00ATTACHMENT_HANDLING est-il decrit differemment entre les Security Guides 2022 et 2023 ?",
+     "ground_truth": {
+       "claim1": {"text": "Business Add-In (BAdI) HRASR00ATTACHMENT_HANDLING is used for defining the file types", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+       "claim2": {"text": "This section provides information on a Business Add-In (BAdI) that can be used for defining file types", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+       "tension_nature": "evolution"
+     },
+     "grading_rules": {"must_surface_both_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]}},
+
+    {"question_id": "T2_KG_0004", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Le concept d'autorisation Cross-Application Time Sheet (CA-TS) a-t-il change entre les deux Security Guides ?",
+     "ground_truth": {
+       "claim1": {"text": "The Cross-Application Time Sheet (CA-TS) uses authorization objects", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+       "claim2": {"text": "The Cross-Application Time Sheet (CA-TS) uses the authorization concept provided by the system", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]}},
+
+    {"question_id": "T2_KG_0005", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "La planification SOP (Standard SOP) est-elle presentee de la meme maniere entre le Feature Scope on-premise et Cloud Private Edition ?",
+     "ground_truth": {
+       "claim1": {"text": "Standard SOP enables you to perform resource leveling for production resources", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+       "claim2": {"text": "Standard SOP enables you to perform resource leveling for costs", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+       "tension_nature": "scope_variation"
+     },
+     "grading_rules": {"must_surface_both_docs": ["025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]}},
+
+    {"question_id": "T2_KG_0006", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Le contenu du cost of sales ledger est-il decrit differemment entre les deux Feature Scope Descriptions ?",
+     "ground_truth": {
+       "claim1": {"text": "The contents of the cost of sales ledger and all special ledgers created in table", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+       "claim2": {"text": "The contents of the reconciliation ledger and all special ledgers created in table", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+       "tension_nature": "scope_variation"
+     },
+     "grading_rules": {"must_surface_both_docs": ["025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]}},
+
+    {"question_id": "T2_KG_0007", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "L'application log (transaction SLG1) enregistre-t-il les memes informations dans le Operations Guide 2021 et 2023 ?",
+     "ground_truth": {
+       "claim1": {"text": "The application log (transaction SLG1) records the message exchange between SAP components", "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"},
+       "claim2": {"text": "The application log (transaction SLG1) records all messages sent to or received from external systems", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+       "tension_nature": "evolution"
+     },
+     "grading_rules": {"must_surface_both_docs": ["016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3", "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"]}},
+
+    {"question_id": "T2_KG_0008", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "La transaction /SAPAPO/OM17 est-elle decrite avec les memes capacites dans les Operations Guides 2021 et 2022 ?",
+     "ground_truth": {
+       "claim1": {"text": "Transaction /SAPAPO/OM17 checks the consistency of master data in liveCache by comparing", "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"},
+       "claim2": {"text": "Transaction /SAPAPO/OM17 offers an option to resolve inconsistencies between liveCache and database", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"]}},
+
+    {"question_id": "T2_KG_0009", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Le process scheduler de Product Compliance est-il decrit de la meme facon dans les Operations Guides 2021 et 2023 ?",
+     "ground_truth": {
+       "claim1": {"text": "The process scheduler of Product Compliance is used for recurring tasks", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+       "claim2": {"text": "The Product Compliance for Discrete Industries process scheduler is integrated in the system", "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"},
+       "tension_nature": "evolution"
+     },
+     "grading_rules": {"must_surface_both_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]}},
+
+    {"question_id": "T2_KG_0010", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "La gestion des elements WBS est-elle presentee differemment entre le Feature Scope on-premise et Cloud Private Edition ?",
+     "ground_truth": {
+       "claim1": {"text": "Creating a grouping WBS element and including it in the operative WBS structure", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+       "claim2": {"text": "This helps to segregate costs of key parts and assemblies from the MRP-driving operative WBS elements", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"]}},
+
+    {"question_id": "T2_KG_0011", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Le process foundation est-il decrit de la meme facon dans les Operations Guides 2021 et 2022 ?",
+     "ground_truth": {
+       "claim1": {"text": "The process foundation links together the SAP Business Workflow engine and the Business Rule Framework", "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"},
+       "claim2": {"text": "The process foundation links together the SAP Business Workflow engine and the Business Rule Framework", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"]}},
+
+    {"question_id": "T2_KG_0012", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Les roles E-Recruiting SAP_ERC_INT_CAND ont-ils la meme description dans les Security Guides 2022 et 2023 ?",
+     "ground_truth": {
+       "claim1": {"text": "SAP_ERC_INT_CAND_CLIENT_CI_4 provides necessary authorizations for an internal candidate", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+       "claim2": {"text": "SAP_RCF_UNREG_CANDIDATE_CLIENT role contains necessary authorizations for unregistered candidates", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+       "tension_nature": "evolution"
+     },
+     "grading_rules": {"must_surface_both_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]}},
+
+    {"question_id": "T2_KG_0013", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "L'objet d'autorisation P_ORGXXCON et P_ORGINCON sont-ils documentes de la meme facon entre les deux Security Guides ?",
+     "ground_truth": {
+       "claim1": {"text": "The authorization object consists of the same fields as the authorization object P_ORGINCON", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+       "claim2": {"text": "P_P_ORGXXCON is an authorization object that consists of the same fields as P_ORGINCON", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]}},
+
+    {"question_id": "T2_KG_0014", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "La planification detaillee des produits finis est-elle presentee differemment entre les deux Feature Scope Descriptions ?",
+     "ground_truth": {
+       "claim1": {"text": "You can perform detailed planning of finished products using Standard SOP", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+       "claim2": {"text": "You can perform high-level planning of product groups using Standard SOP", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+       "tension_nature": "scope_variation"
+     },
+     "grading_rules": {"must_surface_both_docs": ["025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]}},
+
+    {"question_id": "T2_KG_0015", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Les prepayment agreements sont-ils lies aux memes types de documents dans les deux Feature Scope Descriptions ?",
+     "ground_truth": {
+       "claim1": {"text": "Barter prepayment agreements are linked to sales documents such as sales orders", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+       "claim2": {"text": "Prepayment agreements are linked to purchase documents such as trading contracts", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+       "tension_nature": "scope_variation"
+     },
+     "grading_rules": {"must_surface_both_docs": ["025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]}},
+
+    {"question_id": "T2_KG_0016", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "La gestion des couts de scrap est-elle traitee differemment entre les Feature Scope on-premise et PCE ?",
+     "ground_truth": {
+       "claim1": {"text": "The costs tied to loss from MRP-driving operative WBS elements can be segregated", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+       "claim2": {"text": "The costs associated with scrap can be directed to other project WBS elements", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]}},
+
+    {"question_id": "T2_KG_0017", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "L'impact de la planning procedure sur les secondary control cycles differe-t-il entre les Feature Scope Descriptions ?",
+     "ground_truth": {
+       "claim1": {"text": "When a secondary control cycle is assigned a planning procedure, it is not relevant", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+       "claim2": {"text": "The secondary control cycle's planning procedure does not affect the type of planning", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]}},
+
+    {"question_id": "T2_KG_0018", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Le report ARBFND_SEND_STATUS est-il reference de la meme facon dans les Operations Guides 2022 et 2023 ?",
+     "ground_truth": {
+       "claim1": {"text": "The report Send Status Update for Canceled Inbound Messages (ARBFND_SEND_STATUS_UPDATE)", "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"},
+       "claim2": {"text": "The report Send Status Update for Canceled Inbound Messages (ARBFND_SEND_STATUS_UPDATE)", "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]}},
+
+    {"question_id": "T2_KG_0019", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "La gestion des freight units dans le VSR optimizer est-elle presentee differemment entre les deux Feature Scope ?",
+     "ground_truth": {
+       "claim1": {"text": "VSR optimization inserts the freight units step-by-step into the transportation plan", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+       "claim2": {"text": "VSR optimization inserts freight units into the transportation plan", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]}},
+
+    {"question_id": "T2_KG_0020", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Le JIT call processing est-il decrit de la meme facon dans les Feature Scope on-premise et Cloud Private Edition ?",
+     "ground_truth": {
+       "claim1": {"text": "You can use the JIT call processing feature for processing JIT calls", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+       "claim2": {"text": "JIT call processing is available for manufacturing execution", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]}},
+
+    {"question_id": "T2_KG_0021", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "La Product Compliance est-elle integree de la meme facon dans les Operations Guides 2021 et 2023 ?",
+     "ground_truth": {
+       "claim1": {"text": "The process scheduler of Product Compliance is used for recurring tasks", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+       "claim2": {"text": "The Product Compliance for Discrete Industries process scheduler is integrated in the system", "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"},
+       "tension_nature": "evolution"
+     },
+     "grading_rules": {"must_surface_both_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]}},
+
+    {"question_id": "T2_KG_0022", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Les external customer/vendor items AP/AR sont-ils traites de la meme facon dans les deux Feature Scope ?",
+     "ground_truth": {
+       "claim1": {"text": "Other external customer/vendor AP/AR items under the same company code", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+       "claim2": {"text": "External customer/vendor AP/AR items are managed under the company code", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+       "tension_nature": "nuance"
+     },
+     "grading_rules": {"must_surface_both_docs": ["025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]}},
+
+    {"question_id": "T2_KG_0023", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "La Product Compliance dans le secteur Discrete Industries est-elle traitee de la meme facon dans les Security Guides et les Operations Guides ?",
+     "ground_truth": {
+       "claim1": {"text": "Several business processes within Product Compliance for Discrete Industries", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+       "claim2": {"text": "The Product Compliance for Discrete Industries process scheduler is integrated", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+       "tension_nature": "scope_variation"
+     },
+     "grading_rules": {"must_surface_both_docs": ["028_SAP_S4HANA_2022_Security_Guide_44f7ec32", "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"]}},
+
+    {"question_id": "T2_KG_0024", "task": "T2_contradictions", "source": "kg_derived",
+     "question": "Le Project Cost Planning est-il reference dans les memes contextes entre les Security Guides et les Operations Guides ?",
+     "ground_truth": {
+       "claim1": {"text": "The Project Cost and Revenue Planning application uses the transaction types", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+       "claim2": {"text": "Project Cost and Revenue Planning requires specific authorization objects", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+       "tension_nature": "scope_variation"
+     },
+     "grading_rules": {"must_surface_both_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]}}
+  ]
+}

@@ -1,0 +1,662 @@
+{
+  "metadata": {
+    "task": "T4",
+    "source": "human_derived",
+    "corpus": "SAP Enterprise Documentation",
+    "count": 50,
+    "generated_at": "2026-03-22T19:00:00Z",
+    "note": "Questions generees manuellement par Claude en lisant les caches SAP (SANS acces au KG). Questions d'audit/completude couvrant plusieurs documents."
+  },
+  "questions": [
+    {
+      "question_id": "T4_HUM_0000",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Fais un resume complet de tout ce que disent les documents sur le processus de conversion vers SAP S/4HANA, incluant les prerequis, outils et etapes cles.",
+      "ground_truth": {
+        "entity": "SAP S/4HANA conversion process",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 1,
+        "expected_docs": ["005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0", "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0001",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les differents documents sur le Simplification Item-Check (SI-Check), ses codes retour et son role dans les upgrades et conversions ?",
+      "ground_truth": {
+        "entity": "Simplification Item-Check (SI-Check)",
+        "expected_claim_count": 8,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]
+      },
+      "grading_rules": {"must_mention_docs_count": 3}
+    },
+    {
+      "question_id": "T4_HUM_0002",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les objets d'autorisation dans le commerce international (International Trade) de SAP S/4HANA ?",
+      "ground_truth": {
+        "entity": "International Trade authorization objects",
+        "expected_claim_count": 6,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0003",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur l'Extended Warehouse Management (EWM) dans SAP S/4HANA, incluant le deploiement, les jobs batch et les fonctionnalites ?",
+      "ground_truth": {
+        "entity": "Extended Warehouse Management (EWM)",
+        "expected_claim_count": 10,
+        "expected_contradiction_count": 1,
+        "expected_docs": ["015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba", "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e", "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"]
+      },
+      "grading_rules": {"must_mention_docs_count": 3}
+    },
+    {
+      "question_id": "T4_HUM_0004",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur SAP Fiori dans le contexte des upgrades, installations et configurations S/4HANA ?",
+      "ground_truth": {
+        "entity": "SAP Fiori",
+        "expected_claim_count": 8,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696", "011_SAP_S4HANA_2023_Installation_Guide_23de8c60", "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 3}
+    },
+    {
+      "question_id": "T4_HUM_0005",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur RISE with SAP, incluant l'infrastructure, la securite et les modeles de connectivite ?",
+      "ground_truth": {
+        "entity": "RISE with SAP",
+        "expected_claim_count": 8,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357", "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896", "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0006",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le workflow SAP Business Workflow, incluant les changements d'utilisateurs systeme, les jobs et les roles ?",
+      "ground_truth": {
+        "entity": "SAP Business Workflow",
+        "expected_claim_count": 6,
+        "expected_contradiction_count": 1,
+        "expected_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0007",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur la gestion du Custom Code lors des conversions et upgrades S/4HANA ?",
+      "ground_truth": {
+        "entity": "Custom Code Management",
+        "expected_claim_count": 6,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0008",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le monitoring et la gestion des erreurs dans les Operations Guides SAP S/4HANA ?",
+      "ground_truth": {
+        "entity": "Monitoring and Error Handling",
+        "expected_claim_count": 10,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0009",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur Joule, l'assistant IA de SAP, ses capacites et son evolution entre les versions ?",
+      "ground_truth": {
+        "entity": "Joule AI assistant",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba", "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914", "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_\u2014_Highlights_of_Innovations_(2023_FPS03)_01b01cbf"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0010",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les SAP Notes essentielles a appliquer avant une conversion ou un upgrade S/4HANA ?",
+      "ground_truth": {
+        "entity": "SAP Notes for conversion/upgrade",
+        "expected_claim_count": 15,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696", "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 3}
+    },
+    {
+      "question_id": "T4_HUM_0011",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur la securite ILM (Information Lifecycle Management) dans SAP S/4HANA ?",
+      "ground_truth": {
+        "entity": "Information Lifecycle Management (ILM)",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0012",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur Product Safety and Stewardship (EHS) dans les Operations Guides ?",
+      "ground_truth": {
+        "entity": "Product Safety and Stewardship (EHS)",
+        "expected_claim_count": 8,
+        "expected_contradiction_count": 1,
+        "expected_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0013",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le Service Management dans SAP S/4HANA, incluant les contrats, quotations et ordres de service ?",
+      "ground_truth": {
+        "entity": "Service Management",
+        "expected_claim_count": 6,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_\u2014_Highlights_of_Innovations_(2023_FPS03)_01b01cbf"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0014",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les elements deprecies ou supprimes dans le Simplification List et comment cela impacte les autres documents ?",
+      "ground_truth": {
+        "entity": "Simplification List deprecations",
+        "expected_claim_count": 12,
+        "expected_contradiction_count": 3,
+        "expected_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0015",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur la transaction PFCG et la gestion des roles dans SAP S/4HANA ?",
+      "ground_truth": {
+        "entity": "PFCG role management",
+        "expected_claim_count": 6,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e", "027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0016",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le MRP (Material Requirements Planning) dans SAP S/4HANA, incluant les transactions, rapports et BAdIs ?",
+      "ground_truth": {
+        "entity": "MRP (Material Requirements Planning)",
+        "expected_claim_count": 8,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0017",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le Production Planning dans SAP S/4HANA, incluant le PP/DS, le PPO et l'Interactive Scheduling Board ?",
+      "ground_truth": {
+        "entity": "Production Planning",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba", "013_SAP-014_What's_New_in_SAP_S_4HANA_and_SAP_S_4HANA_Cloud_Private_Edition_2023_SPS04_611b554d"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0018",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur la connectivite reseau et les options VPN/Express Route pour SAP Cloud Private Edition ?",
+      "ground_truth": {
+        "entity": "Cloud networking and connectivity",
+        "expected_claim_count": 6,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357", "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0019",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur l'ATP (Available-to-Promise) dans SAP S/4HANA, incluant l'Advanced ATP ?",
+      "ground_truth": {
+        "entity": "Available-to-Promise (ATP)",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0020",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le Sourcing and Procurement dans SAP S/4HANA Cloud, incluant les innovations recentes ?",
+      "ground_truth": {
+        "entity": "Sourcing and Procurement",
+        "expected_claim_count": 6,
+        "expected_contradiction_count": 1,
+        "expected_docs": ["022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba", "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0021",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le dual-stack split et les prerequis d'architecture pour la conversion S/4HANA ?",
+      "ground_truth": {
+        "entity": "Dual-stack split",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0", "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0022",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les certifications et audits de securite SAP (SOC, ISO) pour les services cloud ?",
+      "ground_truth": {
+        "entity": "Security certifications and audits",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357", "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0023",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le SAP Readiness Check et son utilisation dans les projets de conversion/upgrade ?",
+      "ground_truth": {
+        "entity": "SAP Readiness Check",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0024",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les installations SAP S/4HANA, incluant les differences entre les versions 2021 et 2023 ?",
+      "ground_truth": {
+        "entity": "SAP S/4HANA installation",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 1,
+        "expected_docs": ["011_SAP_S4HANA_2023_Installation_Guide_23de8c60", "012_SAP_S4HANA_2021_Installation_Guide_c441dbaf"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0025",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les partenaires technologiques et IA de l'ecosysteme SAP ?",
+      "ground_truth": {
+        "entity": "SAP technology and AI partners",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914", "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0026",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le Payroll dans SAP S/4HANA, incluant le Payroll Control Center et les autorisations ?",
+      "ground_truth": {
+        "entity": "Payroll and Payroll Control Center",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0027",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le E-Recruiting dans SAP S/4HANA, incluant les roles, autorisations et architecture RFC ?",
+      "ground_truth": {
+        "entity": "E-Recruiting",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0028",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le Permit to Work dans SAP S/4HANA pour l'industrie Oil & Gas ?",
+      "ground_truth": {
+        "entity": "Permit to Work (Oil & Gas)",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0029",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les solutions SAP pour l'industrie Insurance (assurance) dans S/4HANA 1809 ?",
+      "ground_truth": {
+        "entity": "SAP Insurance solutions",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0030",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur SAP Transportation Management (TM) et son integration dans S/4HANA ?",
+      "ground_truth": {
+        "entity": "SAP Transportation Management",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 1,
+        "expected_docs": ["018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0031",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le liveCache monitoring dans SAP S/4HANA ?",
+      "ground_truth": {
+        "entity": "liveCache monitoring",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0032",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le clean core dans SAP S/4HANA et son impact sur le developpement ?",
+      "ground_truth": {
+        "entity": "Clean core development",
+        "expected_claim_count": 3,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0033",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le SAPRouter et la connectivite reseau dans SAP Cloud Private Edition ?",
+      "ground_truth": {
+        "entity": "SAPRouter connectivity",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0034",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le Software Update Manager (SUM) et son role dans les upgrades/conversions ?",
+      "ground_truth": {
+        "entity": "Software Update Manager (SUM)",
+        "expected_claim_count": 6,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0", "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0035",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le Technical Job Repository et la planification des jobs dans S/4HANA ?",
+      "ground_truth": {
+        "entity": "Technical Job Repository",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0036",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le Maintenance Planner et son utilisation dans la preparation des conversions S/4HANA ?",
+      "ground_truth": {
+        "entity": "Maintenance Planner",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0037",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les solutions SAP pour le secteur bancaire dans S/4HANA 1809 ?",
+      "ground_truth": {
+        "entity": "SAP Banking solutions",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0038",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les solutions SAP pour le secteur Utilities dans S/4HANA ?",
+      "ground_truth": {
+        "entity": "SAP Utilities solutions",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0039",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le ABAP Test Cockpit (ATC) et le Custom Code Migration dans le contexte des upgrades ?",
+      "ground_truth": {
+        "entity": "ABAP Test Cockpit (ATC)",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0040",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les transactions SPDD, SPAU et SPAU_ENH dans le contexte des upgrades S/4HANA ?",
+      "ground_truth": {
+        "entity": "SPDD/SPAU/SPAU_ENH adjustment",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0041",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le Data Protection et la gestion des donnees personnelles dans SAP S/4HANA ?",
+      "ground_truth": {
+        "entity": "Data Protection and personal data management",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0042",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur la gestion de la Time Sheet et l'integration SuccessFactors dans SAP S/4HANA ?",
+      "ground_truth": {
+        "entity": "Time Sheet Management and SuccessFactors integration",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0043",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur SAP Best Practices et le Solution Builder pour SAP S/4HANA Cloud Private Edition ?",
+      "ground_truth": {
+        "entity": "SAP Best Practices and Solution Builder",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0044",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les RFC destinations et la configuration reseau inter-systemes dans SAP S/4HANA ?",
+      "ground_truth": {
+        "entity": "RFC destinations and inter-system networking",
+        "expected_claim_count": 6,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e", "027_SAP_S4HANA_2023_Security_Guide_c160af0e", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0045",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le Feature Scope de SAP S/4HANA pour la Finance, incluant la Treasury et le Watch List Screening ?",
+      "ground_truth": {
+        "entity": "Finance feature scope",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0046",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les innovations Manufacturing dans S/4HANA 2023, incluant les CDS views et le Production Model ?",
+      "ground_truth": {
+        "entity": "Manufacturing innovations 2023",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_\u2014_Highlights_of_Innovations_(2023_FPS03)_01b01cbf", "013_SAP-014_What's_New_in_SAP_S_4HANA_and_SAP_S_4HANA_Cloud_Private_Edition_2023_SPS04_611b554d", "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0047",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les solutions SAP pour le secteur Retail et Fashion dans S/4HANA ?",
+      "ground_truth": {
+        "entity": "SAP Retail and Fashion solutions",
+        "expected_claim_count": 4,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"]
+      },
+      "grading_rules": {"must_mention_docs_count": 1}
+    },
+    {
+      "question_id": "T4_HUM_0048",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur le SAP Data Protection framework (ILM-based blocking and deletion) dans S/4HANA ?",
+      "ground_truth": {
+        "entity": "ILM-based Data Protection framework",
+        "expected_claim_count": 5,
+        "expected_contradiction_count": 0,
+        "expected_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]
+      },
+      "grading_rules": {"must_mention_docs_count": 2}
+    },
+    {
+      "question_id": "T4_HUM_0049",
+      "task": "T4_audit",
+      "source": "human_derived",
+      "question": "Que disent les documents sur les differences de scope entre SAP S/4HANA on-premise et Cloud Private Edition ?",
+      "ground_truth": {
+        "entity": "On-premise vs Cloud Private Edition scope differences",
+        "expected_claim_count": 8,
+        "expected_contradiction_count": 2,
+        "expected_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"]
+      },
+      "grading_rules": {"must_mention_docs_count": 3}
+    }
+  ]
+}

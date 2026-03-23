@@ -1,0 +1,111 @@
+{
+  "metadata": {
+    "task": "T4",
+    "source": "kg_derived",
+    "corpus": "SAP Enterprise Documentation",
+    "count": 20,
+    "generated_at": "2026-03-23T21:45:00Z",
+    "note": "Questions KG v3 — audit/completude cross-doc. Testent la capacite a agreger les informations de plusieurs documents pour produire un resume complet et source."
+  },
+  "questions": [
+    {"question_id": "T4_KG_0000", "task": "T4_audit", "source": "kg_derived",
+     "question": "Fais un resume complet de la couverture documentaire de SAP Fiori a travers tous les documents SAP disponibles, en distinguant les aspects configuration, securite et fonctionnalites.",
+     "ground_truth": {"entity": "SAP Fiori", "expected_claim_count": 10, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "011_SAP_S4HANA_2023_Installation_Guide_23de8c60", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]},
+     "grading_rules": {"must_mention_docs_count": 3}},
+
+    {"question_id": "T4_KG_0001", "task": "T4_audit", "source": "kg_derived",
+     "question": "Resume tous les aspects de securite documentes pour RFC dans SAP S/4HANA, incluant les autorisations, les destinations et le monitoring.",
+     "ground_truth": {"entity": "RFC security", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0002", "task": "T4_audit", "source": "kg_derived",
+     "question": "Quels sont tous les prerequis documentes pour une conversion vers SAP S/4HANA, toutes versions confondues ?",
+     "ground_truth": {"entity": "conversion prerequisites", "expected_claim_count": 8, "expected_contradiction_count": 1, "expected_docs": ["005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0", "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0003", "task": "T4_audit", "source": "kg_derived",
+     "question": "Resume toute la documentation disponible sur SAP Extended Warehouse Management a travers les guides d'operations, de securite et les Feature Scope.",
+     "ground_truth": {"entity": "SAP Extended Warehouse Management", "expected_claim_count": 10, "expected_contradiction_count": 0, "expected_docs": ["015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "027_SAP_S4HANA_2023_Security_Guide_c160af0e", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]},
+     "grading_rules": {"must_mention_docs_count": 3}},
+
+    {"question_id": "T4_KG_0004", "task": "T4_audit", "source": "kg_derived",
+     "question": "Quelles sont toutes les informations disponibles sur ABAP Platform dans les documents SAP, en couvrant securite, migration et operations ?",
+     "ground_truth": {"entity": "ABAP Platform", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0005", "task": "T4_audit", "source": "kg_derived",
+     "question": "Fais un audit complet de la documentation sur Joule (IA SAP) a travers tous les documents disponibles.",
+     "ground_truth": {"entity": "Joule", "expected_claim_count": 6, "expected_contradiction_count": 0, "expected_docs": ["022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba", "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914", "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_\u2014_Highlights_of_Innovations_(2023_FPS03)_01b01cbf"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0006", "task": "T4_audit", "source": "kg_derived",
+     "question": "Resume tous les mecanismes de securite cloud documentes pour SAP S/4HANA Cloud Private Edition.",
+     "ground_truth": {"entity": "cloud security", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357", "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0007", "task": "T4_audit", "source": "kg_derived",
+     "question": "Quels sont tous les objets d'autorisation documentes pour le commerce international (Intrastat, Global Trade) dans les Security Guides ?",
+     "ground_truth": {"entity": "trade authorization", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0008", "task": "T4_audit", "source": "kg_derived",
+     "question": "Resume toutes les informations sur SAP HANA disponibles dans les documents de securite, d'operations et de conversion.",
+     "ground_truth": {"entity": "SAP HANA", "expected_claim_count": 10, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"]},
+     "grading_rules": {"must_mention_docs_count": 3}},
+
+    {"question_id": "T4_KG_0009", "task": "T4_audit", "source": "kg_derived",
+     "question": "Fais un audit de la couverture de SAP NetWeaver dans tous les documents SAP disponibles.",
+     "ground_truth": {"entity": "SAP NetWeaver", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"]},
+     "grading_rules": {"must_mention_docs_count": 3}},
+
+    {"question_id": "T4_KG_0010", "task": "T4_audit", "source": "kg_derived",
+     "question": "Quelles sont toutes les informations disponibles sur SAP Information Lifecycle Management (ILM) dans les Security Guides ?",
+     "ground_truth": {"entity": "SAP ILM", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0011", "task": "T4_audit", "source": "kg_derived",
+     "question": "Resume les fonctionnalites SAP Master Data Governance documentees dans les Feature Scope Descriptions et les Security Guides.",
+     "ground_truth": {"entity": "SAP Master Data Governance", "expected_claim_count": 6, "expected_contradiction_count": 0, "expected_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0012", "task": "T4_audit", "source": "kg_derived",
+     "question": "Fais un audit complet de la documentation sur le E-Recruiting dans les Security Guides SAP.",
+     "ground_truth": {"entity": "E-Recruiting", "expected_claim_count": 6, "expected_contradiction_count": 1, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0013", "task": "T4_audit", "source": "kg_derived",
+     "question": "Resume toute la documentation sur les connectivites reseau (VPN, Express Route, SAPRouter) pour SAP Cloud Private Edition.",
+     "ground_truth": {"entity": "network connectivity", "expected_claim_count": 6, "expected_contradiction_count": 0, "expected_docs": ["020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357", "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0014", "task": "T4_audit", "source": "kg_derived",
+     "question": "Quelles sont toutes les informations documentees sur le Custom Code Migration a travers les guides de conversion et d'upgrade ?",
+     "ground_truth": {"entity": "Custom Code Migration", "expected_claim_count": 6, "expected_contradiction_count": 0, "expected_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0015", "task": "T4_audit", "source": "kg_derived",
+     "question": "Resume la couverture de SAP Business Technology Platform dans les documents de securite et de migration.",
+     "ground_truth": {"entity": "SAP BTP", "expected_claim_count": 5, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0016", "task": "T4_audit", "source": "kg_derived",
+     "question": "Fais un audit de toute la documentation sur BRFplus a travers les Installation Guides, Operations Guides et Security Guides.",
+     "ground_truth": {"entity": "BRFplus", "expected_claim_count": 5, "expected_contradiction_count": 0, "expected_docs": ["012_SAP_S4HANA_2021_Installation_Guide_c441dbaf", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0017", "task": "T4_audit", "source": "kg_derived",
+     "question": "Resume toutes les innovations SAP documentees dans les Business Scope FPS03 et Business Scope 2025.",
+     "ground_truth": {"entity": "SAP innovations", "expected_claim_count": 10, "expected_contradiction_count": 0, "expected_docs": ["022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba", "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0018", "task": "T4_audit", "source": "kg_derived",
+     "question": "Quels sont tous les aspects de Product Compliance documentes a travers les Operations Guides et les Security Guides ?",
+     "ground_truth": {"entity": "Product Compliance", "expected_claim_count": 6, "expected_contradiction_count": 1, "expected_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]},
+     "grading_rules": {"must_mention_docs_count": 2}},
+
+    {"question_id": "T4_KG_0019", "task": "T4_audit", "source": "kg_derived",
+     "question": "Fais un audit de la documentation SAP Ariba et SAP Ariba Network a travers les Feature Scope et Business Scope documents.",
+     "ground_truth": {"entity": "SAP Ariba", "expected_claim_count": 6, "expected_contradiction_count": 0, "expected_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"]},
+     "grading_rules": {"must_mention_docs_count": 2}}
+  ]
+}

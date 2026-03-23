@@ -45,6 +45,59 @@ def get_neo4j_driver(config: dict):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Question generation helpers
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _claim_to_targeted_question(claim: Dict) -> str:
+    """Transforme un claim en question de niveau consultant SAP.
+
+    Principe d'equilibre :
+    - PAS trop vague ("Que dit le corpus sur X ?") → impossible a valider
+    - PAS trop cible ("Quel switch dans T77S0 ?") → biaise vers le KG
+    - JUSTE le bon niveau : question qu'un consultant SAP poserait en connaissant
+      le domaine mais pas la reponse. L'entite est un indice legitime.
+      La question oriente vers le DOMAINE du claim, pas vers sa reponse.
+    """
+    text = claim["claim_text"]
+    entity = claim["entity_name"]
+    text_lower = text.lower()
+
+    import re
+
+    # Detecter le domaine du claim (pas son contenu specifique)
+    if re.search(r'authorization|security|permission|role|access', text_lower):
+        return f"Quelles sont les regles de securite et d'autorisation pour {entity} dans SAP S/4HANA ?"
+    elif re.search(r'configur|setting|parameter|activ|enabl', text_lower):
+        return f"Comment est configure {entity} dans SAP S/4HANA ?"
+    elif re.search(r'integrat|interface|connect|communicat|rfc|idoc', text_lower):
+        return f"Comment fonctionne l'integration de {entity} dans SAP S/4HANA ?"
+    elif re.search(r'prerequisit|require|must|need|condition|before', text_lower):
+        return f"Quels sont les prerequis pour utiliser {entity} dans SAP S/4HANA ?"
+    elif re.search(r'version|release|upgrade|migrat', text_lower):
+        return f"Quelles informations de version ou de migration existent pour {entity} ?"
+    elif re.search(r'process|workflow|step|procedure|sequence', text_lower):
+        return f"Quel est le processus lie a {entity} dans SAP S/4HANA ?"
+    elif re.search(r'monitor|check|log|alert|trace|diagnostic', text_lower):
+        return f"Comment monitorer ou diagnostiquer {entity} dans SAP S/4HANA ?"
+    elif re.search(r'install|deploy|setup', text_lower):
+        return f"Comment mettre en place {entity} dans SAP S/4HANA ?"
+    elif re.search(r'schedul|batch|job|periodic|frequent', text_lower):
+        return f"Comment est planifie {entity} dans SAP S/4HANA ?"
+    elif re.search(r'data|table|field|object|record', text_lower):
+        return f"Quelle est la structure de donnees liee a {entity} dans SAP S/4HANA ?"
+    elif re.search(r'support|function|feature|capabilit', text_lower):
+        return f"Quelles fonctionnalites offre {entity} dans SAP S/4HANA ?"
+    elif re.search(r'transport|migration|conversion', text_lower):
+        return f"Comment gerer le transport ou la migration de {entity} ?"
+    elif re.search(r'creat|delet|modif|updat|maintain', text_lower):
+        return f"Quelles operations sont possibles sur {entity} dans SAP S/4HANA ?"
+    else:
+        # Fallback neutre — pas plus precis que necessaire
+        return f"Que documente SAP concernant {entity} dans S/4HANA ?"
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # TACHE 1 — Provenance & Citation
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -81,18 +134,9 @@ def generate_t1_provenance(driver, tenant_id: str, count: int, seed: int) -> Lis
     selected = random.sample(all_claims, count)
 
     questions = []
-    # Patterns de questions varies
-    patterns = [
-        "Que dit le corpus sur {entity} ?",
-        "Quelle information est disponible concernant {entity} ?",
-        "Que sait-on de {entity} dans la documentation ?",
-        "Quel est le role de {entity} selon les documents ?",
-        "Comment {entity} est-il decrit dans le corpus ?",
-    ]
 
     for i, claim in enumerate(selected):
-        pattern = patterns[i % len(patterns)]
-        question = pattern.format(entity=claim["entity_name"])
+        question = _claim_to_targeted_question(claim)
 
         questions.append({
             "question_id": f"T1_KG_{i:04d}",

@@ -63,11 +63,24 @@ Tu evalues si une reponse est correcte, sourcee, et complete par rapport a une q
 Reponds TOUJOURS en JSON valide avec les champs demandes. Sois strict mais juste."""
 
 
-def judge_provenance(question: str, answer: str, ground_truth: dict) -> Dict:
+def judge_provenance(question: str, answer: str, ground_truth: dict, source_map: str = "") -> Dict:
     """Juge T1 : la reponse cite-t-elle correctement ses sources ?"""
     expected_claim = ground_truth.get("expected_claim", "")
     expected_doc = ground_truth.get("doc_id", "")
     verbatim = ground_truth.get("verbatim_quote", "")
+
+    # Le source_map permet au juge de resoudre [Source N] -> nom du document
+    source_map_section = ""
+    if source_map:
+        source_map_section = f"""
+Correspondance des sources utilisees par le systeme:
+{source_map}
+
+IMPORTANT: la reponse utilise [Source N] pour citer ses sources. Utilise la correspondance
+ci-dessus pour verifier si le bon document ({expected_doc}) est effectivement cite.
+Par exemple si le document attendu apparait comme [Source 3] et que la reponse cite [Source 3],
+alors correct_source_cited = true.
+"""
 
     prompt = f"""Evalue cette reponse sur plusieurs criteres.
 
@@ -75,22 +88,23 @@ Question: {question}
 
 Reponse du systeme:
 {answer[:2000]}
-
+{source_map_section}
 Information attendue (ground truth):
 - Fait attendu: {expected_claim[:500]}
-- Document source: {expected_doc}
+- Document source attendu: {expected_doc}
 - Citation verbatim: {verbatim[:300]}
 
 IMPORTANT pour l'evaluation :
 - Le fait attendu EXISTE dans le corpus. Donc une bonne reponse DOIT le mentionner (meme paraphrase).
-- Si le systeme dit "je ne sais pas" alors que le fait existe, c'est une ERREUR (false_idk).
-- factual_correctness = la reponse contient-elle le sens du fait attendu, meme reformule ?
+- Si le systeme dit "je ne sais pas" alors que le fait existe, c'est une ERREUR (says_idk_when_info_exists = true).
+- factual_correctness = la reponse contient-elle le SENS du fait attendu, meme reformule ou paraphrase ?
+- correct_source_cited = le document source attendu est-il cite (directement ou via [Source N]) ?
 
 Evalue en JSON:
 {{
   "factual_correctness": 0.0-1.0,  // La reponse contient-elle le fait attendu (meme paraphrase) ?
   "citation_present": true/false,   // La reponse cite-t-elle des sources [Source N] ?
-  "correct_source_cited": true/false, // Le bon document est-il cite ?
+  "correct_source_cited": true/false, // Le bon document est-il cite (voir correspondance ci-dessus) ?
   "answer_relevant": true/false,    // La reponse repond-elle a la question ?
   "says_idk_when_info_exists": true/false, // Le systeme dit-il "je ne sais pas" ALORS QUE le fait existe ? (= ERREUR)
   "answers_correctly": true/false,  // Le systeme repond-il correctement avec le fait attendu ?
@@ -100,7 +114,7 @@ Evalue en JSON:
     return call_judge(JUDGE_SYSTEM, prompt)
 
 
-def judge_contradiction(question: str, answer: str, ground_truth: dict) -> Dict:
+def judge_contradiction(question: str, answer: str, ground_truth: dict, source_map: str = "") -> Dict:
     """Juge T2 : la reponse expose-t-elle les deux cotes d'une contradiction ?"""
     claim1 = ground_truth.get("claim1", {}).get("text", "")
     claim2 = ground_truth.get("claim2", {}).get("text", "")
@@ -131,7 +145,7 @@ Evalue en JSON:
     return call_judge(JUDGE_SYSTEM, prompt)
 
 
-def judge_temporal(question: str, answer: str, ground_truth: dict) -> Dict:
+def judge_temporal(question: str, answer: str, ground_truth: dict, source_map: str = "") -> Dict:
     """Juge T3 : la reponse distingue-t-elle les versions ?"""
     versions = ground_truth.get("versions", [])
     entity = ground_truth.get("entity", "")
@@ -159,7 +173,7 @@ Evalue en JSON:
     return call_judge(JUDGE_SYSTEM, prompt)
 
 
-def judge_audit(question: str, answer: str, ground_truth: dict) -> Dict:
+def judge_audit(question: str, answer: str, ground_truth: dict, source_map: str = "") -> Dict:
     """Juge T4 : la reponse est-elle complete et tracable ?"""
     entity = ground_truth.get("entity", "")
     expected_claims = ground_truth.get("expected_claim_count", 0)
@@ -234,9 +248,17 @@ def evaluate_results(results_path: str, model: str = "gpt-4o-mini", output_path:
         question = r["question"]
         gt = r["ground_truth"]
 
+        # Extraire le mapping [Source N] -> document pour le juge
+        chunks = r["response"].get("results", r["response"].get("chunks", []))
+        source_map = ""
+        if chunks:
+            map_lines = [f"[Source {j+1}] = {c.get('source_file', c.get('doc_id', '?'))}"
+                         for j, c in enumerate(chunks)]
+            source_map = "\n".join(map_lines)
+
         logger.info(f"  [{i+1}/{len(results)}] Judging {r['question_id']}...")
 
-        judgment = judge_fn(question, answer, gt)
+        judgment = judge_fn(question, answer, gt, source_map=source_map)
         total_tokens += judgment.get("tokens", 0)
 
         judgments.append({

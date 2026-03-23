@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -111,11 +112,35 @@ def retrieve_osmosis(api_base: str, token: str, question: str) -> Dict[str, Any]
         return {"error": str(e), "retrieve_ms": (time.time() - start) * 1000}
 
 
+def _get_llm_client(llm_model: str):
+    """Retourne le client OpenAI adapte au modele (GPT ou Qwen/vLLM)."""
+    from openai import OpenAI
+    if "qwen" in llm_model.lower() or llm_model.startswith("Qwen/"):
+        vllm_url = os.environ.get("VLLM_URL", "http://54.93.245.241:8000")
+        return OpenAI(api_key="EMPTY", base_url=f"{vllm_url}/v1")
+    return OpenAI()
+
+
+# Prompt de synthese renforce — identique entre OSMOSIS et RAG
+# En anglais pour meilleur instruction-following Qwen 2.5
+SYNTHESIS_SYSTEM_PROMPT = """You are a precise assistant. Answer questions using ONLY the provided sources.
+
+MANDATORY RULES:
+1. Every factual statement MUST be followed by [Source N]
+2. Be specific: include names, numbers, values, transaction codes when available
+3. If the information is partially available, answer with what you have — do NOT refuse
+4. ONLY say "information not available" if NONE of the sources contain ANY relevant information
+5. If sources contain contradictions or divergences, mention them explicitly
+6. If [Contradiction] or [Entites] metadata is provided with a source, incorporate it in your answer
+
+Answer in the SAME LANGUAGE as the question."""
+
+
 def synthesize_with_standard_llm(
     question: str,
     chunks: List[Dict],
     llm_model: str = "gpt-4o",
-    max_tokens: int = 1500,
+    max_tokens: int = 1200,
 ) -> Dict[str, Any]:
     """Synthetise avec le MEME LLM et le MEME prompt que le RAG baseline.
 
@@ -131,37 +156,39 @@ def synthesize_with_standard_llm(
         entities = chunk.get("entity_names", [])
         contradictions = chunk.get("contradiction_texts", [])
         if entities:
-            extra += f"\n  [Entites: {', '.join(entities[:3])}]"
+            extra += f"\n  [Entites: {', '.join(entities[:5])}]"
         if contradictions:
-            extra += f"\n  [Contradiction: {contradictions[0][:150]}]"
+            for contra in contradictions[:2]:
+                if contra:
+                    extra += f"\n  [Contradiction: {contra[:200]}]"
         context_parts.append(f"[Source {i+1}: {source}]{extra}\n{text}")
 
     context = "\n\n".join(context_parts)
 
-    system_prompt = """Tu es un assistant qui repond aux questions en se basant UNIQUEMENT sur les sources fournies.
-Regles:
-- Cite tes sources avec [Source N] apres chaque affirmation
-- Si l'information n'est pas dans les sources, dis "Je ne dispose pas de cette information dans les documents fournis."
-- Ne fabrique pas d'information
-- Sois precis et factuel
-- Si des contradictions sont signalees entre sources, mentionne-les explicitement"""
+    source_map_lines = []
+    for i, chunk in enumerate(chunks):
+        doc = chunk.get("source_file", "unknown")
+        source_map_lines.append(f"  [Source {i+1}] = {doc}")
+    source_map = "\n".join(source_map_lines)
 
-    user_prompt = f"""Sources disponibles:
+    user_prompt = f"""Source mapping:
+{source_map}
+
+Sources:
 
 {context}
 
 Question: {question}
 
-Reponse (avec citations [Source N]):"""
+Answer (cite every source with [Source N]):"""
 
     start = time.time()
     try:
-        from openai import OpenAI
-        client = OpenAI()
+        client = _get_llm_client(llm_model)
         response = client.chat.completions.create(
             model=llm_model,
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
             max_tokens=max_tokens,
@@ -186,86 +213,124 @@ Reponse (avec citations [Source N]):"""
         }
 
 
-def run_benchmark(config_path: str, questions_path: str, output_path: str = None):
-    config = load_config(config_path)
-    api_base = config["corpus"]["osmosis_api"]
-    llm_model = config["models"]["synthesis_primary"]
+def _process_one_question(args) -> Dict[str, Any]:
+    """Traite une question (pour parallelisation via ThreadPoolExecutor)."""
+    i, q, api_base, token, llm_model, total = args
+    logger.info(f"  [{i+1}/{total}] {q['question'][:80]}...")
 
-    with open(questions_path, "r", encoding="utf-8") as f:
-        questions_data = json.load(f)
+    retrieval = retrieve_osmosis(api_base, token, q["question"])
 
-    questions = questions_data["questions"]
-    metadata = questions_data["metadata"]
-
-    logger.info(f"Running OSMOSIS benchmark: {len(questions)} questions, LLM={llm_model}")
-
-    token = get_auth_token(api_base)
-    logger.info("Authenticated with OSMOSIS API")
-
-    results = []
-    for i, q in enumerate(questions):
-        logger.info(f"  [{i+1}/{len(questions)}] {q['question'][:80]}...")
-
-        # 1. Retrieve via OSMOSIS (KG-enriched)
-        retrieval = retrieve_osmosis(api_base, token, q["question"])
-
-        if retrieval.get("error"):
-            results.append({
-                "question_id": q["question_id"],
-                "task": q["task"],
-                "question": q["question"],
-                "system": "osmosis",
-                "response": {
-                    "answer": "",
-                    "error": retrieval["error"],
-                    "latency_ms": retrieval.get("retrieve_ms", 0),
-                },
-                "ground_truth": q["ground_truth"],
-                "grading_rules": q.get("grading_rules", {}),
-            })
-            continue
-
-        # 2. Synthesize avec le MEME LLM (GPT-4o)
-        synthesis = synthesize_with_standard_llm(
-            q["question"], retrieval["chunks"], llm_model,
-        )
-
-        total_latency = retrieval["retrieve_ms"] + synthesis.get("synthesis_ms", 0)
-
-        results.append({
+    if retrieval.get("error"):
+        return {
             "question_id": q["question_id"],
             "task": q["task"],
             "question": q["question"],
             "system": "osmosis",
             "response": {
-                "answer": synthesis["answer"],
-                "native_synthesis": retrieval.get("native_synthesis", ""),
-                "chunks_retrieved": len(retrieval["chunks"]),
-                "results": retrieval["chunks"],
-                "sources_used": [c["source_file"] for c in retrieval["chunks"] if c.get("source_file")],
-                # Metadonnees KG (ce que RAG n'a PAS)
-                "entity_names": list(set(
-                    e for c in retrieval["chunks"] for e in c.get("entity_names", [])
-                )),
-                "contradiction_texts": list(set(
-                    t for c in retrieval["chunks"] for t in c.get("contradiction_texts", [])
-                )),
-                "graph_context": retrieval.get("graph_context", {}),
-                "related_articles": retrieval.get("related_articles", []),
-                "insight_hints": retrieval.get("insight_hints", []),
-                "cross_doc_comparisons": retrieval.get("cross_doc_comparisons", []),
-                # Timing
-                "latency_ms": total_latency,
-                "retrieve_ms": retrieval["retrieve_ms"],
-                "synthesis_ms": synthesis.get("synthesis_ms", 0),
-                "tokens": synthesis.get("tokens", 0),
-                "error": synthesis.get("error"),
+                "answer": "",
+                "error": retrieval["error"],
+                "latency_ms": retrieval.get("retrieve_ms", 0),
             },
             "ground_truth": q["ground_truth"],
             "grading_rules": q.get("grading_rules", {}),
-        })
+        }
 
-        time.sleep(0.5)
+    # Synthesize avec le MEME LLM (GPT-4o-mini)
+    synthesis = synthesize_with_standard_llm(
+        q["question"], retrieval["chunks"], llm_model,
+    )
+
+    total_latency = retrieval["retrieve_ms"] + synthesis.get("synthesis_ms", 0)
+
+    return {
+        "question_id": q["question_id"],
+        "task": q["task"],
+        "question": q["question"],
+        "system": "osmosis",
+        "response": {
+            "answer": synthesis["answer"],
+            "native_synthesis": retrieval.get("native_synthesis", ""),
+            "chunks_retrieved": len(retrieval["chunks"]),
+            "results": retrieval["chunks"],
+            "sources_used": [c["source_file"] for c in retrieval["chunks"] if c.get("source_file")],
+            # Metadonnees KG (ce que RAG n'a PAS)
+            "entity_names": list(set(
+                e for c in retrieval["chunks"] for e in c.get("entity_names", [])
+            )),
+            "contradiction_texts": list(set(
+                t for c in retrieval["chunks"] for t in c.get("contradiction_texts", [])
+            )),
+            "graph_context": retrieval.get("graph_context", {}),
+            "related_articles": retrieval.get("related_articles", []),
+            "insight_hints": retrieval.get("insight_hints", []),
+            "cross_doc_comparisons": retrieval.get("cross_doc_comparisons", []),
+            # Timing
+            "latency_ms": total_latency,
+            "retrieve_ms": retrieval["retrieve_ms"],
+            "synthesis_ms": synthesis.get("synthesis_ms", 0),
+            "tokens": synthesis.get("tokens", 0),
+            "error": synthesis.get("error"),
+        },
+        "ground_truth": q["ground_truth"],
+        "grading_rules": q.get("grading_rules", {}),
+    }
+
+
+def run_benchmark(
+    config_path: str,
+    questions_path: str,
+    output_path: str = None,
+    max_workers: int = 4,
+):
+    """Execute le benchmark OSMOSIS avec parallelisation."""
+    config = load_config(config_path)
+    corpus = config["corpus"]
+    api_base = corpus["osmosis_api"]
+    llm_model = config["models"]["synthesis_primary"]
+
+    with open(questions_path, "r", encoding="utf-8") as f:
+        qdata = json.load(f)
+
+    questions = qdata["questions"]
+    metadata = qdata["metadata"]
+
+    logger.info(f"Running OSMOSIS benchmark: {len(questions)} questions, {max_workers} workers")
+
+    # Auth
+    token = get_auth_token(api_base)
+    logger.info("Auth OK")
+
+    # Preparer les arguments pour le pool
+    total = len(questions)
+    args_list = [
+        (i, q, api_base, token, llm_model, total)
+        for i, q in enumerate(questions)
+    ]
+
+    # Execution parallele
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_process_one_question, args): args[0] for args in args_list}
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                logger.error(f"  Question {idx} failed: {e}")
+                q = questions[idx]
+                results.append({
+                    "question_id": q["question_id"],
+                    "task": q["task"],
+                    "question": q["question"],
+                    "system": "osmosis",
+                    "response": {"answer": "", "error": str(e), "latency_ms": 0},
+                    "ground_truth": q["ground_truth"],
+                    "grading_rules": q.get("grading_rules", {}),
+                })
+
+    # Trier par question_id pour reproductibilite
+    results.sort(key=lambda r: r["question_id"])
 
     # Sauvegarder
     if not output_path:
@@ -282,6 +347,7 @@ def run_benchmark(config_path: str, questions_path: str, output_path: str = None
                 "task": metadata["task"],
                 "corpus": metadata["corpus"],
                 "questions_count": len(results),
+                "max_workers": max_workers,
                 "run_at": datetime.now(timezone.utc).isoformat(),
                 "config": config_path,
                 "api_base": api_base,
@@ -301,9 +367,10 @@ def main():
     parser.add_argument("--config", default="benchmark/config.yaml")
     parser.add_argument("--questions", required=True)
     parser.add_argument("--output", default=None)
+    parser.add_argument("--workers", type=int, default=4, help="Nombre de workers paralleles")
     args = parser.parse_args()
 
-    run_benchmark(args.config, args.questions, args.output)
+    run_benchmark(args.config, args.questions, args.output, args.workers)
 
 
 if __name__ == "__main__":

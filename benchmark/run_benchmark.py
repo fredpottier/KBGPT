@@ -48,7 +48,7 @@ def run_step(description: str, cmd: list, env: dict = None) -> bool:
             cmd,
             cwd=str(Path(__file__).parent.parent),
             env=full_env,
-            timeout=1800,  # 30 min max par step
+            timeout=7200,  # 2h max par step (OSMOSIS peut etre lent sans burst)
             capture_output=False,
         )
         if result.returncode != 0:
@@ -75,6 +75,9 @@ def main():
     parser.add_argument("--skip-osmosis", action="store_true", help="Skip OSMOSIS run")
     parser.add_argument("--skip-rag", action="store_true", help="Skip RAG baseline run")
     parser.add_argument("--skip-judge", action="store_true", help="Skip LLM judge evaluation")
+    parser.add_argument("--workers", type=int, default=4, help="Parallel workers for OSMOSIS runner")
+    parser.add_argument("--include-human", action="store_true", help="Include human-derived questions (doc-only, no KG)")
+    parser.add_argument("--human-only", action="store_true", help="Run ONLY human-derived questions")
     args = parser.parse_args()
 
     python = sys.executable
@@ -108,91 +111,114 @@ def main():
     logger.info(f"Benchmark: tasks={tasks}, count={count}, results={results_dir}")
 
     for task in tasks:
-        task_lower = task.lower()
-        questions_file = f"benchmark/questions/{_task_filename(task)}"
-        osm_results = str(results_dir / f"osmosis_{task}.json")
-        rag_results = str(results_dir / f"rag_claim_{task}.json")
-        osm_judge = str(results_dir / f"judge_osmosis_{task}.json")
-        rag_judge = str(results_dir / f"judge_rag_claim_{task}.json")
+        # Determiner quels sets de questions traiter
+        question_sets = []
+        if not args.human_only:
+            question_sets.append(("kg", _task_filename(task, "kg")))
+        if args.include_human or args.human_only:
+            question_sets.append(("human", _task_filename(task, "human")))
 
-        # Step 1: Generate questions
-        if not args.skip_generate:
-            ok = run_step(
-                f"Generate {task} questions ({count})",
-                [python, "benchmark/questions/generate_kg_questions.py",
-                 "--config", config, "--task", task, "--count", str(count)],
-                env,
-            )
-            if not ok:
-                logger.warning(f"Skipping {task} — question generation failed")
+        for q_source, q_filename in question_sets:
+            suffix = f"{task}_{q_source}"
+            questions_file = f"benchmark/questions/{q_filename}"
+            osm_results = str(results_dir / f"osmosis_{suffix}.json")
+            rag_results = str(results_dir / f"rag_claim_{suffix}.json")
+            osm_judge = str(results_dir / f"judge_osmosis_{suffix}.json")
+            rag_judge = str(results_dir / f"judge_rag_claim_{suffix}.json")
+
+            # Step 1: Generate questions
+            if not args.skip_generate:
+                if q_source == "kg":
+                    ok = run_step(
+                        f"Generate {task} KG questions ({count})",
+                        [python, "benchmark/questions/generate_kg_questions.py",
+                         "--config", config, "--task", task, "--count", str(count)],
+                        env,
+                    )
+                else:
+                    ok = run_step(
+                        f"Generate {task} human questions ({count})",
+                        [python, "benchmark/questions/generate_human_questions.py",
+                         "--config", config, "--task", task, "--count", str(count)],
+                        env,
+                    )
+                if not ok:
+                    logger.warning(f"Skipping {suffix} — question generation failed")
+                    continue
+
+            # Verifier que les questions existent
+            if not Path(questions_file).exists():
+                logger.warning(f"Skipping {suffix} — {questions_file} not found")
                 continue
 
-        # Verifier que les questions existent
-        if not Path(questions_file).exists():
-            logger.warning(f"Skipping {task} — {questions_file} not found")
-            continue
-
-        # Step 2: Run OSMOSIS
-        if not args.skip_osmosis:
-            run_step(
-                f"Run OSMOSIS on {task} ({count} questions)",
-                [python, "benchmark/runners/run_osmosis.py",
-                 "--config", config, "--questions", questions_file,
-                 "--output", osm_results],
-                env,
-            )
-
-        # Step 3: Run RAG baseline
-        if not args.skip_rag:
-            run_step(
-                f"Run RAG-claim baseline on {task}",
-                [python, "benchmark/baselines/rag_baseline.py",
-                 "--config", config, "--questions", questions_file,
-                 "--baseline", "rag_claim", "--output", rag_results],
-                env,
-            )
-
-        # Step 4: LLM Judge
-        if not args.skip_judge:
-            if Path(osm_results).exists():
+            # Step 2: Run OSMOSIS
+            if not args.skip_osmosis:
                 run_step(
-                    f"LLM Judge — OSMOSIS {task}",
-                    [python, "benchmark/evaluators/llm_judge.py",
-                     "--results", osm_results, "--output", osm_judge],
-                    env,
-                )
-            if Path(rag_results).exists():
-                run_step(
-                    f"LLM Judge — RAG {task}",
-                    [python, "benchmark/evaluators/llm_judge.py",
-                     "--results", rag_results, "--output", rag_judge],
+                    f"Run OSMOSIS on {suffix} ({count} questions)",
+                    [python, "benchmark/runners/run_osmosis.py",
+                     "--config", config, "--questions", questions_file,
+                     "--output", osm_results, "--workers", str(args.workers)],
                     env,
                 )
 
-        # Step 5: Compare
-        if Path(osm_judge).exists() and Path(rag_judge).exists():
-            report_path = str(results_dir / f"report_{task}.md")
-            run_step(
-                f"Compare OSMOSIS vs RAG — {task}",
-                [python, "benchmark/analysis/compare.py",
-                 "--osmosis", osm_judge, "--baseline", rag_judge,
-                 "--output", report_path],
-                env,
-            )
+            # Step 3: Run RAG baseline
+            if not args.skip_rag:
+                run_step(
+                    f"Run RAG-claim baseline on {suffix}",
+                    [python, "benchmark/baselines/rag_baseline.py",
+                     "--config", config, "--questions", questions_file,
+                     "--baseline", "rag_claim", "--output", rag_results],
+                    env,
+                )
+
+            # Step 4: LLM Judge
+            if not args.skip_judge:
+                if Path(osm_results).exists():
+                    run_step(
+                        f"LLM Judge — OSMOSIS {suffix}",
+                        [python, "benchmark/evaluators/llm_judge.py",
+                         "--results", osm_results, "--output", osm_judge],
+                        env,
+                    )
+                if Path(rag_results).exists():
+                    run_step(
+                        f"LLM Judge — RAG {suffix}",
+                        [python, "benchmark/evaluators/llm_judge.py",
+                         "--results", rag_results, "--output", rag_judge],
+                        env,
+                    )
+
+            # Step 5: Compare
+            if Path(osm_judge).exists() and Path(rag_judge).exists():
+                report_path = str(results_dir / f"report_{suffix}.md")
+                run_step(
+                    f"Compare OSMOSIS vs RAG — {suffix}",
+                    [python, "benchmark/analysis/compare.py",
+                     "--osmosis", osm_judge, "--baseline", rag_judge,
+                     "--output", report_path],
+                    env,
+                )
 
     logger.info(f"\n{'='*60}")
     logger.info(f"BENCHMARK COMPLETE — Results in {results_dir}")
     logger.info(f"{'='*60}")
 
 
-def _task_filename(task: str) -> str:
-    mapping = {
+def _task_filename(task: str, source: str = "kg") -> str:
+    mapping_kg = {
         "T1": "task1_provenance_kg.json",
         "T2": "task2_contradictions_kg.json",
         "T3": "task3_temporal_kg.json",
         "T4": "task4_audit_kg.json",
     }
-    return mapping.get(task, f"task_{task.lower()}_kg.json")
+    mapping_human = {
+        "T1": "task1_provenance_human.json",
+        "T2": "task2_contradictions_human.json",
+        "T4": "task4_audit_human.json",
+    }
+    if source == "human":
+        return mapping_human.get(task, f"task_{task.lower()}_human.json")
+    return mapping_kg.get(task, f"task_{task.lower()}_kg.json")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,762 @@
+{
+  "metadata": {
+    "task": "T2",
+    "source": "human_derived",
+    "corpus": "SAP Enterprise Documentation",
+    "count": 50,
+    "generated_at": "2026-03-22T18:30:00Z",
+    "note": "Questions generees manuellement par Claude en comparant les documents SAP (SANS acces au KG). Tensions reelles detectees entre versions/editions."
+  },
+  "questions": [
+    {
+      "question_id": "T2_HUM_0000",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les SAP Notes pour les cross-application preparation steps sont-elles les memes entre la conversion 2022 et 2023 ?",
+      "ground_truth": {
+        "claim1": {"text": "La conversion S/4HANA 2022 reference la SAP Note 3226469 pour les cross-application preparation steps.", "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"},
+        "claim2": {"text": "La conversion S/4HANA 2023 reference la SAP Note 3340515 pour les cross-application preparation steps.", "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0001",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "La section Incentive & Sales Force Management est-elle presente dans les deux Security Guides (2022 et 2023) ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Security Guide 2022 contient une section 14.2.10 dediee a Incentive & Sales Force Management (ICM) avec les roles SAP_ICM_S_* et SAP_ICM_C_*.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "Le Security Guide 2023 ne contient pas cette section au meme emplacement (chars 500000-505000 couvrent le Payroll Control Center, pas ICM).", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0002",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le guide d'upgrade 2023 on-premise et le guide d'upgrade PCE 2025 donnent-ils les memes regles d'arret du SUM pour le SI-Check ?",
+      "ground_truth": {
+        "claim1": {"text": "L'Upgrade Guide 2023 indique que SUM arrete le processus si le code retour SI-Check >= 12 en debut de SUM, >= 8 juste avant downtime.", "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"},
+        "claim2": {"text": "L'Upgrade Guide PCE 2025 indique exactement les memes regles d'arret (>=12 et >=8).", "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0003",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Comment le Operations Guide 2023 differe-t-il du 2021 et 2022 concernant le monitoring WWI ?",
+      "ground_truth": {
+        "claim1": {"text": "Les Operations Guides 2021 et 2022 ne mentionnent pas de transaction specifique WWI Monitor.", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+        "claim2": {"text": "Le Operations Guide 2023 ajoute la transaction CG5Z (WWI Monitor) et les niveaux de trace detailles (0-5, defaut=3).", "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0004",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le job /SCWM/R_ODO_POST_GI est-il mentionne dans les trois versions du Operations Guide ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Operations Guide 2022 mentionne le job /SCWM/R_ODO_POST_GI avec frequence Hourly pour poster les goods issue des outbound delivery orders.", "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"},
+        "claim2": {"text": "Le Operations Guide 2021 ne mentionne pas ce job specifique dans la meme section.", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0005",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Quelle est la difference entre les Release Information Notes de S/4HANA 2022 et 2023 ?",
+      "ground_truth": {
+        "claim1": {"text": "S/4HANA 2022 utilise la SAP Note 3145277 comme Release Information Note.", "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"},
+        "claim2": {"text": "S/4HANA 2023 utilise la SAP Note 3307222 comme Release Information Note.", "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"},
+        "tension_nature": "evolution",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0006",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le RISE with SAP system transition workbench est-il mentionne dans les guides de conversion on-premise ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Conversion Guide PCE 2025 mentionne le RISE with SAP system transition workbench, restreint aux partenaires Essential Level.", "doc_id": "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"},
+        "claim2": {"text": "Les Conversion Guides on-premise 2022 et 2023 ne mentionnent pas cet outil.", "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0007",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les instances Java sont-elles gerees de la meme maniere entre S/4HANA on-premise et Cloud Private Edition 2025 ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Conversion Guide PCE 2025 liste 5 instances Java incluses (Adobe Document Services, ESR, AAEE, Elster, Swift) et indique que toutes les autres sont obsoletes.", "doc_id": "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"},
+        "claim2": {"text": "Les guides de conversion on-premise ne restreignent pas les instances Java de la meme maniere car le dual-stack est gere par le split prerequis.", "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0008",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le service request identifier pour les SAP Notes techniques existe-t-il dans les guides d'upgrade on-premise ?",
+      "ground_truth": {
+        "claim1": {"text": "L'Upgrade Guide PCE 2025 introduit les identifiants BASIC_1.5.04 (notes techniques BC-CST/BC-DB) et BASIC_1.5.03 (notes applicatives facturables) pour les demandes a SAP ECS.", "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"},
+        "claim2": {"text": "L'Upgrade Guide 2023 on-premise ne contient pas de service request identifiers car le client gere lui-meme l'application des notes.", "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696", "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0009",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les fonctionnalites du Feature Scope Description sont-elles identiques entre l'edition on-premise et Cloud Private Edition 2023 ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Feature Scope Description on-premise 2023 et le Feature Scope Description PCE 2023 presentent un contenu quasi-identique pour Service Management, Intrastat, et Permit to Work.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+        "claim2": {"text": "Le Feature Scope Description PCE 2023 confirme la parite fonctionnelle entre les deux editions pour ces modules.", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0010",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Comment les Operations Guides 2022 et 2021 different-ils sur le monitoring liveCache ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Operations Guide 2022 liste les transactions liveCache : SMQ1, SMQ2, /SAPAPO/CCR, /SAPAPO/CPP, /SAPAPO/CC, /SAPAPO/OM17, /SAPAPO/OM13, /SAPAPO/OM03.", "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"},
+        "claim2": {"text": "Le Operations Guide 2021 ne liste pas ces transactions liveCache dans la meme section MRP.", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0011",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "L'EWM est-il embarque ou decouple dans les differentes versions de S/4HANA ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Business Scope 1809 presente l'EWM embarque dans S/4HANA eliminant la duplication de donnees.", "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"},
+        "claim2": {"text": "Le Business Scope 1809 mentionne aussi un deploiement EWM & TM side-by-side pour Hub Deployment necessitant une licence additionnelle.", "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0012",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "SAP Best Practices livre-t-il un concept d'autorisation ou est-ce au client de l'adapter ?",
+      "ground_truth": {
+        "claim1": {"text": "L'Admin Guide indique explicitement que SAP Best Practices ne livre PAS de concept d'autorisation.", "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"},
+        "claim2": {"text": "Le Security Guide 2023 fournit des centaines de roles SAP_* detailles avec des autorisations specifiques par objet.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0013",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Warehouse Billing est-il gere de la meme facon dans les Operations Guides 2021 et 2022 ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Operations Guide 2022 ajoute les jobs /SCWM/WB_SNAPSHOT_DELETION (Monthly) et /SCWM/WB_WBMR_DELETION (Yearly) pour le Warehouse Billing.", "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"},
+        "claim2": {"text": "Le Operations Guide 2021 ne contient pas ces jobs Warehouse Billing.", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0014",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Comment la gestion des utilisateurs standard differe-t-elle entre ESS et E-Recruiting dans les Security Guides ?",
+      "ground_truth": {
+        "claim1": {"text": "Pour ESS, aucun utilisateur standard n'est livre (No standard users delivered).", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "Pour E-Recruiting, des roles standard specifiques sont fournis : SAP_RCF_MANAGER et SAP_RFC_MANAGER_SERVICE.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["028_SAP_S4HANA_2022_Security_Guide_44f7ec32", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0015",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Quelles differences de documentation existent entre la section clean core du Operations Guide 2023 et les versions precedentes ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Operations Guide 2023 ajoute la section 4.7 Set Up Clean Core Development Environment, absente des versions precedentes.", "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"},
+        "claim2": {"text": "Les Operations Guides 2021 et 2022 ne contiennent pas de section clean core.", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3", "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0016",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le processus d'upgrade dans un paysage systeme distribue est-il le meme entre l'Upgrade Guide 2023 et le PCE 2025 ?",
+      "ground_truth": {
+        "claim1": {"text": "L'Upgrade Guide PCE 2025 utilise un Temporary System Landscape avec copies DEV'/QAS' upgradees puis integration dans PRD via Transport Route.", "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"},
+        "claim2": {"text": "L'Upgrade Guide 2023 utilise SAP Readiness Check et SI-Check directement dans le paysage existant.", "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696", "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0017",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Comment Joule est-il decrit dans le Business Scope FPS03 par rapport au Business Scope 2025 ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Business Scope FPS03 presente Joule comme copilote AI avec orchestration multi-agents pour dispute management, planning, accounting.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+        "claim2": {"text": "Le Business Scope 2025 detaille les capacites specifiques de Joule pour le Sourcing & Procurement, notamment la creation de Purchase Requisitions.", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
+        "tension_nature": "evolution",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba", "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0018",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les Installation Guides 2021 et 2023 couvrent-ils les memes technologies front-end ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Installation Guide 2021 couvre les transactions specifiques a 2021, les services SICF, l'import BRF+ customizing.", "doc_id": "012_SAP_S4HANA_2021_Installation_Guide_c441dbaf"},
+        "claim2": {"text": "Le Installation Guide 2023 couvre SAP Fiori setup, User Assistance/SHELP_CONFIG, SAP Web Dispatcher configuration.", "doc_id": "011_SAP_S4HANA_2023_Installation_Guide_23de8c60"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["012_SAP_S4HANA_2021_Installation_Guide_c441dbaf", "011_SAP_S4HANA_2023_Installation_Guide_23de8c60"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0019",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "La SAP Note pour la Fiori Release Information est-elle la meme entre S/4HANA 2022, 2023 et PCE 2025 ?",
+      "ground_truth": {
+        "claim1": {"text": "S/4HANA 2022 reference la SAP Note 3226678 pour Fiori Release Information.", "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"},
+        "claim2": {"text": "S/4HANA PCE 2025 reference la SAP Note 3493254 pour Fiori Release Information.", "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"},
+        "tension_nature": "evolution",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0020",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Security Guide recommande-t-il les memes pratiques de communication pour ISF et E-Recruiting ?",
+      "ground_truth": {
+        "claim1": {"text": "ISF utilise la technologie RFC pour la communication avec les systemes externes (CRM, policy management). Les destinations de communication ne font PAS partie de la livraison standard ISF.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "claim2": {"text": "E-Recruiting requiert une connexion RFC specifique du systeme HR (EA-HR) vers ERECRUIT avec un service user anonyme.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["028_SAP_S4HANA_2022_Security_Guide_44f7ec32", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0021",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Quel est le nombre de versions documentees pour chaque Operations Guide (2021, 2022, 2023) ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Operations Guide 2021 a 9 versions (1.0 Oct 2021 a 9.0 Jul 2025 SPS08).", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+        "claim2": {"text": "Le Operations Guide 2023 n'a que 5 versions (1.0 Oct 2023 a 5.0 Aug 2025 SPS04).", "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0022",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le cross-docking dans EWM est-il decrit de la meme maniere dans le Business Scope 2025 et le Operations Guide 2022 ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Business Scope 2025 decrit le cross-docking comme fonctionnalite avancee avec nested handling-units et consolidation multi-vendeurs.", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
+        "claim2": {"text": "Le Operations Guide 2022 fournit les jobs batch planifies pour EWM (dont /SCWM/R_BW_COLLECTIVE_RUN) sans detailler le cross-docking.", "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0023",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le SAP Readiness Check est-il obligatoire ou recommande selon les differents guides ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Conversion Guide 2022 indique que le SAP Readiness Check est 'non obligatoire mais hautement recommande'.", "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"},
+        "claim2": {"text": "L'Upgrade Guide PCE 2025 qualifie le SAP Readiness Check de 'hautement recommande en debut de projet'.", "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0024",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le modele RISE with SAP est-il decrit de la meme maniere dans le document RISE et le document Access to Customer Systems ?",
+      "ground_truth": {
+        "claim1": {"text": "Le document RISE decrit l'architecture en 4 couches (Run Functional Application, Run Solution, Run System, Run Infrastructure) avec CAS et ECS comme modeles de delivery.", "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"},
+        "claim2": {"text": "Le document Access to Customer Systems detaille les 4 principes d'acces (Consent, Authentication, Authorisation, Log Review) et les certifications (ISO 27001, SOC1/2).", "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357", "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0025",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les configurations manuelles EWM de l'Admin Guide sont-elles couvertes par les transport requests ?",
+      "ground_truth": {
+        "claim1": {"text": "L'Admin Guide indique explicitement que les settings manuels EWM ne sont PAS captures dans les transport requests et doivent etre recrees dans QA et Production.", "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"},
+        "claim2": {"text": "Le Conversion Guide 2023 recommande de collecter tous les changements dans des transport requests pendant la test conversion.", "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0026",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Simplification List mentionne-t-il la deprecation de Design Studio Apps et HANA Live Reporting ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List 2023 inclut les items de deprecation : Design Studio Apps (item 2.39), SAP HANA Live Reporting (item 2.44), et Enterprise Search (item 2.45).", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Le Feature Scope Description 2023 continue de decrire des fonctionnalites analytics et reporting comme actives.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+        "tension_nature": "contradiction",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0027",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Simplification List deprecie-t-il l'Internet Pricing and Configurator (SAP IPC) alors qu'il est utilise dans d'autres modules ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List 2023 inclut l'item 2.48 : Deprecation of Internet Pricing and Configurator (SAP IPC).", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Le Feature Scope Description 2023 decrit la configuration de produits variantes avec single-level variant configuration dans Service Management.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0028",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Transportation Management est-il embarque ou decouple dans S/4HANA selon les differents documents ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Business Scope 1809 presente l'Embedded Transportation Management comme elimant le besoin de replication de donnees et de hardware additionnel.", "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"},
+        "claim2": {"text": "Le meme document mentionne TM side-by-side pour Hub Deployment necessitant une licence additionnelle.", "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0029",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le job RBDMANI2 est-il present dans les trois Operations Guides ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Operations Guide 2023 ajoute le job RBDMANI2 (Hourly) pour traiter les IDocs non postes dans Transportation Integration.", "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"},
+        "claim2": {"text": "Le Operations Guide 2021 ne mentionne pas le job RBDMANI2.", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3", "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0030",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "La Foundation Release Information Note est-elle la meme entre S/4HANA 2022, 2023 et 2025 ?",
+      "ground_truth": {
+        "claim1": {"text": "Foundation 2022 utilise la SAP Note 3143630.", "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"},
+        "claim2": {"text": "Foundation 2025 utilise la SAP Note 3568504.", "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"},
+        "tension_nature": "evolution",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0031",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le What's New 2023 SPS04 et le Highlights FPS03 couvrent-ils les memes innovations Manufacturing ?",
+      "ground_truth": {
+        "claim1": {"text": "Le What's New 2023 SPS04 ajoute de nouvelles CDS views pour Production Operations (PP-VDM) et PLM Change Records avec Dynamic Field Control.", "doc_id": "013_SAP-014_What's_New_in_SAP_S_4HANA_and_SAP_S_4HANA_Cloud_Private_Edition_2023_SPS04_611b554d"},
+        "claim2": {"text": "Le Highlights FPS03 presente le Manage Production Models avec BOM, shop floor routing et visualisation 3D.", "doc_id": "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_\u2014_Highlights_of_Innovations_(2023_FPS03)_01b01cbf"},
+        "tension_nature": "scope_variation",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["013_SAP-014_What's_New_in_SAP_S_4HANA_and_SAP_S_4HANA_Cloud_Private_Edition_2023_SPS04_611b554d", "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_\u2014_Highlights_of_Innovations_(2023_FPS03)_01b01cbf"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0032",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Simplification List deprecie-t-il les BI Extractors alors que le Operations Guide recommande des transferts BW quotidiens ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List mentionne l'item 2.27 : S4TWL – BI Extractors in SAP S/4HANA.", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Le Operations Guide 2022 recommande le job quotidien /SCWM/R_BW_COLLECTIVE_RUN pour transferer les queues qRFC vers la BI Delta Queue.", "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"},
+        "tension_nature": "contradiction",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0033",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le HANA Rules Framework est-il deprecie dans le Simplification List tout en etant utilise dans BRF+ ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List 2023 inclut l'item 2.51 : ABAPTWL – Deprecation of Hana Rules Framework.", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "L'Installation Guide 2021 mentionne l'import de BRF+ customizing.", "doc_id": "012_SAP_S4HANA_2021_Installation_Guide_c441dbaf"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "012_SAP_S4HANA_2021_Installation_Guide_c441dbaf"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0034",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les roles SAP_BR* et les roles SAP_RCF_MANAGER sont-ils decrits de la meme maniere dans l'Admin Guide et le Security Guide ?",
+      "ground_truth": {
+        "claim1": {"text": "L'Admin Guide indique que les roles SAP_BR* ne sont pas des roles productifs et doivent etre adaptes.", "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e"},
+        "claim2": {"text": "Le Security Guide fournit le role SAP_RCF_MANAGER comme role standard pour l'acces manager E-Recruiting.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0035",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Comment le Simplification List traite-t-il les nouveaux parametres de securite par defaut par rapport au Security Guide ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List inclut l'item 2.37 : S4TWL – New Default Security Settings for SAP S/4HANA.", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Le Security Guide 2023 detaille les parametres d'autorisation specifiques par module sans signaler de changements par defaut.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0036",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Simplification List deprecie-t-il l'Output Management tout en gardant les prints requests WWI dans le Operations Guide ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List 2023 mentionne l'item 2.43 : S4TWL – OUTPUT MANAGEMENT.", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Le Operations Guide 2023 continue de documenter les print requests WWI avec les codes statut AA, ZS, ZD.", "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"},
+        "tension_nature": "contradiction",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0037",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Simplification List supprime-t-il le CTS_PLUG Add-On alors que les transport requests restent documentees dans les guides ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List 2023 inclut l'item 2.34 : S4TWL – Removal of Add-On CTS_PLUG.", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Les Conversion Guides continuent de documenter les transport requests comme mecanisme standard de propagation des changements.", "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0038",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les deux modeles de deployment RISE (CAS et ECS) offrent-ils les memes services de securite ?",
+      "ground_truth": {
+        "claim1": {"text": "Le document RISE liste les activites securite identiques pour CAS et ECS : Cloud Network Setup, System Hardening, Patch Management, Vulnerability Management, Penetration Testing.", "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"},
+        "claim2": {"text": "Le document Access to Customer Systems distingue les procedures d'acces entre CAS/Product Support et ECS Operations.", "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357", "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0039",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Simplification List deprecie-t-il l'Ariba Network Integration alors que le Feature Scope decrit toujours l'integration Procurement ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List inclut l'item 2.47 : S4TWL – Ariba Network Integration.", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Le Business Scope FPS03 decrit les innovations Sourcing & Procurement incluant central purchase requisitions et contracts.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0040",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Business User Management change-t-il entre les versions selon le Simplification List ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List mentionne l'item 2.32 : S4TWL – Business User Management comme simplification.", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Le Security Guide 2022 documente la gestion des utilisateurs via SU01 et PFCG comme methode standard.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0041",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les checks d'autorisation du Business Workflow changent-ils selon le Simplification List 2023 ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List mentionne l'item 2.31 : ABAPTWL – Change of authorization checks SAP Business Workflow.", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Le Security Guide 2023 documente les objets d'autorisation workflow existants sans mentionner les changements.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0042",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Watch List Screening est-il decrit de la meme maniere dans le Feature Scope et le Business Scope ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Feature Scope PCE 2023 decrit l'integration avec SAP Watch List Screening pour le screening des adresses business partner et le scheduling du postprocessing.", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+        "claim2": {"text": "Le Business Scope FPS03 decrit les champs de statut de screening des adresses et la planification de transferts de masse.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0043",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Comment le Simplification List et le Feature Scope different-ils sur le sujet de la Batch Management dans Logistics ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List mentionne un item sur Logistics Batch Management dans la section Master Data.", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Le Feature Scope 2023 decrit les fonctionnalites d'Inbound et Outbound with Batch Management comme scope items actifs (1V5, 1V7).", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+        "tension_nature": "nuance",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0044",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Comment la SAP Note pour Fiori et Maintenance Strategy evolue-t-elle entre les guides ?",
+      "ground_truth": {
+        "claim1": {"text": "L'Upgrade Guide PCE 2025 reference la SAP Note 2217489 pour Maintenance and Update Strategy for SAP Fiori avec verification des dependances FES.", "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"},
+        "claim2": {"text": "Les Conversion Guides 2022/2023 mentionnent la necessite de desinstaller les Fiori apps non compatibles avec SAP_UI 7.50.", "doc_id": "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0045",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Simplification List supprime-t-il le BSP-based Dealer Portal alors que le Feature Scope decrit encore des portals ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Simplification List liste le BSP-based Dealer Portal et le Web Dynpro-based Dealer Portal comme items de simplification dans la section DIMP.", "doc_id": "029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58"},
+        "claim2": {"text": "Le Feature Scope PCE 2023 continue de decrire les portals dans le contexte de la Data Protection (ILM-based blocking and deletion).", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["029_SAP-011_Simplification_List_for_SAP_S_4HANA_2023_(Initial_Shipment)_eb35dd58", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0046",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Le Help Portal URL differe-t-il entre les trois versions du Operations Guide ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Operations Guide 2021 reference help.sap.com/s4hana_op_2021.", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+        "claim2": {"text": "Le Operations Guide 2023 reference help.sap.com/s4hana_op_2023.", "doc_id": "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"},
+        "tension_nature": "evolution",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0047",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les services ILM (SRS et XML DAS) sont-ils documentes de la meme maniere entre les Security Guides 2022 et 2023 ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Security Guide 2023 decrit le systeme landscape ILM : AS ABAP + WebDAV server + SRS ou XML DAS service. Les deux services tournent sur AS ABAP.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+        "claim2": {"text": "Le Security Guide 2022 ajoute le detail : HTTP/HTTPS protocol pour SRS sur un systeme separe.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+        "tension_nature": "nuance",
+        "has_real_tension": false
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0048",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les partenaires AI listes dans le Business Scope 2025 incluent-ils les memes fournisseurs que ceux mentionnes dans le Business Scope FPS03 ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Business Scope 2025 liste Aleph Alpha, Anthropic, AWS, Cohere, Databricks, Google Cloud, IBM, Meta, Microsoft, Mistral AI, nVIDIA.", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
+        "claim2": {"text": "Le Business Scope FPS03 presente Joule avec SAP Build et Business Agent Foundation sans lister individuellement les partenaires AI externes.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914", "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"]
+      }
+    },
+    {
+      "question_id": "T2_HUM_0049",
+      "task": "T2_contradictions",
+      "source": "human_derived",
+      "question": "Les deux guides d'installation (2021 et 2023) couvrent-ils le Management of Change de la meme facon ?",
+      "ground_truth": {
+        "claim1": {"text": "Le Installation Guide 2021 couvre le Management of Change activation.", "doc_id": "012_SAP_S4HANA_2021_Installation_Guide_c441dbaf"},
+        "claim2": {"text": "Le Installation Guide 2023 couvre SAP Fiori setup et User Assistance/SHELP_CONFIG, avec un focus different sur les technologies front-end.", "doc_id": "011_SAP_S4HANA_2023_Installation_Guide_23de8c60"},
+        "tension_nature": "evolution",
+        "has_real_tension": true
+      },
+      "grading_rules": {
+        "must_surface_both_docs": ["012_SAP_S4HANA_2021_Installation_Guide_c441dbaf", "011_SAP_S4HANA_2023_Installation_Guide_23de8c60"]
+      }
+    }
+  ]
+}

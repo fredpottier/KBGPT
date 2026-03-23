@@ -1,0 +1,161 @@
+{
+  "metadata": {
+    "task": "T1",
+    "source": "kg_derived",
+    "corpus": "SAP Enterprise Documentation",
+    "count": 30,
+    "generated_at": "2026-03-23T21:00:00Z",
+    "note": "Questions KG v3 — cross-doc synthesis. Testent la capacite a croiser plusieurs documents pour produire une reponse sourcee. Toutes verifiees dans le KG."
+  },
+  "questions": [
+    {"question_id": "T1_KG_0000", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Quelles sont les differences de prerequis entre la conversion vers S/4HANA 2022 et la conversion vers S/4HANA Cloud Private Edition 2025 ?",
+     "ground_truth": {"expected_claim": "Les prerequis de base sont identiques (Unicode, ABAP-only, dual-stack split). Le PCE 2025 ajoute les instances Java specifiques et le RISE transition workbench.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "prerequis", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0001", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment les autorisations pour le commerce international (Intrastat) ont-elles evolue entre le Security Guide 2022 et 2023 ?",
+     "ground_truth": {"expected_claim": "Les deux guides documentent S_PROGNAM avec P_PROGNAM et les business catalogs SAP_SLL_BC_INTRASTAT. Le guide 2022 ajoute les catalogs SAP_SLL_BC_CLS avec dependance SAP_CMD_BC_PRODUCT_DSP.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "S_PROGNAM", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0002", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment les capacites IA de SAP (Joule) ont-elles evolue entre le Business Scope FPS03 et le Business Scope 2025 ?",
+     "ground_truth": {"expected_claim": "Le FPS03 presente Joule comme copilote AI multi-agents. Le 2025 detaille la creation de Purchase Requisitions via Joule. Les Highlights FPS03 montrent le SD Premium Assistant.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "Joule", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0003", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment le clean core development est-il positionne dans le Operations Guide 2023 par rapport aux versions precedentes ?",
+     "ground_truth": {"expected_claim": "Le Operations Guide 2023 ajoute la section clean core environment setup avec les guidelines ABAP Cloud et le blueprint d'extensibilite. Les guides 2021 et 2022 ne couvrent pas ce sujet.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "clean core", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0004", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment RFC est-il utilise selon les Security Guides, les Operations Guides et les Installation Guides ?",
+     "ground_truth": {"expected_claim": "Les Security Guides couvrent les destinations RFC et l'authentification SNC. Les Operations Guides couvrent le monitoring qRFC (SMQ1/SMQ2). Les Installation Guides couvrent la configuration des destinations.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "RFC", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0005", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment la securite cloud SAP est-elle documentee entre le document RISE with SAP et le document Access to Customer Systems ?",
+     "ground_truth": {"expected_claim": "RISE couvre les Security Policies, l'isolation tenant, TLS, Application Security (RAVEN). Access to Customer Systems couvre les principes d'acces et le Security Audit Log.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "securite", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0006", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Le workflow user SAP_WFRT est-il documente de la meme facon dans les Security Guides 2022 et 2023 ?",
+     "ground_truth": {"expected_claim": "Les deux Security Guides documentent SAP_WFRT avec le role SAP_BC_BMT_WFM_SERV_USER. Le guide 2023 mentionne son usage specifique pour les credit decisions.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "SAP_WFRT", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0007", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Quels aspects de SAP Extended Warehouse Management sont couverts dans les Operations Guides et les Security Guides ?",
+     "ground_truth": {"expected_claim": "Les Operations Guides couvrent les jobs batch (/SCWM/), le monitoring et les taches periodiques. Les Security Guides couvrent les autorisations EWM et les roles.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "EWM", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0008", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment SAP HANA est-il reference dans les documents de securite, d'operations et de conversion ?",
+     "ground_truth": {"expected_claim": "Les Security Guides couvrent l'authentification HANA. Les Operations Guides couvrent le monitoring et la maintenance. Les Conversion Guides specifient le prerequis de stockage (2x la taille).", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "HANA", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0009", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment ABAP Platform est-il positionne dans les documents de securite et de migration SAP ?",
+     "ground_truth": {"expected_claim": "Les Security Guides documentent ABAP Platform pour l'authentification et les mecanismes SSO. Les guides de conversion specifient la version ABAP Platform requise par release.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "ABAP Platform", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0010", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Les fonctionnalites SAP Fiori apps sont-elles couvertes de maniere coherente entre les Feature Scope Descriptions et les Installation Guides ?",
+     "ground_truth": {"expected_claim": "Les Feature Scope Descriptions listent les apps Fiori disponibles par module. Les Installation Guides couvrent la configuration technique (SAP Web Dispatcher, SICF, /IWFND/MAINT_SERVICE).", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "Fiori", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0011", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment BRFplus est-il reference dans les differents types de documents SAP ?",
+     "ground_truth": {"expected_claim": "BRFplus est mentionne dans les Installation Guides pour l'import customizing, dans les Operations Guides pour les lean trace records EWM, et dans les Security Guides pour les regles metier.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "BRFplus", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0012", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment SAP Master Data Governance est-il positionne dans les documents de securite et les Feature Scope Descriptions ?",
+     "ground_truth": {"expected_claim": "Les Security Guides couvrent les autorisations MDG. Les Feature Scope Descriptions detaillent les fonctionnalites de gouvernance des donnees maitresses.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "Master Data Governance", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0013", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Le SI-Check (Simplification Item Check) est-il documente de facon coherente entre les guides de conversion et d'upgrade ?",
+     "ground_truth": {"expected_claim": "Les codes retour (vert/jaune/rouge) et les regles SUM sont identiques. Les SAP Notes referencees different par version (2399707, 2502552).", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "SI-Check", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0014", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment SAP Process Integration est-il reference dans les Feature Scope Descriptions et les Security Guides ?",
+     "ground_truth": {"expected_claim": "Les Feature Scope Descriptions positionnent SAP PI dans le contexte d'integration. Les Security Guides documentent les business catalogs requis et les dependances.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "Process Integration", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0015", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment l'application log (transaction SLG1) est-il documente differemment entre le Operations Guide 2021 et le Operations Guide 2023 ?",
+     "ground_truth": {"expected_claim": "Le guide 2021 indique que SLG1 enregistre tous les messages. Le guide 2023 precise que SLG1 enregistre les echanges de messages entre composants specifiques.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "SLG1", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0016", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment SAP Business Technology Platform est-il positionne dans les documents de securite, d'operations et de migration ?",
+     "ground_truth": {"expected_claim": "BTP est reference dans 13 documents couvrant la securite (connecteurs), les operations (monitoring) et la migration (integration).", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "Business Technology Platform", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0017", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Le Custom Code Migration est-il decrit de facon identique dans les guides de conversion 2022, 2023 et l'upgrade PCE 2025 ?",
+     "ground_truth": {"expected_claim": "Tous les guides referencent la Simplification Database (SAP Note 2241080) et l'outil ATC. Le PCE 2025 ajoute le business catalog SAP_BASIS_BC_CCM.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "Custom Code", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0018", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment la Product Compliance est-elle documentee a travers les trois versions du Operations Guide ?",
+     "ground_truth": {"expected_claim": "La Product Compliance est presente dans les trois guides avec le process scheduler pour les taches recurrentes. Les guides partagent les memes log objects.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "Product Compliance", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0019", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment la planification de la production (SOP) est-elle presentee differemment entre le Feature Scope on-premise et le Feature Scope Cloud Private Edition ?",
+     "ground_truth": {"expected_claim": "Le on-premise mentionne le resource leveling pour production resources. Le PCE mentionne le resource leveling pour costs. Les deux couvrent Standard SOP.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "SOP", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0020", "task": "T1_provenance", "source": "kg_derived",
+     "question": "SAP NetWeaver est-il reference avec les memes prerequis de version dans les guides de conversion et les Operations Guides ?",
+     "ground_truth": {"expected_claim": "Les guides de conversion specifient les versions minimum de NetWeaver requises. Les Operations Guides referencent NetWeaver pour ADS et le monitoring.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "NetWeaver", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0021", "task": "T1_provenance", "source": "kg_derived",
+     "question": "L'authentification par certificats X.509 est-elle documentee de la meme facon dans les deux Security Guides ?",
+     "ground_truth": {"expected_claim": "Les deux Security Guides documentent l'authentification X.509 sur le Web server avec des differences dans les details de configuration SSL.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "X.509", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0022", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Quels services ECS sont specifiques au Cloud Private Edition et absents des guides on-premise ?",
+     "ground_truth": {"expected_claim": "Le PCE introduit les service request identifiers BASIC_1.5.04 et BASIC_1.5.03 pour les demandes a SAP ECS. Les guides on-premise ne referencent pas ces services.", "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"},
+     "grading_rules": {"answer_must_contain_fact": "BASIC_1.5"}},
+
+    {"question_id": "T1_KG_0023", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment le processus de conversion dans un paysage systeme distribue est-il decrit dans les differents guides ?",
+     "ground_truth": {"expected_claim": "Les guides de conversion decrivent l'architecture DEV + DEV2 (copie test) + PROD avec le SUM. Le PCE 2025 ajoute le Temporary System Landscape avec copies DEV'/QAS'.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "distribue", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0024", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment SAP Information Lifecycle Management (ILM) est-il documente dans les Security Guides ?",
+     "ground_truth": {"expected_claim": "Les deux Security Guides documentent le systeme ILM avec AS ABAP + WebDAV + SRS/XML DAS. Le guide 2022 ajoute le detail HTTP/HTTPS et l'authentification basique pour WebDAV.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "ILM", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0025", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment SAP Ariba est-il positionne dans les Feature Scope Descriptions et les Business Scope documents ?",
+     "ground_truth": {"expected_claim": "Les Feature Scope Descriptions couvrent l'integration SAP Ariba Network. Les Business Scope documents detaillent les innovations sourcing et procurement.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "Ariba", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0026", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment la transaction /SAPAPO/OM17 est-elle referencee dans les differents Operations Guides ?",
+     "ground_truth": {"expected_claim": "La transaction /SAPAPO/OM17 est documentee dans les Operations Guides 2021 et 2022 pour la reconciliation des donnees liveCache et la verification de coherence des master data.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "/SAPAPO/OM17", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0027", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment l'Admin Guide positionne-t-il les roles SAP_BR* par rapport aux roles detailles dans le Security Guide ?",
+     "ground_truth": {"expected_claim": "L'Admin Guide indique que les roles SAP_BR* ne sont pas productifs. Le Security Guide fournit des roles specifiques comme SAP_RCF_MANAGER et SAP_HR_PYC_TM_MNG.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "SAP_BR", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0028", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment SAP Solution Manager est-il reference dans les documents d'operations et de conversion ?",
+     "ground_truth": {"expected_claim": "Les Operations Guides referencent SAP Solution Manager pour le monitoring. Les Conversion Guides referencent la connexion RFC SM_<SID>CLNT<CLNT>_READ.", "doc_id": "multi_doc"},
+     "grading_rules": {"answer_must_contain_fact": "Solution Manager", "must_cite_multiple_docs": true}},
+
+    {"question_id": "T1_KG_0029", "task": "T1_provenance", "source": "kg_derived",
+     "question": "Comment le WIP Management avec integration MES est-il decrit dans la documentation SAP 2025 ?",
+     "ground_truth": {"expected_claim": "Le Business Scope 2025 decrit un processus en 12 etapes entre EWM et SAP Digital Manufacturing Cloud avec SFC numbers et PSA.", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
+     "grading_rules": {"answer_must_contain_fact": "WIP"}}
+  ]
+}
