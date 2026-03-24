@@ -30,26 +30,58 @@ logger = logging.getLogger("benchmark-judge")
 def call_judge(
     system_prompt: str,
     user_prompt: str,
-    model: str = "gpt-4o-mini",
+    model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ",
 ) -> Dict[str, Any]:
     """Appelle le LLM juge et parse la reponse JSON."""
     from openai import OpenAI
+    import os
 
-    client = OpenAI()
+    is_qwen = "qwen" in model.lower() or model.startswith("Qwen/")
+    is_claude = "claude" in model.lower()
+
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=500,
-            temperature=0,
-            response_format={"type": "json_object"},
-        )
-        text = response.choices[0].message.content or "{}"
-        tokens = response.usage.total_tokens if response.usage else 0
-        return {"result": json.loads(text), "tokens": tokens, "error": None}
+        if is_claude:
+            # Claude via Anthropic API
+            import anthropic
+            client_anthropic = anthropic.Anthropic()
+            response = client_anthropic.messages.create(
+                model=model,
+                max_tokens=500,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+                temperature=0,
+            )
+            text = response.content[0].text if response.content else "{}"
+            tokens = (response.usage.input_tokens + response.usage.output_tokens) if response.usage else 0
+        else:
+            # OpenAI-compatible (GPT ou Qwen/vLLM)
+            if is_qwen:
+                vllm_url = os.environ.get("VLLM_URL", "http://63.178.18.3:8000")
+                client = OpenAI(api_key="EMPTY", base_url=f"{vllm_url}/v1")
+            else:
+                client = OpenAI()
+
+            create_kwargs: dict = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "max_tokens": 500,
+                "temperature": 0,
+            }
+            if not is_qwen:
+                create_kwargs["response_format"] = {"type": "json_object"}
+
+            response = client.chat.completions.create(**create_kwargs)
+            text = response.choices[0].message.content or "{}"
+            tokens = response.usage.total_tokens if response.usage else 0
+
+        # Parser le JSON (extraire du markdown si necessaire)
+        clean = text.strip()
+        if clean.startswith("```"):
+            clean = clean.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        return {"result": json.loads(clean), "tokens": tokens, "error": None}
     except Exception as e:
         return {"result": {}, "tokens": 0, "error": str(e)}
 
@@ -222,7 +254,7 @@ TASK_JUDGES = {
 }
 
 
-def evaluate_results(results_path: str, model: str = "gpt-4o-mini", output_path: str = None):
+def evaluate_results(results_path: str, model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ", output_path: str = None):
     """Evalue tous les resultats d'un fichier avec le LLM juge."""
 
     with open(results_path, "r", encoding="utf-8") as f:
@@ -375,7 +407,7 @@ def _bool_rate(judgments: List[Dict], field: str) -> float:
 def main():
     parser = argparse.ArgumentParser(description="LLM-as-Judge evaluator")
     parser.add_argument("--results", required=True, help="Results JSON to evaluate")
-    parser.add_argument("--model", default="gpt-4o-mini", help="Judge model")
+    parser.add_argument("--model", default="Qwen/Qwen2.5-14B-Instruct-AWQ", help="Judge model")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 

@@ -30,7 +30,7 @@ models:
   embedding: "intfloat/multilingual-e5-large"
   synthesis_primary: "Qwen/Qwen2.5-14B-Instruct-AWQ"
   synthesis_claude: "claude-sonnet-4-20250514"
-  evaluation: "gpt-4o-mini"
+  evaluation: "Qwen/Qwen2.5-14B-Instruct-AWQ"
   temperature: 0
   max_answer_tokens: 1500
 
@@ -42,19 +42,19 @@ retrieval:
 baselines:
   - name: "rag_claim"
     description: "RAG sur meme collection Qdrant, sans Neo4j"
-    llm: "gpt-4o"
+    llm: "Qwen/Qwen2.5-14B-Instruct-AWQ"
     retrieval: "vector_only"
     use_kg: false
 
   - name: "rag_hybrid"
     description: "BM25 + vector search, sans Neo4j"
-    llm: "gpt-4o"
+    llm: "Qwen/Qwen2.5-14B-Instruct-AWQ"
     retrieval: "bm25_vector"
     use_kg: false
 
   - name: "chatgpt_context"
     description: "GPT-4o avec meme contexte retrieval injecte"
-    llm: "gpt-4o"
+    llm: "Qwen/Qwen2.5-14B-Instruct-AWQ"
     retrieval: "injected_context"
     use_kg: false
 

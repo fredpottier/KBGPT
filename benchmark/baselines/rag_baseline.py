@@ -113,7 +113,7 @@ def _get_llm_client(llm_model: str):
     """Retourne le client OpenAI adapte au modele (GPT ou Qwen/vLLM)."""
     from openai import OpenAI
     if "qwen" in llm_model.lower() or llm_model.startswith("Qwen/"):
-        vllm_url = os.environ.get("VLLM_URL", "http://54.93.245.241:8000")
+        vllm_url = os.environ.get("VLLM_URL", "http://63.178.18.3:8000")
         return OpenAI(api_key="EMPTY", base_url=f"{vllm_url}/v1")
     return OpenAI()
 
@@ -260,7 +260,7 @@ def run_rag_benchmark(
     # Direct TEI + Qdrant retrieval (pas de synthese native inutile)
     qdrant_url = corpus["qdrant"]["url"]
     collection = corpus["qdrant"]["collection"]
-    tei_url = os.environ.get("TEI_URL", "http://54.93.245.241:8001")
+    tei_url = os.environ.get("TEI_URL", "http://63.178.18.3:8001")
     mode = "direct_tei_qdrant"
 
     logger.info(

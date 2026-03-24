@@ -770,6 +770,74 @@ def search_documents(
             query_filter=query_filter,
         )
         filtered = [r for r in results if r.score >= SCORE_THRESHOLD]
+
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE C light — KG Document Scoping
+        # Si les claims KG contiennent des tensions cross-doc
+        # (REFINES/QUALIFIES), forcer la diversite documentaire
+        # en ajoutant des chunks des documents en tension.
+        # Domain-agnostic : fonctionne sur tout corpus avec des tensions.
+        # ═══════════════════════════════════════════════════════════════
+        if kg_claim_results and filtered:
+            # Identifier les documents en tension depuis les claims KG
+            tension_doc_ids = set()
+            for claim in kg_claim_results:
+                for tension_text in claim.get("contradiction_texts", []):
+                    if tension_text:
+                        # Les tensions contiennent des textes d'autres claims
+                        # Le doc source du claim en tension est dans source_file
+                        tension_doc_ids.add(claim.get("source_file", ""))
+
+            # Documents deja presents dans les resultats Qdrant
+            qdrant_doc_ids = set()
+            for r in filtered:
+                doc_id = (r.payload or {}).get("doc_id", "")
+                if doc_id:
+                    qdrant_doc_ids.add(doc_id)
+
+            # Documents en tension ABSENTS des resultats Qdrant
+            missing_tension_docs = tension_doc_ids - qdrant_doc_ids - {""}
+            if not missing_tension_docs:
+                # Aussi chercher les docs des claims KG qui ne sont pas dans les resultats
+                claim_doc_ids = set(c.get("source_file", "") for c in kg_claim_results if c.get("source_file"))
+                multi_doc_claims = len(claim_doc_ids) > 1
+                if multi_doc_claims:
+                    missing_tension_docs = claim_doc_ids - qdrant_doc_ids - {""}
+
+            if missing_tension_docs:
+                # Faire un search Qdrant supplementaire filtre par ces documents
+                try:
+                    tension_filter = Filter(
+                        must=[FieldCondition(key="doc_id", match=MatchAny(any=list(missing_tension_docs)))]
+                    )
+                    tension_results = qdrant_client.search(
+                        collection_name=settings.qdrant_collection,
+                        query_vector=query_vector,
+                        limit=3,  # Max 3 chunks supplementaires des docs en tension
+                        with_payload=True,
+                        query_filter=tension_filter,
+                    )
+                    tension_filtered = [r for r in tension_results if r.score >= SCORE_THRESHOLD * 0.8]
+
+                    if tension_filtered:
+                        # Ajouter ces chunks aux resultats (dedup par texte)
+                        existing_texts = {(r.payload or {}).get("text", "")[:80] for r in filtered}
+                        added = 0
+                        for r in tension_filtered:
+                            text_key = (r.payload or {}).get("text", "")[:80]
+                            if text_key not in existing_texts:
+                                filtered.append(r)
+                                existing_texts.add(text_key)
+                                added += 1
+
+                        if added > 0:
+                            logger.info(
+                                f"[KG-SCOPE] Added {added} chunks from {len(missing_tension_docs)} "
+                                f"tension documents: {[d[:30] for d in missing_tension_docs]}"
+                            )
+                except Exception as e:
+                    logger.debug(f"[KG-SCOPE] Tension doc search failed (non-blocking): {e}")
+
         if not filtered:
             return {
                 "status": "no_results",

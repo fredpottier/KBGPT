@@ -20,10 +20,17 @@ import {
   Progress,
   Select,
 } from '@chakra-ui/react'
-import { FiBarChart2, FiInfo, FiTrendingUp, FiTrendingDown, FiMinus } from 'react-icons/fi'
+import { FiBarChart2, FiInfo, FiTrendingUp, FiTrendingDown, FiMinus, FiAlertTriangle } from 'react-icons/fi'
 import * as d3 from 'd3'
 
 // ── Types ──────────────────────────────────────────────────────────────
+
+interface Divergence {
+  primary: number
+  secondary: number
+  delta: number
+  secondary_judge: string
+}
 
 interface TaskResult {
   task: string
@@ -32,6 +39,7 @@ interface TaskResult {
   scores: Record<string, number>
   metadata: Record<string, unknown>
   judgments_count: number
+  divergences?: Record<string, Divergence>
 }
 
 interface BenchmarkRun {
@@ -387,9 +395,10 @@ function RadarChart({ data, width = 300, height = 300, highlight = null }: {
   return <svg ref={svgRef} width={width} height={height} />
 }
 
-function ComparisonBar({ label, osmosis, baseline, higherIsBetter, frameworks = [], onHover }: {
+function ComparisonBar({ label, osmosis, baseline, higherIsBetter, frameworks = [], onHover, divergence }: {
   label: string; osmosis: number; baseline: number; higherIsBetter: boolean; frameworks?: string[]
   onHover?: (system: 'osmosis' | 'rag' | null) => void
+  divergence?: Divergence
 }) {
   const osmPct = Math.round(osmosis * 100)
   const basPct = Math.round(baseline * 100)
@@ -443,6 +452,16 @@ function ComparisonBar({ label, osmosis, baseline, higherIsBetter, frameworks = 
             sx={{ '& > div': { bg: '#f97316' } }} />
         </Box>
       </HStack>
+      {divergence && (
+        <Tooltip label={`Divergence inter-juges : Qwen ${Math.round(divergence.primary * 100)}% vs ${divergence.secondary_judge} ${Math.round(divergence.secondary * 100)}% (ecart ${Math.round(divergence.delta * 100)}pp)`} placement="bottom" hasArrow>
+          <HStack spacing={1} mt={0.5} cursor="help">
+            <Box as={FiAlertTriangle} color="#f59e0b" fontSize="10px" />
+            <Text fontSize="9px" color="#f59e0b">
+              Divergence inter-juges ({Math.round(divergence.delta * 100)}pp)
+            </Text>
+          </HStack>
+        </Tooltip>
+      )}
     </Box>
   )
 }
@@ -539,6 +558,7 @@ function TaskSection({ task, source, results }: {
                     higherIsBetter={true}
                     frameworks={info?.frameworks || []}
                     onHover={setHighlightSystem}
+                    divergence={osmosis.divergences?.[key]}
                   />
                 )
               })}
@@ -595,7 +615,6 @@ function TaskSection({ task, source, results }: {
 function VerdictBadge({ scores, task, hasBaseline }: {
   scores: Record<string, number>; task: string; hasBaseline: boolean
 }) {
-  // Compute an overall quality verdict
   let goodCount = 0
   let totalCount = 0
 
@@ -604,7 +623,9 @@ function VerdictBadge({ scores, task, hasBaseline }: {
     const info = METRIC_EXPLANATIONS[key]
     if (!info) return
     totalCount++
-    if (info.higherIsBetter ? value >= 0.5 : value <= 0.3) goodCount++
+    // Normaliser (inverser les metriques "lower is better") puis seuil a 40%
+    const normVal = info.higherIsBetter ? value : (1 - value)
+    if (normVal >= 0.4) goodCount++
   })
 
   const ratio = totalCount > 0 ? goodCount / totalCount : 0
