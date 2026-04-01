@@ -664,3 +664,108 @@ async def delete_t2t5_report(filename: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Rapport {filename} introuvable")
 
     return {"deleted": filename, "message": "Rapport supprime"}
+
+
+# ════════════════════════════════════════════════════════════════════════
+# ── ROBUSTESSE ENDPOINTS ───────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/robustness")
+async def get_robustness_reports() -> dict[str, Any]:
+    """Liste les rapports robustesse (10 plus recents)."""
+    seen: dict[str, Path] = {}
+    for results_dir in _get_all_results_dirs():
+        for f in results_dir.glob("robustness_run_*.json"):
+            if f.name not in seen:
+                seen[f.name] = f
+
+    reports = []
+    for filepath in seen.values():
+        try:
+            data = json.loads(filepath.read_text(encoding="utf-8"))
+            reports.append({
+                "filename": filepath.name,
+                "timestamp": data.get("timestamp", ""),
+                "tag": data.get("tag", ""),
+                "description": data.get("description", ""),
+                "duration_s": data.get("duration_s"),
+                "scores": data.get("scores", {}),
+                "errors": data.get("errors", 0),
+            })
+        except Exception as e:
+            logger.warning(f"Erreur lecture robustness {filepath}: {e}")
+
+    reports.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    return {"reports": reports[:10]}
+
+
+@router.get("/robustness/progress")
+async def get_robustness_progress():
+    """Progression du benchmark robustesse en cours."""
+    try:
+        rc = _get_redis_client()
+        state_raw = rc.get("osmose:benchmark:robustness:state")
+        if state_raw:
+            return json.loads(state_raw)
+    except Exception:
+        pass
+    return {"status": "idle"}
+
+
+@router.get("/robustness/{filename}")
+async def get_robustness_report_detail(filename: str) -> dict[str, Any]:
+    """Detail complet d'un rapport robustesse (avec per_sample)."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Nom de fichier invalide")
+    for results_dir in _get_all_results_dirs():
+        filepath = results_dir / filename
+        if filepath.exists():
+            return json.loads(filepath.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail=f"Rapport {filename} introuvable")
+
+
+@router.delete("/robustness/{filename}")
+async def delete_robustness_report(filename: str) -> dict[str, Any]:
+    """Supprime un rapport robustesse."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Nom de fichier invalide")
+    for results_dir in _get_all_results_dirs():
+        filepath = results_dir / filename
+        if filepath.exists():
+            filepath.unlink()
+            return {"deleted": filename}
+    raise HTTPException(status_code=404, detail=f"Rapport {filename} introuvable")
+
+
+class RobustnessRunRequest(BaseModel):
+    tag: str = ""
+    description: str = ""
+
+
+@router.post("/robustness/run")
+async def run_robustness_benchmark(req: RobustnessRunRequest):
+    """Lance un benchmark robustesse via RQ worker."""
+    rc = _get_redis_client()
+    try:
+        state_raw = rc.get("osmose:benchmark:robustness:state")
+        if state_raw:
+            state = json.loads(state_raw)
+            if state.get("status") == "running":
+                raise HTTPException(status_code=409, detail="Benchmark robustesse deja en cours")
+    except redis.RedisError:
+        pass
+
+    job_id = os.urandom(4).hex()
+    rc.setex("osmose:benchmark:robustness:state", 7200, json.dumps({
+        "status": "starting", "job_id": job_id, "progress": 0, "total": 0,
+    }))
+
+    from rq import Queue as RQQueue
+    q = RQQueue("benchmark", connection=rc)
+    q.enqueue(
+        "benchmark.evaluators.robustness_diagnostic.run_benchmark_job",
+        kwargs={"redis_url": REDIS_URL, "tag": req.tag, "description": req.description},
+        job_id=job_id, job_timeout=7200, result_ttl=3600,
+    )
+    return {"job_id": job_id, "message": "Benchmark robustesse lance"}
