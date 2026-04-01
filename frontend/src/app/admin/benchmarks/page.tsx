@@ -302,13 +302,16 @@ export default function BenchmarksPage() {
 
   useEffect(() => {
     if (!compRunA) { setCompDetailA(null); return }
-    apiFetch<RagasReport>(`/api/benchmarks/ragas/${encodeURIComponent(compRunA)}`).then(d => setCompDetailA(d))
-  }, [compRunA])
+    // Le detail endpoint retourne {filename, data: {...}} — on utilise le rapport de la liste
+    const found = ragasReports.find(r => r.filename === compRunA)
+    setCompDetailA(found || null)
+  }, [compRunA, ragasReports])
 
   useEffect(() => {
     if (!compRunB) { setCompDetailB(null); return }
-    apiFetch<RagasReport>(`/api/benchmarks/ragas/${encodeURIComponent(compRunB)}`).then(d => setCompDetailB(d))
-  }, [compRunB])
+    const found = ragasReports.find(r => r.filename === compRunB)
+    setCompDetailB(found || null)
+  }, [compRunB, ragasReports])
 
   // ── Derived data ────────────────────────────────────────────────────
 
