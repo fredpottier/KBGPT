@@ -219,14 +219,17 @@ export default function BenchmarksPage() {
   // ── Data fetching ───────────────────────────────────────────────────
 
   const fetchAllLists = useCallback(async () => {
-    const [ragas, t2t5, robust] = await Promise.all([
-      apiFetch<RagasReport[]>('/api/benchmarks/ragas'),
-      apiFetch<T2T5Report[]>('/api/benchmarks/t2t5'),
-      apiFetch<RobustnessReport[]>('/api/benchmarks/robustness'),
+    const [ragasData, t2t5Data, robustData] = await Promise.all([
+      apiFetch<{ reports: RagasReport[] }>('/api/benchmarks/ragas'),
+      apiFetch<{ reports: T2T5Report[] }>('/api/benchmarks/t2t5'),
+      apiFetch<{ reports: RobustnessReport[] }>('/api/benchmarks/robustness'),
     ])
-    if (ragas) setRagasReports(ragas)
-    if (t2t5) setT2t5Reports(t2t5)
-    if (robust) setRobustnessReports(robust)
+    const ragas = ragasData?.reports || []
+    const t2t5 = t2t5Data?.reports || []
+    const robust = robustData?.reports || []
+    setRagasReports(ragas)
+    setT2t5Reports(t2t5)
+    setRobustnessReports(robust)
 
     // Fetch latest details
     if (ragas && ragas.length > 0) {
