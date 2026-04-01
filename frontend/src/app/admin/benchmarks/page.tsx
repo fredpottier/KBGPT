@@ -1434,7 +1434,12 @@ function RagasHistoryTable({ reports, onDelete }: { reports: RagasReport[], onDe
             </Tr>
           </Thead>
           <Tbody>
-            {reports.map((report) => {
+            {(() => {
+              // Baseline = rapport le plus ancien (dernier de la liste triee desc)
+              const baseline = reports.length > 1 ? reports[reports.length - 1]?.systems?.['osmosis'] : null
+              const baseFPct = baseline?.scores?.faithfulness !== undefined ? Math.round(baseline.scores.faithfulness * 100) : null
+              const baseCPct = baseline?.scores?.context_relevance !== undefined ? Math.round(baseline.scores.context_relevance * 100) : null
+              return reports.map((report, idx) => {
               const osm = report.systems['osmosis']
               if (!osm) return null
               const faith = osm.scores.faithfulness
@@ -1443,6 +1448,11 @@ function RagasHistoryTable({ reports, onDelete }: { reports: RagasReport[], onDe
               const cPct = ctx !== undefined ? Math.round(ctx * 100) : null
               const diagColor = osm.diagnostic.color === 'green' ? '#22c55e'
                 : osm.diagnostic.color === 'orange' ? '#f97316' : osm.diagnostic.color === 'red' ? '#ef4444' : 'var(--text-muted)'
+
+              // Delta vs baseline (le plus ancien rapport)
+              const isBaseline = idx === reports.length - 1
+              const deltaF = !isBaseline && fPct !== null && baseFPct !== null ? fPct - baseFPct : null
+              const deltaC = !isBaseline && cPct !== null && baseCPct !== null ? cPct - baseCPct : null
 
               const tsFormatted = report.timestamp
                 ? new Date(report.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -1465,16 +1475,30 @@ function RagasHistoryTable({ reports, onDelete }: { reports: RagasReport[], onDe
                     <Text fontSize="xs" color="var(--text-primary)">{osm.sample_count}</Text>
                   </Td>
                   <Td borderColor="var(--border-subtle)" isNumeric>
-                    <Text fontSize="xs" fontWeight="bold"
-                      color={fPct === null ? 'var(--text-muted)' : fPct >= 80 ? '#22c55e' : fPct >= 60 ? '#eab308' : '#ef4444'}>
-                      {fPct !== null ? `${fPct}%` : '-'}
-                    </Text>
+                    <HStack spacing={1} justify="flex-end">
+                      <Text fontSize="xs" fontWeight="bold"
+                        color={fPct === null ? 'var(--text-muted)' : fPct >= 80 ? '#22c55e' : fPct >= 60 ? '#eab308' : '#ef4444'}>
+                        {fPct !== null ? `${fPct}%` : '-'}
+                      </Text>
+                      {deltaF !== null && deltaF !== 0 && (
+                        <Text fontSize="9px" color={deltaF > 0 ? '#22c55e' : '#ef4444'}>
+                          {deltaF > 0 ? '+' : ''}{deltaF}
+                        </Text>
+                      )}
+                    </HStack>
                   </Td>
                   <Td borderColor="var(--border-subtle)" isNumeric>
-                    <Text fontSize="xs" fontWeight="bold"
-                      color={cPct === null ? 'var(--text-muted)' : cPct >= 80 ? '#22c55e' : cPct >= 60 ? '#eab308' : '#ef4444'}>
-                      {cPct !== null ? `${cPct}%` : '-'}
-                    </Text>
+                    <HStack spacing={1} justify="flex-end">
+                      <Text fontSize="xs" fontWeight="bold"
+                        color={cPct === null ? 'var(--text-muted)' : cPct >= 80 ? '#22c55e' : cPct >= 60 ? '#eab308' : '#ef4444'}>
+                        {cPct !== null ? `${cPct}%` : '-'}
+                      </Text>
+                      {deltaC !== null && deltaC !== 0 && (
+                        <Text fontSize="9px" color={deltaC > 0 ? '#22c55e' : '#ef4444'}>
+                          {deltaC > 0 ? '+' : ''}{deltaC}
+                        </Text>
+                      )}
+                    </HStack>
                   </Td>
                   <Td borderColor="var(--border-subtle)">
                     <Badge fontSize="9px" bg={`${diagColor}22`} color={diagColor} border="1px solid" borderColor={`${diagColor}44`}>
@@ -1506,7 +1530,8 @@ function RagasHistoryTable({ reports, onDelete }: { reports: RagasReport[], onDe
                   </Td>
                 </Tr>
               )
-            })}
+            })
+            })()}
           </Tbody>
         </Table>
       </Box>
@@ -2387,17 +2412,30 @@ function T2T5Tab({ reports, progress, profile, setProfile, tag, setTag, descript
                 </Tr>
               </Thead>
               <Tbody>
-                {reports.map((report) => {
+                {reports.map((report, idx) => {
                   const s = report.scores
                   const tsFormatted = report.timestamp
                     ? new Date(report.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                     : report.filename
 
-                  const fmtPct = (v: number | undefined) => {
+                  // Delta vs baseline (rapport le plus ancien)
+                  const isBaseline = idx === reports.length - 1
+                  const baseReport = reports.length > 1 ? reports[reports.length - 1] : null
+                  const ps = !isBaseline ? (baseReport?.scores || {}) : {}
+
+                  const fmtPct = (v: number | undefined, prevV?: number) => {
                     if (v === undefined) return '-'
                     const p = Math.round(v * 100)
                     const c = p >= 80 ? '#22c55e' : p >= 50 ? '#f97316' : '#ef4444'
-                    return <Text as="span" color={c} fontWeight="bold">{p}%</Text>
+                    const delta = prevV !== undefined ? p - Math.round(prevV * 100) : null
+                    return <HStack as="span" spacing={1} justify="flex-end" display="inline-flex">
+                      <Text as="span" color={c} fontWeight="bold">{p}%</Text>
+                      {delta !== null && delta !== 0 && (
+                        <Text as="span" fontSize="9px" color={delta > 0 ? '#22c55e' : '#ef4444'}>
+                          {delta > 0 ? '+' : ''}{delta}
+                        </Text>
+                      )}
+                    </HStack>
                   }
 
                   return (
@@ -2425,12 +2463,12 @@ function T2T5Tab({ reports, progress, profile, setProfile, tag, setTag, descript
                       <Td borderColor="var(--border-subtle)">
                         <Text fontSize="xs" color="var(--text-muted)">{report.profile_label || report.profile}</Text>
                       </Td>
-                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.both_sides_surfaced)}</Text></Td>
-                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.tension_mentioned)}</Text></Td>
-                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.both_sources_cited)}</Text></Td>
-                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.chain_coverage)}</Text></Td>
-                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.multi_doc_cited)}</Text></Td>
-                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.proactive_detection)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.both_sides_surfaced, ps.both_sides_surfaced)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.tension_mentioned, ps.tension_mentioned)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.both_sources_cited, ps.both_sources_cited)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.chain_coverage, ps.chain_coverage)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.multi_doc_cited, ps.multi_doc_cited)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.proactive_detection, ps.proactive_detection)}</Text></Td>
                       <Td borderColor="var(--border-subtle)" isNumeric>
                         <Text fontSize="xs" color="var(--text-muted)">
                           {report.duration_s ? `${Math.round(report.duration_s)}s` : '-'}

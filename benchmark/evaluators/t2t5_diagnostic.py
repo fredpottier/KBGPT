@@ -469,7 +469,10 @@ def aggregate_scores(per_sample: list[dict]) -> dict[str, float]:
     if t5_samples:
         evals = [s["evaluation"] for s in t5_samples if "error" not in s.get("evaluation", {})]
         if evals:
-            scores["chain_coverage"] = round(sum(e.get("chain_coverage", 0) for e in evals) / len(evals), 4)
+            # chain_coverage : exclure proactive_contradiction (force a 0, pas applicable)
+            chain_evals = [e for e in evals if e.get("category") != "proactive_contradiction"]
+            if chain_evals:
+                scores["chain_coverage"] = round(sum(e.get("chain_coverage", 0) for e in chain_evals) / len(chain_evals), 4)
             scores["multi_doc_cited"] = round(sum(e.get("multi_doc_cited", 0) for e in evals) / len(evals), 4)
 
         # proactive_detection only for proactive questions
