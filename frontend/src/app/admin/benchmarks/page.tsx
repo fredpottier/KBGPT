@@ -240,7 +240,7 @@ export default function BenchmarksPage() {
     if (robust && robust.length > 0) {
       const latest = [...robust].sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0]
       const detail = await apiFetch<RobustnessReport>(`/api/benchmarks/robustness/${encodeURIComponent(latest.filename)}`)
-      if (detail) setLatestRobustnessDetail(detail)
+      if (detail) setLatestRobustnessDetail({ ...detail, filename: latest.filename })
     }
   }, [])
 
