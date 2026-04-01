@@ -426,7 +426,7 @@ export default function BenchmarksPage() {
       {/* Tab content */}
       {activeTab === 'overview' && (
         <OverviewTab
-          ragasReport={latestRagasDetail || latestRagas}
+          ragasReport={latestRagas}
           t2t5Report={latestT2t5}
           robustnessReport={latestRobustness}
           recentRuns={recentRuns}
@@ -439,7 +439,7 @@ export default function BenchmarksPage() {
       {activeTab === 'ragas' && (
         <RagasTab
           reports={ragasReports}
-          latestDetail={latestRagasDetail}
+          latestDetail={latestRagas}
           onLaunch={handleLaunch}
           isRunning={isRunning}
           runProgress={runProgress}
