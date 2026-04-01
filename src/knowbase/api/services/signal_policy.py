@@ -131,12 +131,11 @@ def build_policy(report: SignalReport) -> SignalPolicy:
         #     policy.unanswerable = True
         #     ...
 
-        # Soft signal : gap eleve → prevenir le LLM (sans hard reject)
-        if gap_score >= 0.6:
-            policy.synthesis_additions.append(
-                "NOTE: Some specific aspects of this question may not be covered by the available sources. "
-                "Answer with what the sources contain, and clearly state if specific information is missing."
-            )
+        # Soft signal gap DESACTIVE — cause des degradations cross-lingue.
+        # Le QA-Class gere le negative rejection, le gap soft est inutile.
+        # if gap_score >= 0.6:
+        #     policy.synthesis_additions.append(...)
+        pass
 
     # Signal 6 — Dense Answerability
     # CONSTAT : les scores denses ne discriminent PAS answerable vs unanswerable
