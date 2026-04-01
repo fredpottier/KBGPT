@@ -108,11 +108,19 @@ def detect_signals(
         if gap:
             signals.append(gap)
 
-    # Signal 6 — Dense Answerability (cross-lingue, hard reject possible)
+    # Signal 6 — Dense Answerability (ne sert que pour hors-domaine total)
     if chunks:
         dense_ans = _detect_dense_answerability(chunks)
         if dense_ans:
             signals.append(dense_ans)
+
+    # Signal 7 — QA-Class Answerability (Qwen/vLLM, multilingue)
+    # Declenche UNIQUEMENT si le gap signal indique un doute (>= 0.6)
+    gap_signal = next((s for s in signals if s.type == "question_context_gap"), None)
+    if question and chunks:
+        qa_signal = _detect_qa_answerability(question, chunks, gap_signal=gap_signal)
+        if qa_signal:
+            signals.append(qa_signal)
 
     report = SignalReport(signals=signals, claims_analyzed=len(kg_claims))
 
@@ -472,3 +480,59 @@ def _detect_dense_answerability(chunks: list[dict]) -> Signal | None:
             "threshold": DENSE_LOW_THRESHOLD,
         },
     )
+
+
+# ── Signal 7 : QA-Class Answerability (Qwen/vLLM) ───────────────────
+
+def _detect_qa_answerability(
+    question: str,
+    chunks: list[dict],
+    gap_signal: Signal | None = None,
+) -> Signal | None:
+    """Evalue si les chunks permettent de repondre via Qwen/vLLM.
+
+    DECLENCHEMENT CONDITIONNEL : appele uniquement si gap_signal indique
+    un doute (gap >= 0.6). Sur les questions ou le gap est faible, on
+    ne consomme pas de ressource LLM — le pipeline normal suffit.
+
+    Historique de la decision (1er avril 2026) :
+    - V3 prompt tuning : +30pp unanswerable mais -18pp false_premise
+    - V4 gap lexical IDF : +54pp mais -67pp multi_hop (cross-lingue)
+    - V5 dense score pre-RRF : indiscernable (ecart 0.04)
+    - V6 QA-Class Qwen/vLLM : 100% sur 8 paires test, multilingue, 100ms/chunk
+    Le QA-Class est la SEULE approche validee experimentalement.
+    """
+    # Condition de declenchement : gap signal present et >= 0.6
+    if not gap_signal:
+        return None
+    gap_score = gap_signal.evidence.get("gap_score", 0)
+    if gap_score < 0.6:
+        return None
+
+    try:
+        from .qa_class import evaluate_answerability
+
+        result = evaluate_answerability(question, chunks)
+        if result is None:
+            return None  # vLLM non disponible → pas de signal
+
+        if result.answerable:
+            return None  # Au moins 1 chunk repond → pas de signal negatif
+
+        # Aucun chunk ne repond → signal negatif fort
+        return Signal(
+            type="qa_answerability",
+            strength=1.0 - result.max_score,
+            evidence={
+                "votes": result.votes,
+                "scores": result.scores,
+                "max_score": result.max_score,
+                "latency_ms": result.latency_ms,
+                "answerable": result.answerable,
+                "triggered_by_gap": round(gap_score, 3),
+            },
+        )
+
+    except Exception as e:
+        logger.debug(f"[SIGNAL:QA] QA-Class failed: {e}")
+        return None

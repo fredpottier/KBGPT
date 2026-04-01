@@ -157,6 +157,24 @@ def build_policy(report: SignalReport) -> SignalPolicy:
             )
             logger.info(f"[POLICY] UNANSWERABLE (dense) — max_dense={max_dense:.3f}")
 
+    # Signal 7 — QA-Class Answerability (Qwen/vLLM, hard reject fiable)
+    # C'est le SEUL signal qui peut faire un hard reject sans faux positifs.
+    # Historique : 4 approches testees et eliminees (prompt, lexical, dense).
+    # Le QA-Class est multilingue, domain-agnostic, et evalue directement
+    # "ce chunk permet-il de repondre ?" au lieu d'utiliser des proxies.
+    qa = report.get_signal("qa_answerability")
+    if qa and not policy.unanswerable:  # ne pas overrider un UNANSWERABLE dense
+        votes = qa.evidence.get("votes", [])
+        # Hard reject seulement si TOUS les votes sont NO (pas PARTIAL, pas UNKNOWN)
+        all_no = all(v == "NO" for v in votes) and len(votes) >= 2
+        if all_no:
+            policy.unanswerable = True
+            policy.unanswerable_reason = (
+                "Aucun des documents recuperes ne contient d'information "
+                "permettant de repondre a cette question."
+            )
+            logger.info(f"[POLICY] UNANSWERABLE (QA-Class) — votes={votes}")
+
     # Guard-rail : limiter le nombre d'instructions ajoutees
     if len(policy.synthesis_additions) > 3:
         policy.synthesis_additions = policy.synthesis_additions[:3]
