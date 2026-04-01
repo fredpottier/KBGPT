@@ -249,8 +249,89 @@ Le probleme est que l'IDF est calcule sur les tokens bruts. Pour supporter le mu
 
 5. **Approche la plus simple** : ne pas utiliser le gap lexical du tout. Plutot, utiliser le **score dense max du retriever** comme proxy de repondabilite. Si le meilleur chunk a un score dense < 0.3, c'est un signal fort d'absence. Mais les scores RRF actuels (~0.028) ne sont pas exploitables — il faudrait acceder au score dense brut avant fusion RRF.
 
-**Recommandation** : L'option 5 est la plus pragmatique — elle est domain-agnostic, multilingue par nature (les embeddings e5-large sont multilingues), et ne necessite aucun dictionnaire. Mais elle necessite de modifier le retriever pour exposer le score dense pre-RRF.
+**Recommandation** : L'option 5 (score dense) a ete testee et s'avere insuffisante (voir section 8).
 
 ---
 
-*Document mis a jour le 1er avril 2026 avec les resultats V4 et l'analyse cross-lingue.*
+## 8. Resultats V5 — Signal dense pre-RRF
+
+Le score dense brut a ete expose dans le retriever et teste. Resultat :
+- "cout de licence" (UNANSWERABLE) → dense max = 0.786
+- "autorisation Credit Management" (ANSWERABLE) → dense max = 0.826
+
+**Ecart = 0.04 points → indiscernable.** Le bi-encoder (e5-large) capture la proximite thematique ("SAP"), pas la repondabilite. Toute question mentionnant SAP a un score dense > 0.75 dans un corpus SAP.
+
+### Conclusion des 4 approches testees
+
+| Approche | unanswerable | Faux positifs | Viable ? |
+|---|---|---|---|
+| V2 baseline (prompt "never refuse") | 10% | 0 | ❌ hallucine |
+| V3 prompt "honesty rule + rule 12" | 40.5% | Massifs (-18pp) | ❌ trade-off |
+| V4 gap lexical IDF | 63.8% | Massifs (-67pp) | ❌ cross-lingue |
+| V5 dense score pre-RRF | ~10% | 0 | ❌ ne discrimine pas |
+
+**Toutes les approximations (lexicales, embedding, prompt) echouent.**
+
+---
+
+## 9. Direction finale — QA-Class (Question-Answerability Classifier)
+
+### Diagnostic (consensus Claude + ChatGPT)
+
+Le probleme n'est pas le retrieval (les chunks sont trouves) ni la synthese (le LLM est capable).
+Le probleme est **la decision : "ce chunk permet-il de repondre a cette question ?"**
+
+Aucun proxy (mots, embeddings, scores) ne capture cette decision.
+Il faut l'evaluer **directement**.
+
+### Architecture cible
+
+```
+retrieve → rerank → top_k_chunks
+                        ↓
+              QA-Class (Qwen/vLLM)    ← NOUVEAU
+                        ↓
+            signal: answerability_score
+                        ↓
+              signal_policy
+                        ↓
+              LLM synthese (ou refus)
+```
+
+### Principe
+
+Pour les top-3 chunks, poser a un LLM leger la question :
+"Ce chunk contient-il assez d'information pour repondre a la question ? YES / PARTIAL / NO"
+
+Si 3/3 = NO → UNANSWERABLE (hard reject deterministe)
+Si au moins 1 YES → ANSWERABLE (pipeline normal)
+Si PARTIAL seulement → UNCERTAIN (soft signal)
+
+### Pourquoi Qwen/vLLM (pas Haiku)
+
+- **Gratuit** : vLLM tourne sur l'EC2 burst deja provisionnee
+- **Rapide** : ~100ms par appel, 3 appels = 300ms
+- **Pas de dependance API externe** pour une decision critique
+- **Qwen 14B** est largement capable de classification YES/NO avec contexte
+- Compatible avec la philosophie "pas de cout LLM pour la decision, LLM seulement pour la synthese"
+
+### Prerequis
+
+- EC2 burst avec vLLM doit etre accessible
+- Fallback si vLLM non disponible : passer au LLM sans QA-Class (comportement actuel)
+- A integrer comme signal dans `detect_signals()` / `signal_policy()`
+
+### Impact attendu
+
+- unanswerable : 10% → 60-80%
+- Sans degradation des autres categories (le QA-Class est semantique, pas lexical)
+- Multilingue natif (Qwen comprend FR, EN, DE, etc.)
+- Domain-agnostic (la question "ce chunk repond-il ?" ne depend d'aucun domaine)
+
+### Statut
+
+Decision validee, implementation reportee a la prochaine session avec EC2 burst disponible.
+
+---
+
+*Document mis a jour le 1er avril 2026. Historique complet : V2 → V3 → V4 → V5 → decision QA-Class.*
