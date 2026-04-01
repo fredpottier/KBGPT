@@ -479,4 +479,55 @@ Ameliorer le prompt pour les questions conditionnelles ("Si X alors quoi ?").
 
 ---
 
-*Document genere par Claude Code pour analyse complementaire par d'autres IA. Mis a jour le 1er avril 2026 avec les resultats du benchmark robustesse.*
+## 9. Benchmark Robustesse V9-V10 — QA-Class avec Haiku
+
+NOTE IMPORTANTE: Les benchmarks V2 à V8 étaient invalides (solde Anthropic épuisé, Haiku en fallback). V9 est le premier benchmark fiable.
+
+### V9 — QA-Class prompt strict + Haiku
+| Catégorie | Score |
+|---|---|
+| unanswerable | 86.5% |
+| set_list | 80.0% |
+| synthesis_large | 66.9% |
+| hypothetical | 57.5% |
+| multi_hop | 46.7% |
+| false_premise | 46.1% |
+| causal_why | 42.0% |
+| conditional | 35.0% |
+| temporal | 33.0% |
+| negation | 20.0% |
+| GLOBAL | 52.1% |
+
+Problème: negation à 20% car le QA-Class rejetait des questions answerable (prompt trop strict "does the chunk contain enough information to answer")
+
+### V10 — QA-Class prompt "relevant" + Haiku (REFERENCE)
+| Catégorie | Score | Delta vs V9 |
+|---|---|---|
+| set_list | 80.0% | stable |
+| synthesis_large | 72.3% | +5.4pp |
+| hypothetical | 67.5% | +10pp |
+| unanswerable | 64.9% | -21.6pp |
+| negation | 63.8% | +43.8pp |
+| conditional | 54.6% | +19.6pp |
+| false_premise | 52.3% | +6.2pp |
+| causal_why | 52.5% | +10.5pp |
+| multi_hop | 46.7% | stable |
+| temporal | 37.3% | +4.3pp |
+| GLOBAL | 58.1% | +6pp |
+
+Le prompt "is this chunk RELEVANT to answering" au lieu de "does it contain ENOUGH to answer" résout le trade-off:
+- unanswerable reste élevé (65% vs 10% sans QA-Class)
+- negation remonte (+44pp)
+- Toutes les catégories progressent
+
+Architecture QA-Class validée:
+- Signal question_context_gap (IDF) déclenche le QA-Class quand gap >= 0.6
+- QA-Class via llm_router → auto-route vers Qwen/vLLM si burst actif
+- Hard reject seulement si 3/3 chunks = NO
+- Multilingue natif (question FR, chunks EN)
+
+Limite connue: 5 questions par catégorie = statistiquement insuffisant. Élargissement à 25 questions minimum en cours.
+
+---
+
+*Document genere par Claude Code pour analyse complementaire par d'autres IA. Mis a jour le 1er avril 2026 avec les resultats du benchmark robustesse et V9-V10 QA-Class.*
