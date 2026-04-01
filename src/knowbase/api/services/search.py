@@ -1037,6 +1037,8 @@ def search_documents(
         kg_claims=kg_claim_results,
         retrieval_doc_ids=retrieval_doc_ids,
         qs_crossdoc_data=qs_crossdoc_data,
+        question=query,
+        chunks=reranked_chunks,
     )
     signal_policy = build_policy(signal_report)
 
@@ -1066,6 +1068,35 @@ def search_documents(
             f"[ENVELOPE] ContradictionEnvelope built: {len(contradiction_envelope.pairs)} pairs, "
             f"mode={contradiction_envelope.synthesis_mode}"
         )
+
+    # Court-circuit UNANSWERABLE — pas de synthese LLM
+    if signal_policy.unanswerable:
+        logger.info(f"[SEARCH] UNANSWERABLE — skipping LLM synthesis")
+        unanswerable_answer = (
+            f"Les documents disponibles ne contiennent pas d'information sur ce sujet specifique. "
+            f"{signal_policy.unanswerable_reason} "
+            f"Le corpus couvre principalement la documentation technique du domaine "
+            f"mais pas les aspects demandes dans cette question."
+        )
+        return {
+            "status": "ok",
+            "results": reranked_chunks[:5],
+            "synthesis": {
+                "synthesized_answer": unanswerable_answer,
+                "gate_decision": "UNANSWERABLE",
+                "gate_reason": signal_policy.unanswerable_reason,
+                "missing_terms": signal_policy.unanswerable_missing_terms,
+            },
+            "includes_visual_interpretation": False,
+            "signal_report": {
+                "signals": [{"type": s.type, "strength": s.strength} for s in signal_report.signals],
+            },
+            "contradiction_envelope": None,
+            "visibility": {"chunks_count": len(reranked_chunks)},
+            "knowledge_proof": None,
+            "confidence": 0.0,
+            "reasoning_trace": ["question_context_gap → UNANSWERABLE"],
+        }
 
     # Generate synthesized response + instrumented answer in parallel (if both needed)
     if use_instrumented:
