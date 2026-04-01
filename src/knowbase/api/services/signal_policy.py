@@ -138,6 +138,25 @@ def build_policy(report: SignalReport) -> SignalPolicy:
                 "Answer with what the sources contain, and clearly state if specific information is missing."
             )
 
+    # Signal 6 — Dense Answerability
+    # CONSTAT : les scores denses ne discriminent PAS answerable vs unanswerable
+    # sur un corpus thematique (toute question "SAP" a un score dense > 0.75).
+    # Le signal dense ne sert que pour les questions TOTALEMENT hors-domaine
+    # (ex: "recette de gateau" sur un corpus SAP → dense < 0.3).
+    # Pour les questions dans le domaine mais hors-scope (prix, salaires),
+    # le score dense est trop eleve pour etre utile.
+    # TODO: explorer cross-encoder re-ranking ou NLI question-chunk pour discriminer.
+    dense = report.get_signal("dense_answerability")
+    if dense:
+        max_dense = dense.evidence.get("max_dense_score", 0)
+        if max_dense < 0.25:
+            policy.unanswerable = True
+            policy.unanswerable_reason = (
+                f"Aucun document du corpus ne semble lié à cette question "
+                f"(meilleur score de similarite : {max_dense:.0%})."
+            )
+            logger.info(f"[POLICY] UNANSWERABLE (dense) — max_dense={max_dense:.3f}")
+
     # Guard-rail : limiter le nombre d'instructions ajoutees
     if len(policy.synthesis_additions) > 3:
         policy.synthesis_additions = policy.synthesis_additions[:3]

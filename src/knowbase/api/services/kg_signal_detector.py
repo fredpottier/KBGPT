@@ -102,11 +102,17 @@ def detect_signals(
         if exactness:
             signals.append(exactness)
 
-    # Signal 5 — Question-Context Gap
+    # Signal 5 — Question-Context Gap (lexical, soft signal only)
     if question and chunks:
         gap = _detect_question_context_gap(question, chunks, kg_claims=kg_claims)
         if gap:
             signals.append(gap)
+
+    # Signal 6 — Dense Answerability (cross-lingue, hard reject possible)
+    if chunks:
+        dense_ans = _detect_dense_answerability(chunks)
+        if dense_ans:
+            signals.append(dense_ans)
 
     report = SignalReport(signals=signals, claims_analyzed=len(kg_claims))
 
@@ -409,5 +415,60 @@ def _detect_question_context_gap(
             "missing_terms": missing_terms,
             "gap_score": round(gap_score, 3),
             "max_chunk_score": round(max_chunk_score, 3),
+        },
+    )
+
+
+# ── Signal 6 : Dense Answerability ───────────────────────────────────
+
+# Seuil de score dense sous lequel on considere que le retrieval n'a rien trouve de pertinent.
+# e5-large renvoie des scores cosine entre 0 et 1. En dessous de 0.35, le chunk est
+# thematiquement distant de la question.
+DENSE_LOW_THRESHOLD = 0.35
+
+
+def _detect_dense_answerability(chunks: list[dict]) -> Signal | None:
+    """Detecte un faible score dense = le retriever n'a rien trouve de semantiquement proche.
+
+    Avantage majeur vs gap lexical : multilingue par nature (e5-large est cross-lingual).
+    "cout" en francais et "cost" en anglais ont des embeddings proches → pas de faux gap.
+
+    Signal asymetrique :
+    - score dense faible = forte indication que la question est hors-corpus
+    - score dense eleve = pas de conclusion (ne prouve pas que la reponse existe)
+    """
+    if not chunks:
+        return None
+
+    # Extraire les scores denses des top chunks
+    dense_scores = []
+    for chunk in chunks[:10]:
+        ds = chunk.get("_dense_score") or chunk.get("payload", {}).get("_dense_score", 0)
+        if ds and isinstance(ds, (int, float)) and ds > 0:
+            dense_scores.append(float(ds))
+
+    if not dense_scores:
+        return None  # Pas de score dense disponible (fallback dense-only ou ancien format)
+
+    max_dense = max(dense_scores)
+    avg_dense = sum(dense_scores) / len(dense_scores)
+
+    # Ne signaler que les cas ou le score dense est clairement faible
+    if max_dense >= DENSE_LOW_THRESHOLD:
+        return None  # Au moins un chunk est semantiquement proche → pas de signal negatif
+
+    logger.info(
+        f"[SIGNAL:DENSE] Low dense answerability: "
+        f"max={max_dense:.3f}, avg={avg_dense:.3f}, threshold={DENSE_LOW_THRESHOLD}"
+    )
+
+    return Signal(
+        type="dense_answerability",
+        strength=1.0 - max_dense,  # Plus le score est bas, plus le signal est fort
+        evidence={
+            "max_dense_score": round(max_dense, 4),
+            "avg_dense_score": round(avg_dense, 4),
+            "chunks_analyzed": len(dense_scores),
+            "threshold": DENSE_LOW_THRESHOLD,
         },
     )

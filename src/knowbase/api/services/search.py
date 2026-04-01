@@ -139,6 +139,7 @@ def build_response_payload(result, public_url: str) -> dict[str, Any]:
         "source_file": source_file_url,
         "slide_index": slide_index,
         "score": result.score,
+        "_dense_score": payload.get("_dense_score", 0),
         "slide_image_url": slide_image_url,
         # Phase B: axis values pour filtrage version/release
         "axis_release_id": payload.get("axis_release_id"),
