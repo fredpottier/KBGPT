@@ -750,12 +750,19 @@ def run_benchmark_job(
         results_dir.mkdir(parents=True, exist_ok=True)
         report_path = results_dir / report_filename
 
+        synthesis_model = os.getenv("OSMOSIS_SYNTHESIS_MODEL", "")
+        synthesis_provider = os.getenv("OSMOSIS_SYNTHESIS_PROVIDER", "anthropic")
+        if not synthesis_model:
+            synthesis_model = "claude-haiku-4-5-20251001" if synthesis_provider == "anthropic" else "gpt-4o-mini"
+
         report_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "profile": profile,
             "profile_label": prof["label"],
             "tag": tag or "",
             "description": description or "",
+            "synthesis_model": synthesis_model,
+            "synthesis_provider": synthesis_provider,
             "duration_s": duration_s,
             "scores": osmosis_scores,
             "scores_rag": rag_scores,

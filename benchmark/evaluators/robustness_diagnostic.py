@@ -624,11 +624,19 @@ def run_benchmark_job(
     results_dir = Path("data/benchmark/results")
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    # Detecter le modele de synthese utilise
+    synthesis_model = os.getenv("OSMOSIS_SYNTHESIS_MODEL", "")
+    synthesis_provider = os.getenv("OSMOSIS_SYNTHESIS_PROVIDER", "anthropic")
+    if not synthesis_model:
+        synthesis_model = "claude-haiku-4-5-20251001" if synthesis_provider == "anthropic" else "gpt-4o-mini"
+
     report_data = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "profile": profile,
         "tag": tag or "",
         "description": description or "",
+        "synthesis_model": synthesis_model,
+        "synthesis_provider": synthesis_provider,
         "duration_s": duration_s,
         "scores": scores,
         "per_sample": per_sample,

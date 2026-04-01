@@ -33,7 +33,6 @@ def call_judge(
     model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ",
 ) -> Dict[str, Any]:
     """Appelle le LLM juge et parse la reponse JSON."""
-    from openai import OpenAI
     import os
 
     is_qwen = "qwen" in model.lower() or model.startswith("Qwen/")
@@ -41,22 +40,35 @@ def call_judge(
 
     try:
         if is_claude:
-            # Claude via Anthropic API
-            import anthropic
-            client_anthropic = anthropic.Anthropic()
-            response = client_anthropic.messages.create(
-                model=model,
-                max_tokens=500,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-                temperature=0,
+            # Claude via requests direct (pas le SDK pour eviter les conflits httpx)
+            import requests as _requests
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            _resp = _requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "max_tokens": 500,
+                    "system": system_prompt,
+                    "messages": [{"role": "user", "content": user_prompt}],
+                    "temperature": 0,
+                },
+                timeout=120,
             )
-            text = response.content[0].text if response.content else "{}"
-            tokens = (response.usage.input_tokens + response.usage.output_tokens) if response.usage else 0
+            _resp.raise_for_status()
+            _resp_data = _resp.json()
+            text = _resp_data.get("content", [{}])[0].get("text", "{}")
+            _usage = _resp_data.get("usage", {})
+            tokens = _usage.get("input_tokens", 0) + _usage.get("output_tokens", 0)
         else:
-            # OpenAI-compatible (GPT ou Qwen/vLLM)
+            # OpenAI-compatible (GPT ou Qwen/vLLM) — import lazy
+            from openai import OpenAI  # noqa: import only when needed
             if is_qwen:
-                vllm_url = os.environ.get("VLLM_URL", "http://63.178.18.3:8000")
+                vllm_url = os.environ.get("VLLM_URL", "http://18.194.28.167:8000")
                 client = OpenAI(api_key="EMPTY", base_url=f"{vllm_url}/v1")
             else:
                 client = OpenAI()
@@ -355,8 +367,42 @@ def aggregate_judgments(judgments: List[Dict], task: str) -> Dict[str, Any]:
         scores["citation_present_rate"] = _bool_rate(judgments, "citation_present")
         scores["correct_source_rate"] = _bool_rate(judgments, "correct_source_cited")
         scores["answer_relevant_rate"] = _bool_rate(judgments, "answer_relevant")
-        scores["answers_correctly_rate"] = _bool_rate(judgments, "answers_correctly")
+        # answers_correctly derive du factual_correctness (plus fiable que le booleen du juge)
+        answers_correct_count = sum(
+            1 for j in judgments
+            if isinstance(j.get("judgment", {}).get("factual_correctness", 0), (int, float))
+            and j.get("judgment", {}).get("factual_correctness", 0) >= 0.8
+        )
+        scores["answers_correctly_rate"] = answers_correct_count / max(total, 1)
+        scores["answers_correctly_raw_rate"] = _bool_rate(judgments, "answers_correctly")  # ancien, pour comparaison
         scores["false_idk_rate"] = _bool_rate(judgments, "says_idk_when_info_exists")  # plus bas = mieux
+
+        # Metriques derivees — corrigees Sprint 2
+        # Le juge LLM (Qwen 14B) est incoherent entre factual_correctness et answers_correctly
+        # (donne factual=1.0 mais answers_correctly=false dans 14/31 cas).
+        # On derive answers_correctly du factual_correctness pour la fiabilite.
+        correct = 0
+        false_idk = 0
+        false_answer = 0
+        irrelevant = 0
+        for j in judgments:
+            jd = j.get("judgment", {})
+            is_idk = jd.get("says_idk_when_info_exists", False)
+            factual = jd.get("factual_correctness", 0)
+            is_relevant = jd.get("answer_relevant", False)
+            # Derive : factual >= 0.8 = reponse correcte (plus fiable que le booleen du juge)
+            is_correct = factual >= 0.8 if isinstance(factual, (int, float)) else jd.get("answers_correctly", False)
+            if is_correct:
+                correct += 1
+            elif is_idk:
+                false_idk += 1
+            elif is_relevant and not is_correct:
+                false_answer += 1
+            else:
+                irrelevant += 1
+        scores["false_answer_rate"] = false_answer / max(total, 1)  # plus bas = mieux
+        scores["irrelevant_rate"] = irrelevant / max(total, 1)  # plus bas = mieux
+        scores["total_error_rate"] = (false_idk + false_answer) / max(total, 1)
 
     elif task in ("T2_contradictions", "T2"):
         scores["both_sides_surfaced_rate"] = _bool_rate(judgments, "surfaces_both_sides")

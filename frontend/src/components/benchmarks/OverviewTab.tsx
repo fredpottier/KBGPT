@@ -42,6 +42,7 @@ interface OverviewTabProps {
     delta: number | null
     timestamp: string
     filename: string
+    synthesis_model?: string
   }>
   onLaunch: (benchType: string, profile: string, tag: string, description: string) => void
   isRunning: boolean
@@ -320,6 +321,9 @@ function RecentRunsTable({ runs }: { runs: OverviewTabProps['recentRuns'] }) {
               Delta
             </Th>
             <Th color={tokens.textMuted} fontSize="10px" textTransform="uppercase" borderBottom="1px solid" borderColor={tokens.borderSubtle} pb={2}>
+              Modele
+            </Th>
+            <Th color={tokens.textMuted} fontSize="10px" textTransform="uppercase" borderBottom="1px solid" borderColor={tokens.borderSubtle} pb={2}>
               Date
             </Th>
           </Tr>
@@ -380,6 +384,11 @@ function RecentRunsTable({ runs }: { runs: OverviewTabProps['recentRuns'] }) {
                       {deltaInfo.text}
                     </Text>
                   </HStack>
+                </Td>
+                <Td borderBottom="1px solid" borderColor={tokens.borderSubtle} py={2.5}>
+                  <Text fontSize="10px" fontFamily="'Fira Code', monospace" color={tokens.textMuted}>
+                    {run.synthesis_model ? run.synthesis_model.replace('claude-haiku-4-5-20251001', 'Haiku').replace('gpt-4o-mini', '4o-mini') : '-'}
+                  </Text>
                 </Td>
                 <Td borderBottom="1px solid" borderColor={tokens.borderSubtle} py={2.5}>
                   <Text fontSize="11px" color={tokens.textMuted}>

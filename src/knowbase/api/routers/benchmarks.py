@@ -181,6 +181,7 @@ def _parse_ragas_report(filepath: Path) -> dict[str, Any] | None:
         "timestamp": timestamp,
         "tag": data.get("tag", ""),
         "description": data.get("description", ""),
+        "synthesis_model": data.get("synthesis_model", ""),
         "profile": data.get("profile", ""),
         "systems": {},
     }
@@ -614,6 +615,7 @@ async def get_t2t5_reports() -> dict[str, Any]:
                 "timestamp": data.get("timestamp", ""),
                 "tag": data.get("tag", ""),
                 "description": data.get("description", ""),
+                "synthesis_model": data.get("synthesis_model", ""),
                 "profile": data.get("profile", ""),
                 "profile_label": data.get("profile_label", ""),
                 "duration_s": data.get("duration_s"),
@@ -689,6 +691,7 @@ async def get_robustness_reports() -> dict[str, Any]:
                 "timestamp": data.get("timestamp", ""),
                 "tag": data.get("tag", ""),
                 "description": data.get("description", ""),
+                "synthesis_model": data.get("synthesis_model", ""),
                 "duration_s": data.get("duration_s"),
                 "scores": data.get("scores", {}),
                 "errors": data.get("errors", 0),

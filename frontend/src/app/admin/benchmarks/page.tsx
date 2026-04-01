@@ -328,7 +328,7 @@ export default function BenchmarksPage() {
   }, [robustnessReports])
 
   const recentRuns = useMemo(() => {
-    const runs: Array<{ type: string; tag: string; score: number; delta: number | null; timestamp: string; filename: string }> = []
+    const runs: Array<{ type: string; tag: string; score: number; delta: number | null; timestamp: string; filename: string; synthesis_model?: string }> = []
 
     const ragasSorted = [...ragasReports].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
     const baselineRagasScore = ragasSorted[0]?.systems?.osmosis?.scores?.faithfulness ?? null
@@ -336,7 +336,7 @@ export default function BenchmarksPage() {
     for (const r of ragasReports) {
       const s = r.systems?.osmosis?.scores?.faithfulness ?? 0
       const delta = baselineRagasScore != null ? s - baselineRagasScore : null
-      runs.push({ type: 'ragas', tag: r.tag || '', score: s, delta, timestamp: r.timestamp, filename: r.filename })
+      runs.push({ type: 'ragas', tag: r.tag || '', score: s, delta, timestamp: r.timestamp, filename: r.filename, synthesis_model: (r as any).synthesis_model })
     }
 
     const t2Sorted = [...t2t5Reports].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
@@ -345,7 +345,7 @@ export default function BenchmarksPage() {
     for (const r of t2t5Reports) {
       const s = r.scores?.both_sides_surfaced ?? 0
       const delta = baselineT2Score != null ? s - baselineT2Score : null
-      runs.push({ type: 't2t5', tag: r.tag || '', score: s, delta, timestamp: r.timestamp, filename: r.filename })
+      runs.push({ type: 't2t5', tag: r.tag || '', score: s, delta, timestamp: r.timestamp, filename: r.filename, synthesis_model: (r as any).synthesis_model })
     }
 
     const robSorted = [...robustnessReports].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
@@ -354,7 +354,7 @@ export default function BenchmarksPage() {
     for (const r of robustnessReports) {
       const s = r.scores?.global_score ?? 0
       const delta = baselineRobScore != null ? s - baselineRobScore : null
-      runs.push({ type: 'robustness', tag: r.tag || '', score: s, delta, timestamp: r.timestamp, filename: r.filename })
+      runs.push({ type: 'robustness', tag: r.tag || '', score: s, delta, timestamp: r.timestamp, filename: r.filename, synthesis_model: (r as any).synthesis_model })
     }
 
     runs.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
