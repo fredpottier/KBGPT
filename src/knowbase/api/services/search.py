@@ -1045,6 +1045,20 @@ def search_documents(
         signal_context = "\n".join(f"- {a}" for a in signal_policy.synthesis_additions)
         graph_context_text = f"\n\n## Signal-driven analysis\n{signal_context}" + graph_context_text
 
+    # Signal de confiance retrieval — prevenir le LLM si les chunks sont peu pertinents
+    if reranked_chunks:
+        chunk_scores = [c.get("score", 0) for c in reranked_chunks if c.get("score")]
+        avg_score = sum(chunk_scores) / len(chunk_scores) if chunk_scores else 0
+        max_score = max(chunk_scores) if chunk_scores else 0
+        if max_score < 0.35:
+            graph_context_text += (
+                "\n\n## Retrieval confidence WARNING\n"
+                "The retrieved sources have LOW relevance scores to this question. "
+                "This means the corpus may NOT contain information about this specific topic. "
+                "If you cannot find a clear answer in the sources, say so honestly rather than guessing."
+            )
+            logger.info(f"[RETRIEVAL-CONFIDENCE] Low confidence: avg={avg_score:.3f}, max={max_score:.3f}")
+
     # Construire le ContradictionEnvelope pour forcer la divulgation des tensions
     contradiction_envelope = _build_contradiction_envelope(kg_claim_results, signal_report)
     if contradiction_envelope.has_tension:
