@@ -57,7 +57,7 @@ const T = {
   statusError: '#ef4444',
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API = ''  // Use Next.js proxy routes (relative paths)
 
 // ── Types ─────────────────────────────────────────────────────────────
 
