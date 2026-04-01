@@ -196,4 +196,61 @@ Le V3 montre que le prompt peut pousser unanswerable a 40% mais au prix d'une de
 
 ---
 
-*Document pour analyse complementaire. La decision d'implementation sera prise apres revue multi-IA.*
+---
+
+## 7. Resultats d'implementation — Question-Context Gap Signal
+
+### Ce qui a ete implemente (1er avril 2026)
+
+Un signal `question_context_gap` a ete ajoute dans l'architecture signal-driven :
+- **IDF corpus-aware** : index de frequence calcule sur 2000 chunks Qdrant (14091 termes)
+- **Extraction de termes specifiques** : les termes dont l'IDF > 2.0 sont consideres "specifiques" a la question
+- **Gap score** : proportion des termes specifiques absents des chunks + claims KG
+- **Decision** : gap=1.0 + pas d'exactness → UNANSWERABLE (hard reject, court-circuit LLM)
+- **Soft signal** : gap >= 0.6 → note pour le LLM ("certains aspects ne sont peut-etre pas couverts")
+
+### Resultats du benchmark V4
+
+| Categorie | V2 (baseline) | V4 (gap signal) | Delta |
+|---|---|---|---|
+| **unanswerable** | 10% | **63.8%** | **+53.8pp** |
+| negation | 82.6% | 53.2% | **-29.4pp** |
+| multi_hop | 76.7% | 10.0% | **-66.7pp** |
+| false_premise | 60.6% | 21.6% | **-39pp** |
+| synthesis_large | 67.7% | 33.0% | **-34.7pp** |
+| GLOBAL | 55.5% | 42.0% | **-13.5pp** |
+
+### Diagnostic : le cross-lingue tue le signal
+
+**Cause racine** : Le gap lexical ne traverse pas la barriere de langue. Avec un corpus en anglais et des questions en francais :
+- "processus" (FR) ne matche pas "processes" (EN) → considere comme absent → gap artificiel
+- "supportes" (FR) ne matche pas "supported" (EN) → idem
+- "bloquer" (FR) ne matche pas "blocked" (EN) → idem
+
+Resultat : le hard reject se declenche sur des questions legitimement answerable, detruisant les scores des autres categories.
+
+### Decision : hard reject DESACTIVE, soft signal conserve
+
+Le hard reject est desactive dans `signal_policy.py` (commente avec TODO). Le soft signal (gap >= 0.6 → note au LLM) est conserve car il n'a pas d'impact negatif.
+
+Le code complet (IDF index, extraction termes, gap score, court-circuit search.py) est en place et pret a etre reactive quand le cross-lingue sera resolu.
+
+### Piste pour resoudre le cross-lingue
+
+Le probleme est que l'IDF est calcule sur les tokens bruts. Pour supporter le multilingue, il faudrait l'une de ces approches :
+
+1. **Embeddings de termes** au lieu de matching lexical : comparer l'embedding du terme de la question avec les embeddings des termes des chunks. "cout" serait proche de "cost" en espace embedding. Mais cela ajoute un cout de calcul significatif.
+
+2. **Dictionnaire de lemmes multilingue** : utiliser un mapping FR→EN, DE→EN, etc. Mais c'est du maintien de dictionnaire et potentiellement domain-specific.
+
+3. **IDF sur embeddings de chunks** : au lieu de calculer l'IDF sur les tokens, le calculer sur les embeddings. Si l'embedding de la question est loin de tous les chunks (faible similarite dense max), c'est un signal d'absence. Mais c'est essentiellement ce que le retriever fait deja.
+
+4. **Cross-lingual NER** : utiliser un modele NER multilingue (ex: xlm-roberta) pour extraire les entites dans la question ET les chunks, puis comparer les entites. Plus robuste que le lexical mais necessite un modele supplementaire.
+
+5. **Approche la plus simple** : ne pas utiliser le gap lexical du tout. Plutot, utiliser le **score dense max du retriever** comme proxy de repondabilite. Si le meilleur chunk a un score dense < 0.3, c'est un signal fort d'absence. Mais les scores RRF actuels (~0.028) ne sont pas exploitables — il faudrait acceder au score dense brut avant fusion RRF.
+
+**Recommandation** : L'option 5 est la plus pragmatique — elle est domain-agnostic, multilingue par nature (les embeddings e5-large sont multilingues), et ne necessite aucun dictionnaire. Mais elle necessite de modifier le retriever pour exposer le score dense pre-RRF.
+
+---
+
+*Document mis a jour le 1er avril 2026 avec les resultats V4 et l'analyse cross-lingue.*

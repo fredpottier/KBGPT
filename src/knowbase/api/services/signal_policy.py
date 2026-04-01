@@ -122,20 +122,17 @@ def build_policy(report: SignalReport) -> SignalPolicy:
         max_chunk_score = gap.evidence.get("max_chunk_score", 0)
         missing_terms = gap.evidence.get("missing_terms", [])
 
-        # Hard reject : gap total ET pas de signal exactness
-        # (exactness = QD match precis, seul signal fiable de pertinence)
-        has_exactness = report.has_signal("exactness")
-        if gap_score >= 1.0 and not has_exactness:
-            policy.unanswerable = True
-            policy.unanswerable_reason = (
-                f"Les termes specifiques de la question ({', '.join(missing_terms)}) "
-                f"sont absents des documents disponibles."
-            )
-            policy.unanswerable_missing_terms = missing_terms
-            logger.info(f"[POLICY] UNANSWERABLE — gap={gap_score:.2f}, max_score={max_chunk_score:.3f}")
+        # DESACTIVE — le hard reject cause trop de faux positifs en contexte multilingue
+        # (questions FR avec corpus EN : les termes specifiques ne matchent jamais)
+        # Voir doc/ongoing/ANALYSE_NEGATIVE_REJECTION_STRATEGY.md pour l'analyse complete
+        # TODO: reactiver quand le gap signal supportera le cross-lingue (lemmatisation, embeddings de termes)
+        #
+        # if gap_score >= 1.0 and not has_exactness:
+        #     policy.unanswerable = True
+        #     ...
 
-        # Soft signal : gap eleve mais chunks proches → prevenir le LLM
-        elif gap_score >= 0.6:
+        # Soft signal : gap eleve → prevenir le LLM (sans hard reject)
+        if gap_score >= 0.6:
             policy.synthesis_additions.append(
                 "NOTE: Some specific aspects of this question may not be covered by the available sources. "
                 "Answer with what the sources contain, and clearly state if specific information is missing."
