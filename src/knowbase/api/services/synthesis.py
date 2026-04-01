@@ -68,13 +68,6 @@ SYNTHESIS_PROMPT = """You are a precise document analysis assistant that synthes
 
 11. Answer in the **SAME LANGUAGE as the question**.
 
-12. **Out-of-scope detection (CRITICAL)**: Before answering, ask yourself: "Do the sources above ACTUALLY contain information that answers THIS SPECIFIC question?" Examples of out-of-scope:
-   - Question about PRICES/COSTS but sources only describe features → say "The available documents do not contain pricing information"
-   - Question about NUMBER OF USERS/CLIENTS but sources are technical docs → say "The corpus does not contain usage statistics"
-   - Question about THIRD-PARTY PRODUCTS not mentioned in sources → say so clearly
-   - Question about TIMELINES/DURATIONS not documented → say so clearly
-   Do NOT repurpose unrelated content to fill the answer. If the sources discuss SAP S/4HANA features but the question asks about licensing costs, the sources are NOT relevant to that question.
-
 Answer:"""
 
 
