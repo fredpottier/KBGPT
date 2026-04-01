@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=2560, height=720, initial-scale=1.0, user-scalable=no">
+    <title>OSMOSIS Cockpit</title>
+    <link rel="stylesheet" href="/cockpit/static/style.css?v=8">
+</head>
+<body>
+<div id="cockpit">
+
+    <!-- Topbar -->
+    <div class="topbar">
+        <span class="topbar-brand">OSMOSIS COCKPIT</span>
+        <span class="topbar-clock" id="clock">--:--:--</span>
+        <div class="topbar-dot" id="ws-dot"></div>
+    </div>
+
+    <!-- Widgets row -->
+    <div class="widgets-row">
+
+        <!-- W1: EC2 Burst -->
+        <div class="card w-burst">
+            <div class="card-header">
+                <span class="card-title">EC2 Burst</span>
+            </div>
+            <div class="card-body" id="burst-body">
+                <div class="burst-status-pill off" id="burst-pill">OFF</div>
+                <div class="burst-info" id="burst-info"></div>
+            </div>
+        </div>
+
+        <!-- W2: Pipeline -->
+        <div class="card w-pipeline">
+            <div class="card-header">
+                <span class="card-title" id="pipeline-title">OSMOSIS Pipelines</span>
+                <span class="card-header-right" id="pipeline-elapsed"></span>
+            </div>
+            <div class="card-body pipeline-canvas" id="pipeline-body">
+                <div class="pipeline-empty" id="pipeline-empty">Aucun pipeline actif</div>
+            </div>
+        </div>
+
+        <!-- W3: Containers -->
+        <div class="card w-containers">
+            <div class="card-header">
+                <span class="card-title">Containers</span>
+            </div>
+            <div class="card-body" id="containers-body"></div>
+        </div>
+
+        <!-- W4: Knowledge -->
+        <div class="card w-knowledge">
+            <div class="card-header">
+                <span class="card-title">Knowledge</span>
+            </div>
+            <div class="card-body" id="knowledge-body"></div>
+        </div>
+
+        <!-- W5: Qualité Osmosis -->
+        <div class="card w-llm">
+            <div class="card-header">
+                <span class="card-title">Qualité Osmosis</span>
+            </div>
+            <div class="card-body" id="quality-body">
+                <div id="ragas-section"></div>
+                <div id="t2t5-section"></div>
+            </div>
+        </div>
+
+        <!-- W6: Smart Events -->
+        <div class="card w-events">
+            <div class="card-header">
+                <span class="card-title">Events</span>
+                <span class="card-header-right" id="events-count"></span>
+            </div>
+            <div class="card-body" id="events-body">
+                <div class="events-empty" id="events-empty">Aucune anomalie</div>
+            </div>
+        </div>
+
+    </div><!-- /widgets-row -->
+</div><!-- /cockpit -->
+
+<script src="/cockpit/static/cockpit.js?v=8"></script>
+</body>
+</html>

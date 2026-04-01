@@ -1,9 +1,9 @@
 ﻿from __future__ import annotations
 
-import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue, HasIdCondition
@@ -13,6 +13,88 @@ from knowbase.config.settings import Settings
 from knowbase.common.clients import rerank_chunks
 from knowbase.common.logging import setup_logging
 from .synthesis import synthesize_response
+from .retriever import embed_query, retrieve_chunks as _retrieve_chunks
+from .kg_signal_detector import detect_signals, SignalReport
+from .signal_policy import build_policy
+
+
+# ---------------------------------------------------------------------------
+# ContradictionEnvelope — contrat de sortie pour les tensions KG
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ContradictionEnvelope:
+    """Enveloppe deterministe pour forcer la divulgation des tensions KG.
+
+    Quand requires_disclosure=True, la synthese DOIT mentionner les divergences.
+    Si le LLM les ignore, un fallback deterministe est ajoute a la reponse.
+    """
+    has_tension: bool = False
+    requires_disclosure: bool = False
+    pairs: list[dict] = field(default_factory=list)
+    synthesis_mode: str = "standard"  # "standard" ou "tension_explicit"
+
+
+def _build_contradiction_envelope(
+    kg_claims: list[dict],
+    signal_report: SignalReport,
+) -> ContradictionEnvelope:
+    """Construit un ContradictionEnvelope a partir des claims KG et du signal report.
+
+    Ne fait aucun appel externe — tout est calcule a partir des donnees deja en memoire.
+    """
+    tension_signal = signal_report.get_signal("tension")
+    if not tension_signal:
+        return ContradictionEnvelope()
+
+    # Collecter les paires de contradictions depuis les claims
+    pairs: list[dict] = []
+    for claim in kg_claims:
+        contradiction_texts = [t for t in claim.get("contradiction_texts", []) if t]
+        if not contradiction_texts:
+            continue
+
+        claim_text = claim.get("text", "")
+        claim_doc = claim.get("source_file", "")
+        if claim_doc:
+            claim_doc = claim_doc.split("/")[-1].replace(".pptx", "").replace(".pdf", "")
+
+        for contra_text in contradiction_texts:
+            # Les contradiction_texts sont prefixees par le type de relation
+            # ex: "⚠ CONTRADICTION: ...", "↻ REFINES: ...", "≈ QUALIFIES: ..."
+            axis = "tension"
+            clean_text = contra_text
+            if contra_text.startswith("⚠ CONTRADICTION:"):
+                axis = "contradiction"
+                clean_text = contra_text.replace("⚠ CONTRADICTION:", "").strip()
+            elif contra_text.startswith("↻ REFINES:"):
+                axis = "refinement"
+                clean_text = contra_text.replace("↻ REFINES:", "").strip()
+            elif contra_text.startswith("≈ QUALIFIES:"):
+                axis = "qualification"
+                clean_text = contra_text.replace("≈ QUALIFIES:", "").strip()
+
+            # Eviter les doublons exacts
+            if any(p["claim_b"] == clean_text and p["claim_a"] == claim_text for p in pairs):
+                continue
+
+            pairs.append({
+                "claim_a": claim_text,
+                "claim_b": clean_text,
+                "doc_a": claim_doc or "Source A",
+                "doc_b": "Source B",  # Le doc de la claim contradictoire n'est pas dans le query Neo4j
+                "axis": axis,
+            })
+
+    if not pairs:
+        return ContradictionEnvelope()
+
+    return ContradictionEnvelope(
+        has_tension=True,
+        requires_disclosure=True,
+        pairs=pairs[:5],  # Limiter a 5 paires max
+        synthesis_mode="tension_explicit",
+    )
 
 TOP_K = 10
 SCORE_THRESHOLD = 0.5
@@ -96,12 +178,16 @@ def _search_claims_vector(
                 WHERE score > 0.65 AND c.tenant_id = $tenant_id
                 OPTIONAL MATCH (c)-[tension:CONTRADICTS|REFINES|QUALIFIES]-(other:Claim)
                 OPTIONAL MATCH (c)-[:ABOUT]->(e:Entity)
+                OPTIONAL MATCH (c)-[comp:COMPLEMENTS|EVOLVES_TO|SPECIALIZES]-(complement:Claim)
+                WHERE complement.doc_id <> c.doc_id
                 WITH c, score,
                      collect(DISTINCT CASE WHEN type(tension) = 'CONTRADICTS' THEN '⚠ CONTRADICTION: ' + coalesce(other.text, '')
                                            WHEN type(tension) = 'REFINES' THEN '↻ REFINES: ' + coalesce(other.text, '')
                                            WHEN type(tension) = 'QUALIFIES' THEN '≈ QUALIFIES: ' + coalesce(other.text, '')
                                            END)[..3] AS contradiction_texts,
-                     collect(DISTINCT e.name)[..5] AS entity_names
+                     collect(DISTINCT e.name)[..5] AS entity_names,
+                     collect(DISTINCT CASE WHEN complement IS NOT NULL
+                         THEN type(comp) + ': ' + coalesce(complement.text, '') END)[..3] AS complement_texts
                 RETURN
                     c.claim_id AS chunk_id,
                     c.text AS text,
@@ -110,6 +196,7 @@ def _search_claims_vector(
                     score,
                     contradiction_texts,
                     entity_names,
+                    complement_texts,
                     c.chunk_ids AS chunk_ids
                 ORDER BY score DESC
                 LIMIT $k
@@ -128,6 +215,7 @@ def _search_claims_vector(
                     "claim_id": r["chunk_id"],
                     "entity_names": r["entity_names"],
                     "contradiction_texts": r["contradiction_texts"],
+                    "complement_texts": [t for t in (r["complement_texts"] or []) if t],
                     "chunk_ids": r["chunk_ids"] or [],  # Pont vers Qdrant
                     "source_type": "claim_vector",
                 }
@@ -214,6 +302,8 @@ def _search_via_question_dimensions(
             MATCH (c:Claim {claim_id: qs.claim_id, tenant_id: $tenant_id})
             OPTIONAL MATCH (c)-[:ABOUT]->(e:Entity)
             OPTIONAL MATCH (c)-[tension:CONTRADICTS|REFINES|QUALIFIES]-(other:Claim)
+            OPTIONAL MATCH (c)-[comp:COMPLEMENTS|EVOLVES_TO|SPECIALIZES]-(complement:Claim)
+            WHERE complement.doc_id <> c.doc_id
 
             RETURN
                 qd.dimension_key AS dimension_key,
@@ -230,7 +320,9 @@ def _search_via_question_dimensions(
                     WHEN type(tension) = 'CONTRADICTS' THEN 'CONTRADICTION: ' + coalesce(other.text, '')
                     WHEN type(tension) = 'REFINES' THEN 'REFINES: ' + coalesce(other.text, '')
                     WHEN type(tension) = 'QUALIFIES' THEN 'QUALIFIES: ' + coalesce(other.text, '')
-                END)[..3] AS contradiction_texts
+                END)[..3] AS contradiction_texts,
+                collect(DISTINCT CASE WHEN complement IS NOT NULL
+                    THEN type(comp) + ': ' + coalesce(complement.text, '') END)[..3] AS complement_texts
             ORDER BY score DESC, qs.confidence DESC
             LIMIT $max_results
             """,
@@ -356,36 +448,142 @@ def _fetch_chunks_for_claims(
     return fetched_chunks
 
 
+def _build_kg_findings(
+    kg_claims: List[Dict],
+    chunks: List[Dict],
+) -> List[Dict]:
+    """Construit les findings KG comme instructions de lecture (pas contenu narratif).
+
+    INV-ARCH-06 : Le KG diagnostique, il ne raconte pas.
+    Le KG ne fournit PAS du contenu semantique concurrent des chunks.
+    Il fournit des INSTRUCTIONS DE LECTURE pour le LLM.
+
+    Returns:
+        Liste de dicts {"type": str, "instruction": str}
+    """
+    if not kg_claims:
+        return []
+
+    findings = []
+
+    # 1. Tensions detectees (CONTRADICTS, REFINES, QUALIFIES)
+    tensions = []
+    for claim in kg_claims:
+        for t in claim.get("contradiction_texts", []):
+            if t and t not in tensions:
+                tensions.append(t)
+
+    if tensions:
+        findings.append({
+            "type": "tension",
+            "instruction": (
+                "Sources contain DIVERGENT information on this topic. "
+                "Present ALL positions explicitly with their sources. "
+                "Do NOT collapse into a single consensus answer."
+            ),
+        })
+
+    # 2. Complements cross-doc (COMPLEMENTS, EVOLVES_TO, SPECIALIZES)
+    complements = []
+    for claim in kg_claims:
+        for t in claim.get("complement_texts", []):
+            if t and t not in complements:
+                complements.append(t)
+
+    if complements:
+        findings.append({
+            "type": "cross_doc_complement",
+            "instruction": (
+                "Other documents provide COMPLEMENTARY information on this topic. "
+                "Integrate perspectives from ALL relevant documents to give a complete answer. "
+                "Do NOT limit yourself to a single document's view."
+            ),
+        })
+
+    # 3. Cross-doc discovery (documents absents du RAG mais pertinents)
+    chunk_doc_ids = {c.get("doc_id", c.get("source_file", "")) for c in chunks}
+    cross_doc_sources = set()
+    for claim in kg_claims:
+        claim_doc = claim.get("source_file", "")
+        if claim_doc and claim_doc not in chunk_doc_ids:
+            cross_doc_sources.add(claim_doc)
+
+    if cross_doc_sources:
+        doc_names = ", ".join(sorted(cross_doc_sources)[:3])
+        findings.append({
+            "type": "cross_doc_discovery",
+            "instruction": (
+                f"Additional documents ({doc_names}) were found via knowledge graph analysis "
+                f"but were NOT in the initial search. If their content appears in the sources below, "
+                f"compare it explicitly with the primary sources."
+            ),
+        })
+
+    # 3. Coverage gap (signal detector a detecte des docs manquants)
+    # Ceci est gere par le signal_policy, pas ici
+
+    logger.info(
+        f"[KG-FINDINGS] {len(findings)} findings: "
+        f"tensions={len(tensions)}, complements={len(complements)}, cross_doc={len(cross_doc_sources)}"
+    )
+
+    return findings
+
+
+def _format_kg_findings_as_instructions(findings: List[Dict]) -> str:
+    """Formatte les findings KG en instructions de lecture pour le prompt.
+
+    Placees APRES les sources dans le prompt pour eviter l'early commitment bias.
+    """
+    if not findings:
+        return ""
+
+    lines = []
+    for f in findings:
+        lines.append(f"- {f['instruction']}")
+
+    return "\n## Reading instructions (from document analysis)\n" + "\n".join(lines)
+
+
+def _build_kg_context_block(
+    kg_claims: List[Dict],
+    chunks: List[Dict],
+) -> str:
+    """Wrapper de compatibilite — appelle _build_kg_findings + _format_kg_findings_as_instructions."""
+    findings = _build_kg_findings(kg_claims, chunks)
+    return _format_kg_findings_as_instructions(findings)
+
+
 def _enrich_chunks_with_kg(
     chunks: List[Dict],
     kg_claims: List[Dict],
     enrichment_map: Dict[str, Dict],
 ) -> None:
-    """Proposition A — Enrichit les chunks Qdrant avec les metadonnees KG.
+    """Enrichit les chunks Qdrant avec les metadonnees KG.
 
-    Strategie double :
-    1. Lookup EXACT par chunk_id : le claim pointe directement vers ce chunk via chunk_ids
-    2. Fallback par doc_id : si pas de match exact, prendre le meilleur claim du meme doc
+    Strategie 2 niveaux (le KG enrichit le RAG, ne le remplace pas) :
+    1. Match EXACT par chunk_id (bridge claim→chunk, prioritaire)
+    2. Match SAME-DOC : claims du meme doc_id propagent entites et tensions
+       aux chunks de ce document (pas de pollution cross-doc)
 
     Injecte : entity_names, contradiction_texts (REFINES/QUALIFIES/CONTRADICTS), source_type
     """
-    # Index 1 : claims par chunk_id (matching exact)
+    # Index niveau 1 : claims par chunk_id (bridge exact)
     claims_by_chunk_id: Dict[str, Dict] = {}
     for claim in kg_claims:
         for cid in claim.get("chunk_ids", []):
             if cid and cid not in claims_by_chunk_id:
                 claims_by_chunk_id[cid] = claim
 
-    # Index 2 : claims par doc_id (fallback)
+    # Index niveau 2 : claims par doc_id (same-doc fallback)
     claims_by_doc: Dict[str, List[Dict]] = {}
     for claim in kg_claims:
-        doc = claim.get("source_file", "")
-        if doc:
-            claims_by_doc.setdefault(doc, []).append(claim)
+        did = claim.get("doc_id") or claim.get("source_file", "")
+        if did:
+            claims_by_doc.setdefault(did, []).append(claim)
 
     enriched_count = 0
     tension_count = 0
-    exact_match_count = 0
 
     for chunk in chunks:
         chunk_id = chunk.get("chunk_id", "")
@@ -393,26 +591,36 @@ def _enrich_chunks_with_kg(
 
         best_claim = None
 
-        # 1. Match EXACT par chunk_id (le claim pointe vers CE chunk)
+        # Niveau 1 : match EXACT par chunk_id (bridge)
         if chunk_id and chunk_id in claims_by_chunk_id:
             best_claim = claims_by_chunk_id[chunk_id]
-            exact_match_count += 1
 
-        # 2. Fallback par doc_id
-        if not best_claim:
-            doc_claims = claims_by_doc.get(chunk_doc, [])
-            if not doc_claims:
-                for doc_key, doc_cl in claims_by_doc.items():
-                    if doc_key and chunk_doc and (doc_key in chunk_doc or chunk_doc in doc_key):
-                        doc_claims = doc_cl
-                        break
-            if doc_claims:
-                best_claim = max(doc_claims, key=lambda c: c.get("score", 0))
+        # Niveau 2 : same-doc — agréger entités et tensions de tous les claims du même doc
+        if not best_claim and chunk_doc and chunk_doc in claims_by_doc:
+            doc_claims = claims_by_doc[chunk_doc]
+            # Agreger les entites et tensions du meme document
+            agg_entities = []
+            agg_tensions = []
+            for dc in doc_claims:
+                for e in dc.get("entity_names", []):
+                    if e and e not in agg_entities:
+                        agg_entities.append(e)
+                for t in dc.get("contradiction_texts", []):
+                    if t and t not in agg_tensions:
+                        agg_tensions.append(t)
+            if agg_entities or agg_tensions:
+                chunk["entity_names"] = agg_entities[:10]
+                chunk["contradiction_texts"] = agg_tensions[:5]
+                chunk["source_type"] = "kg_doc_enriched"
+                enriched_count += 1
+                if agg_tensions:
+                    tension_count += 1
+                continue
 
         if not best_claim:
             continue
 
-        # Injecter les enrichissements KG
+        # Injecter les enrichissements KG (niveau 1)
         entities = best_claim.get("entity_names", [])
         tensions = [t for t in best_claim.get("contradiction_texts", []) if t]
 
@@ -448,8 +656,7 @@ def _enrich_chunks_with_kg(
     if enriched_count > 0:
         logger.info(
             f"[KG-ENRICH] Enriched {enriched_count}/{len(chunks)} chunks "
-            f"(exact={exact_match_count}, fallback={enriched_count - exact_match_count}, "
-            f"tensions={tension_count}, entities={len(all_entities)})"
+            f"(bridge+same_doc, tensions={tension_count}, entities={len(all_entities)})"
         )
 
 
@@ -529,32 +736,10 @@ def search_documents(
         except Exception as e:
             logger.warning(f"[MEMORY] Failed to load session context (non-blocking): {e}")
 
-    # Utiliser la requête enrichie pour l'embedding
-    query_vector = embedding_model.encode(enriched_query)
-    if hasattr(query_vector, "tolist"):
-        query_vector = query_vector.tolist()
-    elif hasattr(query_vector, "numpy"):
-        query_vector = query_vector.numpy().tolist()
-    query_vector = [float(x) for x in query_vector]
+    # Utiliser la requête enrichie pour l'embedding (delegue a retriever)
+    query_vector = embed_query(enriched_query, embedding_model)
 
-    # 🌊 ADR_GRAPH_FIRST_ARCHITECTURE Phase C: Graph-First Search Mode
-    graph_first_plan = None
-    graph_first_chunks = None
-    graph_first_succeeded = False
-
-    # DÉSACTIVÉ: Graph-First complet dépend de CanonicalConcept + index concept_search (OSMOSE semantic)
-    # qui n'existent pas en mode ClaimFirst.
-    effective_graph_first = False
-
-    # ═══════════════════════════════════════════════════════════════════
-    # PROPOSITION A — KG-Enriched Qdrant
-    #
-    # Qdrant choisit les preuves (memes chunks que le RAG).
-    # Le KG choisit le contexte d'interpretation (entites, tensions, QD).
-    #
-    # Le search Qdrant reste IDENTIQUE au RAG. On enrichit APRES.
-    # OSMOSIS ne peut PAS etre pire que le RAG dans cette configuration.
-    # ═══════════════════════════════════════════════════════════════════
+    # Signal-driven KG injection : le KG detecte les signaux, le RAG reste pur par defaut
     kg_claim_results = []
     kg_enrichment_map = {}
 
@@ -584,278 +769,78 @@ def search_documents(
         except Exception as e:
             logger.warning(f"[KG-ENRICH] Claims search failed (non-blocking): {e}")
 
-    if effective_graph_first:
-        try:
-            from .graph_first_search import get_graph_first_service, SearchMode as GFSearchMode
+    # Retrieval Qdrant (RAG pur — invariant, identique pour toutes les questions)
+    retrieval_result = _retrieve_chunks(
+        question=query,
+        query_vector=query_vector,
+        qdrant_client=qdrant_client,
+        settings=settings,
+        top_k=TOP_K,
+        score_threshold=SCORE_THRESHOLD,
+        solution_filter=solution,
+        release_filter=release_id,
+    )
 
-            gf_service = get_graph_first_service(tenant_id)
+    if not retrieval_result.chunks:
+        return {
+            "status": "no_results",
+            "results": [],
+            "message": "Aucune information pertinente n'a été trouvée dans la base de connaissance.",
+        }
 
-            # Construire le plan de recherche (détermine le mode)
-            loop = asyncio.new_event_loop()
+    reranked_chunks = retrieval_result.chunks
+
+    # Phase C light — KG Document Scoping
+    # Ajouter des chunks des documents en tension absents du retrieval initial
+    if kg_claim_results:
+        tension_doc_ids = set()
+        for claim in kg_claim_results:
+            for tension_text in claim.get("contradiction_texts", []):
+                if tension_text:
+                    tension_doc_ids.add(claim.get("source_file", ""))
+
+        missing_tension_docs = tension_doc_ids - retrieval_result.docs_involved - {""}
+        if not missing_tension_docs:
+            claim_doc_ids = set(c.get("source_file", "") for c in kg_claim_results if c.get("source_file"))
+            if len(claim_doc_ids) > 1:
+                missing_tension_docs = claim_doc_ids - retrieval_result.docs_involved - {""}
+
+        if missing_tension_docs:
             try:
-                graph_first_plan = loop.run_until_complete(
-                    gf_service.build_search_plan(query)
+                tension_retrieval = _retrieve_chunks(
+                    question=query,
+                    query_vector=query_vector,
+                    qdrant_client=qdrant_client,
+                    settings=settings,
+                    top_k=3,
+                    score_threshold=SCORE_THRESHOLD * 0.8,
+                    doc_filter=list(missing_tension_docs),
                 )
-            finally:
-                loop.close()
-
-            # Exécuter la recherche selon le mode
-            if graph_first_plan.mode in (GFSearchMode.REASONED, GFSearchMode.ANCHORED):
-                context_ids = graph_first_plan.get_context_ids_for_qdrant()
-                document_ids = graph_first_plan.get_document_ids_for_qdrant()
-
-                # Utiliser context_ids si disponible, sinon document_ids (fix 2026-01-23)
-                if context_ids or document_ids:
-                    # Recherche Qdrant filtrée par context_ids ou document_ids
-                    loop = asyncio.new_event_loop()
-                    try:
-                        graph_first_chunks = loop.run_until_complete(
-                            gf_service.search_qdrant_filtered(
-                                query=enriched_query,
-                                context_ids=context_ids,
-                                document_ids=document_ids if not context_ids else None,
-                                collection_name=settings.qdrant_collection,
-                                top_k=TOP_K,
-                            )
-                        )
-                    finally:
-                        loop.close()
-
-                    if graph_first_chunks:
-                        graph_first_succeeded = True
-                        filter_type = "contexts" if context_ids else "documents"
-                        filter_count = len(context_ids) if context_ids else len(document_ids)
+                if tension_retrieval.chunks:
+                    existing_texts = {c.get("text", "")[:80] for c in reranked_chunks}
+                    added = 0
+                    for tc in tension_retrieval.chunks:
+                        text_key = tc.get("text", "")[:80]
+                        if text_key not in existing_texts:
+                            reranked_chunks.append(tc)
+                            existing_texts.add(text_key)
+                            added += 1
+                    if added > 0:
                         logger.info(
-                            f"[GRAPH-FIRST] Mode {graph_first_plan.mode.value}: "
-                            f"{len(graph_first_chunks)} chunks from {filter_count} {filter_type}"
+                            f"[KG-SCOPE] Added {added} chunks from {len(missing_tension_docs)} "
+                            f"tension documents: {[d[:30] for d in missing_tension_docs]}"
                         )
+            except Exception as e:
+                logger.debug(f"[KG-SCOPE] Tension doc search failed (non-blocking): {e}")
 
-            if not graph_first_succeeded:
-                # Phase 4 Bridge: en mode TEXT_ONLY, chercher d'abord dans les claims
-                # par vector search Neo4j au lieu du RAG Qdrant aveugle.
-                try:
-                    claim_results = _search_claims_vector(
-                        query=enriched_query,
-                        tenant_id=tenant_id,
-                        top_k=TOP_K,
-                    )
-                    if claim_results:
-                        graph_first_chunks = claim_results
-                        graph_first_succeeded = True
-                        logger.info(
-                            f"[GRAPH-FIRST] TEXT_ONLY → claims vector search: "
-                            f"{len(claim_results)} claims found"
-                        )
-                except Exception as e:
-                    logger.debug(f"[GRAPH-FIRST] Claims vector search failed: {e}")
-
-            if not graph_first_succeeded:
-                logger.info(
-                    f"[GRAPH-FIRST] Falling back to standard search "
-                    f"(mode={graph_first_plan.mode.value}, reason={graph_first_plan.fallback_reason})"
-                )
-
-        except Exception as e:
-            logger.warning(f"[GRAPH-FIRST] Search failed, falling back to standard: {e}")
-
-    # 🚀 OSMOSE Phase 7: Hybrid Anchor Search Mode
-    reranked_chunks = None
-    hybrid_search_succeeded = False
-
-    if use_hybrid_anchor_search:
-        try:
-            from .hybrid_anchor_search import (
-                get_hybrid_anchor_search_service,
-                SearchMode
-            )
-
-            hybrid_service = get_hybrid_anchor_search_service(
-                qdrant_client=qdrant_client,
-                embedding_model=embedding_model,
-                tenant_id=tenant_id
-            )
-
-            # Construire les filtres
-            filter_params = {}
-            if solution:
-                filter_params["solution.main"] = solution
-
-            # Exécuter la recherche hybride
-            hybrid_response = hybrid_service.search_sync(
-                query=enriched_query,
-                collection_name=settings.qdrant_collection,
-                top_k=TOP_K,
-                mode=SearchMode.HYBRID,
-                filter_params=filter_params if filter_params else None
-            )
-
-            if hybrid_response.results:
-                # Convertir les résultats hybrides en format standard
-                hybrid_chunks = []
-                for hr in hybrid_response.results:
-                    chunk_data = {
-                        "text": hr.text,
-                        "source_file": hr.source_file_url or hr.document_name,
-                        "slide_index": hr.slide_index,
-                        "score": hr.score,
-                        "slide_image_url": hr.slide_image_url,
-                        # Métadonnées additionnelles Hybrid Anchor
-                        "chunk_score": hr.chunk_score,
-                        "concept_score": hr.concept_score,
-                        "citations": [
-                            {
-                                "concept_label": c.concept_label,
-                                "anchor_role": c.anchor_role,
-                                "quote": c.quote,
-                            }
-                            for c in hr.citations
-                        ]
-                    }
-                    hybrid_chunks.append(chunk_data)
-
-                reranked_chunks = hybrid_chunks
-                hybrid_search_succeeded = True
-
-                logger.info(
-                    f"[OSMOSE:HybridAnchor] Search returned {len(hybrid_chunks)} results "
-                    f"({hybrid_response.total_concepts_matched} concepts matched, "
-                    f"{hybrid_response.processing_time_ms:.1f}ms)"
-                )
-
-        except Exception as e:
-            logger.warning(
-                f"[OSMOSE:HybridAnchor] Search failed, falling back to standard: {e}"
-            )
-
-    # ADR_GRAPH_FIRST: Si graph-first a réussi, utiliser ces chunks
-    if graph_first_succeeded and graph_first_chunks:
-        reranked_chunks = graph_first_chunks
-        # Reranker pour améliorer l'ordre
-        reranked_chunks = rerank_chunks(query, reranked_chunks, top_k=TOP_K)
-
-    # Recherche classique (seulement si graph-first ET hybrid search n'ont pas fonctionné)
-    if not graph_first_succeeded and not hybrid_search_succeeded:
-        # Construction du filtre
-        must_not_conditions = []
-        must_conditions = []
-
-        # Exclure les Q/A RFP si le champ type existe (ancienne collection knowbase)
-        # knowbase_chunks_v2 n'a pas ce champ, le filtre est ignoré proprement
-        if settings.qdrant_collection == "knowbase":
-            must_not_conditions.append(
-                FieldCondition(key="type", match=MatchValue(value="rfp_qa"))
-            )
-
-        # Ajouter le filtre par solution si spécifié
-        if solution:
-            must_conditions.append(
-                FieldCondition(key="solution.main", match=MatchValue(value=solution))
-            )
-
-        # 🔄 Phase B: Filtre par release_id (axis_release_id dans payload Qdrant)
-        if release_id:
-            must_conditions.append(
-                FieldCondition(key="axis_release_id", match=MatchValue(value=release_id))
-            )
-
-        query_filter = Filter(
-            must_not=must_not_conditions if must_not_conditions else None,
-            must=must_conditions if must_conditions else None
-        )
-        results = qdrant_client.search(
-            collection_name=settings.qdrant_collection,
-            query_vector=query_vector,
-            limit=TOP_K,
-            with_payload=True,
-            query_filter=query_filter,
-        )
-        filtered = [r for r in results if r.score >= SCORE_THRESHOLD]
-
-        # ═══════════════════════════════════════════════════════════════
-        # PHASE C light — KG Document Scoping
-        # Si les claims KG contiennent des tensions cross-doc
-        # (REFINES/QUALIFIES), forcer la diversite documentaire
-        # en ajoutant des chunks des documents en tension.
-        # Domain-agnostic : fonctionne sur tout corpus avec des tensions.
-        # ═══════════════════════════════════════════════════════════════
-        if kg_claim_results and filtered:
-            # Identifier les documents en tension depuis les claims KG
-            tension_doc_ids = set()
-            for claim in kg_claim_results:
-                for tension_text in claim.get("contradiction_texts", []):
-                    if tension_text:
-                        # Les tensions contiennent des textes d'autres claims
-                        # Le doc source du claim en tension est dans source_file
-                        tension_doc_ids.add(claim.get("source_file", ""))
-
-            # Documents deja presents dans les resultats Qdrant
-            qdrant_doc_ids = set()
-            for r in filtered:
-                doc_id = (r.payload or {}).get("doc_id", "")
-                if doc_id:
-                    qdrant_doc_ids.add(doc_id)
-
-            # Documents en tension ABSENTS des resultats Qdrant
-            missing_tension_docs = tension_doc_ids - qdrant_doc_ids - {""}
-            if not missing_tension_docs:
-                # Aussi chercher les docs des claims KG qui ne sont pas dans les resultats
-                claim_doc_ids = set(c.get("source_file", "") for c in kg_claim_results if c.get("source_file"))
-                multi_doc_claims = len(claim_doc_ids) > 1
-                if multi_doc_claims:
-                    missing_tension_docs = claim_doc_ids - qdrant_doc_ids - {""}
-
-            if missing_tension_docs:
-                # Faire un search Qdrant supplementaire filtre par ces documents
-                try:
-                    tension_filter = Filter(
-                        must=[FieldCondition(key="doc_id", match=MatchAny(any=list(missing_tension_docs)))]
-                    )
-                    tension_results = qdrant_client.search(
-                        collection_name=settings.qdrant_collection,
-                        query_vector=query_vector,
-                        limit=3,  # Max 3 chunks supplementaires des docs en tension
-                        with_payload=True,
-                        query_filter=tension_filter,
-                    )
-                    tension_filtered = [r for r in tension_results if r.score >= SCORE_THRESHOLD * 0.8]
-
-                    if tension_filtered:
-                        # Ajouter ces chunks aux resultats (dedup par texte)
-                        existing_texts = {(r.payload or {}).get("text", "")[:80] for r in filtered}
-                        added = 0
-                        for r in tension_filtered:
-                            text_key = (r.payload or {}).get("text", "")[:80]
-                            if text_key not in existing_texts:
-                                filtered.append(r)
-                                existing_texts.add(text_key)
-                                added += 1
-
-                        if added > 0:
-                            logger.info(
-                                f"[KG-SCOPE] Added {added} chunks from {len(missing_tension_docs)} "
-                                f"tension documents: {[d[:30] for d in missing_tension_docs]}"
-                            )
-                except Exception as e:
-                    logger.debug(f"[KG-SCOPE] Tension doc search failed (non-blocking): {e}")
-
-        if not filtered:
-            return {
-                "status": "no_results",
-                "results": [],
-                "message": "Aucune information pertinente n'a été trouvée dans la base de connaissance.",
-                "graph_first_plan": graph_first_plan.to_dict() if graph_first_plan else None,
-            }
-
-        public_url = PUBLIC_URL
-        response_chunks = [build_response_payload(r, public_url) for r in filtered]
-
-        # Apply reranking to improve relevance ordering
-        reranked_chunks = rerank_chunks(query, response_chunks, top_k=TOP_K)
-
-    # PROPOSITION A — Enrichissement KG post-Qdrant
-    # Les chunks Qdrant sont IDENTIQUES au RAG. On enrichit avec le KG.
-    # Qdrant choisit les preuves. Le KG choisit le contexte d'interpretation.
+    # PROPOSITION A — Enrichissement KG post-Qdrant (conforme PHASE_B doc)
+    # INVARIANT : les chunks Qdrant sont IDENTIQUES au RAG. Le KG ne modifie PAS les chunks.
+    # Le KG produit un BLOC CONTEXTE SEPARE injecté dans le prompt de synthèse.
+    kg_context_block = ""
     if kg_claim_results and reranked_chunks:
+        kg_context_block = _build_kg_context_block(kg_claim_results, reranked_chunks)
+        # Propager entity_names et contradiction_texts sur les chunks pour le frontend
+        # (metadata seulement, pas dans le texte du chunk)
         _enrich_chunks_with_kg(reranked_chunks, kg_claim_results, kg_enrichment_map)
 
     # 🧠 Session Entity Resolution: Si session active, chercher chunks via KG
@@ -895,7 +880,8 @@ def search_documents(
             logger.warning(f"[SESSION-KG] Entity resolution failed (non-blocking): {e}")
 
     # 🌊 OSMOSE: Enrichissement Knowledge Graph
-    graph_context_text = ""
+    # Le KG context block est un bloc séparé, pas mélangé dans les chunks (PHASE_B doc)
+    graph_context_text = kg_context_block  # Bloc KG séparé (entités, tensions, supplements)
     graph_context_data = None
     # DÉSACTIVÉ: graph_guided_search dépend de CanonicalConcept + index concept_search
     # + collection osmos_concepts (OSMOSE semantic pipeline) qui n'existent pas en mode
@@ -1039,6 +1025,34 @@ def search_documents(
         }
         logger.debug(f"[OSMOSE] KG signals for synthesis: {kg_signals}")
 
+    # Signal-driven KG injection : detecter les signaux puis appliquer la policy
+    retrieval_doc_ids = set()
+    if reranked_chunks:
+        for c in reranked_chunks:
+            doc_id = c.get("doc_id", c.get("source_file", ""))
+            if doc_id:
+                retrieval_doc_ids.add(doc_id)
+
+    signal_report = detect_signals(
+        kg_claims=kg_claim_results,
+        retrieval_doc_ids=retrieval_doc_ids,
+        qs_crossdoc_data=qs_crossdoc_data,
+    )
+    signal_policy = build_policy(signal_report)
+
+    # Ajouter les instructions signal-driven au contexte de synthese
+    if signal_policy.synthesis_additions:
+        signal_context = "\n".join(f"- {a}" for a in signal_policy.synthesis_additions)
+        graph_context_text = f"\n\n## Signal-driven analysis\n{signal_context}" + graph_context_text
+
+    # Construire le ContradictionEnvelope pour forcer la divulgation des tensions
+    contradiction_envelope = _build_contradiction_envelope(kg_claim_results, signal_report)
+    if contradiction_envelope.has_tension:
+        logger.info(
+            f"[ENVELOPE] ContradictionEnvelope built: {len(contradiction_envelope.pairs)} pairs, "
+            f"mode={contradiction_envelope.synthesis_mode}"
+        )
+
     # Generate synthesized response + instrumented answer in parallel (if both needed)
     if use_instrumented:
         from .instrumented_answer_builder import build_instrumented_answer
@@ -1052,7 +1066,8 @@ def search_documents(
                 graph_context_text,
                 session_context_text,
                 kg_signals,
-                chain_signals=chain_signals
+                chain_signals=chain_signals,
+                contradiction_envelope=contradiction_envelope,
             )
 
         def _run_instrumented():
@@ -1092,15 +1107,23 @@ def search_documents(
             graph_context_text,
             session_context_text,
             kg_signals,
-            chain_signals=chain_signals
+            chain_signals=chain_signals,
+            contradiction_envelope=contradiction_envelope,
         )
         instrumented_answer = None
         build_metadata = None
 
+    # Detecter si des chunks contiennent du contenu visuel interprete
+    includes_visual_interpretation = any(
+        "\u2550\u2550\u2550 VISUAL CONTENT" in (c.get("text", "") or "")
+        for c in reranked_chunks
+    )
+
     response = {
         "status": "success",
         "results": reranked_chunks,
-        "synthesis": synthesis_result
+        "synthesis": synthesis_result,
+        "includes_visual_interpretation": includes_visual_interpretation,
     }
 
     if instrumented_answer is not None:
@@ -1120,9 +1143,24 @@ def search_documents(
     if qs_crossdoc_data:
         response["cross_doc_comparisons"] = qs_crossdoc_data
 
-    # 🌊 ADR_GRAPH_FIRST Phase C: Ajouter le plan graph-first
-    if graph_first_plan:
-        response["graph_first_plan"] = graph_first_plan.to_dict()
+    # Signal report dans la reponse (pour debug/frontend)
+    if not signal_report.is_silent:
+        response["signal_report"] = {
+            "signals": [{"type": s.type, "strength": s.strength} for s in signal_report.signals],
+            "claims_analyzed": signal_report.claims_analyzed,
+        }
+
+    # ContradictionEnvelope dans la reponse (pour debug/frontend)
+    if contradiction_envelope.has_tension:
+        response["contradiction_envelope"] = {
+            "has_tension": True,
+            "requires_disclosure": contradiction_envelope.requires_disclosure,
+            "pairs_count": len(contradiction_envelope.pairs),
+            "synthesis_mode": contradiction_envelope.synthesis_mode,
+            # Le champ tension_disclosed est dans synthesis_result["contradiction_envelope"]
+            "tension_disclosed": synthesis_result.get("contradiction_envelope", {}).get("tension_disclosed", True),
+            "fallback_appended": synthesis_result.get("contradiction_envelope", {}).get("fallback_appended", False),
+        }
 
     # 🌊 Phase 2.12: Ajouter le profil de visibilité actif
     try:

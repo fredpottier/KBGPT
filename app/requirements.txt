@@ -62,6 +62,7 @@ jinja2
 # Docling: extraction structurée PDF/DOCX/PPTX/XLSX/HTML/Markdown/Images
 # Documentation: https://github.com/DS4SD/docling
 docling>=2.14.0
+docling-hierarchical-pdf>=0.1.0  # Post-processing: reading order + heading hierarchy
 
 # LangChain minimal (pas toute la suite)
 langchain>=0.3.0  # Base package needed for memory classes
@@ -72,7 +73,8 @@ langchain_openai>=0.1.21
 # Unstructured MINIMAL (pas [all-docs] qui est énorme !)
 unstructured==0.15.0
 
-# OCR simple (pas ONNX qui est lourd)
+# OCR simple — onnxruntime requis par rapidocr >= 3.x
+onnxruntime>=1.24.0
 pytesseract
 
 # Optionnel si vraiment besoin plus tard:
@@ -144,3 +146,4 @@ python-ulid>=2.2.0  # ULID pour IDs RawAssertion
 # Modèles spaCy supplémentaires pour patterns multilingues:
 # python -m spacy download en_core_web_sm  # English (small - 13MB)
 # python -m spacy download fr_core_news_sm # French (small - 16MB)
+ragas>=0.4.0

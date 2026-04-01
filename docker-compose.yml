@@ -65,6 +65,7 @@ services:
       - ./config:/app/config
       - ./tests:/app/tests
       - ./poc:/app/poc
+      - ./benchmark:/app/benchmark  # Benchmark — resultats, questions, scripts (inclus dans les backups)
       - /var/run/docker.sock:/var/run/docker.sock:ro  # Domain Packs — lecture seule (build via docker API)
     networks:
       - knowbase_net
@@ -99,6 +100,7 @@ services:
       ONNXTR_CACHE_DIR: /data/models/onnxtr  # Persister cache OnnxTR
       KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://redis:6379/0
+      OSMOSIS_API_URL: http://app:8000
       DEV_MODE: "false"  # Mode production: worker tourne en continu (10 jobs avant reload)
 
       # ========== CONFIGURATION TIMEOUT CENTRALISÉE ==========
@@ -129,6 +131,7 @@ services:
       - ./config:/app/config
       - ./tests:/app/tests
       - ./poc:/app/poc
+      - ./benchmark:/app/benchmark
     networks:
       - knowbase_net
     working_dir: /app

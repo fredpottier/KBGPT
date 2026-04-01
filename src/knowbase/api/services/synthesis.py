@@ -2,57 +2,70 @@ from __future__ import annotations
 
 import time
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TYPE_CHECKING
 
 from knowbase.common.llm_router import TaskType, get_llm_router
+
+if TYPE_CHECKING:
+    from .search import ContradictionEnvelope
 
 logger = logging.getLogger(__name__)
 
 
-SYNTHESIS_PROMPT = """Tu es un assistant expert qui aide les utilisateurs à trouver des informations pertinentes dans la base de connaissances.
+SYNTHESIS_PROMPT = """You are a precise document analysis assistant that synthesizes information from provided sources.
 {session_context}
-## Question actuelle de l'utilisateur
+## User question
 {question}
 
-## Sources disponibles
+## Available sources
 {chunks_content}
 {graph_context}
 
-## Règles de réponse
+## Response rules
 
-1. **Synthétise** les informations des sources pour répondre à la question de manière claire et structurée.
+0. **Source priority (CRITICAL)**: The "Available sources" section above is your PRIMARY evidence. Read it FIRST. Any "Reading instructions" section below provides diagnostic guidance from knowledge graph analysis — use it to ADJUST your answer, not to replace your source-based reasoning.
 
-2. **Raisonnement cross-document (PRIORITAIRE)** : Si une section "Raisonnement cross-document" est fournie, elle contient des chaînes de faits reliant plusieurs documents. Ces chaînes constituent **LA réponse principale** à la question — elles révèlent des liens architecturaux qu'aucun document seul ne contient. Tu DOIS :
-   - **Structurer ta réponse autour de ces chaînes** (pas autour des chunks individuels)
-   - **Expliquer la chaîne complète** : "A repose sur B (source 1), qui lui-même s'appuie sur C (source 2)"
-   - **Citer tous les documents de la chaîne** pour montrer le raisonnement multi-source
-   - Les chunks individuels servent de **complément**, pas de base de la réponse
+1. **Synthesize** information from sources to answer clearly and in a structured manner.
 
-3. **Contexte conversationnel** : Si un contexte de conversation précédente est fourni, utilise-le pour comprendre les références implicites ("cela", "cette personne", "ce document", etc.) et maintenir la continuité de la discussion.
+2. **Cross-document reasoning (PRIORITY)**: If a "Cross-document reasoning" section is provided, it contains fact chains linking multiple documents. These chains are **THE MAIN answer** — they reveal architectural links no single document contains. You MUST:
+   - **Structure your answer around these chains** (not around individual chunks)
+   - **Explain the complete chain**: "A relies on B (source 1), which itself builds on C (source 2)"
+   - **Cite all documents in the chain** to show multi-source reasoning
+   - Individual chunks serve as **complement**, not the basis of the answer
 
-4. **Citations obligatoires** : Pour chaque information importante dont la source est connue, cite-la ainsi :
-   - Format simple : *(Source : Document ABC, slide 12)*
-   - Si plusieurs slides d'un même document : *(Source : Document ABC, slides 12-15)*
-   - Si plusieurs documents : indique le nom du document à chaque citation
+3. **Conversational context**: If previous conversation context is provided, use it to resolve implicit references and maintain discussion continuity.
 
-5. **Ne jamais** utiliser "Bloc #X", "Extrait X", "Document inconnu" ou "Source inconnue" - cite UNIQUEMENT les documents dont le nom est explicitement fourni dans les sources. Si une source n'a pas de nom de document clair, n'ajoute pas de citation pour cette information.
+4. **Mandatory citations**: For each important piece of information, cite it as:
+   - Simple format: *(Source: Document ABC, slide 12)*
+   - Multiple slides: *(Source: Document ABC, slides 12-15)*
+   - Multiple documents: indicate document name for each citation
 
-6. **Structure** ta réponse avec des sections ou puces si approprié.
+5. **Never** use "Block #X", "Extract X", "Unknown document" or "Unknown source" — cite ONLY documents whose name is explicitly provided in sources.
 
-7. Si les sources sont **insuffisantes** pour répondre complètement, indique-le clairement.
+6. **Structure** your response with sections or bullet points when appropriate.
 
-8. Si des informations sont **contradictoires**, mentionne les deux versions avec leurs sources.
+7. **Partial information rule (CRITICAL)**: If sources contain information that is PARTIALLY relevant to the question, answer with what you have. Do NOT refuse to answer. Say "Based on available sources..." and provide the partial answer. ONLY say information is not available if NONE of the sources contain ANY relevant information at all.
+   - **IMPORTANT**: Even if sources do not contain the EXACT term or value asked about, if they contain information about the SAME TOPIC or RELATED CONCEPT, you MUST answer with that information. For example, if asked about a specific transaction code and sources describe the same functional area, provide what the sources say about that area.
+   - **NEVER** start with "I don't have information" or "the sources don't contain" when sources discuss the topic. Instead, start with what the sources DO say.
 
-9. **Comparaisons cross-document (IMPORTANT)** : Si une section "Comparaisons cross-document (QuestionSignatures)" est fournie, elle contient des **faits comparables détectés automatiquement entre documents**. Tu DOIS :
-   - **Inclure une section dédiée** dans ta réponse (ex: "### Évolutions entre versions" ou "### Points de vigilance")
-   - Pour chaque **ÉVOLUTION** : expliquer clairement ce qui a changé, entre quels documents, et quel est l'impact
-   - Pour chaque **CONTRADICTION** : signaler la divergence avec les sources précises
-   - Pour chaque **ACCORD** : mentionner la confirmation cross-doc (renforce la fiabilité)
-   - **Ces données sont des faits vérifiés** extraits du Knowledge Graph — ne les ignore pas
+8. If information is **contradictory**, present BOTH versions with their sources explicitly.
 
-10. Réponds dans la **même langue que la question** de l'utilisateur.
+9. **Cross-document comparisons (IMPORTANT)**: If a "Cross-document comparisons (QuestionSignatures)" section is provided, it contains **automatically detected comparable facts across documents**. You MUST:
+   - **Include a dedicated section** (e.g., "### Version changes" or "### Points of attention")
+   - For each **EVOLUTION**: clearly explain what changed, between which documents, and the impact
+   - For each **CONTRADICTION**: flag the divergence with precise sources
+   - For each **AGREEMENT**: mention cross-doc confirmation (reinforces reliability)
+   - **These are verified facts** from the Knowledge Graph — do NOT ignore them
 
-Réponse :"""
+10. **Visual content interpretation (IMPORTANT)**: Source texts between "═══ VISUAL CONTENT" and "═══ END VISUAL CONTENT" markers are **AI-generated interpretations of diagrams and visual elements**, NOT author text. When your answer uses visual content:
+   - **Always use hedging language**: "The diagram appears to show...", "Based on visual interpretation of the slide..."
+   - **Never present it as a documented fact** — it is a machine reading of a visual, not a verbatim statement
+   - **Prefer author text** (bullets, speaker notes) over visual interpretation when both cover the same topic
+   - **Cite the source slide** so the reader can verify the visual themselves
+
+11. Answer in the **SAME LANGUAGE as the question**.
+
+Answer:"""
 
 
 def format_chunks_for_synthesis(chunks: List[Dict[str, Any]]) -> str:
@@ -107,13 +120,66 @@ def format_chunks_for_synthesis(chunks: List[Dict[str, Any]]) -> str:
     return "\n\n".join(formatted_chunks)
 
 
+def _build_tension_prompt_section(envelope: "ContradictionEnvelope") -> str:
+    """Construit la section MANDATORY du prompt pour forcer la divulgation des tensions."""
+    lines = [
+        "\n## MANDATORY: Tension disclosure",
+        "The following divergences have been detected between documents. "
+        "You MUST address each one in your response.",
+        "For each divergence, present BOTH positions with their respective sources.\n",
+    ]
+    for pair in envelope.pairs:
+        lines.append(
+            f"- {pair['doc_a']} says: \"{pair['claim_a'][:150]}\" "
+            f"vs {pair.get('doc_b', 'another source')} says: \"{pair['claim_b'][:150]}\""
+        )
+    lines.append(
+        "\nYour response MUST contain a \"## Divergences\" or \"## Points d'attention\" "
+        "section addressing these tensions."
+    )
+    return "\n".join(lines)
+
+
+def _validate_tension_disclosure(answer: str, envelope: "ContradictionEnvelope") -> bool:
+    """Verifie si la reponse mentionne les tensions detectees.
+
+    Heuristique simple : presence de mots-cles lies aux divergences.
+    """
+    if not envelope.requires_disclosure:
+        return True
+    tension_keywords = [
+        "divergen", "contradict", "differ", "disagree", "however",
+        "en revanche", "toutefois", "cependant", "attention",
+        "divergence", "contradiction", "unlike", "while",
+        "points d'attention", "points of attention",
+    ]
+    answer_lower = answer.lower()
+    return any(kw in answer_lower for kw in tension_keywords)
+
+
+def _build_tension_fallback(envelope: "ContradictionEnvelope") -> str:
+    """Construit un fallback deterministe (sans LLM) garantissant la divulgation."""
+    fallback = (
+        "\n\n## Points d'attention\n"
+        "Les sources ne sont pas homogènes sur ce point. "
+    )
+    for pair in envelope.pairs[:3]:
+        fallback += (
+            f"\n- {pair['doc_a']} indique : \"{pair['claim_a'][:100]}\" "
+            f"tandis que {pair.get('doc_b', 'une autre source')} indique : "
+            f"\"{pair['claim_b'][:100]}\""
+        )
+    return fallback
+
+
 def synthesize_response(
     question: str,
     chunks: List[Dict[str, Any]],
     graph_context_text: str = "",
     session_context_text: str = "",
     kg_signals: Dict[str, Any] = None,
-    chain_signals: Dict[str, Any] = None
+    chain_signals: Dict[str, Any] = None,
+    contradiction_envelope: "ContradictionEnvelope | None" = None,
 ) -> Dict[str, Any]:
     """
     Génère une réponse synthétisée à partir des chunks et de la question.
@@ -127,19 +193,29 @@ def synthesize_response(
                    {"concepts_count", "relations_count", "sources_count", "avg_confidence"}
         chain_signals: Signaux de qualité des chaînes CHAINS_TO multi-doc
                       {"chain_count", "distinct_docs_count", "max_hops", "avg_hops"}
+        contradiction_envelope: Enveloppe de tensions KG — si requires_disclosure=True,
+                               la reponse DOIT mentionner les divergences (fallback deterministe)
 
     Returns:
         Dictionnaire contenant la réponse synthétisée et les métadonnées
     """
     if not chunks:
         return {
-            "synthesized_answer": "Aucune information pertinente n'a été trouvée dans la base de connaissances pour répondre à votre question.",
+            "synthesized_answer": "No relevant information was found in the knowledge base to answer your question.",
             "sources_used": [],
             "confidence": 0.0
         }
 
     # Formate les chunks pour le prompt
     chunks_content = format_chunks_for_synthesis(chunks)
+
+    # Injecter la section tension MANDATORY si l'enveloppe l'exige
+    if contradiction_envelope and contradiction_envelope.requires_disclosure:
+        graph_context_text += _build_tension_prompt_section(contradiction_envelope)
+        logger.info(
+            f"[SYNTHESIS] ContradictionEnvelope injected: "
+            f"{len(contradiction_envelope.pairs)} tension pairs, mode={contradiction_envelope.synthesis_mode}"
+        )
 
     # Construit le prompt avec contextes optionnels (KG et Session)
     prompt = SYNTHESIS_PROMPT.format(
@@ -149,28 +225,95 @@ def synthesize_response(
         session_context=session_context_text
     )
 
-    # Appel LLM via le routeur
-    router = get_llm_router()
-    messages = [
-        {"role": "system", "content": "Tu es un assistant expert SAP qui synthétise des informations pour répondre aux questions des utilisateurs."},
-        {"role": "user", "content": prompt}
-    ]
+    # Appel LLM — Architecture tiered :
+    # 1. Claude Haiku (API) si ANTHROPIC_API_KEY disponible — meilleur pour la synthese
+    # 2. Fallback : routeur LLM local (Qwen via Ollama/vLLM)
+    import os
 
-    # Log prompt size for debugging
+    SYSTEM_MSG = (
+        "You are a precise document analysis assistant. You synthesize information "
+        "from provided sources to answer user questions. ALWAYS answer with what you "
+        "have — even partial or tangential information is valuable. Lead with facts, "
+        "never with disclaimers. Only say 'information not available' when sources are "
+        "completely unrelated to the question."
+    )
+
     prompt_size = len(prompt)
     logger.info(f"[SYNTHESIS] Starting LLM call, prompt size: {prompt_size} chars")
     start_time = time.time()
 
     try:
-        synthesized_answer = router.complete(
-            task_type=TaskType.LONG_TEXT_SUMMARY,
-            messages=messages,
-            temperature=0.3,
-            max_tokens=2000
-        )
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if anthropic_key:
+            # Tier 1 : Claude Haiku (API) — 80% correct, $0.004/question
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=anthropic_key)
+                haiku_model = os.environ.get("OSMOSIS_SYNTHESIS_MODEL", "claude-haiku-4-5-20251001")
+                response = client.messages.create(
+                    model=haiku_model,
+                    max_tokens=2000,
+                    system=SYSTEM_MSG,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                )
+                synthesized_answer = response.content[0].text if response.content else ""
+                logger.info(
+                    f"[SYNTHESIS] Claude {haiku_model} completed in "
+                    f"{(time.time() - start_time) * 1000:.0f}ms, "
+                    f"{len(synthesized_answer)} chars"
+                )
+                # Track tokens pour le cockpit
+                try:
+                    from knowbase.common.token_tracker import track_tokens
+                    track_tokens(
+                        model=haiku_model,
+                        task_type="synthesis",
+                        input_tokens=response.usage.input_tokens,
+                        output_tokens=response.usage.output_tokens,
+                        context="synthesis_chat",
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.warning(f"[SYNTHESIS] Claude API failed, falling back to local LLM: {e}")
+                anthropic_key = ""  # Force fallback
+
+        if not anthropic_key:
+            # Tier 2 : Fallback LLM local (Qwen via routeur)
+            router = get_llm_router()
+            messages = [
+                {"role": "system", "content": SYSTEM_MSG},
+                {"role": "user", "content": prompt}
+            ]
+            synthesized_answer = router.complete(
+                task_type=TaskType.LONG_TEXT_SUMMARY,
+                messages=messages,
+                temperature=0.3,
+                max_tokens=2000
+            )
+            logger.info(
+                f"[SYNTHESIS] Local LLM completed in "
+                f"{(time.time() - start_time) * 1000:.0f}ms, "
+                f"{len(synthesized_answer)} chars"
+            )
 
         elapsed_ms = (time.time() - start_time) * 1000
         logger.info(f"[SYNTHESIS] LLM call completed in {elapsed_ms:.0f}ms, response: {len(synthesized_answer)} chars")
+
+        # ContradictionEnvelope : validation + fallback deterministe
+        tension_disclosed = True
+        if contradiction_envelope and contradiction_envelope.requires_disclosure:
+            tension_disclosed = _validate_tension_disclosure(synthesized_answer, contradiction_envelope)
+            if not tension_disclosed:
+                fallback_text = _build_tension_fallback(contradiction_envelope)
+                synthesized_answer += fallback_text
+                logger.warning(
+                    f"[SYNTHESIS] Tension disclosure FAILED validation — "
+                    f"appended deterministic fallback ({len(contradiction_envelope.pairs)} pairs)"
+                )
+            else:
+                logger.info("[SYNTHESIS] Tension disclosure validated OK — LLM addressed divergences")
 
         # Extrait les sources utilisées
         sources_used = []
@@ -290,7 +433,7 @@ def synthesize_response(
         # Score final = base + KG bonus + chain bonus (plafonné à 90%)
         confidence = min(base_confidence_final + kg_bonus + chain_bonus, 0.90)
 
-        return {
+        result = {
             "synthesized_answer": synthesized_answer.strip(),
             "sources_used": sources_used,
             "confidence": confidence,
@@ -301,6 +444,19 @@ def synthesize_response(
                 "final_score": round(confidence, 3)
             }
         }
+
+        # Ajouter les metadonnees ContradictionEnvelope si applicable
+        if contradiction_envelope and contradiction_envelope.has_tension:
+            result["contradiction_envelope"] = {
+                "has_tension": True,
+                "requires_disclosure": contradiction_envelope.requires_disclosure,
+                "pairs_count": len(contradiction_envelope.pairs),
+                "synthesis_mode": contradiction_envelope.synthesis_mode,
+                "tension_disclosed": tension_disclosed,
+                "fallback_appended": not tension_disclosed,
+            }
+
+        return result
 
     except Exception as e:
         return {

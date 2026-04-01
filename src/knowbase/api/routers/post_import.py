@@ -96,11 +96,12 @@ STEPS = [
         description="Regroupe les variantes d'une meme entite sous une CanonicalEntity unique via LLM (ex: acronymes, noms courts, variantes orthographiques).",
         order=1,
         estimated_duration="1 - 5min",
+        requires_llm=True,
     ),
     StepInfo(
         id="facets",
         name="Reconstruction facettes",
-        description="Ré-extrait les facettes thématiques (1 appel LLM/doc), puis matche les 34k claims aux facettes validées.",
+        description="Ré-extrait les facettes thématiques (1 appel LLM/doc), puis matche les claims aux facettes validées.",
         order=2,
         estimated_duration="10 - 25min",
         requires_llm=True,
@@ -155,6 +156,29 @@ STEPS = [
         description="Marque les claims sans structured_form et sans relations (ABOUT, CHAINS_TO, REFINES...) comme archivées. Elles restent dans le KG mais sont exclues des recherches.",
         order=9,
         estimated_duration="10 - 30s",
+    ),
+    StepInfo(
+        id="garbage_collection",
+        name="Garbage collection entités",
+        description="Marque les entités selon leur qualité : VALID (>= 2 claims ou canonical), UNCERTAIN (1 claim orpheline), NOISY (0 claims). Pas de suppression, juste du marquage pour filtrage.",
+        order=10,
+        estimated_duration="5 - 15s",
+    ),
+    StepInfo(
+        id="c4_relations",
+        name="C4 Relations Evidence-First",
+        description="Détecte CONTRADICTS/QUALIFIES/REFINES entre claims cross-doc via embedding similarity + adjudication LLM (Claude Haiku). Chaque relation a des preuves verbatim.",
+        order=11,
+        estimated_duration="5 - 30min",
+        requires_llm=True,
+    ),
+    StepInfo(
+        id="c6_pivots",
+        name="C6 Cross-doc Pivots",
+        description="Détecte COMPLEMENTS/EVOLVES_TO/SPECIALIZES entre claims cross-doc partageant une entité pivot. Exploite les entités canoniques comme liens inter-documents.",
+        order=12,
+        estimated_duration="5 - 30min",
+        requires_llm=True,
     ),
 ]
 
@@ -376,6 +400,12 @@ def _execute_step(step_id: str, tenant_id: str, on_progress=None) -> dict:
         return _run_claim_chunk_bridge(tenant_id, progress)
     elif step_id == "archive_isolated":
         return _run_archive_isolated(tenant_id)
+    elif step_id == "garbage_collection":
+        return _run_garbage_collection(tenant_id)
+    elif step_id == "c4_relations":
+        return _run_c4_relations(tenant_id, progress)
+    elif step_id == "c6_pivots":
+        return _run_c6_pivots(tenant_id, progress)
     else:
         raise ValueError(f"Étape inconnue: {step_id}")
 
@@ -1026,6 +1056,192 @@ def _run_archive_isolated(tenant_id: str) -> dict:
     }
 
 
+def _run_garbage_collection(tenant_id: str) -> dict:
+    """C3 Garbage collection — marque les entites VALID/UNCERTAIN/NOISY."""
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    driver = get_neo4j_client().driver
+
+    with driver.session() as session:
+        # Marquer NOISY : 0 claims, pas de canonical
+        noisy = session.run("""
+            MATCH (e:Entity {tenant_id: $tid})
+            WHERE NOT (e)<-[:ABOUT]-(:Claim) AND NOT (e)-[:SAME_CANON_AS]->(:CanonicalEntity)
+            SET e.quality_status = 'NOISY', e.status_updated_at = datetime()
+            RETURN count(e) AS cnt
+        """, tid=tenant_id).single()["cnt"]
+
+        # Marquer UNCERTAIN : 1 claim, pas de canonical
+        uncertain = session.run("""
+            MATCH (e:Entity {tenant_id: $tid})
+            WHERE NOT (e)-[:SAME_CANON_AS]->(:CanonicalEntity)
+              AND e.quality_status IS NULL
+            WITH e
+            MATCH (e)<-[:ABOUT]-(c:Claim)
+            WITH e, count(c) AS claims
+            WHERE claims = 1
+            SET e.quality_status = 'UNCERTAIN', e.status_updated_at = datetime()
+            RETURN count(e) AS cnt
+        """, tid=tenant_id).single()["cnt"]
+
+        # Marquer VALID : tout le reste non marque
+        valid = session.run("""
+            MATCH (e:Entity {tenant_id: $tid})
+            WHERE e.quality_status IS NULL
+            SET e.quality_status = 'VALID', e.status_updated_at = datetime()
+            RETURN count(e) AS cnt
+        """, tid=tenant_id).single()["cnt"]
+
+    return {
+        "noisy": noisy,
+        "uncertain": uncertain,
+        "valid": valid,
+        "total": noisy + uncertain + valid,
+    }
+
+
+def _run_c4_relations(tenant_id: str, progress=None) -> dict:
+    """C4 Relations Evidence-First : mining + adjudication + persistance."""
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.relations.candidate_miner_c4 import CandidateMinerC4
+    from knowbase.relations.nli_adjudicator import NLIAdjudicator
+    from knowbase.relations.relation_persister_c4 import RelationPersisterC4
+
+    _p = progress or (lambda pct, detail="": None)
+
+    driver = get_neo4j_client().driver
+
+    # Stage 1 : Mining
+    _p(5, "Stage 1 : Mining paires candidates...")
+    miner = CandidateMinerC4(driver, tenant_id=tenant_id)
+    pre_stats = miner.get_mining_stats()
+
+    pairs = miner.mine_candidates(
+        cosine_threshold=0.85,
+        max_neighbors=5,
+        max_total_pairs=5000,
+        exclude_existing=True,
+    )
+
+    if not pairs:
+        _p(100, "Aucune paire candidate")
+        return {"message": "Aucune paire candidate trouvee", "pairs": 0}
+
+    _p(30, f"Stage 2 : Adjudication de {len(pairs)} paires...")
+
+    # Stage 2 : Adjudication NLI
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        _p(100, "ANTHROPIC_API_KEY manquante")
+        return {"error": "ANTHROPIC_API_KEY non definie"}
+
+    adjudicator = NLIAdjudicator(max_workers=3)
+
+    def on_adj(done, total):
+        pct = 30 + int(50 * done / total)
+        _p(pct, f"Adjudication: {done}/{total}")
+
+    results = adjudicator.adjudicate_batch(pairs, on_progress=on_adj)
+
+    if not results:
+        _p(100, "Aucune relation detectee")
+        return {
+            "pairs_mined": len(pairs),
+            "relations_found": 0,
+            "message": "Aucune relation detectee apres adjudication",
+        }
+
+    # Stage 3 : Persistance
+    _p(85, f"Stage 3 : Persistance de {len(results)} relations...")
+    persister = RelationPersisterC4(driver, tenant_id=tenant_id)
+    counts_before = persister.get_relation_counts()
+    persist_stats = persister.persist_batch(results)
+    counts_after = persister.get_relation_counts()
+
+    _p(100, f"{persist_stats.created} nouvelles relations creees")
+
+    by_type = {}
+    for r in results:
+        by_type[r.relation] = by_type.get(r.relation, 0) + 1
+
+    return {
+        "corpus_claims": pre_stats["total_claims"],
+        "corpus_docs": pre_stats["total_docs"],
+        "pairs_mined": len(pairs),
+        "relations_found": len(results),
+        "by_type": by_type,
+        "created": persist_stats.created,
+        "updated": persist_stats.updated,
+        "errors": persist_stats.errors,
+        "counts_before": counts_before,
+        "counts_after": counts_after,
+    }
+
+
+def _run_c6_pivots(tenant_id: str, progress=None) -> dict:
+    """C6 Cross-doc Pivots : mining via entites partagees + adjudication + persistance."""
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    from knowbase.relations.pivot_miner_c6 import PivotMinerC6
+    from knowbase.relations.pivot_adjudicator_c6 import PivotAdjudicatorC6
+    from knowbase.relations.relation_persister_c4 import RelationPersisterC4
+
+    _p = progress or (lambda pct, detail="": None)
+
+    driver = get_neo4j_client().driver
+
+    _p(5, "Stage 1 : Mining paires via pivots...")
+    miner = PivotMinerC6(driver, tenant_id=tenant_id)
+
+    pairs = miner.mine_candidates(
+        min_pivot_docs=2,
+        max_pairs_per_pivot=10,
+        max_total_pairs=3000,
+        exclude_existing=True,
+    )
+
+    if not pairs:
+        _p(100, "Aucune paire candidate")
+        return {"message": "Aucune paire pivot trouvee", "pairs": 0}
+
+    _p(30, f"Stage 2 : Adjudication de {len(pairs)} paires...")
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        _p(100, "ANTHROPIC_API_KEY manquante")
+        return {"error": "ANTHROPIC_API_KEY non definie"}
+
+    adjudicator = PivotAdjudicatorC6(max_workers=3)
+
+    def on_adj(done, total):
+        pct = 30 + int(50 * done / total)
+        _p(pct, f"Adjudication: {done}/{total}")
+
+    results = adjudicator.adjudicate_batch(pairs, on_progress=on_adj)
+
+    if not results:
+        _p(100, "Aucune relation C6 detectee")
+        return {"pairs_mined": len(pairs), "relations_found": 0}
+
+    _p(85, f"Stage 3 : Persistance de {len(results)} relations...")
+    persister = RelationPersisterC4(driver, tenant_id=tenant_id)
+    counts_before = persister.get_relation_counts()
+    persist_stats = persister.persist_batch(results)
+    counts_after = persister.get_relation_counts()
+
+    _p(100, f"{persist_stats.created} nouvelles relations C6")
+
+    by_type = {}
+    for r in results:
+        by_type[r.relation] = by_type.get(r.relation, 0) + 1
+
+    return {
+        "pairs_mined": len(pairs),
+        "relations_found": len(results),
+        "by_type": by_type,
+        "created": persist_stats.created,
+        "updated": persist_stats.updated,
+        "counts_before": counts_before,
+        "counts_after": counts_after,
+    }
+
+
 def _run_domain_pack_reprocess(tenant_id: str, progress=None) -> dict:
     from knowbase.domain_packs.reprocess_job import run_reprocess
     from knowbase.domain_packs.registry import get_pack_registry
@@ -1140,10 +1356,12 @@ def _update_state(
             "current_step_name": current_step_name,
             "step_progress": step_progress,
             "step_detail": step_detail,
+            "step_started_at": time.time() if current_step and step_progress == 0 else None,
             "completed_steps": completed,
             "total_steps": len(all_steps),
             "progress": len(completed) / len(all_steps) if all_steps else 0,
             "results": results or [],
+            "updated_at": time.time(),
         }
         rc.client.set(
             f"osmose:post_import:state:{tenant_id}",

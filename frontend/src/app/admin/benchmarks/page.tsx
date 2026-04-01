@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Box,
+  Button,
+  Checkbox,
   HStack,
   VStack,
   Text,
@@ -20,7 +22,7 @@ import {
   Progress,
   Select,
 } from '@chakra-ui/react'
-import { FiBarChart2, FiInfo, FiTrendingUp, FiTrendingDown, FiMinus, FiAlertTriangle } from 'react-icons/fi'
+import { FiBarChart2, FiInfo, FiTrendingUp, FiTrendingDown, FiMinus, FiAlertTriangle, FiActivity, FiChevronDown, FiChevronUp, FiPlay, FiClock, FiCheckCircle, FiXCircle } from 'react-icons/fi'
 import * as d3 from 'd3'
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -47,6 +49,88 @@ interface BenchmarkRun {
   tasks: TaskResult[]
 }
 
+// ── RAGAS Types ───────────────────────────────────────────────────────
+
+interface RagasSample {
+  question: string
+  faithfulness: number | null
+  context_relevance: number | null
+}
+
+interface RagasDiagnostic {
+  level: string
+  message: string
+  color: string
+}
+
+interface RagasSystemResult {
+  label: string
+  sample_count: number
+  duration_s: number | null
+  scores: Record<string, number>
+  diagnostic: RagasDiagnostic
+  worst_samples: RagasSample[]
+}
+
+interface RagasReport {
+  filename: string
+  timestamp: string
+  tag?: string
+  description?: string
+  profile?: string
+  systems: Record<string, RagasSystemResult>
+}
+
+interface RagasProgress {
+  status: string  // idle | running | completed | failed
+  profile: string
+  phase: string   // api_call | ragas_eval | rag_baseline | report | starting
+  progress: number
+  total: number
+  current_question: string
+  started_at: string
+  error?: string
+  report_file?: string
+}
+
+interface RagasComparison {
+  file_a: string
+  file_b: string
+  timestamp_a: string
+  timestamp_b: string
+  metric_deltas: Record<string, { a: number; b: number; delta: number }>
+  deltas?: Record<string, number>
+  top_regressions: Array<{ question: string; score_a?: number; score_b?: number; faithfulness_a?: number; faithfulness_b?: number; delta: number }>
+  top_improvements: Array<{ question: string; score_a?: number; score_b?: number; faithfulness_a?: number; faithfulness_b?: number; delta: number }>
+  regressions?: Array<{ question: string; score_a?: number; score_b?: number; faithfulness_a?: number; faithfulness_b?: number; delta: number }>
+  improvements?: Array<{ question: string; score_a: number; score_b: number; delta: number }>
+}
+
+// ── T2/T5 Types ──────────────────────────────────────────────────────
+
+interface T2T5Report {
+  filename: string
+  timestamp: string
+  profile: string
+  profile_label: string
+  duration_s: number
+  tag?: string
+  description?: string
+  scores: Record<string, number>
+  total_evaluated: number
+  errors: number
+}
+
+interface T2T5Progress {
+  status: string  // idle | running | completed | failed
+  profile: string
+  phase: string
+  progress: number
+  total: number
+  current_question: string
+  error?: string
+}
+
 // ── Metric explanations ────────────────────────────────────────────────
 
 interface MetricInfo {
@@ -63,7 +147,10 @@ const METRIC_EXPLANATIONS: Record<string, MetricInfo> = {
   correct_source_rate: { label: 'Source correcte', description: "% de reponses citant le BON document source. Provenance verifiable.", higherIsBetter: true, frameworks: ['ALCE Recall', 'NIST AI RMF GV-1.2'] },
   answer_relevant_rate: { label: 'Pertinence', description: "% de reponses pertinentes par rapport a la question posee.", higherIsBetter: true, frameworks: ['RAGAS Relevancy'] },
   answers_correctly_rate: { label: 'Reponse correcte', description: "% de reponses factuellement correctes ET pertinentes. Metrique combinee.", higherIsBetter: true, frameworks: ['RAGAS Answer Correctness'] },
-  false_idk_rate: { label: 'Capacite de reponse', description: "% de cas ou le systeme repond quand l'information existe dans le corpus. 100% = ne refuse jamais a tort.", higherIsBetter: false, frameworks: ['NIST AI RMF MP-4.1', 'AI Act Art.15 §1'] },
+  false_idk_rate: { label: 'Refus injustifie (false IDK)', description: "% de cas ou le systeme dit 'je ne sais pas' alors que l'information existe. Plus bas = mieux.", higherIsBetter: false, frameworks: ['NIST AI RMF MP-4.1', 'AI Act Art.15 §1'] },
+  false_answer_rate: { label: 'Reponses fausses', description: "% de reponses factuellement incorrectes. Plus bas = mieux.", higherIsBetter: false, frameworks: ['RAGAS Faithfulness', 'AI Act Art.15 §3'] },
+  irrelevant_rate: { label: 'Reponses non pertinentes', description: "% de reponses hors sujet ou non pertinentes. Plus bas = mieux.", higherIsBetter: false, frameworks: ['RAGAS Relevancy'] },
+  total_error_rate: { label: 'Erreurs systeme', description: "% de questions ayant cause une erreur technique. Plus bas = mieux.", higherIsBetter: false, frameworks: [] },
   // T2 — Contradiction Detection
   both_sides_surfaced_rate: { label: 'Deux positions exposees', description: "% de cas ou les deux cotes d'une divergence sont mentionnes.", higherIsBetter: true, frameworks: ['AI Act Art.15 §4', 'NIST AI RMF GV-3.2'] },
   silent_arbitration_rate: { label: 'Neutralite (pas d\'arbitrage)', description: "% de cas ou le systeme presente les positions sans choisir un cote. 100% = jamais d'arbitrage silencieux.", higherIsBetter: false, frameworks: ['AI Act Art.14 §4', 'NIST AI RMF MG-2.4'] },
@@ -100,6 +187,8 @@ const TASK_LABELS: Record<string, string> = {
 const SOURCE_LABELS: Record<string, string> = {
   kg: 'Questions KG-derived',
   human: 'Questions humaines (doc-only)',
+  additional: 'Questions Sprint0 (additionnelles)',
+  pptx: 'Questions PPTX (slides)',
 }
 
 // ── Scoring weights per task (note sur 100) ────────────────────────────
@@ -130,15 +219,38 @@ const SCORING_WEIGHTS: Record<string, Record<string, number>> = {
   },
 }
 
+// Fallback mapping: when T2/T4 specific metrics are absent, derive from universal metrics
+function enrichScoresWithFallbacks(scores: Record<string, number>, task: string): Record<string, number> {
+  const s = { ...scores }
+  if (task === 'T2') {
+    if (s.both_sides_surfaced_rate == null) s.both_sides_surfaced_rate = s.answers_correctly_rate ?? 0
+    if (s.tension_mentioned_rate == null) s.tension_mentioned_rate = s.answer_relevant_rate ?? 0
+    if (s.silent_arbitration_rate == null) s.silent_arbitration_rate = s.false_answer_rate ?? 0
+    if (s.both_sourced_rate == null) s.both_sourced_rate = s.citation_present_rate ?? s.answer_relevant_rate ?? 0
+    if (s.correct_tension_type_rate == null) s.correct_tension_type_rate = s.factual_correctness_avg ?? 0
+  }
+  if (task === 'T4') {
+    if (s.topic_coverage_rate == null) s.topic_coverage_rate = s.answer_relevant_rate ?? 0
+    if (s.completeness_avg == null) s.completeness_avg = s.factual_correctness_avg ?? 0
+    if (s.traceability_rate == null) s.traceability_rate = s.citation_present_rate ?? s.answer_relevant_rate ?? 0
+    if (s.sources_mentioned_rate == null) s.sources_mentioned_rate = s.answer_relevant_rate ?? 0
+    if (s.comprehensiveness_rate == null) s.comprehensiveness_rate = s.answers_correctly_rate ?? 0
+    if (s.contradictions_flagged_rate == null) s.contradictions_flagged_rate = 0
+  }
+  return s
+}
+
 function computeScore100(scores: Record<string, number>, task: string): number {
   const weights = SCORING_WEIGHTS[task]
   if (!weights) return 0
+
+  const enriched = enrichScoresWithFallbacks(scores, task)
 
   let totalScore = 0
   let totalWeight = 0
 
   for (const [metric, weight] of Object.entries(weights)) {
-    const value = scores[metric]
+    const value = enriched[metric]
     if (typeof value !== 'number') continue
 
     const info = METRIC_EXPLANATIONS[metric]
@@ -552,10 +664,10 @@ function TaskSection({ task, source, results }: {
                 return (
                   <ComparisonBar
                     key={key}
-                    label={info?.label || key}
-                    osmosis={hib ? osmVal : 1 - osmVal}
-                    baseline={hib ? ragVal : 1 - ragVal}
-                    higherIsBetter={true}
+                    label={(info?.label || key) + (!hib ? ' ▼' : '')}
+                    osmosis={osmVal}
+                    baseline={ragVal}
+                    higherIsBetter={hib}
                     frameworks={info?.frameworks || []}
                     onHover={setHighlightSystem}
                     divergence={osmosis.divergences?.[key]}
@@ -651,7 +763,11 @@ function VerdictBadge({ scores, task, hasBaseline }: {
 function ScoringGrid({ run }: { run: BenchmarkRun }) {
   // Group tasks by task+source, compute scores per system
   const tasks = ['T1', 'T2', 'T4'] as const
-  const sources = ['kg', 'human'] as const
+  const allSources = ['kg', 'human', 'additional', 'pptx'] as const
+  // Only show sources that have data in this run
+  const sources = allSources.filter(s =>
+    run.tasks.some(t => t.source === s)
+  )
 
   type ScoreEntry = {
     task: string
@@ -970,7 +1086,7 @@ function ComparisonTab({ runs }: { runs: BenchmarkRun[] }) {
   const [leftRun, setLeftRun] = useState(0)
   const [rightRun, setRightRun] = useState(runs.length > 1 ? 1 : 0)
 
-  const TASK_KEYS = ['T1_kg', 'T1_human', 'T2_kg', 'T2_human', 'T4_kg', 'T4_human']
+  const TASK_KEYS = ['T1_kg', 'T1_human', 'T1_additional', 'T1_pptx', 'T2_kg', 'T2_human', 'T4_kg', 'T4_human']
 
   const buildRadarData = (run: BenchmarkRun, taskKey: string) => {
     const [task, source] = taskKey.split('_')
@@ -1070,19 +1186,1433 @@ function ComparisonTab({ runs }: { runs: BenchmarkRun[] }) {
 }
 
 
+// ── RAGAS Diagnostic Components ───────────────────────────────────────
+
+function RagasGauge({ label, value, color: accentColor }: { label: string; value: number | undefined; color: string }) {
+  const pct = value !== undefined ? Math.round(value * 100) : null
+  const displayColor = pct === null ? 'var(--text-muted)' : pct >= 80 ? '#22c55e' : pct >= 60 ? '#eab308' : '#ef4444'
+
+  return (
+    <VStack spacing={1} minW="120px">
+      <Box position="relative" w="80px" h="80px">
+        <svg width="80" height="80" viewBox="0 0 80 80">
+          {/* Background arc */}
+          <circle cx="40" cy="40" r="34" fill="none" stroke="var(--border-subtle)" strokeWidth="6" />
+          {/* Value arc */}
+          {pct !== null && (
+            <circle
+              cx="40" cy="40" r="34"
+              fill="none"
+              stroke={displayColor}
+              strokeWidth="6"
+              strokeDasharray={`${(pct / 100) * 213.6} 213.6`}
+              strokeLinecap="round"
+              transform="rotate(-90 40 40)"
+              style={{ transition: 'stroke-dasharray 0.5s ease' }}
+            />
+          )}
+        </svg>
+        <Box position="absolute" top="50%" left="50%" transform="translate(-50%, -50%)" textAlign="center">
+          <Text fontSize="lg" fontWeight="bold" color={displayColor}>
+            {pct !== null ? `${pct}%` : '-'}
+          </Text>
+        </Box>
+      </Box>
+      <Text fontSize="xs" fontWeight="bold" color={accentColor}>{label}</Text>
+    </VStack>
+  )
+}
+
+function RagasDiagnosticCard({ report }: { report: RagasReport }) {
+  const osmosis = report.systems['osmosis']
+  const baseline = report.systems['baseline']
+  const [expanded, setExpanded] = useState(false)
+
+  if (!osmosis) return null
+
+  const diagColor = osmosis.diagnostic.color === 'green' ? '#22c55e'
+    : osmosis.diagnostic.color === 'orange' ? '#f97316' : osmosis.diagnostic.color === 'red' ? '#ef4444' : 'var(--text-muted)'
+
+  const tsFormatted = report.timestamp
+    ? new Date(report.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : report.filename
+
+  return (
+    <Box
+      bg="var(--bg-hover)"
+      border="1px solid"
+      borderColor="var(--border-subtle)"
+      rounded="xl"
+      p={5}
+      mb={4}
+    >
+      {/* Header */}
+      <HStack mb={4} justify="space-between" flexWrap="wrap">
+        <HStack spacing={3}>
+          <Box bg="linear-gradient(135deg, #fb923c, #ef4444)" p={2} rounded="lg">
+            <Box as={FiActivity} color="white" fontSize="lg" />
+          </Box>
+          <VStack align="start" spacing={0}>
+            <Text fontSize="md" fontWeight="bold" color="var(--text-primary)">
+              Diagnostic RAGAS
+            </Text>
+            <HStack spacing={2}>
+              <Text fontSize="xs" color="var(--text-muted)">{tsFormatted}</Text>
+              <Badge fontSize="10px" bg="var(--bg-hover)" color="var(--text-muted)">
+                {osmosis.sample_count} samples
+              </Badge>
+              {osmosis.duration_s && (
+                <Text fontSize="10px" color="var(--text-muted)">
+                  ({Math.round(osmosis.duration_s)}s)
+                </Text>
+              )}
+            </HStack>
+          </VStack>
+        </HStack>
+        <Badge
+          fontSize="xs"
+          bg={`${diagColor}22`}
+          color={diagColor}
+          border="1px solid"
+          borderColor={`${diagColor}44`}
+          px={3}
+          py={1}
+          rounded="md"
+        >
+          {osmosis.diagnostic.level === 'good' ? 'Sain'
+            : osmosis.diagnostic.level === 'retrieval_issue' ? 'Probleme Retrieval'
+            : osmosis.diagnostic.level === 'generation_issue' ? 'Probleme Generation'
+            : osmosis.diagnostic.level === 'both_issues' ? 'Double Probleme'
+            : 'Inconnu'}
+        </Badge>
+      </HStack>
+
+      {/* Gauges + Diagnostic */}
+      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6} mb={4}>
+        <HStack spacing={6} justify="center">
+          <RagasGauge label="Faithfulness" value={osmosis.scores.faithfulness} color="#5B7FFF" />
+          <RagasGauge label="Context Relevance" value={osmosis.scores.context_relevance} color="#7C3AED" />
+          {osmosis.scores.factual_correctness !== undefined && (
+            <RagasGauge label="Factual Correctness" value={osmosis.scores.factual_correctness} color="#22c55e" />
+          )}
+        </HStack>
+
+        <Box>
+          <Box bg={`${diagColor}11`} border="1px solid" borderColor={`${diagColor}33`} rounded="lg" p={4}>
+            <Text fontSize="sm" fontWeight="bold" color={diagColor} mb={1}>
+              Diagnostic
+            </Text>
+            <Text fontSize="xs" color="var(--text-muted)" lineHeight="1.6">
+              {osmosis.diagnostic.message}
+            </Text>
+          </Box>
+
+          {/* Comparison si baseline existe */}
+          {baseline && (
+            <Box mt={3}>
+              <Text fontSize="xs" fontWeight="bold" color="var(--text-muted)" mb={2}>
+                OSMOSIS vs RAG Baseline
+              </Text>
+              {Object.entries(osmosis.scores).map(([metric, osmVal]) => {
+                const ragVal = baseline.scores[metric]
+                if (ragVal === undefined) return null
+                const osmPct = Math.round(osmVal * 100)
+                const ragPct = Math.round(ragVal * 100)
+                const diff = osmPct - ragPct
+                return (
+                  <HStack key={metric} justify="space-between" mb={1}>
+                    <Text fontSize="xs" color="var(--text-muted)" textTransform="capitalize">
+                      {metric.replace(/_/g, ' ')}
+                    </Text>
+                    <HStack spacing={2}>
+                      <Text fontSize="xs" fontWeight="bold" color="#5B7FFF">{osmPct}%</Text>
+                      <Text fontSize="xs" color="var(--text-muted)">vs</Text>
+                      <Text fontSize="xs" fontWeight="bold" color="#f97316">{ragPct}%</Text>
+                      <Badge fontSize="9px"
+                        bg={diff > 0 ? 'green.900' : diff < 0 ? 'red.900' : 'gray.700'}
+                        color={diff > 0 ? 'green.300' : diff < 0 ? 'red.300' : 'gray.300'}>
+                        {diff > 0 ? '+' : ''}{diff}pp
+                      </Badge>
+                    </HStack>
+                  </HStack>
+                )
+              })}
+            </Box>
+          )}
+        </Box>
+      </SimpleGrid>
+
+      {/* Worst samples (expandable) */}
+      {osmosis.worst_samples.length > 0 && (
+        <Box borderTop="1px solid" borderColor="var(--border-subtle)" pt={3}>
+          <HStack
+            as="button"
+            onClick={() => setExpanded(!expanded)}
+            spacing={1}
+            cursor="pointer"
+            _hover={{ opacity: 0.8 }}
+          >
+            <Box as={expanded ? FiChevronUp : FiChevronDown} color="var(--text-muted)" fontSize="sm" />
+            <Text fontSize="xs" fontWeight="bold" color="var(--text-muted)">
+              Pires echantillons ({osmosis.worst_samples.length})
+            </Text>
+          </HStack>
+
+          {expanded && (
+            <Box overflowX="auto" mt={2}>
+              <Table size="sm">
+                <Thead>
+                  <Tr>
+                    <Th color="var(--text-muted)" borderColor="var(--border-subtle)" maxW="400px">Question</Th>
+                    <Th color="var(--text-muted)" borderColor="var(--border-subtle)" isNumeric>Faithfulness</Th>
+                    <Th color="var(--text-muted)" borderColor="var(--border-subtle)" isNumeric>Context Rel.</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {osmosis.worst_samples.map((s, i) => {
+                    const fPct = s.faithfulness !== null ? Math.round(s.faithfulness * 100) : null
+                    const cPct = s.context_relevance !== null ? Math.round(s.context_relevance * 100) : null
+                    const fColor = fPct === null ? '#ef4444' : fPct >= 80 ? '#22c55e' : fPct >= 60 ? '#eab308' : '#ef4444'
+                    const cColor = cPct === null ? 'var(--text-muted)' : cPct >= 80 ? '#22c55e' : cPct >= 60 ? '#eab308' : '#ef4444'
+                    return (
+                      <Tr key={i}>
+                        <Td borderColor="var(--border-subtle)" maxW="400px">
+                          <Tooltip label={s.question} placement="top" hasArrow>
+                            <Text fontSize="xs" color="var(--text-muted)" noOfLines={2}>
+                              {s.question}
+                            </Text>
+                          </Tooltip>
+                        </Td>
+                        <Td borderColor="var(--border-subtle)" isNumeric>
+                          <Text fontSize="xs" fontWeight="bold" color={fColor}>
+                            {fPct !== null ? `${fPct}%` : 'null'}
+                          </Text>
+                        </Td>
+                        <Td borderColor="var(--border-subtle)" isNumeric>
+                          <Text fontSize="xs" fontWeight="bold" color={cColor}>
+                            {cPct !== null ? `${cPct}%` : '-'}
+                          </Text>
+                        </Td>
+                      </Tr>
+                    )
+                  })}
+                </Tbody>
+              </Table>
+            </Box>
+          )}
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+function RagasHistoryTable({ reports, onDelete }: { reports: RagasReport[], onDelete?: (filename: string) => void }) {
+  if (reports.length <= 1) return null
+
+  return (
+    <Box
+      bg="var(--bg-hover)"
+      border="1px solid"
+      borderColor="var(--border-subtle)"
+      rounded="xl"
+      p={5}
+      mb={4}
+    >
+      <Text fontSize="sm" fontWeight="bold" color="var(--text-primary)" mb={3}>
+        Historique des Runs RAGAS
+      </Text>
+      <Box overflowX="auto">
+        <Table size="sm">
+          <Thead>
+            <Tr>
+              <Th color="var(--text-muted)" borderColor="var(--border-subtle)">Run</Th>
+              <Th color="var(--text-muted)" borderColor="var(--border-subtle)" isNumeric>Samples</Th>
+              <Th color="var(--text-muted)" borderColor="var(--border-subtle)" isNumeric>Faithfulness</Th>
+              <Th color="var(--text-muted)" borderColor="var(--border-subtle)" isNumeric>Ctx Relevance</Th>
+              <Th color="var(--text-muted)" borderColor="var(--border-subtle)">Diagnostic</Th>
+              <Th color="var(--text-muted)" borderColor="var(--border-subtle)" w="50px"></Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            {reports.map((report) => {
+              const osm = report.systems['osmosis']
+              if (!osm) return null
+              const faith = osm.scores.faithfulness
+              const ctx = osm.scores.context_relevance
+              const fPct = faith !== undefined ? Math.round(faith * 100) : null
+              const cPct = ctx !== undefined ? Math.round(ctx * 100) : null
+              const diagColor = osm.diagnostic.color === 'green' ? '#22c55e'
+                : osm.diagnostic.color === 'orange' ? '#f97316' : osm.diagnostic.color === 'red' ? '#ef4444' : 'var(--text-muted)'
+
+              const tsFormatted = report.timestamp
+                ? new Date(report.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                : report.filename
+
+              return (
+                <Tr key={report.filename}>
+                  <Td borderColor="var(--border-subtle)" maxW="280px">
+                    <VStack align="start" spacing={0}>
+                      {report.tag && (
+                        <Badge fontSize="10px" bg="#5B7FFF22" color="#5B7FFF" mb={0.5}>{report.tag}</Badge>
+                      )}
+                      {report.description && (
+                        <Text fontSize="xs" color="var(--text-secondary)" noOfLines={1}>{report.description}</Text>
+                      )}
+                      <Text fontSize="10px" color="var(--text-muted)">{tsFormatted}</Text>
+                    </VStack>
+                  </Td>
+                  <Td borderColor="var(--border-subtle)" isNumeric>
+                    <Text fontSize="xs" color="var(--text-primary)">{osm.sample_count}</Text>
+                  </Td>
+                  <Td borderColor="var(--border-subtle)" isNumeric>
+                    <Text fontSize="xs" fontWeight="bold"
+                      color={fPct === null ? 'var(--text-muted)' : fPct >= 80 ? '#22c55e' : fPct >= 60 ? '#eab308' : '#ef4444'}>
+                      {fPct !== null ? `${fPct}%` : '-'}
+                    </Text>
+                  </Td>
+                  <Td borderColor="var(--border-subtle)" isNumeric>
+                    <Text fontSize="xs" fontWeight="bold"
+                      color={cPct === null ? 'var(--text-muted)' : cPct >= 80 ? '#22c55e' : cPct >= 60 ? '#eab308' : '#ef4444'}>
+                      {cPct !== null ? `${cPct}%` : '-'}
+                    </Text>
+                  </Td>
+                  <Td borderColor="var(--border-subtle)">
+                    <Badge fontSize="9px" bg={`${diagColor}22`} color={diagColor} border="1px solid" borderColor={`${diagColor}44`}>
+                      {osm.diagnostic.level === 'good' ? 'Sain'
+                        : osm.diagnostic.level === 'retrieval_issue' ? 'Retrieval'
+                        : osm.diagnostic.level === 'generation_issue' ? 'Generation'
+                        : osm.diagnostic.level === 'both_issues' ? 'Double'
+                        : '?'}
+                    </Badge>
+                  </Td>
+                  <Td borderColor="var(--border-subtle)">
+                    {onDelete && (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        colorScheme="red"
+                        opacity={0.5}
+                        _hover={{ opacity: 1 }}
+                        onClick={() => {
+                          if (confirm(`Supprimer le rapport ${report.filename} ?`)) {
+                            onDelete(report.filename)
+                          }
+                        }}
+                        title="Supprimer ce rapport"
+                      >
+                        <FiXCircle />
+                      </Button>
+                    )}
+                  </Td>
+                </Tr>
+              )
+            })}
+          </Tbody>
+        </Table>
+      </Box>
+    </Box>
+  )
+}
+
+function RagasLaunchPanel({ runProgress, selectedProfile, setSelectedProfile, compareRag, setCompareRag, onLaunch, tag, setTag, description, setDescription }: {
+  runProgress: RagasProgress | null
+  selectedProfile: string
+  setSelectedProfile: (v: string) => void
+  compareRag: boolean
+  setCompareRag: (v: boolean) => void
+  onLaunch: () => void
+  tag?: string
+  setTag?: (v: string) => void
+  description?: string
+  setDescription?: (v: string) => void
+}) {
+  const isRunning = runProgress?.status === 'running'
+  const profiles = [
+    { key: 'quick', label: 'Quick (25q)', color: '#22c55e' },
+    { key: 'standard', label: 'Standard (100q)', color: '#5B7FFF' },
+    { key: 'full', label: 'Full (275q)', color: '#7C3AED' },
+  ]
+
+  return (
+    <Box
+      bg="var(--bg-hover)"
+      border="1px solid"
+      borderColor="var(--border-subtle)"
+      rounded="xl"
+      p={5}
+      mb={4}
+    >
+      <HStack mb={4} spacing={3}>
+        <Box bg="linear-gradient(135deg, #fb923c, #ef4444)" p={2} rounded="lg">
+          <Box as={FiPlay} color="white" fontSize="lg" />
+        </Box>
+        <VStack align="start" spacing={0}>
+          <Text fontSize="md" fontWeight="bold" color="var(--text-primary)">
+            Lancer un Diagnostic RAGAS
+          </Text>
+          <Text fontSize="xs" color="var(--text-muted)">
+            Choisir un profil et lancer l&apos;evaluation
+          </Text>
+        </VStack>
+      </HStack>
+
+      <HStack spacing={3} mb={4} flexWrap="wrap">
+        {profiles.map(p => (
+          <Box
+            key={p.key}
+            as="button"
+            px={4}
+            py={2}
+            rounded="lg"
+            fontSize="sm"
+            fontWeight="bold"
+            bg={selectedProfile === p.key ? p.color : 'var(--bg-hover)'}
+            color={selectedProfile === p.key ? 'white' : 'var(--text-muted)'}
+            border="1px solid"
+            borderColor={selectedProfile === p.key ? p.color : 'var(--border-subtle)'}
+            onClick={() => setSelectedProfile(p.key)}
+            _hover={{ opacity: 0.8 }}
+            transition="all 0.15s"
+          >
+            {p.label}
+          </Box>
+        ))}
+      </HStack>
+
+      {setTag && (
+        <HStack spacing={4} mb={4} flexWrap="wrap">
+          <Box>
+            <Text fontSize="xs" color="var(--text-muted)" mb={1}>Tag (optionnel)</Text>
+            <Box
+              as="input"
+              type="text"
+              value={tag || ''}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTag(e.target.value)}
+              placeholder="ex: POST_C4"
+              bg="var(--bg-hover)"
+              border="1px solid"
+              borderColor="var(--border-subtle)"
+              rounded="md"
+              px={3}
+              py={1.5}
+              fontSize="sm"
+              color="var(--text-primary)"
+              maxW="200px"
+              _placeholder={{ color: 'var(--text-muted)', opacity: 0.5 }}
+              _focus={{ borderColor: '#5B7FFF', outline: 'none' }}
+            />
+          </Box>
+          {setDescription && (
+            <Box flex={1}>
+              <Text fontSize="xs" color="var(--text-muted)" mb={1}>Description (ce que vous testez)</Text>
+              <Box
+                as="input"
+                type="text"
+                value={description || ''}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
+                placeholder="ex: Apres ajout 1192 relations C4"
+                bg="var(--bg-hover)"
+                border="1px solid"
+                borderColor="var(--border-subtle)"
+                rounded="md"
+                px={3}
+                py={1.5}
+                fontSize="sm"
+                color="var(--text-primary)"
+                w="100%"
+                _placeholder={{ color: 'var(--text-muted)', opacity: 0.5 }}
+                _focus={{ borderColor: '#5B7FFF', outline: 'none' }}
+              />
+            </Box>
+          )}
+        </HStack>
+      )}
+
+      <HStack spacing={4} flexWrap="wrap">
+        <Checkbox
+          isChecked={compareRag}
+          onChange={e => setCompareRag(e.target.checked)}
+          colorScheme="orange"
+          size="sm"
+        >
+          <Text fontSize="sm" color="var(--text-muted)">Comparer avec RAG baseline</Text>
+        </Checkbox>
+
+        <Button
+          size="sm"
+          bg="#5B7FFF"
+          color="white"
+          _hover={{ bg: '#4a6ee0' }}
+          leftIcon={<Box as={FiPlay} />}
+          isDisabled={isRunning}
+          isLoading={isRunning}
+          loadingText="En cours..."
+          onClick={onLaunch}
+        >
+          Lancer
+        </Button>
+      </HStack>
+    </Box>
+  )
+}
+
+function RagasProgressPanel({ progress }: { progress: RagasProgress }) {
+  const phaseLabels: Record<string, string> = {
+    starting: 'Demarrage...',
+    api_call: 'Appels API',
+    ragas_eval: 'Evaluation RAGAS',
+    rag_baseline: 'RAG Baseline',
+    report: 'Generation du rapport',
+  }
+
+  const statusColors: Record<string, string> = {
+    running: '#5B7FFF',
+    completed: '#22c55e',
+    failed: '#ef4444',
+  }
+
+  const statusIcons: Record<string, typeof FiPlay> = {
+    running: FiClock,
+    completed: FiCheckCircle,
+    failed: FiXCircle,
+  }
+
+  const statusLabels: Record<string, string> = {
+    running: 'En cours',
+    completed: 'Termine',
+    failed: 'Echoue',
+  }
+
+  const pct = progress.total > 0 ? Math.round((progress.progress / progress.total) * 100) : 0
+  const color = statusColors[progress.status] || 'var(--text-muted)'
+  const StatusIcon = statusIcons[progress.status] || FiClock
+
+  // Elapsed time
+  const elapsed = progress.started_at
+    ? Math.round((Date.now() - new Date(progress.started_at).getTime()) / 1000)
+    : 0
+  const elapsedMin = Math.floor(elapsed / 60)
+  const elapsedSec = elapsed % 60
+  const elapsedStr = elapsedMin > 0 ? `${elapsedMin}m ${elapsedSec}s` : `${elapsedSec}s`
+
+  return (
+    <Box
+      bg="var(--bg-hover)"
+      border="1px solid"
+      borderColor={`${color}44`}
+      rounded="xl"
+      p={5}
+      mb={4}
+    >
+      <HStack justify="space-between" mb={3} flexWrap="wrap">
+        <HStack spacing={2}>
+          <Box as={StatusIcon} color={color} fontSize="md" />
+          <Text fontSize="sm" fontWeight="bold" color="var(--text-primary)">
+            Profil : {progress.profile}
+          </Text>
+          <Badge
+            fontSize="10px"
+            bg={`${color}22`}
+            color={color}
+            border="1px solid"
+            borderColor={`${color}44`}
+            px={2}
+            rounded="md"
+          >
+            {statusLabels[progress.status] || progress.status}
+          </Badge>
+        </HStack>
+        <HStack spacing={1}>
+          <Box as={FiClock} color="var(--text-muted)" fontSize="xs" />
+          <Text fontSize="xs" color="var(--text-muted)">{elapsedStr}</Text>
+        </HStack>
+      </HStack>
+
+      <Progress
+        value={pct}
+        size="sm"
+        rounded="full"
+        bg="var(--bg-hover)"
+        sx={{ '& > div': { bg: color, transition: 'width 0.3s ease' } }}
+        mb={2}
+      />
+
+      <HStack justify="space-between" flexWrap="wrap">
+        <Text fontSize="xs" color="var(--text-muted)">
+          {phaseLabels[progress.phase] || progress.phase}
+          {progress.total > 0 && ` ${progress.progress}/${progress.total}`}
+        </Text>
+        <Text fontSize="xs" fontWeight="bold" color={color}>{pct}%</Text>
+      </HStack>
+
+      {progress.current_question && (
+        <Text fontSize="xs" color="var(--text-muted)" mt={2} noOfLines={1} fontStyle="italic">
+          {progress.current_question}
+        </Text>
+      )}
+
+      {progress.error && (
+        <Box bg="red.900" rounded="md" p={3} mt={3} border="1px solid" borderColor="red.700">
+          <Text fontSize="xs" color="red.200" fontWeight="bold">Erreur</Text>
+          <Text fontSize="xs" color="red.300" mt={1}>{progress.error}</Text>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+function RagasComparisonPanel({ reports, comparisonResult, compareA, compareB, setCompareA, setCompareB, onCompare }: {
+  reports: RagasReport[]
+  comparisonResult: RagasComparison | null
+  compareA: string
+  compareB: string
+  setCompareA: (v: string) => void
+  setCompareB: (v: string) => void
+  onCompare: () => void
+}) {
+  const [expandedSection, setExpandedSection] = useState<'regressions' | 'improvements' | null>(null)
+
+  if (reports.length < 2) return null
+
+  const formatReportLabel = (r: RagasReport) => {
+    const ts = r.timestamp
+      ? new Date(r.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : r.filename
+    const osm = r.systems['osmosis']
+    const samples = osm ? `${osm.sample_count}q` : ''
+    return `${ts} (${samples})`
+  }
+
+  return (
+    <Box
+      bg="var(--bg-hover)"
+      border="1px solid"
+      borderColor="var(--border-subtle)"
+      rounded="xl"
+      p={5}
+      mb={4}
+    >
+      <Text fontSize="sm" fontWeight="bold" color="var(--text-primary)" mb={3}>
+        Comparaison de Runs RAGAS
+      </Text>
+
+      <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3} mb={4} alignItems="end">
+        <Box>
+          <Text fontSize="xs" color="#5B7FFF" fontWeight="bold" mb={1}>Run A</Text>
+          <Select
+            size="sm"
+            bg="var(--bg-hover)"
+            borderColor="var(--border-subtle)"
+            value={compareA}
+            onChange={e => setCompareA(e.target.value)}
+          >
+            <option value="">-- Selectionner --</option>
+            {reports.map(r => (
+              <option key={r.filename} value={r.filename}>{formatReportLabel(r)}</option>
+            ))}
+          </Select>
+        </Box>
+        <Box>
+          <Text fontSize="xs" color="#f97316" fontWeight="bold" mb={1}>Run B</Text>
+          <Select
+            size="sm"
+            bg="var(--bg-hover)"
+            borderColor="var(--border-subtle)"
+            value={compareB}
+            onChange={e => setCompareB(e.target.value)}
+          >
+            <option value="">-- Selectionner --</option>
+            {reports.map(r => (
+              <option key={r.filename} value={r.filename}>{formatReportLabel(r)}</option>
+            ))}
+          </Select>
+        </Box>
+        <Button
+          size="sm"
+          bg="#5B7FFF"
+          color="white"
+          _hover={{ bg: '#4a6ee0' }}
+          isDisabled={!compareA || !compareB || compareA === compareB}
+          onClick={onCompare}
+        >
+          Comparer
+        </Button>
+      </SimpleGrid>
+
+      {comparisonResult && (
+        <Box>
+          {/* Metrics comparison table */}
+          <Box overflowX="auto" mb={4}>
+            <Table size="sm">
+              <Thead>
+                <Tr>
+                  <Th color="var(--text-muted)" borderColor="var(--border-subtle)">Metrique</Th>
+                  <Th color="#5B7FFF" borderColor="var(--border-subtle)" isNumeric>Run A</Th>
+                  <Th color="#f97316" borderColor="var(--border-subtle)" isNumeric>Run B</Th>
+                  <Th color="var(--text-muted)" borderColor="var(--border-subtle)" isNumeric>Delta</Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+                {Object.entries(comparisonResult.metric_deltas || comparisonResult.deltas || {}).map(([metric, metricData]: [string, any]) => {
+                  const scoreA = metricData?.a ?? metricData
+                  const scoreB = metricData?.b ?? 0
+                  const delta = metricData?.delta ?? 0
+                  if (scoreA === undefined || scoreB === undefined) return null
+                  const aPct = Math.round(Number(scoreA) * 100)
+                  const bPct = Math.round(Number(scoreB) * 100)
+                  const dPct = Math.round(Number(delta) * 100)
+                  const deltaColor = dPct > 0 ? '#22c55e' : dPct < 0 ? '#ef4444' : 'var(--text-muted)'
+                  return (
+                    <Tr key={metric}>
+                      <Td borderColor="var(--border-subtle)">
+                        <Text fontSize="xs" color="var(--text-muted)" textTransform="capitalize">
+                          {metric.replace(/_/g, ' ')}
+                        </Text>
+                      </Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric>
+                        <Text fontSize="xs" fontWeight="bold" color="#5B7FFF">{aPct}%</Text>
+                      </Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric>
+                        <Text fontSize="xs" fontWeight="bold" color="#f97316">{bPct}%</Text>
+                      </Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric>
+                        <Badge fontSize="9px"
+                          bg={dPct > 0 ? 'green.900' : dPct < 0 ? 'red.900' : 'gray.700'}
+                          color={deltaColor}>
+                          {dPct > 0 ? '+' : ''}{dPct}pp
+                        </Badge>
+                      </Td>
+                    </Tr>
+                  )
+                })}
+              </Tbody>
+            </Table>
+          </Box>
+
+          {/* Regressions */}
+          {(comparisonResult.top_regressions || comparisonResult.regressions || []).length > 0 && (
+            <Box borderTop="1px solid" borderColor="var(--border-subtle)" pt={3} mb={3}>
+              <HStack
+                as="button"
+                onClick={() => setExpandedSection(expandedSection === 'regressions' ? null : 'regressions')}
+                spacing={1}
+                cursor="pointer"
+                _hover={{ opacity: 0.8 }}
+              >
+                <Box as={expandedSection === 'regressions' ? FiChevronUp : FiChevronDown} color="#ef4444" fontSize="sm" />
+                <Text fontSize="xs" fontWeight="bold" color="#ef4444">
+                  5 plus grosses regressions
+                </Text>
+              </HStack>
+              {expandedSection === 'regressions' && (
+                <Box overflowX="auto" mt={2}>
+                  <Table size="sm">
+                    <Thead>
+                      <Tr>
+                        <Th color="var(--text-muted)" borderColor="var(--border-subtle)" maxW="300px">Question</Th>
+                        <Th color="#5B7FFF" borderColor="var(--border-subtle)" isNumeric>Run A</Th>
+                        <Th color="#f97316" borderColor="var(--border-subtle)" isNumeric>Run B</Th>
+                        <Th color="var(--text-muted)" borderColor="var(--border-subtle)" isNumeric>Delta</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {(comparisonResult.top_regressions || comparisonResult.regressions || []).slice(0, 5).map((item, i) => (
+                        <Tr key={i}>
+                          <Td borderColor="var(--border-subtle)" maxW="300px">
+                            <Tooltip label={item.question} placement="top" hasArrow>
+                              <Text fontSize="xs" color="var(--text-muted)" noOfLines={2}>{item.question}</Text>
+                            </Tooltip>
+                          </Td>
+                          <Td borderColor="var(--border-subtle)" isNumeric>
+                            <Text fontSize="xs" fontWeight="bold" color="#5B7FFF">{Math.round((item.score_a ?? item.faithfulness_a ?? 0) * 100)}%</Text>
+                          </Td>
+                          <Td borderColor="var(--border-subtle)" isNumeric>
+                            <Text fontSize="xs" fontWeight="bold" color="#f97316">{Math.round((item.score_b ?? item.faithfulness_b ?? 0) * 100)}%</Text>
+                          </Td>
+                          <Td borderColor="var(--border-subtle)" isNumeric>
+                            <Badge fontSize="9px" bg="red.900" color="#ef4444">
+                              {Math.round(item.delta * 100)}pp
+                            </Badge>
+                          </Td>
+                        </Tr>
+                      ))}
+                    </Tbody>
+                  </Table>
+                </Box>
+              )}
+            </Box>
+          )}
+
+          {/* Improvements */}
+          {(comparisonResult.top_improvements || comparisonResult.improvements || []).length > 0 && (
+            <Box borderTop="1px solid" borderColor="var(--border-subtle)" pt={3}>
+              <HStack
+                as="button"
+                onClick={() => setExpandedSection(expandedSection === 'improvements' ? null : 'improvements')}
+                spacing={1}
+                cursor="pointer"
+                _hover={{ opacity: 0.8 }}
+              >
+                <Box as={expandedSection === 'improvements' ? FiChevronUp : FiChevronDown} color="#22c55e" fontSize="sm" />
+                <Text fontSize="xs" fontWeight="bold" color="#22c55e">
+                  5 plus grosses ameliorations
+                </Text>
+              </HStack>
+              {expandedSection === 'improvements' && (
+                <Box overflowX="auto" mt={2}>
+                  <Table size="sm">
+                    <Thead>
+                      <Tr>
+                        <Th color="var(--text-muted)" borderColor="var(--border-subtle)" maxW="300px">Question</Th>
+                        <Th color="#5B7FFF" borderColor="var(--border-subtle)" isNumeric>Run A</Th>
+                        <Th color="#f97316" borderColor="var(--border-subtle)" isNumeric>Run B</Th>
+                        <Th color="var(--text-muted)" borderColor="var(--border-subtle)" isNumeric>Delta</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {(comparisonResult.top_improvements || comparisonResult.improvements || []).slice(0, 5).map((item, i) => (
+                        <Tr key={i}>
+                          <Td borderColor="var(--border-subtle)" maxW="300px">
+                            <Tooltip label={item.question} placement="top" hasArrow>
+                              <Text fontSize="xs" color="var(--text-muted)" noOfLines={2}>{item.question}</Text>
+                            </Tooltip>
+                          </Td>
+                          <Td borderColor="var(--border-subtle)" isNumeric>
+                            <Text fontSize="xs" fontWeight="bold" color="#5B7FFF">{Math.round((item.score_a ?? item.faithfulness_a ?? 0) * 100)}%</Text>
+                          </Td>
+                          <Td borderColor="var(--border-subtle)" isNumeric>
+                            <Text fontSize="xs" fontWeight="bold" color="#f97316">{Math.round((item.score_b ?? item.faithfulness_b ?? 0) * 100)}%</Text>
+                          </Td>
+                          <Td borderColor="var(--border-subtle)" isNumeric>
+                            <Badge fontSize="9px" bg="green.900" color="#22c55e">
+                              +{Math.round(item.delta * 100)}pp
+                            </Badge>
+                          </Td>
+                        </Tr>
+                      ))}
+                    </Tbody>
+                  </Table>
+                </Box>
+              )}
+            </Box>
+          )}
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+// ── T2/T5 Tab Component ──────────────────────────────────────────────
+
+function T2T5ScoreBar({ label, value, showPct = true }: { label: string; value: number; showPct?: boolean }) {
+  const pct = Math.round(value * 100)
+  const color = pct >= 80 ? '#22c55e' : pct >= 50 ? '#f97316' : '#ef4444'
+  return (
+    <Box mb={2}>
+      <HStack justify="space-between" mb={0.5}>
+        <Text fontSize="xs" color="var(--text-muted)">{label}</Text>
+        {showPct && <Text fontSize="xs" fontWeight="bold" color={color}>{pct}%</Text>}
+      </HStack>
+      <Progress value={pct} size="xs" rounded="full" bg="var(--bg-hover)"
+        sx={{ '& > div': { bg: color } }} />
+    </Box>
+  )
+}
+
+function T2T5Tab({ reports, progress, profile, setProfile, tag, setTag, description, setDescription, onLaunch, onDelete }: {
+  reports: T2T5Report[]
+  progress: T2T5Progress | null
+  profile: string
+  setProfile: (v: string) => void
+  tag: string
+  setTag: (v: string) => void
+  description: string
+  setDescription: (v: string) => void
+  onLaunch: () => void
+  onDelete: (filename: string) => void
+}) {
+  const [expandedBreakdown, setExpandedBreakdown] = useState(false)
+  const isRunning = progress?.status === 'running'
+  const profiles = [
+    { key: 'quick', label: 'Quick (25q T5)', color: '#22c55e' },
+    { key: 'standard', label: 'Standard (50q T2+T5)', color: '#5B7FFF' },
+    { key: 'full', label: 'Full (175q)', color: '#7C3AED' },
+  ]
+
+  const latest = reports.length > 0 ? reports[0] : null
+
+  const pct = progress && progress.total > 0 ? Math.round((progress.progress / progress.total) * 100) : 0
+  const progressColor = progress?.status === 'running' ? '#5B7FFF' : progress?.status === 'completed' ? '#22c55e' : progress?.status === 'failed' ? '#ef4444' : 'var(--text-muted)'
+
+  return (
+    <Box>
+      {/* Launch Panel */}
+      <Box
+        bg="var(--bg-hover)"
+        border="1px solid"
+        borderColor="var(--border-subtle)"
+        rounded="xl"
+        p={5}
+        mb={4}
+      >
+        <HStack mb={4} spacing={3}>
+          <Box bg="linear-gradient(135deg, #7C3AED, #5B7FFF)" p={2} rounded="lg">
+            <Box as={FiPlay} color="white" fontSize="lg" />
+          </Box>
+          <VStack align="start" spacing={0}>
+            <Text fontSize="md" fontWeight="bold" color="var(--text-primary)">
+              Lancer un Benchmark T2/T5
+            </Text>
+            <Text fontSize="xs" color="var(--text-muted)">
+              Contradictions (T2) + Differenciateurs cross-doc (T5)
+            </Text>
+          </VStack>
+        </HStack>
+
+        <HStack spacing={3} mb={4} flexWrap="wrap">
+          {profiles.map(p => (
+            <Box
+              key={p.key}
+              as="button"
+              px={4}
+              py={2}
+              rounded="lg"
+              fontSize="sm"
+              fontWeight="bold"
+              bg={profile === p.key ? p.color : 'var(--bg-hover)'}
+              color={profile === p.key ? 'white' : 'var(--text-muted)'}
+              border="1px solid"
+              borderColor={profile === p.key ? p.color : 'var(--border-subtle)'}
+              onClick={() => setProfile(p.key)}
+              _hover={{ opacity: 0.8 }}
+              transition="all 0.15s"
+            >
+              {p.label}
+            </Box>
+          ))}
+        </HStack>
+
+        <HStack spacing={4} mb={4} flexWrap="wrap">
+          <Box>
+            <Text fontSize="xs" color="var(--text-muted)" mb={1}>Tag (optionnel)</Text>
+            <Box
+              as="input"
+              type="text"
+              value={tag}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTag(e.target.value)}
+              placeholder="ex: POST_C6"
+              bg="var(--bg-hover)"
+              border="1px solid"
+              borderColor="var(--border-subtle)"
+              rounded="md"
+              px={3}
+              py={1.5}
+              fontSize="sm"
+              color="var(--text-primary)"
+              maxW="200px"
+              _placeholder={{ color: 'var(--text-muted)', opacity: 0.5 }}
+              _focus={{ borderColor: '#7C3AED', outline: 'none' }}
+            />
+          </Box>
+          <Box flex={1}>
+            <Text fontSize="xs" color="var(--text-muted)" mb={1}>Description (ce que vous testez)</Text>
+            <Box
+              as="input"
+              type="text"
+              value={description}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
+              placeholder="ex: Apres Phase 3 complete"
+              bg="var(--bg-hover)"
+              border="1px solid"
+              borderColor="var(--border-subtle)"
+              rounded="md"
+              px={3}
+              py={1.5}
+              fontSize="sm"
+              color="var(--text-primary)"
+              w="100%"
+              _placeholder={{ color: 'var(--text-muted)', opacity: 0.5 }}
+              _focus={{ borderColor: '#7C3AED', outline: 'none' }}
+            />
+          </Box>
+        </HStack>
+
+        <Button
+          size="sm"
+          bg="#7C3AED"
+          color="white"
+          _hover={{ bg: '#6d28d9' }}
+          leftIcon={<Box as={FiPlay} />}
+          isDisabled={isRunning}
+          isLoading={isRunning}
+          loadingText="En cours..."
+          onClick={onLaunch}
+        >
+          Lancer
+        </Button>
+      </Box>
+
+      {/* Progress panel */}
+      {progress && progress.status !== 'idle' && (
+        <Box
+          bg="var(--bg-hover)"
+          border="1px solid"
+          borderColor={`${progressColor}44`}
+          rounded="xl"
+          p={5}
+          mb={4}
+        >
+          <HStack justify="space-between" mb={3} flexWrap="wrap">
+            <HStack spacing={2}>
+              <Box as={progress.status === 'completed' ? FiCheckCircle : progress.status === 'failed' ? FiXCircle : FiClock} color={progressColor} fontSize="md" />
+              <Text fontSize="sm" fontWeight="bold" color="var(--text-primary)">
+                Profil : {progress.profile}
+              </Text>
+              <Badge
+                fontSize="10px"
+                bg={`${progressColor}22`}
+                color={progressColor}
+                border="1px solid"
+                borderColor={`${progressColor}44`}
+                px={2}
+                rounded="md"
+              >
+                {progress.status === 'running' ? 'En cours' : progress.status === 'completed' ? 'Termine' : progress.status === 'failed' ? 'Echoue' : progress.status}
+              </Badge>
+            </HStack>
+          </HStack>
+
+          <Progress
+            value={pct}
+            size="sm"
+            rounded="full"
+            bg="var(--bg-hover)"
+            sx={{ '& > div': { bg: progressColor, transition: 'width 0.3s ease' } }}
+            mb={2}
+          />
+
+          <HStack justify="space-between" flexWrap="wrap">
+            <Text fontSize="xs" color="var(--text-muted)">
+              {progress.phase}{progress.total > 0 && ` ${progress.progress}/${progress.total}`}
+            </Text>
+            <Text fontSize="xs" fontWeight="bold" color={progressColor}>{pct}%</Text>
+          </HStack>
+
+          {progress.current_question && (
+            <Text fontSize="xs" color="var(--text-muted)" mt={2} noOfLines={1} fontStyle="italic">
+              {progress.current_question}
+            </Text>
+          )}
+
+          {progress.error && (
+            <Box bg="red.900" rounded="md" p={3} mt={3} border="1px solid" borderColor="red.700">
+              <Text fontSize="xs" color="red.200" fontWeight="bold">Erreur</Text>
+              <Text fontSize="xs" color="red.300" mt={1}>{progress.error}</Text>
+            </Box>
+          )}
+        </Box>
+      )}
+
+      {/* Latest Report Summary */}
+      {latest && (
+        <Box
+          bg="var(--bg-hover)"
+          border="1px solid"
+          borderColor="var(--border-subtle)"
+          rounded="xl"
+          p={5}
+          mb={4}
+        >
+          <HStack mb={4} justify="space-between" flexWrap="wrap">
+            <HStack spacing={3}>
+              <Box bg="linear-gradient(135deg, #7C3AED, #5B7FFF)" p={2} rounded="lg">
+                <Box as={FiBarChart2} color="white" fontSize="lg" />
+              </Box>
+              <VStack align="start" spacing={0}>
+                <Text fontSize="md" fontWeight="bold" color="var(--text-primary)">
+                  Dernier Rapport T2/T5
+                </Text>
+                <HStack spacing={2}>
+                  <Text fontSize="xs" color="var(--text-muted)">
+                    {latest.timestamp ? new Date(latest.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : latest.filename}
+                  </Text>
+                  <Badge fontSize="10px" bg="var(--bg-hover)" color="var(--text-muted)">
+                    {latest.profile_label || latest.profile}
+                  </Badge>
+                  <Text fontSize="10px" color="var(--text-muted)">
+                    ({Math.round(latest.duration_s)}s)
+                  </Text>
+                  {latest.tag && (
+                    <Badge fontSize="10px" bg="#7C3AED22" color="#7C3AED" border="1px solid" borderColor="#7C3AED44" fontWeight="bold">
+                      {latest.tag}
+                    </Badge>
+                  )}
+                </HStack>
+              </VStack>
+            </HStack>
+          </HStack>
+
+          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
+            {/* T2 Contradictions */}
+            <Box>
+              <Text fontSize="sm" fontWeight="bold" color="#f97316" mb={3}>
+                T2 — Contradictions
+                {latest.scores.t2_count !== undefined && (
+                  <Text as="span" fontSize="xs" fontWeight="normal" color="var(--text-muted)" ml={2}>
+                    ({latest.scores.t2_count} questions)
+                  </Text>
+                )}
+              </Text>
+              <T2T5ScoreBar label="Deux positions exposees (both_sides_surfaced)" value={latest.scores.both_sides_surfaced ?? 0} />
+              <T2T5ScoreBar label="Tension mentionnee (tension_mentioned)" value={latest.scores.tension_mentioned ?? 0} />
+              <T2T5ScoreBar label="Deux sources citees (both_sources_cited)" value={latest.scores.both_sources_cited ?? 0} />
+            </Box>
+
+            {/* T5 Differentiators */}
+            <Box>
+              <Text fontSize="sm" fontWeight="bold" color="#7C3AED" mb={3}>
+                T5 — Differenciateurs
+                {latest.scores.t5_count !== undefined && (
+                  <Text as="span" fontSize="xs" fontWeight="normal" color="var(--text-muted)" ml={2}>
+                    ({latest.scores.t5_count} questions)
+                  </Text>
+                )}
+              </Text>
+              <T2T5ScoreBar label="Couverture chaine (chain_coverage)" value={latest.scores.chain_coverage ?? 0} />
+              <T2T5ScoreBar label="Multi-doc cite (multi_doc_cited)" value={latest.scores.multi_doc_cited ?? 0} />
+              <T2T5ScoreBar label="Detection proactive (proactive_detection)" value={latest.scores.proactive_detection ?? 0} />
+            </Box>
+          </SimpleGrid>
+        </Box>
+      )}
+
+      {/* T5 Category Breakdown (expandable) */}
+      {latest && (latest.scores.t5_cross_doc_chain_count !== undefined || latest.scores.t5_proactive_contradiction_count !== undefined) && (
+        <Box
+          bg="var(--bg-hover)"
+          border="1px solid"
+          borderColor="var(--border-subtle)"
+          rounded="xl"
+          p={5}
+          mb={4}
+        >
+          <HStack
+            as="button"
+            onClick={() => setExpandedBreakdown(!expandedBreakdown)}
+            spacing={1}
+            cursor="pointer"
+            _hover={{ opacity: 0.8 }}
+          >
+            <Box as={expandedBreakdown ? FiChevronUp : FiChevronDown} color="#7C3AED" fontSize="sm" />
+            <Text fontSize="sm" fontWeight="bold" color="#7C3AED">
+              Detail par categorie T5
+            </Text>
+          </HStack>
+
+          {expandedBreakdown && (
+            <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4} mt={4}>
+              {/* Cross-doc chains */}
+              {latest.scores.t5_cross_doc_chain_count !== undefined && (
+                <Box bg="var(--bg-hover)" border="1px solid" borderColor="var(--border-subtle)" rounded="lg" p={3}>
+                  <Text fontSize="xs" fontWeight="bold" color="var(--text-primary)" mb={2}>
+                    Chaines cross-doc
+                    <Badge ml={1} fontSize="9px" bg="var(--bg-hover)" color="var(--text-muted)">
+                      {latest.scores.t5_cross_doc_chain_count}q
+                    </Badge>
+                  </Text>
+                  <T2T5ScoreBar label="chain_coverage" value={latest.scores.t5_cross_doc_chain_chain_coverage ?? 0} />
+                  <T2T5ScoreBar label="multi_doc_cited" value={latest.scores.t5_cross_doc_chain_multi_doc_cited ?? 0} />
+                </Box>
+              )}
+
+              {/* Proactive contradiction */}
+              {latest.scores.t5_proactive_contradiction_count !== undefined && (
+                <Box bg="var(--bg-hover)" border="1px solid" borderColor="var(--border-subtle)" rounded="lg" p={3}>
+                  <Text fontSize="xs" fontWeight="bold" color="var(--text-primary)" mb={2}>
+                    Contradiction proactive
+                    <Badge ml={1} fontSize="9px" bg="var(--bg-hover)" color="var(--text-muted)">
+                      {latest.scores.t5_proactive_contradiction_count}q
+                    </Badge>
+                  </Text>
+                  <T2T5ScoreBar label="chain_coverage" value={latest.scores.t5_proactive_contradiction_chain_coverage ?? 0} />
+                  <T2T5ScoreBar label="multi_doc_cited" value={latest.scores.t5_proactive_contradiction_multi_doc_cited ?? 0} />
+                </Box>
+              )}
+
+              {/* Multi-source synthesis */}
+              {latest.scores.t5_multi_source_synthesis_count !== undefined && (
+                <Box bg="var(--bg-hover)" border="1px solid" borderColor="var(--border-subtle)" rounded="lg" p={3}>
+                  <Text fontSize="xs" fontWeight="bold" color="var(--text-primary)" mb={2}>
+                    Synthese multi-source
+                    <Badge ml={1} fontSize="9px" bg="var(--bg-hover)" color="var(--text-muted)">
+                      {latest.scores.t5_multi_source_synthesis_count}q
+                    </Badge>
+                  </Text>
+                  <T2T5ScoreBar label="chain_coverage" value={latest.scores.t5_multi_source_synthesis_chain_coverage ?? 0} />
+                  <T2T5ScoreBar label="multi_doc_cited" value={latest.scores.t5_multi_source_synthesis_multi_doc_cited ?? 0} />
+                </Box>
+              )}
+            </SimpleGrid>
+          )}
+        </Box>
+      )}
+
+      {/* History table */}
+      {reports.length > 0 && (
+        <Box
+          bg="var(--bg-hover)"
+          border="1px solid"
+          borderColor="var(--border-subtle)"
+          rounded="xl"
+          p={5}
+          mb={4}
+        >
+          <Text fontSize="sm" fontWeight="bold" color="var(--text-primary)" mb={3}>
+            Historique des Runs T2/T5
+          </Text>
+          <Box overflowX="auto">
+            <Table size="sm">
+              <Thead>
+                <Tr>
+                  <Th color="var(--text-muted)" borderColor="var(--border-subtle)">Run</Th>
+                  <Th color="var(--text-muted)" borderColor="var(--border-subtle)">Profil</Th>
+                  <Th color="#f97316" borderColor="var(--border-subtle)" isNumeric>both_sides</Th>
+                  <Th color="#f97316" borderColor="var(--border-subtle)" isNumeric>tension</Th>
+                  <Th color="#f97316" borderColor="var(--border-subtle)" isNumeric>sources</Th>
+                  <Th color="#7C3AED" borderColor="var(--border-subtle)" isNumeric>chain</Th>
+                  <Th color="#7C3AED" borderColor="var(--border-subtle)" isNumeric>multi_doc</Th>
+                  <Th color="#7C3AED" borderColor="var(--border-subtle)" isNumeric>proactive</Th>
+                  <Th color="var(--text-muted)" borderColor="var(--border-subtle)" isNumeric>Duree</Th>
+                  <Th color="var(--text-muted)" borderColor="var(--border-subtle)" w="50px"></Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+                {reports.map((report) => {
+                  const s = report.scores
+                  const tsFormatted = report.timestamp
+                    ? new Date(report.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : report.filename
+
+                  const fmtPct = (v: number | undefined) => {
+                    if (v === undefined) return '-'
+                    const p = Math.round(v * 100)
+                    const c = p >= 80 ? '#22c55e' : p >= 50 ? '#f97316' : '#ef4444'
+                    return <Text as="span" color={c} fontWeight="bold">{p}%</Text>
+                  }
+
+                  return (
+                    <Tr key={report.filename}>
+                      <Td borderColor="var(--border-subtle)" maxW="250px">
+                        <VStack align="start" spacing={0}>
+                          {report.tag && (
+                            <Badge fontSize="10px" bg="#7C3AED22" color="#7C3AED" mb={0.5}>{report.tag}</Badge>
+                          )}
+                          {report.description && (
+                            <Text fontSize="xs" color="var(--text-secondary)" noOfLines={1}>{report.description}</Text>
+                          )}
+                          <Text fontSize="10px" color="var(--text-muted)">{tsFormatted}</Text>
+                        </VStack>
+                      </Td>
+                      <Td borderColor="var(--border-subtle)" style={{display: 'none'}}>
+                        {report.tag ? (
+                          <Badge fontSize="10px" bg="#7C3AED22" color="#7C3AED" border="1px solid" borderColor="#7C3AED44" fontWeight="bold">
+                            {report.tag}
+                          </Badge>
+                        ) : (
+                          <Text fontSize="xs" color="var(--text-muted)" opacity={0.4}>-</Text>
+                        )}
+                      </Td>
+                      <Td borderColor="var(--border-subtle)">
+                        <Text fontSize="xs" color="var(--text-muted)">{report.profile_label || report.profile}</Text>
+                      </Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.both_sides_surfaced)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.tension_mentioned)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.both_sources_cited)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.chain_coverage)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.multi_doc_cited)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric><Text fontSize="xs">{fmtPct(s.proactive_detection)}</Text></Td>
+                      <Td borderColor="var(--border-subtle)" isNumeric>
+                        <Text fontSize="xs" color="var(--text-muted)">
+                          {report.duration_s ? `${Math.round(report.duration_s)}s` : '-'}
+                        </Text>
+                      </Td>
+                      <Td borderColor="var(--border-subtle)">
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          colorScheme="red"
+                          opacity={0.5}
+                          _hover={{ opacity: 1 }}
+                          onClick={() => {
+                            if (confirm(`Supprimer le rapport ${report.filename} ?`)) {
+                              onDelete(report.filename)
+                            }
+                          }}
+                          title="Supprimer ce rapport"
+                        >
+                          <FiXCircle />
+                        </Button>
+                      </Td>
+                    </Tr>
+                  )
+                })}
+              </Tbody>
+            </Table>
+          </Box>
+        </Box>
+      )}
+
+      {/* Methodology note */}
+      <Box
+        bg="var(--bg-hover)"
+        border="1px solid"
+        borderColor="var(--border-subtle)"
+        rounded="xl"
+        p={4}
+      >
+        <Text fontSize="xs" fontWeight="bold" color="var(--text-muted)" mb={2}>
+          Methodologie T2/T5
+        </Text>
+        <Text fontSize="xs" color="var(--text-muted)" lineHeight="1.6">
+          <Text as="span" fontWeight="bold">T2 (Contradictions)</Text> evalue la capacite du systeme a exposer les deux
+          cotes d&apos;une divergence documentaire, signaler explicitement les tensions, et citer les sources pour chaque position.
+          <Text as="span" fontWeight="bold"> T5 (Differenciateurs)</Text> mesure les capacites cross-document :
+          chaines de raisonnement multi-docs, detection proactive de contradictions, et synthese multi-source.
+          Ces metriques sont specifiques a OSMOSIS et constituent les differenciateurs cles face aux systemes RAG classiques.
+        </Text>
+      </Box>
+    </Box>
+  )
+}
+
+function RagasTab({ reports, runProgress, selectedProfile, setSelectedProfile, compareRag, setCompareRag, onLaunch, onDelete, comparisonResult, compareA, compareB, setCompareA, setCompareB, onCompare, tag, setTag, description, setDescription }: {
+  reports: RagasReport[]
+  runProgress: RagasProgress | null
+  selectedProfile: string
+  setSelectedProfile: (v: string) => void
+  compareRag: boolean
+  setCompareRag: (v: boolean) => void
+  onLaunch: () => void
+  onDelete: (filename: string) => void
+  comparisonResult: RagasComparison | null
+  compareA: string
+  compareB: string
+  setCompareA: (v: string) => void
+  setCompareB: (v: string) => void
+  onCompare: () => void
+  tag?: string
+  setTag?: (v: string) => void
+  description?: string
+  setDescription?: (v: string) => void
+}) {
+  return (
+    <Box>
+      {/* Launch panel */}
+      <RagasLaunchPanel
+        runProgress={runProgress}
+        selectedProfile={selectedProfile}
+        setSelectedProfile={setSelectedProfile}
+        compareRag={compareRag}
+        setCompareRag={setCompareRag}
+        onLaunch={onLaunch}
+        tag={tag}
+        setTag={setTag}
+        description={description}
+        setDescription={setDescription}
+      />
+
+      {/* Progress panel — only when a run is in progress or just finished */}
+      {runProgress && runProgress.status !== 'idle' && (
+        <RagasProgressPanel progress={runProgress} />
+      )}
+
+      {/* Most recent report — full card */}
+      {reports.length > 0 && <RagasDiagnosticCard report={reports[0]} />}
+
+      {/* History table */}
+      <RagasHistoryTable reports={reports} onDelete={onDelete} />
+
+      {/* Comparison panel */}
+      <RagasComparisonPanel
+        reports={reports}
+        comparisonResult={comparisonResult}
+        compareA={compareA}
+        compareB={compareB}
+        setCompareA={setCompareA}
+        setCompareB={setCompareB}
+        onCompare={onCompare}
+      />
+
+      {/* Methodology note */}
+      <Box
+        bg="var(--bg-hover)"
+        border="1px solid"
+        borderColor="var(--border-subtle)"
+        rounded="xl"
+        p={4}
+      >
+        <Text fontSize="xs" fontWeight="bold" color="var(--text-muted)" mb={2}>
+          Methodologie RAGAS
+        </Text>
+        <Text fontSize="xs" color="var(--text-muted)" lineHeight="1.6">
+          <Text as="span" fontWeight="bold">Faithfulness</Text> mesure si la reponse est fidelement
+          derivee du contexte fourni (pas d&apos;hallucination). <Text as="span" fontWeight="bold">Context Relevance</Text> mesure
+          si les passages recuperes sont pertinents pour la question posee.
+          Le croisement de ces deux metriques permet de diagnostiquer si le probleme vient du retrieval
+          (mauvais passages) ou de la generation (hallucinations malgre un bon contexte).
+        </Text>
+      </Box>
+    </Box>
+  )
+}
+
+
 export default function BenchmarksPage() {
   const [runs, setRuns] = useState<BenchmarkRun[]>([])
+  const [ragasReports, setRagasReports] = useState<RagasReport[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedRun, setSelectedRun] = useState(0)
-  const [activeTab, setActiveTab] = useState<'results' | 'compare'>('results')
+  const [activeTab, setActiveTab] = useState<'results' | 'compare' | 'ragas' | 't2t5'>('results')
+
+  // RAGAS launch & progress state
+  const [runProgress, setRunProgress] = useState<RagasProgress | null>(null)
+  const [selectedProfile, setSelectedProfile] = useState('standard')
+  const [compareRag, setCompareRag] = useState(false)
+  const [comparisonResult, setComparisonResult] = useState<RagasComparison | null>(null)
+  const [compareA, setCompareA] = useState('')
+  const [compareB, setCompareB] = useState('')
+  const [ragasTag, setRagasTag] = useState('')
+  const [ragasDescription, setRagasDescription] = useState('')
+
+  // T2/T5 state
+  const [t2t5Reports, setT2t5Reports] = useState<T2T5Report[]>([])
+  const [t2t5Progress, setT2t5Progress] = useState<T2T5Progress | null>(null)
+  const [t2t5Profile, setT2t5Profile] = useState('standard')
+  const [t2t5Tag, setT2t5Tag] = useState('')
+  const [t2t5Description, setT2t5Description] = useState('')
+
+  const fetchRagasReports = () => {
+    fetch('/api/benchmarks/ragas').then(r => r.json()).catch(() => ({ reports: [] }))
+      .then(data => setRagasReports(data.reports || []))
+  }
+
+  const fetchT2T5Reports = () => {
+    fetch('/api/benchmarks/t2t5').then(r => r.json()).catch(() => ({ reports: [] }))
+      .then(data => setT2t5Reports(data.reports || []))
+  }
 
   useEffect(() => {
-    fetch('/api/benchmarks')
-      .then(r => r.json())
-      .then(data => {
-        setRuns(data.runs || [])
-        if (data.error) setError(data.error)
+    Promise.all([
+      fetch('/api/benchmarks').then(r => r.json()),
+      fetch('/api/benchmarks/ragas').then(r => r.json()).catch(() => ({ reports: [] })),
+      fetch('/api/benchmarks/t2t5').then(r => r.json()).catch(() => ({ reports: [] })),
+    ])
+      .then(([benchData, ragasData, t2t5Data]) => {
+        setRuns(benchData.runs || [])
+        setRagasReports(ragasData.reports || [])
+        setT2t5Reports(t2t5Data.reports || [])
+        if (benchData.error) setError(benchData.error)
         setLoading(false)
       })
       .catch(e => {
@@ -1090,6 +2620,112 @@ export default function BenchmarksPage() {
         setLoading(false)
       })
   }, [])
+
+  // Polling for RAGAS progress
+  useEffect(() => {
+    if (!runProgress || runProgress.status !== 'running') return
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/benchmarks/ragas/progress')
+        const data = await res.json()
+        setRunProgress(data)
+        if (data.status !== 'running') {
+          clearInterval(interval)
+          fetchRagasReports()
+        }
+      } catch {
+        // Silently ignore fetch errors during polling
+      }
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [runProgress?.status])
+
+  // Polling for T2/T5 progress
+  useEffect(() => {
+    if (!t2t5Progress || t2t5Progress.status !== 'running') return
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/benchmarks/t2t5/progress')
+        const data = await res.json()
+        setT2t5Progress(data)
+        if (data.status !== 'running') {
+          clearInterval(interval)
+          fetchT2T5Reports()
+        }
+      } catch {
+        // Silently ignore fetch errors during polling
+      }
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [t2t5Progress?.status])
+
+  const launchRagas = async () => {
+    try {
+      await fetch('/api/benchmarks/ragas/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile: selectedProfile, compare_rag: compareRag, tag: ragasTag || undefined, description: ragasDescription || undefined }),
+      })
+      setRunProgress({
+        status: 'running',
+        profile: selectedProfile,
+        phase: 'starting',
+        progress: 0,
+        total: 0,
+        current_question: '',
+        started_at: new Date().toISOString(),
+      })
+    } catch (e) {
+      setRunProgress({
+        status: 'failed',
+        profile: selectedProfile,
+        phase: 'starting',
+        progress: 0,
+        total: 0,
+        current_question: '',
+        started_at: new Date().toISOString(),
+        error: String(e),
+      })
+    }
+  }
+
+  const compareRagasRuns = async () => {
+    try {
+      const res = await fetch(`/api/benchmarks/ragas/compare?a=${encodeURIComponent(compareA)}&b=${encodeURIComponent(compareB)}`)
+      const data = await res.json()
+      setComparisonResult(data)
+    } catch {
+      // Silently ignore
+    }
+  }
+
+  const launchT2T5 = async () => {
+    try {
+      await fetch('/api/benchmarks/t2t5/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile: t2t5Profile, tag: t2t5Tag || undefined, description: t2t5Description || undefined }),
+      })
+      setT2t5Progress({
+        status: 'running',
+        profile: t2t5Profile,
+        phase: 'starting',
+        progress: 0,
+        total: 0,
+        current_question: '',
+      })
+    } catch (e) {
+      setT2t5Progress({
+        status: 'failed',
+        profile: t2t5Profile,
+        phase: 'starting',
+        progress: 0,
+        total: 0,
+        current_question: '',
+        error: String(e),
+      })
+    }
+  }
 
   if (loading) {
     return (
@@ -1140,8 +2776,7 @@ export default function BenchmarksPage() {
       </HStack>
 
       {/* Tabs */}
-      {runs.length > 0 && (
-        <HStack spacing={0} mb={4}>
+      <HStack spacing={0} mb={4}>
           <Box as="button" px={4} py={2} fontSize="sm" fontWeight="bold" rounded="lg" roundedRight="none"
             bg={activeTab === 'results' ? '#5B7FFF' : 'var(--bg-hover)'}
             color={activeTab === 'results' ? 'white' : 'var(--text-muted)'}
@@ -1149,17 +2784,80 @@ export default function BenchmarksPage() {
             _hover={{ opacity: 0.8 }}>
             Resultats
           </Box>
-          <Box as="button" px={4} py={2} fontSize="sm" fontWeight="bold" rounded="lg" roundedLeft="none"
+          <Box as="button" px={4} py={2} fontSize="sm" fontWeight="bold" rounded="none"
             bg={activeTab === 'compare' ? '#5B7FFF' : 'var(--bg-hover)'}
             color={activeTab === 'compare' ? 'white' : 'var(--text-muted)'}
             onClick={() => setActiveTab('compare')}
             _hover={{ opacity: 0.8 }}>
             Comparaison
           </Box>
+          <Box as="button" px={4} py={2} fontSize="sm" fontWeight="bold" rounded="none"
+            bg={activeTab === 'ragas' ? '#5B7FFF' : 'var(--bg-hover)'}
+            color={activeTab === 'ragas' ? 'white' : 'var(--text-muted)'}
+            onClick={() => setActiveTab('ragas')}
+            _hover={{ opacity: 0.8 }}>
+            RAGAS
+            {ragasReports.length > 0 && (
+              <Badge ml={1} fontSize="9px" bg="rgba(255,255,255,0.2)" color="inherit" rounded="full" px={1.5}>
+                {ragasReports.length}
+              </Badge>
+            )}
+          </Box>
+          <Box as="button" px={4} py={2} fontSize="sm" fontWeight="bold" rounded="lg" roundedLeft="none"
+            bg={activeTab === 't2t5' ? '#7C3AED' : 'var(--bg-hover)'}
+            color={activeTab === 't2t5' ? 'white' : 'var(--text-muted)'}
+            onClick={() => setActiveTab('t2t5')}
+            _hover={{ opacity: 0.8 }}>
+            T2/T5
+            {t2t5Reports.length > 0 && (
+              <Badge ml={1} fontSize="9px" bg="rgba(255,255,255,0.2)" color="inherit" rounded="full" px={1.5}>
+                {t2t5Reports.length}
+              </Badge>
+            )}
+          </Box>
         </HStack>
-      )}
 
-      {runs.length === 0 ? (
+      {activeTab === 't2t5' ? (
+        <T2T5Tab
+          reports={t2t5Reports}
+          progress={t2t5Progress}
+          profile={t2t5Profile}
+          setProfile={setT2t5Profile}
+          tag={t2t5Tag}
+          setTag={setT2t5Tag}
+          description={t2t5Description}
+          setDescription={setT2t5Description}
+          onLaunch={launchT2T5}
+          onDelete={async (filename: string) => {
+            await fetch(`/api/benchmarks/t2t5/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+            fetchT2T5Reports()
+          }}
+        />
+      ) : activeTab === 'ragas' ? (
+        <RagasTab
+          reports={ragasReports}
+          runProgress={runProgress}
+          selectedProfile={selectedProfile}
+          setSelectedProfile={setSelectedProfile}
+          compareRag={compareRag}
+          setCompareRag={setCompareRag}
+          onLaunch={launchRagas}
+          onDelete={async (filename: string) => {
+            await fetch(`/api/benchmarks/ragas/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+            fetchRagasReports()
+          }}
+          comparisonResult={comparisonResult}
+          compareA={compareA}
+          compareB={compareB}
+          setCompareA={setCompareA}
+          setCompareB={setCompareB}
+          onCompare={compareRagasRuns}
+          tag={ragasTag}
+          setTag={setRagasTag}
+          description={ragasDescription}
+          setDescription={setRagasDescription}
+        />
+      ) : runs.length === 0 ? (
         <Box
           bg="var(--bg-hover)"
           border="1px solid"
