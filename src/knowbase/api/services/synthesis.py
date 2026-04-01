@@ -243,13 +243,56 @@ def synthesize_response(
     start_time = time.time()
 
     try:
+        # Choix du provider de synthese via env (default: anthropic)
+        synthesis_provider = os.environ.get("OSMOSIS_SYNTHESIS_PROVIDER", "anthropic")
+
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if anthropic_key:
-            # Tier 1 : Claude Haiku (API) — 80% correct, $0.004/question
+
+        synthesized_via = None
+
+        # Tier 0 : OpenAI (si configure comme provider principal)
+        if synthesis_provider == "openai" and openai_key:
+            try:
+                from openai import OpenAI
+                oai_client = OpenAI(api_key=openai_key)
+                oai_model = os.environ.get("OSMOSIS_SYNTHESIS_MODEL", "gpt-4o-mini")
+                response = oai_client.chat.completions.create(
+                    model=oai_model,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_MSG},
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=2000,
+                    temperature=0.3,
+                )
+                synthesized_answer = response.choices[0].message.content or ""
+                synthesized_via = "openai"
+                logger.info(
+                    f"[SYNTHESIS] OpenAI {oai_model} completed in "
+                    f"{(time.time() - start_time) * 1000:.0f}ms, "
+                    f"{len(synthesized_answer)} chars"
+                )
+                try:
+                    from knowbase.common.token_tracker import track_tokens
+                    track_tokens(
+                        model=oai_model,
+                        task_type="synthesis",
+                        input_tokens=response.usage.prompt_tokens if response.usage else 0,
+                        output_tokens=response.usage.completion_tokens if response.usage else 0,
+                        context="synthesis_chat",
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.warning(f"[SYNTHESIS] OpenAI failed, falling back: {e}")
+
+        # Tier 1 : Claude Haiku (default ou fallback)
+        if not synthesized_via and anthropic_key:
             try:
                 import anthropic
                 client = anthropic.Anthropic(api_key=anthropic_key)
-                haiku_model = os.environ.get("OSMOSIS_SYNTHESIS_MODEL", "claude-haiku-4-5-20251001")
+                haiku_model = os.environ.get("OSMOSIS_SYNTHESIS_MODEL" if synthesis_provider == "anthropic" else "_IGNORE_", "claude-haiku-4-5-20251001")
                 response = client.messages.create(
                     model=haiku_model,
                     max_tokens=2000,
@@ -258,6 +301,7 @@ def synthesize_response(
                     temperature=0.3,
                 )
                 synthesized_answer = response.content[0].text if response.content else ""
+                synthesized_via = "anthropic"
                 logger.info(
                     f"[SYNTHESIS] Claude {haiku_model} completed in "
                     f"{(time.time() - start_time) * 1000:.0f}ms, "
@@ -277,9 +321,9 @@ def synthesize_response(
                     pass
             except Exception as e:
                 logger.warning(f"[SYNTHESIS] Claude API failed, falling back to local LLM: {e}")
-                anthropic_key = ""  # Force fallback
+                pass  # Fall through to Tier 2
 
-        if not anthropic_key:
+        if not synthesized_via:
             # Tier 2 : Fallback LLM local (Qwen via routeur)
             router = get_llm_router()
             messages = [
