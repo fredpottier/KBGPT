@@ -23,15 +23,17 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-QA_CLASS_PROMPT = """Given a question and a text chunk from a document, determine if the chunk contains enough information to answer the question.
+QA_CLASS_PROMPT = """Given a question and a text chunk from a document, determine if the chunk is RELEVANT to answering the question.
 
 Question: "{question}"
 Chunk: "{chunk}"
 
 Answer with EXACTLY one word: YES, PARTIAL, or NO.
-- YES: the chunk directly answers the question
-- PARTIAL: the chunk is related but does not fully answer
-- NO: the chunk does not help answer this question"""
+- YES: the chunk contains information directly useful to answer the question
+- PARTIAL: the chunk discusses the same topic and could contribute to an answer
+- NO: the chunk is about a completely different topic and cannot help at all
+
+IMPORTANT: If the chunk discusses the same subject as the question (even from a different angle, in a different language, or with different wording), answer PARTIAL or YES. Answer NO only if the chunk is truly unrelated."""
 
 MAX_CHUNKS_TO_EVALUATE = 3
 MAX_CHUNK_CHARS = 500
