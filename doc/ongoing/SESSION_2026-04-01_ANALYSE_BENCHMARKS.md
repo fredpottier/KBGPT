@@ -530,4 +530,63 @@ Limite connue: 5 questions par catégorie = statistiquement insuffisant. Élargi
 
 ---
 
-*Document genere par Claude Code pour analyse complementaire par d'autres IA. Mis a jour le 1er avril 2026 avec les resultats du benchmark robustesse et V9-V10 QA-Class.*
+---
+
+## 10. Comparaison multi-modeles — V12/V13 (246 questions, 25/categorie)
+
+### Contexte
+
+Apres l'elargissement du corpus de questions a 25/categorie, trois modeles de synthese ont ete compares sur le benchmark robustesse complet :
+- **Qwen 14B AWQ** : vLLM local, gratuit
+- **Claude Haiku 3.5** : Anthropic, ~$4.89/full suite
+- **GPT-4o-mini** : OpenAI, ~$0.84/full suite (6x moins cher que Haiku)
+
+### Resultats
+
+| Categorie | Qwen (gratuit) | Haiku ($4.89) | GPT-4o-mini ($0.84) | Meilleur |
+|---|---|---|---|---|
+| synthesis_large | 82.6% | 83.3% | **92.3%** | GPT-4o-mini |
+| multi_hop | 61.1% | 74.0% | **76.0%** | GPT-4o-mini |
+| set_list | 50.2% | 50.0% | **70.3%** | GPT-4o-mini |
+| false_premise | 51.0% | 52.7% | **61.2%** | GPT-4o-mini |
+| unanswerable | 62.8% | **72.1%** | 23.8% | Haiku |
+| hypothetical | 34.9% | 45.4% | **56.0%** | GPT-4o-mini |
+| causal_why | 43.1% | **57.2%** | 40.8% | Haiku |
+| temporal | 31.7% | 32.0% | **53.4%** | GPT-4o-mini |
+| negation | 30.3% | 43.2% | **45.7%** | GPT-4o-mini |
+| conditional | 38.8% | **50.5%** | 39.9% | Haiku |
+| **GLOBAL** | 48.6% | **56.1%** | **56.1%** | Egalite |
+
+### Analyse
+
+**GPT-4o-mini = Haiku en score global (56.1%) pour 6x moins cher.**
+
+Mais les profils sont radicalement differents :
+
+**GPT-4o-mini excelle sur :** synthesis (+9pp), set_list (+20pp), temporal (+21pp), hypothetical (+11pp), false_premise (+8pp). Il produit des syntheses plus riches et enumere mieux.
+
+**Haiku excelle sur :** unanswerable (+48pp !!), causal (+16pp), conditional (+11pp). Il sait dire "je ne sais pas" et extraire les conditions/causes.
+
+**Le unanswerable a 23.8% vs 72.1% est le point critique.** GPT-4o-mini hallucine massivement quand la reponse n'est pas dans le corpus. Le QA-Class (gate pre-LLM via Qwen/vLLM) compense partiellement mais son efficacite varie selon le LLM de synthese.
+
+### Couts compares
+
+| Modele | Input $/M | Output $/M | Cout/question | Full suite (671q) |
+|---|---|---|---|---|
+| Qwen 14B | $0 | $0 | $0 | $0 |
+| GPT-4o-mini | $0.15 | $0.60 | $0.0012 | **$0.84** |
+| Claude Haiku | $0.80 | $4.00 | $0.0073 | **$4.89** |
+
+### Decision et prochaines etapes
+
+GPT-4o-mini est le candidat pour la synthese courante (6x economie). Le deficit sur unanswerable (-48pp) et conditional (-11pp) doit etre compense par :
+1. Amelioration du QA-Class pour mieux fonctionner avec GPT-4o-mini (prompt ou seuils)
+2. Ou instruction specifique dans le prompt de synthese pour GPT-4o-mini
+
+Contrainte : eviter de multiplier les modeles pour une meme tache. Un seul modele de synthese, pas de routing conditionnel Haiku/GPT-4o-mini selon le type de question.
+
+**Note** : Les scores absolus sont a prendre avec prudence (voir CHANTIER_QUALITE_EVALUATEURS.md). Les comparaisons relatives restent fiables.
+
+---
+
+*Document genere par Claude Code pour analyse complementaire par d'autres IA. Mis a jour le 2 avril 2026 avec comparaison multi-modeles V12/V13.*
