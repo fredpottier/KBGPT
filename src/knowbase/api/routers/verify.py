@@ -273,11 +273,18 @@ def _build_explanation(assertion) -> str:
 
     ev = assertion.evidence[0]
     source = getattr(ev, "source_doc", "source inconnue") or "source inconnue"
-    # Nettoyer le nom de source
+    # Nettoyer le nom de source (enlever prefixe numerique et hash)
     if source and "_" in source:
-        parts = source.split("_", 2)
-        source = parts[1] if len(parts) > 1 else source
-    claim = getattr(ev, "claim_text", "") or ""
+        parts = source.split("_")
+        # Garder les parties significatives (enlever le numero et le hash)
+        clean_parts = [p for p in parts[1:] if len(p) > 8]  # ignorer les hash courts
+        source = " ".join(clean_parts[:5]) if clean_parts else source
+    claim = getattr(ev, "text", "") or getattr(ev, "claim_text", "") or ""
+    # Nettoyer le prefixe [FACTUAL] etc.
+    if claim.startswith("["):
+        bracket_end = claim.find("]")
+        if bracket_end > 0 and bracket_end < 20:
+            claim = claim[bracket_end + 1:].strip()
     relationship = getattr(ev, "relationship", "") or ""
     comparison = getattr(ev, "comparison_details", None)
 
