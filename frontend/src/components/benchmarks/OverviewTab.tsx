@@ -496,7 +496,7 @@ export function OverviewTab({
         />
 
         <ScoreCard
-          title="Contradictions T2/T5"
+          title="Contradictions"
           mainScore={t2BothSides}
           mainLabel="Both sides"
           accent={tokens.accentPurple}
@@ -552,6 +552,13 @@ export function OverviewTab({
         benchTypes={BENCH_TYPES}
         isRunning={isRunning}
         runProgress={runProgress}
+        onLaunchAll={async () => {
+          for (const bt of ['ragas', 't2t5', 'robustness']) {
+            onLaunch(bt, selectedProfile, tag, description)
+            // Small delay so each request is dispatched
+            await new Promise(r => setTimeout(r, 500))
+          }
+        }}
       />
     </VStack>
   )

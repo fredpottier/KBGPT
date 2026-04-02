@@ -16,6 +16,7 @@ interface LaunchPanelProps {
   isRunning?: boolean
   runProgress?: { phase: string; progress: number; total: number; current_question?: string }
   accentColor?: string
+  onLaunchAll?: () => void
 }
 
 export function LaunchPanel({
@@ -30,6 +31,7 @@ export function LaunchPanel({
   benchTypes,
   isRunning,
   runProgress,
+  onLaunchAll,
 }: LaunchPanelProps) {
   return (
     <Box
@@ -118,6 +120,20 @@ export function LaunchPanel({
             {bt.label}
           </Button>
         ))}
+        {onLaunchAll && (
+          <Button
+            size="sm"
+            variant="outline"
+            borderColor="var(--text-secondary, #94a3b8)"
+            color="var(--text-secondary, #94a3b8)"
+            _hover={{ bg: 'rgba(148, 163, 184, 0.1)' }}
+            leftIcon={<FiPlay />}
+            onClick={onLaunchAll}
+            isDisabled={isRunning}
+          >
+            Lancer tout
+          </Button>
+        )}
       </HStack>
 
       {isRunning && runProgress && (

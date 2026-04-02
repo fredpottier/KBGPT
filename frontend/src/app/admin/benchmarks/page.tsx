@@ -7,7 +7,6 @@ import {
   VStack,
   Text,
   Badge,
-  Select,
   Table,
   Thead,
   Tbody,
@@ -37,6 +36,7 @@ import {
   QuestionDetailRow,
   OverviewTab,
   RobustnessTab,
+  RadarChart,
 } from '@/components/benchmarks'
 
 // ── Design tokens ─────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ interface RunProgress {
   current_question?: string
 }
 
-type TabKey = 'overview' | 'ragas' | 'contradictions' | 'robustness' | 'comparison'
+type TabKey = 'overview' | 'ragas' | 'contradictions' | 'robustness'
 
 // ── Tab definitions ───────────────────────────────────────────────────
 
@@ -122,7 +122,7 @@ const TABS: { key: TabKey; label: string; Icon: React.ElementType; accent: strin
   { key: 'ragas', label: 'RAGAS', Icon: FiBarChart2, accent: T.accentRagas },
   { key: 'contradictions', label: 'Contradictions', Icon: FiAlertTriangle, accent: T.accentContra },
   { key: 'robustness', label: 'Robustesse', Icon: FiShield, accent: T.accentRobust },
-  { key: 'comparison', label: 'Comparaison', Icon: FiGitMerge, accent: T.accentRagas },
+  // Onglet Comparaison supprime — les deltas vs baseline sont dans chaque onglet
 ]
 
 const PROFILES = [
@@ -210,11 +210,7 @@ export default function BenchmarksPage() {
   const [runType, setRunType] = useState<string | null>(null)
   const [runProgress, setRunProgress] = useState<RunProgress | null>(null)
 
-  // ── Comparison state ────────────────────────────────────────────────
-  const [compRunA, setCompRunA] = useState<string>('')
-  const [compRunB, setCompRunB] = useState<string>('')
-  const [compDetailA, setCompDetailA] = useState<RagasReport | null>(null)
-  const [compDetailB, setCompDetailB] = useState<RagasReport | null>(null)
+  // ── Comparison state (simplified) ────────────────────────────────────
 
   // ── Data fetching ───────────────────────────────────────────────────
 
@@ -297,21 +293,6 @@ export default function BenchmarksPage() {
       body: JSON.stringify({ profile, tag: tag || undefined, description: description || undefined }),
     })
   }, [])
-
-  // ── Comparison fetching ─────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!compRunA) { setCompDetailA(null); return }
-    // Le detail endpoint retourne {filename, data: {...}} — on utilise le rapport de la liste
-    const found = ragasReports.find(r => r.filename === compRunA)
-    setCompDetailA(found || null)
-  }, [compRunA, ragasReports])
-
-  useEffect(() => {
-    if (!compRunB) { setCompDetailB(null); return }
-    const found = ragasReports.find(r => r.filename === compRunB)
-    setCompDetailB(found || null)
-  }, [compRunB, ragasReports])
 
   // ── Derived data ────────────────────────────────────────────────────
 
@@ -472,17 +453,7 @@ export default function BenchmarksPage() {
         />
       )}
 
-      {activeTab === 'comparison' && (
-        <ComparisonTab
-          ragasReports={ragasReports}
-          compRunA={compRunA}
-          compRunB={compRunB}
-          onSelectA={setCompRunA}
-          onSelectB={setCompRunB}
-          detailA={compDetailA}
-          detailB={compDetailB}
-        />
-      )}
+      {/* Onglet Comparaison supprime — deltas vs baseline dans chaque onglet */}
     </Box>
   )
 }
@@ -777,10 +748,13 @@ function RagasTab({
 //  TAB 3: CONTRADICTIONS (T2/T5)
 // ══════════════════════════════════════════════════════════════════════
 
-const CONTRA_METRICS = [
-  { key: 'tension_mentioned', label: 'Tension mentionnee' },
+const CONTRA_T2_METRICS = [
   { key: 'both_sides_surfaced', label: 'Deux cotes surfaces' },
+  { key: 'tension_mentioned', label: 'Tension mentionnee' },
   { key: 'both_sources_cited', label: 'Sources citees' },
+] as const
+
+const CONTRA_T5_METRICS = [
   { key: 'chain_coverage', label: 'Couverture chaines' },
   { key: 'multi_doc_cited', label: 'Multi-doc cite' },
   { key: 'proactive_detection', label: 'Detection proactive' },
@@ -791,6 +765,8 @@ const CONTRA_CATEGORIES = [
   { key: 'proactive_contradiction', label: 'Contradiction proactive' },
   { key: 'multi_source_synthesis', label: 'Synthese multi-source' },
 ] as const
+
+const CONTRA_CAT_SUB_METRICS = ['chain_coverage', 'multi_doc_cited'] as const
 
 function ContradictionsTab({
   reports,
@@ -821,44 +797,104 @@ function ContradictionsTab({
   const scores = latest?.scores ?? {}
   const baseScores = baseline?.scores ?? {}
 
+  // Radar data: combine T2 + T5 metrics
+  const radarData = useMemo(() => {
+    const allMetrics = [...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS]
+    return allMetrics.map(m => ({
+      label: m.label,
+      value: scores[m.key] ?? 0,
+    }))
+  }, [scores])
+
   return (
     <VStack spacing={6} align="stretch">
-      {/* Metric bars */}
-      <Card accent={T.accentContra}>
-        <Text fontSize="sm" fontWeight="700" color={T.textPrimary} mb={4}>
-          Metriques principales
-        </Text>
-        {CONTRA_METRICS.map(m => {
-          const val = scores[m.key] ?? 0
-          const baseVal = baseScores[m.key]
-          const delta = baseVal != null ? Math.round((val - baseVal) * 100) : null
-          return (
-            <MetricBar
-              key={m.key}
-              label={m.label}
-              value={val}
-              delta={delta !== 0 ? delta : null}
-            />
-          )
-        })}
-      </Card>
+      {/* Radar + Metric bars row */}
+      <HStack spacing={6} align="start" flexWrap={{ base: 'wrap', lg: 'nowrap' }}>
+        {/* Left: Radar */}
+        <Card flexShrink={0}>
+          <Text fontSize="sm" fontWeight="700" color={T.textPrimary} mb={3}>
+            Radar T2/T5
+          </Text>
+          <RadarChart data={radarData} size={260} color={T.accentContra} />
+        </Card>
 
-      {/* Category breakdown */}
+        {/* Right: Metric bars */}
+        <VStack spacing={4} align="stretch" flex={1} minW="300px">
+          <Card accent={T.accentContra}>
+            <Text fontSize="xs" fontWeight="700" color={T.accentContra} textTransform="uppercase" mb={3}>
+              T2 — Detection de contradictions
+            </Text>
+            {CONTRA_T2_METRICS.map(m => {
+              const val = scores[m.key] ?? 0
+              const baseVal = baseScores[m.key]
+              const delta = baseVal != null ? Math.round((val - baseVal) * 100) : null
+              return (
+                <MetricBar
+                  key={m.key}
+                  label={m.label}
+                  value={val}
+                  delta={delta !== 0 ? delta : null}
+                />
+              )
+            })}
+          </Card>
+
+          <Card accent={T.accentContra}>
+            <Text fontSize="xs" fontWeight="700" color={T.accentContra} textTransform="uppercase" mb={3}>
+              T5 — Chaines documentaires
+            </Text>
+            {CONTRA_T5_METRICS.map(m => {
+              const val = scores[m.key] ?? 0
+              const baseVal = baseScores[m.key]
+              const delta = baseVal != null ? Math.round((val - baseVal) * 100) : null
+              return (
+                <MetricBar
+                  key={m.key}
+                  label={m.label}
+                  value={val}
+                  delta={delta !== 0 ? delta : null}
+                />
+              )
+            })}
+          </Card>
+        </VStack>
+      </HStack>
+
+      {/* Category breakdown with sub-metrics */}
       <Card>
         <Text fontSize="sm" fontWeight="700" color={T.textPrimary} mb={4}>
-          Par categorie
+          Par categorie (T5)
         </Text>
         {CONTRA_CATEGORIES.map(cat => {
-          const val = scores[`${cat.key}_score`] ?? scores[cat.key] ?? 0
-          const baseVal = baseScores[`${cat.key}_score`] ?? baseScores[cat.key]
-          const delta = baseVal != null ? Math.round((val - baseVal) * 100) : null
+          // Filtrer les sub-metrics N/A (ex: chain_coverage pour proactive_contradiction)
+          const subMetrics = CONTRA_CAT_SUB_METRICS.filter(sub => {
+            const scoreKey = `t5_${cat.key}_${sub}`
+            // Exclure si le score est 0 ET que c'est un cas connu N/A
+            if (cat.key === 'proactive_contradiction' && sub === 'chain_coverage') return false
+            return true
+          })
+          if (subMetrics.length === 0) return null
+
           return (
-            <MetricBar
-              key={cat.key}
-              label={cat.label}
-              value={val}
-              delta={delta !== 0 ? delta : null}
-            />
+            <Box key={cat.key} mb={4}>
+              <Text fontSize="12px" fontWeight="700" color={T.textSecondary} mb={2}>
+                {cat.label}
+              </Text>
+              {subMetrics.map(sub => {
+                const scoreKey = `t5_${cat.key}_${sub}`
+                const val = scores[scoreKey] ?? 0
+                const baseVal = baseScores[scoreKey]
+                const delta = baseVal != null ? Math.round((val - baseVal) * 100) : null
+                return (
+                  <MetricBar
+                    key={scoreKey}
+                    label={sub.replace(/_/g, ' ')}
+                    value={val}
+                    delta={delta !== 0 ? delta : null}
+                  />
+                )
+              })}
+            </Box>
           )
         })}
       </Card>
@@ -971,209 +1007,26 @@ function ContradictionsTab({
 //  TAB 5: COMPARAISON
 // ══════════════════════════════════════════════════════════════════════
 
-function ComparisonTab({
-  ragasReports,
-  compRunA,
-  compRunB,
-  onSelectA,
-  onSelectB,
-  detailA,
-  detailB,
-}: {
-  ragasReports: RagasReport[]
-  compRunA: string
-  compRunB: string
-  onSelectA: (v: string) => void
-  onSelectB: (v: string) => void
-  detailA: RagasReport | null
-  detailB: RagasReport | null
-}) {
-  const sorted = useMemo(() =>
-    [...ragasReports].sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
-    [ragasReports],
-  )
-
-  const osmA = detailA?.systems?.osmosis
-  const osmB = detailB?.systems?.osmosis
-  const scoresA = osmA?.scores ?? {}
-  const scoresB = osmB?.scores ?? {}
-
-  // Collect all metric keys
-  const allMetrics = useMemo(() => {
-    const keys = new Set<string>()
-    for (const k of Object.keys(scoresA)) keys.add(k)
-    for (const k of Object.keys(scoresB)) keys.add(k)
-    return Array.from(keys).sort()
-  }, [scoresA, scoresB])
-
-  // Regressions / improvements
-  const diffs = useMemo(() => {
-    if (!osmA || !osmB) return []
-    return allMetrics.map(m => ({
-      metric: m,
-      a: scoresA[m] ?? 0,
-      b: scoresB[m] ?? 0,
-      delta: (scoresB[m] ?? 0) - (scoresA[m] ?? 0),
-    })).sort((x, y) => x.delta - y.delta)
-  }, [osmA, osmB, allMetrics, scoresA, scoresB])
-
-  const regressions = diffs.filter(d => d.delta < -0.01)
-  const improvements = diffs.filter(d => d.delta > 0.01)
-
+function ComparisonTab() {
   return (
     <VStack spacing={6} align="stretch">
-      {/* Selection row */}
       <Card>
-        <Text fontSize="sm" fontWeight="700" color={T.textPrimary} mb={4}>
-          Selectionner deux runs RAGAS
-        </Text>
-        <HStack spacing={6} flexWrap="wrap">
-          <Box flex={1} minW="250px">
-            <Text fontSize="11px" color={T.textMuted} mb={1}>Run A (reference)</Text>
-            <Select
-              size="sm"
-              value={compRunA}
-              onChange={e => onSelectA(e.target.value)}
-              bg={T.bgBase}
-              borderColor={T.borderSubtle}
-              color={T.textPrimary}
-              placeholder="-- Selectionner --"
-            >
-              {sorted.map(r => (
-                <option key={r.filename} value={r.filename}>
-                  {formatTs(r.timestamp)} {r.tag ? `[${r.tag}]` : ''} - F:{Math.round((r.systems?.osmosis?.scores?.faithfulness ?? 0) * 100)}%
-                </option>
-              ))}
-            </Select>
-          </Box>
-          <Box flex={1} minW="250px">
-            <Text fontSize="11px" color={T.textMuted} mb={1}>Run B (nouveau)</Text>
-            <Select
-              size="sm"
-              value={compRunB}
-              onChange={e => onSelectB(e.target.value)}
-              bg={T.bgBase}
-              borderColor={T.borderSubtle}
-              color={T.textPrimary}
-              placeholder="-- Selectionner --"
-            >
-              {sorted.map(r => (
-                <option key={r.filename} value={r.filename}>
-                  {formatTs(r.timestamp)} {r.tag ? `[${r.tag}]` : ''} - F:{Math.round((r.systems?.osmosis?.scores?.faithfulness ?? 0) * 100)}%
-                </option>
-              ))}
-            </Select>
-          </Box>
-        </HStack>
+        <VStack py={10} spacing={4}>
+          <FiGitMerge size={32} color={T.textMuted} />
+          <Text fontSize="sm" fontWeight="700" color={T.textPrimary}>
+            Comparaison integree
+          </Text>
+          <Text fontSize="13px" color={T.textSecondary} textAlign="center" maxW="500px" lineHeight="1.7">
+            La comparaison detaillee est disponible directement dans chaque onglet
+            (RAGAS, Contradictions, Robustesse) via les deltas vs baseline dans les
+            tableaux historiques.
+          </Text>
+          <Text fontSize="11px" color={T.textMuted} textAlign="center" maxW="450px">
+            Chaque tableau historique affiche automatiquement les deltas par rapport au premier run (baseline).
+            Les regressions et ameliorations sont visibles en un coup d&apos;oeil.
+          </Text>
+        </VStack>
       </Card>
-
-      {/* Side-by-side comparison */}
-      {osmA && osmB && (
-        <>
-          <Card>
-            <Text fontSize="sm" fontWeight="700" color={T.textPrimary} mb={3}>
-              Comparaison des metriques
-            </Text>
-            <Box overflowX="auto">
-              <Table size="sm" variant="unstyled">
-                <Thead>
-                  <Tr borderBottom="1px solid" borderColor={T.borderSubtle}>
-                    <Th color={T.textMuted} fontSize="10px" textTransform="uppercase" py={2}>Metrique</Th>
-                    <Th color={T.textMuted} fontSize="10px" textTransform="uppercase" py={2} isNumeric>
-                      Run A {detailA?.tag && `(${detailA.tag})`}
-                    </Th>
-                    <Th color={T.textMuted} fontSize="10px" textTransform="uppercase" py={2} isNumeric>
-                      Run B {detailB?.tag && `(${detailB.tag})`}
-                    </Th>
-                    <Th color={T.textMuted} fontSize="10px" textTransform="uppercase" py={2} isNumeric>Delta</Th>
-                  </Tr>
-                </Thead>
-                <Tbody>
-                  {allMetrics.map(m => {
-                    const a = scoresA[m] ?? 0
-                    const b = scoresB[m] ?? 0
-                    const d = b - a
-                    return (
-                      <Tr key={m} borderBottom="1px solid" borderColor={T.borderSubtle} _hover={{ bg: T.bgElevated }}>
-                        <Td py={2}>
-                          <Text fontSize="12px" color={T.textSecondary}>
-                            {m.replace(/_/g, ' ')}
-                          </Text>
-                        </Td>
-                        <Td py={2} isNumeric>
-                          <Text fontSize="13px" fontFamily="'Fira Code', monospace" fontWeight="600" color={scoreColor(a)}>
-                            {Math.round(a * 100)}%
-                          </Text>
-                        </Td>
-                        <Td py={2} isNumeric>
-                          <Text fontSize="13px" fontFamily="'Fira Code', monospace" fontWeight="600" color={scoreColor(b)}>
-                            {Math.round(b * 100)}%
-                          </Text>
-                        </Td>
-                        <Td py={2} isNumeric>
-                          <InlineDelta delta={d} />
-                        </Td>
-                      </Tr>
-                    )
-                  })}
-                </Tbody>
-              </Table>
-            </Box>
-          </Card>
-
-          {/* Regressions */}
-          {regressions.length > 0 && (
-            <Card accent={T.statusError}>
-              <Text fontSize="sm" fontWeight="700" color={T.statusError} mb={3}>
-                Regressions ({regressions.length})
-              </Text>
-              {regressions.map(d => (
-                <HStack key={d.metric} spacing={3} py={1.5} borderBottom="1px solid" borderColor={T.borderSubtle}>
-                  <FiTrendingDown size={14} color={T.statusError} />
-                  <Text fontSize="12px" color={T.textSecondary} flex={1}>
-                    {d.metric.replace(/_/g, ' ')}
-                  </Text>
-                  <Text fontSize="12px" fontFamily="'Fira Code', monospace" color={T.statusError}>
-                    {Math.round(d.a * 100)}% &rarr; {Math.round(d.b * 100)}% ({Math.round(d.delta * 100) > 0 ? '+' : ''}{Math.round(d.delta * 100)}pp)
-                  </Text>
-                </HStack>
-              ))}
-            </Card>
-          )}
-
-          {/* Improvements */}
-          {improvements.length > 0 && (
-            <Card accent={T.statusOk}>
-              <Text fontSize="sm" fontWeight="700" color={T.statusOk} mb={3}>
-                Ameliorations ({improvements.length})
-              </Text>
-              {improvements.map(d => (
-                <HStack key={d.metric} spacing={3} py={1.5} borderBottom="1px solid" borderColor={T.borderSubtle}>
-                  <FiTrendingUp size={14} color={T.statusOk} />
-                  <Text fontSize="12px" color={T.textSecondary} flex={1}>
-                    {d.metric.replace(/_/g, ' ')}
-                  </Text>
-                  <Text fontSize="12px" fontFamily="'Fira Code', monospace" color={T.statusOk}>
-                    {Math.round(d.a * 100)}% &rarr; {Math.round(d.b * 100)}% (+{Math.round(d.delta * 100)}pp)
-                  </Text>
-                </HStack>
-              ))}
-            </Card>
-          )}
-        </>
-      )}
-
-      {/* Empty state */}
-      {(!compRunA || !compRunB) && (
-        <Card>
-          <VStack py={10} spacing={3}>
-            <FiGitMerge size={32} color={T.textMuted} />
-            <Text fontSize="sm" color={T.textMuted} textAlign="center">
-              Selectionnez deux runs RAGAS pour comparer leurs metriques
-            </Text>
-          </VStack>
-        </Card>
-      )}
     </VStack>
   )
 }
