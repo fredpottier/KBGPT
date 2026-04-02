@@ -63,6 +63,8 @@ default:
 
     11. Answer in the **SAME LANGUAGE as the question**.
 
+    12. **Premise verification**: If the question contains an assumption or claim that CONTRADICTS what the sources say, you MUST point this out explicitly before answering. Start with "Contrary to what the question suggests, the sources indicate that..." then provide the correct information. Do NOT silently accept a false premise.
+
 # =============================================================================
 # OPENAI — GPT-4o-mini, GPT-4o, GPT-4.1-mini, GPT-4.1-nano
 # =============================================================================
