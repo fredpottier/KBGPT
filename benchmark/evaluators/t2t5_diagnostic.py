@@ -583,7 +583,22 @@ def run_benchmark_job(
         per_sample: list[dict] = []
         errors = 0
 
+        def _refresh_token():
+            try:
+                r = requests.post(f"{api_base}/api/auth/login",
+                                  json={"email": "admin@example.com", "password": "admin123"}, timeout=10)
+                if r.status_code == 200:
+                    return r.json().get("access_token", "")
+            except:
+                pass
+            return token
+
         for i, q_item in enumerate(all_questions):
+            # Refresh token toutes les 40 questions (expire apres ~30min)
+            if i > 0 and i % 40 == 0:
+                token = _refresh_token()
+                logger.info(f"[T2T5:BENCH] Token refreshed at question {i}")
+
             question = q_item.get("question", "")
             if not question:
                 continue
