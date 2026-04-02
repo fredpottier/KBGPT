@@ -120,6 +120,54 @@ SYNTHESIS_PROMPT = """You are a precise document analysis assistant that synthes
 Answer:"""
 
 
+import math
+
+
+def _compute_logprob_entropy(response) -> float:
+    """Calcule l'entropie moyenne des top logprobs de la reponse.
+
+    Haute entropie = le modele est incertain = probable hallucination.
+    Basse entropie = le modele est confiant = reponse probablement fondee.
+
+    Ref: HALT (arXiv 2602.02888), EPR (arXiv 2509.04492)
+    """
+    try:
+        logprobs_content = response.choices[0].logprobs
+        if not logprobs_content or not logprobs_content.content:
+            return 0.0
+
+        entropies = []
+        for token_info in logprobs_content.content:
+            top = token_info.top_logprobs
+            if not top or len(top) < 2:
+                continue
+
+            # Convertir logprobs en probabilites et calculer l'entropie
+            probs = [math.exp(t.logprob) for t in top]
+            total = sum(probs)
+            if total <= 0:
+                continue
+            probs = [p / total for p in probs]  # normaliser
+
+            entropy = -sum(p * math.log(p + 1e-10) for p in probs if p > 0)
+            entropies.append(entropy)
+
+        if not entropies:
+            return 0.0
+
+        return sum(entropies) / len(entropies)
+
+    except Exception:
+        return 0.0
+
+
+# Seuil d'entropie au-dessus duquel la reponse est consideree incertaine.
+# A calibrer sur le benchmark (25 questions unanswerable).
+# log(5) = 1.609 = entropie maximale avec 5 tokens equiprobables.
+# Valeur initiale conservatrice — a ajuster empiriquement.
+ENTROPY_HIGH_THRESHOLD = 1.0  # A calibrer
+
+
 def format_chunks_for_synthesis(chunks: List[Dict[str, Any]]) -> str:
     """
     Formate les chunks pour inclusion dans le prompt de synthèse.
@@ -321,13 +369,19 @@ def synthesize_response(
                     ],
                     max_tokens=2000,
                     temperature=0.3,
+                    logprobs=True,
+                    top_logprobs=5,
                 )
                 synthesized_answer = response.choices[0].message.content or ""
                 synthesized_via = "openai"
+
+                # Calcul entropie logprobs pour detection hallucination
+                entropy_score = _compute_logprob_entropy(response)
+
                 logger.info(
                     f"[SYNTHESIS] OpenAI {oai_model} completed in "
                     f"{(time.time() - start_time) * 1000:.0f}ms, "
-                    f"{len(synthesized_answer)} chars"
+                    f"{len(synthesized_answer)} chars, entropy={entropy_score:.3f}"
                 )
                 try:
                     from knowbase.common.token_tracker import track_tokens
@@ -533,6 +587,12 @@ def synthesize_response(
         # Score final = base + KG bonus + chain bonus (plafonné à 90%)
         confidence = min(base_confidence_final + kg_bonus + chain_bonus, 0.90)
 
+        # Entropie logprob (si disponible) — indicateur d'incertitude
+        _entropy = locals().get("entropy_score", 0.0)
+        entropy_flag = "high" if _entropy > ENTROPY_HIGH_THRESHOLD else "normal"
+        if _entropy > ENTROPY_HIGH_THRESHOLD:
+            logger.info(f"[SYNTHESIS:ENTROPY] HIGH entropy={_entropy:.3f} — reponse potentiellement non fondee")
+
         result = {
             "synthesized_answer": synthesized_answer.strip(),
             "sources_used": sources_used,
@@ -542,7 +602,12 @@ def synthesize_response(
                 "kg_bonus": round(kg_bonus, 3),
                 "chain_bonus": round(chain_bonus, 3),
                 "final_score": round(confidence, 3)
-            }
+            },
+            "entropy": {
+                "score": round(_entropy, 4),
+                "flag": entropy_flag,
+                "threshold": ENTROPY_HIGH_THRESHOLD,
+            },
         }
 
         # Ajouter les metadonnees ContradictionEnvelope si applicable
