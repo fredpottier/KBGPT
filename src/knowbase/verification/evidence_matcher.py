@@ -828,12 +828,29 @@ class EvidenceMatcher:
         )
 
         try:
-            response = await self.llm_router.acomplete(
-                task_type=TaskType.FAST_CLASSIFICATION,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=500
-            )
+            # Utiliser OpenAI directement si configure (evite fallback Ollama)
+            import os
+            provider = os.getenv("OSMOSIS_SYNTHESIS_PROVIDER", "")
+            openai_key = os.getenv("OPENAI_API_KEY", "")
+
+            if provider == "openai" and openai_key:
+                from openai import AsyncOpenAI
+                oai = AsyncOpenAI(api_key=openai_key)
+                oai_model = os.getenv("OSMOSIS_SYNTHESIS_MODEL", "gpt-4o-mini")
+                oai_resp = await oai.chat.completions.create(
+                    model=oai_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=500,
+                )
+                response = oai_resp.choices[0].message.content or ""
+            else:
+                response = await self.llm_router.acomplete(
+                    task_type=TaskType.FAST_CLASSIFICATION,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=500
+                )
 
             analysis = self._parse_analysis_response(response)
 
