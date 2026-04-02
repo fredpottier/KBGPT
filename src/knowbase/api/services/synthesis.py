@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import os
 import time
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, TYPE_CHECKING
+
+import yaml
 
 from knowbase.common.llm_router import TaskType, get_llm_router
 
@@ -10,6 +14,54 @@ if TYPE_CHECKING:
     from .search import ContradictionEnvelope
 
 logger = logging.getLogger(__name__)
+
+# ── Chargement des prompts externalises ────────────────────────────────
+
+_synthesis_prompts_cache = None
+
+def _load_synthesis_prompts() -> dict:
+    """Charge les prompts de synthese depuis config/synthesis_prompts.yaml."""
+    global _synthesis_prompts_cache
+    if _synthesis_prompts_cache is not None:
+        return _synthesis_prompts_cache
+
+    config_paths = [
+        Path("/app/config/synthesis_prompts.yaml"),
+        Path(__file__).parent.parent.parent.parent / "config" / "synthesis_prompts.yaml",
+    ]
+    for p in config_paths:
+        if p.exists():
+            _synthesis_prompts_cache = yaml.safe_load(p.read_text(encoding="utf-8"))
+            logger.info(f"[SYNTHESIS] Loaded prompts from {p}")
+            return _synthesis_prompts_cache
+
+    logger.warning("[SYNTHESIS] No synthesis_prompts.yaml found, using hardcoded defaults")
+    _synthesis_prompts_cache = {}
+    return _synthesis_prompts_cache
+
+
+def get_rule_7_for_provider(provider: str = "") -> str:
+    """Retourne la regle 7 adaptee au provider de synthese actif."""
+    if not provider:
+        provider = os.environ.get("OSMOSIS_SYNTHESIS_PROVIDER", "anthropic")
+
+    prompts = _load_synthesis_prompts()
+    provider_config = prompts.get(provider, prompts.get("default", {}))
+
+    # Provider-specific rule_7 override
+    override = provider_config.get("rule_7_override")
+    if override:
+        return override.strip()
+
+    # Default rule_7
+    default_rules = prompts.get("default", {}).get("rules", "")
+    if default_rules:
+        # Extract rule 7 from default rules
+        for line in default_rules.split("\n\n"):
+            if line.strip().startswith("7."):
+                return line.strip()
+
+    return ""
 
 
 SYNTHESIS_PROMPT = """You are a precise document analysis assistant that synthesizes information from provided sources.
@@ -44,10 +96,7 @@ SYNTHESIS_PROMPT = """You are a precise document analysis assistant that synthes
 
 6. **Structure** your response with sections or bullet points when appropriate.
 
-7. **Partial information rule (CRITICAL)**: If sources contain information that is PARTIALLY relevant to the question, answer with what you have. Say "Based on available sources..." and provide the partial answer.
-   - If sources discuss the SAME TOPIC or RELATED CONCEPT, provide what the sources say about that area.
-   - **BUT**: If the question asks about something the sources clearly do NOT cover (pricing, third-party products not mentioned, statistics not documented, tools or plugins not referenced), start your answer with "The available documents do not contain information about [specific topic]." then briefly mention what the sources DO cover on the broader topic if relevant.
-   - **Key principle**: It is better to honestly say the sources don't cover something than to rephrase unrelated content as if it answers the question.
+{rule_7}
 
 8. If information is **contradictory**, present BOTH versions with their sources explicitly.
 
@@ -219,11 +268,15 @@ def synthesize_response(
         )
 
     # Construit le prompt avec contextes optionnels (KG et Session)
+    # Charger la regle 7 adaptee au provider actif
+    rule_7 = get_rule_7_for_provider()
+
     prompt = SYNTHESIS_PROMPT.format(
         question=question,
         chunks_content=chunks_content,
         graph_context=graph_context_text,
-        session_context=session_context_text
+        session_context=session_context_text,
+        rule_7=rule_7,
     )
 
     # Appel LLM — Architecture tiered :
