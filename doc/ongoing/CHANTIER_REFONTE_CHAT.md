@@ -227,7 +227,134 @@ Pas d'encart. Indicateur rouge (le systeme admet ne pas savoir). Honnete et util
 
 ---
 
-## 7. Implementation technique
+## 7. Architecture dual-mode automatique
+
+### Principe
+
+L'utilisateur ne choisit pas de mode. Le systeme decide en fonction de ce qu'il a trouve.
+
+**Pas de tension detectee → Mode Reponse (80% des cas)**
+- Reponse clean, ChatGPT-like
+- Sources discretes
+- Indicateur vert
+- Aucun bruit
+
+**Tension/contradiction/evolution detectee → Mode Exploration (20% des cas)**
+- Reponse PLUS positions documentaires visibles
+- Le format change automatiquement pour exposer la realite multi-source
+- L'utilisateur VOIT immediatement que OSMOSIS fait quelque chose de different
+
+### Signal de switch (deja dans le backend)
+
+```python
+# Le backend retourne deja ces donnees :
+if contradiction_envelope.has_tension:
+    mode = "exploration"  # positions documentaires visibles
+elif signal_report.has_signal("coverage_gap"):
+    mode = "exploration"  # docs manquants signales
+elif signal_report.has_signal("temporal_evolution"):
+    mode = "exploration"  # evolution detectee
+else:
+    mode = "response"     # reponse clean standard
+```
+
+### Mode Reponse (clean)
+
+```
+┌─────────────────────────────────────────────────┐
+│ Reponse structuree en Markdown                  │
+│                                                 │
+│ Les connexions RFC peuvent etre protegees par   │
+│ **SNC** [Sec.Guide 2023] et **TLS** [Ops.Guide]│
+│                                                 │
+│ Sources : Security Guide 2023 · Ops Guide 2023  │
+│                                              🟢 │
+└─────────────────────────────────────────────────┘
+```
+
+### Mode Exploration (tensions detectees)
+
+```
+┌─────────────────────────────────────────────────┐
+│ Reponse structuree en Markdown                  │
+│                                                 │
+│ Pour la suppression des donnees de plan de      │
+│ controle, un job doit etre planifie pour        │
+│ appeler CNS_CP_DELETE ou CNS_DP_DELETE_MULT     │
+│ [Sec.Guide 2023].                               │
+│                                                 │
+├─────────────────────────────────────────────────┤
+│ ⚠️ Positions documentaires                      │
+│                                                 │
+│ Ce sujet fait l'objet de DIFFERENCES entre      │
+│ les documents :                                 │
+│                                                 │
+│ 📄 Security Guide 2023                          │
+│    CNS_CP_DELETE ou CNS_DP_DELETE_MULT          │
+│    (version la plus recente)                    │
+│                                                 │
+│ 📄 Security Guide 2022                          │
+│    CNS_CP_DELETE ou CNS_CP_DELETE_MULT          │
+│    (version anterieure)                         │
+│                                                 │
+│ → Le nom du second report a change entre les    │
+│   versions. La reponse utilise la version 2023. │
+│                                                 │
+│ Sources : Security Guide 2023 · Security Guide  │
+│ 2022                                         🟡 │
+└─────────────────────────────────────────────────┘
+```
+
+### Pourquoi dual-mode automatique
+
+| Approche | Avantage | Risque |
+|---|---|---|
+| Chat-only (Claude V1) | Adoption rapide | Differenciateur invisible |
+| Exploration-only (ChatGPT radical) | Forte differenciation | Friction sur les 80% simples |
+| **Dual-mode automatique** | **Adoption + differenciation** | **Aucun** — simple par defaut, riche quand necessaire |
+
+Le switch est invisible pour l'utilisateur. Il recoit toujours "la meilleure reponse possible" — parfois c'est une reponse simple, parfois c'est une exploration documentaire. Le systeme decide.
+
+### Ce qui declenche le mode Exploration
+
+| Signal backend | Deja disponible ? | Ce que l'utilisateur voit |
+|---|---|---|
+| `contradiction_envelope.has_tension` | ✅ Oui | Bloc "Positions documentaires" avec les claims des deux cotes |
+| `insight_hints` type "contradiction" | ✅ Oui | Encart "Point d'attention" |
+| `insight_hints` type "evolution" | ✅ Oui | Encart "Evolution detectee entre versions" |
+| `signal_report` "coverage_gap" | ✅ Oui | Encart "Certains documents n'ont pas ete trouves" |
+| `entropy.flag == "high"` | ✅ Oui | Indicateur 🟡 au lieu de 🟢 |
+| Aucun signal | — | Mode Reponse clean (pas d'encart) |
+
+---
+
+## 8. Plan d'implementation en 2 phases
+
+### Phase 1 — Mode Reponse clean (2-3 jours)
+
+Objectif : le chat ressemble a ChatGPT mais mieux source.
+
+1. **Supprimer** : score %, bloc "verite documentaire", vocabulaire interne
+2. **Nettoyer sources** : noms lisibles, cliquables, integrees dans le texte
+3. **Indicateur discret** : point colore (vert/orange/rouge) au lieu du score
+4. **Suggestions** : questions de depart sur page vide
+
+Resultat : un chat propre qui ne fait pas peur.
+
+### Phase 2 — Mode Exploration automatique (2-3 jours)
+
+Objectif : quand le KG detecte quelque chose, le montrer intelligemment.
+
+1. **Detecter** le mode (Reponse vs Exploration) a partir des signaux backend
+2. **Bloc "Positions documentaires"** : quand contradiction_envelope.has_tension, afficher les claims des deux cotes avec les sources
+3. **Encarts contextuels** : evolution, coverage gap, complement
+4. **Indicateur adapte** : 🟡 quand tensions, 🟢 quand clean
+
+Resultat : la valeur du KG est visible exactement quand elle est pertinente.
+
+---
+
+## 9. Implementation technique
 
 ### Donnees deja disponibles dans le backend
 
