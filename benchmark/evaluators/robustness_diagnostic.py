@@ -391,10 +391,121 @@ def evaluate_multi_hop(answer: str, sources: list[str], ground_truth: dict) -> d
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# LLM Judge (remplace keyword matching pour les categories cross-lingue)
+# ═══════════════════════════════════════════════════════════════════════
+
+# Descriptions par categorie pour guider le juge
+CATEGORY_JUDGE_CRITERIA = {
+    "false_premise": "The question contains a FALSE premise. A good answer should CORRECT the false premise and provide the correct information from the sources. A bad answer accepts the false premise without questioning it.",
+    "temporal_evolution": "The question asks about how something CHANGED between document versions. A good answer identifies specific changes and cites both versions. A bad answer is vague or doesn't compare versions.",
+    "causal_why": "The question asks WHY something is done. A good answer explains the reason based on documented facts. A bad answer gives generic reasons not grounded in the sources.",
+    "hypothetical": "The question asks what would happen IF a condition is not met. A good answer infers consequences from documented facts. A bad answer speculates without source basis.",
+    "negation": "The question asks what is NOT possible/supported. A good answer identifies the limitation or restriction from the sources. A bad answer fails to address the negation.",
+    "synthesis_large": "The question asks for a comprehensive overview. A good answer covers multiple aspects from multiple documents. A bad answer is too narrow or misses major aspects.",
+    "conditional": "The question asks about a specific condition or prerequisite. A good answer identifies and explains the condition from the sources. A bad answer misses the conditional aspect.",
+    "set_list": "The question asks to LIST or ENUMERATE items. A good answer lists the correct items from the sources. A bad answer misses items or lists wrong ones.",
+    "multi_hop": "The question requires CHAINING facts from multiple sources. A good answer connects the facts logically. A bad answer only addresses part of the chain.",
+}
+
+_llm_judge_client = None
+
+def _get_llm_judge_client():
+    """Retourne le client OpenAI pour le LLM-juge (meme modele que la synthese)."""
+    global _llm_judge_client
+    if _llm_judge_client is not None:
+        return _llm_judge_client
+
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    if openai_key:
+        try:
+            from openai import OpenAI
+            _llm_judge_client = OpenAI(api_key=openai_key)
+            return _llm_judge_client
+        except Exception:
+            pass
+    return None
+
+
+def evaluate_with_llm_judge(
+    answer: str,
+    question: str,
+    category: str,
+    ground_truth: dict,
+) -> dict[str, Any]:
+    """Evalue une reponse via LLM-juge (GPT-4o-mini).
+
+    Remplace le keyword matching pour les categories cross-lingue.
+    Cout : ~$0.00005 par appel (~$0.01 pour 246 questions).
+    """
+    client = _get_llm_judge_client()
+    if not client:
+        # Fallback keyword si pas de client OpenAI
+        logger.debug("[JUDGE] No OpenAI client, falling back to keyword eval")
+        return None
+
+    criteria = CATEGORY_JUDGE_CRITERIA.get(category, "A good answer addresses the question based on the sources.")
+    expected = ground_truth.get("expected_behavior", "")
+    evidence = ground_truth.get("evidence_claim", ground_truth.get("correct_fact", ""))
+
+    prompt = f"""You are a strict benchmark evaluator for a document analysis system.
+
+Question: "{question[:200]}"
+Category: {category}
+Expected behavior: {expected}
+{f'Reference evidence: "{evidence[:200]}"' if evidence else ''}
+
+Evaluation criteria: {criteria}
+
+Actual answer (first 400 chars):
+"{answer[:400]}"
+
+Rate the answer from 0 to 100:
+- 0-20: Completely wrong, irrelevant, or hallucinates
+- 20-50: Partially relevant but misses the key point
+- 50-70: Addresses the topic but incomplete
+- 70-90: Good, mostly correct and grounded in sources
+- 90-100: Excellent, fully addresses with evidence
+
+Reply with ONLY a number (0-100)."""
+
+    try:
+        judge_model = os.getenv("OSMOSIS_JUDGE_MODEL", os.getenv("OSMOSIS_SYNTHESIS_MODEL", "gpt-4o-mini"))
+        resp = client.chat.completions.create(
+            model=judge_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=5,
+            temperature=0.0,
+        )
+        raw = resp.choices[0].message.content.strip()
+        import re as _re
+        m = _re.search(r"\d+", raw)
+        score = int(m.group()) / 100.0 if m else 0.0
+        score = min(1.0, max(0.0, score))
+
+        return {
+            "category": category,
+            "score": round(score, 3),
+            "judge_model": judge_model,
+            "judge_raw": raw,
+        }
+
+    except Exception as e:
+        logger.debug(f"[JUDGE] LLM judge failed: {e}")
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Router
 # ═══════════════════════════════════════════════════════════════════════
 
-EVALUATORS = {
+# Categories evaluees par LLM-juge (cross-lingue, keyword insuffisant)
+LLM_JUDGE_CATEGORIES = {
+    "false_premise", "temporal_evolution", "causal_why", "hypothetical",
+    "negation", "synthesis_large", "conditional", "set_list", "multi_hop",
+}
+
+# Keyword evaluators (fallback ou categories non-LLM)
+KEYWORD_EVALUATORS = {
     "false_premise": lambda ans, src, gt: evaluate_false_premise(ans, gt),
     "unanswerable": lambda ans, src, gt: evaluate_unanswerable(ans, gt),
     "temporal_evolution": lambda ans, src, gt: evaluate_temporal(ans, src, gt),
@@ -406,6 +517,8 @@ EVALUATORS = {
     "set_list": lambda ans, src, gt: evaluate_set_list(ans, gt),
     "multi_hop": lambda ans, src, gt: evaluate_multi_hop(ans, src, gt),
 }
+
+EVALUATORS = KEYWORD_EVALUATORS  # Kept for backward compat
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -582,11 +695,18 @@ def run_benchmark_job(
             answer = api_result["answer"]
             sources = api_result["sources_used"]
 
-            evaluator = EVALUATORS.get(category)
-            if evaluator:
-                evaluation = evaluator(answer, sources, ground_truth)
-            else:
-                evaluation = {"category": category, "score": 0.0, "error": f"Unknown category: {category}"}
+            # LLM-juge pour les categories cross-lingue, keyword pour unanswerable
+            evaluation = None
+            if category in LLM_JUDGE_CATEGORIES:
+                evaluation = evaluate_with_llm_judge(answer, question, category, ground_truth)
+
+            if evaluation is None:
+                # Fallback keyword (ou unanswerable qui reste keyword)
+                evaluator = KEYWORD_EVALUATORS.get(category)
+                if evaluator:
+                    evaluation = evaluator(answer, sources, ground_truth)
+                else:
+                    evaluation = {"category": category, "score": 0.0, "error": f"Unknown category: {category}"}
 
             per_sample.append({
                 "question_id": question_id,
@@ -637,6 +757,8 @@ def run_benchmark_job(
         "description": description or "",
         "synthesis_model": synthesis_model,
         "synthesis_provider": synthesis_provider,
+        "judge_model": os.getenv("OSMOSIS_JUDGE_MODEL", os.getenv("OSMOSIS_SYNTHESIS_MODEL", "gpt-4o-mini")),
+        "judge_mode": "llm" if _get_llm_judge_client() else "keyword",
         "duration_s": duration_s,
         "scores": scores,
         "per_sample": per_sample,
