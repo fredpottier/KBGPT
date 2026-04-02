@@ -234,4 +234,66 @@ Les 4 categories MAUVAIS sont le vrai chantier :
 
 ---
 
-*Analyse d'etape pour guider les prochaines iterations. Mis a jour le 2 avril 2026 apres audit P0 et V14.*
+---
+
+## 7. V16 — Vrais scores avec LLM-juge (2 avril 2026)
+
+### Changement d'evaluateur
+
+9 categories sur 10 sont maintenant evaluees par un LLM-juge (GPT-4o-mini) au lieu du keyword matching. Seul `unanswerable` reste en keyword (la detection de "je ne sais pas" est fiable par keywords).
+
+Le LLM-juge comprend naturellement le cross-lingue (question FR, claim EN) et evalue la qualite reelle de la reponse, pas juste la presence de mots-cles.
+
+### Impact : le profil d'OSMOSIS est radicalement different
+
+| Categorie | V15 (keyword) | V16 (LLM-juge) | Delta | Ce que ca revele |
+|---|---|---|---|---|
+| conditional | 38.2% | **78.3%** | +40.1pp | Les reponses etaient bonnes, keyword ne captait pas |
+| negation | 46.5% | **75.6%** | +29.1pp | Idem — cross-lingue masquait la qualite |
+| causal_why | 39.3% | **75.4%** | +36.1pp | Idem |
+| hypothetical | 54.8% | **73.5%** | +18.7pp | Idem |
+| temporal | 53.7% | **64.8%** | +11.1pp | Idem |
+| multi_hop | 74.0% | 64.4% | -9.6pp | LLM-juge plus strict que keyword |
+| set_list | 69.2% | 64.0% | -5.2pp | Idem |
+| synthesis_large | 91.1% | **60.0%** | -31.1pp | Keyword surestimait massivement |
+| false_premise | 49.2% | 45.2% | -4pp | Score confirme |
+| unanswerable | 52.5% | 43.8% | -8.7pp | Keyword only, prompt ameliore |
+| **GLOBAL** | 57.0% | **64.3%** | +7.3pp | |
+
+### Nouveau profil qualite (reference V16)
+
+| Verdict | Categories | Scores |
+|---|---|---|
+| **BON (>= 70%)** | conditional 78%, negation 76%, causal 75%, hypothetical 73% | ✅ |
+| **CORRECT (60-70%)** | temporal 65%, multi_hop 64%, set_list 64%, synthesis 60% | ⚠️ |
+| **FRAGILE (< 60%)** | false_premise 45%, unanswerable 44% | ❌ |
+| **GLOBAL** | **64.3%** | |
+
+### Ce qui a change dans notre comprehension
+
+1. **causal, conditional, negation ETAIENT deja bons** — on a perdu du temps a tenter de les ameliorer alors que c'etait le thermometre qui etait casse.
+
+2. **synthesis_large ETAIT surestimee** — keyword donnait 91% car il detectait des mots-cles d'aspects, le LLM-juge est plus exigeant sur la completude et la coherence.
+
+3. **Les vrais problemes sont maintenant clairs** :
+   - **unanswerable (44%)** : GPT-4o-mini hallucine quand la reponse n'est pas dans le corpus. Le prompt externalise aide (+35pp vs V14) mais ne suffit pas.
+   - **false_premise (45%)** : le LLM ne corrige pas assez les premisses fausses. Il accepte la premisse et repond dessus au lieu de la contester.
+
+### Priorites revisees (V16)
+
+| # | Action | Score actuel | Cible | Impact |
+|---|---|---|---|---|
+| 1 | **unanswerable** : iterer le prompt ou QA-Class ameliore | 44% | 65%+ | +3pp global |
+| 2 | **false_premise** : instruction "verify premise against sources" | 45% | 65%+ | +3pp global |
+| 3 | **synthesis_large** : enrichir le prompt pour syntheses multi-aspects | 60% | 75%+ | +2pp global |
+| 4 | **temporal** : injecter EVOLVES_TO dans la synthese | 65% | 75%+ | +1pp global |
+
+### Cout de l'evaluation V16
+
+- Synthese GPT-4o-mini : ~$0.84 (246 questions)
+- LLM-juge GPT-4o-mini : ~$0.01 (221 jugements, 25 keyword)
+- **Total : ~$0.85** (6x moins cher que Haiku)
+
+---
+
+*Analyse d'etape pour guider les prochaines iterations. Mis a jour le 2 avril 2026 avec LLM-juge et vrais scores V16.*
