@@ -62,9 +62,11 @@
 
 | # | Tache | Doc source | Effort |
 |---|-------|-----------|--------|
+| 4.0 | **Refonte page chat** | Reponse trop complexe, KG non mis en valeur | 1-2j |
 | 4.1 | Atlas Phase 1 | `CHANTIER_ATLAS.md` §1 | 2-3j |
-| 4.2 | UI tensions | `VISION_PRODUIT.md` | 2-3j |
-| 4.3 | Verify | `VISION_PRODUIT.md` §4 | 3-5j |
+| 4.2 | ~~UI tensions~~ | Deprioritise — peu de valeur utilisateur (admin only) | — |
+| 4.3 | Verify V1 — refactorer moteur | Reutiliser pipeline search au lieu de evidence_matcher. Coquille OK. | 1.5j |
+| 4.4 | Verify V2 — positions documentaires | C4/C6 dans les commentaires Word | 1sem |
 
 ---
 

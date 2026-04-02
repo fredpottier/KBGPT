@@ -110,10 +110,58 @@ Paradoxe RAG-abstention identifie (NeurIPS 2024).
 
 ---
 
+## Realisations additionnelles (apres le bilan initial)
+
+### V17 Robustesse — Meilleur score obtenu (66.1%)
+
+| Categorie | V16 | V17 | Delta |
+|---|---|---|---|
+| conditional | 78.3% | **80.4%** | +2.1pp |
+| negation | 75.6% | **78.4%** | +2.8pp |
+| causal_why | 75.4% | 75.8% | +0.4pp |
+| hypothetical | 73.5% | 70.0% | -3.5pp |
+| temporal | 64.8% | **67.2%** | +2.4pp |
+| multi_hop | 64.4% | 64.8% | +0.4pp |
+| set_list | 64.0% | 64.4% | +0.4pp |
+| synthesis | 60.0% | 61.2% | +1.2pp |
+| **unanswerable** | 43.8% | **52.5%** | **+8.7pp** |
+| false_premise | 45.2% | 48.0% | +2.8pp |
+| **GLOBAL** | 64.3% | **66.1%** | **+1.8pp** |
+
+Impact de la regle 12 (premise verification) + prompt OpenAI externalise.
+
+### Logprob entropy detection
+
+Signal HALT/EPR implemente dans synthesis.py. AN avg=0.33, UN avg=0.41.
+Signal present mais overlap (salaires 0.10 = faux negatif).
+Utile en complement, pas suffisant seul. Expose dans le resultat de synthese.
+
+### Verify V1 — Coquille OK, moteur defaillant
+
+- Backend upload Word + frontend mode Document implementes
+- python-docx 1.2.0 installe (commentaires natifs Word)
+- MAIS : le pipeline verification (evidence_matcher) produit des verdicts absurdes
+- Plan : refactorer pour reutiliser le pipeline search (qui fonctionne)
+- Voir `doc/ongoing/CHANTIER_VERIFY_V1_ETAT.md`
+
+### Fixes divers
+
+- Token refresh dans T2/T5 diagnostic (70/150 erreurs resolues)
+- Verify utilise OpenAI directement quand OSMOSIS_SYNTHESIS_PROVIDER=openai
+- Build Docker avec python-docx
+- Proxy Next.js pour /api/verify/upload-docx
+
+### Prochain chantier identifie
+
+Refonte page chat :
+- Reponse trop complexe et prend trop de place
+- KG non mis en valeur quand il produit des insights
+- Organisation des informations a repenser
+
+---
+
 ## Commits de la session
 
-Total : ~30 commits sur la branche feat/wiki-concept-assembly-engine
-Fichiers crees : ~40 (composants, evaluateurs, scripts, docs, configs)
-Fichiers modifies : ~25 (search.py, synthesis.py, benchmarks.py, page.tsx, etc.)
+Total : ~50 commits sur la branche feat/wiki-concept-assembly-engine
 
-*Session collaborative Fred + Claude Code (Opus 4.6 1M context)*
+*Session collaborative Fred + Claude Code (Opus 4.6 1M context) — 1-2 avril 2026*
