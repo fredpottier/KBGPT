@@ -1,44 +1,82 @@
-# Specification — Verify V2 : Document Review
+# Specification — Verify V2/V3 : Document Review & Critique Documentaire
 
 **Date** : 2 avril 2026
 **Statut** : Draft pour validation
-**Objectif** : L'utilisateur uploade un document Word, OSMOSIS l'analyse phrase par phrase et retourne le meme document avec des annotations de type "review" sur tout ce qu'il a decouvert.
+**Objectif** : L'utilisateur uploade un document Word, OSMOSIS l'analyse, le confronte au corpus documentaire et retourne le meme document avec des annotations de type "review" — pas juste des verifications d'assertions mais une vraie critique documentaire structuree.
 
 ---
 
 ## 1. Vision produit
 
-### Use case principal
+### Le shift conceptuel
 
-L'utilisateur travaille sur un document (guide technique, proposition commerciale, rapport d'audit, note de synthese). Il veut savoir si ce document est coherent avec le corpus documentaire de reference de son organisation.
+Le Verify actuel verifie des **assertions isolees** : chaque phrase est comparee au corpus independamment. C'est du "spellcheck intelligent".
 
-Il uploade le document. OSMOSIS l'analyse et retourne le **meme document** avec des commentaires dans la marge, exactement comme si un expert humain l'avait relu.
+La cible est un **moteur de critique documentaire** qui :
+- **Positionne** chaque affirmation dans le paysage documentaire (qui dit quoi, depuis quand, dans quel contexte)
+- **Detecte les tensions** entre le document et le corpus (pas juste "vrai/faux" mais "Doc A dit X, Doc B dit Y, vous dites Z")
+- **Detecte les incoherences internes** du document lui-meme
+- **Evalue la completude** : ce que le document ne dit pas mais devrait dire
 
-### Exemples de commentaires OSMOSIS
+Ce n'est pas un verificateur de faits. C'est un **systeme qui challenge intellectuellement un document**.
 
+### Use case
+
+L'utilisateur travaille sur un document (guide technique, proposition commerciale, rapport d'audit). Il uploade le document. OSMOSIS le confronte au corpus et retourne le **meme document** avec des commentaires dans la marge, comme si un expert du domaine l'avait relu avec acces a toute la documentation de reference.
+
+### Niveaux d'analyse (V1 → V3)
+
+| Niveau | Description | Phase |
+|---|---|---|
+| **Assertion** | Chaque phrase verifiee contre le corpus | V1 |
+| **Position documentaire** | Chaque affirmation situee dans le paysage (Doc A vs Doc B vs Doc C) | V2 |
+| **Coherence interne** | Le document se contredit-il lui-meme ? | V3 |
+| **Completude** | Que manque-t-il ? Quels sujets connexes ne sont pas couverts ? | V3 |
+
+### Exemples de commentaires par niveau
+
+**Niveau 1 — Assertion (V1)** :
 ```
-[OSMOSIS - Confirme] ✅
-Ce point est confirme par le Security Guide 2023 (p.41).
-
 [OSMOSIS - Contredit] ❌
-Attention : le Security Guide 2023 indique "TLS 1.3" et non "TLS 1.2".
+Le Security Guide 2023 indique "TLS 1.3" et non "TLS 1.2".
 Source : SAP S/4HANA Security Guide 2023, section 14.
+```
 
-[OSMOSIS - Complete] ➕
-Le corpus ajoute une precision importante : cette fonctionnalite
-necessite egalement l'activation de SNC. Source : Operations Guide 2023.
+**Niveau 2 — Position documentaire (V2)** :
+```
+[OSMOSIS - Position documentaire] ⚖️
+Votre affirmation : "TLS 1.2 est requis"
 
-[OSMOSIS - Nuance] ⚠️
-Cette affirmation est correcte pour l'edition On-Premise mais le
-Cloud Private Edition utilise un mecanisme different (SAML au lieu de SSO tickets).
+Le corpus montre des positions differentes selon les documents :
+• Security Guide 2023 → TLS 1.3 obligatoire (plus recent)
+• Security Guide 2022 → TLS 1.2 acceptable
+• Operations Guide 2023 → TLS 1.2 uniquement pour backward compatibility
 
-[OSMOSIS - Non verifiable] ❓
-Aucune information dans le corpus sur ce point. Verification manuelle recommandee.
+Conclusion : votre affirmation correspond a la position 2022 mais est
+obsolete par rapport au Security Guide 2023.
+```
+
+**Niveau 3 — Coherence interne (V3)** :
+```
+[OSMOSIS - Incoherence interne] ⚠️
+Votre document affirme "TLS 1.2 requis" (page 3) mais mentionne
+"migration vers TLS 1.3 terminee" (page 12). Ces deux affirmations
+sont contradictoires. Verifiez quelle version est a jour.
+```
+
+**Niveau 3 — Completude (V3)** :
+```
+[OSMOSIS - Information manquante] 📋
+Votre document traite de la securite des connexions RFC mais ne mentionne
+pas SNC (Secure Network Communications) qui est systematiquement associe
+aux RFC dans la documentation de reference (5 documents sur 5 le mentionnent).
 ```
 
 ### Differenciateur
 
-Aucun outil RAG ne fait ca. ChatGPT/Copilot repondent a des questions. OSMOSIS **verifie des documents entiers** contre un corpus de reference. C'est le positionnement "Documentation Verification Platform".
+Aucun outil RAG ne fait ca. ChatGPT/Copilot repondent a des questions. OSMOSIS **critique des documents entiers** en les positionnant dans un espace documentaire structure. C'est le positionnement "Documentation Verification Platform".
+
+Le KG (2400+ relations C4/C6) est le moteur de cette critique — il contient deja les positions contradictoires, les evolutions, les complements. On l'exploite comme **moteur de raisonnement**, pas juste comme source d'evidence.
 
 ---
 
@@ -224,10 +262,13 @@ await context.sync()
 
 ---
 
-## 5. Plan d'implementation
+## 5. Plan d'implementation en 3 versions
 
-### Phase A — Backend Word processing (1 jour)
+### V1 — Upload Word + verification assertion-level (3 jours)
 
+Le pipeline existant (AssertionSplitter → EvidenceMatcher → ComparisonEngine) est reutilise. On ajoute l'entree/sortie Word.
+
+**Backend (1 jour)** :
 1. Ajouter `python-docx >= 1.2.0` dans requirements.txt
 2. Creer `src/knowbase/verification/docx_processor.py`
    - Extraction texte par paragraphe avec mapping positions
@@ -237,25 +278,82 @@ await context.sync()
    - Accept multipart/form-data
    - Return fichier .docx annote (StreamingResponse)
 
-### Phase B — Ameliorations pipeline (1 jour)
+**Pipeline (1 jour)** :
+1. Chunking par sections pour documents longs (> 15K chars)
+2. Provider-aware (GPT-4o-mini au lieu de Qwen par defaut)
+3. Augmenter la limite d'assertions (20 → 50 par section)
 
-1. Chunking par sections pour documents longs
-2. Exploitation relations C4/C6 dans evidence_matcher
-3. Provider-aware (GPT-4o-mini au lieu de Qwen par defaut)
-
-### Phase C — Frontend (1 jour)
-
+**Frontend (1 jour)** :
 1. Ajouter zone upload dans /verify (drag & drop)
-2. Progress bar pendant l'analyse
+2. Progress bar pendant l'analyse (WebSocket ou polling)
 3. Bouton download du document annote
-4. Vue resultats en parallele (optionnel)
+4. Vue resultats en parallele (existant, ameliore)
 
-### Phase D — Plugin Word (futur, 1-2 semaines)
+**Livrable V1** : Un .docx annote avec des commentaires type "confirme/contredit/incomplet/inconnu" par assertion. Fonctionnel mais basique.
 
-1. Scaffolding Office Add-in
-2. Task pane React avec bouton "Verifier"
-3. Integration API OSMOSIS
-4. Distribution sideloading puis Admin Center
+### V2 — Position documentaire + KG-driven (1 semaine)
+
+Le moteur de verification exploite les relations C4/C6 pour positionner chaque affirmation dans le paysage documentaire.
+
+**Enrichissement evidence_matcher** :
+1. Pour chaque assertion matchee dans le KG, suivre les relations :
+   - CONTRADICTS → trouver les positions contradictoires connues
+   - REFINES/QUALIFIES → trouver les nuances et conditions
+   - EVOLVES_TO → identifier les evolutions entre versions
+   - COMPLEMENTS → trouver les informations complementaires
+2. Construire une "position documentaire" structuree :
+   ```python
+   DocumentaryPosition(
+       assertion="TLS 1.2 est requis",
+       corpus_positions=[
+           Position(doc="Security Guide 2023", claim="TLS 1.3", relation="CONTRADICTS"),
+           Position(doc="Security Guide 2022", claim="TLS 1.2", relation="CONFIRMS"),
+           Position(doc="Operations Guide", claim="TLS 1.2 backward compat", relation="QUALIFIES"),
+       ],
+       verdict="obsolete_vs_latest",
+       confidence=0.85,
+   )
+   ```
+
+**Commentaires enrichis** :
+- Au lieu de "contredit par source X", montrer toutes les positions du corpus
+- Indiquer quelle position est la plus recente
+- Mentionner les nuances et conditions
+
+**Livrable V2** : Commentaires de niveau expert avec positionnement documentaire complet.
+
+### V3 — Coherence interne + completude (2 semaines)
+
+Le systeme analyse le document comme un tout, pas juste phrase par phrase.
+
+**Coherence interne** :
+1. Apres l'extraction des assertions, les comparer entre elles
+2. Detecter les contradictions internes (page 3 vs page 12)
+3. Detecter les repetitions et inconsistances terminologiques
+4. Generer des commentaires specifiques "incoherence interne"
+
+**Completude** :
+1. Identifier les sujets abordes dans le document (via entites KG)
+2. Pour chaque sujet, verifier si le corpus contient des informations connexes importantes non mentionnees
+3. Generer des commentaires "information manquante" pour les omissions significatives
+4. Exemple : document sur la securite RFC qui ne mentionne pas SNC
+
+**Document Model** :
+1. Construire une representation structuree du document (sections, sujets, arguments)
+2. Analyser la coherence de la structure argumentative
+3. Identifier les sauts logiques et les non sequitur
+
+**Livrable V3** : Un systeme qui "challenge intellectuellement" le document — pas juste des verifications mais une vraie critique documentaire.
+
+### Phase future — Plugin Word (1-2 semaines, apres V2)
+
+1. Scaffolding Office Add-in (React + TypeScript + Office.js)
+2. Task pane avec :
+   - Bouton "Verifier la selection" → appel API + commentaire inline
+   - Bouton "Analyser tout le document" → traitement complet
+   - Panneau de navigation des resultats (clic → navigue dans le doc)
+   - Indicateur de confiance par section
+3. Distribution : sideloading (dev) → Admin Center M365 (entreprise)
 
 ---
 
