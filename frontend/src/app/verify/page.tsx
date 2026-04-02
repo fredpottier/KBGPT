@@ -334,8 +334,12 @@ function SummaryBadges({ summary }: { summary: VerificationResult['summary'] }) 
 export default function VerifyPage() {
   const [inputText, setInputText] = useState('')
   const [mode, setMode] = useState<'edit' | 'result'>('edit')
+  const [inputMode, setInputMode] = useState<'text' | 'document'>('text')
   const [result, setResult] = useState<VerificationResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null)
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+  const [uploadFilename, setUploadFilename] = useState<string>('')
   const { hasCopied, onCopy } = useClipboard(inputText)
 
   // Analyze mutation
@@ -433,6 +437,55 @@ export default function VerifyPage() {
     setResult(null)
     setMode('edit')
     setError(null)
+    setDownloadUrl(null)
+    setUploadFilename('')
+    setUploadProgress(null)
+  }
+
+  const handleUploadDocx = async (file: File) => {
+    if (!file.name.endsWith('.docx')) {
+      setError('Seuls les fichiers .docx sont acceptes')
+      return
+    }
+    setError(null)
+    setUploadProgress('Upload et analyse en cours...')
+    setUploadFilename(file.name)
+    setDownloadUrl(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const response = await fetch(`${API_BASE}/api/verify/upload-docx`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        throw new Error(errData.detail || `Erreur ${response.status}`)
+      }
+
+      // Recuperer le blob du document annote
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      setDownloadUrl(url)
+
+      // Extraire les metriques des headers
+      const reliability = response.headers.get('X-Osmosis-Reliability')
+      const contradicted = response.headers.get('X-Osmosis-Contradicted')
+      const confirmed = response.headers.get('X-Osmosis-Confirmed')
+
+      setUploadProgress(
+        `Analyse terminee ! Fiabilite : ${reliability ? Math.round(parseFloat(reliability) * 100) : '?'}% ` +
+        `(${confirmed || '?'} confirmes, ${contradicted || '?'} contredits)`
+      )
+
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de l\'upload')
+      setUploadProgress(null)
+    }
   }
 
   const needsCorrection = result && (
@@ -448,10 +501,10 @@ export default function VerifyPage() {
         <HStack justify="space-between" mb={4}>
           <VStack align="start" spacing={0}>
             <Text fontSize="xl" fontWeight="bold" color="text.primary">
-              Vérificateur de Texte
+              Verificateur Documentaire
             </Text>
             <Text fontSize="sm" color="text.muted">
-              Vérifiez vos affirmations contre la base de connaissances
+              Confrontez vos documents au corpus de reference
             </Text>
           </VStack>
           {(result || inputText) && (
@@ -474,9 +527,126 @@ export default function VerifyPage() {
           </Alert>
         )}
 
+        {/* Mode selector: text vs document */}
+        {mode === 'edit' && (
+          <HStack spacing={3} mb={4}>
+            <Button
+              size="sm"
+              variant={inputMode === 'text' ? 'solid' : 'outline'}
+              colorScheme="brand"
+              leftIcon={<FiEdit3 />}
+              onClick={() => { setInputMode('text'); handleReset() }}
+            >
+              Texte
+            </Button>
+            <Button
+              size="sm"
+              variant={inputMode === 'document' ? 'solid' : 'outline'}
+              colorScheme="brand"
+              leftIcon={<FiFile />}
+              onClick={() => { setInputMode('document'); handleReset() }}
+            >
+              Document Word
+            </Button>
+          </HStack>
+        )}
+
         {/* Main content area */}
         <AnimatePresence mode="wait">
-          {mode === 'edit' ? (
+          {mode === 'edit' && inputMode === 'document' ? (
+            <motion.div
+              key="upload"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {/* Upload mode */}
+              <Box
+                bg="bg.secondary"
+                border="2px dashed"
+                borderColor={downloadUrl ? 'green.500' : 'border.default'}
+                rounded="xl"
+                p={8}
+                textAlign="center"
+                minH="250px"
+                display="flex"
+                flexDirection="column"
+                alignItems="center"
+                justifyContent="center"
+                cursor={uploadProgress && !downloadUrl ? 'wait' : 'pointer'}
+                _hover={!uploadProgress ? { borderColor: 'brand.500', bg: 'bg.tertiary' } : {}}
+                onClick={() => {
+                  if (!uploadProgress || downloadUrl) {
+                    const input = document.createElement('input')
+                    input.type = 'file'
+                    input.accept = '.docx'
+                    input.onchange = (e) => {
+                      const file = (e.target as HTMLInputElement).files?.[0]
+                      if (file) handleUploadDocx(file)
+                    }
+                    input.click()
+                  }
+                }}
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  const file = e.dataTransfer.files[0]
+                  if (file) handleUploadDocx(file)
+                }}
+              >
+                {!uploadProgress && !downloadUrl && (
+                  <>
+                    <Icon as={FiFile} boxSize={12} color="text.muted" mb={4} />
+                    <Text fontSize="lg" fontWeight="600" color="text.primary" mb={2}>
+                      Glissez un document Word ici
+                    </Text>
+                    <Text fontSize="sm" color="text.muted">
+                      ou cliquez pour selectionner un fichier .docx
+                    </Text>
+                    <Text fontSize="xs" color="text.muted" mt={2}>
+                      OSMOSIS analysera chaque affirmation et retournera le document avec des commentaires de review
+                    </Text>
+                  </>
+                )}
+
+                {uploadProgress && !downloadUrl && (
+                  <>
+                    <Spinner size="lg" color="brand.500" mb={4} />
+                    <Text fontSize="md" fontWeight="600" color="text.primary" mb={2}>
+                      Analyse de {uploadFilename}...
+                    </Text>
+                    <Text fontSize="sm" color="text.muted">
+                      {uploadProgress}
+                    </Text>
+                  </>
+                )}
+
+                {downloadUrl && (
+                  <>
+                    <Icon as={FiCheckCircle} boxSize={12} color="green.400" mb={4} />
+                    <Text fontSize="md" fontWeight="600" color="text.primary" mb={2}>
+                      {uploadProgress}
+                    </Text>
+                    <Button
+                      as="a"
+                      href={downloadUrl}
+                      download={uploadFilename.replace('.docx', '_osmosis_review.docx')}
+                      colorScheme="green"
+                      size="lg"
+                      mt={4}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Telecharger le document annote
+                    </Button>
+                    <Text fontSize="xs" color="text.muted" mt={2}>
+                      Le document contient des commentaires de review OSMOSIS dans la marge
+                    </Text>
+                  </>
+                )}
+              </Box>
+            </motion.div>
+          ) : mode === 'edit' ? (
             <motion.div
               key="edit"
               initial={{ opacity: 0 }}
