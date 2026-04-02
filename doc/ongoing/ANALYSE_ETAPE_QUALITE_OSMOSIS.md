@@ -176,4 +176,62 @@
 
 ---
 
-*Analyse d'etape pour guider les prochaines iterations. A mettre a jour apres chaque amelioration significative.*
+---
+
+## 6. Mise a jour apres audit P0 (2 avril 2026)
+
+### Resultat de l'audit
+
+L'audit a revele que le QA-Class causait **62 faux rejets sur 246 questions (31%)** :
+- temporal: 60% de faux rejets
+- negation: 40%
+- set_list: 36%
+- false_premise: 32%
+- hypothetical: 30%
+
+Le QA-Class a ete desactive et un benchmark V14 (GPT-4o-mini sans QA-Class) a ete lance.
+
+### V14 — Vrais scores GPT-4o-mini (246q, sans QA-Class)
+
+| Categorie | Score | Verdict |
+|---|---|---|
+| synthesis_large | **91.8%** | BON |
+| multi_hop | **71.3%** | BON |
+| set_list | **70.0%** | BON |
+| false_premise | **62.1%** | FRAGILE |
+| hypothetical | **58.7%** | FRAGILE |
+| temporal | **54.1%** | FRAGILE |
+| negation | **44.2%** | MAUVAIS |
+| causal_why | **39.0%** | MAUVAIS |
+| conditional | **39.0%** | MAUVAIS |
+| unanswerable | **17.9%** | MAUVAIS |
+| **GLOBAL** | **54.9%** | |
+
+### Surprise : QA-Class impact marginal
+
+La comparaison V13 (avec QA-Class) vs V14 (sans) montre seulement -1.2pp de difference globale. Le QA-Class ne degradait pas autant qu'on pensait (les faux rejets tombaient sur des questions a scores moyens de toute facon). Mais il ne resolvait pas non plus le vrai probleme : la qualite de synthese GPT-4o-mini sur certains types de questions.
+
+### Nouveau diagnostic
+
+Les 4 categories MAUVAIS sont le vrai chantier :
+
+1. **unanswerable (17.9%)** : GPT-4o-mini hallucine massivement. Le QA-Class est la bonne approche mais doit etre ameliore (trop de faux rejets actuellement). Alternative : prompt specifique pour GPT-4o-mini.
+
+2. **causal_why (39.0%)** : GPT-4o-mini n'explique pas le "pourquoi" a partir des sources. Il repond de maniere generique au lieu de citer les raisons documentees. MAIS il faut aussi verifier l'evaluateur — `evidence_coverage` par keyword overlap est peut-etre trop strict.
+
+3. **conditional (39.0%)** : L'extraction de conditions ("si X alors Y") est faible. L'evaluateur ne mesure que le keyword overlap, ce qui est probablement insuffisant pour cette categorie. Audit evaluateur necessaire.
+
+4. **negation (44.2%)** : Les questions "qu'est-ce qui n'est PAS..." sont mal traitees. Possibles causes : le LLM ne repond pas aux negations, OU l'evaluateur est trop strict (keyword "ne pas" vs "cannot").
+
+### Priorites revisees
+
+| # | Action | Impact estime | Effort |
+|---|---|---|---|
+| 1 | Audit evaluateurs causal/conditional/negation (verifier si les scores refletent la realite) | Fiabiliser les mesures | 2h |
+| 2 | Prompt GPT-4o-mini pour unanswerable (instruction specifique sans casser le reste) | unanswerable 18% → 40%+ | 1h |
+| 3 | Temporal : injecter EVOLVES_TO dans la synthese | temporal 54% → 65%+ | 2h |
+| 4 | both_sides : claims verbatim dans le prompt | both_sides 73% → 80%+ | 1h |
+
+---
+
+*Analyse d'etape pour guider les prochaines iterations. Mis a jour le 2 avril 2026 apres audit P0 et V14.*

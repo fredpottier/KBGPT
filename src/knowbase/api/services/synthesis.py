@@ -44,9 +44,10 @@ SYNTHESIS_PROMPT = """You are a precise document analysis assistant that synthes
 
 6. **Structure** your response with sections or bullet points when appropriate.
 
-7. **Partial information rule (CRITICAL)**: If sources contain information that is PARTIALLY relevant to the question, answer with what you have. Do NOT refuse to answer. Say "Based on available sources..." and provide the partial answer. ONLY say information is not available if NONE of the sources contain ANY relevant information at all.
-   - **IMPORTANT**: Even if sources do not contain the EXACT term or value asked about, if they contain information about the SAME TOPIC or RELATED CONCEPT, you MUST answer with that information. For example, if asked about a specific transaction code and sources describe the same functional area, provide what the sources say about that area.
-   - **NEVER** start with "I don't have information" or "the sources don't contain" when sources discuss the topic. Instead, start with what the sources DO say.
+7. **Partial information rule (CRITICAL)**: If sources contain information that is PARTIALLY relevant to the question, answer with what you have. Say "Based on available sources..." and provide the partial answer.
+   - If sources discuss the SAME TOPIC or RELATED CONCEPT, provide what the sources say about that area.
+   - **BUT**: If the question asks about something the sources clearly do NOT cover (pricing, third-party products not mentioned, statistics not documented, tools or plugins not referenced), start your answer with "The available documents do not contain information about [specific topic]." then briefly mention what the sources DO cover on the broader topic if relevant.
+   - **Key principle**: It is better to honestly say the sources don't cover something than to rephrase unrelated content as if it answers the question.
 
 8. If information is **contradictory**, present BOTH versions with their sources explicitly.
 
