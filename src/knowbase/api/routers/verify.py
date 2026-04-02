@@ -263,21 +263,50 @@ async def upload_and_verify_docx(
 
 
 def _build_explanation(assertion) -> str:
-    """Construit l'explication textuelle a partir d'une assertion verifiee."""
+    """Construit l'explication textuelle a partir d'une assertion verifiee.
+
+    Le commentaire doit expliquer POURQUOI il y a confirmation/contradiction,
+    pas juste QUOI est dans le corpus.
+    """
     if not assertion.evidence:
-        return "Aucune information trouvee dans le corpus."
+        return "Aucune information trouvee dans le corpus sur ce point."
 
     ev = assertion.evidence[0]
     source = getattr(ev, "source_doc", "source inconnue") or "source inconnue"
+    # Nettoyer le nom de source
+    if source and "_" in source:
+        parts = source.split("_", 2)
+        source = parts[1] if len(parts) > 1 else source
     claim = getattr(ev, "claim_text", "") or ""
+    relationship = getattr(ev, "relationship", "") or ""
+    comparison = getattr(ev, "comparison_details", None)
 
     if assertion.status == "confirmed":
-        return f"Confirme par {source}."
+        return (
+            f"Cette affirmation est confirmee par le corpus.\n"
+            f"Source : {source}\n"
+            f"Evidence : \"{claim[:200]}\""
+        )
     elif assertion.status == "contradicted":
-        return f"Le corpus indique : \"{claim[:150]}\"\nSource : {source}"
+        explanation = f"Cette affirmation est CONTREDITE par le corpus.\n\n"
+        explanation += f"Votre texte : \"{assertion.text[:150]}\"\n"
+        explanation += f"Le corpus indique : \"{claim[:200]}\"\n\n"
+        if comparison and hasattr(comparison, "reason_code"):
+            explanation += f"Raison : {comparison.reason_code}\n"
+        explanation += f"Source : {source}"
+        return explanation
     elif assertion.status == "incomplete":
-        return f"Information complementaire dans {source} : \"{claim[:150]}\""
+        return (
+            f"Le corpus apporte une NUANCE importante.\n\n"
+            f"Votre texte : \"{assertion.text[:150]}\"\n"
+            f"Le corpus precise : \"{claim[:200]}\"\n\n"
+            f"Source : {source}"
+        )
     elif assertion.status == "fallback":
-        return f"Information trouvee dans {source} (non structuree)."
+        return (
+            f"Information trouvee dans le corpus (non structuree).\n"
+            f"Source : {source}\n"
+            f"Passage : \"{claim[:200]}\""
+        )
     else:
-        return "Aucune information dans le corpus sur ce point."
+        return "Aucune information trouvee dans le corpus sur ce point."

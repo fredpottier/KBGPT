@@ -456,8 +456,8 @@ export default function VerifyPage() {
       const formData = new FormData()
       formData.append('file', file)
 
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const response = await fetch(`${API_BASE}/api/verify/upload-docx`, {
+      // Via proxy Next.js (evite CORS + headers custom)
+      const response = await fetch('/api/verify/upload-docx', {
         method: 'POST',
         body: formData,
       })
