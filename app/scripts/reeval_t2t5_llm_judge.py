@@ -37,29 +37,29 @@ def main():
     per_sample = data.get("per_sample", [])
 
     T2_PROMPT = (
-        'You are a strict benchmark evaluator for a document contradiction detection system.\n\n'
-        'Question: "{question}"\n'
-        'Ground truth claim 1: "{claim1}"\n'
-        'Ground truth claim 2: "{claim2}"\n\n'
-        'The system should detect the tension between these two claims and present BOTH sides.\n\n'
-        'Actual answer (first 400 chars):\n"{answer}"\n\n'
-        'Evaluate three aspects (each 0 or 1):\n'
-        '1. both_sides_surfaced: Does the answer present BOTH positions/claims?\n'
-        '2. tension_mentioned: Does the answer mention a tension, difference, or contradiction?\n'
-        '3. both_sources_cited: Does the answer cite or reference both source documents?\n\n'
-        'Reply with ONLY three numbers separated by commas: both_sides,tension,sources\n'
-        'Example: 1,1,0'
+        'You are a benchmark evaluator for a document contradiction detection system.\n\n'
+        'Question: "{question}"\n\n'
+        'The corpus contains TWO claims that may be in tension:\n'
+        'Claim 1 (from document A): "{claim1}"\n'
+        'Claim 2 (from document B): "{claim2}"\n\n'
+        'The system produced this answer (first 400 chars):\n"{answer}"\n\n'
+        'Rate each aspect from 0 to 100:\n'
+        '1. both_sides: Does the answer present information from BOTH claims? Even paraphrased, in a different language, or summarized — if BOTH perspectives are covered, score high.\n'
+        '2. tension: Does the answer acknowledge a difference, evolution, tension, contradiction, or divergence between sources? Look for words like "however", "but", "cependant", "toutefois", "differs", "changed", "evolution", "attention", "diverge" in ANY language.\n'
+        '3. sources: Does the answer reference or cite multiple source documents? Look for any mention of document names, years, guide names, version numbers.\n\n'
+        'Reply with ONLY three numbers (0-100) separated by commas.\n'
+        'Example: 85,70,60'
     )
 
     T5_PROMPT = (
-        'You are a strict benchmark evaluator for a cross-document analysis system.\n\n'
+        'You are a benchmark evaluator for a cross-document analysis system.\n\n'
         'Question: "{question}"\nCategory: {category}\n\n'
-        'Actual answer (first 400 chars):\n"{answer}"\n\n'
-        'Evaluate (0.0 to 1.0):\n'
-        '1. chain_coverage: How well does the answer cover the chain of facts across documents?\n'
-        '2. multi_doc_cited: Does the answer reference multiple documents?\n\n'
-        'Reply with ONLY two numbers separated by commas: chain_coverage,multi_doc_cited\n'
-        'Example: 0.7,1.0'
+        'The system produced this answer (first 400 chars):\n"{answer}"\n\n'
+        'Rate each aspect from 0 to 100:\n'
+        '1. chain_coverage: How well does the answer cover facts from multiple documents to build a complete answer? A good answer connects information across sources.\n'
+        '2. multi_doc: Does the answer reference or cite multiple source documents? Look for any document names, years, or version references.\n\n'
+        'Reply with ONLY two numbers (0-100) separated by commas.\n'
+        'Example: 75,80'
     )
 
     new_per_sample = []
@@ -90,16 +90,21 @@ def main():
                 raw = resp.choices[0].message.content.strip()
                 parts = [float(x.strip()) for x in raw.split(",")]
                 if len(parts) >= 3:
+                    # Scores 0-100 → normaliser en 0-1
+                    sides = min(parts[0], 100) / 100.0
+                    tension = min(parts[1], 100) / 100.0
+                    sources = min(parts[2], 100) / 100.0
                     new_eval = {
                         "task_type": "T2",
-                        "both_sides_surfaced": parts[0],
-                        "tension_mentioned": parts[1],
-                        "both_sources_cited": parts[2],
+                        "both_sides_surfaced": round(sides, 3),
+                        "tension_mentioned": round(tension, 3),
+                        "both_sources_cited": round(sources, 3),
                         "judge_model": model,
+                        "judge_raw": raw,
                     }
-                    t2_all["both_sides_surfaced"].append(parts[0])
-                    t2_all["tension_mentioned"].append(parts[1])
-                    t2_all["both_sources_cited"].append(parts[2])
+                    t2_all["both_sides_surfaced"].append(sides)
+                    t2_all["tension_mentioned"].append(tension)
+                    t2_all["both_sources_cited"].append(sources)
                     s_copy = dict(s)
                     s_copy["evaluation"] = new_eval
                     new_per_sample.append(s_copy)
@@ -117,6 +122,10 @@ def main():
                 raw = resp.choices[0].message.content.strip()
                 parts = [float(x.strip()) for x in raw.split(",")]
                 if len(parts) >= 2:
+                    # Scores 0-100 → normaliser en 0-1
+                    chain = min(parts[0], 100) / 100.0
+                    multi = min(parts[1], 100) / 100.0
+
                     tension_kw = ["contradiction", "diverge", "tension", "different", "contrast",
                                   "however", "cependant", "toutefois", "neanmoins", "attention"]
                     proactive = 1.0 if (category == "proactive_contradiction" and
@@ -125,14 +134,15 @@ def main():
                     new_eval = {
                         "task_type": "T5",
                         "category": category,
-                        "chain_coverage": parts[0],
-                        "multi_doc_cited": parts[1],
+                        "chain_coverage": round(chain, 3),
+                        "multi_doc_cited": round(multi, 3),
                         "proactive_detection": proactive,
                         "judge_model": model,
+                        "judge_raw": raw,
                     }
                     if category != "proactive_contradiction":
-                        t5_chain.append(parts[0])
-                    t5_multi.append(parts[1])
+                        t5_chain.append(chain)
+                    t5_multi.append(multi)
                     if category == "proactive_contradiction":
                         t5_proactive.append(proactive)
 

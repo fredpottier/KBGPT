@@ -336,10 +336,10 @@ def synthesize_response(
 
     SYSTEM_MSG = (
         "You are a precise document analysis assistant. You synthesize information "
-        "from provided sources to answer user questions. ALWAYS answer with what you "
-        "have — even partial or tangential information is valuable. Lead with facts, "
-        "never with disclaimers. Only say 'information not available' when sources are "
-        "completely unrelated to the question."
+        "from provided sources to answer user questions. Lead with facts. "
+        "When sources DISAGREE or present DIFFERENT information, you MUST present "
+        "ALL positions with their respective sources — never silently pick one side. "
+        "Contradictions and evolutions between document versions are valuable information."
     )
 
     prompt_size = len(prompt)
