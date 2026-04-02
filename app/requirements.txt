@@ -147,3 +147,6 @@ python-ulid>=2.2.0  # ULID pour IDs RawAssertion
 # python -m spacy download en_core_web_sm  # English (small - 13MB)
 # python -m spacy download fr_core_news_sm # French (small - 16MB)
 ragas>=0.4.0
+
+# === Document Verification (Phase 4 - Verify V1) ===
+python-docx>=1.2.0  # Annotations Word natives (add_comment)
