@@ -639,6 +639,8 @@ def run_benchmark_job(
                     "question": question[:200],
                     "task_name": q_item.get("_task_name", ""),
                     "evaluation": evaluation,
+                    "answer": api_result["answer"][:500],
+                    "ground_truth": q_item.get("ground_truth", {}),
                     "answer_length": len(api_result["answer"]),
                     "chunks_retrieved": api_result["chunks_retrieved"],
                     "sources_used": api_result["sources_used"],
