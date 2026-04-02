@@ -115,12 +115,14 @@ def detect_signals(
             signals.append(dense_ans)
 
     # Signal 7 — QA-Class Answerability (Qwen/vLLM, multilingue)
-    # Declenche UNIQUEMENT si le gap signal indique un doute (>= 0.6)
-    gap_signal = next((s for s in signals if s.type == "question_context_gap"), None)
-    if question and chunks:
-        qa_signal = _detect_qa_answerability(question, chunks, gap_signal=gap_signal)
-        if qa_signal:
-            signals.append(qa_signal)
+    # DESACTIVE — cause 62 faux rejets sur 246 questions (31%).
+    # Le QA-Class rejette trop de questions answerable (temporal 60%, negation 40%, set_list 36%).
+    # A reactiver quand le prompt sera ameliore pour reduire les faux rejets.
+    # gap_signal = next((s for s in signals if s.type == "question_context_gap"), None)
+    # if question and chunks:
+    #     qa_signal = _detect_qa_answerability(question, chunks, gap_signal=gap_signal)
+    #     if qa_signal:
+    #         signals.append(qa_signal)
 
     report = SignalReport(signals=signals, claims_analyzed=len(kg_claims))
 
