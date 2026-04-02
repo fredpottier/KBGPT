@@ -510,15 +510,15 @@ function RagasTab({
     <VStack spacing={6} align="stretch">
       {/* Gauges row */}
       <HStack spacing={6} align="start" flexWrap="wrap">
-        <Card accent={T.accentRagas} flex={1} minW="280px">
+        <Card accent={T.accentContra} flex={1} minW="280px">
           <HStack spacing={6} align="center">
-            <ScoreGauge value={faith} label="Faithfulness" color={T.accentRagas} size={130} target={0.80} />
+            <ScoreGauge value={ctxRel} label="Context Relevance" color={T.accentContra} size={130} target={0.80} />
             <VStack align="start" spacing={2} flex={1}>
-              <Text fontSize="xs" fontWeight="700" color={T.accentRagas} textTransform="uppercase">
-                Fidelite des reponses
+              <Text fontSize="xs" fontWeight="700" color={T.accentContra} textTransform="uppercase">
+                Pertinence du contexte
               </Text>
-              {baseFaith != null && (
-                <DeltaBadge current={faith} baseline={baseFaith} />
+              {baseCtxRel != null && (
+                <DeltaBadge current={ctxRel} baseline={baseCtxRel} />
               )}
               <Text fontSize="11px" color={T.textMuted}>
                 {osm?.sample_count ?? '--'} questions evaluees
@@ -527,15 +527,15 @@ function RagasTab({
           </HStack>
         </Card>
 
-        <Card accent={T.accentContra} flex={1} minW="280px">
+        <Card accent={T.accentRagas} flex={1} minW="280px">
           <HStack spacing={6} align="center">
-            <ScoreGauge value={ctxRel} label="Context Relevance" color={T.accentContra} size={130} target={0.70} />
+            <ScoreGauge value={faith} label="Faithfulness" color={T.accentRagas} size={130} target={0.85} />
             <VStack align="start" spacing={2} flex={1}>
-              <Text fontSize="xs" fontWeight="700" color={T.accentContra} textTransform="uppercase">
-                Pertinence du contexte
+              <Text fontSize="xs" fontWeight="700" color={T.accentRagas} textTransform="uppercase">
+                Fidelite des reponses
               </Text>
-              {baseCtxRel != null && (
-                <DeltaBadge current={ctxRel} baseline={baseCtxRel} />
+              {baseFaith != null && (
+                <DeltaBadge current={faith} baseline={baseFaith} />
               )}
             </VStack>
           </HStack>
