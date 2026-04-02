@@ -264,86 +264,154 @@ await context.sync()
 
 ## 5. Plan d'implementation en 3 versions
 
+### Principe d'implementation : "Concevoir comme V3, implementer comme V1"
+
+Les structures de donnees sont concues pour la V3 des le depart meme si on n'implemente que la V1. Pas de prototype jetable — une version incomplete d'un systeme correct.
+
+### Structures de donnees (V3-ready des V1)
+
+```python
+@dataclass
+class CorpusPosition:
+    """Position d'un document du corpus sur un sujet."""
+    doc_id: str
+    doc_title: str
+    claim_text: str
+    relation: str          # CONFIRMS | CONTRADICTS | QUALIFIES | REFINES | EVOLVES_TO | COMPLEMENTS
+    confidence: float
+    is_most_recent: bool   # V2: flag version la plus recente
+
+@dataclass
+class AssertionVerdict:
+    """Verdict structure sur une assertion — le KG decide, le LLM explique."""
+    assertion_id: str
+    assertion_text: str
+    paragraph_index: int
+    
+    # Verdict (deterministe, pas LLM)
+    status: str            # confirmed | contradicted | qualified | outdated | incomplete | unknown
+    severity: str          # high | medium | low
+    confidence: float
+    reasoning_type: str    # exact_match | value_conflict | scope_mismatch | temporal_evolution | partial_coverage
+    
+    # Positions corpus (V2: enrichi avec C4/C6)
+    corpus_positions: list[CorpusPosition]
+    
+    # Entites detectees (pour coherence interne + blind spots)
+    entities: list[str]
+    
+    # Explication (LLM — genere a partir du verdict, ne raisonne pas)
+    explanation: str       # commentaire humain pour le Word
+    
+    # V1.5: coherence interne
+    internal_conflicts: list[str]  # IDs des assertions contradictoires dans le meme document
+    
+    # V1.5: blind spots
+    blind_spots: list[str]  # dimensions du sujet non couvertes par le document
+
+@dataclass
+class DocumentReviewResult:
+    """Resultat complet de la review documentaire."""
+    assertions: list[AssertionVerdict]
+    
+    # Metriques globales
+    reliability_score: float       # score de fiabilite du document (0-1)
+    total_confirmed: int
+    total_contradicted: int
+    total_qualified: int
+    total_unknown: int
+    high_severity_count: int
+    
+    # V1.5: coherence interne
+    internal_contradictions: int   # nombre de contradictions internes
+    
+    # V1.5: blind spots
+    coverage_score: float          # % des dimensions couvertes vs corpus
+    missing_dimensions: list[str]  # dimensions importantes non couvertes
+```
+
 ### V1 — Upload Word + verification assertion-level (3 jours)
 
-Le pipeline existant (AssertionSplitter → EvidenceMatcher → ComparisonEngine) est reutilise. On ajoute l'entree/sortie Word.
+Le pipeline existant (AssertionSplitter → EvidenceMatcher → ComparisonEngine) est reutilise. On ajoute l'entree/sortie Word et on utilise les structures V3.
 
 **Backend (1 jour)** :
 1. Ajouter `python-docx >= 1.2.0` dans requirements.txt
 2. Creer `src/knowbase/verification/docx_processor.py`
    - Extraction texte par paragraphe avec mapping positions
-   - Annotation du document avec commentaires
+   - Annotation du document avec commentaires (statut + explication)
    - Mapping assertion → paragraphe → runs
 3. Creer endpoint `POST /api/verify/upload-docx`
    - Accept multipart/form-data
    - Return fichier .docx annote (StreamingResponse)
+4. Les verdicts utilisent deja `AssertionVerdict` (severity=medium par defaut, corpus_positions=[evidence], entities=[], internal_conflicts=[], blind_spots=[])
 
 **Pipeline (1 jour)** :
 1. Chunking par sections pour documents longs (> 15K chars)
-2. Provider-aware (GPT-4o-mini au lieu de Qwen par defaut)
+2. Provider-aware (GPT-4o-mini via OSMOSIS_SYNTHESIS_PROVIDER)
 3. Augmenter la limite d'assertions (20 → 50 par section)
+4. Explication = LLM qui met en mots le verdict structure (pas de raisonnement LLM)
 
 **Frontend (1 jour)** :
 1. Ajouter zone upload dans /verify (drag & drop)
 2. Progress bar pendant l'analyse (WebSocket ou polling)
 3. Bouton download du document annote
-4. Vue resultats en parallele (existant, ameliore)
+4. Vue resultats avec metriques globales (reliability_score, counts par statut)
 
-**Livrable V1** : Un .docx annote avec des commentaires type "confirme/contredit/incomplet/inconnu" par assertion. Fonctionnel mais basique.
+**Livrable V1** : Un .docx annote avec des commentaires structures. Les champs V1.5/V2 sont presents mais vides.
 
-### V2 — Position documentaire + KG-driven (1 semaine)
+### V1.5 — Coherence interne + blind spots simples (2 jours)
 
-Le moteur de verification exploite les relations C4/C6 pour positionner chaque affirmation dans le paysage documentaire.
+Deux ajouts "low-cost, high-value" qui exploitent les donnees deja extraites en V1.
+
+**Coherence interne light** :
+1. Apres extraction de toutes les assertions, grouper par entite
+2. Pour chaque groupe d'assertions sur la meme entite : comparer les valeurs
+3. Si assertion page 3 dit "TLS 1.2" et assertion page 12 dit "TLS 1.3" → flag
+4. Remplir `internal_conflicts` dans `AssertionVerdict`
+5. Commentaire Word : "[OSMOSIS - Incoherence interne] Voir aussi page X qui dit Y"
+
+**Blind spots simples** :
+1. Extraire les entites mentionnees dans le document
+2. Pour chaque entite, compter les dimensions couvertes dans le corpus (via facettes/claims KG)
+3. Si le document couvre 2/5 dimensions d'un sujet → blind spot
+4. Remplir `blind_spots` et `coverage_score`
+5. Commentaire Word en fin de document : "[OSMOSIS - Sujets non couverts] Le corpus contient aussi des informations sur X, Y, Z que votre document ne mentionne pas"
+
+**Pas d'appel LLM supplementaire** — tout est calcule a partir des assertions deja extraites et du KG.
+
+### V2 — Positions documentaires C4/C6 + commentaires experts (1 semaine)
+
+Le moteur de verification exploite les relations C4/C6 pour positionner chaque affirmation.
 
 **Enrichissement evidence_matcher** :
 1. Pour chaque assertion matchee dans le KG, suivre les relations :
-   - CONTRADICTS → trouver les positions contradictoires connues
-   - REFINES/QUALIFIES → trouver les nuances et conditions
-   - EVOLVES_TO → identifier les evolutions entre versions
-   - COMPLEMENTS → trouver les informations complementaires
-2. Construire une "position documentaire" structuree :
-   ```python
-   DocumentaryPosition(
-       assertion="TLS 1.2 est requis",
-       corpus_positions=[
-           Position(doc="Security Guide 2023", claim="TLS 1.3", relation="CONTRADICTS"),
-           Position(doc="Security Guide 2022", claim="TLS 1.2", relation="CONFIRMS"),
-           Position(doc="Operations Guide", claim="TLS 1.2 backward compat", relation="QUALIFIES"),
-       ],
-       verdict="obsolete_vs_latest",
-       confidence=0.85,
-   )
-   ```
+   - CONTRADICTS → positions contradictoires connues
+   - REFINES/QUALIFIES → nuances et conditions
+   - EVOLVES_TO → evolutions entre versions
+   - COMPLEMENTS → informations complementaires
+2. Construire `corpus_positions[]` dans `AssertionVerdict`
+3. Determiner `is_most_recent` pour chaque position
+4. Severity calculee automatiquement :
+   - high : contredit par le document le plus recent
+   - medium : contredit par un document mais confirme par un autre
+   - low : nuance ou qualification
 
-**Commentaires enrichis** :
-- Au lieu de "contredit par source X", montrer toutes les positions du corpus
-- Indiquer quelle position est la plus recente
-- Mentionner les nuances et conditions
+**Commentaires enrichis (LLM explique le verdict)** :
+```
+[OSMOSIS - Position documentaire]
+Votre affirmation : "TLS 1.2 est requis"
+
+Le corpus montre des positions differentes :
+• Security Guide 2023 → TLS 1.3 obligatoire (plus recent)
+• Security Guide 2022 → TLS 1.2 acceptable
+• Operations Guide → TLS 1.2 backward compatibility uniquement
+
+Conclusion : votre affirmation correspond a la position 2022 mais
+est obsolete par rapport au guide 2023.
+Severite : HAUTE
+```
 
 **Livrable V2** : Commentaires de niveau expert avec positionnement documentaire complet.
-
-### V3 — Coherence interne + completude (2 semaines)
-
-Le systeme analyse le document comme un tout, pas juste phrase par phrase.
-
-**Coherence interne** :
-1. Apres l'extraction des assertions, les comparer entre elles
-2. Detecter les contradictions internes (page 3 vs page 12)
-3. Detecter les repetitions et inconsistances terminologiques
-4. Generer des commentaires specifiques "incoherence interne"
-
-**Completude** :
-1. Identifier les sujets abordes dans le document (via entites KG)
-2. Pour chaque sujet, verifier si le corpus contient des informations connexes importantes non mentionnees
-3. Generer des commentaires "information manquante" pour les omissions significatives
-4. Exemple : document sur la securite RFC qui ne mentionne pas SNC
-
-**Document Model** :
-1. Construire une representation structuree du document (sections, sujets, arguments)
-2. Analyser la coherence de la structure argumentative
-3. Identifier les sauts logiques et les non sequitur
-
-**Livrable V3** : Un systeme qui "challenge intellectuellement" le document — pas juste des verifications mais une vraie critique documentaire.
 
 ### Phase future — Plugin Word (1-2 semaines, apres V2)
 
