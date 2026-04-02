@@ -126,42 +126,54 @@ async def get_benchmark_runs() -> dict[str, Any]:
 
 
 def _compute_ragas_diagnostic(scores: dict[str, float]) -> dict[str, Any]:
-    """Calcule un diagnostic a partir des scores RAGAS."""
+    """Calcule un diagnostic a partir des scores RAGAS.
+
+    Seuils :
+    - Excellent : >= 0.85
+    - Bon : >= 0.70
+    - A ameliorer : >= 0.50
+    - Critique : < 0.50
+    """
     faith = scores.get("faithfulness")
     ctx = scores.get("context_relevance")
-    factual = scores.get("factual_correctness")
 
     level = "unknown"
     message = "Donnees insuffisantes pour un diagnostic."
     color = "gray"
 
     if faith is not None and ctx is not None:
-        if faith >= 0.8 and ctx >= 0.8:
-            level = "good"
-            message = "Retrieval ET generation sont performants."
+        if faith >= 0.85 and ctx >= 0.80:
+            level = "excellent"
+            message = "Retrieval et generation sont tres performants. Niveau production."
             color = "green"
-        elif faith >= 0.8 and ctx < 0.8:
-            level = "retrieval_issue"
-            message = (
-                "Le LLM genere fidelement a partir du contexte, "
-                "mais le retrieval ne ramene pas les bons passages. "
-                "Priorite : ameliorer le chunking ou le retrieval."
-            )
+        elif faith >= 0.70 and ctx >= 0.65:
+            level = "good"
+            faith_pct = round(faith * 100)
+            ctx_pct = round(ctx * 100)
+            tips = []
+            if faith < 0.85:
+                tips.append(f"Faithfulness {faith_pct}% — ameliorable (cible 85%)")
+            if ctx < 0.80:
+                tips.append(f"Context Relevance {ctx_pct}% — ameliorable (cible 80%)")
+            message = "Systeme fonctionnel. " + " | ".join(tips) if tips else "Systeme fonctionnel."
+            color = "green"
+        elif faith >= 0.50 and ctx >= 0.50:
+            level = "acceptable"
+            if faith < 0.70:
+                message = "Faithfulness faible — le LLM deforme parfois les faits. Ameliorer le prompt ou le modele."
+            elif ctx < 0.65:
+                message = "Context Relevance faible — le retrieval ne ramene pas toujours les bons passages."
+            else:
+                message = "Scores corrects mais sous les cibles production."
             color = "orange"
-        elif faith < 0.8 and ctx >= 0.8:
-            level = "generation_issue"
-            message = (
-                "Le retrieval ramene les bons passages, "
-                "mais le LLM hallucine ou deforme les faits. "
-                "Priorite : ameliorer le prompt de synthese ou changer de modele."
-            )
-            color = "red"
         else:
-            level = "both_issues"
-            message = (
-                "Probleme double : le retrieval est faible ET le LLM hallucine. "
-                "Commencer par ameliorer le retrieval, puis la generation."
-            )
+            level = "critical"
+            if faith < 0.50 and ctx < 0.50:
+                message = "Scores critiques sur retrieval ET generation. Verifier l'infrastructure."
+            elif faith < 0.50:
+                message = "Faithfulness critique — le LLM hallucine frequemment."
+            else:
+                message = "Context Relevance critique — le retrieval est defaillant."
             color = "red"
 
     return {"level": level, "message": message, "color": color}
