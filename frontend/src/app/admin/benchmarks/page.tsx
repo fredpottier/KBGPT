@@ -806,8 +806,31 @@ function ContradictionsTab({
     }))
   }, [scores])
 
+  // Score global T2/T5 (moyenne des 6 metriques)
+  const allMetricValues = [...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS].map(m => scores[m.key] ?? 0)
+  const globalScore = allMetricValues.length > 0 ? allMetricValues.reduce((a, b) => a + b, 0) / allMetricValues.length : 0
+  const baseAllValues = [...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS].map(m => baseScores[m.key] ?? 0)
+  const baseGlobal = baseAllValues.length > 0 ? baseAllValues.reduce((a, b) => a + b, 0) / baseAllValues.length : 0
+
   return (
     <VStack spacing={6} align="stretch">
+      {/* Header: global score + info */}
+      <HStack spacing={6} align="center" flexWrap="wrap">
+        <ScoreGauge value={globalScore} label="Score global" color={T.accentContra} size={110} target={0.80} />
+        <VStack align="start" spacing={1}>
+          <Text fontSize="sm" fontWeight="700" color={T.textPrimary}>
+            Contradictions — {latest?.tag || 'Dernier run'}
+          </Text>
+          <Text fontSize="xs" color={T.textMuted}>
+            {scores.total_evaluated ?? scores.t2_count + scores.t5_count ?? '--'} questions
+            {latest?.duration_s ? ` — ${Math.round(latest.duration_s)}s` : ''}
+          </Text>
+          {baseGlobal > 0 && (
+            <DeltaBadge current={globalScore} baseline={baseGlobal} />
+          )}
+        </VStack>
+      </HStack>
+
       {/* Radar + Metric bars row */}
       <HStack spacing={6} align="start" flexWrap={{ base: 'wrap', lg: 'nowrap' }}>
         {/* Left: Radar */}
