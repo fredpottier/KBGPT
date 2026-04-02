@@ -43,6 +43,21 @@
 
 ---
 
+## PHASE 3.5 — Qualite et Mesure (session 1-2 avril 2026)
+
+| # | Tache | Statut | Detail |
+|---|-------|--------|--------|
+| ~~3.6~~ | ~~Dashboard benchmark 4 onglets~~ | ✅ | Vue ensemble + RAGAS + Contradictions + Robustesse. ScoreGauges D3, RadarChart, drill-down questions. |
+| ~~3.7~~ | ~~Benchmark robustesse 246q~~ | ✅ | 10 categories, 25q/cat. false_premise, unanswerable, temporal, causal, hypothetical, negation, synthesis, conditional, set_list, multi_hop. |
+| ~~3.8~~ | ~~LLM-juge~~ | ✅ | GPT-4o-mini remplace keyword matching (cross-lingue). Global 57% → 64.3%. |
+| ~~3.9~~ | ~~Multi-provider synthese~~ | ✅ | OpenAI/Anthropic/vLLM via OSMOSIS_SYNTHESIS_PROVIDER. Prompts externalises YAML. |
+| ~~3.10~~ | ~~Comparaison 3 modeles~~ | ✅ | Qwen 49% / Haiku 56% / GPT-4o-mini 56% (=Haiku, 6x moins cher). |
+| 3.11 | Indicateur entropie frontend | A faire | Afficher "confiance faible" dans le chat quand entropy > seuil. Signal HALT/EPR implemente. |
+| 3.12 | T2/T5 avec LLM-juge | En cours | Run propre + reevaluation. Evaluateurs keyword cross-lingue. |
+| 3.13 | Unanswerable > 60% | Recherche | Logprob entropy (signal present mais overlap). CDA abandonne (2x cout). Piste R-Tuning si fine-tune. |
+
+---
+
 ## PHASE 4 — Produit visible
 
 | # | Tache | Doc source | Effort |
@@ -105,3 +120,9 @@ Rapport : `t2t5_run_20260331_155830_BASELINE_PRE_C4.json`
 | Decision Defense complet | Phase 3 |
 | Coref Named-Named Phases B-D | Phase 2 |
 | Evidence Bundle Resolver extended | Phase 3 |
+| Indicateur entropie dans chat frontend | Phase 3.5 |
+| LLMLingua-2 compression prompts (si besoin reduction couts) | Independant |
+| Purge ciblee par document (corpus vivant ADR) | Phase 4+ |
+| Connecteurs OneDrive/SharePoint (corpus vivant) | Phase 4+ |
+| R-Tuning Qwen pour abstention (si fine-tune envisage) | Phase 4+ |
+| Re-ranking cross-encoder (ameliorer context relevance) | Phase 4 |
