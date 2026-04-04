@@ -32,6 +32,7 @@ interface TensionPair {
   doc_a: string
   doc_b: string
   axis: string
+  summary?: string
 }
 
 interface TensionIndicatorProps {
@@ -115,39 +116,35 @@ export default function TensionIndicator({ pairs, pairsCount }: TensionIndicator
                     borderColor="border.default"
                     fontSize="xs"
                   >
-                    {/* Type de divergence */}
-                    <Badge colorScheme={config.color} fontSize="2xs" borderRadius="sm" mb={2}>
-                      {config.label}
-                    </Badge>
+                    <HStack spacing={2} mb={1}>
+                      <Badge colorScheme={config.color} fontSize="2xs" borderRadius="sm">
+                        {config.label}
+                      </Badge>
+                      <Text fontSize="2xs" color="text.muted">
+                        {docA} vs {docB}
+                      </Text>
+                    </HStack>
 
-                    {/* Explication en deux blocs empiles */}
-                    <VStack spacing={2} align="stretch">
-                      <Box
-                        pl={3}
-                        borderLeft="2px solid"
-                        borderColor="blue.400"
-                      >
-                        <Text fontSize="2xs" fontWeight="600" color="blue.300" mb={0.5}>
-                          {docA}
-                        </Text>
-                        <Text color="text.secondary" lineHeight="tall">
-                          {pair.claim_a.length > 150 ? pair.claim_a.substring(0, 147) + '...' : pair.claim_a}
-                        </Text>
-                      </Box>
-
-                      <Box
-                        pl={3}
-                        borderLeft="2px solid"
-                        borderColor="orange.400"
-                      >
-                        <Text fontSize="2xs" fontWeight="600" color="orange.300" mb={0.5}>
-                          {docB}
-                        </Text>
-                        <Text color="text.secondary" lineHeight="tall">
-                          {pair.claim_b.length > 150 ? pair.claim_b.substring(0, 147) + '...' : pair.claim_b}
-                        </Text>
-                      </Box>
-                    </VStack>
+                    {/* Resume humain (si disponible) */}
+                    {pair.summary ? (
+                      <Text color="text.primary" lineHeight="tall">
+                        {pair.summary}
+                      </Text>
+                    ) : (
+                      /* Fallback: claims brutes si pas de resume */
+                      <VStack spacing={1.5} align="stretch">
+                        <Box pl={3} borderLeft="2px solid" borderColor="blue.400">
+                          <Text color="text.secondary" lineHeight="tall">
+                            {pair.claim_a.length > 120 ? pair.claim_a.substring(0, 117) + '...' : pair.claim_a}
+                          </Text>
+                        </Box>
+                        <Box pl={3} borderLeft="2px solid" borderColor="orange.400">
+                          <Text color="text.secondary" lineHeight="tall">
+                            {pair.claim_b.length > 120 ? pair.claim_b.substring(0, 117) + '...' : pair.claim_b}
+                          </Text>
+                        </Box>
+                      </VStack>
+                    )}
                   </Box>
                 )
               })}

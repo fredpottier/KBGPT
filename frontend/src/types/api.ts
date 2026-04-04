@@ -306,6 +306,7 @@ export interface SearchResponse {
       doc_a: string
       doc_b: string
       axis: string
+      summary?: string
     }>
   }
   // 🎯 V3 Response Modes

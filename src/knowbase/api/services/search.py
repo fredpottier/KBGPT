@@ -35,6 +35,70 @@ class ContradictionEnvelope:
     synthesis_mode: str = "standard"  # "standard" ou "tension_explicit"
 
 
+def _summarize_tension_pairs(pairs: list[dict]) -> list[dict]:
+    """Genere un resume humain pour chaque paire de tension via un appel LLM.
+
+    Un seul appel batch pour toutes les paires (economie de latence).
+    Si le LLM echoue, les paires sont retournees sans resume.
+    """
+    if not pairs:
+        return pairs
+
+    import json as _json
+
+    provider = os.environ.get("OSMOSIS_SYNTHESIS_PROVIDER", "anthropic")
+    prompt_lines = [
+        "Pour chaque paire de claims ci-dessous, ecris UNE phrase qui explique la divergence de maniere claire et comprehensible pour un non-expert.",
+        "Reponds en JSON array avec un objet par paire : [{\"summary\": \"...\"}]",
+        ""
+    ]
+    for i, p in enumerate(pairs):
+        prompt_lines.append(f"Paire {i+1}:")
+        prompt_lines.append(f"  Document A ({p['doc_a']}): {p['claim_a'][:150]}")
+        prompt_lines.append(f"  Document B ({p['doc_b']}): {p['claim_b'][:150]}")
+        prompt_lines.append(f"  Type: {p['axis']}")
+        prompt_lines.append("")
+
+    prompt = "\n".join(prompt_lines)
+
+    try:
+        if provider == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+            model = os.environ.get("OSMOSIS_SYNTHESIS_MODEL", "claude-haiku-4-5-20251001")
+            resp = client.messages.create(
+                model=model, max_tokens=500, temperature=0.0,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = resp.content[0].text
+        else:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+            model = os.environ.get("OSMOSIS_SYNTHESIS_MODEL", "gpt-4o-mini")
+            resp = client.chat.completions.create(
+                model=model, max_tokens=500, temperature=0.0,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = resp.choices[0].message.content
+
+        # Parser le JSON
+        raw = raw.strip()
+        if "```" in raw:
+            raw = raw.split("```")[1].strip()
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+        summaries = _json.loads(raw)
+
+        for i, s in enumerate(summaries):
+            if i < len(pairs):
+                pairs[i]["summary"] = s.get("summary", "")
+
+    except Exception as e:
+        logger.warning(f"[TENSION:SUMMARY] LLM summary failed: {e}")
+
+    return pairs
+
+
 def _clean_source_name_simple(doc_id: str) -> str:
     """Nom lisible court d'un doc_id pour l'UI."""
     import re
@@ -1434,6 +1498,25 @@ def search_documents(
 
     # ContradictionEnvelope dans la reponse (pour debug/frontend)
     if contradiction_envelope.has_tension:
+        tension_pairs = []
+        for p in contradiction_envelope.pairs[:5]:
+            doc_a = _clean_source_name_simple(p.get("doc_a", ""))
+            doc_b = _clean_source_name_simple(p.get("doc_b", ""))
+            tension_pairs.append({
+                "claim_a": p.get("claim_a", "")[:200],
+                "claim_b": p.get("claim_b", "")[:200],
+                "doc_a": doc_a,
+                "doc_b": doc_b,
+                "axis": p.get("axis", "tension"),
+                "summary": "",
+            })
+
+        # Generer des resumes humains pour les tensions (1 appel LLM batch)
+        try:
+            tension_pairs = _summarize_tension_pairs(tension_pairs)
+        except Exception as e:
+            logger.warning(f"[TENSION] Summary generation failed (non-blocking): {e}")
+
         response["contradiction_envelope"] = {
             "has_tension": True,
             "requires_disclosure": contradiction_envelope.requires_disclosure,
@@ -1441,16 +1524,7 @@ def search_documents(
             "synthesis_mode": contradiction_envelope.synthesis_mode,
             "tension_disclosed": synthesis_result.get("contradiction_envelope", {}).get("tension_disclosed", True),
             "fallback_appended": synthesis_result.get("contradiction_envelope", {}).get("fallback_appended", False),
-            "pairs": [
-                {
-                    "claim_a": p.get("claim_a", "")[:200],
-                    "claim_b": p.get("claim_b", "")[:200],
-                    "doc_a": _clean_source_name_simple(p.get("doc_a", "")),
-                    "doc_b": _clean_source_name_simple(p.get("doc_b", "")),
-                    "axis": p.get("axis", "tension"),
-                }
-                for p in contradiction_envelope.pairs[:5]
-            ],
+            "pairs": tension_pairs,
         }
 
     # 🌊 Phase 2.12: Ajouter le profil de visibilité actif
