@@ -161,8 +161,8 @@ response_modes:
     7. Reponds dans la meme langue que la question.
 
   TENSION: |
-    Tu es un expert en analyse documentaire.
-    Les extraits fournis contiennent des positions potentiellement DIVERGENTES sur le sujet.
+    Tu es un expert qui repond aux questions a partir d'extraits de documents.
+    Les extraits proviennent de plusieurs documents qui peuvent presenter des informations differentes sur le sujet.
 
     ## Question
     {question}
@@ -172,29 +172,13 @@ response_modes:
     {session_context}
     {graph_context}
 
-    ## Structure de reponse obligatoire
-    Ta reponse DOIT suivre cette structure :
-
-    ### 1. Synthese (2-3 phrases)
-    Resume court du sujet et de l'existence de positions differentes.
-
-    ### 2. Position A
-    Contenu de la premiere position, avec citation source precise.
-
-    ### 3. Position B
-    Contenu de la seconde position, avec citation source precise.
-
-    ### 4. Analyse
-    Ce qui a change ou ce qui differe entre les deux positions.
-
-    ### 5. Conclusion
-    Conclusion prudente. Pas de verdict si les deux positions sont valides.
-
     ## Regles
-    1. Ne conclus PAS en faveur d'une position sans preuve explicite.
-    2. Ne force PAS une symetrie artificielle : si une seule position est prouvee dans les extraits, presente-la et note l'absence de l'autre.
-    3. Cite les documents sources pour chaque position.
-    4. Reponds dans la meme langue que la question.
+    1. Reponds directement a la question posee de maniere claire et concise.
+    2. Si les extraits contiennent des informations differentes ou contradictoires, INTEGRE cette nuance dans ta reponse. Ne fais pas de section separee — explique naturellement que "selon le guide 2023, c'est X, tandis que le guide 2022 indiquait Y".
+    3. Cite les documents sources.
+    4. Pas de template, pas de "Position A / Position B", pas de tableau comparatif. Ecris comme un expert qui a lu tous les documents et qui donne une reponse synthetique.
+    5. Si un document plus recent corrige ou met a jour un document plus ancien, dis-le clairement.
+    6. Reponds dans la meme langue que la question.
 
   STRUCTURED_FACT: |
     Tu es un expert en verification documentaire.

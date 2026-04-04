@@ -38,7 +38,6 @@ import ThumbnailCarousel from './ThumbnailCarousel'
 import SynthesizedAnswer from './SynthesizedAnswer'
 import SourcesSection from './SourcesSection'
 import ReasoningTracePanel from '../chat/ReasoningTracePanel'
-import SplitTruthView from '../chat/SplitTruthView'
 import type { GraphData, ProofGraph } from '@/types/graph'
 import NextLink from 'next/link'
 import {
@@ -113,23 +112,17 @@ export default function SearchResultDisplay({
         />
       )}
 
-      {/* Synthesized Answer */}
+      {/* Synthesized Answer — toujours le meme rendu, quel que soit le mode */}
       {searchResult.synthesis && (
-        searchResult.response_mode === 'TENSION' && searchResult.synthesis.synthesized_answer ? (
-          /* Mode TENSION : Split Truth View uniquement */
-          <SplitTruthView answer={searchResult.synthesis.synthesized_answer} />
-        ) : (
-          /* Mode standard : reponse markdown */
-          <SynthesizedAnswer
-            synthesis={searchResult.synthesis}
-            chunks={searchResult.results}
-            onSlideClick={handleSlideClick}
-            graphData={graphData}
-            proofGraph={proofGraph || searchResult.proof_graph}
-            explorationIntelligence={explorationIntelligence}
-            onSearch={onSearch}
-          />
-        )
+        <SynthesizedAnswer
+          synthesis={searchResult.synthesis}
+          chunks={searchResult.results}
+          onSlideClick={handleSlideClick}
+          graphData={graphData}
+          proofGraph={proofGraph || searchResult.proof_graph}
+          explorationIntelligence={explorationIntelligence}
+          onSearch={onSearch}
+        />
       )}
 
       {/* 🌊 Atlas Convergence: Explorer ce sujet */}
