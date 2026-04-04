@@ -18,6 +18,7 @@ import {
   useDisclosure,
   Icon,
   HStack,
+  Flex,
   Badge,
   Tooltip,
   Link,
@@ -36,6 +37,7 @@ import {
 import { useState } from 'react'
 import ThumbnailCarousel from './ThumbnailCarousel'
 import SynthesizedAnswer from './SynthesizedAnswer'
+import TensionIndicator from '../chat/TensionIndicator'
 import type { GraphData, ProofGraph } from '@/types/graph'
 import NextLink from 'next/link'
 import {
@@ -121,6 +123,16 @@ export default function SearchResultDisplay({
           explorationIntelligence={explorationIntelligence}
           onSearch={onSearch}
         />
+      )}
+
+      {/* Indicateur de tension — petit eclair orange si divergences detectees */}
+      {searchResult.contradiction_envelope?.has_tension && searchResult.contradiction_envelope?.pairs && (
+        <Flex justify="flex-end" mt={-2}>
+          <TensionIndicator
+            pairs={searchResult.contradiction_envelope.pairs}
+            pairsCount={searchResult.contradiction_envelope.pairs_count || searchResult.contradiction_envelope.pairs.length}
+          />
+        </Flex>
       )}
 
       {/* 🌊 Atlas Convergence: Explorer ce sujet */}

@@ -296,6 +296,18 @@ export interface SearchResponse {
   // 🌊 Atlas Convergence: Chat ↔ Atlas
   related_articles?: RelatedArticle[]
   insight_hints?: InsightHint[]
+  // Contradiction envelope (tensions KG)
+  contradiction_envelope?: {
+    has_tension: boolean
+    pairs_count: number
+    pairs?: Array<{
+      claim_a: string
+      claim_b: string
+      doc_a: string
+      doc_b: string
+      axis: string
+    }>
+  }
   // 🎯 V3 Response Modes
   response_mode?: 'DIRECT' | 'AUGMENTED' | 'TENSION' | 'STRUCTURED_FACT'
   response_mode_metadata?: {

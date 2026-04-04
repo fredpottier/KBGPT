@@ -35,6 +35,17 @@ class ContradictionEnvelope:
     synthesis_mode: str = "standard"  # "standard" ou "tension_explicit"
 
 
+def _clean_source_name_simple(doc_id: str) -> str:
+    """Nom lisible court d'un doc_id pour l'UI."""
+    import re
+    name = doc_id.split("/")[-1]
+    name = re.sub(r"_[a-f0-9]{6,}$", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"^\d{3}_(\d+_)?", "", name)
+    name = re.sub(r"\.\w+$", "", name)
+    name = name.replace("_", " ").replace("-", " ").strip()
+    return re.sub(r"\s+", " ", name) or doc_id
+
+
 def _build_contradiction_envelope(
     kg_claims: list[dict],
     signal_report: SignalReport,
@@ -1428,9 +1439,18 @@ def search_documents(
             "requires_disclosure": contradiction_envelope.requires_disclosure,
             "pairs_count": len(contradiction_envelope.pairs),
             "synthesis_mode": contradiction_envelope.synthesis_mode,
-            # Le champ tension_disclosed est dans synthesis_result["contradiction_envelope"]
             "tension_disclosed": synthesis_result.get("contradiction_envelope", {}).get("tension_disclosed", True),
             "fallback_appended": synthesis_result.get("contradiction_envelope", {}).get("fallback_appended", False),
+            "pairs": [
+                {
+                    "claim_a": p.get("claim_a", "")[:200],
+                    "claim_b": p.get("claim_b", "")[:200],
+                    "doc_a": _clean_source_name_simple(p.get("doc_a", "")),
+                    "doc_b": _clean_source_name_simple(p.get("doc_b", "")),
+                    "axis": p.get("axis", "tension"),
+                }
+                for p in contradiction_envelope.pairs[:5]
+            ],
         }
 
     # 🌊 Phase 2.12: Ajouter le profil de visibilité actif
