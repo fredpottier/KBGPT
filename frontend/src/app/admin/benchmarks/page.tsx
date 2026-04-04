@@ -15,6 +15,7 @@ import {
   Td,
   Progress,
   Collapse,
+  SimpleGrid,
 } from '@chakra-ui/react'
 import {
   FiActivity,
@@ -86,6 +87,7 @@ interface T2T5Report {
   profile_label: string
   duration_s: number
   scores: Record<string, number>
+  scores_rag?: Record<string, number> | null
   total_evaluated: number
 }
 
@@ -796,8 +798,9 @@ function ContradictionsTab({
   const latest = sorted[0] ?? null
   const scores = latest?.scores ?? {}
   const baseScores = baseline?.scores ?? {}
+  const ragScores = latest?.scores_rag ?? null
 
-  // Radar data: combine T2 + T5 metrics
+  // Radar data: combine T2 + T5 metrics — OSMOSIS + RAG overlay
   const radarData = useMemo(() => {
     const allMetrics = [...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS]
     return allMetrics.map(m => ({
@@ -811,6 +814,10 @@ function ContradictionsTab({
   const globalScore = allMetricValues.length > 0 ? allMetricValues.reduce((a, b) => a + b, 0) / allMetricValues.length : 0
   const baseAllValues = [...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS].map(m => baseScores[m.key] ?? 0)
   const baseGlobal = baseAllValues.length > 0 ? baseAllValues.reduce((a, b) => a + b, 0) / baseAllValues.length : 0
+
+  // RAG global score
+  const ragAllValues = ragScores ? [...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS].map(m => ragScores[m.key] ?? 0) : []
+  const ragGlobal = ragAllValues.length > 0 ? ragAllValues.reduce((a, b) => a + b, 0) / ragAllValues.length : null
 
   return (
     <VStack spacing={6} align="stretch">
@@ -830,6 +837,57 @@ function ContradictionsTab({
           )}
         </VStack>
       </HStack>
+
+      {/* OSMOSIS vs RAG comparison banner */}
+      {ragScores && ragGlobal != null && (
+        <Card accent="#22c55e">
+          <Text fontSize="xs" fontWeight="700" color="#22c55e" textTransform="uppercase" mb={3}>
+            OSMOSIS vs RAG pur
+          </Text>
+          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+            {[...CONTRA_T2_METRICS, ...CONTRA_T5_METRICS].map(m => {
+              const osmVal = scores[m.key] ?? 0
+              const ragVal = ragScores[m.key] ?? 0
+              const diff = Math.round((osmVal - ragVal) * 100)
+              return (
+                <HStack key={m.key} justify="space-between" px={2} py={1}
+                  borderRadius="md" bg={diff > 0 ? 'rgba(34,197,94,0.06)' : diff < 0 ? 'rgba(239,68,68,0.06)' : 'transparent'}>
+                  <Text fontSize="12px" color={T.textSecondary} minW="140px">{m.label}</Text>
+                  <HStack spacing={3}>
+                    <Text fontSize="12px" fontWeight="600" color={T.accentContra}>
+                      {(osmVal * 100).toFixed(0)}%
+                    </Text>
+                    <Text fontSize="10px" color={T.textMuted}>vs</Text>
+                    <Text fontSize="12px" color={T.textMuted}>
+                      {(ragVal * 100).toFixed(0)}%
+                    </Text>
+                    <Text fontSize="12px" fontWeight="700"
+                      color={diff > 0 ? '#22c55e' : diff < 0 ? '#ef4444' : T.textMuted}>
+                      {diff > 0 ? '+' : ''}{diff}pp
+                    </Text>
+                  </HStack>
+                </HStack>
+              )
+            })}
+            <HStack justify="space-between" px={2} py={2} borderTop="1px solid" borderColor={T.borderSubtle}>
+              <Text fontSize="12px" fontWeight="700" color={T.textPrimary}>Score global</Text>
+              <HStack spacing={3}>
+                <Text fontSize="13px" fontWeight="700" color={T.accentContra}>
+                  {(globalScore * 100).toFixed(0)}%
+                </Text>
+                <Text fontSize="10px" color={T.textMuted}>vs</Text>
+                <Text fontSize="13px" fontWeight="600" color={T.textMuted}>
+                  {(ragGlobal * 100).toFixed(0)}%
+                </Text>
+                <Text fontSize="13px" fontWeight="700"
+                  color={globalScore > ragGlobal ? '#22c55e' : '#ef4444'}>
+                  {globalScore > ragGlobal ? '+' : ''}{Math.round((globalScore - ragGlobal) * 100)}pp
+                </Text>
+              </HStack>
+            </HStack>
+          </SimpleGrid>
+        </Card>
+      )}
 
       {/* Radar + Metric bars row */}
       <HStack spacing={6} align="start" flexWrap={{ base: 'wrap', lg: 'nowrap' }}>

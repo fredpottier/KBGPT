@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-T2/T5 Diagnostic — Evaluation deterministe contradiction detection & cross-doc reasoning.
+T2/T5 Diagnostic — Evaluation contradiction detection & cross-doc reasoning.
 
 Metriques T2 (contradictions) :
 - both_sides_surfaced   : la reponse mentionne-t-elle les DEUX claims ?
@@ -12,7 +12,9 @@ Metriques T5 (KG differentiators) :
 - multi_doc_cited       : combien des documents requis sont cites ?
 - proactive_detection   : le systeme detecte-t-il une contradiction cachee ?
 
-100% DETERMINISTE — aucun appel LLM, cout zero, reproductible.
+Mode hybride : keyword matching + LLM-juge (GPT-4o-mini) pour les metriques
+cross-lingue (both_sides_surfaced T2, chain_coverage T5 multi_source_synthesis).
+Le LLM-juge est active si OPENAI_API_KEY est disponible.
 
 Usage :
     # Live : interroge l'API et evalue
@@ -37,6 +39,103 @@ import requests
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [T2T5] %(message)s")
 logger = logging.getLogger("t2t5-diagnostic")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# LLM Judge (GPT-4o-mini) — pour evaluation cross-lingue
+# ═══════════════════════════════════════════════════════════════════════
+
+_llm_judge_client = None
+LLM_JUDGE_MODEL = "gpt-4o-mini"
+
+
+def _get_llm_judge():
+    """Retourne un client OpenAI si OPENAI_API_KEY est disponible, sinon None."""
+    global _llm_judge_client
+    if _llm_judge_client is not None:
+        return _llm_judge_client
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        from openai import OpenAI
+        _llm_judge_client = OpenAI(api_key=api_key)
+        logger.info(f"[T2T5] LLM judge initialized ({LLM_JUDGE_MODEL})")
+        return _llm_judge_client
+    except Exception as e:
+        logger.warning(f"[T2T5] LLM judge unavailable: {e}")
+        return None
+
+
+def _llm_judge_t2(client, question: str, claim1_text: str, claim2_text: str, answer: str) -> dict | None:
+    """LLM-juge pour T2 : evalue both_sides, tension, sources (scores 0-100)."""
+    prompt = (
+        'You are a benchmark evaluator for a document contradiction detection system.\n\n'
+        f'Question: "{question[:200]}"\n\n'
+        f'Claim 1 (from document A): "{claim1_text[:150]}"\n'
+        f'Claim 2 (from document B): "{claim2_text[:150]}"\n\n'
+        f'The system produced this answer (first 1500 chars):\n"{answer[:1500]}"\n\n'
+        'Rate each aspect from 0 to 100:\n'
+        '1. both_sides: Does the answer present information from BOTH claims? Even paraphrased, '
+        'in a different language, or summarized — if BOTH perspectives are covered, score high.\n'
+        '2. tension: Does the answer acknowledge a difference, evolution, tension, contradiction, '
+        'or divergence between sources? Look for words like "however", "but", "cependant", '
+        '"toutefois", "differs", "changed", "evolution" in ANY language.\n'
+        '3. sources: Does the answer reference or cite multiple source documents? '
+        'Look for any mention of document names, years, guide names, version numbers.\n\n'
+        'Reply with ONLY three numbers (0-100) separated by commas.\n'
+        'Example: 85,70,60'
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=LLM_JUDGE_MODEL, max_tokens=10, temperature=0.0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.choices[0].message.content.strip()
+        parts = [float(x.strip()) for x in raw.split(",")]
+        if len(parts) >= 3:
+            return {
+                "both_sides_surfaced": round(min(parts[0], 100) / 100.0, 3),
+                "tension_mentioned": round(min(parts[1], 100) / 100.0, 3),
+                "both_sources_cited": round(min(parts[2], 100) / 100.0, 3),
+                "judge_raw": raw,
+            }
+    except Exception as e:
+        logger.debug(f"[T2T5] LLM judge T2 error: {e}")
+    return None
+
+
+def _llm_judge_t5(client, question: str, category: str, answer: str) -> dict | None:
+    """LLM-juge pour T5 : evalue chain_coverage et multi_doc (scores 0-100)."""
+    prompt = (
+        'You are a benchmark evaluator for a cross-document analysis system.\n\n'
+        f'Question: "{question[:200]}"\nCategory: {category}\n\n'
+        f'The system produced this answer (first 1500 chars):\n"{answer[:1500]}"\n\n'
+        'Rate each aspect from 0 to 100:\n'
+        '1. chain_coverage: How well does the answer cover facts from multiple documents to '
+        'build a complete answer? A good answer connects information across sources and covers '
+        'the main aspects asked in the question.\n'
+        '2. multi_doc: Does the answer reference or cite multiple source documents? '
+        'Look for any document names, years, or version references.\n\n'
+        'Reply with ONLY two numbers (0-100) separated by commas.\n'
+        'Example: 75,80'
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=LLM_JUDGE_MODEL, max_tokens=10, temperature=0.0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.choices[0].message.content.strip()
+        parts = [float(x.strip()) for x in raw.split(",")]
+        if len(parts) >= 2:
+            return {
+                "chain_coverage": round(min(parts[0], 100) / 100.0, 3),
+                "multi_doc_cited": round(min(parts[1], 100) / 100.0, 3),
+                "judge_raw": raw,
+            }
+    except Exception as e:
+        logger.debug(f"[T2T5] LLM judge T5 error: {e}")
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -582,6 +681,9 @@ def run_benchmark_job(
         # ── Phase 2 : API calls + evaluation ────────────────────────
         per_sample: list[dict] = []
         errors = 0
+        judge_client = _get_llm_judge()
+        judge_mode = "hybrid" if judge_client else "keyword"
+        logger.info(f"[T2T5:BENCH] Evaluation mode: {judge_mode}")
 
         def _refresh_token():
             try:
@@ -628,6 +730,19 @@ def run_benchmark_job(
                         api_result["sources_used"],
                         ground_truth,
                     )
+                    # LLM-juge enrichissement T2 — uniquement both_sides_surfaced
+                    # tension_mentioned et both_sources_cited fonctionnent bien en keyword
+                    if judge_client and api_result["answer"]:
+                        claim1_text = ground_truth.get("claim1", {}).get("text", "")
+                        claim2_text = ground_truth.get("claim2", {}).get("text", "")
+                        llm_scores = _llm_judge_t2(
+                            judge_client, question, claim1_text, claim2_text, api_result["answer"]
+                        )
+                        if llm_scores:
+                            evaluation["keyword_both_sides"] = evaluation["both_sides_surfaced"]
+                            evaluation["both_sides_surfaced"] = llm_scores["both_sides_surfaced"]
+                            evaluation["judge_model"] = LLM_JUDGE_MODEL
+
                 elif task_type == "T5":
                     # Determine category from task field or category field
                     if not category:
@@ -646,6 +761,17 @@ def run_benchmark_job(
                         grading_rules,
                         category,
                     )
+                    # LLM-juge enrichissement T5 — uniquement chain_coverage
+                    # multi_doc_cited fonctionne bien en keyword (doc prefixes)
+                    if judge_client and api_result["answer"] and category in ("cross_doc_chain", "multi_source_synthesis"):
+                        llm_scores = _llm_judge_t5(
+                            judge_client, question, category, api_result["answer"]
+                        )
+                        if llm_scores:
+                            evaluation["keyword_chain_coverage"] = evaluation["chain_coverage"]
+                            evaluation["chain_coverage"] = llm_scores["chain_coverage"]
+                            evaluation["judge_model"] = LLM_JUDGE_MODEL
+
                 else:
                     evaluation = {"task_type": "unknown"}
 
@@ -706,6 +832,11 @@ def run_benchmark_job(
             rag_per_sample = []
             rag_errors = 0
             for i, q_item in enumerate(all_questions):
+                # Token refresh toutes les 40 questions
+                if i > 0 and i % 40 == 0:
+                    token = _refresh_token()
+                    logger.info(f"[T2T5:BENCH:RAG] Token refreshed at question {i}")
+
                 question = q_item.get("question", "")
                 if not question:
                     continue
@@ -727,14 +858,42 @@ def run_benchmark_job(
 
                     if task_type == "T2":
                         evaluation = evaluate_t2(api_result["answer"], api_result["sources_used"], ground_truth)
+                        # LLM-juge T2 (meme juge que OSMOSIS)
+                        if judge_client and api_result["answer"]:
+                            claim1_text = ground_truth.get("claim1", {}).get("text", "")
+                            claim2_text = ground_truth.get("claim2", {}).get("text", "")
+                            llm_scores = _llm_judge_t2(
+                                judge_client, question, claim1_text, claim2_text, api_result["answer"]
+                            )
+                            if llm_scores:
+                                evaluation["keyword_both_sides"] = evaluation["both_sides_surfaced"]
+                                evaluation["both_sides_surfaced"] = llm_scores["both_sides_surfaced"]
                     elif task_type == "T5":
+                        if not category:
+                            task_field = q_item.get("task", "")
+                            if "cross_doc" in task_field:
+                                category = "cross_doc_chain"
+                            elif "proactive" in task_field:
+                                category = "proactive_contradiction"
+                            elif "multi_source" in task_field:
+                                category = "multi_source_synthesis"
                         evaluation = evaluate_t5(api_result["answer"], api_result["sources_used"], ground_truth, q_item.get("grading_rules", {}), category)
+                        # LLM-juge T5 (meme juge que OSMOSIS)
+                        if judge_client and api_result["answer"] and category in ("cross_doc_chain", "multi_source_synthesis"):
+                            llm_scores = _llm_judge_t5(
+                                judge_client, question, category, api_result["answer"]
+                            )
+                            if llm_scores:
+                                evaluation["keyword_chain_coverage"] = evaluation["chain_coverage"]
+                                evaluation["chain_coverage"] = llm_scores["chain_coverage"]
                     else:
                         evaluation = {"task_type": "unknown"}
 
                     rag_per_sample.append({
                         "question_id": q_item.get("question_id", f"q_{i}"),
                         "question": question[:200],
+                        "answer": api_result["answer"][:500],
+                        "sources_used": api_result["sources_used"],
                         "evaluation": evaluation,
                     })
                 except Exception as e:
@@ -763,7 +922,11 @@ def run_benchmark_job(
         tag_suffix = f"_{tag}" if tag else ""
         report_filename = f"t2t5_run_{ts}{tag_suffix}.json"
 
-        results_dir = Path("data/benchmark/results")
+        # Utiliser /data (volume Docker) si disponible, sinon chemin relatif (local)
+        if Path("/data").exists():
+            results_dir = Path("/data/benchmark/results")
+        else:
+            results_dir = Path("data/benchmark/results")
         results_dir.mkdir(parents=True, exist_ok=True)
         report_path = results_dir / report_filename
 
@@ -777,6 +940,8 @@ def run_benchmark_job(
             "profile": profile,
             "profile_label": prof["label"],
             "tag": tag or "",
+            "judge_mode": judge_mode,
+            "judge_model": LLM_JUDGE_MODEL if judge_client else None,
             "description": description or "",
             "synthesis_model": synthesis_model,
             "synthesis_provider": synthesis_provider,

@@ -1,0 +1,105 @@
+# =============================================================================
+# OSMOSIS — Exemples de classification de mode de reponse
+# =============================================================================
+#
+# Utilises par le classificateur few-shot (embedding similarity).
+# Pour chaque mode non-DIRECT, on definit des exemples de questions
+# representatifs. DIRECT est le defaut — pas besoin d'exemples.
+#
+# Pour adapter a un nouveau corpus/langue :
+# 1. Ajouter des exemples dans la langue cible
+# 2. Adapter le vocabulaire au domaine
+# 3. Le classificateur est multilingue (e5-large)
+#
+# =============================================================================
+
+version: "2026-04-04"
+
+# Seuils de classification
+thresholds:
+  tension: 0.72         # cosine min pour activer TENSION
+  structured_fact: 0.74 # cosine min pour activer STRUCTURED_FACT
+  augmented: 0.70       # cosine min pour activer AUGMENTED (desactive pour l'instant)
+
+modes:
+  TENSION:
+    description: "Questions demandant une analyse de coherence, contradiction, divergence ou evolution entre documents"
+    examples:
+      # Francais
+      - "Les documents sont-ils coherents concernant ce sujet ?"
+      - "Y a-t-il des contradictions dans la documentation ?"
+      - "Les guides 2022 et 2023 disent-ils la meme chose ?"
+      - "Quelles divergences existent entre les versions du document ?"
+      - "La documentation est-elle incoherente sur ce point ?"
+      - "Comment ce sujet a-t-il evolue entre les differentes versions ?"
+      - "Les sources se contredisent-elles sur cette question ?"
+      - "Quelles differences y a-t-il entre les Security Guides 2022 et 2023 ?"
+      - "Les documents presentent-ils des informations contradictoires ?"
+      - "Y a-t-il des tensions entre les sources sur ce theme ?"
+      # Anglais
+      - "Are the documents consistent regarding this topic?"
+      - "Are there any contradictions in the documentation?"
+      - "Do the 2022 and 2023 guides say the same thing?"
+      - "What discrepancies exist between document versions?"
+      - "Is the documentation inconsistent on this point?"
+      - "How has this topic evolved between different versions?"
+      - "Do the sources contradict each other on this question?"
+      - "What are the differences between the 2022 and 2023 Security Guides?"
+      - "Are there conflicting statements across the documents?"
+      - "Do the documents present diverging information?"
+
+  STRUCTURED_FACT:
+    description: "Questions demandant une comparaison structuree de valeurs, versions, seuils ou parametres"
+    examples:
+      # Francais
+      - "Comparez les valeurs de ce parametre entre les deux versions"
+      - "Quel est le seuil recommande dans chaque guide ?"
+      - "Quelle version du protocole est requise ?"
+      - "Quelles sont les valeurs exactes documentees pour ce parametre ?"
+      - "Comparez les prerequis entre l'installation 2022 et 2023"
+      - "Quel est le nombre minimum de nœuds requis selon chaque document ?"
+      - "Les exigences de version ont-elles change entre les releases ?"
+      # Anglais
+      - "Compare the values of this parameter between the two versions"
+      - "What is the recommended threshold in each guide?"
+      - "Which protocol version is required?"
+      - "What are the exact documented values for this parameter?"
+      - "Compare the prerequisites between the 2022 and 2023 installations"
+      - "What is the minimum number of nodes required according to each document?"
+      - "Have the version requirements changed between releases?"
+
+  DIRECT:
+    description: "Questions simples, factuelles, demandant une reponse directe sans comparaison"
+    examples:
+      # Francais
+      - "Quel est le nom officiel du produit ?"
+      - "Comment fonctionne ce processus ?"
+      - "Qu est-ce que cette fonctionnalite ?"
+      - "Comment configurer ce parametre ?"
+      - "Quelle est la procedure d'installation ?"
+      - "A quoi sert ce module ?"
+      - "Quel est le role de ce composant ?"
+      - "Comment creer un utilisateur ?"
+      - "Quelle est la posologie recommandee ?"
+      - "Quel est le delai de prescription applicable ?"
+      - "Comment fonctionne l'authentification ?"
+      - "Quels sont les prerequis d'installation ?"
+      # Anglais
+      - "What is the official product name?"
+      - "How does this process work?"
+      - "What is this feature about?"
+      - "How to configure this parameter?"
+      - "What is the installation procedure?"
+      - "What is this module used for?"
+      - "What is the recommended dosage for this medication?"
+      - "How does the authentication work?"
+      - "What are the installation prerequisites?"
+      - "What is the role of this component?"
+
+  # AUGMENTED est desactive pour l'instant (trop permissif sur corpus dense)
+  # A activer avec calibration auto-adaptative
+  # AUGMENTED:
+  #   description: "Questions necessitant des informations de plusieurs documents"
+  #   examples:
+  #     - "Donnez-moi une vue complete de ce sujet"
+  #     - "Give me a comprehensive overview"

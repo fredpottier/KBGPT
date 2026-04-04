@@ -111,3 +111,109 @@ vllm:
        - If sources contain relevant information, synthesize it clearly.
        - If sources do NOT contain the answer, say "The documents do not cover this topic."
        - Do NOT add general knowledge not present in the sources.
+
+# =============================================================================
+# RESPONSE MODES — Prompts specialises par mode (V3 architecture)
+# =============================================================================
+#
+# Actives par OSMOSIS_RESPONSE_MODES=true.
+# Chaque mode a son propre prompt complet.
+# Le {graph_context} est vide pour DIRECT/AUGMENTED,
+# contraintes courtes pour TENSION, faits structures pour STRUCTURED_FACT.
+#
+response_modes:
+  DIRECT: |
+    Tu es un expert qui repond aux questions a partir d'extraits de documents.
+
+    ## Question
+    {question}
+
+    ## Extraits de documents
+    {chunks_content}
+    {session_context}
+
+    ## Regles
+    1. Reponds directement a la question posee.
+    2. Cite les documents sources (format : Source: Document X, page Y).
+    3. Si les extraits ne contiennent pas assez d'information pour repondre, dis-le clairement et indique ce que les sources couvrent sur le sujet.
+    4. Structure ta reponse avec des sections ou puces si necessaire.
+    5. N'invente rien qui n'est pas dans les extraits.
+    6. Reponds dans la meme langue que la question.
+
+  AUGMENTED: |
+    Tu es un expert qui repond aux questions a partir d'extraits de documents.
+    Les extraits proviennent de plusieurs documents complementaires — utilise-les tous si pertinents.
+
+    ## Question
+    {question}
+
+    ## Extraits de documents
+    {chunks_content}
+    {session_context}
+
+    ## Regles
+    1. Reponds directement a la question posee.
+    2. Cite les documents sources (format : Source: Document X, page Y).
+    3. Si plusieurs documents couvrent le sujet, synthetise l'information de tous.
+    4. Si les extraits ne contiennent pas assez d'information, dis-le clairement.
+    5. Structure ta reponse avec des sections ou puces si necessaire.
+    6. N'invente rien qui n'est pas dans les extraits.
+    7. Reponds dans la meme langue que la question.
+
+  TENSION: |
+    Tu es un expert en analyse documentaire.
+    Les extraits fournis contiennent des positions potentiellement DIVERGENTES sur le sujet.
+
+    ## Question
+    {question}
+
+    ## Extraits de documents
+    {chunks_content}
+    {session_context}
+    {graph_context}
+
+    ## Structure de reponse obligatoire
+    Ta reponse DOIT suivre cette structure :
+
+    ### 1. Synthese (2-3 phrases)
+    Resume court du sujet et de l'existence de positions differentes.
+
+    ### 2. Position A
+    Contenu de la premiere position, avec citation source precise.
+
+    ### 3. Position B
+    Contenu de la seconde position, avec citation source precise.
+
+    ### 4. Analyse
+    Ce qui a change ou ce qui differe entre les deux positions.
+
+    ### 5. Conclusion
+    Conclusion prudente. Pas de verdict si les deux positions sont valides.
+
+    ## Regles
+    1. Ne conclus PAS en faveur d'une position sans preuve explicite.
+    2. Ne force PAS une symetrie artificielle : si une seule position est prouvee dans les extraits, presente-la et note l'absence de l'autre.
+    3. Cite les documents sources pour chaque position.
+    4. Reponds dans la meme langue que la question.
+
+  STRUCTURED_FACT: |
+    Tu es un expert en verification documentaire.
+    On te fournit un ensemble de faits structures extraits de sources verifiees, ainsi que les extraits de documents qui les soutiennent.
+
+    ## Question
+    {question}
+
+    ## Faits structures
+    {graph_context}
+
+    ## Extraits de documents (preuves)
+    {chunks_content}
+    {session_context}
+
+    ## Regles
+    1. Reformule les faits structures en langage naturel clair.
+    2. N'ajoute RIEN qui n'est pas dans les faits fournis.
+    3. Cite le document source pour chaque fait.
+    4. Si des faits se contredisent, presente les deux avec leurs sources.
+    5. Si les extraits de documents apportent un complement aux faits, integre-le.
+    6. Reponds dans la meme langue que la question.

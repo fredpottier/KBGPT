@@ -1,0 +1,174 @@
+# OSMOSIS Cockpit — Définitions des pipelines.
+# Chaque pipeline a sa propre clé Redis et sa propre structure.
+# Le cockpit traduit chaque format vers PipelineStatus canonique.
+
+pipelines:
+  claim-first:
+    display_name: "CLAIM-FIRST"
+    redis_key: "osmose:claimfirst:state"
+    redis_type: hash  # HGETALL
+    stages:
+      - name: "Chargement corpus"
+        short: "Load"
+        phase_match: "LOADING"
+      - name: "Extraction par document"
+        short: "Extr"
+        phase_match: "EXTRACTING"
+        iterable: true
+        progress_fields:
+          done: "phase_items_done"
+          total: "phase_items_total"
+      - name: "Chaînes cross-doc"
+        short: "Chain"
+        phase_match: "CROSS_DOC_CHAINS"
+      - name: "Canonicalisation entités"
+        short: "Canon"
+        phase_match: "CANONICALIZE_ENTITIES"
+      - name: "Clustering cross-doc"
+        short: "Clust"
+        phase_match: "CROSS_DOC_CLUSTERING"
+      - name: "QuestionSig cross-doc"
+        short: "QSig"
+        phase_match: "QS_CROSS_DOC_COMPARISON"
+      - name: "Hygiène KG L1"
+        short: "Hyg"
+        phase_match: "KG_HYGIENE_L1"
+    started_field: "started_at"
+    status_field: "status"
+    active_when: ["PROCESSING", "STARTING"]
+    run_id_field: "job_id"
+
+  post-import:
+    display_name: "POST-IMPORT"
+    redis_key: "osmose:post_import:state:default"
+    redis_type: json  # GET → JSON parse
+    stages:
+      dynamic: true
+      completed_field: "completed_steps"
+      current_field: "current_step_name"
+      total_field: "total_steps"
+      progress_field: "step_progress"
+      detail_field: "step_detail"
+    started_field: "step_started_at"
+    status_field: "running"
+    active_when: [true]
+    run_id_field: null
+    # Étapes connues (pour short names quand dynamique)
+    known_steps:
+      canonicalize: "Canon"
+      facets: "Facet"
+      cluster_cross_doc: "Clust"
+      chains_cross_doc: "Chain"
+      detect_contradictions: "Contr"
+      domain_pack_reprocess: "DPack"
+      claim_embeddings: "Embed"
+      claim_chunk_bridge: "Bridge"
+      archive_isolated: "Archv"
+
+  burst-extract:
+    display_name: "BURST EC2"
+    redis_key: "osmose:burst:state:live"
+    redis_type: json
+    stages:
+      - name: "Préparation batch"
+        short: "Prep"
+        phase_match: "preparing"
+      - name: "Démarrage Spot"
+        short: "Spot"
+        phase_match:
+          - "requesting_spot"
+          - "waiting_capacity"
+          - "instance_starting"
+      - name: "Traitement"
+        short: "Proc"
+        phase_match: "processing"
+        iterable: true
+        progress_fields:
+          done: "documents_done"
+          total: "total_documents"
+    started_field: "started_at"
+    status_field: "status"
+    # "ready" N'EST PAS un pipeline actif — c'est juste le provisioning terminé.
+    # Le pipeline n'est actif que quand un batch est en cours de traitement.
+    active_when:
+      - "preparing"
+      - "requesting_spot"
+      - "waiting_capacity"
+      - "instance_starting"
+      - "processing"
+    run_id_field: "batch_id"
+
+  benchmark-ragas:
+    display_name: "RAGAS BENCHMARK"
+    redis_key: "osmose:benchmark:state"
+    redis_type: json
+    stages:
+      - name: "API OSMOSIS"
+        short: "API"
+        phase_match: "api_call"
+        iterable: true
+        progress_fields:
+          done: "progress"
+          total: "total"
+      - name: "Eval OSMOSIS"
+        short: "Eval"
+        phase_match: "ragas_eval"
+        iterable: true
+        progress_fields:
+          done: "progress"
+          total: "total"
+      - name: "API RAG"
+        short: "RAG"
+        phase_match: "rag_baseline"
+        iterable: true
+        progress_fields:
+          done: "progress"
+          total: "total"
+      - name: "Eval RAG"
+        short: "EvRAG"
+        phase_match: "rag_eval"
+        iterable: true
+        progress_fields:
+          done: "progress"
+          total: "total"
+      - name: "Rapport"
+        short: "Rpt"
+        phase_match: "report"
+    started_field: null
+    status_field: "status"
+    active_when:
+      - "running"
+      - "starting"
+    run_id_field: "job_id"
+
+  benchmark-t2t5:
+    display_name: "T2/T5 DIAGNOSTIC"
+    redis_key: "osmose:benchmark:t2t5:state"
+    redis_type: json
+    stages:
+      - name: "Authentification"
+        short: "Auth"
+        phase_match: "auth"
+      - name: "API + Evaluation"
+        short: "Eval"
+        phase_match: "api_eval"
+        iterable: true
+        progress_fields:
+          done: "progress"
+          total: "total"
+      - name: "Baseline RAG"
+        short: "RAG"
+        phase_match: "rag_baseline"
+        iterable: true
+        progress_fields:
+          done: "progress"
+          total: "total"
+      - name: "Rapport"
+        short: "Rpt"
+        phase_match: "report"
+    started_field: null
+    status_field: "status"
+    active_when:
+      - "running"
+      - "starting"
+    run_id_field: "job_id"

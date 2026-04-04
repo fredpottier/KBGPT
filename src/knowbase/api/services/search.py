@@ -555,6 +555,81 @@ def _build_kg_context_block(
     return _format_kg_findings_as_instructions(findings)
 
 
+def _build_tension_constraints(
+    kg_claims: List[Dict],
+    signal_report,
+    chunks: List[Dict],
+) -> str:
+    """V3 Mode TENSION : contraintes structurelles courtes (max 3 lignes).
+
+    Le KG ne fournit pas de texte narratif — il emet des regles procedurales
+    que le LLM doit suivre pour structurer sa reponse.
+    """
+    # Identifier les docs en tension
+    tension_docs = set()
+    tension_topics = []
+    for claim in kg_claims:
+        for t in claim.get("contradiction_texts", []):
+            if t:
+                doc_id = claim.get("doc_id") or claim.get("source_file", "")
+                if doc_id:
+                    tension_docs.add(doc_id)
+                # Extraire le sujet de la tension (entites du claim)
+                for e in claim.get("entity_names", []):
+                    if e and e not in tension_topics:
+                        tension_topics.append(e)
+
+    if not tension_docs or len(tension_docs) < 2:
+        return ""
+
+    # Noms courts des docs
+    doc_names = []
+    for d in list(tension_docs)[:2]:
+        short = d.split("_", 1)[1] if "_" in d else d
+        short = short.replace("_", " ").replace("-", " ")[:40]
+        doc_names.append(short)
+
+    topic = tension_topics[0] if tension_topics else "ce sujet"
+
+    # Max 2-3 lignes procedurales
+    lines = [
+        f"Les documents \"{doc_names[0]}\" et \"{doc_names[1]}\" presentent des positions differentes sur {topic}.",
+        "Presente les deux positions separement avec leurs sources.",
+    ]
+    return "\n".join(lines)
+
+
+def _build_structured_facts_block(
+    qs_crossdoc_data: List[Dict] | None,
+    kg_claims: List[Dict],
+) -> str:
+    """V3 Mode STRUCTURED_FACT : faits structures, 1 par ligne.
+
+    Format machine-stable pour que le LLM reformule sans inventer.
+    """
+    if not qs_crossdoc_data:
+        return ""
+
+    lines = []
+    for i, entry in enumerate(qs_crossdoc_data[:8], 1):
+        question = entry.get("canonical_question", "")
+        comparison_type = entry.get("comparison_type", "")
+        docs = entry.get("documents", [])
+
+        for doc in docs[:2]:
+            doc_id = doc.get("doc_id", "")
+            value = doc.get("extracted_value", "")
+            version = doc.get("version", "")
+            short_doc = doc_id.split("_", 1)[1].replace("_", " ")[:40] if "_" in doc_id else doc_id
+            version_str = f" | Version: {version}" if version else ""
+            lines.append(f"FAIT {i}: {question} = {value} | Source: {short_doc}{version_str}")
+
+        if comparison_type:
+            lines.append(f"  -> Type: {comparison_type}")
+
+    return "\n".join(lines) if lines else ""
+
+
 def _enrich_chunks_with_kg(
     chunks: List[Dict],
     kg_claims: List[Dict],
@@ -678,6 +753,7 @@ def search_documents(
     use_instrumented: bool = False,
     release_id: str | None = None,  # 🔄 Phase B: Filtre par release
     use_latest: bool = True,  # 🔄 Phase B: Boost latest version
+    response_mode_override: str | None = None,  # 🎯 V3: Override du mode (admin/benchmark)
 ) -> dict[str, Any]:
     """
     Recherche sémantique avec enrichissement Knowledge Graph (OSMOSE) et contexte conversationnel.
@@ -740,6 +816,10 @@ def search_documents(
     # Utiliser la requête enrichie pour l'embedding (delegue a retriever)
     query_vector = embed_query(enriched_query, embedding_model)
 
+    # Query Decomposition — detecte et decompose les questions multi-facettes
+    from .query_decomposer import decompose_query
+    decomposition = decompose_query(enriched_query)
+
     # Signal-driven KG injection : le KG detecte les signaux, le RAG reste pur par defaut
     kg_claim_results = []
     kg_enrichment_map = {}
@@ -781,6 +861,51 @@ def search_documents(
         solution_filter=solution,
         release_filter=release_id,
     )
+
+    # Multi-facet retrieval : si la question a ete decomposee, retriever chaque sous-query
+    # et fusionner les chunks (deduplication par chunk_id, garder le meilleur score)
+    if decomposition.is_decomposed:
+        seen_chunk_ids = set()
+        for chunk in retrieval_result.chunks:
+            cid = chunk.get("chunk_id") or chunk.get("id") or id(chunk)
+            seen_chunk_ids.add(cid)
+
+        extra_chunks = []
+        for sub_query in decomposition.sub_queries[1:]:  # skip [0] = original query
+            try:
+                sub_vector = embed_query(sub_query, embedding_model)
+                sub_result = _retrieve_chunks(
+                    question=sub_query,
+                    query_vector=sub_vector,
+                    qdrant_client=qdrant_client,
+                    settings=settings,
+                    top_k=TOP_K // 2,  # moitie du budget par sous-query
+                    score_threshold=SCORE_THRESHOLD,
+                    solution_filter=solution,
+                    release_filter=release_id,
+                )
+                for chunk in sub_result.chunks:
+                    cid = chunk.get("chunk_id") or chunk.get("id") or id(chunk)
+                    if cid not in seen_chunk_ids:
+                        seen_chunk_ids.add(cid)
+                        extra_chunks.append(chunk)
+                        retrieval_result.docs_involved.add(
+                            chunk.get("doc_id", chunk.get("source_file", ""))
+                        )
+            except Exception as e:
+                logger.warning(f"[DECOMPOSE] Sub-query retrieval failed: {e}")
+
+        if extra_chunks:
+            # Fusionner : chunks originaux + extras, tronquer au budget total
+            retrieval_result.chunks.extend(extra_chunks)
+            retrieval_result.chunks = rerank_chunks(
+                query, retrieval_result.chunks, top_k=TOP_K
+            )
+            logger.info(
+                f"[DECOMPOSE] Added {len(extra_chunks)} extra chunks from "
+                f"{len(decomposition.sub_queries) - 1} sub-queries, "
+                f"total docs: {len(retrieval_result.docs_involved)}"
+            )
 
     if not retrieval_result.chunks:
         return {
@@ -1041,12 +1166,101 @@ def search_documents(
         question=query,
         chunks=reranked_chunks,
     )
-    signal_policy = build_policy(signal_report)
+    signal_policy = build_policy(
+        signal_report,
+        kg_claims=kg_claim_results,
+        retrieval_doc_ids=retrieval_doc_ids,
+        qs_crossdoc_data=qs_crossdoc_data,
+        question=query,
+        embedding_model=embedding_model,
+    )
 
-    # Ajouter les instructions signal-driven au contexte de synthese
-    if signal_policy.synthesis_additions:
-        signal_context = "\n".join(f"- {a}" for a in signal_policy.synthesis_additions)
-        graph_context_text = f"\n\n## Signal-driven analysis\n{signal_context}" + graph_context_text
+    # ══════════════════════════════════════════════════════════════
+    # V3 Response Mode — branchement du graph_context_text par mode
+    # ══════════════════════════════════════════════════════════════
+    from .signal_policy import ResponseMode
+    resolved_mode = signal_policy.response_mode
+
+    # Override admin/benchmark si fourni
+    modes_enabled = os.environ.get("OSMOSIS_RESPONSE_MODES", "false").lower() == "true"
+    if response_mode_override and modes_enabled:
+        try:
+            resolved_mode = ResponseMode(response_mode_override)
+            logger.info(f"[OSMOSIS:MODE] Override applied: {response_mode_override}")
+        except ValueError:
+            logger.warning(f"[OSMOSIS:MODE] Invalid override '{response_mode_override}', using auto-detected")
+
+    if resolved_mode == ResponseMode.DIRECT:
+        # RAG pur : zero KG dans le prompt
+        graph_context_text = ""
+        logger.info("[MODE:DIRECT] No KG context injected")
+
+    elif resolved_mode == ResponseMode.AUGMENTED:
+        # KG a deja agi via doc expansion (lignes 845-884) et chunk enrichment (ligne 894)
+        # Pas de texte KG narratif dans le prompt — le KG agit via les chunks
+        graph_context_text = ""
+        # Garde-fou : ne pas elargir si RAG deja tres bon
+        if reranked_chunks:
+            top_score = max((c.get("score", 0) for c in reranked_chunks), default=0)
+            if top_score > 0.8:
+                logger.info(f"[MODE:AUGMENTED] Top score {top_score:.3f} > 0.8, skipping doc expansion benefit")
+        logger.info("[MODE:AUGMENTED] KG acted via chunk selection, no text injected")
+
+    elif resolved_mode == ResponseMode.TENSION:
+        # B' doc injection : si l'override a identifie des docs manquants, les injecter maintenant
+        logger.info(
+            f"[MODE:TENSION:B'] Check: fetch={signal_policy.fetch_missing_tension_docs}, "
+            f"tension_doc_ids={[d[:30] for d in signal_policy.tension_doc_ids] if signal_policy.tension_doc_ids else 'empty'}"
+        )
+        if signal_policy.fetch_missing_tension_docs and signal_policy.tension_doc_ids:
+            existing_doc_ids = set(
+                c.get("source_file", "") for c in reranked_chunks
+            )
+            missing_for_tension = signal_policy.tension_doc_ids - existing_doc_ids - {""}
+            if missing_for_tension:
+                try:
+                    tension_inject = _retrieve_chunks(
+                        question=query,
+                        query_vector=query_vector,
+                        qdrant_client=qdrant_client,
+                        settings=settings,
+                        top_k=3,
+                        score_threshold=SCORE_THRESHOLD * 0.5,  # seuil bas pour trouver les chunks
+                        doc_filter=list(missing_for_tension),
+                    )
+                    if tension_inject.chunks:
+                        existing_texts = {c.get("text", "")[:80] for c in reranked_chunks}
+                        added = 0
+                        for tc in tension_inject.chunks:
+                            if tc.get("text", "")[:80] not in existing_texts:
+                                reranked_chunks.append(tc)
+                                existing_texts.add(tc.get("text", "")[:80])
+                                added += 1
+                        if added:
+                            logger.info(
+                                f"[MODE:TENSION:B'] Injected {added} chunks from "
+                                f"missing tension docs: {[d[:30] for d in missing_for_tension]}"
+                            )
+                except Exception as e:
+                    logger.warning(f"[MODE:TENSION:B'] Doc injection failed: {e}")
+
+        # Contraintes structurelles courtes, pas de texte narratif
+        graph_context_text = _build_tension_constraints(
+            kg_claim_results, signal_report, reranked_chunks
+        )
+        logger.info(f"[MODE:TENSION] Constraints injected ({len(graph_context_text)} chars)")
+
+    elif resolved_mode == ResponseMode.STRUCTURED_FACT:
+        # Faits structures
+        graph_context_text = _build_structured_facts_block(qs_crossdoc_data, kg_claim_results)
+        logger.info(f"[MODE:STRUCTURED_FACT] Facts block injected ({len(graph_context_text)} chars)")
+
+    else:
+        # Fallback : comportement existant (feature flag off)
+        # Ajouter les instructions signal-driven au contexte de synthese
+        if signal_policy.synthesis_additions:
+            signal_context = "\n".join(f"- {a}" for a in signal_policy.synthesis_additions)
+            graph_context_text = f"\n\n## Signal-driven analysis\n{signal_context}" + graph_context_text
 
     # Signal de confiance retrieval — prevenir le LLM si les chunks sont peu pertinents
     if reranked_chunks:
@@ -1114,6 +1328,7 @@ def search_documents(
                 kg_signals,
                 chain_signals=chain_signals,
                 contradiction_envelope=contradiction_envelope,
+                response_mode=resolved_mode.value if hasattr(resolved_mode, 'value') else str(resolved_mode),
             )
 
         def _run_instrumented():
@@ -1155,6 +1370,7 @@ def search_documents(
             kg_signals,
             chain_signals=chain_signals,
             contradiction_envelope=contradiction_envelope,
+            response_mode=resolved_mode.value if hasattr(resolved_mode, 'value') else str(resolved_mode),
         )
         instrumented_answer = None
         build_metadata = None
@@ -1170,6 +1386,15 @@ def search_documents(
         "results": reranked_chunks,
         "synthesis": synthesis_result,
         "includes_visual_interpretation": includes_visual_interpretation,
+        "response_mode": resolved_mode.value if hasattr(resolved_mode, 'value') else str(resolved_mode),
+        "response_mode_metadata": {
+            "candidate_mode": signal_policy.candidate_mode.value if hasattr(signal_policy.candidate_mode, 'value') else "DIRECT",
+            "resolved_mode": resolved_mode.value if hasattr(resolved_mode, 'value') else str(resolved_mode),
+            "confidence": signal_policy.response_mode_confidence,
+            "reason": signal_policy.response_mode_reason,
+            "kg_trust_score": signal_policy.kg_trust_score,
+            "fallback_to_direct": signal_policy.forced_fallback_to_direct,
+        },
     }
 
     if instrumented_answer is not None:
@@ -1988,15 +2213,14 @@ def _get_kg_traversal_context(query: str, tenant_id: str) -> tuple[str, list[str
         return name
 
     # 4. Formater en markdown (pour le LLM de synthèse) + collecter les doc_ids
-    lines = ["## Raisonnement cross-document (Knowledge Graph)\n"]
-    lines.append("IMPORTANT : Ces chaînes de faits relient plusieurs documents et révèlent "
-                 "des liens architecturaux impossibles à trouver dans un seul document. "
-                 "Tu DOIS reformuler ces chaînes dans la langue de la question en expliquant "
-                 "clairement la logique transitive : A implique B (source 1), "
-                 "qui implique C (source 2), etc.\n")
+    lines = ["## Cross-document reasoning (supplementary notes)\n"]
+    lines.append("The following fact chains were detected across multiple documents. "
+                 "Use them ONLY if relevant to the user's question. Ignore if off-topic.\n")
     seen_chains = set()
     all_chain_doc_ids = set()
     chain_hops_list = []  # hops de chaque chaîne retenue (pour signaux qualité)
+
+    MAX_CHAINS_INJECTED = 3  # Limiter le bruit — seules les 3 premieres chaines cross-doc
 
     for rec in cross_doc_records:
         steps = rec["chain_steps"]
@@ -2010,6 +2234,12 @@ def _get_kg_traversal_context(query: str, tenant_id: str) -> tuple[str, list[str
             continue
         seen_chains.add(chain_key)
         chain_hops_list.append(hops)
+
+        # Limiter les chaines injectees dans le prompt (les doc_ids continuent d'etre collectes)
+        if len(seen_chains) > MAX_CHAINS_INJECTED:
+            for doc_id in docs_in_chain:
+                all_chain_doc_ids.add(doc_id)
+            continue
 
         # Collecter les doc_ids pour recherche Qdrant ciblée
         for doc_id in docs_in_chain:
@@ -2028,7 +2258,7 @@ def _get_kg_traversal_context(query: str, tenant_id: str) -> tuple[str, list[str
     # B.3: Formater les résultats SAME_CANON_AS (entités canoniques cross-doc)
     if canon_records:
         lines.append("### Cross-doc (entités canoniques)\n")
-        for rec in canon_records:
+        for rec in canon_records[:3]:  # Max 3 entites canoniques
             canon_name = rec.get("canon_name", "?")
             related_doc_ids = rec.get("related_doc_ids", [])
             related_claims = rec.get("related_claims", [])

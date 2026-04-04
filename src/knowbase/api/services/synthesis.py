@@ -40,6 +40,16 @@ def _load_synthesis_prompts() -> dict:
     return _synthesis_prompts_cache
 
 
+def _load_mode_prompt(mode: str) -> str | None:
+    """Charge le prompt specialise pour un mode de reponse (V3 architecture).
+
+    Retourne None si le mode n'est pas dans le YAML (fallback vers prompt existant).
+    """
+    prompts = _load_synthesis_prompts()
+    modes = prompts.get("response_modes", {})
+    return modes.get(mode)
+
+
 def get_rule_7_for_provider(provider: str = "") -> str:
     """Retourne la regle 7 adaptee au provider de synthese actif."""
     if not provider:
@@ -79,11 +89,10 @@ SYNTHESIS_PROMPT = """You are a precise document analysis assistant that synthes
 
 1. **Synthesize** information from sources to answer clearly and in a structured manner.
 
-2. **Cross-document reasoning (PRIORITY)**: If a "Cross-document reasoning" section is provided, it contains fact chains linking multiple documents. These chains are **THE MAIN answer** — they reveal architectural links no single document contains. You MUST:
-   - **Structure your answer around these chains** (not around individual chunks)
-   - **Explain the complete chain**: "A relies on B (source 1), which itself builds on C (source 2)"
-   - **Cite all documents in the chain** to show multi-source reasoning
-   - Individual chunks serve as **complement**, not the basis of the answer
+2. **Cross-document reasoning**: If a "Cross-document reasoning" section is provided, it contains supplementary fact chains linking multiple documents. Use these chains ONLY if they are directly relevant to the user's question. If they are relevant:
+   - Weave them naturally into your source-based answer
+   - Explain the chain: "A relies on B (source 1), which itself builds on C (source 2)"
+   - If the chains are NOT relevant to the question, IGNORE them entirely — do NOT force irrelevant cross-document links into your answer
 
 3. **Conversational context**: If previous conversation context is provided, use it to resolve implicit references and maintain discussion continuity.
 
@@ -100,12 +109,11 @@ SYNTHESIS_PROMPT = """You are a precise document analysis assistant that synthes
 
 8. If information is **contradictory**, present BOTH versions with their sources explicitly.
 
-9. **Cross-document comparisons (IMPORTANT)**: If a "Cross-document comparisons (QuestionSignatures)" section is provided, it contains **automatically detected comparable facts across documents**. You MUST:
-   - **Include a dedicated section** (e.g., "### Version changes" or "### Points of attention")
-   - For each **EVOLUTION**: clearly explain what changed, between which documents, and the impact
-   - For each **CONTRADICTION**: flag the divergence with precise sources
-   - For each **AGREEMENT**: mention cross-doc confirmation (reinforces reliability)
-   - **These are verified facts** from the Knowledge Graph — do NOT ignore them
+9. **Cross-document comparisons**: If a "Cross-document comparisons" section is provided, it contains automatically detected comparable facts across documents. Include this information ONLY when directly relevant to the question:
+   - For **EVOLUTION**: explain what changed, between which documents
+   - For **CONTRADICTION**: flag the divergence with precise sources
+   - For **AGREEMENT**: mention cross-doc confirmation briefly
+   - If these comparisons are NOT related to the user's question, IGNORE them
 
 10. **Visual content interpretation (IMPORTANT)**: Source texts between "═══ VISUAL CONTENT" and "═══ END VISUAL CONTENT" markers are **AI-generated interpretations of diagrams and visual elements**, NOT author text. When your answer uses visual content:
    - **Always use hedging language**: "The diagram appears to show...", "Based on visual interpretation of the slide..."
@@ -280,6 +288,7 @@ def synthesize_response(
     kg_signals: Dict[str, Any] = None,
     chain_signals: Dict[str, Any] = None,
     contradiction_envelope: "ContradictionEnvelope | None" = None,
+    response_mode: str = "DIRECT",
 ) -> Dict[str, Any]:
     """
     Génère une réponse synthétisée à partir des chunks et de la question.
@@ -290,11 +299,9 @@ def synthesize_response(
         graph_context_text: Contexte Knowledge Graph formaté (OSMOSE)
         session_context_text: Contexte conversationnel formaté (Memory Layer Phase 2.5)
         kg_signals: Signaux KG optionnels pour le calcul de confiance
-                   {"concepts_count", "relations_count", "sources_count", "avg_confidence"}
         chain_signals: Signaux de qualité des chaînes CHAINS_TO multi-doc
-                      {"chain_count", "distinct_docs_count", "max_hops", "avg_hops"}
-        contradiction_envelope: Enveloppe de tensions KG — si requires_disclosure=True,
-                               la reponse DOIT mentionner les divergences (fallback deterministe)
+        contradiction_envelope: Enveloppe de tensions KG
+        response_mode: Mode de reponse V3 (DIRECT, AUGMENTED, TENSION, STRUCTURED_FACT)
 
     Returns:
         Dictionnaire contenant la réponse synthétisée et les métadonnées
@@ -309,30 +316,52 @@ def synthesize_response(
     # Formate les chunks pour le prompt
     chunks_content = format_chunks_for_synthesis(chunks)
 
-    # Injecter la section tension MANDATORY si l'enveloppe l'exige
-    if contradiction_envelope and contradiction_envelope.requires_disclosure:
-        graph_context_text += _build_tension_prompt_section(contradiction_envelope)
-        logger.info(
-            f"[SYNTHESIS] ContradictionEnvelope injected: "
-            f"{len(contradiction_envelope.pairs)} tension pairs, mode={contradiction_envelope.synthesis_mode}"
+    # V3 : Prompt specialise par mode (si feature flag actif)
+    modes_enabled = os.environ.get("OSMOSIS_RESPONSE_MODES", "false").lower() == "true"
+    mode_prompt = None
+    if modes_enabled and response_mode != "DIRECT":
+        mode_prompt = _load_mode_prompt(response_mode)
+        if mode_prompt:
+            logger.info(f"[SYNTHESIS] Using mode-specific prompt: {response_mode}")
+
+    if mode_prompt:
+        # Prompt specialise V3 — pas de graph_context pour AUGMENTED
+        # Pour TENSION : graph_context = contraintes courtes
+        # Pour STRUCTURED_FACT : graph_context = faits structures
+        if response_mode == "TENSION" and contradiction_envelope and contradiction_envelope.requires_disclosure:
+            # Injecter les contraintes de tension dans graph_context
+            graph_context_text += _build_tension_prompt_section(contradiction_envelope)
+
+        prompt = mode_prompt.format(
+            question=question,
+            chunks_content=chunks_content,
+            graph_context=graph_context_text,
+            session_context=session_context_text,
         )
+    else:
+        # Prompt existant (mode DIRECT ou feature flag off)
+        # Injecter la section tension MANDATORY si l'enveloppe l'exige
+        if contradiction_envelope and contradiction_envelope.requires_disclosure:
+            graph_context_text += _build_tension_prompt_section(contradiction_envelope)
+            logger.info(
+                f"[SYNTHESIS] ContradictionEnvelope injected: "
+                f"{len(contradiction_envelope.pairs)} tension pairs, mode={contradiction_envelope.synthesis_mode}"
+            )
 
-    # Construit le prompt avec contextes optionnels (KG et Session)
-    # Charger la regle 7 adaptee au provider actif
-    rule_7 = get_rule_7_for_provider()
+        # Charger la regle 7 adaptee au provider actif
+        rule_7 = get_rule_7_for_provider()
 
-    prompt = SYNTHESIS_PROMPT.format(
-        question=question,
-        chunks_content=chunks_content,
-        graph_context=graph_context_text,
-        session_context=session_context_text,
-        rule_7=rule_7,
+        prompt = SYNTHESIS_PROMPT.format(
+            question=question,
+            chunks_content=chunks_content,
+            graph_context=graph_context_text,
+            session_context=session_context_text,
+            rule_7=rule_7,
     )
 
     # Appel LLM — Architecture tiered :
     # 1. Claude Haiku (API) si ANTHROPIC_API_KEY disponible — meilleur pour la synthese
     # 2. Fallback : routeur LLM local (Qwen via Ollama/vLLM)
-    import os
 
     SYSTEM_MSG = (
         "You are a precise document analysis assistant. You synthesize information "
@@ -608,6 +637,7 @@ def synthesize_response(
                 "flag": entropy_flag,
                 "threshold": ENTROPY_HIGH_THRESHOLD,
             },
+            "response_mode": response_mode,
         }
 
         # Ajouter les metadonnees ContradictionEnvelope si applicable

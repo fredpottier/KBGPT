@@ -67,6 +67,12 @@ class SearchRequest(BaseModel):
         description="Préférer la version la plus récente si aucune release spécifiée"
     )
 
+    # 🎯 V3 Response Mode Override (admin/benchmark)
+    response_mode: str | None = Field(
+        None,
+        description="Override du mode de reponse (DIRECT, AUGMENTED, TENSION, STRUCTURED_FACT). Auto-detect si non specifie."
+    )
+
     class Config:
         json_schema_extra = {
             "example": {

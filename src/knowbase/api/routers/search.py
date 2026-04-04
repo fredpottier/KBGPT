@@ -98,6 +98,7 @@ def search(
         use_instrumented=request.use_instrumented,
         release_id=request.release_id,
         use_latest=request.use_latest,
+        response_mode_override=request.response_mode,
     )
 
 

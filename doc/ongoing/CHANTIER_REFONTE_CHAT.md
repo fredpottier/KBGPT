@@ -387,4 +387,104 @@ Le backend retourne deja tout ce qu'il faut (mais le frontend ne l'exploite pas)
 
 ---
 
-*Document pour reflexion conjointe avec ChatGPT. Le chat est le point d'entree principal — il doit etre impeccable.*
+---
+
+## 10. Decision design finale (2 avril 2026)
+
+### Synthese des analyses Claude + ChatGPT + Fred
+
+Apres exploration de 4 designs proposes par ChatGPT et arbitrage :
+
+### Composants retenus
+
+**1. Reponse clean (toujours)**
+- Markdown propre, sources integrees dans le texte
+- Pas de score, pas de point colore, pas d'indicateur de confiance
+- La confiance vient de la qualite des sources citees et des insights, pas d'un auto-jugement
+
+**2. Split Truth View (quand contradiction detectee)**
+- Cote-a-cote des positions documentaires divergentes
+- Ex: "Doc 2023 → TLS 1.3" vs "Doc 2022 → TLS 1.2"
+- Declenchement automatique via `contradiction_envelope.has_tension`
+- C'est LE differenciateur produit — comprehension instantanee
+- Uniquement quand pertinent (pas de bruit sur les 80% de questions simples)
+
+```
+┌──────────────┬────────────────────────┐
+│ 📄 Sec Guide │ 📄 Sec Guide           │
+│    2023      │    2022                │
+│              │                        │
+│ TLS 1.3      │ TLS 1.2               │
+│ Obligatoire  │ Acceptable            │
+│              │                        │
+│ plus recent  │ version anterieure     │
+└──────────────┴────────────────────────┘
+→ Evolution detectee entre versions
+```
+
+**3. Insight Cards (quand signal KG)**
+- Petits encarts colores SOUS la reponse
+- 1 idee = 1 carte, max 2-3 cartes
+- Declenchement : evolution, coverage gap, complement cross-doc
+- Texte ultra court
+
+```
+⚠️ Evolution detectee
+Changement entre Security Guide 2022 et 2023 sur ce point.
+
+➕ Complement
+Le Feature Scope Description ajoute une precision sur l'edition Cloud Private.
+```
+
+### Composants rejetes
+
+**❌ Score de confiance (% ou point colore)**
+- Raison : tout indicateur de fiabilite auto-evaluatif peut se retourner contre le produit
+- Les autres LLM (ChatGPT, Gemini) n'en fournissent jamais
+- La confiance doit venir des sources et des insights, pas d'un jugement du systeme sur lui-meme
+
+**❌ Evidence Radar (barres support/partiel/contradict)**
+- Raison : gain marginal vs Insight Cards, composant supplementaire a maintenir
+- Les Insight Cards couvrent le meme besoin de maniere plus simple
+
+**❌ Bloc "verite documentaire" / knowledge_proof**
+- Raison : incomprehensible, redondant, vocabulaire interne
+- A supprimer completement
+
+### Mapping backend → UI
+
+| Signal backend | Composant UI | Condition |
+|---|---|---|
+| Aucun signal | Reponse clean seule | Toujours |
+| `contradiction_envelope.has_tension` | **Split Truth View** | Quand 2+ positions divergentes |
+| `insight_hints` type evolution | Insight Card "Evolution" | Quand EVOLVES_TO detecte |
+| `insight_hints` type complement | Insight Card "Complement" | Quand COMPLEMENTS cross-doc |
+| `signal_report` coverage_gap | Insight Card "Information partielle" | Quand docs manquants |
+| Haute entropie | Rien de visible | Le signal reste interne (pas d'indicateur utilisateur) |
+
+### Principe UX fondamental
+
+> La confiance de l'utilisateur vient de ce qu'il VOIT (sources, positions documentaires, insights)
+> pas de ce que le systeme PRETEND (score, pourcentage, point colore).
+
+Si les sources sont bonnes et les insights pertinents → l'utilisateur fait confiance naturellement.
+Si les sources sont vagues et pas d'insight → l'utilisateur doute naturellement.
+Pas besoin d'un indicateur pour lui dire quoi penser.
+
+### Plan d'implementation
+
+**Phase 1 (2-3 jours)** : Nettoyer le chat
+- Supprimer score, bloc verite, knowledge_proof
+- Nettoyer les noms de sources
+- Sources integrees dans le texte
+- Suggestions de questions
+
+**Phase 2 (2-3 jours)** : Ajouter les composants differenciants
+- Split Truth View (composant React)
+- Insight Cards (composant React)
+- Logique de switch automatique (signals backend → composants UI)
+- Expansion au clic pour les details
+
+---
+
+*Document de reference pour l'implementation. Decision design validee le 2 avril 2026.*

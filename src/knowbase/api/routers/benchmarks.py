@@ -632,6 +632,7 @@ async def get_t2t5_reports() -> dict[str, Any]:
                 "profile_label": data.get("profile_label", ""),
                 "duration_s": data.get("duration_s"),
                 "scores": data.get("scores", {}),
+                "scores_rag": data.get("scores_rag"),
                 "total_evaluated": data.get("scores", {}).get("total_evaluated", 0),
                 "errors": data.get("errors", 0),
             })

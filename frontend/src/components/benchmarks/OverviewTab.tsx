@@ -438,9 +438,20 @@ export function OverviewTab({
   const ragasSampleCount = ragasReport?.systems?.osmosis?.sample_count
   const ragasDiagnostic = ragasReport?.systems?.osmosis?.diagnostic
 
+  // Score global RAGAS = moyenne faithfulness + context_relevance
+  const ragasAllMetrics = [ragasFaithfulness, ragasContextRelevance].filter(v => v != null) as number[]
+  const ragasGlobalScore = ragasAllMetrics.length > 0 ? ragasAllMetrics.reduce((a, b) => a + b, 0) / ragasAllMetrics.length : null
+
   const t2BothSides = extractScore(t2t5Report, ['scores', 'both_sides_surfaced'])
   const t2TensionMentioned = extractScore(t2t5Report, ['scores', 'tension_mentioned'])
-  const t2BalancedConclusion = extractScore(t2t5Report, ['scores', 'balanced_conclusion'])
+  const t2BothSourcesCited = extractScore(t2t5Report, ['scores', 'both_sources_cited'])
+  const t5ChainCoverage = extractScore(t2t5Report, ['scores', 'chain_coverage'])
+  const t5MultiDocCited = extractScore(t2t5Report, ['scores', 'multi_doc_cited'])
+  const t5ProactiveDetection = extractScore(t2t5Report, ['scores', 'proactive_detection'])
+
+  // Score global contradictions = moyenne des 6 metriques T2+T5
+  const t2t5AllMetrics = [t2BothSides, t2TensionMentioned, t2BothSourcesCited, t5ChainCoverage, t5MultiDocCited, t5ProactiveDetection].filter(v => v != null) as number[]
+  const t2t5GlobalScore = t2t5AllMetrics.length > 0 ? t2t5AllMetrics.reduce((a, b) => a + b, 0) / t2t5AllMetrics.length : null
 
   const robGlobal = extractScore(robustnessReport, ['scores', 'global_score'])
   const robParaphrase = extractScore(robustnessReport, ['scores', 'paraphrase_score'])
@@ -455,7 +466,7 @@ export function OverviewTab({
 
   // ── System health ───────────────────────────────────────────────────
 
-  const healthLevel = computeSystemHealth([ragasFaithfulness, t2BothSides, robGlobal])
+  const healthLevel = computeSystemHealth([ragasGlobalScore, t2t5GlobalScore, robGlobal])
 
   // ── Render ──────────────────────────────────────────────────────────
 
@@ -472,45 +483,41 @@ export function OverviewTab({
       {/* Score Cards */}
       <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
         <ScoreCard
-          title="RAGAS Fidelite"
-          mainScore={ragasFaithfulness}
-          mainLabel="Faithfulness"
+          title="RAGAS"
+          mainScore={ragasGlobalScore}
+          mainLabel="Score global"
           accent={tokens.accentBlue}
           target={0.80}
           delta={latestDelta('ragas')}
           timestamp={ragasReport?.timestamp}
           secondaryLines={[
             {
+              label: 'Faithfulness',
+              value: ragasFaithfulness != null ? `${(ragasFaithfulness * 100).toFixed(1)}%` : '--',
+            },
+            {
               label: 'Ctx relevance',
               value: ragasContextRelevance != null ? `${(ragasContextRelevance * 100).toFixed(1)}%` : '--',
-            },
-            {
-              label: 'Questions',
-              value: ragasSampleCount != null ? String(ragasSampleCount) : '--',
-            },
-            {
-              label: 'Diagnostic',
-              value: ragasDiagnostic?.level ?? '--',
             },
           ]}
         />
 
         <ScoreCard
           title="Contradictions"
-          mainScore={t2BothSides}
-          mainLabel="Both sides"
+          mainScore={t2t5GlobalScore}
+          mainLabel="Score global"
           accent={tokens.accentPurple}
-          target={0.70}
+          target={0.80}
           delta={latestDelta('t2t5')}
           timestamp={t2t5Report?.timestamp}
           secondaryLines={[
             {
-              label: 'Tension',
-              value: t2TensionMentioned != null ? `${(t2TensionMentioned * 100).toFixed(1)}%` : '--',
+              label: 'Both sides',
+              value: t2BothSides != null ? `${(t2BothSides * 100).toFixed(1)}%` : '--',
             },
             {
-              label: 'Conclusion eq.',
-              value: t2BalancedConclusion != null ? `${(t2BalancedConclusion * 100).toFixed(1)}%` : '--',
+              label: 'Tension',
+              value: t2TensionMentioned != null ? `${(t2TensionMentioned * 100).toFixed(1)}%` : '--',
             },
           ]}
         />

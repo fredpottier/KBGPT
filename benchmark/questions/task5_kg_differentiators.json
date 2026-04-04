@@ -1,0 +1,470 @@
+{
+  "metadata": {
+    "task": "T5",
+    "source": "kg_differentiators",
+    "corpus": "SAP Enterprise Documentation",
+    "count": 30,
+    "generated_at": "2026-03-29T20:30:00",
+    "note": "Questions qui testent la VALEUR DIFFERENCIANTE du KG vs RAG. 3 catégories : cross-doc transitivity, proactive contradiction detection, multi-source synthesis. Un RAG pur NE PEUT PAS répondre correctement à ces questions."
+  },
+  "questions": [
+    {
+      "question_id": "T5_CHAIN_0001",
+      "task": "T5_cross_doc",
+      "category": "cross_doc_chain",
+      "question": "SAP S/4HANA utilise Embedded Transportation Management. Cette fonctionnalité est-elle intégrée au cœur digital de S/4HANA ? Et si oui, quelle base de données est requise pour S/4HANA ?",
+      "ground_truth": {
+        "chain": [
+          {"text": "SAP S/4HANA uses embedded Transportation Management to handle freight agreements and delivery based charges.", "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba"},
+          {"text": "Embedded Transportation Management is seamlessly integrated into the digital core of SAP S/4HANA.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+          {"text": "A new installation of SAP S/4HANA needs to run on the SAP HANA database.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"}
+        ],
+        "docs_required": 3,
+        "reasoning": "Répondre complètement nécessite de traverser 3 documents : Business Scope 1809 → Business Scope Cloud PE → Security Guide 2023"
+      },
+      "grading_rules": {
+        "must_mention_all_chain_elements": true,
+        "must_cite_multiple_docs": true,
+        "min_docs_cited": 2
+      }
+    },
+    {
+      "question_id": "T5_CHAIN_0002",
+      "task": "T5_cross_doc",
+      "category": "cross_doc_chain",
+      "question": "Quels outils ABAP Platform sont utilisés pour le monitoring des connexions RFC dans les paysages PLM ? Et comment ces connexions RFC peuvent-elles être sécurisées ?",
+      "ground_truth": {
+        "chain": [
+          {"text": "SAP S/4HANA uses the standard ABAP Platform tools for tracing and logging.", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+          {"text": "Standard ABAP Platform tools are used for monitoring RFC connections in PLM system landscapes.", "doc_id": "017_SAP_S4HANA_2023_Operations_Guide_b11842e3"},
+          {"text": "RFC connections can be protected using Secure Network Communications (SNC).", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"}
+        ],
+        "docs_required": 3,
+        "reasoning": "Operations Guide 2021 → Operations Guide 2023 → Security Guide : chaîne ABAP→RFC→SNC"
+      },
+      "grading_rules": {
+        "must_mention_all_chain_elements": true,
+        "must_cite_multiple_docs": true,
+        "min_docs_cited": 2
+      }
+    },
+    {
+      "question_id": "T5_CHAIN_0003",
+      "task": "T5_cross_doc",
+      "category": "cross_doc_chain",
+      "question": "Comment SAP SuccessFactors Employee Central s'intègre-t-il à SAP S/4HANA ? Quelles données peut-on intégrer et quel objet d'autorisation contrôle l'accès aux objets TemSe liés ?",
+      "ground_truth": {
+        "chain": [
+          {"text": "SAP S/4HANA supports the integration scenario with SAP SuccessFactors Employee Central.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+          {"text": "You can integrate contingent worker data like basic data and contact details from SAP SuccessFactors Employee Central to SAP S/4HANA system.", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"},
+          {"text": "SAP S/4HANA system uses the authorization object S_TMS_ACT to control access to TemSe objects.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"}
+        ],
+        "docs_required": 3,
+        "reasoning": "Feature Scope → Cloud PE Feature Scope → Security Guide : chaîne intégration→données→autorisation"
+      },
+      "grading_rules": {
+        "must_mention_all_chain_elements": true,
+        "must_cite_multiple_docs": true,
+        "min_docs_cited": 2
+      }
+    },
+    {
+      "question_id": "T5_CHAIN_0004",
+      "task": "T5_cross_doc",
+      "category": "cross_doc_chain",
+      "question": "SAP S/4HANA Cloud Private Edition s'intègre avec Ariba Network pour les ventes. Ce réseau a-t-il changé de nom récemment ? Et comment l'intégration est-elle sécurisée ?",
+      "ground_truth": {
+        "chain": [
+          {"text": "SAP S/4HANA Cloud Private Edition integrates with Ariba Network for Sales.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+          {"text": "Ariba Network has been renamed to SAP Business Network.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"}
+        ],
+        "docs_required": 2,
+        "reasoning": "Business Scope → Security Guide : renommage cross-doc"
+      },
+      "grading_rules": {
+        "must_mention_all_chain_elements": true,
+        "must_cite_multiple_docs": true,
+        "min_docs_cited": 2
+      }
+    },
+    {
+      "question_id": "T5_CHAIN_0005",
+      "task": "T5_cross_doc",
+      "category": "cross_doc_chain",
+      "question": "Comment Open Catalog Interface (OCI) est-il utilisé dans SAP S/4HANA ? SAP recommande-t-il cette intégration pour les catalogues externes ? Et comment fonctionne-t-elle techniquement ?",
+      "ground_truth": {
+        "chain": [
+          {"text": "SAP recommends integrating SAP S/4HANA and catalogs using Open catalog Interface (OCI).", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+          {"text": "The Open Catalog Interface incorporates external product catalogs into SAP S/4HANA applications using HTTP.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"}
+        ],
+        "docs_required": 2,
+        "reasoning": "Security Guide 2022 (recommandation) → Security Guide 2023 (détails techniques HTTP)"
+      },
+      "grading_rules": {
+        "must_mention_all_chain_elements": true,
+        "must_cite_multiple_docs": true,
+        "min_docs_cited": 2
+      }
+    },
+    {
+      "question_id": "T5_CHAIN_0006",
+      "task": "T5_cross_doc",
+      "category": "cross_doc_chain",
+      "question": "SAP Information Lifecycle Management (ILM) est utilisé pour l'archivage. Tous les objets d'archivage sont-ils conformes aux règles ILM ? Et peut-on l'utiliser pour contrôler la suppression des données personnelles ?",
+      "ground_truth": {
+        "chain": [
+          {"text": "All archiving objects comply with the rules of SAP Information Lifecycle Management (ILM).", "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07"},
+          {"text": "You can use SAP Information Lifecycle Management (ILM) to control the blocking and deletion of personal data.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"}
+        ],
+        "docs_required": 2,
+        "reasoning": "Operations Guide (conformité archivage) → Security Guide (RGPD/données personnelles)"
+      },
+      "grading_rules": {
+        "must_mention_all_chain_elements": true,
+        "must_cite_multiple_docs": true,
+        "min_docs_cited": 2
+      }
+    },
+    {
+      "question_id": "T5_CHAIN_0007",
+      "task": "T5_cross_doc",
+      "category": "cross_doc_chain",
+      "question": "Public Sector Collection and Disbursement (PSCD) gère des charges. Comment ces charges sont-elles intégrées avec les processus SD et MM ?",
+      "ground_truth": {
+        "chain": [
+          {"text": "Public Sector Collection and Disbursement (PSCD) is used to manage charges.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+          {"text": "The charges can be set up in the app as a receivable or a payable and are integrated accordingly with SD and MM pricing and document flow.", "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3"}
+        ],
+        "docs_required": 2,
+        "reasoning": "Feature Scope → Cloud PE Feature Scope : définition PSCD → détails d'intégration"
+      },
+      "grading_rules": {
+        "must_mention_all_chain_elements": true,
+        "must_cite_multiple_docs": true,
+        "min_docs_cited": 2
+      }
+    },
+    {
+      "question_id": "T5_CHAIN_0008",
+      "task": "T5_cross_doc",
+      "category": "cross_doc_chain",
+      "question": "SAP S/4HANA s'intègre avec SAP Marketing Cloud. Quelles données doivent être nettoyées quand les contrats arrivent à échéance ?",
+      "ground_truth": {
+        "chain": [
+          {"text": "SAP S/4HANA integrates with SAP Marketing Cloud for marketing activities.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"},
+          {"text": "SAP Marketing Cloud requires data to be cleaned by the utility when utilities contracts or sales contracts reach their end date.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"}
+        ],
+        "docs_required": 2,
+        "reasoning": "Feature Scope (intégration) → Security Guide 2022 (nettoyage données)"
+      },
+      "grading_rules": {
+        "must_mention_all_chain_elements": true,
+        "must_cite_multiple_docs": true,
+        "min_docs_cited": 2
+      }
+    },
+    {
+      "question_id": "T5_CHAIN_0009",
+      "task": "T5_cross_doc",
+      "category": "cross_doc_chain",
+      "question": "Pour le freight management dans SAP, peut-on créer des freight orders à la place des freight units ? Et comment les freight units sont-ils créés à partir des documents logistiques ?",
+      "ground_truth": {
+        "chain": [
+          {"text": "You can have freight orders or package units created instead of freight units when freight units are created.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+          {"text": "Freight units are created on the basis of logistics business documents in planning.", "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700"}
+        ],
+        "docs_required": 2,
+        "reasoning": "Business Scope (options) → Feature Scope (mécanisme de création)"
+      },
+      "grading_rules": {
+        "must_mention_all_chain_elements": true,
+        "must_cite_multiple_docs": true,
+        "min_docs_cited": 2
+      }
+    },
+    {
+      "question_id": "T5_CHAIN_0010",
+      "task": "T5_cross_doc",
+      "category": "cross_doc_chain",
+      "question": "L'item-based accounting est-il un prérequis pour les price items ? Un fixed price service item est-il obligatoire pour les intercompany service orders ?",
+      "ground_truth": {
+        "chain": [
+          {"text": "Item-based accounting is a prerequisite for price items.", "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"},
+          {"text": "A fixed price service item is required for an intercompany service order.", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"}
+        ],
+        "docs_required": 2,
+        "reasoning": "Business Scope PE → Business Scope Cloud ERP : prérequis item accounting → contrainte intercompany"
+      },
+      "grading_rules": {
+        "must_mention_all_chain_elements": true,
+        "must_cite_multiple_docs": true,
+        "min_docs_cited": 2
+      }
+    },
+    {
+      "question_id": "T5_PROACTIVE_0001",
+      "task": "T5_proactive_detection",
+      "category": "proactive_contradiction",
+      "question": "Quel rapport de suppression doit être planifié régulièrement pour les données personnelles dans SAP ?",
+      "ground_truth": {
+        "expected_answer_contains": "CNS_CP_DELETE and CNS_DP_DELETE_MULT or CNS_CP_DELETE_MULT",
+        "hidden_contradiction": {
+          "claim1": {"text": "A regular job should be scheduled to call one of the deletion reports CNS_CP_DELETE or CNS_DP_DELETE_MULT.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+          "claim2": {"text": "A regular job should be scheduled to call one of the deletion reports CNS_CP_DELETE or CNS_CP_DELETE_MULT.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"}
+        },
+        "expected_behavior": "Le système devrait PROACTIVEMENT signaler que le Security Guide 2023 mentionne CNS_DP_DELETE_MULT alors que le Security Guide 2022 mentionne CNS_CP_DELETE_MULT (changement de nom de rapport entre versions). Le RAG ne trouve que le doc 2023."
+      },
+      "grading_rules": {
+        "must_surface_contradiction_proactively": true,
+        "must_cite_both_docs": true,
+        "question_does_NOT_ask_about_contradictions": true
+      }
+    },
+    {
+      "question_id": "T5_PROACTIVE_0002",
+      "task": "T5_proactive_detection",
+      "category": "proactive_contradiction",
+      "question": "Sur quel rapport est basé l'authorization object S_Program pour les données personnelles dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_answer_contains": "RPCIPD00 or RPCIPS00 or RPCIPA00",
+        "hidden_contradiction": {
+          "claim1": {"text": "Authorization object S_Program is based on report RPCIPD00", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+          "claim2": {"text": "Authorization object S_Program is based on report RPCIPS00", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"}
+        },
+        "expected_behavior": "Le système devrait signaler que le nom du rapport a changé entre les versions : RPCIPD00 (2022) vs RPCIPS00 (2023). Le RAG ne retourne que le Security Guide 2023."
+      },
+      "grading_rules": {
+        "must_surface_contradiction_proactively": true,
+        "must_cite_both_docs": true,
+        "question_does_NOT_ask_about_contradictions": true
+      }
+    },
+    {
+      "question_id": "T5_PROACTIVE_0003",
+      "task": "T5_proactive_detection",
+      "category": "proactive_contradiction",
+      "question": "Quel business catalog backend doit être assigné en complément de SAP_SLL_BC_LICENSE_MANAGE ?",
+      "ground_truth": {
+        "expected_answer_contains": "SAP_CMD_BC_BP_D or SAP_CMD_BC_PROD",
+        "hidden_contradiction": {
+          "claim1": {"text": "Assigning business catalog SAP_SLL_BC_LICENSE_MANAGE in backend role requires assigning business catalog SAP_CMD_BC_PROD", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+          "claim2": {"text": "Assigning business catalog SAP_SLL_BC_LICENSE_MANAGE in backend role requires assigning business catalog SAP_CMD_BC_BP_D", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"}
+        },
+        "expected_behavior": "Le système devrait signaler que le catalog requis a changé entre versions : SAP_CMD_BC_BP_D (2022) vs SAP_CMD_BC_PROD (2023). Le RAG ne retourne que le Security Guide 2023."
+      },
+      "grading_rules": {
+        "must_surface_contradiction_proactively": true,
+        "must_cite_both_docs": true,
+        "question_does_NOT_ask_about_contradictions": true
+      }
+    },
+    {
+      "question_id": "T5_PROACTIVE_0004",
+      "task": "T5_proactive_detection",
+      "category": "proactive_contradiction",
+      "question": "Quand les IDocs sont-ils envoyés au système Dispute Case Processing depuis Accounts Receivable ?",
+      "ground_truth": {
+        "expected_answer_contains": "items are cleared or clearing is reset",
+        "hidden_contradiction": {
+          "claim1": {"text": "IDocs are sent to the Dispute Case Processing system from the Accounts Receivable system when items are cleared.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"},
+          "claim2": {"text": "IDocs are sent to the Dispute Case Processing system from the Accounts Receivable system when the clearing of items is reset.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"}
+        },
+        "expected_behavior": "Le système devrait signaler que le déclencheur a changé entre versions : 'when items are cleared' (2022) vs 'when the clearing of items is reset' (2023). Le RAG ne retourne que le Security Guide 2023."
+      },
+      "grading_rules": {
+        "must_surface_contradiction_proactively": true,
+        "must_cite_both_docs": true,
+        "question_does_NOT_ask_about_contradictions": true
+      }
+    },
+    {
+      "question_id": "T5_PROACTIVE_0005",
+      "task": "T5_proactive_detection",
+      "category": "proactive_contradiction",
+      "question": "Dans quel sens les dialog calls s'effectuent-ils entre Accounts Receivable et Collections Management ?",
+      "ground_truth": {
+        "expected_answer_contains": "AR to Collections or Collections to AR",
+        "hidden_contradiction": {
+          "claim1": {"text": "This destination is used for dialog calls that take place from the Accounts Receivable system to the Collections Management system.", "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e"},
+          "claim2": {"text": "This destination is used for dialog calls that take place from the Collections Management system to the Accounts Receivable system.", "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"}
+        },
+        "expected_behavior": "Le système devrait signaler que le Security Guide 2023 indique AR→Collections alors que le 2022 indique Collections→AR (direction inversée). Le RAG ne retourne que le doc 2023."
+      },
+      "grading_rules": {
+        "must_surface_contradiction_proactively": true,
+        "must_cite_both_docs": true,
+        "question_does_NOT_ask_about_contradictions": true
+      }
+    },
+    {
+      "question_id": "T5_MULTI_0001",
+      "task": "T5_multi_source",
+      "category": "multi_source_synthesis",
+      "question": "Donnez-moi une vue complète de SAP Extended Warehouse Management (EWM) : quelles fonctionnalités offre-t-il, comment s'intègre-t-il et quels aspects de sécurité faut-il considérer ?",
+      "ground_truth": {
+        "expected_docs": ["018", "022", "024", "025", "027", "028"],
+        "min_docs_required": 3,
+        "expected_aspects": ["fonctionnalites", "integration", "securite"],
+        "reasoning": "Une réponse complète nécessite de croiser Business Scope (fonctionnalités), Feature Scope (capacités détaillées), et Security Guide (aspects sécurité). Un RAG ne ramènera que les chunks les plus similaires d'1-2 docs."
+      },
+      "grading_rules": {
+        "must_cite_min_docs": 3,
+        "must_cover_multiple_aspects": true,
+        "must_not_be_single_doc_answer": true
+      }
+    },
+    {
+      "question_id": "T5_MULTI_0002",
+      "task": "T5_multi_source",
+      "category": "multi_source_synthesis",
+      "question": "Quel est le rôle de SAP HANA dans l'écosystème S/4HANA ? Couvrez les aspects infrastructure, performance et sécurité depuis différentes sources.",
+      "ground_truth": {
+        "expected_docs": ["014", "015", "017", "027", "028"],
+        "min_docs_required": 3,
+        "expected_aspects": ["infrastructure_db", "operations_monitoring", "security"],
+        "reasoning": "Operations Guides (monitoring HANA), Security Guides (sécurité HANA), Installation Guides (prérequis). Un RAG ne trouvera que le top-10 chunks les plus similaires."
+      },
+      "grading_rules": {
+        "must_cite_min_docs": 3,
+        "must_cover_multiple_aspects": true,
+        "must_not_be_single_doc_answer": true
+      }
+    },
+    {
+      "question_id": "T5_MULTI_0003",
+      "task": "T5_multi_source",
+      "category": "multi_source_synthesis",
+      "question": "Comment la gestion des autorisations fonctionne-t-elle dans SAP S/4HANA ? Couvrez les rôles, les objets d'autorisation et les bonnes pratiques.",
+      "ground_truth": {
+        "expected_docs": ["027", "028", "021"],
+        "min_docs_required": 2,
+        "expected_aspects": ["roles_business", "authorization_objects", "best_practices"],
+        "reasoning": "Security Guides 2022+2023 (objets autorisation), Admin Guide (best practices). Multi-version cross-doc."
+      },
+      "grading_rules": {
+        "must_cite_min_docs": 2,
+        "must_cover_multiple_aspects": true,
+        "must_not_be_single_doc_answer": true
+      }
+    },
+    {
+      "question_id": "T5_MULTI_0004",
+      "task": "T5_multi_source",
+      "category": "multi_source_synthesis",
+      "question": "Quelles sont les fonctionnalités de SAP S/4HANA pour l'industrie Oil & Gas ? Couvrez le scope fonctionnel, les opérations et la sécurité.",
+      "ground_truth": {
+        "expected_docs": ["018", "022", "024", "025"],
+        "min_docs_required": 2,
+        "expected_aspects": ["functional_scope", "industry_features"],
+        "reasoning": "Business Scope 1809 + Cloud PE Business Scope + Feature Scope. Multi-doc pour une vue complète industrie."
+      },
+      "grading_rules": {
+        "must_cite_min_docs": 2,
+        "must_cover_multiple_aspects": true,
+        "must_not_be_single_doc_answer": true
+      }
+    },
+    {
+      "question_id": "T5_MULTI_0005",
+      "task": "T5_multi_source",
+      "category": "multi_source_synthesis",
+      "question": "Quelles sont toutes les intégrations documentées de SAP S/4HANA avec des solutions cloud tierces (SuccessFactors, Ariba, Marketing Cloud, etc.) ?",
+      "ground_truth": {
+        "expected_docs": ["022", "023", "024", "025", "027"],
+        "min_docs_required": 3,
+        "expected_integrations": ["SuccessFactors", "Ariba/Business Network", "Marketing Cloud", "Field Service Management"],
+        "reasoning": "Chaque intégration est documentée dans des docs différents. Seul le KG peut traverser toutes les entités liées."
+      },
+      "grading_rules": {
+        "must_cite_min_docs": 3,
+        "must_list_min_integrations": 3,
+        "must_not_be_single_doc_answer": true
+      }
+    },
+    {
+      "question_id": "T5_MULTI_0006",
+      "task": "T5_multi_source",
+      "category": "multi_source_synthesis",
+      "question": "Comment le processus de conversion vers SAP S/4HANA a-t-il évolué entre les guides 2022 et 2023 ?",
+      "ground_truth": {
+        "expected_docs": ["005", "006"],
+        "min_docs_required": 2,
+        "expected_aspects": ["differences_2022_2023", "new_features", "deprecated_steps"],
+        "reasoning": "Conversion Guide 2022 vs 2023. Comparaison cross-version."
+      },
+      "grading_rules": {
+        "must_cite_min_docs": 2,
+        "must_compare_versions": true,
+        "must_not_be_single_doc_answer": true
+      }
+    },
+    {
+      "question_id": "T5_MULTI_0007",
+      "task": "T5_multi_source",
+      "category": "multi_source_synthesis",
+      "question": "Quelles différences y a-t-il entre les Operations Guides 2021, 2022 et 2023 pour SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_docs": ["014", "015", "017"],
+        "min_docs_required": 3,
+        "expected_aspects": ["evolution_operations", "new_monitoring", "changed_procedures"],
+        "reasoning": "3 versions du même guide. Le KG peut identifier les claims identiques vs modifiés vs ajoutés."
+      },
+      "grading_rules": {
+        "must_cite_min_docs": 3,
+        "must_compare_versions": true,
+        "must_not_be_single_doc_answer": true
+      }
+    },
+    {
+      "question_id": "T5_MULTI_0008",
+      "task": "T5_multi_source",
+      "category": "multi_source_synthesis",
+      "question": "Comment la sécurité des données personnelles est-elle gérée dans SAP S/4HANA ? Comparez les approches des Security Guides 2022 et 2023.",
+      "ground_truth": {
+        "expected_docs": ["027", "028"],
+        "min_docs_required": 2,
+        "expected_aspects": ["data_protection_2022", "data_protection_2023", "changes"],
+        "reasoning": "Security Guide 2022 vs 2023 — les changements dans la gestion données personnelles (Commodity, ILM, etc.)"
+      },
+      "grading_rules": {
+        "must_cite_min_docs": 2,
+        "must_compare_versions": true,
+        "must_not_be_single_doc_answer": true
+      }
+    },
+    {
+      "question_id": "T5_MULTI_0009",
+      "task": "T5_multi_source",
+      "category": "multi_source_synthesis",
+      "question": "Quel est le périmètre fonctionnel complet de SAP S/4HANA pour la gestion de la supply chain ? Incluez les informations de tous les documents disponibles.",
+      "ground_truth": {
+        "expected_docs": ["018", "022", "023", "024", "025"],
+        "min_docs_required": 3,
+        "expected_aspects": ["procurement", "warehouse", "transportation", "planning"],
+        "reasoning": "Supply chain = MM + EWM + TM + PP. Documenté dans 5 docs différents."
+      },
+      "grading_rules": {
+        "must_cite_min_docs": 3,
+        "must_cover_multiple_aspects": true,
+        "must_not_be_single_doc_answer": true
+      }
+    },
+    {
+      "question_id": "T5_MULTI_0010",
+      "task": "T5_multi_source",
+      "category": "multi_source_synthesis",
+      "question": "Quelle est la roadmap de migration recommandée par SAP pour passer d'un système SAP ECC à SAP S/4HANA Cloud Private Edition ? Incluez les guides de conversion, upgrade et installation.",
+      "ground_truth": {
+        "expected_docs": ["003", "005", "006", "008", "011"],
+        "min_docs_required": 3,
+        "expected_aspects": ["conversion_path", "upgrade_steps", "installation_prereqs"],
+        "reasoning": "Migration = Conversion Guides + Upgrade Guide + Installation Guide. Vue complète uniquement via cross-doc."
+      },
+      "grading_rules": {
+        "must_cite_min_docs": 3,
+        "must_cover_multiple_aspects": true,
+        "must_not_be_single_doc_answer": true
+      }
+    }
+  ]
+}
