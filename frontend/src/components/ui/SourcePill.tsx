@@ -26,20 +26,22 @@ export default function SourcePill({ name, page }: SourcePillProps) {
       as="span"
       display="inline-flex"
       spacing={1}
-      px={1.5}
+      px={2}
       py={0.5}
-      bg="rgba(156, 163, 175, 0.12)"
-      borderRadius="md"
+      bg="rgba(120, 160, 220, 0.15)"
+      border="1px solid"
+      borderColor="rgba(120, 160, 220, 0.25)"
+      borderRadius="full"
       fontSize="2xs"
-      color="text.muted"
+      color="blue.300"
       verticalAlign="middle"
       cursor="default"
-      _hover={{ bg: 'rgba(156, 163, 175, 0.20)', color: 'text.secondary' }}
+      _hover={{ bg: 'rgba(120, 160, 220, 0.25)', color: 'blue.200' }}
       transition="all 0.15s"
       lineHeight="1.4"
     >
-      <Box as={FiFileText} boxSize="10px" flexShrink={0} />
-      <Text as="span" fontSize="2xs" fontWeight="500" noOfLines={1}>
+      <Box as={FiFileText} boxSize="10px" flexShrink={0} opacity={0.8} />
+      <Text as="span" fontSize="2xs" fontWeight="600" noOfLines={1}>
         {shortName}{page ? `, ${page}` : ''}
       </Text>
     </HStack>
