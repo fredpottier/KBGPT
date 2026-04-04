@@ -251,51 +251,39 @@ def _clean_source_name(source_file: str) -> str:
 def _reformat_source_citations(answer: str, sources_used: list[str]) -> str:
     """Post-traite la reponse LLM pour normaliser les citations de sources.
 
-    Cherche les mentions de noms de sources dans le texte et les reformate
-    en *(Nom lisible, p.XX)* pour que le frontend les affiche en SourcePill.
+    Transforme toute citation qui ressemble a une source documentaire en
+    marqueur [[SOURCE:nom|page]] que le frontend affiche en SourcePill.
 
-    Strategie : on travaille en un seul passage pour eviter les doubles substitutions.
+    Approche robuste : on ne depend pas du nom exact de la source.
+    Toute citation entre *(..., p.XX)* ou (..., p.XX) avec un nom assez long
+    est transformee en marqueur.
     """
     import re
 
-    if not answer or not sources_used:
+    if not answer:
         return answer
 
-    # Construire les noms lisibles
-    clean_names = []
-    for src in sources_used:
-        clean = _clean_source_name(src)
-        if clean and len(clean) >= 15:
-            clean_names.append(clean)
-
-    if not clean_names:
-        return answer
-
-    # Trier par longueur decroissante (matcher les noms les plus longs d'abord)
-    clean_names.sort(key=len, reverse=True)
-
-    # Construire un mega-pattern qui capture toutes les variantes en un passage :
-    # 1. *(Doc, p.XX)* → deja formate, on ne touche pas
-    # 2. (Doc, p.XX) → on ajoute les *
-    # 3. Doc, p.XX → on wrappe en *()*
-    # 4. Doc (p.XX) → on reformate
-    names_alt = "|".join(re.escape(n) for n in clean_names)
-
-    # Pattern unifie : capture nom + page dans toutes les variantes
-    # Groupe 1 = nom du document, Groupe 2 = page
-    unified = re.compile(
-        r"\*?\(?(" + names_alt + r")\s*[,;]\s*(p\.?\s*\d+(?:\s*(?:[-–]\s*\d+|(?:et|and)\s*p?\.?\s*\d+))?)\)?\*?",
-        re.IGNORECASE,
-    )
-
-    def replacer(m):
+    # Pattern : *(Nom du doc, p.XX)* ou (Nom du doc, p.XX)
+    # Le nom doit faire au moins 10 chars pour eviter les faux positifs
+    # Accepte avec ou sans les * autour
+    def to_source_marker(m):
         doc = m.group(1).strip()
         page = m.group(2).strip()
-        # Marqueur custom que le frontend transforme en SourcePill
-        # Le format [[SOURCE:nom|page]] n'est pas interprete par ReactMarkdown
-        return f"[[SOURCE:{doc}|{page}]]"
+        return f" [[SOURCE:{doc}|{page}]]"
 
-    answer = unified.sub(replacer, answer)
+    # Variante 1 : *(Doc, p.XX)* — avec etoiles (italic markdown)
+    answer = re.sub(
+        r"\s*\*\(([^()]{10,80}?),\s*(p\.?\s*\d+(?:\s*(?:[-–]\s*\d+|(?:et|and)\s*\d+))?)\)\*",
+        to_source_marker,
+        answer,
+    )
+
+    # Variante 2 : (Doc, p.XX) — sans etoiles
+    answer = re.sub(
+        r"\s*\(([^()]{10,80}?),\s*(p\.?\s*\d+(?:\s*(?:[-–]\s*\d+|(?:et|and)\s*\d+))?)\)",
+        to_source_marker,
+        answer,
+    )
 
     return answer
 
