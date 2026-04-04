@@ -133,10 +133,10 @@ response_modes:
     {session_context}
 
     ## Regles
-    1. Reponds directement a la question posee.
+    1. Reponds directement a la question posee. Commence IMMEDIATEMENT par la reponse, sans titre, sans header, sans "Reponse directe".
     2. Cite les documents sources (format : Source: Document X, page Y).
-    3. Si les extraits ne contiennent pas assez d'information pour repondre, dis-le clairement et indique ce que les sources couvrent sur le sujet.
-    4. Structure ta reponse avec des sections ou puces si necessaire.
+    3. Si les extraits ne contiennent pas assez d'information pour repondre, dis-le clairement.
+    4. Utilise des puces si necessaire mais pas de gros headers markdown (pas de # ou ##).
     5. N'invente rien qui n'est pas dans les extraits.
     6. Reponds dans la meme langue que la question.
 
@@ -173,10 +173,10 @@ response_modes:
     {graph_context}
 
     ## Regles
-    1. Reponds directement a la question posee de maniere claire et concise.
-    2. Si les extraits contiennent des informations differentes ou contradictoires, INTEGRE cette nuance dans ta reponse. Ne fais pas de section separee — explique naturellement que "selon le guide 2023, c'est X, tandis que le guide 2022 indiquait Y".
+    1. Reponds directement a la question posee. Commence IMMEDIATEMENT par la reponse, sans titre, sans header, sans "Reponse directe".
+    2. Si les extraits contiennent des informations differentes ou contradictoires, INTEGRE cette nuance naturellement dans ta reponse ("selon le guide 2023, c'est X, tandis que le guide 2022 indiquait Y").
     3. Cite les documents sources.
-    4. Pas de template, pas de "Position A / Position B", pas de tableau comparatif. Ecris comme un expert qui a lu tous les documents et qui donne une reponse synthetique.
+    4. Pas de template, pas de "Position A / Position B", pas de tableau comparatif, pas de gros headers markdown.
     5. Si un document plus recent corrige ou met a jour un document plus ancien, dis-le clairement.
     6. Reponds dans la meme langue que la question.
 
