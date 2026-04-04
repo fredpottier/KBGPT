@@ -36,8 +36,6 @@ import {
 import { useState } from 'react'
 import ThumbnailCarousel from './ThumbnailCarousel'
 import SynthesizedAnswer from './SynthesizedAnswer'
-import SourcesSection from './SourcesSection'
-import ReasoningTracePanel from '../chat/ReasoningTracePanel'
 import type { GraphData, ProofGraph } from '@/types/graph'
 import NextLink from 'next/link'
 import {
@@ -135,15 +133,6 @@ export default function SearchResultDisplay({
         <InsightHintsBlock hints={searchResult.insight_hints} />
       )}
 
-      {/* Reasoning Trace (debug, optionnel) */}
-      {searchResult.reasoning_trace && (
-        <ReasoningTracePanel trace={searchResult.reasoning_trace} />
-      )}
-
-      {/* Sources Section */}
-      {searchResult.synthesis && (
-        <SourcesSection synthesis={searchResult.synthesis} />
-      )}
 
       {/* Fallback: show raw results if no synthesis */}
       {!searchResult.synthesis && searchResult.results && searchResult.results.length > 0 && (

@@ -232,15 +232,6 @@ const MessageBubble = ({
                 <Box as={FiCpu} size={14} color="accent.400" />
               )}
             </Box>
-            <Text fontSize="xs" color="text.muted" order={isUser ? 0 : 1}>
-              {isUser ? 'Vous' : 'OSMOSIS'}
-            </Text>
-            <Text fontSize="xs" color="text.muted">
-              {new Date(message.timestamp).toLocaleTimeString('fr-FR', {
-                hour: '2-digit',
-                minute: '2-digit'
-              })}
-            </Text>
           </HStack>
 
           {/* Message content */}
@@ -283,27 +274,6 @@ const MessageBubble = ({
               </Text>
             )}
 
-            {/* Actions pour messages utilisateur */}
-            {isUser && (
-              <HStack
-                className="message-actions"
-                opacity={0}
-                transition="opacity 0.2s"
-                spacing={1}
-                mt={2}
-                pt={2}
-                borderTop="1px solid"
-                borderColor="whiteAlpha.300"
-              >
-                <CopyButton
-                  text={message.content}
-                  size="xs"
-                  variant="ghost"
-                  color="whiteAlpha.700"
-                  _hover={{ bg: 'whiteAlpha.200', color: 'white' }}
-                />
-              </HStack>
-            )}
 
             {/* Actions pour messages assistant */}
             {!isUser && (

@@ -288,6 +288,8 @@ export default function SynthesizedAnswer({
       <VStack spacing={3} align="stretch">
         {/* Synthesized answer */}
         <Box
+          className="answer-block"
+          position="relative"
           bg="bg.secondary"
           p={4}
           borderRadius="lg"
@@ -304,25 +306,18 @@ export default function SynthesizedAnswer({
             </ReactMarkdown>
           </Box>
 
-          {/* Copy + confidence */}
-          <Flex justify="space-between" align="center" mt={3} pt={3} borderTop="1px solid" borderColor="border.default">
-            <HStack
-              px={2}
-              py={1}
-              bg={confidenceConfig.bg}
-              rounded="md"
-              spacing={1.5}
-            >
-              <Icon as={confidenceConfig.icon} boxSize={3.5} color={confidenceConfig.color} />
-              <Text fontSize="xs" fontWeight="medium" color={confidenceConfig.color}>
-                {Math.round(synthesis.confidence * 100)}%
-              </Text>
-            </HStack>
-            <CopyButton
-              text={synthesis.synthesized_answer}
-              className="copy-answer-button"
-            />
-          </Flex>
+          {/* Copy — discret en haut a droite, visible au hover */}
+          <Box
+            position="absolute"
+            top={2}
+            right={2}
+            opacity={0}
+            className="copy-answer-button"
+            transition="opacity 0.2s"
+            sx={{ '.answer-block:hover &': { opacity: 1 } }}
+          >
+            <CopyButton text={synthesis.synthesized_answer} />
+          </Box>
         </Box>
 
         {/* Knowledge Graph (ProofGraph prioritaire si disponible) */}
