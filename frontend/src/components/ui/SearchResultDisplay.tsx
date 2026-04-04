@@ -122,18 +122,10 @@ export default function SearchResultDisplay({
           proofGraph={proofGraph || searchResult.proof_graph}
           explorationIntelligence={explorationIntelligence}
           onSearch={onSearch}
+          contradictionEnvelope={searchResult.contradiction_envelope}
         />
       )}
 
-      {/* Indicateur de tension — petit eclair orange si divergences detectees */}
-      {searchResult.contradiction_envelope?.has_tension && searchResult.contradiction_envelope?.pairs && (
-        <Flex justify="flex-end" mt={-2}>
-          <TensionIndicator
-            pairs={searchResult.contradiction_envelope.pairs}
-            pairsCount={searchResult.contradiction_envelope.pairs_count || searchResult.contradiction_envelope.pairs.length}
-          />
-        </Flex>
-      )}
 
       {/* 🌊 Atlas Convergence: Explorer ce sujet */}
       {searchResult.related_articles && searchResult.related_articles.length > 0 && (

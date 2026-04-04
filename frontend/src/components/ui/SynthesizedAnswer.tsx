@@ -26,6 +26,7 @@ import { SynthesisResult, SearchChunk, ExplorationIntelligence } from '@/types/a
 import CopyButton from './CopyButton'
 import { renderWithSourcePills } from './SourcePill'
 import { ResponseGraph } from '@/components/chat'
+import TensionIndicator from '@/components/chat/TensionIndicator'
 import type { GraphData, ProofGraph } from '@/types/graph'
 import { FiCheckCircle, FiAlertCircle, FiAlertTriangle } from 'react-icons/fi'
 
@@ -34,9 +35,20 @@ interface SynthesizedAnswerProps {
   chunks?: SearchChunk[]
   onSlideClick?: (chunk: SearchChunk) => void
   graphData?: GraphData
-  proofGraph?: ProofGraph  // 🌊 Phase 3.5+: Proof Graph prioritaire
+  proofGraph?: ProofGraph
   explorationIntelligence?: ExplorationIntelligence
   onSearch?: (query: string) => void
+  contradictionEnvelope?: {
+    has_tension: boolean
+    pairs_count: number
+    pairs?: Array<{
+      claim_a: string
+      claim_b: string
+      doc_a: string
+      doc_b: string
+      axis: string
+    }>
+  }
 }
 
 // Composants Chakra UI personnalisés pour le rendu Markdown
@@ -269,6 +281,7 @@ export default function SynthesizedAnswer({
   proofGraph,
   explorationIntelligence,
   onSearch,
+  contradictionEnvelope,
 }: SynthesizedAnswerProps) {
   // Créer les composants Markdown avec le contexte des slides
   const markdownComponents = createMarkdownComponents(chunks, onSlideClick)
@@ -319,18 +332,25 @@ export default function SynthesizedAnswer({
             </ReactMarkdown>
           </Box>
 
-          {/* Copy — discret en haut a droite, visible au hover */}
-          <Box
+          {/* Actions — en haut a droite, visible au hover */}
+          <HStack
             position="absolute"
             top={2}
             right={2}
+            spacing={0}
             opacity={0}
             className="copy-answer-button"
             transition="opacity 0.2s"
             sx={{ '.answer-block:hover &': { opacity: 1 } }}
           >
+            {contradictionEnvelope?.has_tension && contradictionEnvelope?.pairs && (
+              <TensionIndicator
+                pairs={contradictionEnvelope.pairs}
+                pairsCount={contradictionEnvelope.pairs_count || contradictionEnvelope.pairs.length}
+              />
+            )}
             <CopyButton text={synthesis.synthesized_answer} />
-          </Box>
+          </HStack>
         </Box>
 
         {/* Knowledge Graph (ProofGraph prioritaire si disponible) */}
