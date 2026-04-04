@@ -291,7 +291,9 @@ def _reformat_source_citations(answer: str, sources_used: list[str]) -> str:
     def replacer(m):
         doc = m.group(1).strip()
         page = m.group(2).strip()
-        return f"*({doc}, {page})*"
+        # Marqueur custom que le frontend transforme en SourcePill
+        # Le format [[SOURCE:nom|page]] n'est pas interprete par ReactMarkdown
+        return f"[[SOURCE:{doc}|{page}]]"
 
     answer = unified.sub(replacer, answer)
 
@@ -389,7 +391,7 @@ def synthesize_response(
     # V3 : Prompt specialise par mode (si feature flag actif)
     modes_enabled = os.environ.get("OSMOSIS_RESPONSE_MODES", "false").lower() == "true"
     mode_prompt = None
-    if modes_enabled and response_mode != "DIRECT":
+    if modes_enabled:
         mode_prompt = _load_mode_prompt(response_mode)
         if mode_prompt:
             logger.info(f"[SYNTHESIS] Using mode-specific prompt: {response_mode}")
