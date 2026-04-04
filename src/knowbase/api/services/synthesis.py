@@ -228,6 +228,76 @@ def format_chunks_for_synthesis(chunks: List[Dict[str, Any]]) -> str:
     return "\n\n".join(formatted_chunks)
 
 
+def _clean_source_name(source_file: str) -> str:
+    """Transforme un nom de fichier brut en nom lisible.
+
+    '027_SAP_S4HANA_2023_Security_Guide_c160af0e' → 'SAP S4HANA 2023 Security Guide'
+    """
+    import re
+    name = source_file.split("/")[-1]
+    # Retirer hash final
+    name = re.sub(r"_[a-f0-9]{6,}$", "", name, flags=re.IGNORECASE)
+    # Retirer prefixe numerique
+    name = re.sub(r"^\d{3}_(\d+_)?", "", name)
+    # Retirer extension
+    name = re.sub(r"\.\w+$", "", name)
+    # Underscores et tirets → espaces
+    name = name.replace("_", " ").replace("-", " ").strip()
+    # Nettoyer les espaces multiples
+    name = re.sub(r"\s+", " ", name)
+    return name
+
+
+def _reformat_source_citations(answer: str, sources_used: list[str]) -> str:
+    """Post-traite la reponse LLM pour normaliser les citations de sources.
+
+    Cherche les mentions de noms de sources dans le texte et les reformate
+    en *(Nom lisible, p.XX)* pour que le frontend les affiche en SourcePill.
+
+    Strategie : on travaille en un seul passage pour eviter les doubles substitutions.
+    """
+    import re
+
+    if not answer or not sources_used:
+        return answer
+
+    # Construire les noms lisibles
+    clean_names = []
+    for src in sources_used:
+        clean = _clean_source_name(src)
+        if clean and len(clean) >= 15:
+            clean_names.append(clean)
+
+    if not clean_names:
+        return answer
+
+    # Trier par longueur decroissante (matcher les noms les plus longs d'abord)
+    clean_names.sort(key=len, reverse=True)
+
+    # Construire un mega-pattern qui capture toutes les variantes en un passage :
+    # 1. *(Doc, p.XX)* → deja formate, on ne touche pas
+    # 2. (Doc, p.XX) → on ajoute les *
+    # 3. Doc, p.XX → on wrappe en *()*
+    # 4. Doc (p.XX) → on reformate
+    names_alt = "|".join(re.escape(n) for n in clean_names)
+
+    # Pattern unifie : capture nom + page dans toutes les variantes
+    # Groupe 1 = nom du document, Groupe 2 = page
+    unified = re.compile(
+        r"\*?\(?(" + names_alt + r")\s*[,;]\s*(p\.?\s*\d+(?:\s*(?:[-–]\s*\d+|(?:et|and)\s*p?\.?\s*\d+))?)\)?\*?",
+        re.IGNORECASE,
+    )
+
+    def replacer(m):
+        doc = m.group(1).strip()
+        page = m.group(2).strip()
+        return f"*({doc}, {page})*"
+
+    answer = unified.sub(replacer, answer)
+
+    return answer
+
+
 def _build_tension_prompt_section(envelope: "ContradictionEnvelope") -> str:
     """Construit la section MANDATORY du prompt pour forcer la divulgation des tensions."""
     lines = [
@@ -505,6 +575,11 @@ def synthesize_response(
             slide_index = chunk.get('slide_index', '')
             if source_file and source_file not in sources_used:
                 sources_used.append(source_file)
+
+        # Post-traitement : reformater les mentions de sources dans la reponse
+        # Le LLM cite les sources de maniere inconsistante. On normalise vers le format
+        # *(Nom lisible, p.XX)* pour que le frontend les affiche en SourcePill.
+        synthesized_answer = _reformat_source_citations(synthesized_answer, sources_used)
 
         # Calcule un score de confiance basé sur les scores de reranking et Qdrant
         rerank_scores = [chunk.get('rerank_score', 0) for chunk in chunks]
