@@ -296,4 +296,14 @@ export interface SearchResponse {
   // 🌊 Atlas Convergence: Chat ↔ Atlas
   related_articles?: RelatedArticle[]
   insight_hints?: InsightHint[]
+  // 🎯 V3 Response Modes
+  response_mode?: 'DIRECT' | 'AUGMENTED' | 'TENSION' | 'STRUCTURED_FACT'
+  response_mode_metadata?: {
+    candidate_mode?: string
+    resolved_mode?: string
+    confidence?: number
+    reason?: string
+    kg_trust_score?: number
+    fallback_to_direct?: boolean
+  }
 }

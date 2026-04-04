@@ -62,7 +62,7 @@ interface Message {
 type GraphEnrichmentLevel = 'none' | 'light' | 'standard' | 'deep'
 
 // Composant EmptyState avec animation
-const EmptyState = ({ useGraphContext }: { useGraphContext: boolean }) => (
+const EmptyState = ({ useGraphContext, suggestions, onSuggestionClick }: { useGraphContext: boolean; suggestions: string[]; onSuggestionClick: (s: string) => void }) => (
   <MotionFlex
     initial={{ opacity: 0, y: 20 }}
     animate={{ opacity: 1, y: 0 }}
@@ -139,45 +139,44 @@ const EmptyState = ({ useGraphContext }: { useGraphContext: boolean }) => (
       </MotionBox>
     )}
 
-    {/* Suggestions */}
-    <VStack spacing={2} mt={8} w="full" maxW="400px">
-      <Text fontSize="xs" color="text.muted" textTransform="uppercase" letterSpacing="wide">
-        Essayez par exemple
-      </Text>
-      {[
-        "Quels sont les risques GDPR liés au ransomware ?",
-        "Comment fonctionne l'architecture SAP S/4HANA ?",
-        "Résume les bonnes pratiques de sécurité",
-      ].map((suggestion, i) => (
-        <MotionBox
-          key={i}
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.4 + i * 0.1, duration: 0.4 }}
-          w="full"
-        >
-          <Box
-            px={4}
-            py={3}
-            bg="bg.secondary"
-            rounded="xl"
-            border="1px solid"
-            borderColor="border.default"
-            cursor="pointer"
-            transition="all 0.2s"
-            _hover={{
-              borderColor: 'brand.500',
-              bg: 'bg.tertiary',
-              transform: 'translateX(4px)',
-            }}
+    {/* Suggestions dynamiques depuis le KG */}
+    {suggestions.length > 0 && (
+      <VStack spacing={2} mt={8} w="full" maxW="400px">
+        <Text fontSize="xs" color="text.muted" textTransform="uppercase" letterSpacing="wide">
+          Essayez par exemple
+        </Text>
+        {suggestions.map((suggestion, i) => (
+          <MotionBox
+            key={i}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.4 + i * 0.1, duration: 0.4 }}
+            w="full"
           >
-            <Text fontSize="sm" color="text.secondary">
-              {suggestion}
-            </Text>
-          </Box>
-        </MotionBox>
-      ))}
-    </VStack>
+            <Box
+              px={4}
+              py={3}
+              bg="bg.secondary"
+              rounded="xl"
+              border="1px solid"
+              borderColor="border.default"
+              cursor="pointer"
+              transition="all 0.2s"
+              _hover={{
+                borderColor: 'brand.500',
+                bg: 'bg.tertiary',
+                transform: 'translateX(4px)',
+              }}
+              onClick={() => onSuggestionClick(suggestion)}
+            >
+              <Text fontSize="sm" color="text.secondary">
+                {suggestion}
+              </Text>
+            </Box>
+          </MotionBox>
+        ))}
+      </VStack>
+    )}
   </MotionFlex>
 )
 
@@ -526,6 +525,7 @@ const GraphToggle = ({
 export default function ChatPage() {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
+  const [suggestions, setSuggestions] = useState<string[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [useGraphContext, setUseGraphContext] = useState<boolean>(true)
   const [graphEnrichmentLevel, setGraphEnrichmentLevel] = useState<GraphEnrichmentLevel>('standard')
@@ -587,6 +587,33 @@ export default function ChatPage() {
     }
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Charger les suggestions dynamiques depuis le KG
+  useEffect(() => {
+    async function loadSuggestions() {
+      try {
+        const res = await api.wiki.home()
+        if (res.success && res.data) {
+          const data = res.data as any
+          const topEntities = data.corpus_narrative?.top_entities || []
+          const questions: string[] = []
+          // Patterns de questions variés
+          const patterns = [
+            (name: string) => `Que sait le corpus sur ${name} ?`,
+            (name: string) => `Quelles sont les principales informations concernant ${name} ?`,
+            (name: string) => `Resume les connaissances sur ${name}`,
+          ]
+          for (let i = 0; i < Math.min(3, topEntities.length); i++) {
+            questions.push(patterns[i](topEntities[i].name))
+          }
+          if (questions.length > 0) setSuggestions(questions)
+        }
+      } catch {
+        // Fallback silencieux — les suggestions restent vides
+      }
+    }
+    loadSuggestions()
+  }, [])
+
   const formatSearchResults = (results: any[]): string => {
     if (!results || results.length === 0) {
       return 'Aucune information pertinente trouvée dans la base de connaissance.'
@@ -602,9 +629,18 @@ export default function ChatPage() {
       markdown += '## Aperçus\n\n' + thumbnails.join(' ') + '\n\n---\n\n'
     }
 
+    const cleanSourceName = (sf: string) => {
+      let name = sf.split('/').pop() || sf
+      name = name.replace(/_[a-f0-9]{6,}$/i, '')
+      name = name.replace(/^\d{3}_(\d+_)?/, '')
+      name = name.replace(/\.\w+$/, '')
+      name = name.replace(/[_-]+/g, ' ').trim()
+      return name || sf
+    }
+
     results.forEach((result) => {
       const sourceInfo = result.source_file
-        ? `*(${result.source_file.split('/').pop()}, slide ${result.slide_index})*`
+        ? `*(${cleanSourceName(result.source_file)}, slide ${result.slide_index})*`
         : '*(Source inconnue)*'
       const truncatedText = result.text.length > 150
         ? result.text.substring(0, 150) + '...'
@@ -618,9 +654,9 @@ export default function ChatPage() {
     if (sources.length > 0) {
       markdown += '**Sources**\n\n'
       sources.forEach(source => {
-        const filename = source.split('/').pop()
-        const extension = filename?.split('.').pop()?.toUpperCase() || 'FILE'
-        markdown += `- [${filename}](${source}) - ${extension}\n`
+        const name = cleanSourceName(source)
+        const extension = source.split('.').pop()?.toUpperCase() || 'FILE'
+        markdown += `- ${name} (${extension})\n`
       })
     }
 
@@ -853,7 +889,7 @@ export default function ChatPage() {
           }}
         >
           {messages.length === 0 ? (
-            <EmptyState useGraphContext={useGraphContext} />
+            <EmptyState useGraphContext={useGraphContext} suggestions={suggestions} onSuggestionClick={setInput} />
           ) : (
             <VStack spacing={4} align="stretch" maxW="1200px" mx="auto">
               <AnimatePresence mode="popLayout">

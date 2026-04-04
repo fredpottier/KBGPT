@@ -28,8 +28,6 @@ import {
   SearchResponse,
   SearchChunk,
   ExplorationIntelligence,
-  ConfidenceResult,
-  KnowledgeProofSummary,
   ReasoningTrace,
   CoverageMap,
   RelatedArticle,
@@ -40,23 +38,19 @@ import { useState } from 'react'
 import ThumbnailCarousel from './ThumbnailCarousel'
 import SynthesizedAnswer from './SynthesizedAnswer'
 import SourcesSection from './SourcesSection'
-import KnowledgeProofPanel from '../chat/KnowledgeProofPanel'
 import ReasoningTracePanel from '../chat/ReasoningTracePanel'
-import CoverageMapPanel from '../chat/CoverageMapPanel'
+import SplitTruthView from '../chat/SplitTruthView'
 import { InstrumentedAnswerDisplay } from '../chat'
 import type { GraphData, ProofGraph } from '@/types/graph'
 import NextLink from 'next/link'
 import {
   FiAlertTriangle,
-  FiFileText,
-  FiCheckCircle,
   FiAlertCircle,
-  FiXCircle,
-  FiHelpCircle,
+  FiAlertOctagon,
+  FiFileText,
   FiCompass,
   FiStar,
   FiLink,
-  FiAlertOctagon,
 } from 'react-icons/fi'
 
 interface SearchResultDisplayProps {
@@ -68,18 +62,6 @@ interface SearchResultDisplayProps {
   instrumentedAnswer?: InstrumentedAnswer  // 🎯 OSMOSE Assertion-Centric
 }
 
-// Configuration du badge de confiance (Bloc A)
-const CONFIDENCE_BADGE_CONFIG: Record<string, {
-  icon: any
-  colorScheme: string
-  color: string
-}> = {
-  established: { icon: FiCheckCircle, colorScheme: 'green', color: 'green.400' },
-  partial: { icon: FiAlertCircle, colorScheme: 'yellow', color: 'yellow.400' },
-  debate: { icon: FiAlertTriangle, colorScheme: 'orange', color: 'orange.400' },
-  incomplete: { icon: FiXCircle, colorScheme: 'red', color: 'red.400' },
-  out_of_scope: { icon: FiHelpCircle, colorScheme: 'gray', color: 'gray.400' },
-}
 
 export default function SearchResultDisplay({
   searchResult,
@@ -135,22 +117,25 @@ export default function SearchResultDisplay({
         />
       )}
 
-      {/* Bloc A: Badge de confiance (masque si instrumented) */}
-      {searchResult.confidence && !instrumentedAnswer && (
-        <ConfidenceBadge confidence={searchResult.confidence} />
-      )}
-
-      {/* Synthesized Answer : toujours affichée en premier (réponse LLM reformulée) */}
+      {/* Synthesized Answer */}
       {searchResult.synthesis && (
-        <SynthesizedAnswer
-          synthesis={searchResult.synthesis}
-          chunks={searchResult.results}
-          onSlideClick={handleSlideClick}
-          graphData={graphData}
-          proofGraph={proofGraph || searchResult.proof_graph}
-          explorationIntelligence={explorationIntelligence}
-          onSearch={onSearch}
-        />
+        <>
+          {/* Mode TENSION : tenter le Split Truth View (retourne null si pas de positions) */}
+          {searchResult.response_mode === 'TENSION' && searchResult.synthesis.synthesized_answer && (
+            <SplitTruthView answer={searchResult.synthesis.synthesized_answer} />
+          )}
+
+          {/* Reponse markdown (toujours affichee — en TENSION elle sert de fallback/complement) */}
+          <SynthesizedAnswer
+            synthesis={searchResult.synthesis}
+            chunks={searchResult.results}
+            onSlideClick={handleSlideClick}
+            graphData={graphData}
+            proofGraph={proofGraph || searchResult.proof_graph}
+            explorationIntelligence={explorationIntelligence}
+            onSearch={onSearch}
+          />
+        </>
       )}
 
       {/* 🌊 Atlas Convergence: Explorer ce sujet */}
@@ -172,30 +157,9 @@ export default function SearchResultDisplay({
         />
       )}
 
-      {/* Answer+Proof Panels (Blocs B, C, D) - Masques si instrumented car il a sa propre logique */}
-      {!instrumentedAnswer && (
-        <VStack spacing={3} align="stretch">
-          {/* Bloc B: Knowledge Proof Summary */}
-          {searchResult.knowledge_proof && (
-            <KnowledgeProofPanel proof={searchResult.knowledge_proof} />
-          )}
-
-          {/* Bloc C: Reasoning Trace */}
-          {searchResult.reasoning_trace && (
-            <ReasoningTracePanel trace={searchResult.reasoning_trace} />
-          )}
-
-          {/* Bloc D: Coverage Map - DÉSACTIVÉ
-           * Raison: Les sub_domains du DomainContext sont définis au setup,
-           * mais les documents peuvent ne pas correspondre aux catégories prédéfinies.
-           * Cela donne une fausse impression de mauvaise couverture.
-           * À réactiver si on implémente une détection automatique des catégories
-           * basée sur le contenu réel du Knowledge Graph.
-           */}
-          {/* {searchResult.coverage_map && (
-            <CoverageMapPanel coverage={searchResult.coverage_map} />
-          )} */}
-        </VStack>
+      {/* Reasoning Trace (debug, optionnel) */}
+      {!instrumentedAnswer && searchResult.reasoning_trace && (
+        <ReasoningTracePanel trace={searchResult.reasoning_trace} />
       )}
 
       {/* Sources Section */}
@@ -421,81 +385,3 @@ function InsightHintsBlock({ hints }: { hints: InsightHint[] }) {
   )
 }
 
-// Composant Badge de Confiance (Bloc A)
-interface ConfidenceBadgeProps {
-  confidence: ConfidenceResult
-}
-
-function ConfidenceBadge({ confidence }: ConfidenceBadgeProps) {
-  // Utiliser out_of_scope si hors perimetre, sinon l'etat epistemique
-  const stateKey = confidence.contract_state === 'out_of_scope'
-    ? 'out_of_scope'
-    : confidence.epistemic_state
-
-  const config = CONFIDENCE_BADGE_CONFIG[stateKey] || CONFIDENCE_BADGE_CONFIG.incomplete
-
-  return (
-    <Box
-      p={3}
-      bg="bg.secondary"
-      borderRadius="lg"
-      border="1px solid"
-      borderColor="border.default"
-    >
-      <HStack spacing={3} justify="space-between">
-        <HStack spacing={2}>
-          <Icon as={config.icon} color={config.color} boxSize={5} />
-          <VStack align="start" spacing={0}>
-            <HStack spacing={2}>
-              <Text fontSize="sm" fontWeight="medium" color="text.primary">
-                {confidence.badge}
-              </Text>
-              <Badge colorScheme={config.colorScheme} fontSize="2xs">
-                {confidence.epistemic_state}
-              </Badge>
-            </HStack>
-            <Text fontSize="xs" color="text.muted">
-              {confidence.micro_text}
-            </Text>
-          </VStack>
-        </HStack>
-
-        {/* CTA optionnel */}
-        {confidence.cta && (
-          <Tooltip label={confidence.cta.action} placement="top" fontSize="xs">
-            <Text
-              fontSize="xs"
-              color="brand.400"
-              cursor="pointer"
-              _hover={{ textDecoration: 'underline' }}
-            >
-              {confidence.cta.label}
-            </Text>
-          </Tooltip>
-        )}
-      </HStack>
-
-      {/* Warnings */}
-      {confidence.warnings.length > 0 && (
-        <VStack align="start" mt={2} spacing={0.5}>
-          {confidence.warnings.map((warning, idx) => (
-            <Text key={idx} fontSize="2xs" color="yellow.400">
-              {warning}
-            </Text>
-          ))}
-        </VStack>
-      )}
-
-      {/* Blockers */}
-      {confidence.blockers.length > 0 && (
-        <VStack align="start" mt={2} spacing={0.5}>
-          {confidence.blockers.map((blocker, idx) => (
-            <Text key={idx} fontSize="2xs" color="red.400">
-              {blocker}
-            </Text>
-          ))}
-        </VStack>
-      )}
-    </Box>
-  )
-}
