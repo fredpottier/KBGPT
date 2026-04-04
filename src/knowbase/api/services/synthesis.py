@@ -578,9 +578,16 @@ def synthesize_response(
             if source_file and source_file not in sources_used:
                 sources_used.append(source_file)
 
-        # Post-traitement : reformater les mentions de sources dans la reponse
-        # Le LLM cite les sources de maniere inconsistante. On normalise vers le format
-        # *(Nom lisible, p.XX)* pour que le frontend les affiche en SourcePill.
+        # Post-traitement : nettoyer les headers inutiles et reformater les sources
+        import re
+        # Supprimer les headers en debut de reponse (le LLM les ajoute malgre l'instruction)
+        synthesized_answer = re.sub(
+            r"^(?:#{1,3}\s*)?(?:R[ée]ponse(?:\s+directe)?|Synth[eè]se|Analyse|Summary|Answer)\s*\n+",
+            "",
+            synthesized_answer.strip(),
+            flags=re.IGNORECASE,
+        )
+        # Reformater les citations de sources en marqueurs [[SOURCE:]]
         synthesized_answer = _reformat_source_citations(synthesized_answer, sources_used)
 
         # Calcule un score de confiance basé sur les scores de reranking et Qdrant

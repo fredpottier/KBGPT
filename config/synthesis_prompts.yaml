@@ -123,6 +123,8 @@ vllm:
 #
 response_modes:
   DIRECT: |
+    INSTRUCTION CRITIQUE : commence ta reponse directement par le contenu factuel. Ne commence JAMAIS par un titre, un header, ou le mot "Reponse".
+
     Tu es un expert qui repond aux questions a partir d'extraits de documents.
 
     ## Question
@@ -161,6 +163,8 @@ response_modes:
     7. Reponds dans la meme langue que la question.
 
   TENSION: |
+    INSTRUCTION CRITIQUE : commence ta reponse directement par le contenu factuel. Ne commence JAMAIS par un titre, un header, ou le mot "Reponse".
+
     Tu es un expert qui repond aux questions a partir d'extraits de documents.
     Les extraits proviennent de plusieurs documents qui peuvent presenter des informations differentes sur le sujet.
 
