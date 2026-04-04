@@ -33,14 +33,12 @@ import {
   RelatedArticle,
   InsightHint,
 } from '@/types/api'
-import type { InstrumentedAnswer } from '@/types/instrumented'
 import { useState } from 'react'
 import ThumbnailCarousel from './ThumbnailCarousel'
 import SynthesizedAnswer from './SynthesizedAnswer'
 import SourcesSection from './SourcesSection'
 import ReasoningTracePanel from '../chat/ReasoningTracePanel'
 import SplitTruthView from '../chat/SplitTruthView'
-import { InstrumentedAnswerDisplay } from '../chat'
 import type { GraphData, ProofGraph } from '@/types/graph'
 import NextLink from 'next/link'
 import {
@@ -56,10 +54,9 @@ import {
 interface SearchResultDisplayProps {
   searchResult: SearchResponse
   graphData?: GraphData
-  proofGraph?: ProofGraph  // 🌊 Phase 3.5+: Proof Graph prioritaire
+  proofGraph?: ProofGraph
   explorationIntelligence?: ExplorationIntelligence
   onSearch?: (query: string) => void
-  instrumentedAnswer?: InstrumentedAnswer  // 🎯 OSMOSE Assertion-Centric
 }
 
 
@@ -69,7 +66,6 @@ export default function SearchResultDisplay({
   proofGraph,
   explorationIntelligence,
   onSearch,
-  instrumentedAnswer,
 }: SearchResultDisplayProps) {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [selectedImage, setSelectedImage] = useState<SearchChunk | null>(null)
@@ -119,13 +115,11 @@ export default function SearchResultDisplay({
 
       {/* Synthesized Answer */}
       {searchResult.synthesis && (
-        <>
-          {/* Mode TENSION : tenter le Split Truth View (retourne null si pas de positions) */}
-          {searchResult.response_mode === 'TENSION' && searchResult.synthesis.synthesized_answer && (
-            <SplitTruthView answer={searchResult.synthesis.synthesized_answer} />
-          )}
-
-          {/* Reponse markdown (toujours affichee — en TENSION elle sert de fallback/complement) */}
+        searchResult.response_mode === 'TENSION' && searchResult.synthesis.synthesized_answer ? (
+          /* Mode TENSION : Split Truth View uniquement */
+          <SplitTruthView answer={searchResult.synthesis.synthesized_answer} />
+        ) : (
+          /* Mode standard : reponse markdown */
           <SynthesizedAnswer
             synthesis={searchResult.synthesis}
             chunks={searchResult.results}
@@ -135,7 +129,7 @@ export default function SearchResultDisplay({
             explorationIntelligence={explorationIntelligence}
             onSearch={onSearch}
           />
-        </>
+        )
       )}
 
       {/* 🌊 Atlas Convergence: Explorer ce sujet */}
@@ -148,17 +142,8 @@ export default function SearchResultDisplay({
         <InsightHintsBlock hints={searchResult.insight_hints} />
       )}
 
-      {/* 🎯 OSMOSE Assertion-Centric: Preuves détaillées (sous la synthèse) */}
-      {instrumentedAnswer && (
-        <InstrumentedAnswerDisplay
-          answer={instrumentedAnswer}
-          chunks={searchResult.results}
-          onSlideClick={handleSlideClick}
-        />
-      )}
-
       {/* Reasoning Trace (debug, optionnel) */}
-      {!instrumentedAnswer && searchResult.reasoning_trace && (
+      {searchResult.reasoning_trace && (
         <ReasoningTracePanel trace={searchResult.reasoning_trace} />
       )}
 

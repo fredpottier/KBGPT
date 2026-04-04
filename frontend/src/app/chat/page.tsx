@@ -268,7 +268,6 @@ const MessageBubble = ({
                 graphData={message.graphData}
                 explorationIntelligence={message.explorationIntelligence}
                 onSearch={onSearch}
-                instrumentedAnswer={message.searchResult.instrumented_answer}
               />
             ) : (
               <Text
