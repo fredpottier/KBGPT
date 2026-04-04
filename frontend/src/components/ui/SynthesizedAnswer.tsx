@@ -24,6 +24,7 @@ import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
 import { SynthesisResult, SearchChunk, ExplorationIntelligence } from '@/types/api'
 import CopyButton from './CopyButton'
+import { renderWithSourcePills } from './SourcePill'
 import { ResponseGraph } from '@/components/chat'
 import type { GraphData, ProofGraph } from '@/types/graph'
 import { FiCheckCircle, FiAlertCircle, FiAlertTriangle } from 'react-icons/fi'
@@ -115,15 +116,27 @@ const createMarkdownComponents = (
     return parts.length > 0 ? <>{parts}</> : text
   }
 
-  // Traiter les children pour les slides cliquables
+  // Traiter les children : slides cliquables + source pills
   const processChildren = (children: React.ReactNode): React.ReactNode => {
     if (typeof children === 'string') {
-      return renderTextWithSlides(children)
+      // D'abord les source pills, puis les slides
+      const withPills = renderWithSourcePills(children)
+      if (typeof withPills === 'string') {
+        return renderTextWithSlides(withPills)
+      }
+      return withPills
     }
     if (Array.isArray(children)) {
-      return children.map((child, i) =>
-        typeof child === 'string' ? <span key={i}>{renderTextWithSlides(child)}</span> : child
-      )
+      return children.map((child, i) => {
+        if (typeof child === 'string') {
+          const withPills = renderWithSourcePills(child)
+          if (typeof withPills === 'string') {
+            return <span key={i}>{renderTextWithSlides(withPills)}</span>
+          }
+          return <span key={i}>{withPills}</span>
+        }
+        return child
+      })
     }
     return children
   }
