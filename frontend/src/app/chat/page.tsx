@@ -274,6 +274,23 @@ const MessageBubble = ({
               </Text>
             )}
 
+            {/* Copie question — discret, visible au hover */}
+            {isUser && (
+              <Box
+                className="message-actions"
+                opacity={0}
+                transition="opacity 0.2s"
+                mt={1}
+              >
+                <CopyButton
+                  text={message.content}
+                  size="xs"
+                  variant="ghost"
+                  color="whiteAlpha.500"
+                  _hover={{ color: 'white' }}
+                />
+              </Box>
+            )}
 
             {/* Actions pour messages assistant */}
             {!isUser && (
