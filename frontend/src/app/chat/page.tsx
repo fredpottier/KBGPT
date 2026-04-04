@@ -207,6 +207,7 @@ const MessageBubble = ({
         <Box
           maxW={{ base: '90%', md: '80%' }}
           w={isUser ? 'auto' : 'full'}
+          css={{ '&:hover .message-actions': { opacity: 1 } }}
         >
           {/* Avatar et header */}
           <HStack
@@ -274,24 +275,6 @@ const MessageBubble = ({
               </Text>
             )}
 
-            {/* Copie question — discret, visible au hover */}
-            {isUser && (
-              <Box
-                className="message-actions"
-                opacity={0}
-                transition="opacity 0.2s"
-                mt={1}
-              >
-                <CopyButton
-                  text={message.content}
-                  size="xs"
-                  variant="ghost"
-                  color="whiteAlpha.500"
-                  _hover={{ color: 'white' }}
-                />
-              </Box>
-            )}
-
             {/* Actions pour messages assistant */}
             {!isUser && (
               <HStack
@@ -343,6 +326,19 @@ const MessageBubble = ({
               </HStack>
             )}
           </Box>
+
+          {/* Copie question — SOUS le bloc bleu, a droite, couleur du fond */}
+          {isUser && (
+            <Flex justify="flex-end" mt={0.5} className="message-actions" opacity={0} transition="opacity 0.2s">
+              <CopyButton
+                text={message.content}
+                size="xs"
+                variant="ghost"
+                color="text.muted"
+                _hover={{ color: 'text.primary' }}
+              />
+            </Flex>
+          )}
         </Box>
       </Flex>
     </MotionBox>
