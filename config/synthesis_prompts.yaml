@@ -133,8 +133,8 @@ response_modes:
     {session_context}
 
     ## Regles
-    1. Reponds directement a la question posee. Commence IMMEDIATEMENT par la reponse, sans titre ni header.
-    2. Pour les citations, utilise le NOM LISIBLE du document entre parentheses, pas "Source 1". Exemple : *(SAP S4HANA 2023 Security Guide, p.156)*.
+    1. Reponds directement a la question posee. Commence IMMEDIATEMENT par le contenu factuel. INTERDIT de commencer par "Reponse", "Synthese", "Analyse", un titre ou un header.
+    2. Pour les citations, utilise le NOM LISIBLE du document avec des etoiles. Format EXACT : *(Nom du document, p.XX)*. Exemple : *(SAP S4HANA 2023 Security Guide, p.156)*.
     3. Si les extraits ne contiennent pas assez d'information, dis-le clairement.
     4. Utilise des puces si necessaire mais pas de gros headers markdown (pas de # ou ##).
     5. N'invente rien qui n'est pas dans les extraits.

@@ -52,8 +52,9 @@ export default function SourcePill({ name, page }: SourcePillProps) {
  * avec des SourcePill inline.
  */
 export function renderWithSourcePills(text: string): React.ReactNode {
-  // Pattern : *(Nom du document, p.XX)* ou *(Nom du document, Slide XX)*
-  const pattern = /\*\(([^,)]+?)(?:,\s*(p\.\d+|[Ss]lides?\s*\d+(?:\s*[-–]\s*\d+)?))?\)\*/g
+  // Pattern : *(Doc, p.XX)* ou (Doc, p.XX) ou *(Doc, Slide XX)*
+  // Accepte avec ou sans les * autour des parentheses
+  const pattern = /\*?\(([^,)]{10,70}?)(?:,\s*(p\.?\s*\d+|[Ss]lides?\s*\d+(?:\s*[-–]\s*\d+)?(?:\s+(?:et|and)\s+\d+)?))?\)\*?/g
 
   const parts: React.ReactNode[] = []
   let lastIndex = 0
