@@ -2,20 +2,25 @@
 OSMOSE Verification Service
 
 Business logic for text verification against Knowledge Graph.
+V2: Uses search_documents pipeline instead of evidence_matcher.
 
 Author: Claude Code
 Date: 2026-02-03
 """
 
+import json
 import logging
-from typing import Dict, Optional
-from uuid import uuid4
+import re
+from typing import Dict
 
 from knowbase.verification.assertion_splitter import AssertionSplitter
-from knowbase.verification.evidence_matcher import EvidenceMatcher
+from knowbase.api.services.search import search_documents
+from knowbase.common.clients import get_qdrant_client, get_sentence_transformer
+from knowbase.config.settings import get_settings
 from knowbase.common.llm_router import get_llm_router, TaskType
 from knowbase.api.schemas.verification import (
     Assertion,
+    Evidence,
     VerifyResponse,
     CorrectResponse,
     CorrectionChange,
@@ -23,6 +28,25 @@ from knowbase.api.schemas.verification import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Prompt for comparing assertion against corpus answer
+COMPARE_ASSERTION_PROMPT = """You are a fact-checker. Compare an ASSERTION against the CORPUS ANSWER retrieved from a document knowledge base.
+
+ASSERTION:
+"{assertion}"
+
+CORPUS ANSWER:
+"{corpus_answer}"
+
+Determine:
+- "confirmed" if the corpus answer clearly supports/confirms the assertion
+- "contradicted" if the corpus answer clearly contradicts the assertion (different values, dates, facts)
+- "incomplete" if the corpus answer partially covers the assertion but is missing key details
+- "unknown" if the corpus answer does not address the topic of the assertion at all
+
+Return ONLY a JSON object:
+{{"status": "confirmed|contradicted|incomplete|unknown", "confidence": 0.0-1.0, "explanation": "brief reason"}}"""
 
 
 # Prompt for correcting text
@@ -82,8 +106,10 @@ class VerificationService:
     def __init__(self, tenant_id: str = "default"):
         self.tenant_id = tenant_id
         self.assertion_splitter = AssertionSplitter()
-        self.evidence_matcher = EvidenceMatcher(tenant_id)
         self.llm_router = get_llm_router()
+        self.settings = get_settings()
+        self.qdrant_client = get_qdrant_client()
+        self.embedding_model = get_sentence_transformer()
 
     async def analyze(self, text: str) -> VerifyResponse:
         """
@@ -101,7 +127,7 @@ class VerificationService:
         assertions_raw = await self.assertion_splitter.split(text)
         logger.info(f"[VERIFICATION] Extracted {len(assertions_raw)} assertions")
 
-        # 2. Verify each assertion
+        # 2. Verify each assertion via search pipeline + LLM compare
         assertions = []
         for i, raw in enumerate(assertions_raw):
             assertion_id = f"A{i + 1}"
@@ -109,10 +135,67 @@ class VerificationService:
 
             logger.debug(f"[VERIFICATION] Checking assertion {assertion_id}: {assertion_text[:50]}...")
 
-            # Find evidence
-            evidence, status, confidence = await self.evidence_matcher.find_evidence(
-                assertion_text
-            )
+            try:
+                # 2a. Search corpus using the full search pipeline
+                search_result = search_documents(
+                    question=assertion_text,
+                    qdrant_client=self.qdrant_client,
+                    embedding_model=self.embedding_model,
+                    settings=self.settings,
+                    tenant_id=self.tenant_id,
+                )
+
+                synthesis = search_result.get("synthesis", {})
+                corpus_answer = synthesis.get("synthesized_answer", "")
+                chunks = search_result.get("results", [])
+
+                if not corpus_answer or corpus_answer.strip() == "":
+                    # No answer from corpus
+                    status = VerificationStatus.UNKNOWN
+                    confidence = 0.0
+                    explanation = "Aucune information trouvée dans le corpus"
+                    evidence_list = []
+                else:
+                    # 2b. Compare assertion vs corpus answer via LLM
+                    verdict = await self._compare_assertion_vs_corpus(
+                        assertion_text, corpus_answer
+                    )
+                    status = self._verdict_to_status(verdict.get("status", "unknown"))
+                    confidence = verdict.get("confidence", 0.5)
+                    explanation = verdict.get("explanation", "")
+
+                    # 2c. Build evidence from top chunks
+                    status_to_relationship = {
+                        VerificationStatus.CONFIRMED: "supports",
+                        VerificationStatus.CONTRADICTED: "contradicts",
+                        VerificationStatus.INCOMPLETE: "partial",
+                        VerificationStatus.UNKNOWN: "partial",
+                        VerificationStatus.FALLBACK: "partial",
+                    }
+                    relationship = status_to_relationship.get(status, "partial")
+
+                    evidence_list = []
+                    for chunk in chunks[:3]:
+                        evidence_list.append(Evidence(
+                            type="chunk",
+                            text=chunk.get("text", "")[:500],
+                            source_doc=chunk.get("source_file", "unknown"),
+                            source_page=chunk.get("slide_index"),
+                            confidence=chunk.get("score", 0.5),
+                            relationship=relationship,
+                            comparison_details={
+                                "reason_code": f"SEARCH_PIPELINE_{status.value.upper()}",
+                                "reason_message": explanation,
+                                "deterministic": False,
+                                "corpus_answer_excerpt": corpus_answer[:300],
+                            }
+                        ))
+
+            except Exception as e:
+                logger.error(f"[VERIFICATION] Error checking assertion {assertion_id}: {e}")
+                status = VerificationStatus.UNKNOWN
+                confidence = 0.0
+                evidence_list = []
 
             assertions.append(Assertion(
                 id=assertion_id,
@@ -121,7 +204,7 @@ class VerificationService:
                 end_index=raw.get("end", len(assertion_text)),
                 status=status,
                 confidence=confidence,
-                evidence=evidence
+                evidence=evidence_list,
             ))
 
         # 3. Compute summary
@@ -209,6 +292,40 @@ class VerificationService:
                 changes=[]
             )
 
+    async def _compare_assertion_vs_corpus(self, assertion: str, corpus_answer: str) -> dict:
+        """Compare une assertion avec la réponse du corpus via LLM."""
+        prompt = COMPARE_ASSERTION_PROMPT.format(
+            assertion=assertion,
+            corpus_answer=corpus_answer[:2000],
+        )
+
+        try:
+            response = await self.llm_router.acomplete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=256,
+            )
+
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if json_match:
+                return json.loads(json_match.group())
+        except Exception as e:
+            logger.error(f"[VERIFICATION] LLM compare failed: {e}")
+
+        return {"status": "unknown", "confidence": 0.0, "explanation": "LLM comparison failed"}
+
+    @staticmethod
+    def _verdict_to_status(verdict_status: str) -> VerificationStatus:
+        """Map verdict string to VerificationStatus enum."""
+        mapping = {
+            "confirmed": VerificationStatus.CONFIRMED,
+            "contradicted": VerificationStatus.CONTRADICTED,
+            "incomplete": VerificationStatus.INCOMPLETE,
+            "unknown": VerificationStatus.UNKNOWN,
+        }
+        return mapping.get(verdict_status, VerificationStatus.UNKNOWN)
+
     def _compute_summary(self, assertions: list[Assertion]) -> Dict[str, int]:
         """Compute summary statistics."""
         summary = {
@@ -240,9 +357,6 @@ class VerificationService:
         original_text: str
     ) -> CorrectResponse:
         """Parse LLM correction response."""
-        import json
-        import re
-
         # Try to extract JSON
         json_match = re.search(r'\{[\s\S]*\}', response)
         if json_match:

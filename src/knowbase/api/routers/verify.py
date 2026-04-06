@@ -206,15 +206,22 @@ async def upload_and_verify_docx(
                     corpus_positions.append(CorpusPosition(
                         doc_id=getattr(ev, "source_doc", "") or "",
                         doc_title=getattr(ev, "source_doc", "") or "",
-                        claim_text=getattr(ev, "claim_text", "") or "",
+                        claim_text=getattr(ev, "text", "") or "",
                         relation="CONFIRMS" if assertion.status == "confirmed" else "CONTRADICTS" if assertion.status == "contradicted" else "QUALIFIES",
                         confidence=assertion.confidence or 0.0,
                     ))
 
+                # Trouver le paragraphe qui contient l'assertion
+                matched_para_index = first_para_index
+                for cp in chunk:
+                    if assertion.text[:60] in cp["text"]:
+                        matched_para_index = cp["index"]
+                        break
+
                 verdict = AssertionVerdict(
                     assertion_id=assertion.id,
                     assertion_text=assertion.text,
-                    paragraph_index=first_para_index + (assertion.start_index // max(len(chunk_text) // len(chunk), 1)),
+                    paragraph_index=matched_para_index,
                     status=status_map.get(assertion.status, "unknown"),
                     severity="high" if assertion.status == "contradicted" else "medium" if assertion.status == "incomplete" else "low",
                     confidence=assertion.confidence or 0.0,
@@ -298,8 +305,8 @@ def _build_explanation(assertion) -> str:
         explanation = f"Cette affirmation est CONTREDITE par le corpus.\n\n"
         explanation += f"Votre texte : \"{assertion.text[:150]}\"\n"
         explanation += f"Le corpus indique : \"{claim[:200]}\"\n\n"
-        if comparison and hasattr(comparison, "reason_code"):
-            explanation += f"Raison : {comparison.reason_code}\n"
+        if comparison and isinstance(comparison, dict) and comparison.get("reason_message"):
+            explanation += f"Raison : {comparison['reason_message']}\n"
         explanation += f"Source : {source}"
         return explanation
     elif assertion.status == "incomplete":
