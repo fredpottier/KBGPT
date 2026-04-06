@@ -1,112 +1,73 @@
-# Documentation KnowWhere - Projet OSMOSE
+# Documentation OSMOSIS
 
-**Version:** 2.1
-**Date:** 2026-01-06
-**Status:** Phase 2 en cours
-
----
-
-## Bienvenue
-
-Bienvenue dans la documentation du projet **KnowWhere** (nom commercial) / **OSMOSE** (nom de code technique : Organic Semantic Memory Organization & Smart Extraction).
-
-**Tagline** : *"Le Cortex Documentaire des Organisations - Comprendre vos documents ET maîtriser vos coûts"*
+**Version :** 3.0 — Rationalisation Mars 2026
+**Projet :** OSMOSIS (Organic Semantic Memory Organization & Smart Extraction)
 
 ---
 
-## 📚 Accès rapides par audience
+## Structure
 
-### 👨‍💻 Développeurs
+Cette documentation a été rationalisée le 29 mars 2026. Les 232 fichiers originaux sont archivés dans `archive/pre-rationalization-2026-03/`. La matrice de traçabilité garantit qu'aucune substance décisionnelle n'a été perdue.
 
-1. [Architecture technique](./architecture/OSMOSE_ARCHITECTURE_TECHNIQUE.md)
-2. [Specs extraction (index)](./specs/extraction/)
-3. [Guide OSMOSE Pure](./guides/OSMOSE_PURE_GUIDE.md)
-4. [Guide import documents](./specs/ingestion/SPEC-PROCESSUS_IMPORT_DOCUMENT.md)
+### Fondations (3 docs)
 
-### 🧱 Architectes / Lead Tech
+| Document | Contenu |
+|----------|---------|
+| [NORTH_STAR.md](./NORTH_STAR.md) | **Invariants inviolables**, principes fondateurs, Decision Defense, pistes écartées critiques, profils de visibilité |
+| [VISION_PRODUIT.md](./VISION_PRODUIT.md) | Positionnement produit, 5 capacités, différenciation vs Copilot/RAG, marché cible, usages A/B/C |
+| [HISTORIQUE_PIVOTS.md](./HISTORIQUE_PIVOTS.md) | Timeline chronologique, pivots architecturaux, phases complétées, leçons apprises |
 
-1. [ADN OSMOSE - Graph First](./foundations/GRAPH_FIRST_PRINCIPLE.md)
-2. [Architecture de référence](./architecture/OSMOSE_ARCHITECTURE_TECHNIQUE.md)
-3. [Décisions d’architecture (ADR)](./adr/README.md)
-4. [Déploiement](./architecture/ARCHITECTURE_DEPLOIEMENT.md)
+### Architecture (4 docs)
 
-### 👨‍💼 Product Owner / Direction
+| Document | Contenu |
+|----------|---------|
+| [ARCH_PIPELINE.md](./ARCH_PIPELINE.md) | **Pipeline stratifié Pass 0→3**, Docling, vision gating, extraction, linking — vérifié contre le code |
+| [ARCH_CLAIMFIRST.md](./ARCH_CLAIMFIRST.md) | **Pipeline ClaimFirst** 9 phases, Facet Engine V2, marker normalization, corpus promotion |
+| [ARCH_RETRIEVAL.md](./ARCH_RETRIEVAL.md) | **Graph-Guided RAG**, Signal-Driven search, Concept Matching, Layer R, synthèse tiered |
+| [ARCH_STOCKAGE.md](./ARCH_STOCKAGE.md) | **Neo4j + Qdrant + PostgreSQL + Redis** — schémas, collections, configuration |
 
-1. [Ambition & Roadmap produit](./phases/OSMOSE_AMBITION_PRODUIT_ROADMAP.md)
-2. [Roadmap intégrée](./phases/OSMOSE_ROADMAP_INTEGREE.md)
-3. [Phase 1 : Semantic Core](./phases/PHASE1_SEMANTIC_CORE.md)
+### Chantiers actifs (5 docs)
 
-### 🔧 Ops / SRE
+| Document | Contenu |
+|----------|---------|
+| [CHANTIER_BENCHMARK.md](./CHANTIER_BENCHMARK.md) | Framework 320 questions, dual-judge, scores Sprint 0→2, architecture LLM tiered |
+| [CHANTIER_CHUNKING.md](./CHANTIER_CHUNKING.md) | Diagnostic chunking (70% < 100 chars), stratégie rechunking, unité preuve vs lecture |
+| [CHANTIER_ATLAS.md](./CHANTIER_ATLAS.md) | Atlas cognitif 3 phases, Concept Assembly Engine, Wikipedia OSMOSIS |
+| [CHANTIER_COCKPIT.md](./CHANTIER_COCKPIT.md) | Cockpit opérationnel, 6 widgets, design system, architecture indépendante |
+| [CHANTIER_KG_QUALITY.md](./CHANTIER_KG_QUALITY.md) | 6 chantiers qualité KG, Entity Resolution, déduplication acronymes |
 
-1. [Guide opérations](./operations/OPS_GUIDE.md)
-2. [Guide admin](./operations/ADMIN_GUIDE.md)
-3. [Déploiement AWS](./operations/AWS_DEPLOYMENT_GUIDE.md)
-4. [Coûts AWS](./operations/AWS_COST_MANAGEMENT.md)
+### Ops & Dev (2 docs)
 
-### 🔬 Recherche & Analyse
+| Document | Contenu |
+|----------|---------|
+| [OPS.md](./OPS.md) | Docker multi-compose, kw.ps1, Burst EC2 Spot, AWS, backup, monitoring, purge |
+| [DEV_GUIDE.md](./DEV_GUIDE.md) | Structure code, API endpoints, frontend pages, feature flags, conventions |
 
-1. [Études et analyses](./research/)
-2. [Suivi d’exécution](./tracking/)
+### Suivi & Traçabilité
 
----
-
-## 🧭 Conventions de nommage
-
-- **ADR** : `ADR-YYYYMMDD-slug.md` (voir [adr/README.md](./adr/README.md))
-- **Specs** : `SPEC-<sujet>.md` par domaine (`specs/extraction`, `specs/graph`, `specs/ingestion`)
-- **Tracking** : `TRACKING-<sujet>.md`
-
----
-
-## 🗂️ Structure documentaire (stable)
-
-```
-doc/
-├── README.md                         # Index global + parcours par audience
-├── foundations/                      # Invariants / ADN OSMOSE
-│   ├── KG_AGNOSTIC_ARCHITECTURE.md
-│   └── GRAPH_FIRST_PRINCIPLE.md
-├── adr/                              # Decisions d’architecture
-│   ├── README.md                     # Index ADR (statut, tags)
-│   └── ADR-YYYYMMDD-graph-first-architecture.md
-├── architecture/                     # Architecture de référence (stables)
-│   ├── OSMOSE_ARCHITECTURE_TECHNIQUE.md
-│   └── ARCHITECTURE_DEPLOIEMENT.md
-├── specs/                            # Spécifications techniques
-│   ├── extraction/
-│   ├── graph/
-│   └── ingestion/
-├── guides/                           # Guides pratiques dev
-├── operations/                       # Runbook, déploiement, SRE
-├── phases/                           # Roadmaps/phase delivery
-├── research/                         # Études et analyses exploratoires
-├── tracking/                         # Suivi d’exécution (journalisé)
-└── archive/                          # Historique obsolète
-```
+| Document | Contenu |
+|----------|---------|
+| [TODOLIST.md](./TODOLIST.md) | **Plan d'exécution** : 4 phases, tâches ordonnancées, critères GO/NO-GO. Tâche terminée → mise à jour doc source → suppression ici. |
+| [MATRICE_TRACABILITE_RATIONALIZATION.md](./MATRICE_TRACABILITE_RATIONALIZATION.md) | Preuve du refacto : 19 invariants, 27 pistes écartées, 20+ travaux non terminés, mapping sources→cibles |
 
 ---
 
-## 🔧 Configuration Projet
+## Interfaces
 
-| Fichier | Description |
-|---------|-------------|
-| `config/llm_models.yaml` | Configuration modèles LLM (SMALL/BIG/VISION) |
-| `config/prompts.yaml` | Prompts personnalisables par famille |
-| `config/sap_solutions.yaml` | Catalogue ontologie SAP |
-| `config/semantic_intelligence_v2.yaml` | Configuration OSMOSE (embeddings, segmentation, extraction) |
-
----
-
-## 📊 Monitoring & Interfaces
-
-- **Frontend** : http://localhost:3000
-- **API Docs (Swagger)** : http://localhost:8000/docs
-- **Neo4j Browser** : http://localhost:7474
-- **Qdrant Dashboard** : http://localhost:6333/dashboard
-- **Grafana** : http://localhost:3001
-- **Prometheus** : http://localhost:9090
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:3000 |
+| API Swagger | http://localhost:8000/docs |
+| Neo4j Browser | http://localhost:7474 |
+| Qdrant Dashboard | http://localhost:6333/dashboard |
+| Grafana | http://localhost:3001 |
 
 ---
 
-**Dernière mise à jour** : 2026-01-06
-**Maintenu par** : Équipe OSMOSE
+## Archive
+
+`doc/archive/pre-rationalization-2026-03/` contient les 232 fichiers originaux organisés par répertoire (adr/, specs/, ongoing/, research/, etc.). Consulter la matrice de traçabilité pour retrouver l'origine de chaque décision.
+
+---
+
+*Dernière mise à jour : 2026-03-29*
