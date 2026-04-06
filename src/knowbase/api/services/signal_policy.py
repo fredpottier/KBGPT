@@ -24,11 +24,12 @@ MAX_KG_INJECTION_TOKENS = 150
 
 
 class ResponseMode(str, Enum):
-    """Les 4 modes de reponse OSMOSIS."""
+    """Les 5 modes de reponse OSMOSIS."""
     DIRECT = "DIRECT"              # RAG pur, zero KG dans le prompt
     AUGMENTED = "AUGMENTED"        # KG guide le retrieval (doc expansion) sans texte narratif
     TENSION = "TENSION"            # Template Position A / Position B, contraintes courtes
     STRUCTURED_FACT = "STRUCTURED_FACT"  # Faits structures reformules par le LLM
+    PERSPECTIVE = "PERSPECTIVE"    # Preuves groupees par axes thematiques (questions ouvertes)
 
 
 @dataclass

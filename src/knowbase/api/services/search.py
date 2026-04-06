@@ -1330,6 +1330,30 @@ def search_documents(
         graph_context_text = _build_structured_facts_block(qs_crossdoc_data, kg_claim_results)
         logger.info(f"[MODE:STRUCTURED_FACT] Facts block injected ({len(graph_context_text)} chars)")
 
+    elif resolved_mode == ResponseMode.PERSPECTIVE:
+        # Preuves groupees par axes thematiques (questions ouvertes)
+        try:
+            from knowbase.perspectives.runtime import assemble_perspective_context
+            graph_context_text, perspective_metadata = assemble_perspective_context(
+                question=query,
+                question_embedding=query_vector,
+                kg_claim_results=kg_claim_results,
+                reranked_chunks=reranked_chunks,
+                tenant_id=tenant_id,
+            )
+            if not perspective_metadata.get("activated"):
+                # Fallback DIRECT si Perspectives insuffisantes
+                graph_context_text = ""
+                logger.info(
+                    f"[MODE:PERSPECTIVE] Fallback DIRECT: "
+                    f"{perspective_metadata.get('fallback_reason', 'unknown')}"
+                )
+            else:
+                logger.info(f"[MODE:PERSPECTIVE] Context injected ({len(graph_context_text)} chars)")
+        except Exception as e:
+            logger.warning(f"[MODE:PERSPECTIVE] Failed (non-blocking): {e}")
+            graph_context_text = ""
+
     else:
         # Fallback : comportement existant (feature flag off)
         # Ajouter les instructions signal-driven au contexte de synthese

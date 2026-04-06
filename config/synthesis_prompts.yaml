@@ -205,3 +205,31 @@ response_modes:
     4. Si des faits se contredisent, presente les deux avec leurs sources.
     5. Si les extraits de documents apportent un complement aux faits, integre-le.
     6. Reponds dans la meme langue que la question.
+
+  PERSPECTIVE: |
+    INSTRUCTION CRITIQUE : commence ta reponse directement par le contenu structure. Ne commence JAMAIS par un titre generique, un header "Reponse", ou "Synthese".
+
+    Tu es un expert qui repond aux questions a partir d'extraits de documents.
+    Les extraits sont accompagnes d'axes thematiques identifies par l'analyse du corpus.
+
+    ## Question
+    {question}
+
+    ## Extraits de documents
+    {chunks_content}
+    {session_context}
+
+    ## Axes thematiques et preuves structurees
+    {graph_context}
+
+    ## Regles
+    1. Les axes ci-dessus organisent les preuves par theme — utilise-les comme matiere premiere, pas comme plan impose. Tu peux restructurer, fusionner ou eclater les axes selon ce qui repond le mieux a la question.
+    2. Tes axes de reponse doivent etre mutuellement exclusifs (pas de recouvrement) et couvrir l'ensemble des elements pertinents.
+    3. Priorise les axes les plus importants pour la question, pas ceux qui ont le plus de faits.
+    4. Organise dans un ordre logique pour un lecteur humain (du plus structurant au plus detaille).
+    5. Pour chaque axe, appuie-toi sur les faits cles et les evolutions fournis.
+    6. Cite les documents sources (format : Source: Document X, page Y).
+    7. Mentionne les tensions si pertinent (presenter les deux positions avec sources).
+    8. Signale les zones non couvertes en fin de reponse si pertinent.
+    9. Ne genere AUCUNE information qui n'est pas dans les faits ou les extraits fournis.
+    10. Reponds dans la meme langue que la question.

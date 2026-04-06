@@ -106,6 +106,7 @@ class ClaimFirstSchema:
         "DocumentContext",    # INV-8: Contexte d'applicabilité du document
         "ApplicabilityAxis",  # INV-12/14/25: Axe d'applicabilité
         "ComparableSubject",  # INV-25: Sujet stable comparable entre documents
+        "Perspective",        # Couche Perspective: regroupement thematique par sujet
     ]
 
     # Types de relations
@@ -124,6 +125,9 @@ class ClaimFirstSchema:
         "POSSIBLE_EQUIVALENT",  # SubjectAnchor → SubjectAnchor (INV-9)
         "HAS_AXIS_VALUE",    # DocumentContext → ApplicabilityAxis (INV-26)
         "SIMILAR_TO",        # Entity → Entity (V1.4: uncertain merge, soft-link)
+        "HAS_PERSPECTIVE",   # SubjectAnchor/ComparableSubject → Perspective
+        "INCLUDES_CLAIM",    # Perspective → Claim
+        "SPANS_FACET",       # Perspective → Facet
     ]
 
     # Contraintes (unicité)
@@ -190,6 +194,14 @@ class ClaimFirstSchema:
             name="comparable_subject_unique",
             label="ComparableSubject",
             property_key="subject_id",
+            constraint_type="UNIQUE"
+        ),
+
+        # Perspective: unique par perspective_id
+        SchemaConstraint(
+            name="perspective_unique",
+            label="Perspective",
+            property_key="perspective_id",
             constraint_type="UNIQUE"
         ),
     ])
@@ -361,6 +373,30 @@ class ClaimFirstSchema:
             name="comparable_subject_aliases_search",
             label="ComparableSubject",
             property_keys=["aliases"],
+            index_type="FULLTEXT"
+        ),
+
+        # ==== Perspective Layer ====
+
+        # Index sur tenant_id pour Perspective multi-tenant
+        SchemaIndex(
+            name="perspective_tenant",
+            label="Perspective",
+            property_keys=["tenant_id"]
+        ),
+
+        # Index composite pour Perspective (tenant_id, subject_id)
+        SchemaIndex(
+            name="perspective_subject",
+            label="Perspective",
+            property_keys=["tenant_id", "subject_id"]
+        ),
+
+        # Index fulltext sur label pour recherche
+        SchemaIndex(
+            name="perspective_label_search",
+            label="Perspective",
+            property_keys=["label"],
             index_type="FULLTEXT"
         ),
     ])
