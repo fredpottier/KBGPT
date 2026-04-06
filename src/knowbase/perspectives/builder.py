@@ -87,12 +87,12 @@ def collect_claims_for_subject(
                 "facet_names": [f for f in r["facet_names"] if f],
             })
 
-        # Recuperer les embeddings (claim_embedding) s'ils existent
+        # Recuperer les embeddings
         result = session.run("""
             UNWIND $doc_ids AS did
             MATCH (c:Claim {tenant_id: $tid, doc_id: did})
-            WHERE c.claim_embedding IS NOT NULL
-            RETURN c.claim_id AS claim_id, c.claim_embedding AS embedding
+            WHERE c.embedding IS NOT NULL
+            RETURN c.claim_id AS claim_id, c.embedding AS embedding
         """, doc_ids=doc_ids, tid=tenant_id)
 
         embedding_map = {}
