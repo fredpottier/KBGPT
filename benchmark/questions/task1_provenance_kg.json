@@ -3,159 +3,1910 @@
     "task": "T1",
     "source": "kg_derived",
     "corpus": "SAP Enterprise Documentation",
-    "count": 30,
-    "generated_at": "2026-03-23T21:00:00Z",
-    "note": "Questions KG v3 — cross-doc synthesis. Testent la capacite a croiser plusieurs documents pour produire une reponse sourcee. Toutes verifiees dans le KG."
+    "count": 100,
+    "generated_at": "2026-03-29T09:21:02.180051",
+    "seed": 42
   },
   "questions": [
-    {"question_id": "T1_KG_0000", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Quelles sont les differences de prerequis entre la conversion vers S/4HANA 2022 et la conversion vers S/4HANA Cloud Private Edition 2025 ?",
-     "ground_truth": {"expected_claim": "Les prerequis de base sont identiques (Unicode, ABAP-only, dual-stack split). Le PCE 2025 ajoute les instances Java specifiques et le RISE transition workbench.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "prerequis", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0001", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment les autorisations pour le commerce international (Intrastat) ont-elles evolue entre le Security Guide 2022 et 2023 ?",
-     "ground_truth": {"expected_claim": "Les deux guides documentent S_PROGNAM avec P_PROGNAM et les business catalogs SAP_SLL_BC_INTRASTAT. Le guide 2022 ajoute les catalogs SAP_SLL_BC_CLS avec dependance SAP_CMD_BC_PRODUCT_DSP.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "S_PROGNAM", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0002", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment les capacites IA de SAP (Joule) ont-elles evolue entre le Business Scope FPS03 et le Business Scope 2025 ?",
-     "ground_truth": {"expected_claim": "Le FPS03 presente Joule comme copilote AI multi-agents. Le 2025 detaille la creation de Purchase Requisitions via Joule. Les Highlights FPS03 montrent le SD Premium Assistant.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "Joule", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0003", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment le clean core development est-il positionne dans le Operations Guide 2023 par rapport aux versions precedentes ?",
-     "ground_truth": {"expected_claim": "Le Operations Guide 2023 ajoute la section clean core environment setup avec les guidelines ABAP Cloud et le blueprint d'extensibilite. Les guides 2021 et 2022 ne couvrent pas ce sujet.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "clean core", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0004", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment RFC est-il utilise selon les Security Guides, les Operations Guides et les Installation Guides ?",
-     "ground_truth": {"expected_claim": "Les Security Guides couvrent les destinations RFC et l'authentification SNC. Les Operations Guides couvrent le monitoring qRFC (SMQ1/SMQ2). Les Installation Guides couvrent la configuration des destinations.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "RFC", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0005", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment la securite cloud SAP est-elle documentee entre le document RISE with SAP et le document Access to Customer Systems ?",
-     "ground_truth": {"expected_claim": "RISE couvre les Security Policies, l'isolation tenant, TLS, Application Security (RAVEN). Access to Customer Systems couvre les principes d'acces et le Security Audit Log.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "securite", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0006", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Le workflow user SAP_WFRT est-il documente de la meme facon dans les Security Guides 2022 et 2023 ?",
-     "ground_truth": {"expected_claim": "Les deux Security Guides documentent SAP_WFRT avec le role SAP_BC_BMT_WFM_SERV_USER. Le guide 2023 mentionne son usage specifique pour les credit decisions.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "SAP_WFRT", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0007", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Quels aspects de SAP Extended Warehouse Management sont couverts dans les Operations Guides et les Security Guides ?",
-     "ground_truth": {"expected_claim": "Les Operations Guides couvrent les jobs batch (/SCWM/), le monitoring et les taches periodiques. Les Security Guides couvrent les autorisations EWM et les roles.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "EWM", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0008", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment SAP HANA est-il reference dans les documents de securite, d'operations et de conversion ?",
-     "ground_truth": {"expected_claim": "Les Security Guides couvrent l'authentification HANA. Les Operations Guides couvrent le monitoring et la maintenance. Les Conversion Guides specifient le prerequis de stockage (2x la taille).", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "HANA", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0009", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment ABAP Platform est-il positionne dans les documents de securite et de migration SAP ?",
-     "ground_truth": {"expected_claim": "Les Security Guides documentent ABAP Platform pour l'authentification et les mecanismes SSO. Les guides de conversion specifient la version ABAP Platform requise par release.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "ABAP Platform", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0010", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Les fonctionnalites SAP Fiori apps sont-elles couvertes de maniere coherente entre les Feature Scope Descriptions et les Installation Guides ?",
-     "ground_truth": {"expected_claim": "Les Feature Scope Descriptions listent les apps Fiori disponibles par module. Les Installation Guides couvrent la configuration technique (SAP Web Dispatcher, SICF, /IWFND/MAINT_SERVICE).", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "Fiori", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0011", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment BRFplus est-il reference dans les differents types de documents SAP ?",
-     "ground_truth": {"expected_claim": "BRFplus est mentionne dans les Installation Guides pour l'import customizing, dans les Operations Guides pour les lean trace records EWM, et dans les Security Guides pour les regles metier.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "BRFplus", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0012", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment SAP Master Data Governance est-il positionne dans les documents de securite et les Feature Scope Descriptions ?",
-     "ground_truth": {"expected_claim": "Les Security Guides couvrent les autorisations MDG. Les Feature Scope Descriptions detaillent les fonctionnalites de gouvernance des donnees maitresses.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "Master Data Governance", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0013", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Le SI-Check (Simplification Item Check) est-il documente de facon coherente entre les guides de conversion et d'upgrade ?",
-     "ground_truth": {"expected_claim": "Les codes retour (vert/jaune/rouge) et les regles SUM sont identiques. Les SAP Notes referencees different par version (2399707, 2502552).", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "SI-Check", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0014", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment SAP Process Integration est-il reference dans les Feature Scope Descriptions et les Security Guides ?",
-     "ground_truth": {"expected_claim": "Les Feature Scope Descriptions positionnent SAP PI dans le contexte d'integration. Les Security Guides documentent les business catalogs requis et les dependances.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "Process Integration", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0015", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment l'application log (transaction SLG1) est-il documente differemment entre le Operations Guide 2021 et le Operations Guide 2023 ?",
-     "ground_truth": {"expected_claim": "Le guide 2021 indique que SLG1 enregistre tous les messages. Le guide 2023 precise que SLG1 enregistre les echanges de messages entre composants specifiques.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "SLG1", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0016", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment SAP Business Technology Platform est-il positionne dans les documents de securite, d'operations et de migration ?",
-     "ground_truth": {"expected_claim": "BTP est reference dans 13 documents couvrant la securite (connecteurs), les operations (monitoring) et la migration (integration).", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "Business Technology Platform", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0017", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Le Custom Code Migration est-il decrit de facon identique dans les guides de conversion 2022, 2023 et l'upgrade PCE 2025 ?",
-     "ground_truth": {"expected_claim": "Tous les guides referencent la Simplification Database (SAP Note 2241080) et l'outil ATC. Le PCE 2025 ajoute le business catalog SAP_BASIS_BC_CCM.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "Custom Code", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0018", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment la Product Compliance est-elle documentee a travers les trois versions du Operations Guide ?",
-     "ground_truth": {"expected_claim": "La Product Compliance est presente dans les trois guides avec le process scheduler pour les taches recurrentes. Les guides partagent les memes log objects.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "Product Compliance", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0019", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment la planification de la production (SOP) est-elle presentee differemment entre le Feature Scope on-premise et le Feature Scope Cloud Private Edition ?",
-     "ground_truth": {"expected_claim": "Le on-premise mentionne le resource leveling pour production resources. Le PCE mentionne le resource leveling pour costs. Les deux couvrent Standard SOP.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "SOP", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0020", "task": "T1_provenance", "source": "kg_derived",
-     "question": "SAP NetWeaver est-il reference avec les memes prerequis de version dans les guides de conversion et les Operations Guides ?",
-     "ground_truth": {"expected_claim": "Les guides de conversion specifient les versions minimum de NetWeaver requises. Les Operations Guides referencent NetWeaver pour ADS et le monitoring.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "NetWeaver", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0021", "task": "T1_provenance", "source": "kg_derived",
-     "question": "L'authentification par certificats X.509 est-elle documentee de la meme facon dans les deux Security Guides ?",
-     "ground_truth": {"expected_claim": "Les deux Security Guides documentent l'authentification X.509 sur le Web server avec des differences dans les details de configuration SSL.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "X.509", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0022", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Quels services ECS sont specifiques au Cloud Private Edition et absents des guides on-premise ?",
-     "ground_truth": {"expected_claim": "Le PCE introduit les service request identifiers BASIC_1.5.04 et BASIC_1.5.03 pour les demandes a SAP ECS. Les guides on-premise ne referencent pas ces services.", "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"},
-     "grading_rules": {"answer_must_contain_fact": "BASIC_1.5"}},
-
-    {"question_id": "T1_KG_0023", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment le processus de conversion dans un paysage systeme distribue est-il decrit dans les differents guides ?",
-     "ground_truth": {"expected_claim": "Les guides de conversion decrivent l'architecture DEV + DEV2 (copie test) + PROD avec le SUM. Le PCE 2025 ajoute le Temporary System Landscape avec copies DEV'/QAS'.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "distribue", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0024", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment SAP Information Lifecycle Management (ILM) est-il documente dans les Security Guides ?",
-     "ground_truth": {"expected_claim": "Les deux Security Guides documentent le systeme ILM avec AS ABAP + WebDAV + SRS/XML DAS. Le guide 2022 ajoute le detail HTTP/HTTPS et l'authentification basique pour WebDAV.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "ILM", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0025", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment SAP Ariba est-il positionne dans les Feature Scope Descriptions et les Business Scope documents ?",
-     "ground_truth": {"expected_claim": "Les Feature Scope Descriptions couvrent l'integration SAP Ariba Network. Les Business Scope documents detaillent les innovations sourcing et procurement.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "Ariba", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0026", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment la transaction /SAPAPO/OM17 est-elle referencee dans les differents Operations Guides ?",
-     "ground_truth": {"expected_claim": "La transaction /SAPAPO/OM17 est documentee dans les Operations Guides 2021 et 2022 pour la reconciliation des donnees liveCache et la verification de coherence des master data.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "/SAPAPO/OM17", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0027", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment l'Admin Guide positionne-t-il les roles SAP_BR* par rapport aux roles detailles dans le Security Guide ?",
-     "ground_truth": {"expected_claim": "L'Admin Guide indique que les roles SAP_BR* ne sont pas productifs. Le Security Guide fournit des roles specifiques comme SAP_RCF_MANAGER et SAP_HR_PYC_TM_MNG.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "SAP_BR", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0028", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment SAP Solution Manager est-il reference dans les documents d'operations et de conversion ?",
-     "ground_truth": {"expected_claim": "Les Operations Guides referencent SAP Solution Manager pour le monitoring. Les Conversion Guides referencent la connexion RFC SM_<SID>CLNT<CLNT>_READ.", "doc_id": "multi_doc"},
-     "grading_rules": {"answer_must_contain_fact": "Solution Manager", "must_cite_multiple_docs": true}},
-
-    {"question_id": "T1_KG_0029", "task": "T1_provenance", "source": "kg_derived",
-     "question": "Comment le WIP Management avec integration MES est-il decrit dans la documentation SAP 2025 ?",
-     "ground_truth": {"expected_claim": "Le Business Scope 2025 decrit un processus en 12 etapes entre EWM et SAP Digital Manufacturing Cloud avec SFC numbers et PSA.", "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"},
-     "grading_rules": {"answer_must_contain_fact": "WIP"}}
+    {
+      "question_id": "T1_KG_0000",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour SAP Fiori Launchpad dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You need to assign relevant catalogs to front-end business roles to make the apps contained in a catalog available for user access from the SAP Fiori launchpad.",
+        "verbatim_quote": "You need to assign relevant catalogs to front-end business roles to make the apps contained in a catalog available for user access from the SAP Fiori launchpad.",
+        "doc_id": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0",
+        "page_no": 40,
+        "claim_id": "claim_b85d4fd416be",
+        "entity_name": "SAP Fiori Launchpad"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0",
+        "answer_must_contain_fact": "You need to assign relevant catalogs to front-end business roles to make the apps contained in a cat",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0001",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment monitorer ou diagnostiquer EoP check dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "An EoP check is done for the employee performance document in EWM Labor Management.",
+        "verbatim_quote": "• Executed workload • Employee performance document • Warehouse order • Indirect labor task • Time and attendance For indirect labor tasks, the data is stored using order document manage- ment (ODM).",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 727,
+        "claim_id": "claim_4ff2d5c27f82_b",
+        "entity_name": "EoP check"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "An EoP check is done for the employee performance document in EWM Labor Management.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0002",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant SAP S/4HANA dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA pushes cXML messages to SAP PI",
+        "verbatim_quote": "SAP S/4HANA pushes cXML messages to SAP PI (asynchronous)",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 973,
+        "claim_id": "claim_2ef75e6304ba",
+        "entity_name": "SAP S/4HANA"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "SAP S/4HANA pushes cXML messages to SAP PI",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0003",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant SAP Watch List Screening dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You can manage documents to display the status of legal controls, embargoes, and SAP Watch List Screening for trade compliance.",
+        "verbatim_quote": "| Manage Documents with Trade Compli- ance | You can manage documents to display the status of legal controls, embargoes, and SAP Watch List Screening.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 45,
+        "claim_id": "claim_380b856e6e4f",
+        "entity_name": "SAP Watch List Screening"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "You can manage documents to display the status of legal controls, embargoes, and SAP Watch List Scre",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0004",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant SAP NetWeaver Application Server dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The SAP NetWeaver platform provides user management and authentication mechanisms.",
+        "verbatim_quote": "The Cross-Application Time Sheet (CA-TS) uses the user management and authentication mechanisms provided with the SAP NetWeaver platform, in particular the Application Server ABAP.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 518,
+        "claim_id": "claim_de268318b5c2_c",
+        "entity_name": "SAP NetWeaver Application Server"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "The SAP NetWeaver platform provides user management and authentication mechanisms.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0005",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles operations sont possibles sur selected customer or vendor dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "In the deletion report RCPE_BRF01, a selected customer or vendor is entered.",
+        "verbatim_quote": "In the deletion report RCPE_BRF01 ( Delete BRFplus Decision Table Entries for CPE Formula Assembly ) you enter a selected customer or vendor.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 806,
+        "claim_id": "claim_0ac0bc0b088a",
+        "entity_name": "selected customer or vendor"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "In the deletion report RCPE_BRF01, a selected customer or vendor is entered.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0006",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant FPS03 dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA Cloud Private Edition innovation highlights 2023 FPS03",
+        "verbatim_quote": "SAP S/4HANA Cloud Private Edition innovation highlights 2023 FPS03",
+        "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "page_no": 21,
+        "claim_id": "claim_6c31290718ad",
+        "entity_name": "FPS03"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "answer_must_contain_fact": "SAP S/4HANA Cloud Private Edition innovation highlights 2023 FPS03",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0007",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant SAP business partner dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The error message states 'You cannot assign bus. partner &1 because the partner is a natural person'",
+        "verbatim_quote": "If you use business partners who are natural persons in Treasury and Risk Management, you will get the following error message: You cannot assign bus. partner &1 because the partner is a natural person (message class TI , message number 031 ).",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 127,
+        "claim_id": "claim_10955ec9f99c_d",
+        "entity_name": "SAP business partner"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "The error message states 'You cannot assign bus. partner &1 because the partner is a natural person'",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0008",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles operations sont possibles sur SAP ERP dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You can work with previously existing rebate agreements created in SAP ERP in SAP S/4HANA Cloud Private Edition 2023.",
+        "verbatim_quote": "| Key Feature | Use | Work with rebate agreements created in SAP ERP | You can work with previously existing rebate agreements that you have created in SAP ERP. You can only process these existing rebate agreements until the end of the validity date of the rebate agreement.",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "page_no": 709,
+        "claim_id": "claim_96a3139d2f4f",
+        "entity_name": "SAP ERP"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "answer_must_contain_fact": "You can work with previously existing rebate agreements created in SAP ERP in SAP S/4HANA Cloud Priv",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0009",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour SAP S/4HANA dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The SAP_WFRT user with the SAP Business Workflow: Service User (SAP_BC_BMT_WFM_SERV_USER) role is delivered with the SAP S/4HANA system.",
+        "verbatim_quote": "The SAP_WFRT user with the SAP Business Workflow: Service User ( SAP_BC_BMT_WFM_SERV_USER ) role is delivered with the SAP S/4HANA system.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 826,
+        "claim_id": "claim_8ba795631d26",
+        "entity_name": "SAP S/4HANA"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "The SAP_WFRT user with the SAP Business Workflow: Service User (SAP_BC_BMT_WFM_SERV_USER) role is de",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0010",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment fonctionne l'integration de product innovation platform dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA provides a product innovation platform to integrate innovations.",
+        "verbatim_quote": "Provide a product innovation platform as base to manage, translate, and integrate innovations to accelerate product design , initiate master data, product structures , with change and configuration management , viewing and document mgmt.",
+        "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+        "page_no": 112,
+        "claim_id": "claim_f07804919819_c",
+        "entity_name": "product innovation platform"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+        "answer_must_contain_fact": "SAP S/4HANA provides a product innovation platform to integrate innovations.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0011",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment fonctionne l'integration de SAP Digital Manufacturing dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA EWM integrates with SAP Digital Manufacturing Cloud for Work in Progress Management",
+        "verbatim_quote": "Increased efficiency and transparency in Work in Progress (WIP) Management with the integration between SAP S/4HANA EWM and Manufacturing Execution Systems like SAP Digital Manufacturing Cloud",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "page_no": 71,
+        "claim_id": "claim_a8ec5815b913",
+        "entity_name": "SAP Digital Manufacturing"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "answer_must_contain_fact": "SAP S/4HANA EWM integrates with SAP Digital Manufacturing Cloud for Work in Progress Management",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0012",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour configuration tables dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "An application-specific authorization group BEIC is assigned to all configuration tables, which is associated with the standard authorization object S_TABU_DIS.",
+        "verbatim_quote": "An application-specific authorization group BEIC , is assigned to all configuration tables, which is associated with the standard authorization object S_TABU_DIS .",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 60,
+        "claim_id": "claim_8da35de58734",
+        "entity_name": "configuration tables"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "An application-specific authorization group BEIC is assigned to all configuration tables, which is a",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0013",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment fonctionne l'integration de XML DAS dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The application system requires an HTTP connection to the separate system running the service (SRS or XML DAS).",
+        "verbatim_quote": "If the service ( SRS or XML DAS ) runs on a separate system, you need an HTTP connection from the application system to that system.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 41,
+        "claim_id": "claim_cf9afd18e33c",
+        "entity_name": "XML DAS"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "The application system requires an HTTP connection to the separate system running the service (SRS o",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0014",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour RAL dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The RAL component can be used to monitor and log read-access to data.",
+        "verbatim_quote": "The RAL component can be used to monitor and log read-access to data, and provide information, such as which business users accessed personal data and when they did so.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 896,
+        "claim_id": "claim_67229bbfc0e1",
+        "entity_name": "RAL"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "The RAL component can be used to monitor and log read-access to data.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0015",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure SIHTTP dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The Web Dynpro user interfaces of Supplier Information and Master Data require activation of the virus scan profile /SIHTTP/HTTP_UPLOAD.",
+        "verbatim_quote": "The Web Dynpro user interfaces of Supplier Information and Master Data require that you activate the virus scan profile /SIHTTP/HTTP_UPLOAD .",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 745,
+        "claim_id": "claim_2f6ca667bf6a",
+        "entity_name": "SIHTTP"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "The Web Dynpro user interfaces of Supplier Information and Master Data require activation of the vir",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0016",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelle est la structure de donnees liee a functions for data exchange dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Policy Management provides functions for data exchange with other application components.",
+        "verbatim_quote": "Policy Management provides functions for data exchange with other application components.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 935,
+        "claim_id": "claim_0cedd37c2daf",
+        "entity_name": "functions for data exchange"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "Policy Management provides functions for data exchange with other application components.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0017",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelle est la structure de donnees liee a SAP S/4HANA Cloud Private Edition dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA Cloud Private Edition 2023 supports viewing the carbon footprint of purchase requisition items based on data from an external environmental management system.",
+        "verbatim_quote": "| Sustainability | As a purchaser, you can view the carbon footprint of purchase requisition items based on data from an external environmental management system (currently, SAP Product Footprint Management).",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "page_no": 159,
+        "claim_id": "claim_55306de854f5",
+        "entity_name": "SAP S/4HANA Cloud Private Edition"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "answer_must_contain_fact": "SAP S/4HANA Cloud Private Edition 2023 supports viewing the carbon footprint of purchase requisition",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0018",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure SAP EarlyWatch Alert dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Setting up a remote service connection is required to use SAP remote services such as SAP EarlyWatch or Remote Consulting.",
+        "verbatim_quote": "If you want to use SAP remote services (for example, SAP EarlyWatch or Remote Consulting), or if you would like to permit an SAP support consultant to work directly in your system to make a more precise problem diagnosis, then you need to set up a remote service connection.",
+        "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e",
+        "page_no": 20,
+        "claim_id": "claim_4a4d36be87b5",
+        "entity_name": "SAP EarlyWatch Alert"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e",
+        "answer_must_contain_fact": "Setting up a remote service connection is required to use SAP remote services such as SAP EarlyWatch",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0019",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment monitorer ou diagnostiquer Front-end client dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA supports the use of logon tickets for SSO when using a Web browser as the front-end client.",
+        "verbatim_quote": "SAP S/4HANA supports the use of logon tickets for SSO when using a Web browser as the front-end client.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 11,
+        "claim_id": "claim_5ff065b7917e",
+        "entity_name": "Front-end client"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "SAP S/4HANA supports the use of logon tickets for SSO when using a Web browser as the front-end clie",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0020",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quel est le processus lie a View dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Guided procedures support a single view of the taxpayer.",
+        "verbatim_quote": "| Taxpayer Registration | You can use guided procedures that facilitate the registration process, sup- porting a single view of the taxpayer while accommodating all revenue types, both form (self-assessed) and object-based taxes (such as vehicle or property taxes).",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "page_no": 677,
+        "claim_id": "claim_105222cd8355_b",
+        "entity_name": "View"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "answer_must_contain_fact": "Guided procedures support a single view of the taxpayer.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0021",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour SAP S/4HANA dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The local version for Ireland uses the standard authorization concept used by SAP S/4HANA.",
+        "verbatim_quote": "The local version for Ireland uses the standard authorization concept used by SAP S/4HANA.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 341,
+        "claim_id": "claim_27389b9cb585",
+        "entity_name": "SAP S/4HANA"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "The local version for Ireland uses the standard authorization concept used by SAP S/4HANA.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0022",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment monitorer ou diagnostiquer EBR content dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "EBR content is stored in optical archives using SAP ArchiveLink technology.",
+        "verbatim_quote": "The content of the EBR is stored in optical archives (using SAP ArchiveLink technology).",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "page_no": 701,
+        "claim_id": "claim_750edf805904",
+        "entity_name": "EBR content"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "answer_must_contain_fact": "EBR content is stored in optical archives using SAP ArchiveLink technology.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0023",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant SAP S/4HANA dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA Cloud uses SAP Sustainability Footprint Management.",
+        "verbatim_quote": "Deploy green ledger using SAP S/4HANA Cloud with SAP Sustainability Footprint Management.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "page_no": 29,
+        "claim_id": "claim_0d25a5e1fb18",
+        "entity_name": "SAP S/4HANA"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "answer_must_contain_fact": "SAP S/4HANA Cloud uses SAP Sustainability Footprint Management.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0024",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour RFC dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "For the integration of EWM within Supply Chain, authorization roles for the remote function call (RFC) destination users are used.",
+        "verbatim_quote": "For the integration of EWM within Supply Chain, that is, with Logistics Execution (LE) and Logistics General (LO), use the authorization roles for the remote function call (RFC) destination users.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 788,
+        "claim_id": "claim_94c120a9b984",
+        "entity_name": "RFC"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "For the integration of EWM within Supply Chain, authorization roles for the remote function call (RF",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0025",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelle est la structure de donnees liee a Repair objects dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Repair objects can now be entered directly within a service order.",
+        "verbatim_quote": "In-house service objects\u000bRepair objects can now be entered directly within a service order.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "page_no": 241,
+        "claim_id": "claim_05bf2db1fce7",
+        "entity_name": "Repair objects"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "answer_must_contain_fact": "Repair objects can now be entered directly within a service order.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0026",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant HR Renewal dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP ERP HCM customers have the option to benefit from HR Renewal",
+        "verbatim_quote": "SAP ERP HCM customers may also continue to leverage their existing implementation with option to benefit from HR Renewal",
+        "doc_id": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+        "page_no": 172,
+        "claim_id": "claim_c97a49b051f5",
+        "entity_name": "HR Renewal"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "018_S4HANA_1809_BUSINESS_SCOPE_MASTER_L23_2032edba",
+        "answer_must_contain_fact": "SAP ERP HCM customers have the option to benefit from HR Renewal",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0027",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant Driven Replenishment dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You can define which products are relevant to Demand-Driven Replenishment using classification information.",
+        "verbatim_quote": "| Select products relevant to Demand- Driven Replenishment | You can define which products are relevant to Demand-Driven Replenishment using classification information.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 69,
+        "claim_id": "claim_97589c027701",
+        "entity_name": "Driven Replenishment"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "You can define which products are relevant to Demand-Driven Replenishment using classification infor",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0028",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour authorization concept dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "ABAP Platform authorization concept is based on assigning authorizations to users based on roles",
+        "verbatim_quote": "ABAP Platform authorization concept (based on assigning authorizations to users based on roles) For this purpose, the roles mentioned in section Standard Roles are available as a template.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 207,
+        "claim_id": "claim_239ee2a70f80",
+        "entity_name": "authorization concept"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "ABAP Platform authorization concept is based on assigning authorizations to users based on roles",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0029",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant UCON mechanism dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The UCON mechanism protects standard SAP Fiori Launchpad applications against click-jacking attacks.",
+        "verbatim_quote": "The UCON mechanism is the way to protect your standard SAP Fiori Launchpad applications against click-jacking attacks.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 22,
+        "claim_id": "claim_c7cbd6230a0a",
+        "entity_name": "UCON mechanism"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "The UCON mechanism protects standard SAP Fiori Launchpad applications against click-jacking attacks.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0030",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant Extended Warehouse Management dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "EWM and TM are embedded in one SAP S/4HANA system.",
+        "verbatim_quote": "E EWM and TM embedded in one SAP S/4HANA system.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "page_no": 82,
+        "claim_id": "claim_eeed66f1b5fa",
+        "entity_name": "Extended Warehouse Management"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "answer_must_contain_fact": "EWM and TM are embedded in one SAP S/4HANA system.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0031",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure reporting dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "A collection has its own reporting cockpit to enable portfolio managers to monitor the performance of the collection.",
+        "verbatim_quote": "A collection has its own reporting cockpit to enable portfolio managers to monitor the performance of the collection.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 452,
+        "claim_id": "claim_460ce1df870f",
+        "entity_name": "reporting"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "A collection has its own reporting cockpit to enable portfolio managers to monitor the performance o",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0032",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure External Replenishment dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Inbound processing for JIT/JIS calls with reference to component group level integration includes enhancement to scheduling parameters in JIT master data replenishment lead time in days and new action for reorder to have different internal processing status.",
+        "verbatim_quote": "• Inbound processing for JIT/JIS calls with reference to component group level integration • Enhancement to scheduling parameters in JIT master data replenishment lead time in days • New action for reorder to have different internal processing status.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 61,
+        "claim_id": "claim_26a57023573c",
+        "entity_name": "External Replenishment"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "Inbound processing for JIT/JIS calls with reference to component group level integration includes en",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0033",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant SAP FSA dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "New SAP Fiori app 'My FSA Claims' is available for employees",
+        "verbatim_quote": "New SAP Fiori app 'My FSA Claims' for employees",
+        "doc_id": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "page_no": 503,
+        "claim_id": "claim_1b1a58f85c98",
+        "entity_name": "SAP FSA"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914",
+        "answer_must_contain_fact": "New SAP Fiori app 'My FSA Claims' is available for employees",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0034",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour pre-defined business roles dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA Service comes with a set of pre-defined business roles.",
+        "verbatim_quote": "SAP S/4HANA Service comes with a set of pre-defined business roles.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 677,
+        "claim_id": "claim_b242b29de792",
+        "entity_name": "pre-defined business roles"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "SAP S/4HANA Service comes with a set of pre-defined business roles.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0035",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant PRTs dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You can also register unplanned PRTs if you are working with serial number groups of components.",
+        "verbatim_quote": "You can also register unplanned PRTs if you are working with serial number groups.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 434,
+        "claim_id": "claim_2f5454645762",
+        "entity_name": "PRTs"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "You can also register unplanned PRTs if you are working with serial number groups of components.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0036",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour SAP_SLL_BC_PI_PREF_TRANS dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Assigning business catalog SAP_SLL_BC_PI_PREF_TRANS in the backend role requires assigning the business catalog SAP_CMD_BC_PRODUCT_DSP in the same backend role.",
+        "verbatim_quote": "If you assign business catalog SAP_SLL_BC_PI_PREF_TRANS in the backend role, you also assign the business catalogs SAP_SD_BC_BIL_DOC_DISPL , SAP_CMD_BC_PRODUCT_DSP , SAP_CMD_BC_SUPPLIER_DSP , and SAP_CMD_BC_CUSTOMER_DSP in the same backend role.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 97,
+        "claim_id": "claim_d69f8dd40348_b",
+        "entity_name": "SAP_SLL_BC_PI_PREF_TRANS"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "Assigning business catalog SAP_SLL_BC_PI_PREF_TRANS in the backend role requires assigning the busin",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0037",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment fonctionne l'integration de Communication dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "For the communication with TOMATOSJ for calculation requests via web-based services (REST services), exclusively secured connections are recommended.",
+        "verbatim_quote": "For that purpose exclusively secured connections are recommended.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 876,
+        "claim_id": "claim_417017c141df",
+        "entity_name": "Communication"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "For the communication with TOMATOSJ for calculation requests via web-based services (REST services),",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0038",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant Benefits Administration dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You can administer retirement plans using the Benefits Administration component.",
+        "verbatim_quote": "• Enroll employees in benefits plans and terminate enrollments • Monitor continuing eligibility for plans • Monitor provision of evidence of insurability • View information about current benefit enrollments • Print enrollment and confirmation forms • Transfer data electronically to plan providers • Administer retirement plans | Benefits Employee Self-Service | You can use this component to manage your benefits independently online.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 715,
+        "claim_id": "claim_4aae7f941a82",
+        "entity_name": "Benefits Administration"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "You can administer retirement plans using the Benefits Administration component.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0039",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quels sont les prerequis pour utiliser Incentive and Commission Management (ICM) solution dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "ICM provides specific features and functions to support compliance with legal requirements and data protection and privacy.",
+        "verbatim_quote": "ICM provides specific features and functions to support compliance with the relevant legal requirements and data protection and privacy.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 944,
+        "claim_id": "claim_f9f833d9a7b4",
+        "entity_name": "Incentive and Commission Management (ICM) solution"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "ICM provides specific features and functions to support compliance with legal requirements and data ",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0040",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles fonctionnalites offre feature to manage prepayment agreements dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA 2023 Feature Scope uses the feature to manage prepayment agreements.",
+        "verbatim_quote": "| Key Feature | Use | Prepayment agreements processing | You use this feature to manage prepayment agreements.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 581,
+        "claim_id": "claim_3f3f19a94be7",
+        "entity_name": "feature to manage prepayment agreements"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "SAP S/4HANA 2023 Feature Scope uses the feature to manage prepayment agreements.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0041",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles operations sont possibles sur Specifications dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Label sets are based on specifications and recipes, and are used as input for final product label creation and label artwork design.",
+        "verbatim_quote": "Label sets are based on specifications and recipes, and are used as in- put for final product label creation and label artwork design.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 475,
+        "claim_id": "claim_249945f47005",
+        "entity_name": "Specifications"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "Label sets are based on specifications and recipes, and are used as input for final product label cr",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0042",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quel est le processus lie a freight quotations dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Report /SCMTMS/ TEND_NOTIFICATION_MAIL converts freight quotations received by e-mail so that they can be processed by Report /SCMTMS/ TEND_CONT_PROCESS.",
+        "verbatim_quote": "| Converts freight quotations that have been received from carriers by e- mail so that the quotations can be processed by report  /SCMTMS/ TEND_CONT_PROCESS .",
+        "doc_id": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e",
+        "page_no": 74,
+        "claim_id": "claim_f78d0ed95e60",
+        "entity_name": "freight quotations"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e",
+        "answer_must_contain_fact": "Report /SCMTMS/ TEND_NOTIFICATION_MAIL converts freight quotations received by e-mail so that they c",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0043",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelle est la structure de donnees liee a SAP Agricultural Contract Management dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP Agricultural Contract Management uses Data Archiving to perform data archiving of contracts, settlements, LDCs, and applications.",
+        "verbatim_quote": "| Key Feature | Use | Data Archiving | You can use this feature to perform data archiving of contracts, setttlements, LDCs, and applications in SAP Agricultural Contract Management.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 558,
+        "claim_id": "claim_b0fb0122865e",
+        "entity_name": "SAP Agricultural Contract Management"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "SAP Agricultural Contract Management uses Data Archiving to perform data archiving of contracts, set",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0044",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant Start Reports User dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Start Reports User can start the relevant administrator reports",
+        "verbatim_quote": "• 04: Start Reports User can start the rel- evant administrator re- ports.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 228,
+        "claim_id": "claim_2fdaffb6f335",
+        "entity_name": "Start Reports User"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "Start Reports User can start the relevant administrator reports",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0045",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure Classic Variant Configuration dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Allow integration of variant configuration and classification data into embedded analytics.",
+        "verbatim_quote": "Allow integration of variant configuration and classification data into embedded analytics​",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "page_no": 357,
+        "claim_id": "claim_732233936f3a",
+        "entity_name": "Classic Variant Configuration"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "answer_must_contain_fact": "Allow integration of variant configuration and classification data into embedded analytics.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0046",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles operations sont possibles sur sales product dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Create procurement products based on a sales product in a specific unit of measure to be used for stock separation.",
+        "verbatim_quote": "• Create procurement products based on a sales product in a specific unit of measure to be used for stock separation.",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "page_no": 556,
+        "claim_id": "claim_8d1fa1625318",
+        "entity_name": "sales product"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "answer_must_contain_fact": "Create procurement products based on a sales product in a specific unit of measure to be used for st",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0047",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure SAP S/4HANA dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP Application Interface Framework is enabled.",
+        "verbatim_quote": "12.1.1.1  Enable SAP Application Interface Framework",
+        "doc_id": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07",
+        "page_no": 139,
+        "claim_id": "claim_52058bb3d42f",
+        "entity_name": "SAP S/4HANA"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "014_SAP_S4HANA_2021_Operations_Guide_819d2c07",
+        "answer_must_contain_fact": "SAP Application Interface Framework is enabled.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0048",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quels sont les prerequis pour utiliser qualifications catalog dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The profiles can be used to show both the requirements of a position and the qualifications and career goals (preferences) of a person based on the qualifications catalog created using the Qualifications and Requirements component.",
+        "verbatim_quote": "The profiles can be used to show both the requirements of a position and the qualifications and career goals (preferences) of a person.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 719,
+        "claim_id": "claim_214d63cab926",
+        "entity_name": "qualifications catalog"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "The profiles can be used to show both the requirements of a position and the qualifications and care",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0049",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelle est la structure de donnees liee a SAP business partner dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The business partner, customer and supplier master data uses SAP ILM to support the blocking and deletion of personal data.",
+        "verbatim_quote": "The business partner, customer and supplier master data uses SAP ILM to support the blocking and deletion of personal data as described in the following sections.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 747,
+        "claim_id": "claim_dc33de7ab0d5",
+        "entity_name": "SAP business partner"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "The business partner, customer and supplier master data uses SAP ILM to support the blocking and del",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0050",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour Technology(ies) dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Technology(ies) not licensed/subscribed to from SAP may NOT access the SAP HANA runtime database via any Enterprise Technology solution(s).",
+        "verbatim_quote": "As such, and for the avoidance of doubt, application(s) and/or technology(ies) that are not licensed/subscribed to from SAP may NOT access the SAP HANA runtime database via any Enterprise Technology solution(s); rather, such access is only permissible via the SAP S/4HANA application layer.",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "page_no": 201,
+        "claim_id": "claim_8f6397f5f5f2_b",
+        "entity_name": "Technology(ies)"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "answer_must_contain_fact": "Technology(ies) not licensed/subscribed to from SAP may NOT access the SAP HANA runtime database via",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0051",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant Central purchase contracts dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You can use model product specifications to manage templates with item hierarchies for documents such as purchase contracts.",
+        "verbatim_quote": "| Managing model product specifications | You can use model product specifications to manage tem- plates with item hierarchies for documents, such as pur- chase contracts.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 146,
+        "claim_id": "claim_bc6bbebf6952",
+        "entity_name": "Central purchase contracts"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "You can use model product specifications to manage templates with item hierarchies for documents suc",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0052",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant DMOVE2S4 dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "DMOVE2S4 transforms the system to SAP S/4HANA Cloud Private Edition",
+        "verbatim_quote": "DMOVE2S4 is the SAP-recommended approach that transforms your system to SAP S/4HANA Cloud Private Edition, updates the database to SAP HANA if needed, and relocates both the server and database into SAP's private cloud environment or that of an Infrastructure as a Service (IaaS) provider..",
+        "doc_id": "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "page_no": 20,
+        "claim_id": "claim_76d47ce6cd13",
+        "entity_name": "DMOVE2S4"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e",
+        "answer_must_contain_fact": "DMOVE2S4 transforms the system to SAP S/4HANA Cloud Private Edition",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0053",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure SAP Web Dispatcher dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP Web Dispatcher must be configured to make context-sensitive user assistance available in the SAP Fiori launchpad.",
+        "verbatim_quote": "If you want to make context-sensitive user assistance available in the SAP Fiori launchpad, you must configure SAP Web Dispatcher.",
+        "doc_id": "012_SAP_S4HANA_2021_Installation_Guide_c441dbaf",
+        "page_no": 26,
+        "claim_id": "claim_5a1ecfbba73c",
+        "entity_name": "SAP Web Dispatcher"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "012_SAP_S4HANA_2021_Installation_Guide_c441dbaf",
+        "answer_must_contain_fact": "SAP Web Dispatcher must be configured to make context-sensitive user assistance available in the SAP",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0054",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quel est le processus lie a PRA Interest Processing dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "PRA Interest Processing provides a company level summary of the total interest paid over the last 12 months.",
+        "verbatim_quote": "• Review a company level summary of the total interest paid over the last 12 months.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 589,
+        "claim_id": "claim_1cb4c7ad694a",
+        "entity_name": "PRA Interest Processing"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "PRA Interest Processing provides a company level summary of the total interest paid over the last 12",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0055",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant Hyperscaler dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "RISE is delivered as part of SAP's subscription with the Hyperscaler, tailored to the customer's specific landscape.",
+        "verbatim_quote": " RISE is delivered as part of SAP's subscription with the Hyperscaler, tailored to the customer's specific landscape.",
+        "doc_id": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+        "page_no": 225,
+        "claim_id": "claim_7c33b417451d",
+        "entity_name": "Hyperscaler"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357",
+        "answer_must_contain_fact": "RISE is delivered as part of SAP's subscription with the Hyperscaler, tailored to the customer's spe",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0056",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment fonctionne l'integration de Travel Communication dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "e-Travel Communication with the Web services of e-Travel is HTTPS based.",
+        "verbatim_quote": "e-Travel Communication with the Web services of e-Travel is HTTPS based.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 190,
+        "claim_id": "claim_6d8e5fe8d5cf",
+        "entity_name": "Travel Communication"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "e-Travel Communication with the Web services of e-Travel is HTTPS based.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0057",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelle est la structure de donnees liee a ABAP Platform dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The data is stored in database tables owned by SAP S/4HANA and the ABAP platform.",
+        "verbatim_quote": "The data is stored in database tables owned by SAP S/4HANA and the ABAP platform.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 638,
+        "claim_id": "claim_303a673aa391",
+        "entity_name": "ABAP Platform"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "The data is stored in database tables owned by SAP S/4HANA and the ABAP platform.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0058",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles informations de version ou de migration existent pour PA-PA-NZ ?",
+      "ground_truth": {
+        "expected_claim": "For the local version for New Zealand (PY-NZ, PA-PA-NZ), the local version for New Zealand (PY-NZ, PA-PA-NZ) includes the employee IRD number in the infotype IRD Nbr New Zealand (IT0309).\n\"\"\"",
+        "verbatim_quote": "For the local version for New Zealand (PY-NZ, PA-PA-NZ), this includes the employee IRD number in the infotype IRD Nbr New Zealand (IT0309).",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 294,
+        "claim_id": "claim_1b50c32b804b",
+        "entity_name": "PA-PA-NZ"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "For the local version for New Zealand (PY-NZ, PA-PA-NZ), the local version for New Zealand (PY-NZ, P",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0059",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quels sont les prerequis pour utiliser SAP Utilities dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The initialization report REISU_DPP_AMI_DEVICE_USAGE must be run to determine and store the data usage status for the devices.",
+        "verbatim_quote": "Run the initialization report REISU_DPP_AMI_DEVICE_USAGE to determine and store the data usage status for the devices determined.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 882,
+        "claim_id": "claim_e56627571a84",
+        "entity_name": "SAP Utilities"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "The initialization report REISU_DPP_AMI_DEVICE_USAGE must be run to determine and store the data usa",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0060",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure material dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You can use variant conditions to influence the price of a configurable material depending on the characteristic values assigned.",
+        "verbatim_quote": "• You can use variant conditions to influence the price of a configurable material depending on the characteristic values assigned.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 111,
+        "claim_id": "claim_f90dda5ce1c1",
+        "entity_name": "material"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "You can use variant conditions to influence the price of a configurable material depending on the ch",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0061",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quel est le processus lie a MDG mass processing application dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The MDG consolidation application and the MDG mass processing application do not process business partners with the end of purpose indicator assigned.",
+        "verbatim_quote": "The MDG, consolidation application and the MDG, mass processing application do not process business partners with the end of purpose indicator assigned.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 764,
+        "claim_id": "claim_dffe30ba8014",
+        "entity_name": "MDG mass processing application"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "The MDG consolidation application and the MDG mass processing application do not process business pa",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0062",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure SAP Fiori dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Fiori app Policy Inquiry is not directly RAL-enabled",
+        "verbatim_quote": "Since the Fiori app Policy Inquiry is not directly RAL-enabled you must activate RAL indirectly via the corresponding OData service UI_POLICYINQUIRY .",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 937,
+        "claim_id": "claim_4971d4ba96c9",
+        "entity_name": "SAP Fiori"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "Fiori app Policy Inquiry is not directly RAL-enabled",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0063",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure ICF dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "When activating an Internet Communication Framework (ICF) recording using transaction SICF, the system logs the password in the corresponding ICF trace.",
+        "verbatim_quote": "However, when activating an Internet Communication Framework (ICF) recording using transaction SICF, the system logs the password in the corresponding ICF trace.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 976,
+        "claim_id": "claim_e0b0779b0831",
+        "entity_name": "ICF"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "When activating an Internet Communication Framework (ICF) recording using transaction SICF, the syst",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0064",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment monitorer ou diagnostiquer Benefits Administration dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The Benefits Administration component includes reports used to monitor employee contributions made to benefits plans.",
+        "verbatim_quote": "This component includes information on info- types that are used to administer COBRA plans, Flexible Spending Accounts and Tax-Sheltered Annuity Plans, as well as reports that are used to monitor employee contributions made to benefits plans.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 715,
+        "claim_id": "claim_373a826a5be7",
+        "entity_name": "Benefits Administration"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "The Benefits Administration component includes reports used to monitor employee contributions made t",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0065",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant material dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You use planned orders to model, plan, and trigger material flow",
+        "verbatim_quote": "You use planned orders to model, plan, and trigger material flow",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 75,
+        "claim_id": "claim_11e757230517",
+        "entity_name": "material"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "You use planned orders to model, plan, and trigger material flow",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0066",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment fonctionne l'integration de SAP S/4HANA dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You can execute an initial transfer of documents for the integration of Compliance Management with SAP Global Trade Services.",
+        "verbatim_quote": "You can execute an initial transfer of documents for the integration of Compliance Management with SAP Global Trade Services.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "page_no": 278,
+        "claim_id": "claim_f83a6750e6bc",
+        "entity_name": "SAP S/4HANA"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "answer_must_contain_fact": "You can execute an initial transfer of documents for the integration of Compliance Management with S",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0067",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure key users dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Key users can integrate preconfigured cloud services such as SAP Document Management Service to add attachments to processes.",
+        "verbatim_quote": "Additionally, key users can integrate preconfigured cloud services, for example, SAP Build Process Automation to define and visualize workflows, SAP Document Management Service to add attachments to processes, and SAP Data Quality Management, microservices for location data to validate and enrich addresses.",
+        "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696",
+        "page_no": 49,
+        "claim_id": "claim_6386052239f2",
+        "entity_name": "key users"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696",
+        "answer_must_contain_fact": "Key users can integrate preconfigured cloud services such as SAP Document Management Service to add ",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0068",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quels sont les prerequis pour utiliser Excise duty dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You must define the ED group (excise duty group) field in the Oil specific data view in the material master record.",
+        "verbatim_quote": "You must define theED group (excise duty group) field in the Oil specific data view in the material master record.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 602,
+        "claim_id": "claim_032c845f98db",
+        "entity_name": "Excise duty"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "You must define the ED group (excise duty group) field in the Oil specific data view in the material",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0069",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant SAP Accounts Receivable dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP Dispute Management uses SAP Accounts Receivable in a one-system scenario",
+        "verbatim_quote": "If you use SAP Dispute Management in a one-system scenario, this means that you use SAP Dispute Management in the same system as Accounts Receivable .",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 145,
+        "claim_id": "claim_127454bb9569",
+        "entity_name": "SAP Accounts Receivable"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "SAP Dispute Management uses SAP Accounts Receivable in a one-system scenario",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0070",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles fonctionnalites offre Synthetic load profiling dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Synthetic load profiling provides the capability to de-aggregate a load shape.",
+        "verbatim_quote": "Synthetic load profiling provides the capability to de- aggregate a load shape.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 618,
+        "claim_id": "claim_18f81513f767",
+        "entity_name": "Synthetic load profiling"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "Synthetic load profiling provides the capability to de-aggregate a load shape.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0071",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment gerer le transport ou la migration de Entire Transportation Chain ?",
+      "ground_truth": {
+        "expected_claim": "You can use transit warehousing when receiving or shipping cargo as part of a longer transportation chain.",
+        "verbatim_quote": "• Perform and monitor outbound deliveries using TUs With the shipping cockpit, you can monitor the status of deliveries as- | Transit Warehousing | You can use transit warehousing when you are receiving or shipping cargo as part of a longer transportation chain.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 527,
+        "claim_id": "claim_b2850c2f10d4",
+        "entity_name": "Entire Transportation Chain"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "You can use transit warehousing when receiving or shipping cargo as part of a longer transportation ",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0072",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment monitorer ou diagnostiquer EHFND_CSM dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "EHFND_CSM application function module EHFND_CSM_EOP_CHECK_BP is registered for an EoP check.",
+        "verbatim_quote": "| Application | Implemented Solution (EoP or WUC) | Further Information | EHFND_CSM  (Supplier Raw Materials) | Application function module EHFND_CSM_EOP_CHECK_BP  registered for an EoP check.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 578,
+        "claim_id": "claim_d6096ad51097",
+        "entity_name": "EHFND_CSM"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "EHFND_CSM application function module EHFND_CSM_EOP_CHECK_BP is registered for an EoP check.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0073",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure Benefits Administration dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Benefits Enrollment and Administration enables you to develop and manage employee benefit plans.",
+        "verbatim_quote": "Benefits Enrollment and Administration enables you to develop and manage employee benefit plans.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 714,
+        "claim_id": "claim_f14eebd38dd6",
+        "entity_name": "Benefits Administration"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "Benefits Enrollment and Administration enables you to develop and manage employee benefit plans.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0074",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure ERMS dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "You can associate an e-mail address in the system with this ERMS BOR object under Inbound Distribution: Settings for Recipient Determination (transaction SO28).",
+        "verbatim_quote": "Y ou can associate an e-mail address in the system with this ERMS BOR object under Inbound Distribution: Settings for Recipient Determination (transaction SO28 ).",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 654,
+        "claim_id": "claim_f7912001ac5a",
+        "entity_name": "ERMS"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "You can associate an e-mail address in the system with this ERMS BOR object under Inbound Distributi",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0075",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelle est la structure de donnees liee a PLMI dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The implementation /PLMI/IM_ES_CR_REL_STATUS ensures that a change record can only be completed if all related change records are completed when the BAdI is called by default.",
+        "verbatim_quote": "When the BAdI is called by default, this implementation ensures that a change record can only be completed if all related change records are completed.",
+        "doc_id": "013_SAP-014_What's_New_in_SAP_S_4HANA_and_SAP_S_4HANA_Cloud_Private_Edition_2023_SPS04_611b554d",
+        "page_no": 40,
+        "claim_id": "claim_6d21e2e884d2",
+        "entity_name": "PLMI"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "013_SAP-014_What's_New_in_SAP_S_4HANA_and_SAP_S_4HANA_Cloud_Private_Edition_2023_SPS04_611b554d",
+        "answer_must_contain_fact": "The implementation /PLMI/IM_ES_CR_REL_STATUS ensures that a change record can only be completed if a",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0076",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles informations de version ou de migration existent pour Custom Code Migration ?",
+      "ground_truth": {
+        "expected_claim": "The Custom Code Migration app supports identifying unused custom code based on collected usage data.",
+        "verbatim_quote": "In addition, the app supports you with identifying unused custom code based on your collected usage data.",
+        "doc_id": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696",
+        "page_no": 38,
+        "claim_id": "claim_c69376dfb55a",
+        "entity_name": "Custom Code Migration"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696",
+        "answer_must_contain_fact": "The Custom Code Migration app supports identifying unused custom code based on collected usage data.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0077",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelle est la structure de donnees liee a Quality Management application dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The Quality Management application uses SAP ILM to support the deletion of personal data.",
+        "verbatim_quote": "The Quality Management application uses SAP ILM to support the deletion of personal data as described in the following sections.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 554,
+        "claim_id": "claim_5df104ef17b5",
+        "entity_name": "Quality Management application"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "The Quality Management application uses SAP ILM to support the deletion of personal data.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0078",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant PSM dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Inventory Planning consists of the following planning services in the PSM:",
+        "verbatim_quote": "Inventory Planning consists of the following planning services in the PSM:",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "page_no": 524,
+        "claim_id": "claim_575f5146c415",
+        "entity_name": "PSM"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "answer_must_contain_fact": "Inventory Planning consists of the following planning services in the PSM:",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0079",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant SAP NetWeaver Application Server dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The Cross-Application Time Sheet (CA-TS) uses authentication mechanisms provided with the SAP NetWeaver platform.",
+        "verbatim_quote": "The Cross-Application Time Sheet (CA-TS) uses the user management and authentication mechanisms provided with the SAP NetWeaver platform, in particular the Application Server ABAP.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 518,
+        "claim_id": "claim_de268318b5c2_b",
+        "entity_name": "SAP NetWeaver Application Server"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "The Cross-Application Time Sheet (CA-TS) uses authentication mechanisms provided with the SAP NetWea",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0080",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant SAP Dispute Management dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP Dispute Management uses asynchronous BAPI calls between the systems involved.",
+        "verbatim_quote": "Note that in SAP Dispute Management , asynchronous BAPI calls, synchronous BAPI calls, and dialog calls take place between the systems involved.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 148,
+        "claim_id": "claim_8eb4b8615320",
+        "entity_name": "SAP Dispute Management"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "SAP Dispute Management uses asynchronous BAPI calls between the systems involved.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0081",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant SAP Human Capital Management dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP Human Capital Management uses the new and redesigned My Team Calendar app for SAP S/4HANA",
+        "verbatim_quote": "Easy migration to the new and redesigned My Team Calendar app for SAP Human Capital Management for SAP S/4HANA",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "page_no": 429,
+        "claim_id": "claim_f4f84d21c6ac",
+        "entity_name": "SAP Human Capital Management"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba",
+        "answer_must_contain_fact": "SAP Human Capital Management uses the new and redesigned My Team Calendar app for SAP S/4HANA",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0082",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment monitorer ou diagnostiquer Shop Floor Information System dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The Shop Floor Information System is part of the Logistics Information System.",
+        "verbatim_quote": "The Shop Floor Information System is part of the Logistics Information System that you can use to analyze manufacturing data.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 732,
+        "claim_id": "claim_c80fba576d0c",
+        "entity_name": "Shop Floor Information System"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "The Shop Floor Information System is part of the Logistics Information System.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0083",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant Goods dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA uses predictive journal entries for goods issues and billing documents",
+        "verbatim_quote": "This analysis is based on predictive journal entries for goods issues and billing documents using the most up-to-date sales order data in SAP S/4HANA or from an external system.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 20,
+        "claim_id": "claim_ea4cb356acf6",
+        "entity_name": "Goods"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "SAP S/4HANA uses predictive journal entries for goods issues and billing documents",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0084",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure business function dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "If a business function was switched off in the start release system but defined as always_on in the SAP S/4HANA target release, then the business function will be activated during the upgrade.",
+        "verbatim_quote": "If a business function was switched off in the start release system, but defined as always_on in the SAP S/4HANA target release, then the business function will be activated during the upgrade.",
+        "doc_id": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9",
+        "page_no": 16,
+        "claim_id": "claim_21bf6ff8fd71",
+        "entity_name": "business function"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9",
+        "answer_must_contain_fact": "If a business function was switched off in the start release system but defined as always_on in the ",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0085",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure BRFplus dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Planning scenarios support resource planning activities.",
+        "verbatim_quote": "• Planning scenarios to support key project planning activities such as re- source planning, material planning, expense, and third-party planning.",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "page_no": 456,
+        "claim_id": "claim_979184307bdd_b",
+        "entity_name": "BRFplus"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "answer_must_contain_fact": "Planning scenarios support resource planning activities.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0086",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment monitorer ou diagnostiquer VSCAN dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The messages logged are located in message class VSCAN using system log messages BU8 and BU9 (created in transaction SE92).",
+        "verbatim_quote": "The messages logged are located in message class VSCAN using system log messages BU8 and BU9 (created in transaction SE92 ).",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 782,
+        "claim_id": "claim_53fb007dbe59",
+        "entity_name": "VSCAN"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "The messages logged are located in message class VSCAN using system log messages BU8 and BU9 (create",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0087",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles fonctionnalites offre Contract dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Contract Accounting provides the same functional scope as the Contract Accounting and Credit and Collections Management capabilities as part of Billing and Revenue Innovation Management.",
+        "verbatim_quote": "Contract Accounting provides the same functional scope as the Contract Accounting and Credit and Collections Management capabilities as part of Billing and Revenue Innovation Management.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 364,
+        "claim_id": "claim_6d4d49320b4f",
+        "entity_name": "Contract"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "Contract Accounting provides the same functional scope as the Contract Accounting and Credit and Col",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0088",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour SAP Business Client dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The POWL for talent review meetings is contained in the roles for talent management specialists in SAP Enterprise Portal and SAP Business Client.",
+        "verbatim_quote": "In the standard SAP system, the POWL for talent review meetings is contained in the roles for talent management specialists for SAP Enterprise Portal and SAP Business Client.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 444,
+        "claim_id": "claim_e6779a3905b5",
+        "entity_name": "SAP Business Client"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "The POWL for talent review meetings is contained in the roles for talent management specialists in S",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0089",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles operations sont possibles sur SAP S/4HANA dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA Utilities replicates business partner blocking and deletion events to SAP Marketing Cloud.",
+        "verbatim_quote": "To fulfill this requirement, the SAP S/4HANA Utilities integration with SAP Marketing Cloud replicates the business partner blocking and deletion events to SAP Marketing Cloud.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 893,
+        "claim_id": "claim_4930cde8f031",
+        "entity_name": "SAP S/4HANA"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "SAP S/4HANA Utilities replicates business partner blocking and deletion events to SAP Marketing Clou",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0090",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour relevant business catalogs dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The delivered business role templates cover the relevant business catalogs.",
+        "verbatim_quote": "The delivered business role templates cover the relevant business catalogs.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 61,
+        "claim_id": "claim_f8630f0f7354",
+        "entity_name": "relevant business catalogs"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "The delivered business role templates cover the relevant business catalogs.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0091",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles fonctionnalites offre country/region-specific statutory reports dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Central Finance supports certain country/region-specific statutory reports.",
+        "verbatim_quote": "| Central Statutory Reporting | Central Finance supports certain country/region-specific statutory reports.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 310,
+        "claim_id": "claim_d392c7fe82f9",
+        "entity_name": "country/region-specific statutory reports"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "Central Finance supports certain country/region-specific statutory reports.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0092",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant Contracts dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Defined price types and key dates determine specific contracts.",
+        "verbatim_quote": "Except for commodity forwards, based on DCS and market identification code (MIC), price data can also be entered manually for defined price types and key dates, which determine specific contracts.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 354,
+        "claim_id": "claim_c3911f7e42a6_d",
+        "entity_name": "Contracts"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "Defined price types and key dates determine specific contracts.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0093",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quels sont les prerequis pour utiliser SAP S/4HANA Compatibility Packs dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP S/4HANA 2023 requires SAP S/4HANA Compatibility Packs",
+        "verbatim_quote": "SAP S/4HANA 2023 SAP S/4HANA Compatibility Packs",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 756,
+        "claim_id": "claim_45a64bb14171",
+        "entity_name": "SAP S/4HANA Compatibility Packs"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "SAP S/4HANA 2023 requires SAP S/4HANA Compatibility Packs",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0094",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelles sont les regles de securite et d'autorisation pour SAP Fiori dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "SAP Fiori roles (SAP_BR_*) need to be assigned on the front-end server where UIS4HOP1 is installed.",
+        "verbatim_quote": "SAP Fiori roles ( SAP_BR_* ) need to be assigned on the front-end server on which the UIS4HOP1 software component is installed.",
+        "doc_id": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "page_no": 582,
+        "claim_id": "claim_05ac7e84f0eb",
+        "entity_name": "SAP Fiori"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "027_SAP_S4HANA_2023_Security_Guide_c160af0e",
+        "answer_must_contain_fact": "SAP Fiori roles (SAP_BR_*) need to be assigned on the front-end server where UIS4HOP1 is installed.",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0095",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment fonctionne l'integration de data destruction for Global Label Management dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The data destruction for Global Label Management is integrated in the FI_ACCRECV ILM object of SAP ERP.",
+        "verbatim_quote": "The data destruction for Global Label Management is integrated in the FI_ACCRECV ( customer master data ) ILM object of SAP ERP .",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 607,
+        "claim_id": "claim_2015bb7cc4f9",
+        "entity_name": "data destruction for Global Label Management"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "The data destruction for Global Label Management is integrated in the FI_ACCRECV ILM object of SAP E",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0096",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Comment est configure RFC dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "System administrators must make specific settings for the RFC connection between SAP S/4HANA ERP and SAP S/4HANA decentralized EWM before carrying out any customizing activity.",
+        "verbatim_quote": "System administrators must make specific settings for the Remote Function Call (RFC) connection between the SAP S/4HANA ERP and SAP S/4HANA decentralized EWM before carrying out any customizing activity.",
+        "doc_id": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e",
+        "page_no": 114,
+        "claim_id": "claim_0548cf1dfa71",
+        "entity_name": "RFC"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "021_SAP_S4HANA_2023_Admin_Guide_Implementation_Best_Practices_08ad145e",
+        "answer_must_contain_fact": "System administrators must make specific settings for the RFC connection between SAP S/4HANA ERP and",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0097",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Que documente SAP concernant company code dans S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Other external customer/vendor AP/AR items under the same company code are still managed in the source system of the Central Finance system.",
+        "verbatim_quote": "Other exter- nal customer/vendor AP/AR items under the same company code are still managed in the source system.",
+        "doc_id": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "page_no": 308,
+        "claim_id": "claim_0dacf49ba392",
+        "entity_name": "company code"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "025_SAP_S4HANA_2023_Feature_Scope_Description_bf3d5700",
+        "answer_must_contain_fact": "Other external customer/vendor AP/AR items under the same company code are still managed in the sour",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0098",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quelle est la structure de donnees liee a End of Purpose dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "The business partner End of Purpose (EoP) is fetched from the CDS view I_EMPLOYEE to address the exclusion of employees' personal data that has been marked for End of Purpose.",
+        "verbatim_quote": "The business partner End of Purpose (EoP) is fetched from the CDS view I_EMPLOYEE to address the exclusion of employees' personal data that has been marked for End of Purpose.",
+        "doc_id": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "page_no": 628,
+        "claim_id": "claim_29f99efc0766",
+        "entity_name": "End of Purpose"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "028_SAP_S4HANA_2022_Security_Guide_44f7ec32",
+        "answer_must_contain_fact": "The business partner End of Purpose (EoP) is fetched from the CDS view I_EMPLOYEE to address the exc",
+        "verbatim_must_be_traceable": true
+      }
+    },
+    {
+      "question_id": "T1_KG_0099",
+      "task": "T1_provenance",
+      "source": "kg_derived",
+      "question": "Quel est le processus lie a BRFplus dans SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "In the case of an external replenishment, you use purchasing scheduling agreements to support the supply planning and procurement processes involved.",
+        "verbatim_quote": "In the case of an external replenishment, you use purchasing scheduling agree- ments to support the supply planning and procurement processes involved.",
+        "doc_id": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "page_no": 81,
+        "claim_id": "claim_41cbc557fa43",
+        "entity_name": "BRFplus"
+      },
+      "grading_rules": {
+        "citation_must_include_doc": "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_—_Feature_Scope_Description_(latest)_fd5cc3b3",
+        "answer_must_contain_fact": "In the case of an external replenishment, you use purchasing scheduling agreements to support the su",
+        "verbatim_must_be_traceable": true
+      }
+    }
   ]
 }

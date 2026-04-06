@@ -3,109 +3,1910 @@
     "task": "T4",
     "source": "kg_derived",
     "corpus": "SAP Enterprise Documentation",
-    "count": 20,
-    "generated_at": "2026-03-23T21:45:00Z",
-    "note": "Questions KG v3 — audit/completude cross-doc. Testent la capacite a agreger les informations de plusieurs documents pour produire un resume complet et source."
+    "count": 100,
+    "generated_at": "2026-03-29T09:21:02.968986",
+    "seed": 42
   },
   "questions": [
-    {"question_id": "T4_KG_0000", "task": "T4_audit", "source": "kg_derived",
-     "question": "Fais un resume complet de la couverture documentaire de SAP Fiori a travers tous les documents SAP disponibles, en distinguant les aspects configuration, securite et fonctionnalites.",
-     "ground_truth": {"entity": "SAP Fiori", "expected_claim_count": 10, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "011_SAP_S4HANA_2023_Installation_Guide_23de8c60", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]},
-     "grading_rules": {"must_mention_docs_count": 3}},
-
-    {"question_id": "T4_KG_0001", "task": "T4_audit", "source": "kg_derived",
-     "question": "Resume tous les aspects de securite documentes pour RFC dans SAP S/4HANA, incluant les autorisations, les destinations et le monitoring.",
-     "ground_truth": {"entity": "RFC security", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0002", "task": "T4_audit", "source": "kg_derived",
-     "question": "Quels sont tous les prerequis documentes pour une conversion vers SAP S/4HANA, toutes versions confondues ?",
-     "ground_truth": {"entity": "conversion prerequisites", "expected_claim_count": 8, "expected_contradiction_count": 1, "expected_docs": ["005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0", "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0003", "task": "T4_audit", "source": "kg_derived",
-     "question": "Resume toute la documentation disponible sur SAP Extended Warehouse Management a travers les guides d'operations, de securite et les Feature Scope.",
-     "ground_truth": {"entity": "SAP Extended Warehouse Management", "expected_claim_count": 10, "expected_contradiction_count": 0, "expected_docs": ["015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "027_SAP_S4HANA_2023_Security_Guide_c160af0e", "024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3"]},
-     "grading_rules": {"must_mention_docs_count": 3}},
-
-    {"question_id": "T4_KG_0004", "task": "T4_audit", "source": "kg_derived",
-     "question": "Quelles sont toutes les informations disponibles sur ABAP Platform dans les documents SAP, en couvrant securite, migration et operations ?",
-     "ground_truth": {"entity": "ABAP Platform", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0005", "task": "T4_audit", "source": "kg_derived",
-     "question": "Fais un audit complet de la documentation sur Joule (IA SAP) a travers tous les documents disponibles.",
-     "ground_truth": {"entity": "Joule", "expected_claim_count": 6, "expected_contradiction_count": 0, "expected_docs": ["022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba", "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914", "004_SAP-016_SAP_S_4HANA_Cloud_Private_Edition_\u2014_Highlights_of_Innovations_(2023_FPS03)_01b01cbf"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0006", "task": "T4_audit", "source": "kg_derived",
-     "question": "Resume tous les mecanismes de securite cloud documentes pour SAP S/4HANA Cloud Private Edition.",
-     "ground_truth": {"entity": "cloud security", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357", "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0007", "task": "T4_audit", "source": "kg_derived",
-     "question": "Quels sont tous les objets d'autorisation documentes pour le commerce international (Intrastat, Global Trade) dans les Security Guides ?",
-     "ground_truth": {"entity": "trade authorization", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0008", "task": "T4_audit", "source": "kg_derived",
-     "question": "Resume toutes les informations sur SAP HANA disponibles dans les documents de securite, d'operations et de conversion.",
-     "ground_truth": {"entity": "SAP HANA", "expected_claim_count": 10, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "010_SAP_S4HANA_Cloud_Private_Edition_2025_Conversion_Guide_6075f24e"]},
-     "grading_rules": {"must_mention_docs_count": 3}},
-
-    {"question_id": "T4_KG_0009", "task": "T4_audit", "source": "kg_derived",
-     "question": "Fais un audit de la couverture de SAP NetWeaver dans tous les documents SAP disponibles.",
-     "ground_truth": {"entity": "SAP NetWeaver", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "006_SAP_S4HANA_2023_Conversion_Guide_1e4de7c0"]},
-     "grading_rules": {"must_mention_docs_count": 3}},
-
-    {"question_id": "T4_KG_0010", "task": "T4_audit", "source": "kg_derived",
-     "question": "Quelles sont toutes les informations disponibles sur SAP Information Lifecycle Management (ILM) dans les Security Guides ?",
-     "ground_truth": {"entity": "SAP ILM", "expected_claim_count": 8, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0011", "task": "T4_audit", "source": "kg_derived",
-     "question": "Resume les fonctionnalites SAP Master Data Governance documentees dans les Feature Scope Descriptions et les Security Guides.",
-     "ground_truth": {"entity": "SAP Master Data Governance", "expected_claim_count": 6, "expected_contradiction_count": 0, "expected_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0012", "task": "T4_audit", "source": "kg_derived",
-     "question": "Fais un audit complet de la documentation sur le E-Recruiting dans les Security Guides SAP.",
-     "ground_truth": {"entity": "E-Recruiting", "expected_claim_count": 6, "expected_contradiction_count": 1, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0013", "task": "T4_audit", "source": "kg_derived",
-     "question": "Resume toute la documentation sur les connectivites reseau (VPN, Express Route, SAPRouter) pour SAP Cloud Private Edition.",
-     "ground_truth": {"entity": "network connectivity", "expected_claim_count": 6, "expected_contradiction_count": 0, "expected_docs": ["020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357", "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0014", "task": "T4_audit", "source": "kg_derived",
-     "question": "Quelles sont toutes les informations documentees sur le Custom Code Migration a travers les guides de conversion et d'upgrade ?",
-     "ground_truth": {"entity": "Custom Code Migration", "expected_claim_count": 6, "expected_contradiction_count": 0, "expected_docs": ["003_SAP_S4HANA_2023_Upgrade_Guide_299d71e9", "005_SAP_S4HANA_2022_Conversion_Guide_e68e22cf", "008_SAP-013_Upgrade_Guide_for_SAP_S_4HANA_Cloud_Private_Edition_2025_1162f696"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0015", "task": "T4_audit", "source": "kg_derived",
-     "question": "Resume la couverture de SAP Business Technology Platform dans les documents de securite et de migration.",
-     "ground_truth": {"entity": "SAP BTP", "expected_claim_count": 5, "expected_contradiction_count": 0, "expected_docs": ["027_SAP_S4HANA_2023_Security_Guide_c160af0e", "020_RISE_with_SAP_Cloud_ERP_Private_full_363f5357"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0016", "task": "T4_audit", "source": "kg_derived",
-     "question": "Fais un audit de toute la documentation sur BRFplus a travers les Installation Guides, Operations Guides et Security Guides.",
-     "ground_truth": {"entity": "BRFplus", "expected_claim_count": 5, "expected_contradiction_count": 0, "expected_docs": ["012_SAP_S4HANA_2021_Installation_Guide_c441dbaf", "015_SAP_S4HANA_2022_Operations_Guide_c30abf8e", "027_SAP_S4HANA_2023_Security_Guide_c160af0e"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0017", "task": "T4_audit", "source": "kg_derived",
-     "question": "Resume toutes les innovations SAP documentees dans les Business Scope FPS03 et Business Scope 2025.",
-     "ground_truth": {"entity": "SAP innovations", "expected_claim_count": 10, "expected_contradiction_count": 0, "expected_docs": ["022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba", "023_1212_Business-Scope-2025-SAP-Cloud-ERP-Private_29ff0914"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0018", "task": "T4_audit", "source": "kg_derived",
-     "question": "Quels sont tous les aspects de Product Compliance documentes a travers les Operations Guides et les Security Guides ?",
-     "ground_truth": {"entity": "Product Compliance", "expected_claim_count": 6, "expected_contradiction_count": 1, "expected_docs": ["014_SAP_S4HANA_2021_Operations_Guide_819d2c07", "016_SAP-010_Operations_Guide_for_SAP_S_4HANA_2023_(incl._clean_core_environment_setup)_b11842e3", "028_SAP_S4HANA_2022_Security_Guide_44f7ec32"]},
-     "grading_rules": {"must_mention_docs_count": 2}},
-
-    {"question_id": "T4_KG_0019", "task": "T4_audit", "source": "kg_derived",
-     "question": "Fais un audit de la documentation SAP Ariba et SAP Ariba Network a travers les Feature Scope et Business Scope documents.",
-     "ground_truth": {"entity": "SAP Ariba", "expected_claim_count": 6, "expected_contradiction_count": 0, "expected_docs": ["024_SAP-008_SAP_S_4HANA_Cloud_Private_Edition_2023_\u2014_Feature_Scope_Description_(latest)_fd5cc3b3", "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"]},
-     "grading_rules": {"must_mention_docs_count": 2}}
+    {
+      "question_id": "T4_KG_0000",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur CA-TS.",
+      "ground_truth": {
+        "entity": "CA-TS",
+        "entity_id": "ent_df5a3b2b9a96",
+        "expected_claim_count": 14,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 1
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0001",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Tax and Revenue Management (TRM).",
+      "ground_truth": {
+        "entity": "Tax and Revenue Management (TRM)",
+        "entity_id": "entity_b14a829d4969",
+        "expected_claim_count": 57,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0002",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Extended Warehouse Management.",
+      "ground_truth": {
+        "entity": "SAP Extended Warehouse Management",
+        "entity_id": "ent_b57a5d273c03",
+        "expected_claim_count": 151,
+        "expected_doc_count": 14,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0003",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur WebClient UI framework.",
+      "ground_truth": {
+        "entity": "WebClient UI framework",
+        "entity_id": "entity_e98007fa9e0a",
+        "expected_claim_count": 12,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0004",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur BAPI.",
+      "ground_truth": {
+        "entity": "BAPI",
+        "entity_id": "entity_4c2d38a2c771",
+        "expected_claim_count": 25,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 4
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0005",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP SuccessFactors.",
+      "ground_truth": {
+        "entity": "SAP SuccessFactors",
+        "entity_id": "ent_d14a42d17f80",
+        "expected_claim_count": 26,
+        "expected_doc_count": 8,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0006",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur PFCG.",
+      "ground_truth": {
+        "entity": "PFCG",
+        "entity_id": "entity_ab8bf383e3e5",
+        "expected_claim_count": 27,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0007",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur authorization for purchase orders.",
+      "ground_truth": {
+        "entity": "authorization for purchase orders",
+        "entity_id": "entity_89c48fa8060e",
+        "expected_claim_count": 40,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0008",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Enterprise Portal.",
+      "ground_truth": {
+        "entity": "SAP Enterprise Portal",
+        "entity_id": "entity_22fbcc5714a4",
+        "expected_claim_count": 12,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0009",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Payroll Control Center.",
+      "ground_truth": {
+        "entity": "Payroll Control Center",
+        "entity_id": "entity_65f19d553bdb",
+        "expected_claim_count": 62,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0010",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Subscription Order Management.",
+      "ground_truth": {
+        "entity": "Subscription Order Management",
+        "entity_id": "entity_a35f95a18e89",
+        "expected_claim_count": 13,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0011",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Manage Change Records.",
+      "ground_truth": {
+        "entity": "Manage Change Records",
+        "entity_id": "entity_a099935f7715",
+        "expected_claim_count": 16,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0012",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Ariba.",
+      "ground_truth": {
+        "entity": "SAP Ariba",
+        "entity_id": "entity_bbb59eaa1e93",
+        "expected_claim_count": 76,
+        "expected_doc_count": 10,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0013",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur RFC connections.",
+      "ground_truth": {
+        "entity": "RFC connections",
+        "entity_id": "entity_d028d1ef4fff",
+        "expected_claim_count": 15,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0014",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Software Update Manager.",
+      "ground_truth": {
+        "entity": "SAP Software Update Manager",
+        "entity_id": "ent_e99c16ba7242",
+        "expected_claim_count": 19,
+        "expected_doc_count": 6,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0015",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur RFC.",
+      "ground_truth": {
+        "entity": "RFC",
+        "entity_id": "ent_3c891dbebe05",
+        "expected_claim_count": 151,
+        "expected_doc_count": 10,
+        "expected_contradiction_count": 2
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0016",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Information Lifecycle Management (ILM).",
+      "ground_truth": {
+        "entity": "SAP Information Lifecycle Management (ILM)",
+        "entity_id": "entity_b51eb3294845",
+        "expected_claim_count": 151,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0017",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur BRFplus.",
+      "ground_truth": {
+        "entity": "BRFplus",
+        "entity_id": "entity_e6c3d8cc27bb",
+        "expected_claim_count": 71,
+        "expected_doc_count": 9,
+        "expected_contradiction_count": 1
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0018",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Business Network.",
+      "ground_truth": {
+        "entity": "Business Network",
+        "entity_id": "entity_354ebf2acd05",
+        "expected_claim_count": 27,
+        "expected_doc_count": 7,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0019",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Project Cost and Revenue Planning.",
+      "ground_truth": {
+        "entity": "Project Cost and Revenue Planning",
+        "entity_id": "entity_7abb75d82d64",
+        "expected_claim_count": 26,
+        "expected_doc_count": 7,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0020",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur S/4HANA system.",
+      "ground_truth": {
+        "entity": "S/4HANA system",
+        "entity_id": "entity_97bfb1e8c444",
+        "expected_claim_count": 17,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0021",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur digital core.",
+      "ground_truth": {
+        "entity": "digital core",
+        "entity_id": "entity_f5b9eb4a46b0",
+        "expected_claim_count": 14,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0022",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur BRIM.",
+      "ground_truth": {
+        "entity": "BRIM",
+        "entity_id": "entity_b94b847c8c7e",
+        "expected_claim_count": 12,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0023",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Single Sign-On.",
+      "ground_truth": {
+        "entity": "Single Sign-On",
+        "entity_id": "ent_8b7d231e94e3",
+        "expected_claim_count": 15,
+        "expected_doc_count": 5,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0024",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Structures.",
+      "ground_truth": {
+        "entity": "Structures",
+        "entity_id": "entity_bc337872d18d",
+        "expected_claim_count": 30,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0025",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Software Update Manager (SUM).",
+      "ground_truth": {
+        "entity": "Software Update Manager (SUM)",
+        "entity_id": "entity_f47d61f0353c",
+        "expected_claim_count": 14,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0026",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur qRFC.",
+      "ground_truth": {
+        "entity": "qRFC",
+        "entity_id": "ent_2f5c068b8d6c",
+        "expected_claim_count": 12,
+        "expected_doc_count": 6,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0027",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Commodity Procurement and Commodity Sales.",
+      "ground_truth": {
+        "entity": "Commodity Procurement and Commodity Sales",
+        "entity_id": "entity_4d6e73132041",
+        "expected_claim_count": 20,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 7
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0028",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur EoP check.",
+      "ground_truth": {
+        "entity": "EoP check",
+        "entity_id": "ent_fb528eb5c3c8",
+        "expected_claim_count": 27,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0029",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Process Integration.",
+      "ground_truth": {
+        "entity": "SAP Process Integration",
+        "entity_id": "entity_23fbc68b7373",
+        "expected_claim_count": 19,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0030",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur product.",
+      "ground_truth": {
+        "entity": "product",
+        "entity_id": "ent_eeabdd5bbb56",
+        "expected_claim_count": 15,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0031",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur report shipping orders.",
+      "ground_truth": {
+        "entity": "report shipping orders",
+        "entity_id": "entity_5a489d404a0a",
+        "expected_claim_count": 25,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0032",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP S/4HANA Cloud Private Edition.",
+      "ground_truth": {
+        "entity": "SAP S/4HANA Cloud Private Edition",
+        "entity_id": "entity_0f7bcb549273",
+        "expected_claim_count": 430,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0033",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Best Practices.",
+      "ground_truth": {
+        "entity": "SAP Best Practices",
+        "entity_id": "ent_3bf963e7bb00",
+        "expected_claim_count": 34,
+        "expected_doc_count": 5,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0034",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur import consent records as copies.",
+      "ground_truth": {
+        "entity": "import consent records as copies",
+        "entity_id": "entity_a3946791faf1",
+        "expected_claim_count": 13,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0035",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Process Control.",
+      "ground_truth": {
+        "entity": "SAP Process Control",
+        "entity_id": "entity_e2451cb5dcd3",
+        "expected_claim_count": 22,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0036",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur cXML.",
+      "ground_truth": {
+        "entity": "cXML",
+        "entity_id": "ent_e0bde5de5a74",
+        "expected_claim_count": 14,
+        "expected_doc_count": 5,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0037",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Maintenance Planner.",
+      "ground_truth": {
+        "entity": "SAP Maintenance Planner",
+        "entity_id": "entity_57000494a314",
+        "expected_claim_count": 35,
+        "expected_doc_count": 10,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0038",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Manager Self-Service.",
+      "ground_truth": {
+        "entity": "Manager Self-Service",
+        "entity_id": "entity_392f0e907065",
+        "expected_claim_count": 13,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0039",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Specifications.",
+      "ground_truth": {
+        "entity": "Specifications",
+        "entity_id": "entity_1dad6b93c9ee",
+        "expected_claim_count": 22,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0040",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur TOMATOSJ.",
+      "ground_truth": {
+        "entity": "TOMATOSJ",
+        "entity_id": "entity_0a9690eef7bb",
+        "expected_claim_count": 12,
+        "expected_doc_count": 5,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0041",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Fieldglass.",
+      "ground_truth": {
+        "entity": "SAP Fieldglass",
+        "entity_id": "entity_49b059007926",
+        "expected_claim_count": 13,
+        "expected_doc_count": 7,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0042",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur control cycle.",
+      "ground_truth": {
+        "entity": "control cycle",
+        "entity_id": "entity_712a5b4a680c",
+        "expected_claim_count": 21,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 2
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0043",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Archiving.",
+      "ground_truth": {
+        "entity": "Archiving",
+        "entity_id": "entity_65db9df8ed1f",
+        "expected_claim_count": 66,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0044",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur EoP.",
+      "ground_truth": {
+        "entity": "EoP",
+        "entity_id": "ent_959a59a258df",
+        "expected_claim_count": 22,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0045",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Goods Receipt.",
+      "ground_truth": {
+        "entity": "Goods Receipt",
+        "entity_id": "entity_8bbf462a52f9",
+        "expected_claim_count": 22,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0046",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Collections Management.",
+      "ground_truth": {
+        "entity": "Collections Management",
+        "entity_id": "entity_0bf99fd6ed3a",
+        "expected_claim_count": 25,
+        "expected_doc_count": 5,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0047",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur ABAP Platform.",
+      "ground_truth": {
+        "entity": "ABAP Platform",
+        "entity_id": "entity_378355ecd0e7",
+        "expected_claim_count": 122,
+        "expected_doc_count": 8,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0048",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Supplier Quotations.",
+      "ground_truth": {
+        "entity": "Supplier Quotations",
+        "entity_id": "entity_fde5bcbb3755",
+        "expected_claim_count": 18,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0049",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur flexible workflow.",
+      "ground_truth": {
+        "entity": "flexible workflow",
+        "entity_id": "entity_7d22138847ef",
+        "expected_claim_count": 16,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0050",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Business Technology Platform.",
+      "ground_truth": {
+        "entity": "SAP Business Technology Platform",
+        "entity_id": "entity_c77b5e4e27d2",
+        "expected_claim_count": 46,
+        "expected_doc_count": 14,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0051",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Central purchase contracts.",
+      "ground_truth": {
+        "entity": "Central purchase contracts",
+        "entity_id": "entity_4cba1b1e6d91",
+        "expected_claim_count": 21,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0052",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Master Data Governance.",
+      "ground_truth": {
+        "entity": "SAP Master Data Governance",
+        "entity_id": "ent_d77e2d914d3e",
+        "expected_claim_count": 77,
+        "expected_doc_count": 11,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0053",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Business Add-In.",
+      "ground_truth": {
+        "entity": "Business Add-In",
+        "entity_id": "ent_79ad5753f05b",
+        "expected_claim_count": 16,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0054",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Web Dynpro.",
+      "ground_truth": {
+        "entity": "Web Dynpro",
+        "entity_id": "entity_ef82d786df6e",
+        "expected_claim_count": 24,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0055",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Extended Service Parts Planning (eSPP).",
+      "ground_truth": {
+        "entity": "Extended Service Parts Planning (eSPP)",
+        "entity_id": "entity_e0a0302648e7",
+        "expected_claim_count": 22,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0056",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Fiori Launchpad.",
+      "ground_truth": {
+        "entity": "SAP Fiori Launchpad",
+        "entity_id": "ent_756b3934bd93",
+        "expected_claim_count": 31,
+        "expected_doc_count": 10,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0057",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur S/4HANA Cloud Private Edition.",
+      "ground_truth": {
+        "entity": "S/4HANA Cloud Private Edition",
+        "entity_id": "ent_75a399f4a01c",
+        "expected_claim_count": 84,
+        "expected_doc_count": 7,
+        "expected_contradiction_count": 2
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0058",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur DMS.",
+      "ground_truth": {
+        "entity": "DMS",
+        "entity_id": "entity_a734db3effa9",
+        "expected_claim_count": 15,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0059",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Authorization Object S_TCODE.",
+      "ground_truth": {
+        "entity": "Authorization Object S_TCODE",
+        "entity_id": "entity_43188db6e4b1",
+        "expected_claim_count": 27,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0060",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Where-Used Check functionality.",
+      "ground_truth": {
+        "entity": "Where-Used Check functionality",
+        "entity_id": "entity_69b64b624d03",
+        "expected_claim_count": 24,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0061",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur End of Purpose.",
+      "ground_truth": {
+        "entity": "End of Purpose",
+        "entity_id": "ent_f5e56bf9646e",
+        "expected_claim_count": 15,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0062",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Application Components Data Protection.",
+      "ground_truth": {
+        "entity": "Application Components Data Protection",
+        "entity_id": "entity_ffbfdf01c808",
+        "expected_claim_count": 13,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0063",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Global Trade Services.",
+      "ground_truth": {
+        "entity": "SAP Global Trade Services",
+        "entity_id": "entity_bb38bc41ee18",
+        "expected_claim_count": 66,
+        "expected_doc_count": 9,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0064",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Inventory Management.",
+      "ground_truth": {
+        "entity": "Inventory Management",
+        "entity_id": "entity_e1edce28885f",
+        "expected_claim_count": 14,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0065",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Central Purchase Contract Hierarchy.",
+      "ground_truth": {
+        "entity": "Central Purchase Contract Hierarchy",
+        "entity_id": "entity_e692c8963551",
+        "expected_claim_count": 12,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0066",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur customer details from the sales order.",
+      "ground_truth": {
+        "entity": "customer details from the sales order",
+        "entity_id": "entity_c58394edd802",
+        "expected_claim_count": 18,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0067",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Manage Sales Orders.",
+      "ground_truth": {
+        "entity": "Manage Sales Orders",
+        "entity_id": "entity_fc05d2059b39",
+        "expected_claim_count": 21,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0068",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Manage Explosive Storage Locations application.",
+      "ground_truth": {
+        "entity": "Manage Explosive Storage Locations application",
+        "entity_id": "ent_d0c674ce1a2f",
+        "expected_claim_count": 33,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0069",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Internet Communication Framework.",
+      "ground_truth": {
+        "entity": "Internet Communication Framework",
+        "entity_id": "ent_e0532794dbaa",
+        "expected_claim_count": 21,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0070",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Accounts Receivable.",
+      "ground_truth": {
+        "entity": "SAP Accounts Receivable",
+        "entity_id": "entity_dc560958eb9b",
+        "expected_claim_count": 22,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 3
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0071",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur HTTPS.",
+      "ground_truth": {
+        "entity": "HTTPS",
+        "entity_id": "entity_34b4b48dc5e4",
+        "expected_claim_count": 28,
+        "expected_doc_count": 5,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0072",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Data Services.",
+      "ground_truth": {
+        "entity": "SAP Data Services",
+        "entity_id": "ent_5cdf12c55842",
+        "expected_claim_count": 25,
+        "expected_doc_count": 9,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0073",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Credit Management.",
+      "ground_truth": {
+        "entity": "SAP Credit Management",
+        "entity_id": "entity_25828339045a",
+        "expected_claim_count": 22,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0074",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Dispute Management.",
+      "ground_truth": {
+        "entity": "SAP Dispute Management",
+        "entity_id": "entity_705e882e32fb",
+        "expected_claim_count": 18,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 3
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0075",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP system.",
+      "ground_truth": {
+        "entity": "SAP system",
+        "entity_id": "entity_0e8e362d4b84",
+        "expected_claim_count": 14,
+        "expected_doc_count": 6,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0076",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Incentive and Sales Force Management (ISF).",
+      "ground_truth": {
+        "entity": "SAP Incentive and Sales Force Management (ISF)",
+        "entity_id": "entity_1d54bd196901",
+        "expected_claim_count": 23,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 2
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0077",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Communication.",
+      "ground_truth": {
+        "entity": "Communication",
+        "entity_id": "entity_3cef9a6561cb",
+        "expected_claim_count": 148,
+        "expected_doc_count": 6,
+        "expected_contradiction_count": 2
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0078",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur HTTP.",
+      "ground_truth": {
+        "entity": "HTTP",
+        "entity_id": "entity_6ecc01fc8533",
+        "expected_claim_count": 24,
+        "expected_doc_count": 9,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0079",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur BAdI.",
+      "ground_truth": {
+        "entity": "BAdI",
+        "entity_id": "ent_df0fc2000750",
+        "expected_claim_count": 23,
+        "expected_doc_count": 5,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0080",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur AS ABAP.",
+      "ground_truth": {
+        "entity": "AS ABAP",
+        "entity_id": "ent_f74649b2c9f4",
+        "expected_claim_count": 77,
+        "expected_doc_count": 8,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0081",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Cash Application.",
+      "ground_truth": {
+        "entity": "SAP Cash Application",
+        "entity_id": "entity_8d16b503b564",
+        "expected_claim_count": 17,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0082",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur PFCG profile generator.",
+      "ground_truth": {
+        "entity": "PFCG profile generator",
+        "entity_id": "entity_5e21719cab32",
+        "expected_claim_count": 17,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0083",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Transportation Management.",
+      "ground_truth": {
+        "entity": "Transportation Management",
+        "entity_id": "entity_9db7a283275a",
+        "expected_claim_count": 15,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0084",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP SuccessFactors Employee Central.",
+      "ground_truth": {
+        "entity": "SAP SuccessFactors Employee Central",
+        "entity_id": "entity_bbed0735f6b1",
+        "expected_claim_count": 16,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0085",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SOAP.",
+      "ground_truth": {
+        "entity": "SOAP",
+        "entity_id": "entity_85949607add2",
+        "expected_claim_count": 14,
+        "expected_doc_count": 5,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0086",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SSO.",
+      "ground_truth": {
+        "entity": "SSO",
+        "entity_id": "ent_d1c3f8674c2a",
+        "expected_claim_count": 31,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 3
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0087",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Ariba Network.",
+      "ground_truth": {
+        "entity": "SAP Ariba Network",
+        "entity_id": "ent_c7769e1817f4",
+        "expected_claim_count": 40,
+        "expected_doc_count": 9,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0088",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur delivered business role templates.",
+      "ground_truth": {
+        "entity": "delivered business role templates",
+        "entity_id": "entity_91025cdd8e0b",
+        "expected_claim_count": 18,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0089",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur HAP.",
+      "ground_truth": {
+        "entity": "HAP",
+        "entity_id": "entity_6b734d9c2693",
+        "expected_claim_count": 13,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0090",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP ERP Central Component.",
+      "ground_truth": {
+        "entity": "SAP ERP Central Component",
+        "entity_id": "entity_87ccca526c9b",
+        "expected_claim_count": 17,
+        "expected_doc_count": 6,
+        "expected_contradiction_count": 1
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": true,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0091",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SCWM.",
+      "ground_truth": {
+        "entity": "SCWM",
+        "entity_id": "ent_35740f67cb85",
+        "expected_claim_count": 12,
+        "expected_doc_count": 5,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0092",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur ICM.",
+      "ground_truth": {
+        "entity": "ICM",
+        "entity_id": "ent_1351475e2dfe",
+        "expected_claim_count": 17,
+        "expected_doc_count": 5,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0093",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur collections.",
+      "ground_truth": {
+        "entity": "collections",
+        "entity_id": "entity_fd4d6f47cf18",
+        "expected_claim_count": 17,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0094",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Central Finance system.",
+      "ground_truth": {
+        "entity": "Central Finance system",
+        "entity_id": "entity_bb3a4c3e9674",
+        "expected_claim_count": 21,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0095",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Central Finance Transaction Replication.",
+      "ground_truth": {
+        "entity": "SAP Central Finance Transaction Replication",
+        "entity_id": "entity_c25b470fbd1c",
+        "expected_claim_count": 21,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0096",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP BW.",
+      "ground_truth": {
+        "entity": "SAP BW",
+        "entity_id": "ent_dd75c390815f",
+        "expected_claim_count": 13,
+        "expected_doc_count": 4,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0097",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Purchase requisitions.",
+      "ground_truth": {
+        "entity": "Purchase requisitions",
+        "entity_id": "entity_885b829369b5",
+        "expected_claim_count": 52,
+        "expected_doc_count": 3,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0098",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur SAP Fiori.",
+      "ground_truth": {
+        "entity": "SAP Fiori",
+        "entity_id": "ent_1139abf0e506",
+        "expected_claim_count": 202,
+        "expected_doc_count": 17,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    },
+    {
+      "question_id": "T4_KG_0099",
+      "task": "T4_audit",
+      "source": "kg_derived",
+      "question": "Exporte toutes les informations disponibles sur Handling.",
+      "ground_truth": {
+        "entity": "Handling",
+        "entity_id": "ent_a9f31144e68a",
+        "expected_claim_count": 13,
+        "expected_doc_count": 2,
+        "expected_contradiction_count": 0
+      },
+      "grading_rules": {
+        "must_include_all_claims": true,
+        "must_include_sources": true,
+        "must_include_contradictions_if_exist": false,
+        "must_be_traceable_to_documents": true
+      }
+    }
   ]
 }

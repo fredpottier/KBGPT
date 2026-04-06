@@ -1,0 +1,260 @@
+{
+  "metadata": {
+    "task": "T1",
+    "corpus": "SAP Enterprise Documentation",
+    "source": "sprint0_additional",
+    "count": 20
+  },
+  "questions": [
+    {
+      "question_id": "T1_NEG_0000",
+      "task": "T1_provenance",
+      "question": "Quel est le prix de la licence SAP S/4HANA Cloud ?",
+      "ground_truth": {
+        "expected_claim": "IDK",
+        "doc_id": "NONE"
+      },
+      "grading_rules": {
+        "must_say_idk": true,
+        "reason": "Aucun document ne contient les prix des licences"
+      },
+      "_type": "negative"
+    },
+    {
+      "question_id": "T1_NEG_0001",
+      "task": "T1_provenance",
+      "question": "Comment SAP S/4HANA se compare-t-il a Oracle ERP Cloud ?",
+      "ground_truth": {
+        "expected_claim": "IDK",
+        "doc_id": "NONE"
+      },
+      "grading_rules": {
+        "must_say_idk": true,
+        "reason": "Aucune comparaison avec Oracle dans le corpus"
+      },
+      "_type": "negative"
+    },
+    {
+      "question_id": "T1_NEG_0002",
+      "task": "T1_provenance",
+      "question": "Quels sont les bugs connus de la version 2023 FPS03 ?",
+      "ground_truth": {
+        "expected_claim": "IDK",
+        "doc_id": "NONE"
+      },
+      "grading_rules": {
+        "must_say_idk": true,
+        "reason": "Pas de bug list dans les documents"
+      },
+      "_type": "negative"
+    },
+    {
+      "question_id": "T1_NEG_0003",
+      "task": "T1_provenance",
+      "question": "Combien de clients SAP utilisent S/4HANA dans le monde ?",
+      "ground_truth": {
+        "expected_claim": "IDK",
+        "doc_id": "NONE"
+      },
+      "grading_rules": {
+        "must_say_idk": true,
+        "reason": "Pas de statistiques d'adoption dans le corpus"
+      },
+      "_type": "negative"
+    },
+    {
+      "question_id": "T1_NEG_0004",
+      "task": "T1_provenance",
+      "question": "Quel est le SLA de disponibilite garanti pour RISE with SAP ?",
+      "ground_truth": {
+        "expected_claim": "IDK",
+        "doc_id": "NONE"
+      },
+      "grading_rules": {
+        "must_say_idk": true,
+        "reason": "Pas de SLA chiffre dans les documents fournis"
+      },
+      "_type": "negative"
+    },
+    {
+      "question_id": "T1_NEG_0005",
+      "task": "T1_provenance",
+      "question": "Comment migrer de SAP Business One vers S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "IDK",
+        "doc_id": "NONE"
+      },
+      "grading_rules": {
+        "must_say_idk": true,
+        "reason": "Business One n'est pas couvert dans les guides de conversion"
+      },
+      "_type": "negative"
+    },
+    {
+      "question_id": "T1_NEG_0006",
+      "task": "T1_provenance",
+      "question": "Quelles sont les vulnerabilites CVE connues pour SAP HANA en 2024 ?",
+      "ground_truth": {
+        "expected_claim": "IDK",
+        "doc_id": "NONE"
+      },
+      "grading_rules": {
+        "must_say_idk": true,
+        "reason": "Pas de CVE dans les documents"
+      },
+      "_type": "negative"
+    },
+    {
+      "question_id": "T1_NEG_0007",
+      "task": "T1_provenance",
+      "question": "Quel est le calendrier de release de S/4HANA 2026 ?",
+      "ground_truth": {
+        "expected_claim": "IDK",
+        "doc_id": "NONE"
+      },
+      "grading_rules": {
+        "must_say_idk": true,
+        "reason": "Les documents ne couvrent que jusqu'a 2025"
+      },
+      "_type": "negative"
+    },
+    {
+      "question_id": "T1_NEG_0008",
+      "task": "T1_provenance",
+      "question": "Comment configurer SAP SuccessFactors Employee Central ?",
+      "ground_truth": {
+        "expected_claim": "IDK",
+        "doc_id": "NONE"
+      },
+      "grading_rules": {
+        "must_say_idk": true,
+        "reason": "SuccessFactors n'est mentionne que brievement pour l'integration"
+      },
+      "_type": "negative"
+    },
+    {
+      "question_id": "T1_NEG_0009",
+      "task": "T1_provenance",
+      "question": "Quel est le cout total de possession (TCO) d'une migration S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "IDK",
+        "doc_id": "NONE"
+      },
+      "grading_rules": {
+        "must_say_idk": true,
+        "reason": "Pas d'analyse TCO dans les documents techniques"
+      },
+      "_type": "negative"
+    },
+    {
+      "question_id": "T1_VAGUE_0000",
+      "task": "T1_provenance",
+      "question": "comment on fait pour upgrader ?",
+      "ground_truth": {
+        "expected_claim": "reponse sur upgrade S/4HANA",
+        "doc_id": "multi_doc"
+      },
+      "grading_rules": {},
+      "_type": "vague_fr"
+    },
+    {
+      "question_id": "T1_VAGUE_0001",
+      "task": "T1_provenance",
+      "question": "c'est quoi le truc Fiori la ?",
+      "ground_truth": {
+        "expected_claim": "explication SAP Fiori",
+        "doc_id": "multi_doc"
+      },
+      "grading_rules": {},
+      "_type": "vague_fr"
+    },
+    {
+      "question_id": "T1_VAGUE_0002",
+      "task": "T1_provenance",
+      "question": "Quels sont les prerequis pour le system conversion ?",
+      "ground_truth": {
+        "expected_claim": "prerequis conversion S/4HANA",
+        "doc_id": "multi_doc"
+      },
+      "grading_rules": {},
+      "_type": "code_switch"
+    },
+    {
+      "question_id": "T1_VAGUE_0003",
+      "task": "T1_provenance",
+      "question": "ya des security issues avec la config par defaut ?",
+      "ground_truth": {
+        "expected_claim": "new default security settings",
+        "doc_id": "multi_doc"
+      },
+      "grading_rules": {},
+      "_type": "vague_fr"
+    },
+    {
+      "question_id": "T1_VAGUE_0004",
+      "task": "T1_provenance",
+      "question": "how does the upgrade work with the custom code stuff?",
+      "ground_truth": {
+        "expected_claim": "custom code migration during upgrade",
+        "doc_id": "multi_doc"
+      },
+      "grading_rules": {},
+      "_type": "english"
+    },
+    {
+      "question_id": "T1_VAGUE_0005",
+      "task": "T1_provenance",
+      "question": "les autorisations c'est gere comment dans le nouveau systeme ?",
+      "ground_truth": {
+        "expected_claim": "authorization concept S/4HANA",
+        "doc_id": "multi_doc"
+      },
+      "grading_rules": {},
+      "_type": "vague_fr"
+    },
+    {
+      "question_id": "T1_VAGUE_0006",
+      "task": "T1_provenance",
+      "question": "what changed between 2022 and 2023 version?",
+      "ground_truth": {
+        "expected_claim": "differences entre versions",
+        "doc_id": "multi_doc"
+      },
+      "grading_rules": {},
+      "_type": "english_vague"
+    },
+    {
+      "question_id": "T1_VAGUE_0007",
+      "task": "T1_provenance",
+      "question": "faut faire quoi avant de migrer ?",
+      "ground_truth": {
+        "expected_claim": "prerequis conversion/upgrade",
+        "doc_id": "multi_doc"
+      },
+      "grading_rules": {},
+      "_type": "vague_fr"
+    },
+    {
+      "question_id": "T1_VAGUE_0008",
+      "task": "T1_provenance",
+      "question": "le monitoring on peut faire quoi avec ?",
+      "ground_truth": {
+        "expected_claim": "monitoring dans Operations Guide",
+        "doc_id": "multi_doc"
+      },
+      "grading_rules": {},
+      "_type": "vague_fr"
+    },
+    {
+      "question_id": "T1_VAGUE_0009",
+      "task": "T1_provenance",
+      "question": "Fiori launchpad setup how?",
+      "ground_truth": {
+        "expected_claim": "configuration Fiori Launchpad",
+        "doc_id": "multi_doc"
+      },
+      "grading_rules": {},
+      "_type": "code_switch"
+    }
+  ]
+}

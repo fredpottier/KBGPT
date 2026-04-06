@@ -1,0 +1,92 @@
+# OSMOSIS Benchmark — Configuration corpus-agnostic
+# Rejouable sur n'importe quel corpus (SAP, biomedical, reglementaire)
+
+benchmark:
+  name: "OSMOSIS vs RAG Baselines"
+  version: "1.0"
+  description: "Benchmark comparatif rigoureux — provenance, contradictions, temporal, audit"
+
+corpus:
+  name: "SAP Enterprise Documentation"
+  description: "28 documents SAP (Security Guides, Feature Scope, Operations)"
+  neo4j:
+    uri: "bolt://localhost:7687"
+    user: "neo4j"
+    password_env: "NEO4J_PASSWORD"  # lit depuis env var
+    database: "neo4j"
+  qdrant:
+    url: "http://localhost:6333"
+    collection: "knowbase_chunks_v2"
+  tenant_id: "default"
+  osmosis_api: "http://localhost:8000"
+
+questions:
+  per_task_kg: 100          # questions generees depuis le KG
+  per_task_external: 100    # questions generees depuis les documents (sans KG)
+  dev_set_ratio: 0.2        # 20% pour calibration
+  seed: 42
+
+models:
+  embedding: "intfloat/multilingual-e5-large"
+  synthesis_primary: "Qwen/Qwen2.5-14B-Instruct-AWQ"
+  synthesis_claude: "claude-sonnet-4-20250514"
+  evaluation: "Qwen/Qwen2.5-14B-Instruct-AWQ"
+  temperature: 0
+  max_answer_tokens: 1500
+
+retrieval:
+  top_k: 10
+  score_threshold: 0.5
+  max_context_tokens: 8000
+
+baselines:
+  - name: "rag_claim"
+    description: "RAG sur meme collection Qdrant, sans Neo4j"
+    llm: "Qwen/Qwen2.5-14B-Instruct-AWQ"
+    retrieval: "vector_only"
+    use_kg: false
+
+  - name: "rag_hybrid"
+    description: "BM25 + vector search, sans Neo4j"
+    llm: "Qwen/Qwen2.5-14B-Instruct-AWQ"
+    retrieval: "bm25_vector"
+    use_kg: false
+
+  - name: "chatgpt_context"
+    description: "GPT-4o avec meme contexte retrieval injecte"
+    llm: "Qwen/Qwen2.5-14B-Instruct-AWQ"
+    retrieval: "injected_context"
+    use_kg: false
+
+  - name: "claude_context"
+    description: "Claude Sonnet avec meme contexte retrieval injecte"
+    llm: "claude-sonnet-4-20250514"
+    retrieval: "injected_context"
+    use_kg: false
+
+primary_metrics:
+  - id: "P1"
+    name: "Citation Recall (ALCE)"
+    task: "T1"
+    source: "ALCE"
+  - id: "P2"
+    name: "Contradiction Detection F1"
+    task: "T2"
+    source: "Custom"
+  - id: "P3"
+    name: "Version-Mixing Detection F1"
+    task: "T3"
+    source: "Custom"
+  - id: "P4"
+    name: "Export Completeness"
+    task: "T4"
+    source: "Custom"
+  - id: "P5"
+    name: "Faithfulness (RAGAS)"
+    task: "Cross"
+    source: "RAGAS"
+
+output:
+  directory: "benchmark/results"
+  formats: ["json", "markdown", "csv"]
+  include_raw_outputs: true

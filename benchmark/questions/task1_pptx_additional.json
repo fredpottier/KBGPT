@@ -1,0 +1,230 @@
+{
+  "metadata": {
+    "task": "T1",
+    "corpus": "SAP Enterprise Documentation",
+    "source": "pptx_additional_sprint2",
+    "count": 20
+  },
+  "questions": [
+    {
+      "question_id": "T1_PPTX_0001",
+      "task": "T1_provenance",
+      "question": "Quels sont les 4 principes d'acces de SAP aux systemes clients dans SAP Cloud Application Service ?",
+      "ground_truth": {
+        "expected_claim": "Les 4 principes sont : Consent (obtenu via le contrat DPA), Authentication, Authorisation, et Log Review.",
+        "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0002",
+      "task": "T1_provenance",
+      "question": "Comment SAP CAS accede-t-il aux systemes clients selon les options disponibles ?",
+      "ground_truth": {
+        "expected_claim": "Les options incluent : (1) acces direct sur le reseau client, (2) acces VPN, (3) acces via SAP Cloud Connector.",
+        "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0003",
+      "task": "T1_provenance",
+      "question": "Quel est le processus de cycle de vie des utilisateurs SAP CAS ?",
+      "ground_truth": {
+        "expected_claim": "Processus formel d'onboarding et de gestion de l'equipe. Le client controle l'acces a ses systemes. CAS opere selon des procedures formalisees.",
+        "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0004",
+      "task": "T1_provenance",
+      "question": "Comment sont proteges les fichiers partages entre SAP et le client ?",
+      "ground_truth": {
+        "expected_claim": "Une approche est convenue pour stocker et proteger les fichiers partages, incluant potentiellement les fichiers de chargement.",
+        "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0005",
+      "task": "T1_provenance",
+      "question": "Que signifie le consentement dans le cadre de l'acces SAP aux systemes clients ?",
+      "ground_truth": {
+        "expected_claim": "Selon le DPA SAP, SAP obtiendra toujours le consentement avant d'acceder aux systemes/donnees du client. Le consentement est obtenu dans le cadre du contrat.",
+        "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0006",
+      "task": "T1_provenance",
+      "question": "Qu'est-ce que la SAP Business Suite selon la strategie 2025 ?",
+      "ground_truth": {
+        "expected_claim": "La SAP Business Suite est un moteur de transformation qui reunit applications, donnees et IA. Elle represente le futur de la gestion d'entreprise.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0007",
+      "task": "T1_provenance",
+      "question": "Quel est le role de Joule Agents dans l'ecosysteme SAP ?",
+      "ground_truth": {
+        "expected_claim": "Les Joule Agents sont des agents IA qui travaillent ensemble a travers l'entreprise — finance, HR, procurement, supply chain — pour automatiser les processus end-to-end.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0008",
+      "task": "T1_provenance",
+      "question": "Qu'est-ce que le SAP Business Data Cloud ?",
+      "ground_truth": {
+        "expected_claim": "Le SAP Business Data Cloud connecte toutes les donnees de l'entreprise et permet de liberer le potentiel des donnees souvent verrouillees derriere des silos.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0009",
+      "task": "T1_provenance",
+      "question": "Quels defis business la SAP Business Suite adresse-t-elle ?",
+      "ground_truth": {
+        "expected_claim": "Les CFO equilibrent croissance et rentabilite, les CHRO gerent les talents, les CIO modernisent l'IT, les CPO et COO font face aux disruptions supply chain.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0010",
+      "task": "T1_provenance",
+      "question": "Comment SAP integre l'IA dans ses applications ?",
+      "ground_truth": {
+        "expected_claim": "L'IA SAP est embedded directement dans les applications SAP (Systems of Record) ou elle a le plus d'impact. Chaque interaction devient plus intelligente avec l'IA persona-based.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0011",
+      "task": "T1_provenance",
+      "question": "Quels sont les domaines couverts par SAP S/4HANA Cloud Private Edition FPS03 ?",
+      "ground_truth": {
+        "expected_claim": "Les domaines incluent Financial Management, Human Capital Management, Supply Chain Management, Spend Management, Customer Experience, et Technology Platform.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0012",
+      "task": "T1_provenance",
+      "question": "Qu'est-ce que le Modular Application Portfolio (MAP) de SAP S/4HANA ?",
+      "ground_truth": {
+        "expected_claim": "Le MAP structure les solutions par domaines business avec des solutions modulaires cloud (Accounting, Financial operations, Cost management, Risk and compliance, etc.).",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0013",
+      "task": "T1_provenance",
+      "question": "Quelles options de remote access SAP CAS propose-t-il ?",
+      "ground_truth": {
+        "expected_claim": "SAP CAS propose le remote access si l'installation logicielle est requise, et travaille avec le client pour determiner la meilleure facon d'acceder au systeme.",
+        "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0014",
+      "task": "T1_provenance",
+      "question": "Quelle est la vision SAP AI-First, Suite-First ?",
+      "ground_truth": {
+        "expected_claim": "SAP delivre une innovation orientee marche avec SAP Business Suite, combinant une strategie AI-First avec une approche Suite-First pour la transformation des entreprises.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0015",
+      "task": "T1_provenance",
+      "question": "Qu'est-ce que la transformation depuis SAP SRM vers SAP Ariba pour le Central Procurement ?",
+      "ground_truth": {
+        "expected_claim": "La transformation passe du scenario classique SAP SRM au scenario cible SAP S/4HANA comme systeme central pour le requisitioning, purchase contracts, purchasing et sourcing centralises.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0016",
+      "task": "T1_provenance",
+      "question": "Quelle est la fin de maintenance mainstream pour SAP SRM ?",
+      "ground_truth": {
+        "expected_claim": "La fin de maintenance mainstream pour SAP SRM est en 2025.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0017",
+      "task": "T1_provenance",
+      "question": "Quel est le role de SAP Signavio dans l'ecosysteme SAP Business Suite ?",
+      "ground_truth": {
+        "expected_claim": "SAP Signavio fournit l'AI-assisted Cloud Transformation, permettant la transformation assistee par l'IA des processus metier vers le cloud.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0018",
+      "task": "T1_provenance",
+      "question": "Comment SAP gere-t-il l'authentification pour l'acces aux systemes clients ?",
+      "ground_truth": {
+        "expected_claim": "L'authentification est le deuxieme principe d'acces (apres le consentement). SAP utilise des processus d'authentification formels pour verifier l'identite des personnels accedant aux systemes.",
+        "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0019",
+      "task": "T1_provenance",
+      "question": "Qu'est-ce que le AI Foundation dans la strategie SAP ?",
+      "ground_truth": {
+        "expected_claim": "Le AI Foundation est la base technologique sur laquelle sont construits les Joule Agents, l'IA embedded et l'IA customisee. Il supporte les domaines Supply Chain, Human Capital, Business Spend, Financial et Customer Management.",
+        "doc_id": "022_Business-Scope-S4HANA-Cloud-Private-Edition-FPS03_cf21e8ba"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    },
+    {
+      "question_id": "T1_PPTX_0020",
+      "task": "T1_provenance",
+      "question": "Quels outils SAP utilise-t-il pour le support client dans RISE with SAP ?",
+      "ground_truth": {
+        "expected_claim": "SAP utilise SAP Cloud Application Services (CAS) pour le support, avec des processus d'onboarding formels, un controle d'acces par le client, et des operations selon des procedures formalisees.",
+        "doc_id": "007_SAP_S4HANA_PCE_-_Access_to_Customer_Systems_6ac19896"
+      },
+      "grading_rules": {},
+      "_type": "pptx"
+    }
+  ]
+}

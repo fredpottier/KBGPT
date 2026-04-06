@@ -113,20 +113,7 @@ def _get_llm_client(llm_model: str):
     """Retourne le client OpenAI adapte au modele (GPT ou Qwen/vLLM)."""
     from openai import OpenAI
     if "qwen" in llm_model.lower() or llm_model.startswith("Qwen/"):
-        vllm_url = os.environ.get("VLLM_URL", "")
-        if not vllm_url:
-            try:
-                import redis as _redis
-                _r = _redis.Redis(host=os.environ.get("REDIS_HOST", "redis"),
-                                  port=int(os.environ.get("REDIS_PORT", "6379")))
-                _state = _r.get("osmose:burst:state")
-                if _state:
-                    import json as _j2
-                    vllm_url = _j2.loads(_state).get("vllm_url", _j2.loads(_state).get("endpoint", ""))
-            except Exception:
-                pass
-        if not vllm_url:
-            vllm_url = "http://localhost:8000"
+        vllm_url = os.environ.get("VLLM_URL", "http://18.194.28.167:8000")
         return OpenAI(api_key="EMPTY", base_url=f"{vllm_url}/v1")
     return OpenAI()
 
@@ -242,62 +229,12 @@ def _call_claude(system: str, user: str, model: str, max_tokens: int):
     return answer, tokens
 
 
-def retrieve_via_api(
-    api_base: str, token: str, question: str, top_k: int = 10,
-) -> Dict[str, Any]:
-    """Retrieval via API OSMOSIS avec KG desactive — memes embeddings, synthese native."""
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "question": question,
-        "use_graph_context": False,
-        "use_kg_traversal": False,
-        "use_graph_first": False,
-        "use_latest": True,
-    }
-    start = time.time()
-    try:
-        resp = requests.post(
-            f"{api_base}/api/search", json=payload, headers=headers, timeout=120,
-        )
-        retrieve_ms = (time.time() - start) * 1000
-        if resp.status_code != 200:
-            return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}", "retrieve_ms": retrieve_ms}
-
-        data = resp.json()
-        results = data.get("results", [])
-        chunks = [
-            {
-                "text": r.get("text", ""),
-                "source_file": r.get("source_file", ""),
-                "doc_id": r.get("source_file", ""),
-                "score": r.get("score", 0),
-                "chunk_id": r.get("chunk_id", ""),
-                "page_no": r.get("page_no"),
-            }
-            for r in results[:top_k]
-        ]
-        return {
-            "chunks": chunks,
-            "retrieve_ms": retrieve_ms,
-            "native_answer": data.get("synthesis", {}).get("synthesized_answer", ""),
-            "error": None,
-        }
-    except requests.Timeout:
-        return {"error": "Timeout (120s)", "retrieve_ms": 120000}
-    except Exception as e:
-        return {"error": str(e), "retrieve_ms": (time.time() - start) * 1000}
-
-
 def run_rag_benchmark(
     config_path: str,
     questions_path: str,
     baseline_name: str = "rag_claim",
     llm_override: str = None,
     output_path: str = None,
-    via_api: bool = False,
 ):
     config = load_config(config_path)
     corpus = config["corpus"]
@@ -320,40 +257,15 @@ def run_rag_benchmark(
                 llm_model = bl.get("llm", llm_model)
             break
 
-    # Mode API : utilise l'API OSMOSIS avec KG desactive (synthese native incluse)
-    if via_api:
-        mode = "api_no_kg"
-        token = get_auth_token(api_base)
-        logger.info(f"Auth OK — mode API (KG disabled)")
-    else:
-        # Direct TEI + Qdrant retrieval (pas de synthese native inutile)
-        token = None
-        qdrant_url = os.environ.get("QDRANT_URL", corpus["qdrant"]["url"])
-        collection = corpus["qdrant"]["collection"]
-        tei_url = os.environ.get("TEI_URL", "")
-        if not tei_url:
-            try:
-                import redis
-                r = redis.Redis(host=os.environ.get("REDIS_HOST", "redis"),
-                               port=int(os.environ.get("REDIS_PORT", "6379")))
-                burst_state = r.get("osmose:burst:state")
-                if burst_state:
-                    import json as _json
-                    state = _json.loads(burst_state)
-                    tei_url = state.get("tei_endpoint", state.get("embeddings_url", ""))
-                    logger.info(f"TEI URL from Redis: {tei_url}")
-            except Exception as e:
-                logger.warning(f"Cannot read TEI URL from Redis: {e}")
-        if not tei_url:
-            raise RuntimeError(
-                "TEI_URL not set and not found in Redis. "
-                "Start the EC2 burst instance first, set TEI_URL env var, or use --via-api."
-            )
-        mode = "direct_tei_qdrant"
+    # Direct TEI + Qdrant retrieval (pas de synthese native inutile)
+    qdrant_url = corpus["qdrant"]["url"]
+    collection = corpus["qdrant"]["collection"]
+    tei_url = os.environ.get("TEI_URL", "http://18.194.28.167:8001")
+    mode = "direct_tei_qdrant"
 
     logger.info(
         f"Running RAG baseline '{baseline_name}': {len(questions)} questions, "
-        f"LLM={llm_model}, mode={mode}"
+        f"LLM={llm_model}, mode={mode} (TEI+Qdrant direct, no API overhead)"
     )
 
     top_k = config["retrieval"]["top_k"]
@@ -362,113 +274,63 @@ def run_rag_benchmark(
     for i, q in enumerate(questions):
         logger.info(f"  [{i+1}/{len(questions)}] {q['question'][:80]}...")
 
-        if via_api:
-            # Mode API : retrieval + synthese via API OSMOSIS avec KG desactive
-            retrieval = retrieve_via_api(api_base, token, q["question"], top_k)
+        # 1. Retrieve direct (TEI embedding + Qdrant search — 1 seul appel, pas de synthese native)
+        retrieval = retrieve_chunks_direct(q["question"], qdrant_url, collection, tei_url, top_k)
 
-            if retrieval.get("error"):
-                results.append({
-                    "question_id": q["question_id"],
-                    "task": q["task"],
-                    "question": q["question"],
-                    "system": baseline_name,
-                    "response": {
-                        "answer": "",
-                        "error": retrieval["error"],
-                        "latency_ms": retrieval.get("retrieve_ms", 0),
-                    },
-                    "ground_truth": q["ground_truth"],
-                    "grading_rules": q.get("grading_rules", {}),
-                })
-                continue
-
+        if retrieval.get("error"):
             results.append({
                 "question_id": q["question_id"],
                 "task": q["task"],
                 "question": q["question"],
                 "system": baseline_name,
                 "response": {
-                    "answer": retrieval["native_answer"],
-                    "chunks_retrieved": len(retrieval["chunks"]),
-                    "results": [
-                        {
-                            "text": c["text"][:300],
-                            "source_file": c["source_file"],
-                            "score": c["score"],
-                            "doc_id": c["doc_id"],
-                        }
-                        for c in retrieval["chunks"]
-                    ],
-                    "sources_used": [c["source_file"] for c in retrieval["chunks"] if c.get("source_file")],
-                    "latency_ms": retrieval["retrieve_ms"],
-                    "retrieve_ms": retrieval["retrieve_ms"],
-                    "synthesis_ms": 0,
-                    "tokens": 0,
-                    "error": None,
-                    "entity_names": [],
-                    "contradiction_texts": [],
-                    "graph_context": None,
-                    "insight_hints": [],
-                    "related_articles": [],
+                    "answer": "",
+                    "error": retrieval["error"],
+                    "latency_ms": retrieval.get("retrieve_ms", 0),
                 },
                 "ground_truth": q["ground_truth"],
                 "grading_rules": q.get("grading_rules", {}),
             })
-        else:
-            # Mode direct : TEI embedding + Qdrant search
-            retrieval = retrieve_chunks_direct(q["question"], qdrant_url, collection, tei_url, top_k)
+            continue
 
-            if retrieval.get("error"):
-                results.append({
-                    "question_id": q["question_id"],
-                    "task": q["task"],
-                    "question": q["question"],
-                    "system": baseline_name,
-                    "response": {
-                        "answer": "",
-                        "error": retrieval["error"],
-                        "latency_ms": retrieval.get("retrieve_ms", 0),
-                    },
-                    "ground_truth": q["ground_truth"],
-                    "grading_rules": q.get("grading_rules", {}),
-                })
-                continue
+        # 2. Synthesize (meme LLM, SANS metadonnees KG)
+        synthesis = synthesize_answer(q["question"], retrieval["chunks"], llm_model)
 
-            synthesis = synthesize_answer(q["question"], retrieval["chunks"], llm_model)
-            total_latency = retrieval["retrieve_ms"] + synthesis.get("latency_ms", 0)
+        total_latency = retrieval["retrieve_ms"] + synthesis.get("latency_ms", 0)
 
-            results.append({
-                "question_id": q["question_id"],
-                "task": q["task"],
-                "question": q["question"],
-                "system": baseline_name,
-                "response": {
-                    "answer": synthesis["answer"],
-                    "chunks_retrieved": len(retrieval["chunks"]),
-                    "results": [
-                        {
-                            "text": c["text"][:300],
-                            "source_file": c["source_file"],
-                            "score": c["score"],
-                            "doc_id": c["doc_id"],
-                        }
-                        for c in retrieval["chunks"]
-                    ],
-                    "sources_used": [c["source_file"] for c in retrieval["chunks"] if c.get("source_file")],
-                    "latency_ms": total_latency,
-                    "retrieve_ms": retrieval["retrieve_ms"],
-                    "synthesis_ms": synthesis.get("latency_ms", 0),
-                    "tokens": synthesis["tokens"],
-                    "error": synthesis["error"],
-                    "entity_names": [],
-                    "contradiction_texts": [],
-                    "graph_context": None,
-                    "insight_hints": [],
-                    "related_articles": [],
-                },
-                "ground_truth": q["ground_truth"],
-                "grading_rules": q.get("grading_rules", {}),
-            })
+        results.append({
+            "question_id": q["question_id"],
+            "task": q["task"],
+            "question": q["question"],
+            "system": baseline_name,
+            "response": {
+                "answer": synthesis["answer"],
+                "chunks_retrieved": len(retrieval["chunks"]),
+                "results": [
+                    {
+                        "text": c["text"][:300],
+                        "source_file": c["source_file"],
+                        "score": c["score"],
+                        "doc_id": c["doc_id"],
+                    }
+                    for c in retrieval["chunks"]
+                ],
+                "sources_used": [c["source_file"] for c in retrieval["chunks"] if c.get("source_file")],
+                "latency_ms": total_latency,
+                "retrieve_ms": retrieval["retrieve_ms"],
+                "synthesis_ms": synthesis.get("latency_ms", 0),
+                "tokens": synthesis["tokens"],
+                "error": synthesis["error"],
+                # RAG n'a PAS ces champs (c'est le point)
+                "entity_names": [],
+                "contradiction_texts": [],
+                "graph_context": None,
+                "insight_hints": [],
+                "related_articles": [],
+            },
+            "ground_truth": q["ground_truth"],
+            "grading_rules": q.get("grading_rules", {}),
+        })
 
         time.sleep(0.3)
 
@@ -508,11 +370,9 @@ def main():
                         choices=["rag_claim", "rag_hybrid", "chatgpt_context", "claude_context"])
     parser.add_argument("--llm", default=None, help="Override LLM model")
     parser.add_argument("--output", default=None)
-    parser.add_argument("--via-api", action="store_true",
-                        help="Use OSMOSIS API with KG disabled instead of direct TEI+Qdrant")
     args = parser.parse_args()
 
-    run_rag_benchmark(args.config, args.questions, args.baseline, args.llm, args.output, args.via_api)
+    run_rag_benchmark(args.config, args.questions, args.baseline, args.llm, args.output)
 
 
 if __name__ == "__main__":
