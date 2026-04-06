@@ -1,0 +1,20 @@
+# OSMOSIS Cockpit — Dépendances
+# Service indépendant, ne dépend PAS de l'app OSMOSIS
+
+# API + WebSocket
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# Collecteurs
+redis>=5.0.0
+docker>=7.0.0
+httpx>=0.27.0
+neo4j>=5.15.0
+boto3>=1.34.0
+pyyaml>=6.0.1
+
+# Stdlib (inclus, listés pour documentation)
+# sqlite3
+# json
+# asyncio
+# dataclasses
