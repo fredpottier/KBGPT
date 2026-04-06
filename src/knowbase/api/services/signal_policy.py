@@ -358,6 +358,18 @@ def build_policy(
             confidence = exactness.strength
             reason = f"structured: classifier={question_mode_confidence:.2f} + exactness={exactness.strength:.2f}"
 
+    # Mode PERSPECTIVE : question ouverte/panoramique + Perspectives disponibles
+    perspective_enabled = os.environ.get("MODE_PERSPECTIVE_ENABLED", "true").lower() == "true"
+    if candidate == ResponseMode.DIRECT and perspective_enabled:
+        try:
+            from knowbase.perspectives.runtime import should_activate_perspectives
+            if should_activate_perspectives(question or "", _kg_claims, []):
+                candidate = ResponseMode.PERSPECTIVE
+                confidence = 0.6
+                reason = "perspective: open_question_detected"
+        except Exception as e:
+            logger.debug(f"[MODE_PERSPECTIVE] Detection failed (non-blocking): {e}")
+
     # Mode AUGMENTED : reserve pour override admin ou calibration auto future
 
     policy.candidate_mode = candidate
@@ -382,6 +394,12 @@ def build_policy(
             candidate = ResponseMode.DIRECT
             fallback = True
             reason += f" -> FALLBACK (comparable={comparable}, trust={kg_trust:.2f})"
+
+    elif candidate == ResponseMode.PERSPECTIVE:
+        # Validation legere : on verifie juste que des Perspectives existent
+        # La validation complete (>= 2 Perspectives, couverture) est faite dans runtime.py
+        # qui peut fallback DIRECT de maniere transparente
+        pass
 
     elif candidate == ResponseMode.AUGMENTED:
         kg_doc_ids = set(c.get("doc_id") or c.get("source_file", "") for c in _kg_claims)
