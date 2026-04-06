@@ -426,6 +426,48 @@ def _backup_extraction_cache(backup_dir: Path, include_cache: bool, log_lines: l
         return {"status": "error", "file_count": 0, "size_bytes": 0, "error": str(e)}
 
 
+def _backup_benchmark(backup_dir: Path, log_lines: list) -> dict:
+    """Backup du repertoire benchmark (resultats, questions, scripts)."""
+    benchmark_dir = Path("/app/benchmark")
+    # Fallback : chercher dans le volume monte
+    if not benchmark_dir.exists():
+        benchmark_dir = Path("benchmark")
+    if not benchmark_dir.exists():
+        log_lines.append("[Benchmark] Repertoire inexistant")
+        return {"status": "skipped", "file_count": 0, "size_bytes": 0}
+
+    # Collecter tous les fichiers benchmark
+    benchmark_files = []
+    for ext in ["*.json", "*.py", "*.yaml", "*.md"]:
+        benchmark_files.extend(benchmark_dir.rglob(ext))
+
+    if not benchmark_files:
+        log_lines.append("[Benchmark] Aucun fichier")
+        return {"status": "success", "file_count": 0, "size_bytes": 0}
+
+    try:
+        tar_path = backup_dir / "benchmark.tar.gz"
+        log_lines.append(f"[Benchmark] Compression de {len(benchmark_files)} fichiers...")
+
+        with tarfile.open(tar_path, "w:gz") as tar:
+            for f in benchmark_files:
+                arcname = str(f.relative_to(benchmark_dir.parent))
+                tar.add(str(f), arcname=arcname)
+
+        file_size = tar_path.stat().st_size
+        msg = f"[Benchmark] OK — {len(benchmark_files)} fichiers ({_format_size(file_size)})"
+        log_lines.append(msg)
+        logger.info(msg)
+
+        return {"status": "success", "file_count": len(benchmark_files), "size_bytes": file_size}
+
+    except Exception as e:
+        msg = f"[Benchmark] ERREUR — {e}"
+        log_lines.append(msg)
+        logger.error(msg)
+        return {"status": "error", "file_count": 0, "size_bytes": 0, "error": str(e)}
+
+
 # ---------------------------------------------------------------------------
 #  Helpers restore par composant
 # ---------------------------------------------------------------------------
@@ -692,6 +734,38 @@ def _restore_extraction_cache(backup_dir: Path, log_lines: list) -> dict:
         return {"status": "error", "error": str(e)}
 
 
+def _restore_benchmark(backup_dir: Path, log_lines: list) -> dict:
+    """Restore benchmark depuis tar.gz."""
+    tar_path = backup_dir / "benchmark.tar.gz"
+    if not tar_path.exists():
+        log_lines.append("[Benchmark] Pas de fichier benchmark.tar.gz, skip")
+        return {"status": "skipped"}
+
+    try:
+        log_lines.append("[Benchmark] Extraction du benchmark...")
+        # Extraire dans /app/ (racine du projet dans le container)
+        extract_dir = Path("/app")
+        if not extract_dir.exists():
+            extract_dir = Path(".")
+
+        with tarfile.open(tar_path, "r:gz") as tar:
+            tar.extractall(path=str(extract_dir))
+
+        benchmark_dir = extract_dir / "benchmark"
+        count = len(list(benchmark_dir.rglob("*"))) if benchmark_dir.exists() else 0
+
+        msg = f"[Benchmark] Restaure — {count} fichiers"
+        log_lines.append(msg)
+        logger.info(msg)
+        return {"status": "success", "file_count": count}
+
+    except Exception as e:
+        msg = f"[Benchmark] ERREUR restore — {e}"
+        log_lines.append(msg)
+        logger.error(msg)
+        return {"status": "error", "error": str(e)}
+
+
 # ---------------------------------------------------------------------------
 #  Service principal
 # ---------------------------------------------------------------------------
@@ -947,7 +1021,7 @@ class BackupService:
         log_lines.append(f"Début : {datetime.now().isoformat()}")
 
         # Collecter stats pour le manifest
-        log_lines.append("[0/5] Collecte des statistiques...")
+        log_lines.append("[0/6] Collecte des statistiques...")
         stats = self.get_current_stats()
 
         manifest_data = {
@@ -970,31 +1044,36 @@ class BackupService:
         }
 
         # 1. Neo4j
-        log_lines.append("[1/5] Backup Neo4j...")
-        self._update_job_progress(job_id, "running", "[1/5] Backup Neo4j...", log_lines)
+        log_lines.append("[1/6] Backup Neo4j...")
+        self._update_job_progress(job_id, "running", "[1/6] Backup Neo4j...", log_lines)
         manifest_data["components"]["neo4j"] = _backup_neo4j(backup_dir, log_lines)
 
         # 2. Qdrant
-        log_lines.append("[2/5] Backup Qdrant...")
-        self._update_job_progress(job_id, "running", "[2/5] Backup Qdrant...", log_lines)
+        log_lines.append("[2/6] Backup Qdrant...")
+        self._update_job_progress(job_id, "running", "[2/6] Backup Qdrant...", log_lines)
         manifest_data["components"]["qdrant"] = _backup_qdrant(backup_dir, log_lines)
 
         # 3. PostgreSQL
-        log_lines.append("[3/5] Backup PostgreSQL...")
-        self._update_job_progress(job_id, "running", "[3/5] Backup PostgreSQL...", log_lines)
+        log_lines.append("[3/6] Backup PostgreSQL...")
+        self._update_job_progress(job_id, "running", "[3/6] Backup PostgreSQL...", log_lines)
         manifest_data["components"]["postgresql"] = _backup_postgresql(backup_dir, log_lines)
 
         # 4. Redis
-        log_lines.append("[4/5] Backup Redis...")
-        self._update_job_progress(job_id, "running", "[4/5] Backup Redis...", log_lines)
+        log_lines.append("[4/6] Backup Redis...")
+        self._update_job_progress(job_id, "running", "[4/6] Backup Redis...", log_lines)
         manifest_data["components"]["redis"] = _backup_redis(backup_dir, log_lines)
 
         # 5. Extraction Cache
-        log_lines.append("[5/5] Backup Extraction Cache...")
-        self._update_job_progress(job_id, "running", "[5/5] Backup Extraction Cache...", log_lines)
+        log_lines.append("[5/6] Backup Extraction Cache...")
+        self._update_job_progress(job_id, "running", "[5/6] Backup Extraction Cache...", log_lines)
         manifest_data["components"]["extraction_cache"] = _backup_extraction_cache(
             backup_dir, include_cache, log_lines
         )
+
+        # 6. Benchmark
+        log_lines.append("[6/6] Backup Benchmark...")
+        self._update_job_progress(job_id, "running", "[6/6] Backup Benchmark...", log_lines)
+        manifest_data["components"]["benchmark"] = _backup_benchmark(backup_dir, log_lines)
 
         # Finaliser
         duration = time.time() - start_time
@@ -1017,7 +1096,7 @@ class BackupService:
         log_lines.append(f"=== BACKUP COMPLET : {name} ===")
         log_lines.append(f"Taille : {_format_size(total_size)}")
         log_lines.append(f"Durée : {round(duration, 1)}s")
-        log_lines.append(f"Composants OK : {components_ok}/5")
+        log_lines.append(f"Composants OK : {components_ok}/6")
 
         final_status = "completed" if components_ok >= 3 else "failed"
         self._update_job_progress(job_id, final_status, "Backup terminé", log_lines)
@@ -1086,9 +1165,14 @@ class BackupService:
         _restore_redis(backup_dir, log_lines)
 
         # 5. Cache
-        log_lines.append("[5/5] Restore Extraction Cache...")
-        self._update_job_progress(job_id, "running", "[5/5] Restore Cache...", log_lines)
+        log_lines.append("[5/6] Restore Extraction Cache...")
+        self._update_job_progress(job_id, "running", "[5/6] Restore Cache...", log_lines)
         _restore_extraction_cache(backup_dir, log_lines)
+
+        # 6. Benchmark
+        log_lines.append("[6/6] Restore Benchmark...")
+        self._update_job_progress(job_id, "running", "[6/6] Restore Benchmark...", log_lines)
+        _restore_benchmark(backup_dir, log_lines)
 
         duration = time.time() - start_time
 

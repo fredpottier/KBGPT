@@ -59,7 +59,7 @@ def ensure_layer_r_collection() -> None:
 
 def ensure_axis_indexes() -> None:
     """Crée les payload indexes keyword sur axis_release_id et axis_version."""
-    from qdrant_client.models import PayloadSchemaType
+    from qdrant_client.models import PayloadSchemaType, TextIndexParams, TokenizerType
 
     client = get_qdrant_client()
     for field_name in ("axis_release_id", "axis_version"):
@@ -70,8 +70,24 @@ def ensure_axis_indexes() -> None:
                 field_schema=PayloadSchemaType.KEYWORD,
             )
         except Exception:
-            # Index déjà existant — ignoré silencieusement
             pass
+
+    # Text index sur le champ 'text' pour hybrid BM25+dense search
+    try:
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="text",
+            field_schema=TextIndexParams(
+                type="text",
+                tokenizer=TokenizerType.WORD,
+                min_token_len=2,
+                max_token_len=40,
+                lowercase=True,
+            ),
+        )
+        logger.info("[OSMOSE:LayerR] Created text index on 'text' field (hybrid BM25)")
+    except Exception:
+        pass
 
 
 def upsert_layer_r(
@@ -138,7 +154,7 @@ def upsert_layer_r(
 
             points.append(PointStruct(
                 id=sc.point_id(),
-                vector=embedding.tolist(),
+                vector=embedding.tolist() if hasattr(embedding, "tolist") else list(embedding),
                 payload=payload,
             ))
 

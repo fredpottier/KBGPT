@@ -242,9 +242,9 @@ const ServiceCard = ({
 }) => {
   const isHealthy = service.status === 'healthy'
   const isUnreachable = service.status === 'unreachable'
-  const borderColor = isHealthy ? 'green.600' : isUnreachable ? 'red.600' : 'yellow.600'
-  const bgColor = isHealthy ? 'green.900' : isUnreachable ? 'red.900' : 'yellow.900'
-  const statusColor = isHealthy ? 'green.400' : isUnreachable ? 'red.400' : 'yellow.400'
+  const borderColor = isHealthy ? 'green.500' : isUnreachable ? 'red.500' : 'yellow.500'
+  const bgColor = isHealthy ? 'rgba(34, 197, 94, 0.08)' : isUnreachable ? 'rgba(239, 68, 68, 0.08)' : 'rgba(234, 179, 8, 0.08)'
+  const statusColor = isHealthy ? 'green.500' : isUnreachable ? 'red.500' : 'yellow.500'
   const statusIcon = isHealthy ? FiCheckCircle : isUnreachable ? FiXCircle : FiAlertTriangle
   const displayName = service.name === 'vllm' ? 'vLLM' : 'TEI'
   const port = service.name === 'vllm' ? '8000' : '8001'
@@ -521,9 +521,9 @@ export default function GpuAdminPage() {
             rightIcon={<FiChevronDown />}
             variant="outline"
             isDisabled={!isActive}
-            borderColor={isActive ? 'red.600' : 'whiteAlpha.300'}
-            color={isActive ? 'red.400' : 'text.secondary'}
-            _hover={isActive ? { borderColor: 'red.400', bg: 'red.900' } : {}}
+            borderColor={isActive ? 'red.500' : 'border.default'}
+            color={isActive ? 'red.500' : 'text.secondary'}
+            _hover={isActive ? { borderColor: 'red.400', bg: 'rgba(239, 68, 68, 0.08)' } : {}}
             _disabled={{ borderColor: 'whiteAlpha.100', color: 'whiteAlpha.300', cursor: 'not-allowed' }}
             transition="all 0.2s"
           >
@@ -570,11 +570,11 @@ export default function GpuAdminPage() {
       {/* Section Instance EC2 */}
       {/* ================================================================ */}
       {hasInstance && instanceDetails ? (
-        <Box bg="whiteAlpha.50" border="2px solid" borderColor="green.600" rounded="lg" mb={3} overflow="hidden">
-          <Flex px={3} py={2} bg="green.900" justify="space-between" align="center">
+        <Box bg="bg.secondary" border="2px solid" borderColor="green.500" rounded="lg" mb={3} overflow="hidden">
+          <Flex px={3} py={2} bg="rgba(34, 197, 94, 0.1)" justify="space-between" align="center">
             <HStack spacing={2}>
-              <Icon as={FiServer} boxSize={4} color="green.400" />
-              <Text fontSize="sm" fontWeight="bold" color="green.100">Instance EC2</Text>
+              <Icon as={FiServer} boxSize={4} color="green.500" />
+              <Text fontSize="sm" fontWeight="bold" color="text.primary">Instance EC2</Text>
               <Badge colorScheme="green" fontSize="xs">{instanceDetails.instance_type}</Badge>
             </HStack>
             <Tooltip

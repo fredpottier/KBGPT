@@ -166,7 +166,7 @@ const MetricCard = ({
 }) => (
   <Tooltip label={tooltip} placement="top" hasArrow isDisabled={!tooltip}>
     <Box
-      bg="#1e293b"
+      bg="bg.tertiary"
       border="1px solid"
       borderColor={`${color}.700`}
       rounded="lg"
@@ -187,10 +187,10 @@ const MetricCard = ({
           <Icon as={icon} boxSize={4} color={`${color}.400`} />
         </Box>
         <Box>
-          <Text fontSize="lg" fontWeight="bold" color="#f1f5f9" lineHeight={1}>
+          <Text fontSize="lg" fontWeight="bold" color="text.primary" lineHeight={1}>
             {(value ?? 0).toLocaleString()}
           </Text>
-          <Text fontSize="xs" color="#94a3b8">{label}</Text>
+          <Text fontSize="xs" color="text.muted">{label}</Text>
         </Box>
       </HStack>
     </Box>
@@ -203,7 +203,7 @@ const RelationStat = ({ label, value, color = 'gray' }: { label: string; value: 
     <Text fontWeight="bold" fontSize="lg" color={(value ?? 0) > 0 ? `${color}.400` : '#64748b'}>
       {(value ?? 0).toLocaleString()}
     </Text>
-    <Text fontSize="xs" color="#64748b">{label}</Text>
+    <Text fontSize="xs" color="text.muted">{label}</Text>
   </VStack>
 )
 
@@ -549,7 +549,7 @@ export default function ClaimFirstPage() {
       <Center h="400px">
         <VStack spacing={3}>
           <Spinner color="purple.500" size="lg" />
-          <Text color="#94a3b8">Chargement...</Text>
+          <Text color="text.muted">Chargement...</Text>
         </VStack>
       </Center>
     )
@@ -558,12 +558,12 @@ export default function ClaimFirstPage() {
   if (!isAdmin()) {
     return (
       <Center h="400px">
-        <Box bg="#1e293b" border="1px solid" borderColor="red.700" rounded="xl" p={6}>
+        <Box bg="bg.tertiary" border="1px solid" borderColor="red.700" rounded="xl" p={6}>
           <HStack spacing={3}>
             <Icon as={FiXCircle} color="red.400" boxSize={6} />
             <Box>
-              <Text color="#f1f5f9" fontWeight="bold">Accès refusé</Text>
-              <Text color="#94a3b8" fontSize="sm">Cette page est réservée aux administrateurs.</Text>
+              <Text color="text.primary" fontWeight="bold">Accès refusé</Text>
+              <Text color="text.muted" fontSize="sm">Cette page est réservée aux administrateurs.</Text>
             </Box>
           </HStack>
         </Box>
@@ -576,7 +576,7 @@ export default function ClaimFirstPage() {
       <Center h="400px">
         <VStack spacing={3}>
           <Spinner color="purple.500" size="lg" />
-          <Text color="#94a3b8">Chargement Pipeline Claim-First...</Text>
+          <Text color="text.muted">Chargement Pipeline Claim-First...</Text>
         </VStack>
       </Center>
     )
@@ -599,10 +599,10 @@ export default function ClaimFirstPage() {
             <Icon as={FiTarget} boxSize={5} color="white" />
           </Box>
           <Box>
-            <Text fontSize="xl" fontWeight="bold" color="#f1f5f9" lineHeight={1}>
+            <Text fontSize="xl" fontWeight="bold" color="text.primary" lineHeight={1}>
               Pipeline Claim-First
             </Text>
-            <Text fontSize="sm" color="#94a3b8">
+            <Text fontSize="sm" color="text.muted">
               Pivot Épistémique - Claims comme objet central
             </Text>
           </Box>
@@ -614,7 +614,7 @@ export default function ClaimFirstPage() {
             icon={<FiRefreshCw />}
             size="sm"
             variant="ghost"
-            color="#94a3b8"
+            color="text.muted"
             onClick={loadData}
             isLoading={loading}
           />
@@ -623,7 +623,7 @@ export default function ClaimFirstPage() {
 
       {/* Error */}
       {error && (
-        <Box bg="#1e293b" border="1px solid" borderColor="red.700" rounded="xl" p={4} mb={4}>
+        <Box bg="bg.tertiary" border="1px solid" borderColor="red.700" rounded="xl" p={4} mb={4}>
           <HStack spacing={3}>
             <Icon as={FiAlertTriangle} color="red.400" boxSize={5} />
             <Text color="red.300">{error}</Text>
@@ -644,8 +644,8 @@ export default function ClaimFirstPage() {
           </Flex>
 
           {/* Relations Stats */}
-          <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4} mb={4}>
-            <Text fontSize="sm" fontWeight="semibold" color="#94a3b8" mb={3}>RELATIONS</Text>
+          <Box bg="bg.tertiary" border="1px solid" borderColor="border.default" rounded="xl" p={4} mb={4}>
+            <Text fontSize="sm" fontWeight="semibold" color="text.muted" mb={3}>RELATIONS</Text>
             <SimpleGrid columns={{ base: 4, md: 7 }} gap={4}>
               <RelationStat label="ABOUT" value={status.about} color="blue" />
               <RelationStat label="HAS_FACET" value={status.has_facet} color="purple" />
@@ -658,14 +658,14 @@ export default function ClaimFirstPage() {
           </Box>
 
           {/* Lien vers Post-Import (les actions ont été déplacées) */}
-          <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4} mb={4}>
+          <Box bg="bg.tertiary" border="1px solid" borderColor="border.default" rounded="xl" p={4} mb={4}>
             <Flex justify="space-between" align="center">
               <HStack spacing={2}>
                 <Icon as={FiRefreshCw} color="brand.400" boxSize={4} />
-                <Text fontSize="sm" fontWeight="semibold" color="#f1f5f9">
+                <Text fontSize="sm" fontWeight="semibold" color="text.primary">
                   Opérations post-import
                 </Text>
-                <Text fontSize="xs" color="#64748b">
+                <Text fontSize="xs" color="text.muted">
                   Canonicalisation, chaînes cross-doc, archivage, facettes, contradictions...
                 </Text>
               </HStack>
@@ -717,7 +717,7 @@ export default function ClaimFirstPage() {
 
             return (
             <Box
-              bg="#0f172a"
+              bg="bg.primary"
               border="2px solid"
               borderColor={
                 isCircuitBreaker ? 'red.500' :
@@ -758,13 +758,13 @@ export default function ClaimFirstPage() {
                       boxSize={5}
                     />
                     <Box>
-                      <Text fontWeight="bold" color="#f1f5f9" fontSize="md">
+                      <Text fontWeight="bold" color="text.primary" fontSize="md">
                         {isCircuitBreaker ? 'Circuit Breaker activé' :
                          isFinished ? 'Traitement terminé' :
                          isFailed ? 'Traitement échoué' :
                          'Traitement en cours'}
                       </Text>
-                      <Text fontSize="xs" color="#94a3b8">
+                      <Text fontSize="xs" color="text.muted">
                         Job {currentJob.job_id}
                       </Text>
                     </Box>
@@ -777,8 +777,8 @@ export default function ClaimFirstPage() {
                     )}
                     {elapsed > 0 && (
                       <HStack spacing={1}>
-                        <Icon as={FiClock} color="#64748b" boxSize={3} />
-                        <Text fontSize="xs" color="#94a3b8">{formatDuration(elapsed)}</Text>
+                        <Icon as={FiClock} color="text.muted" boxSize={3} />
+                        <Text fontSize="xs" color="text.muted">{formatDuration(elapsed)}</Text>
                       </HStack>
                     )}
                   </HStack>
@@ -790,12 +790,12 @@ export default function ClaimFirstPage() {
 
                   {/* Document en cours */}
                   {isRunning && currentJob.current_filename && (
-                    <Box bg="#1e293b" rounded="lg" px={3} py={2} border="1px solid" borderColor="#334155">
+                    <Box bg="bg.tertiary" rounded="lg" px={3} py={2} border="1px solid" borderColor="border.default">
                       <HStack spacing={2}>
                         <Icon as={FiFileText} color="blue.400" boxSize={4} />
                         <Box flex={1} minW={0}>
-                          <Text fontSize="xs" color="#64748b">Document en cours</Text>
-                          <Text fontSize="sm" color="#e2e8f0" fontWeight="medium" isTruncated>
+                          <Text fontSize="xs" color="text.muted">Document en cours</Text>
+                          <Text fontSize="sm" color="text.primary" fontWeight="medium" isTruncated>
                             {currentJob.current_filename}
                           </Text>
                         </Box>
@@ -807,15 +807,15 @@ export default function ClaimFirstPage() {
                   <Box>
                     <Flex justify="space-between" mb={1} align="baseline">
                       <HStack spacing={2}>
-                        <Text fontSize="sm" fontWeight="semibold" color="#f1f5f9">
+                        <Text fontSize="sm" fontWeight="semibold" color="text.primary">
                           {progressPct}%
                         </Text>
-                        <Text fontSize="xs" color="#64748b">
+                        <Text fontSize="xs" color="text.muted">
                           ({currentJob.processed} / {currentJob.total} documents)
                         </Text>
                       </HStack>
                       {isRunning && eta > 0 && (
-                        <Text fontSize="xs" color="#94a3b8">
+                        <Text fontSize="xs" color="text.muted">
                           ETA: ~{formatDuration(eta)}
                         </Text>
                       )}
@@ -823,7 +823,7 @@ export default function ClaimFirstPage() {
                     <Progress
                       value={progressPct}
                       colorScheme={isCircuitBreaker ? 'red' : isFinished ? 'green' : 'purple'}
-                      bg="#334155"
+                      bg="bg.hover"
                       borderRadius="full"
                       size="md"
                       hasStripe={isRunning}
@@ -833,35 +833,35 @@ export default function ClaimFirstPage() {
 
                   {/* Métriques temps réel */}
                   <SimpleGrid columns={{ base: 2, md: 5 }} gap={2}>
-                    <Box bg="#1e293b" rounded="md" px={3} py={2} textAlign="center">
+                    <Box bg="bg.tertiary" rounded="md" px={3} py={2} textAlign="center">
                       <Text fontSize="lg" fontWeight="bold" color="green.400">
                         {currentJob.total_claims.toLocaleString()}
                       </Text>
-                      <Text fontSize="xs" color="#64748b">Claims</Text>
+                      <Text fontSize="xs" color="text.muted">Claims</Text>
                     </Box>
-                    <Box bg="#1e293b" rounded="md" px={3} py={2} textAlign="center">
+                    <Box bg="bg.tertiary" rounded="md" px={3} py={2} textAlign="center">
                       <Text fontSize="lg" fontWeight="bold" color="blue.400">
                         {currentJob.total_entities.toLocaleString()}
                       </Text>
-                      <Text fontSize="xs" color="#64748b">Entités</Text>
+                      <Text fontSize="xs" color="text.muted">Entités</Text>
                     </Box>
-                    <Box bg="#1e293b" rounded="md" px={3} py={2} textAlign="center">
-                      <Text fontSize="lg" fontWeight="bold" color="#f1f5f9">
+                    <Box bg="bg.tertiary" rounded="md" px={3} py={2} textAlign="center">
+                      <Text fontSize="lg" fontWeight="bold" color="text.primary">
                         {currentJob.processed}
                       </Text>
-                      <Text fontSize="xs" color="#64748b">Traités</Text>
+                      <Text fontSize="xs" color="text.muted">Traités</Text>
                     </Box>
-                    <Box bg="#1e293b" rounded="md" px={3} py={2} textAlign="center">
+                    <Box bg="bg.tertiary" rounded="md" px={3} py={2} textAlign="center">
                       <Text fontSize="lg" fontWeight="bold" color={currentJob.failed > 0 ? 'red.400' : '#64748b'}>
                         {currentJob.failed}
                       </Text>
-                      <Text fontSize="xs" color="#64748b">Erreurs</Text>
+                      <Text fontSize="xs" color="text.muted">Erreurs</Text>
                     </Box>
-                    <Box bg="#1e293b" rounded="md" px={3} py={2} textAlign="center">
+                    <Box bg="bg.tertiary" rounded="md" px={3} py={2} textAlign="center">
                       <Text fontSize="lg" fontWeight="bold" color={currentJob.skipped > 0 ? 'yellow.400' : '#64748b'}>
                         {currentJob.skipped}
                       </Text>
-                      <Text fontSize="xs" color="#64748b">Ignorés</Text>
+                      <Text fontSize="xs" color="text.muted">Ignorés</Text>
                     </Box>
                   </SimpleGrid>
 
@@ -870,16 +870,16 @@ export default function ClaimFirstPage() {
                     <HStack spacing={4} justify="center">
                       <HStack spacing={1}>
                         <Icon as={FiZap} color="yellow.400" boxSize={3} />
-                        <Text fontSize="xs" color="#94a3b8">
+                        <Text fontSize="xs" color="text.muted">
                           {formatDuration(Math.round(avgPerDoc))}/doc
                         </Text>
                       </HStack>
                       <Text fontSize="xs" color="#475569">|</Text>
-                      <Text fontSize="xs" color="#94a3b8">
+                      <Text fontSize="xs" color="text.muted">
                         {(currentJob.total_claims / (elapsed / 60)).toFixed(1)} claims/min
                       </Text>
                       <Text fontSize="xs" color="#475569">|</Text>
-                      <Text fontSize="xs" color="#94a3b8">
+                      <Text fontSize="xs" color="text.muted">
                         ~{Math.round(currentJob.total_claims / currentJob.processed)} claims/doc
                       </Text>
                     </HStack>
@@ -950,19 +950,19 @@ export default function ClaimFirstPage() {
           })()}
 
           {/* Documents Selection */}
-          <Box bg="#1e293b" border="1px solid" borderColor="#334155" rounded="xl" p={4}>
+          <Box bg="bg.tertiary" border="1px solid" borderColor="border.default" rounded="xl" p={4}>
             <Flex justify="space-between" align="center" mb={4}>
               <Box>
-                <Text fontWeight="semibold" color="#f1f5f9">Documents disponibles</Text>
-                <Text fontSize="sm" color="#64748b">
+                <Text fontWeight="semibold" color="text.primary">Documents disponibles</Text>
+                <Text fontSize="sm" color="text.muted">
                   {documents.length} documents — <Text as="span" color="green.400">{documents.filter(d => importedDocs[d.doc_id]).length} importés</Text>, <Text as="span" color="orange.300">{documents.filter(d => !importedDocs[d.doc_id]).length} nouveaux</Text>
                 </Text>
               </Box>
               <HStack spacing={2}>
-                <Button size="xs" variant="ghost" color="#94a3b8" onClick={selectAll}>
+                <Button size="xs" variant="ghost" color="text.muted" onClick={selectAll}>
                   Tout
                 </Button>
-                <Button size="xs" variant="ghost" color="#94a3b8" onClick={selectNone}>
+                <Button size="xs" variant="ghost" color="text.muted" onClick={selectNone}>
                   Aucun
                 </Button>
                 <Button size="xs" variant="ghost" color="green.400" onClick={selectNewOnly}>
@@ -997,10 +997,10 @@ export default function ClaimFirstPage() {
 
             {/* Documents Table */}
             {documents.length === 0 ? (
-              <Box bg="#0f172a" border="1px solid" borderColor="#334155" rounded="lg" p={4} textAlign="center">
-                <Icon as={FiFileText} boxSize={8} color="#64748b" mb={2} />
-                <Text color="#94a3b8">Aucun document dans le cache</Text>
-                <Text fontSize="sm" color="#64748b">
+              <Box bg="bg.primary" border="1px solid" borderColor="border.default" rounded="lg" p={4} textAlign="center">
+                <Icon as={FiFileText} boxSize={8} color="text.muted" mb={2} />
+                <Text color="text.muted">Aucun document dans le cache</Text>
+                <Text fontSize="sm" color="text.muted">
                   Importez des documents via Pass 0 pour les voir apparaître ici.
                 </Text>
               </Box>
@@ -1009,7 +1009,7 @@ export default function ClaimFirstPage() {
                 maxH="350px"
                 overflowY="auto"
                 border="1px solid"
-                borderColor="#334155"
+                borderColor="border.default"
                 rounded="lg"
                 sx={{
                   '&::-webkit-scrollbar': { width: '6px' },
@@ -1018,12 +1018,12 @@ export default function ClaimFirstPage() {
                 }}
               >
                 <Table size="sm" variant="unstyled">
-                  <Thead position="sticky" top={0} bg="#0f172a" zIndex={1}>
+                  <Thead position="sticky" top={0} bg="bg.primary" zIndex={1}>
                     <Tr>
-                      <Th color="#64748b" width="40px" borderBottom="1px solid" borderColor="#334155"></Th>
-                      <Th color="#64748b" borderBottom="1px solid" borderColor="#334155">Document ID</Th>
-                      <Th color="#64748b" borderBottom="1px solid" borderColor="#334155">Fichier</Th>
-                      <Th color="#64748b" borderBottom="1px solid" borderColor="#334155">Cache</Th>
+                      <Th color="text.muted" width="40px" borderBottom="1px solid" borderColor="border.default"></Th>
+                      <Th color="text.muted" borderBottom="1px solid" borderColor="border.default">Document ID</Th>
+                      <Th color="text.muted" borderBottom="1px solid" borderColor="border.default">Fichier</Th>
+                      <Th color="text.muted" borderBottom="1px solid" borderColor="border.default">Cache</Th>
                     </Tr>
                   </Thead>
                   <Tbody>
@@ -1038,17 +1038,17 @@ export default function ClaimFirstPage() {
                           onClick={() => toggleDoc(doc.doc_id)}
                           bg={selectedDocs.has(doc.doc_id) ? '#334155' : 'transparent'}
                         >
-                          <Td borderBottom="1px solid" borderColor="#1e293b">
+                          <Td borderBottom="1px solid" borderColor="border.default">
                             <Checkbox
                               isChecked={selectedDocs.has(doc.doc_id)}
                               onChange={() => toggleDoc(doc.doc_id)}
                               colorScheme="purple"
                             />
                           </Td>
-                          <Td borderBottom="1px solid" borderColor="#1e293b">
+                          <Td borderBottom="1px solid" borderColor="border.default">
                             <code style={{ fontSize: '11px', color: isImported ? '#4ade80' : '#94a3b8' }}>{doc.doc_id}</code>
                           </Td>
-                          <Td borderBottom="1px solid" borderColor="#1e293b">
+                          <Td borderBottom="1px solid" borderColor="border.default">
                             <Text as="span" color={isImported ? '#4ade80' : '#f1f5f9'}>
                               {doc.filename}
                             </Text>
@@ -1058,7 +1058,7 @@ export default function ClaimFirstPage() {
                               </Text>
                             )}
                           </Td>
-                          <Td fontSize="xs" color="#64748b" borderBottom="1px solid" borderColor="#1e293b">
+                          <Td fontSize="xs" color="text.muted" borderBottom="1px solid" borderColor="border.default">
                             {doc.cached_at ? new Date(doc.cached_at).toLocaleDateString() : '-'}
                           </Td>
                         </Tr>
@@ -1071,16 +1071,16 @@ export default function ClaimFirstPage() {
           </Box>
 
           {/* Info Card */}
-          <Box bg="#1e293b" border="1px solid" borderColor="orange.800" rounded="xl" p={4} mt={4}>
+          <Box bg="bg.tertiary" border="1px solid" borderColor="orange.800" rounded="xl" p={4} mt={4}>
             <HStack spacing={2} mb={2}>
               <Icon as={FiAlertTriangle} color="orange.400" boxSize={4} />
               <Text fontSize="sm" fontWeight="semibold" color="orange.300">Notes Pipeline Claim-First</Text>
             </HStack>
-            <VStack align="start" spacing={1} fontSize="xs" color="#94a3b8">
-              <Text><Text as="span" color="#f1f5f9" fontWeight="medium">Claim</Text> = affirmation synthétisée, fondée sur passages verbatim. Dit UNE chose précise.</Text>
-              <Text><Text as="span" color="#f1f5f9" fontWeight="medium">Entity</Text> = ancre de navigation (pas structurante). Extraction par patterns déterministes.</Text>
-              <Text><Text as="span" color="#f1f5f9" fontWeight="medium">Facet</Text> = axe de navigation (domain, risk, obligation...). Patterns déterministes.</Text>
-              <Text><Text as="span" color="#f1f5f9" fontWeight="medium">ClaimCluster</Text> = agrégation inter-documents. "Ces claims disent la même chose".</Text>
+            <VStack align="start" spacing={1} fontSize="xs" color="text.muted">
+              <Text><Text as="span" color="text.primary" fontWeight="medium">Claim</Text> = affirmation synthétisée, fondée sur passages verbatim. Dit UNE chose précise.</Text>
+              <Text><Text as="span" color="text.primary" fontWeight="medium">Entity</Text> = ancre de navigation (pas structurante). Extraction par patterns déterministes.</Text>
+              <Text><Text as="span" color="text.primary" fontWeight="medium">Facet</Text> = axe de navigation (domain, risk, obligation...). Patterns déterministes.</Text>
+              <Text><Text as="span" color="text.primary" fontWeight="medium">ClaimCluster</Text> = agrégation inter-documents. "Ces claims disent la même chose".</Text>
               <Text color="orange.400" mt={1}>Prérequis: Documents importés via Pass 0 pour générer le cache d'extraction.</Text>
             </VStack>
           </Box>

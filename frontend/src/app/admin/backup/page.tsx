@@ -94,6 +94,7 @@ interface BackupManifest {
     postgresql: any
     redis: any
     extraction_cache: any
+    benchmark?: any
   }
   imported_documents: Array<{ doc_id: string; primary_subject?: string }>
 }
@@ -996,6 +997,28 @@ export default function BackupPage() {
                       </Text>
                     </AccordionPanel>
                   </AccordionItem>
+
+                  {/* Benchmark */}
+                  {backupDetail.components.benchmark && (
+                    <AccordionItem border="1px solid" borderColor="border.default" rounded="lg" mb={2}>
+                      <AccordionButton>
+                        <HStack flex="1" spacing={2}>
+                          <Icon as={FiFileText} boxSize={4} color="text.muted" />
+                          <Text fontWeight="medium" color="text.primary">Benchmark</Text>
+                        </HStack>
+                        <ComponentStatusBadge status={backupDetail.components.benchmark?.status || 'pending'} />
+                        <AccordionIcon ml={2} color="text.muted" />
+                      </AccordionButton>
+                      <AccordionPanel>
+                        <Text fontSize="sm" color="text.muted">
+                          {backupDetail.components.benchmark?.file_count || 0} fichiers
+                          {backupDetail.components.benchmark?.size_bytes
+                            ? ` (${(backupDetail.components.benchmark.size_bytes / 1024 / 1024).toFixed(1)} MB)`
+                            : ''}
+                        </Text>
+                      </AccordionPanel>
+                    </AccordionItem>
+                  )}
                 </Accordion>
 
                 {/* Documents importés */}

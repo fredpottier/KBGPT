@@ -45,6 +45,11 @@ class ExtractionCacheStatus(ComponentStatus):
     file_count: int = 0
 
 
+class BenchmarkComponentStatus(ComponentStatus):
+    """Statut benchmark."""
+    file_count: int = 0
+
+
 class BackupComponents(BaseModel):
     """Ensemble des composants du backup."""
     neo4j: Neo4jComponentStatus = Field(default_factory=lambda: Neo4jComponentStatus(status="pending"))
@@ -52,6 +57,7 @@ class BackupComponents(BaseModel):
     postgresql: PostgresComponentStatus = Field(default_factory=lambda: PostgresComponentStatus(status="pending"))
     redis: ComponentStatus = Field(default_factory=lambda: ComponentStatus(status="pending"))
     extraction_cache: ExtractionCacheStatus = Field(default_factory=lambda: ExtractionCacheStatus(status="pending"))
+    benchmark: BenchmarkComponentStatus = Field(default_factory=lambda: BenchmarkComponentStatus(status="pending"))
 
 
 class ImportedDocumentInfo(BaseModel):
@@ -92,7 +98,7 @@ class BackupSummary(BaseModel):
     qdrant_points: int = 0
     documents_count: int = 0
     components_ok: int = 0
-    components_total: int = 5
+    components_total: int = 6
 
 
 class BackupListResponse(BaseModel):

@@ -40,54 +40,80 @@ def find_chunk_for_claim(
     verbatim: str,
     doc_id: str,
     chunks_by_doc: Dict[str, List[dict]],
+    claim_text: str = "",
 ) -> Optional[str]:
     """
-    Trouve le chunk_id qui contient le verbatim_quote.
+    Trouve le chunk_id qui contient le verbatim_quote ou le claim text.
+
+    Algorithme 4 niveaux (conforme CLAIM_CHUNK_BRIDGE_PLAN.md) :
+    1. Substring exact du verbatim dans le chunk
+    2. Substring des premiers 80 chars du verbatim
+    3. Overlap mot-à-mot verbatim → chunk (seuil 0.6)
+    4. Overlap mot-à-mot claim_text → chunk (seuil 0.5, plus permissif)
 
     Returns:
         chunk_id ou None
     """
-    if not verbatim or len(verbatim) < 20:
-        return None
-
     doc_chunks = chunks_by_doc.get(doc_id, [])
     if not doc_chunks:
         return None
 
-    verbatim_norm = normalize_text(verbatim)
+    # Essayer d'abord avec le verbatim
+    if verbatim and len(verbatim) >= 20:
+        verbatim_norm = normalize_text(verbatim)
 
-    # 1. Substring match exact
-    for chunk in doc_chunks:
-        chunk_norm = normalize_text(chunk["text"])
-        if verbatim_norm in chunk_norm:
-            return chunk["chunk_id"]
-
-    # 2. Substring match sur les premiers 80 chars (verbatim peut être tronqué)
-    verbatim_start = verbatim_norm[:80]
-    if len(verbatim_start) >= 30:
+        # 1. Substring match exact
         for chunk in doc_chunks:
             chunk_norm = normalize_text(chunk["text"])
-            if verbatim_start in chunk_norm:
+            if verbatim_norm in chunk_norm:
                 return chunk["chunk_id"]
 
-    # 3. Overlap ratio (pour les cas de normalisation légère)
-    best_chunk_id = None
-    best_overlap = 0.0
+        # 2. Substring premiers 80 chars (verbatim tronqué)
+        verbatim_start = verbatim_norm[:80]
+        if len(verbatim_start) >= 30:
+            for chunk in doc_chunks:
+                chunk_norm = normalize_text(chunk["text"])
+                if verbatim_start in chunk_norm:
+                    return chunk["chunk_id"]
 
-    verbatim_words = set(verbatim_norm.split())
-    if len(verbatim_words) < 5:
+        # 3. Overlap ratio verbatim → chunk (seuil 0.6)
+        verbatim_words = set(verbatim_norm.split())
+        if len(verbatim_words) >= 4:
+            best_chunk_id = None
+            best_overlap = 0.0
+            for chunk in doc_chunks:
+                chunk_words = set(normalize_text(chunk["text"]).split())
+                if not chunk_words:
+                    continue
+                overlap = len(verbatim_words & chunk_words) / len(verbatim_words)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_chunk_id = chunk["chunk_id"]
+            if best_overlap >= 0.6:
+                return best_chunk_id
+
+    # 4. Fallback : overlap claim_text → chunk (plus permissif)
+    text_to_match = claim_text or verbatim or ""
+    if len(text_to_match) < 15:
         return None
 
+    text_norm = normalize_text(text_to_match)
+    text_words = set(text_norm.split())
+    if len(text_words) < 3:
+        return None
+
+    best_chunk_id = None
+    best_overlap = 0.0
     for chunk in doc_chunks:
         chunk_words = set(normalize_text(chunk["text"]).split())
         if not chunk_words:
             continue
-        overlap = len(verbatim_words & chunk_words) / len(verbatim_words)
+        overlap = len(text_words & chunk_words) / len(text_words)
         if overlap > best_overlap:
             best_overlap = overlap
             best_chunk_id = chunk["chunk_id"]
 
-    if best_overlap >= 0.7:
+    if best_overlap >= 0.5:
         return best_chunk_id
 
     return None
@@ -120,11 +146,14 @@ def main():
             """
             MATCH (c:Claim {tenant_id: $tid})
             RETURN c.claim_id as claim_id, c.doc_id as doc_id,
-                   c.verbatim_quote as verbatim_quote
+                   c.verbatim_quote as verbatim_quote, c.text as claim_text
             """,
             tid=args.tenant_id,
         )
-        claims = [(r["claim_id"], r["doc_id"] or "", r["verbatim_quote"] or "") for r in result]
+        claims = [
+            (r["claim_id"], r["doc_id"] or "", r["verbatim_quote"] or "", r["claim_text"] or "")
+            for r in result
+        ]
     logger.info(f"  {len(claims)} claims à traiter")
 
     # 3. Matcher
@@ -134,8 +163,8 @@ def main():
     unmatched = 0
     bridge_data = []  # (claim_id, chunk_id)
 
-    for claim_id, doc_id, verbatim in claims:
-        chunk_id = find_chunk_for_claim(verbatim, doc_id, chunks_by_doc)
+    for claim_id, doc_id, verbatim, claim_text in claims:
+        chunk_id = find_chunk_for_claim(verbatim, doc_id, chunks_by_doc, claim_text)
         if chunk_id:
             bridge_data.append({"claim_id": claim_id, "chunk_id": chunk_id})
             matched += 1

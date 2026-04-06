@@ -1180,6 +1180,37 @@ class BurstOrchestrator:
             logging.WARNING if severity == EventSeverity.ERROR else logging.INFO,
             f"[BURST:{event_type.upper()}] {message}"
         )
+        # Cockpit: émettre l'état live dans Redis
+        self._emit_redis_live_state()
+
+    def _emit_redis_live_state(self) -> None:
+        """Émet l'état Burst dans Redis pour le cockpit opérationnel."""
+        if not self.state:
+            return
+        try:
+            import os
+            import redis as _redis
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            rc = _redis.from_url(redis_url)
+            data = {
+                "status": self.state.status.value,
+                "batch_id": self.state.batch_id or "",
+                "total_documents": self.state.total_documents,
+                "documents_done": self.state.documents_done,
+                "documents_failed": self.state.documents_failed,
+                "instance_ip": self.state.instance_ip or "",
+                "instance_type": self.state.instance_type or "",
+                "instance_id": self.state.instance_id or "",
+                "vllm_url": self.state.vllm_url or "",
+                "embeddings_url": self.state.embeddings_url or "",
+                "started_at": self.state.started_at or "",
+                "current_document": getattr(self.state, "current_document", ""),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            rc.setex("osmose:burst:state:live", 3600, json.dumps(data))
+            rc.close()
+        except Exception as e:
+            logger.debug(f"[BURST:COCKPIT] Redis emit failed (non-fatal): {e}")
 
     def get_state(self) -> Optional[BurstState]:
         """Retourne l'état actuel."""

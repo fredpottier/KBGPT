@@ -137,19 +137,39 @@ class DoclingExtractor:
         try:
             from docling.document_converter import DocumentConverter, PdfFormatOption
             from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import PdfPipelineOptions
-            from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
+            from docling.datamodel.pipeline_options import (
+                PdfPipelineOptions,
+                TableStructureOptions,
+                TableFormerMode,
+            )
+
+            # Utiliser DoclingParseV4 (meilleur reading order + detection colonnes)
+            # au lieu de PyPdfiumDocumentBackend (le plus faible pour les layouts complexes)
+            try:
+                from docling.backend.docling_parse_v4_backend import DoclingParseV4DocumentBackend
+                pdf_backend = DoclingParseV4DocumentBackend
+                logger.info("[DoclingExtractor] Using DoclingParseV4 backend (improved reading order)")
+            except ImportError:
+                from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
+                pdf_backend = PyPdfiumDocumentBackend
+                logger.warning("[DoclingExtractor] DoclingParseV4 not available, falling back to PyPdfium")
 
             # Configuration du pipeline PDF
             pipeline_options = PdfPipelineOptions(
                 do_ocr=self.ocr_enabled,
                 do_table_structure=True,
+                # do_cell_matching=False evite le merge cross-colonne
+                # qui cause des melanges de texte entre colonnes
+                table_structure_options=TableStructureOptions(
+                    do_cell_matching=False,
+                    mode=TableFormerMode.ACCURATE,
+                ),
             )
 
             # Wrapper PdfFormatOption requis par Docling 2.66+
             pdf_format_option = PdfFormatOption(
                 pipeline_options=pipeline_options,
-                backend=PyPdfiumDocumentBackend,
+                backend=pdf_backend,
             )
 
             # Créer le convertisseur
@@ -263,6 +283,11 @@ class DoclingExtractor:
             # Convertir le document
             result = self._converter.convert(str(path))
 
+            # Post-processing : corriger l'ordre de lecture et la hierarchie
+            # pour les PDF (docling-hierarchical-pdf)
+            if doc_format == "PDF":
+                result = self._apply_hierarchical_postprocessing(result, path.name, source_path=path)
+
             # Extraire les pages en VisionUnits
             units = self._convert_to_units(result, doc_format, include_raw_output)
 
@@ -277,6 +302,44 @@ class DoclingExtractor:
         except Exception as e:
             logger.error(f"[DoclingExtractor] ❌ Extraction failed: {e}")
             raise
+
+    def _apply_hierarchical_postprocessing(self, result: Any, filename: str, source_path: Path = None) -> Any:
+        """
+        Applique le post-processing hierarchique pour corriger :
+        - L'ordre de lecture (paragraphes inverses)
+        - La hierarchie des headings (niveaux incorrects)
+        - L'assignation des sections
+
+        Utilise docling-hierarchical-pdf si disponible.
+        Non-bloquant : si le post-processing echoue, on continue avec le resultat brut.
+        """
+        try:
+            from hierarchical.postprocessor import ResultPostprocessor
+            # Passer le source_path absolu pour que HierarchyBuilderMetadata
+            # puisse re-ouvrir le PDF pour extraction TOC (fix PDFFileNotFoundException)
+            processor = ResultPostprocessor(result, source=source_path, raise_on_error=False)
+            processor.process()
+            if processor.has_hierarchy_levels():
+                logger.info(
+                    f"[DoclingExtractor] Hierarchical post-processing applied: "
+                    f"{filename} — heading levels detected and corrected"
+                )
+            else:
+                logger.debug(
+                    f"[DoclingExtractor] Hierarchical post-processing: "
+                    f"no heading levels detected for {filename}"
+                )
+        except ImportError:
+            logger.debug(
+                "[DoclingExtractor] docling-hierarchical-pdf not installed, "
+                "skipping hierarchical post-processing"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[DoclingExtractor] Hierarchical post-processing failed "
+                f"(non-blocking): {e}"
+            )
+        return result
 
     def _convert_to_units(
         self,
@@ -588,6 +651,11 @@ class DoclingExtractor:
             raise FileNotFoundError(f"Fichier non trouvé: {file_path}")
 
         result = self._converter.convert(str(path))
+
+        # Post-processing hierarchique pour PDF
+        doc_format = self._detect_format(file_path)
+        if doc_format == "PDF":
+            result = self._apply_hierarchical_postprocessing(result, path.name, source_path=path)
 
         # Exporter en markdown
         markdown = result.document.export_to_markdown()

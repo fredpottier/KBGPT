@@ -51,6 +51,32 @@ def get_token_stats(
     }
 
 
+@router.get("/cockpit-costs")
+def get_cockpit_costs():
+    """
+    Endpoint dédié cockpit — pas d'auth requise.
+    Retourne uniquement le coût total et le breakdown par modèle.
+    """
+    tracker = get_token_tracker()
+    stats = tracker.get_stats_by_model()
+
+    total_cost = tracker.get_total_cost()
+    total_calls = len(tracker.usage_history)
+
+    by_model = {}
+    for model, data in stats.items():
+        by_model[model] = {
+            "cost": data.get("total_cost", 0),
+            "calls": data.get("total_calls", 0),
+        }
+
+    return {
+        "total_cost": total_cost,
+        "total_calls": total_calls,
+        "by_model": by_model,
+    }
+
+
 @router.get("/estimate-deck")
 def estimate_deck_cost(
     num_slides: int = Query(..., description="Nombre de slides dans le deck"),

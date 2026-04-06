@@ -349,7 +349,11 @@ class AttachInstanceResponse(BaseModel):
 async def get_burst_status(
     tenant_id: str = Depends(get_tenant_id),
 ) -> BurstStatusResponse:
-    """Récupère le statut actuel du mode Burst."""
+    """Récupère le statut actuel du mode Burst.
+
+    Inclut un health check EC2 : si le statut est 'processing' mais que vLLM
+    ne repond pas, le statut passe automatiquement a 'interrupted'.
+    """
     try:
         from knowbase.ingestion.burst import get_burst_orchestrator
 
@@ -366,9 +370,24 @@ async def get_burst_status(
         state = orchestrator.state
         progress = state.get_progress() if state else {}
 
+        # Health check : si processing mais EC2 inaccessible → interrupted
+        effective_status = state.status.value
+        if effective_status in ("processing", "ready") and state.vllm_url:
+            try:
+                import httpx
+                resp = httpx.get(f"{state.vllm_url}/health", timeout=3.0)
+                if resp.status_code != 200:
+                    effective_status = "interrupted"
+            except Exception:
+                effective_status = "interrupted"
+                logger.warning(
+                    f"[BURST:STATUS] EC2 unreachable ({state.vllm_url}), "
+                    f"marking as interrupted"
+                )
+
         return BurstStatusResponse(
-            active=state.status.value not in ["idle", "completed", "failed", "cancelled"],
-            status=state.status.value,
+            active=effective_status not in ["idle", "completed", "failed", "cancelled", "interrupted"],
+            status=effective_status,
             batch_id=state.batch_id,
             total_documents=state.total_documents,
             documents_done=state.documents_done,
@@ -963,6 +982,11 @@ async def process_batch(
                     try:
                         suffix = doc_path.suffix.lower()
                         logger.info(f"[BURST] Processing: {doc_path.name} (concurrency: {MAX_CONCURRENT_DOCS})")
+                        orchestrator.state.current_document = doc_path.name
+                        orchestrator._add_event(
+                            "doc_started",
+                            f"Traitement: {doc_path.name} [{orchestrator.state.documents_done}/{orchestrator.state.total_documents}]"
+                        )
 
                         # Pipeline V2 unifié (Docling + Vision Gating V4 + OSMOSE)
                         # Supporte: .pdf, .pptx, .docx, .xlsx, .md, .html
@@ -985,8 +1009,14 @@ async def process_batch(
                             else:
                                 doc_status.chunks_count = 0
                             orchestrator.state.documents_done += 1
+                            orchestrator.state.current_document = doc_path.name
 
                         logger.info(f"[BURST] ✅ Completed: {doc_path.name} ({doc_status.chunks_count} proto-concepts)")
+                        orchestrator._add_event(
+                            "doc_completed",
+                            f"Terminé: {doc_path.name} ({doc_status.chunks_count} chunks) "
+                            f"[{orchestrator.state.documents_done}/{orchestrator.state.total_documents}]"
+                        )
 
                     except Exception as e:
                         async with state_lock:
@@ -997,6 +1027,12 @@ async def process_batch(
 
                         logger.error(f"[BURST] ❌ Failed: {doc_path.name} - {e}")
                         logger.error(f"[BURST] Traceback: {traceback.format_exc()}")
+                        orchestrator._add_event(
+                            "doc_failed",
+                            f"Échec: {doc_path.name} - {e} "
+                            f"[{orchestrator.state.documents_done}/{orchestrator.state.total_documents}]",
+                            severity=EventSeverity.ERROR,
+                        )
 
             try:
                 orchestrator.state.status = BurstStatus.PROCESSING
@@ -1012,7 +1048,19 @@ async def process_batch(
 
                 # Lancer tous les traitements en parallèle (limités par le semaphore)
                 tasks = [process_single_doc(doc) for doc in docs_to_process]
-                await asyncio.gather(*tasks, return_exceptions=True)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Log any silently swallowed exceptions
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        doc_name = docs_to_process[i].name if i < len(docs_to_process) else f"doc_{i}"
+                        logger.error(f"[BURST] ❌ Silent exception for {doc_name}: {result}")
+                        logger.error(f"[BURST] Exception type: {type(result).__name__}")
+                        # Mark as failed if not already
+                        if i < len(docs_to_process) and docs_to_process[i].status != "failed":
+                            docs_to_process[i].status = "failed"
+                            docs_to_process[i].error = str(result)
+                            orchestrator.state.documents_failed += 1
 
                 # Batch terminé
                 orchestrator.state.status = BurstStatus.COMPLETED

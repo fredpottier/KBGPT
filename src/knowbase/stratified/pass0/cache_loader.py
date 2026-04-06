@@ -53,6 +53,8 @@ class CacheLoadResult:
     # Layer R: sub-chunks meta (du JSON cache) et chemin vers le sidecar NPZ
     retrieval_embeddings: Optional[Dict] = None
     retrieval_embeddings_path: Optional[str] = None
+    file_type: Optional[str] = None  # "pdf", "pptx", "docx"...
+    source_path: Optional[str] = None  # Chemin original du fichier
     error: Optional[str] = None
 
 
@@ -564,6 +566,8 @@ def load_pass0_from_cache(
             vision_observations=vision_observations,
             retrieval_embeddings=retrieval_embeddings,
             retrieval_embeddings_path=retrieval_embeddings_path,
+            file_type=extraction.get("file_type"),
+            source_path=extraction.get("source_path"),
         )
 
     except Exception as e:

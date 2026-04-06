@@ -447,6 +447,16 @@ class ExtractionPipelineV2:
                     )
                 return cached_result
 
+        # === BRANCHEMENT PPTX : extracteur natif python-pptx ===
+        # Bypass Docling pour les PPTX (bugs hierarchie #1324, notes #1325, titres #2551)
+        file_type_detected = Path(file_path).suffix.lower().lstrip(".")
+        if file_type_detected == "pptx":
+            return await self._process_pptx_document(
+                file_path=file_path,
+                document_id=document_id,
+                tenant_id=effective_tenant,
+            )
+
         # Obtenir le Domain Context
         domain_context = get_vision_domain_context(effective_tenant)
 
@@ -1110,6 +1120,373 @@ class ExtractionPipelineV2:
         domain_context = get_vision_domain_context(effective_tenant)
 
         return self._gating_engine.gate_document(units, domain_context)
+
+    async def _process_pptx_document(
+        self,
+        file_path: str,
+        document_id: str,
+        tenant_id: str,
+    ) -> ExtractionResult:
+        """
+        Chemin d'extraction dedie aux PPTX via python-pptx natif.
+
+        Bypass Docling et produit directement :
+        - VisionUnits (compatibilite pipeline)
+        - StructuralGraphBuildResult (TypeAwareChunks = slides reconstruites)
+        - full_text + structure + page_index
+
+        Le cache V5 est produit avec les memes cles que le chemin Docling.
+        """
+        from knowbase.extraction_v2.extractors.pptx_extractor import extract_pptx
+
+        total_start = time.time()
+
+        logger.info(
+            f"[ExtractionPipelineV2] PPTX native extraction: {file_path}, "
+            f"doc_id={document_id}"
+        )
+
+        pptx_result = extract_pptx(
+            file_path=file_path,
+            tenant_id=tenant_id,
+            doc_id=document_id,
+        )
+
+        structural_graph_result = pptx_result.structural_graph
+
+        # === Vision Path PPTX : interpreter les slides visuelles ===
+        # Les slides avec peu de texte mais beaucoup de visuels (diagrammes,
+        # schemas d'architecture) sont analysees par GPT-4o.
+        # Le texte produit est injecte dans le chunk avec des marqueurs explicites
+        # pour ne jamais etre confondu avec du texte auteur (Piste 2).
+        vision_enriched_count = 0
+        logger.info(
+            f"[ExtractionPipelineV2] PPTX Vision check: "
+            f"enable_vision={self.config.enable_vision}, "
+            f"analyzer={'YES' if self._vision_analyzer else 'NO'}"
+        )
+        if self.config.enable_vision and self._vision_analyzer:
+            from knowbase.retrieval.rechunker import VISUAL_BLOCK_START, VISUAL_BLOCK_END
+
+            domain_context = get_vision_domain_context(tenant_id)
+
+            # Identifier les slides candidates a Vision :
+            # Compter les shapes visuels directement depuis python-pptx
+            # (images, grouped shapes, auto shapes = indicateurs de diagrammes)
+            from pptx import Presentation as PptxPresentation
+            from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+            try:
+                prs = PptxPresentation(file_path)
+            except Exception as e:
+                logger.warning(f"[ExtractionPipelineV2] Cannot reopen PPTX for vision: {e}")
+                prs = None
+
+            vision_candidates = []
+            if prs:
+                for idx_s, slide in enumerate(prs.slides):
+                    visual_shape_count = 0
+                    for shape in slide.shapes:
+                        if shape.shape_type in (
+                            MSO_SHAPE_TYPE.PICTURE,
+                            MSO_SHAPE_TYPE.GROUP,
+                            MSO_SHAPE_TYPE.AUTO_SHAPE,
+                        ):
+                            visual_shape_count += 1
+                    # Slide avec au moins 2 shapes visuels = candidate
+                    if visual_shape_count >= 2:
+                        vision_candidates.append(idx_s)
+
+            if vision_candidates:
+                logger.info(
+                    f"[ExtractionPipelineV2] PPTX Vision: {len(vision_candidates)} "
+                    f"candidate slides for visual analysis"
+                )
+
+                # Budget vision : limiter selon la taille du PPTX
+                # ~$0.01/slide avec GPT-4o Vision
+                max_vision_slides = int(os.getenv("PPTX_VISION_BUDGET", "500"))
+                if len(vision_candidates) > max_vision_slides:
+                    # Prioriser les slides avec le plus de shapes visuels
+                    if prs:
+                        def _visual_score(idx_s):
+                            slide = prs.slides[idx_s]
+                            return sum(
+                                1 for s in slide.shapes
+                                if s.shape_type in (
+                                    MSO_SHAPE_TYPE.PICTURE,
+                                    MSO_SHAPE_TYPE.GROUP,
+                                    MSO_SHAPE_TYPE.AUTO_SHAPE,
+                                )
+                            )
+                        vision_candidates.sort(key=_visual_score, reverse=True)
+                    vision_candidates = vision_candidates[:max_vision_slides]
+                    logger.info(
+                        f"[ExtractionPipelineV2] PPTX Vision budget: "
+                        f"limited to {max_vision_slides} slides"
+                    )
+
+                # Pre-convertir PPTX → PDF une seule fois (LibreOffice ne supporte
+                # pas les appels concurrents — zombie storm si parallélisé)
+                import subprocess
+                import tempfile
+
+                pdf_for_render = None
+                # Chercher un PDF existant
+                for candidate_pdf in [
+                    file_path + ".to.pdf",
+                    str(Path(file_path).with_suffix(".pdf")),
+                ]:
+                    if Path(candidate_pdf).exists():
+                        pdf_for_render = candidate_pdf
+                        break
+
+                if not pdf_for_render:
+                    # Chercher dans docs_done
+                    fname = Path(file_path).name
+                    for search_dir in ["/data/docs_done", "/data/burst/waiting"]:
+                        candidate_pdf = str(Path(search_dir) / (fname + ".to.pdf"))
+                        if Path(candidate_pdf).exists():
+                            pdf_for_render = candidate_pdf
+                            break
+
+                if not pdf_for_render:
+                    # Conversion unique via LibreOffice
+                    tmp_dir = tempfile.mkdtemp(prefix="pptx_vision_")
+                    try:
+                        logger.info(
+                            f"[ExtractionPipelineV2] PPTX→PDF conversion via LibreOffice..."
+                        )
+                        conv_result = subprocess.run(
+                            [
+                                "libreoffice", "--headless", "--convert-to", "pdf",
+                                "--outdir", tmp_dir, file_path,
+                            ],
+                            capture_output=True, text=True, timeout=300,
+                        )
+                        if conv_result.returncode == 0:
+                            pdf_files = list(Path(tmp_dir).glob("*.pdf"))
+                            if pdf_files:
+                                pdf_for_render = str(pdf_files[0])
+                                logger.info(
+                                    f"[ExtractionPipelineV2] PPTX→PDF OK: {pdf_for_render}"
+                                )
+                        else:
+                            logger.warning(
+                                f"[ExtractionPipelineV2] LibreOffice failed: "
+                                f"{conv_result.stderr[:200]}"
+                            )
+                    except subprocess.TimeoutExpired:
+                        logger.warning("[ExtractionPipelineV2] LibreOffice timeout (300s)")
+
+                if not pdf_for_render:
+                    logger.warning(
+                        "[ExtractionPipelineV2] No PDF for PPTX vision rendering, "
+                        "skipping visual analysis"
+                    )
+                else:
+                    logger.info(
+                        f"[ExtractionPipelineV2] Using PDF for slide rendering: "
+                        f"{Path(pdf_for_render).name}"
+                    )
+
+                max_concurrent = min(
+                    self.config.max_concurrent_vision or 20, 20
+                )
+                semaphore = asyncio.Semaphore(max_concurrent)
+
+                async def analyze_slide(slide_idx: int) -> tuple:
+                    async with semaphore:
+                        try:
+                            # Rendre depuis le PDF pre-converti (pas le PPTX)
+                            render_path = pdf_for_render or file_path
+                            image_bytes = await self._vision_analyzer.render_page_image(
+                                render_path, slide_idx
+                            )
+                            if not image_bytes:
+                                return (slide_idx, None, "no image")
+                            extraction = await self._vision_analyzer.analyze_unit(
+                                pptx_result.units[slide_idx],
+                                image_bytes=image_bytes,
+                                domain_context=domain_context,
+                            )
+                            return (slide_idx, extraction, None)
+                        except Exception as e:
+                            logger.warning(
+                                f"[ExtractionPipelineV2] PPTX Vision failed slide {slide_idx}: {e}"
+                            )
+                            return (slide_idx, None, str(e))
+
+                if not pdf_for_render:
+                    results = []
+                else:
+                    tasks = [analyze_slide(idx) for idx in vision_candidates]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Injecter le texte vision dans les chunks correspondants
+                vision_texts: Dict[int, str] = {}  # slide_index -> vision text
+                for r in results:
+                    if isinstance(r, Exception):
+                        continue
+                    slide_idx, extraction, error = r
+                    if extraction is None:
+                        continue
+                    # Construire un texte descriptif depuis VisionExtraction
+                    vision_parts = []
+                    # Type de diagramme
+                    if extraction.kind and extraction.kind != "no_image":
+                        vision_parts.append(f"Diagram type: {extraction.kind}")
+                    # Elements visuels (boxes, labels, icons)
+                    for elem in extraction.elements:
+                        elem_text = getattr(elem, "text", "") or ""
+                        elem_type = getattr(elem, "type", "") or ""
+                        if elem_text and len(elem_text) > 3:
+                            vision_parts.append(f"- [{elem_type}] {elem_text}")
+                    # Relations (fleches, connexions)
+                    if extraction.relations:
+                        for rel in extraction.relations:
+                            src = getattr(rel, "source_id", "") or ""
+                            tgt = getattr(rel, "target_id", "") or ""
+                            label = getattr(rel, "label", "") or ""
+                            if label:
+                                vision_parts.append(f"- Relation: {src} -> {tgt} ({label})")
+                            elif src and tgt:
+                                vision_parts.append(f"- Relation: {src} -> {tgt}")
+                    # Texte brut du modele si les elements sont vides
+                    if not vision_parts:
+                        raw = getattr(extraction, "raw_model_output", "") or ""
+                        if raw and len(raw) > 30:
+                            vision_parts.append(raw[:2000])
+                    if vision_parts:
+                        vision_texts[slide_idx] = "\n".join(vision_parts)
+
+                # Injecter dans les TypeAwareChunks
+                for chunk in structural_graph_result.chunks:
+                    if chunk.page_no in vision_texts:
+                        vision_text = vision_texts[chunk.page_no]
+                        chunk.text = (
+                            chunk.text + "\n\n"
+                            + VISUAL_BLOCK_START + "\n"
+                            + vision_text + "\n"
+                            + VISUAL_BLOCK_END
+                        )
+                        chunk.text_origin = TextOrigin.VISION_SEMANTIC
+                        vision_enriched_count += 1
+
+                logger.info(
+                    f"[ExtractionPipelineV2] PPTX Vision complete: "
+                    f"{len(vision_texts)}/{len(vision_candidates)} slides enriched "
+                    f"with visual interpretation"
+                )
+
+        # === DocContext extraction (meme logique que le chemin PDF) ===
+        doc_context = None
+        if self.config.enable_doc_context and self._doc_context_extractor:
+            try:
+                pages_text = [p.text_markdown for p in pptx_result.structure.pages]
+                if not pages_text:
+                    pages_text = [pptx_result.full_text]
+
+                doc_context = await self._doc_context_extractor.extract(
+                    document_id=document_id,
+                    filename=Path(file_path).name,
+                    pages_text=pages_text,
+                )
+                logger.info(
+                    f"[ExtractionPipelineV2] PPTX DocContext: {doc_context.doc_scope.value}, "
+                    f"markers={doc_context.strong_markers + doc_context.weak_markers}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[ExtractionPipelineV2] PPTX DocContext extraction failed: {e}"
+                )
+
+        # === Serialiser le structural graph pour le cache ===
+        result_stats: Dict[str, Any] = {
+            "tenant_id": tenant_id,
+            "config": self.config.to_dict(),
+            "metrics": {
+                "total_time_ms": (time.time() - total_start) * 1000,
+                "extractor": "pptx_native",
+                "vision_enriched_slides": vision_enriched_count,
+            },
+        }
+
+        serialized_chunks = [
+            {
+                "chunk_id": c.chunk_id,
+                "text": c.text,
+                "kind": c.kind.value,
+                "page_no": c.page_no,
+                "section_id": c.section_id,
+                "item_ids": c.item_ids,
+                "is_relation_bearing": c.is_relation_bearing,
+                "doc_version_id": c.doc_version_id,
+                "text_origin": c.text_origin.value if c.text_origin else None,
+            }
+            for c in structural_graph_result.chunks
+        ]
+
+        serialized_items = [
+            {
+                "item_id": item.item_id,
+                "item_type": item.item_type,
+                "text": item.text,
+                "page_no": item.page_no,
+                "section_id": item.section_id,
+                "charspan_start": item.charspan_start,
+                "charspan_end": item.charspan_end,
+                "reading_order_index": item.reading_order_index,
+                "doc_version_id": item.doc_version_id,
+            }
+            for item in structural_graph_result.doc_items
+        ]
+
+        result_stats["structural_graph"] = {
+            "item_count": structural_graph_result.item_count,
+            "section_count": structural_graph_result.section_count,
+            "chunk_count": structural_graph_result.chunk_count,
+            "narrative_chunk_count": structural_graph_result.narrative_chunk_count,
+            "doc_version_id": structural_graph_result.doc_version.doc_version_id,
+            "structure_analysis": structural_graph_result.structure_analysis,
+            "chunk_analysis": structural_graph_result.chunk_analysis,
+            "chunks": serialized_chunks,
+            "items": serialized_items,
+        }
+
+        # === Construire ExtractionResult ===
+        result = ExtractionResult(
+            document_id=document_id,
+            source_path=file_path,
+            file_type="pptx",
+            full_text=pptx_result.full_text,
+            structure=pptx_result.structure,
+            page_index=pptx_result.page_index,
+            extraction_timestamp=datetime.now().isoformat(),
+            domain_context_name=tenant_id,
+            gating_decisions=[],
+            vision_results=[],
+            doc_context=doc_context,
+            stats=result_stats,
+        )
+
+        # === Cache ===
+        if self._cache:
+            self._cache.set(document_id, file_path, result)
+            logger.info(
+                f"[ExtractionPipelineV2] PPTX cache saved: {document_id}"
+            )
+
+        total_ms = (time.time() - total_start) * 1000
+        logger.info(
+            f"[ExtractionPipelineV2] PPTX extraction complete: "
+            f"{structural_graph_result.chunk_count} chunks, "
+            f"{structural_graph_result.item_count} items, "
+            f"title='{pptx_result.doc_title}', "
+            f"time={total_ms:.0f}ms"
+        )
+
+        return result
 
     def _generate_document_id(self, file_path: str) -> str:
         """Genere un ID unique pour le document basé sur le contenu."""

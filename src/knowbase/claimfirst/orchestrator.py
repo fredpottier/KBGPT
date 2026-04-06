@@ -245,6 +245,16 @@ class ClaimFirstOrchestrator:
             doc_title = doc_context.primary_subject
             logger.info(f"  → doc_title inferred from primary_subject: '{doc_title}'")
 
+        # Enrichir doc_title avec année/version depuis les premiers passages
+        # Le titre du cache est souvent tronqué (ex: "SAP S/4HANA Security Guide")
+        # alors que le full_text contient "Security Guide for SAP S/4HANA 2023"
+        enriched_title = self._enrich_title_from_passages(doc_title, passages)
+        if enriched_title and enriched_title != doc_title:
+            logger.info(
+                f"  → doc_title enriched from passages: '{doc_title}' → '{enriched_title}'"
+            )
+            doc_title = enriched_title
+
         # Phase 0.55: Resolve ComparableSubject (INV-25: Domain-Agnostic)
         logger.info("[OSMOSE:ClaimFirst] Phase 0.55: Resolving comparable subject...")
         comparable_subject, resolver_axis_values = self._resolve_comparable_subject(
@@ -636,17 +646,47 @@ class ClaimFirstOrchestrator:
             logger.info(f"  → {persist_stats}")
 
         # Phase 8: Persist chunks to Qdrant Layer R
-        if self.persist_enabled and result.passages:
+        # ADR: Unite de preuve vs Unite de lecture.
+        # Les TypeAwareChunks du cache sont l'unite de lecture :
+        # - PDF : chunks Docling + rechunker (target 1500, overlap 200)
+        # - PPTX : slides reconstruites via pptx_extractor (deja dans le cache)
+        # Fallback → Passages atomiques (legacy)
+        type_aware_chunks = cache_result.pass0_result.chunks if cache_result.pass0_result else []
+
+        if self.persist_enabled and (type_aware_chunks or result.passages):
             try:
                 logger.info("[OSMOSE:ClaimFirst] Phase 8: Persisting chunks to Qdrant...")
-                qdrant_count = self._persist_chunks_to_qdrant(
-                    passages=result.passages,
-                    doc_id=result.doc_id,
-                    tenant_id=result.tenant_id,
-                    doc_context=result.doc_context,
-                )
+
+                if type_aware_chunks:
+                    qdrant_count = self._persist_type_aware_chunks_to_qdrant(
+                        chunks=type_aware_chunks,
+                        doc_id=result.doc_id,
+                        tenant_id=result.tenant_id,
+                        doc_context=result.doc_context,
+                    )
+                else:
+                    # Fallback : ancienne methode si pas de TypeAwareChunks
+                    qdrant_count = self._persist_chunks_to_qdrant(
+                        passages=result.passages,
+                        doc_id=result.doc_id,
+                        tenant_id=result.tenant_id,
+                        doc_context=result.doc_context,
+                    )
                 result.qdrant_points_upserted = qdrant_count
-                logger.info(f"  → {qdrant_count} points upserted to Qdrant Layer R")
+                logger.info(f"  -> {qdrant_count} points upserted to Qdrant Layer R")
+
+                # Phase 8b: Bridge claim↔chunk pour ce document
+                # Met à jour chunk_ids sur les claims Neo4j (cache rebuildable, INV-BRIDGE)
+                try:
+                    bridge_count = self._bridge_claims_to_chunks(
+                        doc_id=result.doc_id,
+                        tenant_id=result.tenant_id,
+                    )
+                    logger.info(f"  -> {bridge_count} claims bridged to Qdrant chunks")
+                except Exception as e:
+                    logger.warning(
+                        f"[OSMOSE:ClaimFirst] Claim-chunk bridge failed (non-blocking): {e}"
+                    )
             except Exception as e:
                 logger.warning(
                     f"[OSMOSE:ClaimFirst] Qdrant persistence failed (non-blocking): {e}"
@@ -685,6 +725,278 @@ class ClaimFirstOrchestrator:
     # Phase 8: Qdrant Layer R persistence
     # =========================================================================
 
+    def _persist_type_aware_chunks_to_qdrant(
+        self,
+        chunks,
+        doc_id: str,
+        tenant_id: str,
+        doc_context=None,
+    ) -> int:
+        """
+        Persiste les TypeAwareChunks via le rechunker dans Qdrant Layer R.
+
+        Utilise le rechunker existant (target 1500 chars, overlap 200) pour
+        produire des chunks autonomes avec recouvrement. Prefixe chaque chunk
+        avec le contexte documentaire (doc_title + section_title).
+
+        ADR: Unite de preuve vs Unite de lecture.
+        """
+        from knowbase.retrieval.qdrant_layer_r import (
+            delete_doc_from_layer_r,
+            ensure_layer_r_collection,
+            upsert_layer_r,
+        )
+        from knowbase.retrieval.rechunker import rechunk_for_retrieval
+        from knowbase.common.clients.embeddings import get_embedding_manager
+
+        if not chunks:
+            return 0
+
+        # Supprimer les anciens points
+        try:
+            delete_doc_from_layer_r(doc_id, tenant_id)
+        except Exception as e:
+            logger.debug(f"[OSMOSE:ClaimFirst] Qdrant delete_doc skipped: {e}")
+
+        # Construire le dictionnaire section_id → titre lisible
+        # Les SectionInfo sont dans le cache (pass0_result.sections)
+        section_titles = {}
+        try:
+            from knowbase.stratified.pass0.cache_loader import load_pass0_from_cache
+            # Les sections sont dans le structural graph du cache
+            for chunk in chunks:
+                if hasattr(chunk, 'section_id') and chunk.section_id:
+                    # Extraire le titre lisible depuis le section_id slug
+                    # Format: sec_SLUG_HASH → on prend le SLUG et on le rend lisible
+                    sid = chunk.section_id
+                    if sid.startswith("sec_"):
+                        # Supprimer le prefix "sec_" et le hash final (_6chars)
+                        parts = sid[4:].rsplit("_", 1)
+                        if len(parts) == 2 and len(parts[1]) == 6:
+                            slug = parts[0]
+                        else:
+                            slug = sid[4:]
+                        # Convertir le slug en titre lisible
+                        title = slug.replace("_", " ").strip()
+                        # Capitaliser les mots significatifs
+                        title = " ".join(
+                            w.upper() if len(w) <= 3 and w.isalpha() else w.capitalize()
+                            for w in title.split()
+                        )
+                        if title and len(title) > 3:
+                            section_titles[sid] = title
+        except Exception as e:
+            logger.debug(f"[OSMOSE:ClaimFirst] Section title extraction failed: {e}")
+
+        # Rechunker V2 : filtre + consolidation section + decoupe overlap + force-merge
+        sub_chunks = rechunk_for_retrieval(
+            chunks=chunks,
+            tenant_id=tenant_id,
+            doc_id=doc_id,
+            target_chars=1500,
+            overlap_chars=200,
+            section_titles=section_titles,
+        )
+
+        if not sub_chunks:
+            logger.info("[OSMOSE:ClaimFirst] No valid sub-chunks after rechunking")
+            return 0
+
+        # Prefixe contextuel deterministe (ADR: metadonnees structurelles = faits documentaires)
+        doc_title = ""
+        if doc_context:
+            doc_title = getattr(doc_context, "primary_subject", "") or ""
+
+        for sc in sub_chunks:
+            # Ne pas ajouter de prefixe si le texte en a deja un
+            # (le pptx_extractor ajoute son propre prefixe contextuel)
+            if sc.text.startswith("[Document:"):
+                continue
+
+            prefix_parts = []
+            if doc_title:
+                prefix_parts.append(f"Document: {doc_title}")
+            if sc.section_title:
+                prefix_parts.append(f"Section: {sc.section_title}")
+            elif sc.section_id:
+                prefix_parts.append(f"Section: {sc.section_id}")
+            if sc.page_no:
+                prefix_parts.append(f"Page {sc.page_no}")
+
+            if prefix_parts:
+                prefix = "[" + " | ".join(prefix_parts) + "]\n\n"
+                sc.text = prefix + sc.text
+
+        logger.info(
+            f"[OSMOSE:ClaimFirst] Rechunked: {len(chunks)} TypeAwareChunks → "
+            f"{len(sub_chunks)} SubChunks for Qdrant"
+        )
+
+        # Embeddings
+        texts = [sc.text for sc in sub_chunks]
+        manager = get_embedding_manager()
+        embeddings = manager.encode(texts)
+
+        if embeddings is None or len(embeddings) == 0:
+            logger.warning("[OSMOSE:ClaimFirst] No embeddings generated")
+            return 0
+
+        # Filtrer les zero-vectors et normaliser en listes Python
+        import numpy as np
+        pairs = []
+        for sc, emb in zip(sub_chunks, embeddings):
+            if isinstance(emb, np.ndarray):
+                emb_list = emb.tolist()
+            elif isinstance(emb, list):
+                emb_list = emb
+            else:
+                emb_list = list(emb)
+            if any(v != 0.0 for v in emb_list[:10]):
+                pairs.append((sc, emb_list))
+
+        if not pairs:
+            return 0
+
+        ensure_layer_r_collection()
+
+        # Extraire axis_values du doc_context
+        doc_axis_map = {}
+        if doc_context:
+            af = getattr(doc_context, "applicability_frame", None)
+            if af:
+                for axis_name, axis_val in [
+                    ("release_id", getattr(af, "release_id", None)),
+                    ("version", getattr(af, "version", None)),
+                ]:
+                    if axis_val:
+                        doc_axis_map[axis_name] = axis_val
+
+        n = upsert_layer_r(pairs, tenant_id=tenant_id, doc_axis_values=doc_axis_map)
+        return n
+
+    def _bridge_claims_to_chunks(self, doc_id: str, tenant_id: str) -> int:
+        """
+        Phase 8b: Bridge claim↔chunk pour un document.
+
+        Matche les claims Neo4j aux chunks Qdrant du même document via :
+        1. Substring match du verbatim_quote
+        2. Overlap mot-à-mot claim.text → chunk
+        Met à jour chunk_ids sur les claims (cache rebuildable, INV-BRIDGE).
+        """
+        import re
+        import requests as _requests
+
+        def _normalize(text: str) -> str:
+            t = text.lower().strip()
+            return re.sub(r'\s+', ' ', t)
+
+        # 1. Charger les chunks Qdrant du document
+        qdrant_url = os.environ.get("QDRANT_URL", "http://qdrant:6333")
+        collection = "knowbase_chunks_v2"
+        doc_chunks = []
+        offset = None
+        while True:
+            body = {
+                "limit": 500,
+                "with_payload": ["chunk_id", "text"],
+                "with_vector": False,
+                "filter": {"must": [
+                    {"key": "doc_id", "match": {"value": doc_id}},
+                    {"key": "tenant_id", "match": {"value": tenant_id}},
+                ]},
+            }
+            if offset:
+                body["offset"] = offset
+            resp = _requests.post(
+                f"{qdrant_url}/collections/{collection}/points/scroll",
+                json=body, timeout=15,
+            )
+            data = resp.json().get("result", {})
+            for p in data.get("points", []):
+                pl = p.get("payload", {})
+                if pl.get("text"):
+                    doc_chunks.append({
+                        "chunk_id": pl.get("chunk_id", str(p.get("id", ""))),
+                        "text": pl["text"],
+                    })
+            offset = data.get("next_page_offset")
+            if not offset:
+                break
+
+        if not doc_chunks:
+            return 0
+
+        # 2. Charger les claims du document depuis Neo4j
+        with self.neo4j_driver.session() as session:
+            result = session.run(
+                """
+                MATCH (c:Claim {tenant_id: $tid, doc_id: $doc_id})
+                RETURN c.claim_id AS claim_id,
+                       c.verbatim_quote AS verbatim,
+                       c.text AS claim_text
+                """,
+                tid=tenant_id, doc_id=doc_id,
+            )
+            claims = [(r["claim_id"], r["verbatim"] or "", r["claim_text"] or "") for r in result]
+
+        if not claims:
+            return 0
+
+        # 3. Matcher
+        bridge_batch = []
+        for claim_id, verbatim, claim_text in claims:
+            matched_id = None
+
+            # Niveau 1+2 : substring verbatim
+            if verbatim and len(verbatim) >= 20:
+                v_norm = _normalize(verbatim)
+                for chunk in doc_chunks:
+                    if v_norm in _normalize(chunk["text"]):
+                        matched_id = chunk["chunk_id"]
+                        break
+                if not matched_id:
+                    v_start = v_norm[:80]
+                    if len(v_start) >= 30:
+                        for chunk in doc_chunks:
+                            if v_start in _normalize(chunk["text"]):
+                                matched_id = chunk["chunk_id"]
+                                break
+
+            # Niveau 3+4 : overlap mot-à-mot
+            if not matched_id:
+                text = verbatim or claim_text or ""
+                if len(text) >= 15:
+                    t_words = set(_normalize(text).split())
+                    if len(t_words) >= 3:
+                        best_id, best_ov = None, 0.0
+                        for chunk in doc_chunks:
+                            c_words = set(_normalize(chunk["text"]).split())
+                            if not c_words:
+                                continue
+                            ov = len(t_words & c_words) / len(t_words)
+                            if ov > best_ov:
+                                best_ov = ov
+                                best_id = chunk["chunk_id"]
+                        if best_ov >= 0.5:
+                            matched_id = best_id
+
+            if matched_id:
+                bridge_batch.append({"claim_id": claim_id, "chunk_id": matched_id})
+
+        # 4. Persister chunk_ids dans Neo4j
+        if bridge_batch:
+            with self.neo4j_driver.session() as session:
+                session.run(
+                    """
+                    UNWIND $batch AS item
+                    MATCH (c:Claim {claim_id: item.claim_id})
+                    SET c.chunk_ids = [item.chunk_id]
+                    """,
+                    batch=bridge_batch,
+                )
+
+        return len(bridge_batch)
+
     def _persist_chunks_to_qdrant(
         self,
         passages: List[Passage],
@@ -693,7 +1005,7 @@ class ClaimFirstOrchestrator:
         doc_context: Optional[Any] = None,
     ) -> int:
         """
-        Persiste les Passages ClaimFirst comme chunks vectoriels dans Qdrant Layer R.
+        LEGACY: Persiste les Passages ClaimFirst comme chunks vectoriels dans Qdrant Layer R.
 
         Chaque Passage est converti en SubChunk (sub_index=0, atomique)
         puis encodé et upserté de manière idempotente (UUID5).
@@ -1696,6 +2008,120 @@ Return JSON: {{"results": [{{"index": 1, "verdict": "VALID", "reason": "product 
 
         return comparable_subject, axis_values
 
+    def _enrich_title_from_passages(
+        self,
+        doc_title: Optional[str],
+        passages: List[Passage],
+    ) -> Optional[str]:
+        """
+        Enrichit le titre du document avec l'année/version trouvée dans les premiers passages.
+
+        Le titre issu du cache est souvent tronqué (ex: "SAP S/4HANA Security Guide").
+        Les premiers passages contiennent fréquemment le titre complet avec l'année
+        (ex: "Security Guide for SAP S/4HANA 2023").
+
+        Stratégie:
+        1. Chercher dans les 5 premiers passages un texte qui contient le doc_title
+           (ou ses mots-clés) PLUS un identifiant année/version.
+        2. Si trouvé, retourner ce titre enrichi.
+        3. Sinon, retourner le doc_title original.
+
+        Args:
+            doc_title: Titre original (peut être None ou tronqué)
+            passages: Passages du document (triés par reading_order)
+
+        Returns:
+            Titre enrichi ou titre original
+        """
+        if not doc_title:
+            return doc_title
+
+        import re as _re
+
+        # Normaliser le titre pour la recherche (minuscule, sans ponctuation superflue)
+        title_lower = doc_title.lower().strip()
+
+        # Extraire les mots-clés significatifs du titre (>= 3 chars, pas des stopwords)
+        stopwords = {"for", "the", "and", "of", "in", "to", "a", "an", "on", "by", "with"}
+        title_keywords = [
+            w for w in _re.findall(r"[a-zA-Z0-9/]+", title_lower)
+            if len(w) >= 3 and w not in stopwords
+        ]
+
+        if not title_keywords:
+            return doc_title
+
+        # Pattern pour détecter année (4 chiffres 19xx/20xx) ou version (vX.Y, X.Y.Z)
+        year_version_pattern = _re.compile(
+            r"""
+            (?:                         # Année
+                \b((?:19|20)\d{2})\b
+            )
+            |
+            (?:                         # Version explicite (v2.0, Version 3.1)
+                (?:v|version\s*)(\d+(?:\.\d+)+)
+            )
+            |
+            (?:                         # Identifiant numérique 4 chiffres (ex: 1809, 2021)
+                \b(\d{4})\b
+            )
+            """,
+            _re.IGNORECASE | _re.VERBOSE,
+        )
+
+        # Vérifier si le titre contient déjà une année/version
+        if year_version_pattern.search(doc_title):
+            return doc_title  # Déjà enrichi, pas besoin de chercher
+
+        # Chercher dans les premiers passages un texte contenant le titre + année/version
+        sorted_passages = sorted(passages, key=lambda p: p.reading_order_index)
+
+        best_match: Optional[str] = None
+        best_score = 0
+
+        for passage in sorted_passages[:8]:  # Premiers 8 passages (zone cover/intro)
+            text = (passage.text or "").strip()
+            if not text or len(text) < 10 or len(text) > 500:
+                continue
+
+            text_lower = text.lower()
+
+            # Compter combien de mots-clés du titre sont présents dans ce passage
+            matched_keywords = sum(1 for kw in title_keywords if kw in text_lower)
+            keyword_ratio = matched_keywords / len(title_keywords) if title_keywords else 0
+
+            # On exige au moins 60% des mots-clés du titre
+            if keyword_ratio < 0.6:
+                continue
+
+            # Chercher une année/version dans ce passage
+            yv_match = year_version_pattern.search(text)
+            if not yv_match:
+                continue
+
+            # Score = ratio de mots-clés matchés (préférer le match le plus complet)
+            score = keyword_ratio
+
+            if score > best_score:
+                best_score = score
+                # Utiliser le texte du passage comme titre enrichi
+                # Nettoyer: prendre la ligne la plus pertinente si multi-ligne
+                lines = [l.strip() for l in text.split("\n") if l.strip()]
+                for line in lines:
+                    line_lower = line.lower()
+                    line_kw_count = sum(1 for kw in title_keywords if kw in line_lower)
+                    if line_kw_count >= len(title_keywords) * 0.6 and year_version_pattern.search(line):
+                        best_match = line
+                        break
+                else:
+                    # Pas de ligne unique contenant tout — utiliser le texte complet tronqué
+                    best_match = text[:300]
+
+        if best_match:
+            return best_match
+
+        return doc_title
+
     def _extract_resolver_candidates(
         self,
         doc_context: DocumentContext,
@@ -1756,6 +2182,14 @@ Return JSON: {{"results": [{{"index": 1, "verdict": "VALID", "reason": "product 
         for passage in passages[:10]:  # Premiers 10 passages
             if passage.section_title:
                 candidates.add(passage.section_title)
+
+        # 6. Texte des premiers passages (cover area du document)
+        # Les premiers passages contiennent souvent le titre complet, la version,
+        # la date — des informations critiques pour le resolver.
+        for passage in passages[:8]:
+            text = (passage.text or "").strip()
+            if text and 5 <= len(text) <= 200:
+                candidates.add(text)
 
         # Nettoyer et filtrer
         cleaned = []

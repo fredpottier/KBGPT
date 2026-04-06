@@ -78,24 +78,30 @@ def main():
     dim = model.get_sentence_embedding_dimension()
     logger.info(f"Modèle chargé: {dim}d")
 
-    # Traiter par batches
+    # Traiter par batches — avec retry et gestion d'erreur robuste
+    # IMPORTANT : ne pas utiliser SKIP/OFFSET avec WHERE embedding IS NULL
+    # car les claims traitees sortent du filtre et decalent l'offset.
+    # A la place, toujours prendre les N premiers NULL (LIMIT sans SKIP).
     processed = 0
+    failed_batches = 0
+    max_consecutive_failures = 3
+    consecutive_failures = 0
     start_time = time.time()
-    offset = 0
 
-    while offset < total:
+    while True:
+        # Charger un batch de claims SANS embedding (toujours les N premiers)
         with driver.session() as session:
-            # Charger un batch de claims
             if args.force:
                 result = session.run(
                     """
                     MATCH (c:Claim {tenant_id: $tid})
+                    WHERE c.embedding IS NULL OR $force = true
                     RETURN c.claim_id as claim_id, c.text as text
                     ORDER BY c.claim_id
-                    SKIP $offset LIMIT $limit
+                    LIMIT $limit
                     """,
                     tid=args.tenant_id,
-                    offset=offset,
+                    force=args.force,
                     limit=args.batch_size,
                 )
             else:
@@ -105,10 +111,9 @@ def main():
                     WHERE c.embedding IS NULL
                     RETURN c.claim_id as claim_id, c.text as text
                     ORDER BY c.claim_id
-                    SKIP $offset LIMIT $limit
+                    LIMIT $limit
                     """,
                     tid=args.tenant_id,
-                    offset=offset,
                     limit=args.batch_size,
                 )
 
@@ -117,33 +122,67 @@ def main():
         if not claims:
             break
 
-        # Générer les embeddings en batch
-        texts = [f"passage: {text}" for _, text in claims]  # e5 prefix
-        embeddings = model.encode(texts, normalize_embeddings=True, batch_size=64)
-
-        # Persister dans Neo4j
-        batch_data = []
-        for i, (claim_id, _) in enumerate(claims):
-            batch_data.append({
-                "claim_id": claim_id,
-                "embedding": embeddings[i].tolist(),
-            })
-
-        with driver.session() as session:
-            session.run(
-                """
-                UNWIND $batch AS item
-                MATCH (c:Claim {claim_id: item.claim_id})
-                SET c.embedding = item.embedding,
-                    c.embedding_model = $model,
-                    c.embedding_version = $version,
-                    c.embedded_at = datetime()
-                """,
-                batch=batch_data,
-                model=EMBEDDING_MODEL,
-                version=EMBEDDING_VERSION,
+        # Generer les embeddings en batch — avec retry
+        try:
+            texts = [f"passage: {text}" for _, text in claims]  # e5 prefix
+            embeddings = model.encode(texts, normalize_embeddings=True, batch_size=64)
+        except Exception as e:
+            consecutive_failures += 1
+            failed_batches += 1
+            logger.warning(
+                f"  Embedding failed (batch {processed//args.batch_size + 1}, "
+                f"attempt {consecutive_failures}/{max_consecutive_failures}): {e}"
             )
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    f"  ARRET : {max_consecutive_failures} echecs consecutifs. "
+                    f"{processed} claims traitees, {total - processed} restantes."
+                )
+                break
+            # Attendre avant retry (backoff)
+            import time as t
+            t.sleep(5 * consecutive_failures)
+            continue
 
+        # Persister dans Neo4j — avec retry
+        try:
+            batch_data = []
+            for i, (claim_id, _) in enumerate(claims):
+                batch_data.append({
+                    "claim_id": claim_id,
+                    "embedding": embeddings[i].tolist(),
+                })
+
+            with driver.session() as session:
+                session.run(
+                    """
+                    UNWIND $batch AS item
+                    MATCH (c:Claim {claim_id: item.claim_id})
+                    SET c.embedding = item.embedding,
+                        c.embedding_model = $model,
+                        c.embedding_version = $version,
+                        c.embedded_at = datetime()
+                    """,
+                    batch=batch_data,
+                    model=EMBEDDING_MODEL,
+                    version=EMBEDDING_VERSION,
+                )
+        except Exception as e:
+            consecutive_failures += 1
+            failed_batches += 1
+            logger.warning(
+                f"  Neo4j persist failed (batch {processed//args.batch_size + 1}): {e}"
+            )
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    f"  ARRET : {max_consecutive_failures} echecs consecutifs (Neo4j). "
+                    f"{processed} claims traitees."
+                )
+                break
+            continue
+
+        # Succes — reset consecutive failures
+        consecutive_failures = 0
         processed += len(claims)
         elapsed = time.time() - start_time
         rate = processed / elapsed if elapsed > 0 else 0
@@ -151,28 +190,43 @@ def main():
         if processed % (args.batch_size * 4) == 0 or processed >= total:
             logger.info(
                 f"  [{processed}/{total}] {rate:.0f} claims/s "
-                f"({elapsed:.0f}s écoulées)"
+                f"({elapsed:.0f}s ecoulees)"
             )
 
-        offset += args.batch_size
-
     elapsed = time.time() - start_time
-    logger.info(f"\n{'='*60}")
-    logger.info(f"BACKFILL EMBEDDINGS TERMINÉ")
-    logger.info(f"{'='*60}")
-    logger.info(f"Claims traitées: {processed}")
-    logger.info(f"Modèle: {EMBEDDING_MODEL} ({dim}d)")
-    logger.info(f"Durée: {elapsed:.0f}s ({processed/elapsed:.0f} claims/s)")
 
-    # Vérifier l'index
+    # Verification finale : recompter les claims avec et sans embedding
     with driver.session() as session:
-        indexed = session.run(
+        total_claims = session.run(
+            "MATCH (c:Claim {tenant_id: $tid}) RETURN count(c) as cnt",
+            tid=args.tenant_id,
+        ).single()["cnt"]
+        with_embedding = session.run(
             "MATCH (c:Claim {tenant_id: $tid}) "
             "WHERE c.embedding IS NOT NULL "
             "RETURN count(c) as cnt",
             tid=args.tenant_id,
         ).single()["cnt"]
-    logger.info(f"Claims avec embedding: {indexed}/{total}")
+        without_embedding = total_claims - with_embedding
+
+    logger.info(f"\n{'='*60}")
+    logger.info(f"BACKFILL EMBEDDINGS TERMINÉ")
+    logger.info(f"{'='*60}")
+    logger.info(f"Claims traitées: {processed}")
+    logger.info(f"Batches échoués: {failed_batches}")
+    logger.info(f"Modèle: {EMBEDDING_MODEL} ({dim}d)")
+    if elapsed > 0 and processed > 0:
+        logger.info(f"Durée: {elapsed:.0f}s ({processed/elapsed:.0f} claims/s)")
+    logger.info(f"Claims avec embedding: {with_embedding}/{total_claims}")
+
+    if without_embedding > 0:
+        logger.warning(
+            f"⚠️  {without_embedding} claims SANS embedding ! "
+            f"({without_embedding*100//total_claims}% du total). "
+            f"Relancer le script pour completer."
+        )
+    else:
+        logger.info(f"✅ 100% des claims ont un embedding")
 
     driver.close()
 

@@ -132,6 +132,17 @@ class DocumentSampleAnalyzerService:
             # Log tokens
             if response.usage:
                 logger.info(f"[TOKENS] Claude PDF Analysis - Input: {response.usage.input_tokens}, Output: {response.usage.output_tokens}")
+                try:
+                    from knowbase.common.token_tracker import track_tokens
+                    track_tokens(
+                        model=model_name,
+                        task_type="pdf_analysis",
+                        input_tokens=response.usage.input_tokens,
+                        output_tokens=response.usage.output_tokens,
+                        context="document_sample_analyzer",
+                    )
+                except Exception:
+                    pass
 
             # Parser réponse LLM
             result = self._parse_llm_response(llm_response, existing_types)

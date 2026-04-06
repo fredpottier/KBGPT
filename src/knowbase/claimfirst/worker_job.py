@@ -41,6 +41,38 @@ def _update_state(
     redis_client.hset(CLAIMFIRST_STATE_KEY, mapping=state)
 
 
+# ── Cockpit instrumentation ──────────────────────────────────────────
+# Émet l'état de la phase courante pour le cockpit opérationnel.
+# Champs ajoutés : phase_status, phase_started_at, phase_elapsed_s,
+# phase_items_done, phase_items_total.
+
+_phase_started_at: float = 0.0
+
+
+def _emit_phase(
+    redis_client: redis.Redis,
+    phase_name: str,
+    status: str,
+    items_done: int = 0,
+    items_total: int = 0,
+) -> None:
+    """Émet l'état de la phase vers Redis pour le cockpit."""
+    global _phase_started_at
+    now = time.time()
+    if status == "started":
+        _phase_started_at = now
+    elapsed = now - _phase_started_at if _phase_started_at else 0
+    _update_state(
+        redis_client,
+        phase=phase_name,
+        phase_status=status,
+        phase_started_at=_phase_started_at,
+        phase_elapsed_s=round(elapsed, 1),
+        phase_items_done=items_done,
+        phase_items_total=items_total,
+    )
+
+
 def _get_state(redis_client: redis.Redis) -> dict:
     """Récupère l'état actuel du job."""
     current = redis_client.hgetall(CLAIMFIRST_STATE_KEY)
@@ -93,6 +125,7 @@ def claimfirst_process_job(
         phase="INIT",
         started_at=job_started_at,
     )
+    _emit_phase(redis_client, "INIT", "started")
 
     logger.info(
         f"[OSMOSE:ClaimFirst:Worker] Starting job {rq_job_id} for {len(doc_ids)} documents, "
@@ -155,6 +188,7 @@ def claimfirst_process_job(
                 total_entities=results["total_entities"],
                 phase="LOADING",
             )
+            _emit_phase(redis_client, "EXTRACTING", "running", i, len(doc_ids))
 
             # Trouver le cache
             cache_path = cache_map.get(doc_id)
@@ -177,6 +211,7 @@ def claimfirst_process_job(
 
             # Traiter
             _update_state(redis_client, phase="EXTRACTING")
+            _emit_phase(redis_client, "EXTRACTING", "running", i, len(doc_ids))
             result = orchestrator.process_and_persist(
                 doc_id=doc_id,
                 cache_result=cache_result,
@@ -331,13 +366,16 @@ def claimfirst_process_job(
     if results["processed"] >= 2 and neo4j_driver:
         try:
             _update_state(redis_client, phase="CROSS_DOC_CHAINS")
+            _emit_phase(redis_client, "CROSS_DOC_CHAINS", "started")
             logger.info("[OSMOSE:ClaimFirst:Worker] Phase 9: Detecting cross-doc chains...")
             cross_doc_result = _detect_cross_doc_chains(neo4j_driver, tenant_id)
             results["cross_doc_chains"] = cross_doc_result.get("chains_persisted", 0)
+            _emit_phase(redis_client, "CROSS_DOC_CHAINS", "done")
             logger.info(
                 f"  → {cross_doc_result.get('chains_persisted', 0)} cross-doc chains created"
             )
         except Exception as e:
+            _emit_phase(redis_client, "CROSS_DOC_CHAINS", "failed")
             logger.error(f"[OSMOSE:ClaimFirst:Worker] Cross-doc detection failed: {e}")
             results["cross_doc_chains"] = 0
 
@@ -345,15 +383,18 @@ def claimfirst_process_job(
     if results["processed"] >= 2 and neo4j_driver:
         try:
             _update_state(redis_client, phase="CANONICALIZE_ENTITIES")
+            _emit_phase(redis_client, "CANONICALIZE_ENTITIES", "started")
             logger.info("[OSMOSE:ClaimFirst:Worker] Phase 10: Canonicalizing entities cross-doc...")
             canon_result = _canonicalize_entities_cross_doc(neo4j_driver, tenant_id)
             results["entities_merged"] = canon_result.get("total_merges", 0)
             results["hubs_annotated"] = canon_result.get("hubs_annotated", 0)
+            _emit_phase(redis_client, "CANONICALIZE_ENTITIES", "done")
             logger.info(
                 f"  → {canon_result.get('total_merges', 0)} entities merged, "
                 f"{canon_result.get('hubs_annotated', 0)} hubs annotated"
             )
         except Exception as e:
+            _emit_phase(redis_client, "CANONICALIZE_ENTITIES", "failed")
             logger.error(f"[OSMOSE:ClaimFirst:Worker] Entity canonicalization failed: {e}")
             results["entities_merged"] = 0
 
@@ -361,13 +402,16 @@ def claimfirst_process_job(
     if results["processed"] >= 2 and neo4j_driver:
         try:
             _update_state(redis_client, phase="CROSS_DOC_CLUSTERING")
+            _emit_phase(redis_client, "CROSS_DOC_CLUSTERING", "started")
             logger.info("[OSMOSE:ClaimFirst:Worker] Phase 11: Cross-doc clustering...")
             cluster_result = _cluster_cross_doc(neo4j_driver, tenant_id)
             results["cross_doc_clusters"] = cluster_result.get("clusters_created", 0)
+            _emit_phase(redis_client, "CROSS_DOC_CLUSTERING", "done")
             logger.info(
                 f"  → {cluster_result.get('clusters_created', 0)} cross-doc clusters created"
             )
         except Exception as e:
+            _emit_phase(redis_client, "CROSS_DOC_CLUSTERING", "failed")
             logger.error(f"[OSMOSE:ClaimFirst:Worker] Cross-doc clustering failed: {e}")
             results["cross_doc_clusters"] = 0
 
@@ -375,15 +419,18 @@ def claimfirst_process_job(
     if results["processed"] >= 2 and neo4j_driver:
         try:
             _update_state(redis_client, phase="QS_CROSS_DOC_COMPARISON")
+            _emit_phase(redis_client, "QS_CROSS_DOC_COMPARISON", "started")
             logger.info("[OSMOSE:ClaimFirst:Worker] Phase 12: QS cross-doc comparison...")
             qs_result = _compare_question_signatures_cross_doc(neo4j_driver, tenant_id)
             results["qs_comparisons"] = qs_result.get("comparisons_persisted", 0)
+            _emit_phase(redis_client, "QS_CROSS_DOC_COMPARISON", "done")
             logger.info(
                 f"  → {qs_result.get('comparisons_persisted', 0)} QS comparisons persisted "
                 f"({qs_result.get('evolutions', 0)} evolutions, "
                 f"{qs_result.get('contradictions', 0)} contradictions)"
             )
         except Exception as e:
+            _emit_phase(redis_client, "QS_CROSS_DOC_COMPARISON", "failed")
             logger.error(f"[OSMOSE:ClaimFirst:Worker] QS comparison failed: {e}")
             results["qs_comparisons"] = 0
 
@@ -391,6 +438,7 @@ def claimfirst_process_job(
     if results["processed"] >= 1 and neo4j_driver:
         try:
             _update_state(redis_client, phase="KG_HYGIENE_L1")
+            _emit_phase(redis_client, "KG_HYGIENE_L1", "started")
             logger.info("[OSMOSE:ClaimFirst:Worker] Phase 13: KG Hygiene L1...")
             from knowbase.hygiene.engine import HygieneEngine
             from knowbase.hygiene.models import HygieneRunScope
@@ -402,15 +450,18 @@ def claimfirst_process_job(
                 scope_params={"doc_ids": list(doc_ids)},
             )
             results["hygiene_l1"] = hygiene_result.total_actions
+            _emit_phase(redis_client, "KG_HYGIENE_L1", "done")
             logger.info(
                 f"  → {hygiene_result.total_actions} hygiene actions "
                 f"({hygiene_result.applied} applied, {hygiene_result.proposed} proposed)"
             )
         except Exception as e:
+            _emit_phase(redis_client, "KG_HYGIENE_L1", "failed")
             logger.error(f"[OSMOSE:ClaimFirst:Worker] KG Hygiene L1 failed: {e}")
             results["hygiene_l1"] = 0
 
     # Finalisation
+    _emit_phase(redis_client, "DONE", "done")
     elapsed = time.time() - job_started_at
     _update_state(
         redis_client,
