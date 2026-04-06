@@ -103,3 +103,29 @@ backups/
 .worktrees/
 .security-key
 logs/security/
+
+# Docker container artifacts (mounted volumes)
+app/.cache/
+app/.config/
+app/.local/
+app/data/
+
+# Cockpit runtime state
+cockpit/.chrome-profile/
+cockpit/db/
+cockpit/.cockpit.pid
+
+# Temporary debug files
+tmp_*
+nul
+frontend/nul
+.env.backup
+
+# Windows path artifacts
+C\357\200\272*
+
+# Benchmark JSON results (keep questions tracked)
+!benchmark/questions/*.json
+
+# TypeScript build info
+frontend/tsconfig.tsbuildinfo
