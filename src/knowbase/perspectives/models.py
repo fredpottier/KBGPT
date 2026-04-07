@@ -246,5 +246,13 @@ class ScoredPerspective:
     subject_overlap_bonus: float = 0.0
     """Bonus si la Perspective touche un sujet identifie dans la question."""
 
+    # Claims re-rankes par similarite a la question (Phase B6)
+    # Si renseigne, le prompt_builder utilise ces claims plutot que les
+    # representative_texts figes au build time. Permet d'injecter les
+    # claims VRAIMENT pertinents pour la question, pas seulement les plus
+    # importants en general.
+    reranked_claims: Optional[List[Dict[str, Any]]] = None
+    """Claims re-rankes au runtime: [{claim_id, text, doc_id, similarity}, ...]"""
+
 
 __all__ = ["Perspective", "PerspectiveConfig", "ScoredPerspective"]

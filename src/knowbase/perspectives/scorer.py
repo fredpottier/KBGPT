@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
@@ -193,7 +193,92 @@ def score_perspectives(
 
 
 # ---------------------------------------------------------------------------
-# 4. Selection
+# 4. Re-ranking question-dependant des claims (Phase B6)
+# ---------------------------------------------------------------------------
+
+def rerank_claims_in_perspective(
+    perspective_id: str,
+    question_embedding: List[float],
+    top_n: int = 8,
+    max_load: int = 200,
+) -> List[Dict[str, Any]]:
+    """
+    Charge les claims d'une Perspective et les re-trie par similarite
+    semantique a la question.
+
+    Permet d'injecter au LLM les claims VRAIMENT pertinents pour la
+    question, pas les plus importants en general (representative_texts
+    figes au build).
+
+    Args:
+        perspective_id: ID de la Perspective
+        question_embedding: Embedding de la question (E5-large)
+        top_n: Nombre de claims a retourner
+        max_load: Limite de chargement (eviter les Perspectives gigantesques)
+
+    Returns:
+        Liste de {claim_id, text, doc_id, similarity}, triee par similarity desc
+    """
+    if not question_embedding:
+        return []
+
+    try:
+        from neo4j import GraphDatabase
+        uri = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
+        user = os.environ.get("NEO4J_USER", "neo4j")
+        password = os.environ.get("NEO4J_PASSWORD", "graphiti_neo4j_pass")
+        driver = GraphDatabase.driver(uri, auth=(user, password))
+
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (p:Perspective {perspective_id: $pid})-[:INCLUDES_CLAIM]->(c:Claim)
+                WHERE c.embedding IS NOT NULL
+                RETURN c.claim_id AS cid,
+                       c.text AS text,
+                       c.doc_id AS doc_id,
+                       c.embedding AS embedding,
+                       c.confidence AS confidence
+                LIMIT $max_load
+            """, pid=perspective_id, max_load=max_load)
+            claims = [dict(r) for r in result]
+        driver.close()
+
+        if not claims:
+            return []
+
+        q_vec = np.array(question_embedding)
+        q_norm = np.linalg.norm(q_vec)
+        if q_norm == 0:
+            return []
+
+        scored = []
+        for c in claims:
+            emb = c.get("embedding")
+            if not emb:
+                continue
+            emb_vec = np.array(emb)
+            emb_norm = np.linalg.norm(emb_vec)
+            if emb_norm == 0:
+                continue
+            similarity = float(np.dot(q_vec, emb_vec) / (q_norm * emb_norm))
+            scored.append({
+                "claim_id": c["cid"],
+                "text": c["text"] or "",
+                "doc_id": c["doc_id"] or "",
+                "similarity": round(similarity, 4),
+                "confidence": c.get("confidence") or 0.5,
+            })
+
+        scored.sort(key=lambda x: -x["similarity"])
+        return scored[:top_n]
+
+    except Exception as e:
+        logger.warning(f"[PERSPECTIVE:RERANK] Failed for {perspective_id}: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# 5. Selection
 # ---------------------------------------------------------------------------
 
 def select_perspectives(

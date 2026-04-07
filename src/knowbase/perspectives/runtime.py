@@ -18,11 +18,11 @@ Domain-agnostic et multilingue par construction.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .models import ScoredPerspective
 from .prompt_builder import build_perspective_prompt, derive_structuring_hints
-from .scorer import select_perspectives
+from .scorer import rerank_claims_in_perspective, select_perspectives
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ def assemble_perspective_context(
     scored_perspectives: List[ScoredPerspective],
     subject_ids: List[str],
     subject_resolution_mode: str = "single",
+    question_embedding: Optional[List[float]] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Point d'entree unique de l'injection du contexte PERSPECTIVE.
@@ -83,6 +84,30 @@ def assemble_perspective_context(
         )
         return "", metadata
 
+    # Phase B6 : Re-ranking question-dependant des claims
+    # Pour chaque Perspective selectionnee, on re-trie ses claims selon
+    # leur similarite a la question. Permet d'injecter les claims VRAIMENT
+    # pertinents pour la question, pas les representative_texts figes.
+    rerank_count = 0
+    if question_embedding:
+        import time as _time
+        _rerank_start = _time.time()
+        for sp in selected:
+            reranked = rerank_claims_in_perspective(
+                perspective_id=sp.perspective.perspective_id,
+                question_embedding=question_embedding,
+                top_n=8,
+                max_load=200,
+            )
+            if reranked:
+                sp.reranked_claims = reranked
+                rerank_count += len(reranked)
+        _rerank_ms = int((_time.time() - _rerank_start) * 1000)
+        logger.info(
+            f"[PERSPECTIVE:RERANK] {rerank_count} claims re-rankes "
+            f"sur {len(selected)} perspectives en {_rerank_ms}ms"
+        )
+
     # Hints de structuration (derives des metadonnees des Perspectives)
     hints = derive_structuring_hints(question, selected)
     metadata["hints"] = hints
@@ -91,12 +116,15 @@ def assemble_perspective_context(
     graph_context_text = build_perspective_prompt(question, selected, hints)
     metadata["activated"] = True
     metadata["claims_injected"] = sum(
-        len(sp.perspective.representative_texts[:8]) for sp in selected
+        len(sp.reranked_claims) if sp.reranked_claims
+        else len(sp.perspective.representative_texts[:8])
+        for sp in selected
     )
 
     logger.info(
         f"[PERSPECTIVE:ASSEMBLE] {len(selected)} perspectives, "
-        f"{metadata['claims_injected']} claims injectes, "
+        f"{metadata['claims_injected']} claims injectes "
+        f"({'reranked' if rerank_count > 0 else 'representative'}), "
         f"{len(hints)} hints"
     )
     for sp in selected:

@@ -1472,6 +1472,8 @@ def search_documents(
         # Preuves groupees par axes thematiques
         # Reutilise les Perspectives deja consultees/scorees en amont
         # pour eviter un double chargement Neo4j.
+        # Phase B6 : on passe query_vector pour permettre le re-ranking
+        # des claims dans chaque Perspective selon la similarite a la question.
         try:
             from knowbase.perspectives.runtime import assemble_perspective_context
             graph_context_text, perspective_metadata = assemble_perspective_context(
@@ -1479,6 +1481,7 @@ def search_documents(
                 scored_perspectives=_perspectives_consulted,
                 subject_ids=_perspectives_subject_ids,
                 subject_resolution_mode=_perspectives_resolution_mode,
+                question_embedding=query_vector,
             )
             if not perspective_metadata.get("activated"):
                 # Fallback DIRECT si Perspectives insuffisantes

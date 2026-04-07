@@ -126,13 +126,30 @@ def build_perspective_prompt(
             lines.append(f"**Subjects covered:** {subjects_str}")
             lines.append("")
 
-        # Claims representatifs
-        claims_to_show = p.representative_texts[:MAX_CLAIMS_PER_PERSPECTIVE]
-        if claims_to_show:
-            lines.append("**Key facts:**")
-            for claim_text in claims_to_show:
-                lines.append(f"- {claim_text}")
-            lines.append("")
+        # Claims a injecter : reranked si disponibles (Phase B6),
+        # sinon representative_texts figes au build (fallback)
+        if sp.reranked_claims:
+            claims_with_meta = sp.reranked_claims[:MAX_CLAIMS_PER_PERSPECTIVE]
+            if claims_with_meta:
+                lines.append("**Key facts (most relevant to the question):**")
+                for c in claims_with_meta:
+                    text = c.get("text", "")[:300]
+                    doc_id = c.get("doc_id", "")
+                    if doc_id:
+                        # Format compact pour ne pas alourdir le prompt
+                        short_doc = doc_id.split("_", 1)[-1][:50] if "_" in doc_id else doc_id[:50]
+                        lines.append(f"- {text} *(source: {short_doc})*")
+                    else:
+                        lines.append(f"- {text}")
+                lines.append("")
+        else:
+            # Fallback : claims representatifs figes au build
+            claims_to_show = p.representative_texts[:MAX_CLAIMS_PER_PERSPECTIVE]
+            if claims_to_show:
+                lines.append("**Key facts:**")
+                for claim_text in claims_to_show:
+                    lines.append(f"- {claim_text}")
+                lines.append("")
 
         # Evolution (Phase 1B — vide pour l'instant)
         if p.evolution_summary:
