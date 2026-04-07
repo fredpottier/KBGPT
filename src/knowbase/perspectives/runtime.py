@@ -34,20 +34,41 @@ def should_activate_perspectives(
 
     Heuristique composite :
     - Patterns linguistiques ouverts (cross-domain)
+    - Detection de specificite technique (acronymes, codes) -> rejet
     - Dispersion des facets dans les chunks (facet_diversity >= 4)
     """
+    import re
+
     q_lower = question.lower()
 
-    # Patterns linguistiques cross-domain
+    # Patterns linguistiques cross-domain (questions ouvertes)
     open_patterns = [
         "qu'apporte", "que propose", "quoi de neuf", "what's new", "what is new",
         "vue d'ensemble", "vue d ensemble", "overview", "resume", "summary",
-        "quels sont les", "what are the", "decrivez", "describe", "expliquez",
+        "decrivez", "describe", "expliquez", "explain",
         "differences entre", "compare", "evolution", "changements",
         "tout savoir sur", "tell me about", "parlez-moi de",
         "points cles", "key points", "principales", "main features",
+        "comment sap", "comment s/4hana",
+        "comment fonctionne", "comment gere", "how does sap",
+        "enjeux", "challenges",
+        "quels sont les principaux", "what are the main",
+        "quels sont les enjeux", "quels sont les outils et",
+        "outils et processus", "tools and processes",
     ]
     has_open_pattern = any(p in q_lower for p in open_patterns)
+
+    # Detection de specificite technique (acronymes 3+ chars majuscules avec _ ou /)
+    # Exemples : CNS_CP_DELETE, SAP_SLL_BC, S/4HANA (mais pas "S/4HANA" seul)
+    technical_codes = re.findall(r'\b[A-Z][A-Z0-9]{2,}(?:[_/][A-Z0-9]+)+\b', question)
+    has_technical_code = len(technical_codes) > 0
+
+    # Detection de pattern "value/valeur de X" -> question factuelle
+    factual_value_patterns = [
+        "valeur de", "value of", "quel est le nom", "what is the name",
+        "quelle version de", "which version of",
+    ]
+    has_factual_value_pattern = any(p in q_lower for p in factual_value_patterns)
 
     # Facet diversity : compter les facets distinctes dans les claims KG
     facet_ids = set()
@@ -56,12 +77,16 @@ def should_activate_perspectives(
             facet_ids.add(fid)
     facet_diversity = len(facet_ids)
 
-    activated = facet_diversity >= 4 or has_open_pattern
+    # Activation : (pattern ouvert OU dispersion facets) ET pas de specificite technique
+    base_signal = facet_diversity >= 4 or has_open_pattern
+    rejected = has_technical_code or has_factual_value_pattern
+    activated = base_signal and not rejected
 
     logger.info(
         f"[PERSPECTIVE:DETECT] question='{question[:60]}...', "
         f"facet_diversity={facet_diversity}, has_open_pattern={has_open_pattern}, "
-        f"activated={activated}"
+        f"has_technical_code={has_technical_code} ({technical_codes if technical_codes else ''}), "
+        f"has_factual_value={has_factual_value_pattern}, activated={activated}"
     )
     return activated
 
