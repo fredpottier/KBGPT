@@ -33,10 +33,16 @@ def derive_structuring_hints(
     lexicaux. Multilingue et domain-agnostic par construction.
 
     Hints en anglais (langue neutre) — le LLM de synthese les reformule.
+
+    IMPORTANT (Phase B7) : les hints sont calcules sur les CLAIMS RELLEMENT
+    INJECTES (reranked_claims si disponibles), pas sur les metadonnees globales
+    des Perspectives. Cela evite les faux positifs (ex: signaler une tension
+    qui existe dans la Perspective complete mais pas dans les claims selectionnes
+    pour cette question).
     """
     hints = []
 
-    # Hint cross-version
+    # Hint cross-version (sur metadonnees globales — vrai signal de la perspective)
     has_evolution = any(
         sp.perspective.evolution_summary
         or sp.perspective.added_claim_count > 0
@@ -49,12 +55,18 @@ def derive_structuring_hints(
             "distinguish what is new, modified, or unchanged."
         )
 
-    # Hint tensions
-    tension_perspectives = [sp for sp in perspectives if sp.perspective.tension_count > 0]
-    if tension_perspectives:
+    # Hint tensions : seulement si plusieurs Perspectives selectionnees
+    # ont des tensions ET qu'elles sont les Perspectives DOMINANTES (top 2-3).
+    # Ne plus declencher sur une seule Perspective avec tension_count > 0
+    # car le rerank peut ne pas avoir injecte les claims en tension.
+    tension_perspectives = [
+        sp for sp in perspectives[:3]  # top 3 seulement
+        if sp.perspective.tension_count >= 5  # seuil minimal eleve
+    ]
+    if len(tension_perspectives) >= 2:
         hints.append(
-            "Divergent positions exist between sources on some points — "
-            "present them explicitly."
+            "Multiple selected axes contain known divergences between sources — "
+            "if the cited facts show conflicting positions, present them explicitly."
         )
 
     # Hint cross-subject : si les Perspectives selectionnees touchent
@@ -128,6 +140,8 @@ def build_perspective_prompt(
 
         # Claims a injecter : reranked si disponibles (Phase B6),
         # sinon representative_texts figes au build (fallback)
+        # Format des doc_id : on utilise [[doc:ID]] pour que le LLM
+        # produise des citations propres sans dupliquer "source"
         if sp.reranked_claims:
             claims_with_meta = sp.reranked_claims[:MAX_CLAIMS_PER_PERSPECTIVE]
             if claims_with_meta:
@@ -136,9 +150,9 @@ def build_perspective_prompt(
                     text = c.get("text", "")[:300]
                     doc_id = c.get("doc_id", "")
                     if doc_id:
-                        # Format compact pour ne pas alourdir le prompt
-                        short_doc = doc_id.split("_", 1)[-1][:50] if "_" in doc_id else doc_id[:50]
-                        lines.append(f"- {text} *(source: {short_doc})*")
+                        # Format avec balise [[doc:ID]] que le LLM convertira
+                        # en citation propre selon les regles du prompt de synthese
+                        lines.append(f"- {text} [[doc:{doc_id}]]")
                     else:
                         lines.append(f"- {text}")
                 lines.append("")

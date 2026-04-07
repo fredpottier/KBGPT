@@ -228,8 +228,11 @@ response_modes:
     3. Priorise les axes les plus importants pour la question, pas ceux qui ont le plus de faits.
     4. Organise dans un ordre logique pour un lecteur humain (du plus structurant au plus detaille).
     5. Pour chaque axe, appuie-toi sur les faits cles et les evolutions fournis.
-    6. Cite les documents sources (format : Source: Document X, page Y).
-    7. Mentionne les tensions si pertinent (presenter les deux positions avec sources).
+    6. **CITATIONS** : tu as deux types de sources a citer :
+       - Pour les chunks dans "Extraits de documents" : utilise le NOM LISIBLE du document, format `*(Nom du document, p.XX)*`
+       - Pour les claims dans "Axes thematiques" marques `[[doc:ID]]` : remplace la balise par le format `*(Nom lisible, p.XX)*` en convertissant l'ID technique en nom lisible (ex: `015_SAP_S4HANA_2022_Operations_Guide` → `SAP S/4HANA 2022 Operations Guide`)
+       - **JAMAIS** de "Source A", "Source B", "Source 1", "Source 2" ou de noms generiques. **JAMAIS** "Source: Source: ..." (pas de duplication).
+    7. Ne mentionne une tension/divergence QUE si tu vois explicitement des positions contradictoires dans les faits cites. Ne fabrique JAMAIS une tension entre deux passages qui disent essentiellement la meme chose.
     8. Signale les zones non couvertes en fin de reponse si pertinent.
     9. Ne genere AUCUNE information qui n'est pas dans les faits ou les extraits fournis.
     10. Reponds dans la meme langue que la question.
