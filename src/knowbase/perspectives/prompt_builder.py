@@ -29,14 +29,18 @@ def derive_structuring_hints(
     perspectives: List[ScoredPerspective],
 ) -> List[str]:
     """
-    Derive des indices de structuration a partir des metadonnees Perspectives.
+    Derive des indices de structuration UNIQUEMENT a partir des metadonnees
+    structurelles des Perspectives (pas de la question).
 
-    Pas d'appel LLM. Regles deterministes sur les metadonnees.
+    Pas d'appel LLM, pas de listes de mots, pas de patterns lexicaux.
+    Multilingue et domain-agnostic par construction.
+
+    Les hints sont en anglais (langue neutre) — le LLM de synthese les
+    reformulera dans la langue de la question.
     """
     hints = []
-    q_lower = question.lower()
 
-    # Hint cross-version
+    # Hint cross-version (signal structurel : evolution_summary ou claim diffs)
     has_evolution = any(
         sp.perspective.evolution_summary
         or sp.perspective.added_claim_count > 0
@@ -45,27 +49,27 @@ def derive_structuring_hints(
     )
     if has_evolution:
         hints.append(
-            "Certains elements ont evolue entre versions — "
-            "distinguez ce qui est nouveau, modifie ou inchange."
+            "Some elements have evolved across versions — "
+            "distinguish what is new, modified, or unchanged."
         )
 
-    # Hint tensions
+    # Hint tensions (signal structurel : tension_count > 0)
     tension_perspectives = [sp for sp in perspectives if sp.perspective.tension_count > 0]
     if tension_perspectives:
         hints.append(
-            "Des positions divergentes existent entre sources "
-            "sur certains points — presentez-les explicitement."
+            "Divergent positions exist between sources on some points — "
+            "present them explicitly."
         )
 
-    # Hints question-dependants (forme, pas domaine)
-    if any(w in q_lower for w in ["migr", "transition", "passage", "upgrade", "conversion"]):
-        hints.append("Distinguez les prerequis, les changements de comportement et les impacts.")
-
-    elif any(w in q_lower for w in ["compar", "difference", "vs", "entre", "versus"]):
-        hints.append("Structurez autour des dimensions comparees, pas des sources.")
-
-    elif any(w in q_lower for w in ["risque", "risk", "impact", "consequence", "probleme", "issue"]):
-        hints.append("Distinguez les elements critiques des elements secondaires.")
+    # Hint dispersion : si les axes selectionnes ont des coverage_ratio
+    # tres heterogenes, c'est qu'un axe domine — signaler la hierarchie.
+    if len(perspectives) >= 2:
+        coverages = sorted([sp.perspective.coverage_ratio for sp in perspectives], reverse=True)
+        if coverages[0] > 0 and coverages[0] > 2 * coverages[-1]:
+            hints.append(
+                "Coverage is uneven across the identified axes — "
+                "prioritize the most representative ones."
+            )
 
     return hints[:MAX_HINTS]
 
@@ -88,11 +92,13 @@ def build_perspective_prompt(
     if not scored_perspectives:
         return ""
 
+    # Le prompt structurel est ecrit en anglais (langue neutre).
+    # Le LLM de synthese le reformule automatiquement dans la langue de la question.
     lines = []
     subject_names = set(sp.perspective.subject_name for sp in scored_perspectives if sp.perspective.subject_name)
-    subject_label = ", ".join(subject_names) if subject_names else "le sujet"
+    subject_label = ", ".join(subject_names) if subject_names else "the topic"
 
-    lines.append(f"## Axes thematiques identifies pour {subject_label}")
+    lines.append(f"## Thematic axes identified for {subject_label}")
     lines.append("")
 
     for i, sp in enumerate(scored_perspectives, 1):
@@ -101,51 +107,50 @@ def build_perspective_prompt(
         # Header de l'axe
         meta_parts = []
         if p.claim_count:
-            meta_parts.append(f"{p.claim_count} faits")
+            meta_parts.append(f"{p.claim_count} facts")
         if p.doc_count:
             meta_parts.append(f"{p.doc_count} sources")
         meta = f" ({', '.join(meta_parts)})" if meta_parts else ""
 
-        lines.append(f"### Axe {i} : {p.label}{meta}")
+        lines.append(f"### Axis {i}: {p.label}{meta}")
         lines.append("")
 
         if p.description:
             lines.append(f"*{p.description}*")
             lines.append("")
 
-        # Claims representatifs (top N)
+        # Claims representatifs (top N) — preserves dans leur langue d'origine
         claims_to_show = p.representative_texts[:MAX_CLAIMS_PER_PERSPECTIVE]
         if claims_to_show:
-            lines.append("**Faits cles :**")
+            lines.append("**Key facts:**")
             for claim_text in claims_to_show:
                 lines.append(f"- {claim_text}")
             lines.append("")
 
         # Evolution (Phase 1B — vide pour l'instant, pret pour le futur)
         if p.evolution_summary:
-            lines.append(f"**Evolution :** {p.evolution_summary}")
+            lines.append(f"**Evolution:** {p.evolution_summary}")
             lines.append("")
 
         # Tensions
         if p.tension_count > 0:
-            lines.append(f"**Tensions :** {p.tension_count} divergence(s) detectee(s) entre sources.")
+            lines.append(f"**Tensions:** {p.tension_count} divergence(s) detected between sources.")
             lines.append("")
 
         lines.append("---")
         lines.append("")
 
-    # Blind spots : sujets avec faible couverture
-    low_coverage = [sp for sp in scored_perspectives if sp.perspective.coverage_ratio < 0.05]
+    # Blind spots : signal structurel sur la couverture
     total_coverage = sum(sp.perspective.coverage_ratio for sp in scored_perspectives)
     if total_coverage < 0.7:
-        lines.append("### Zones potentiellement non couvertes")
-        lines.append(f"Les axes ci-dessus couvrent ~{total_coverage:.0%} des informations du corpus sur ce sujet.")
-        lines.append("D'autres aspects peuvent exister dans le corpus mais n'ont pas ete retenus comme axes principaux.")
+        lines.append("### Potentially uncovered areas")
+        lines.append(f"The axes above cover ~{total_coverage:.0%} of corpus information on this topic.")
+        lines.append("Other aspects may exist in the corpus but were not retained as primary axes.")
         lines.append("")
 
     # Hints de structuration
     if hints:
-        lines.append("### Indices de structuration")
+        lines.append("### Structuring hints")
         for hint in hints:
             lines.append(f"- {hint}")
         lines.append("")

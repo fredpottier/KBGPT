@@ -1251,9 +1251,150 @@ def search_documents(
     )
 
     # ══════════════════════════════════════════════════════════════
-    # V3 Response Mode — branchement du graph_context_text par mode
+    # Consultation Perspectives + LLM decisionnel de strategie
+    #
+    # Les Perspectives sont consultees systematiquement des qu'un sujet
+    # est resolu. La decision (direct vs structured) est prise par un LLM
+    # informe par la topologie des preuves (strategy_analyzer).
+    #
+    # Consultation = quasi-systematique (si sujets resolus)
+    # Injection = conditionnelle (si LLM dit "structured")
     # ══════════════════════════════════════════════════════════════
     from .signal_policy import ResponseMode
+
+    # Etat des Perspectives consultees (preservees pour reutilisation en aval)
+    _perspectives_consulted: list = []
+    _perspectives_subject_ids: list = []
+    _perspectives_resolution_mode: str = "fallback"
+    _strategy_decision = None
+
+    modes_enabled = os.environ.get("OSMOSIS_RESPONSE_MODES", "false").lower() == "true"
+    perspective_enabled = os.environ.get("MODE_PERSPECTIVE_ENABLED", "true").lower() == "true"
+
+    # On consulte les Perspectives uniquement si :
+    # - les Response Modes V3 sont actifs
+    # - le mode PERSPECTIVE est active
+    # - le signal_policy a decide DIRECT (pas TENSION / STRUCTURED_FACT)
+    if (modes_enabled and perspective_enabled
+            and signal_policy.response_mode == ResponseMode.DIRECT):
+        try:
+            import time as _time
+            _persp_start = _time.time()
+
+            from knowbase.perspectives.scorer import (
+                resolve_subject_ids_from_claims,
+                load_perspectives,
+                score_perspectives,
+            )
+            from knowbase.perspectives.strategy_analyzer import analyze_response_strategy
+            import asyncio as _asyncio
+
+            # 1. Resoudre les sujets
+            subject_ids, resolution_mode = resolve_subject_ids_from_claims(
+                kg_claim_results, tenant_id
+            )
+            _perspectives_subject_ids = subject_ids
+            _perspectives_resolution_mode = resolution_mode
+
+            if subject_ids:
+                # 2. Charger et scorer les Perspectives (lightweight)
+                _load_start = _time.time()
+                perspectives = load_perspectives(subject_ids, tenant_id)
+                _load_ms = int((_time.time() - _load_start) * 1000)
+
+                if perspectives:
+                    _score_start = _time.time()
+                    scored = score_perspectives(query_vector, query, perspectives)
+                    _score_ms = int((_time.time() - _score_start) * 1000)
+                    _perspectives_consulted = scored
+
+                    # 3. LLM decisionnel informe
+                    try:
+                        loop = _asyncio.get_event_loop()
+                        if loop.is_running():
+                            # Dans un contexte deja async : creer une nouvelle loop
+                            # pour l'appel sync (search_documents est sync)
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                future = executor.submit(
+                                    lambda: _asyncio.new_event_loop().run_until_complete(
+                                        analyze_response_strategy(
+                                            question=query,
+                                            kg_claims=kg_claim_results,
+                                            reranked_chunks=reranked_chunks,
+                                            scored_perspectives=scored,
+                                            subject_ids=subject_ids,
+                                            subject_resolution_mode=resolution_mode,
+                                        )
+                                    )
+                                )
+                                _strategy_decision = future.result(timeout=30)
+                        else:
+                            _strategy_decision = _asyncio.run(
+                                analyze_response_strategy(
+                                    question=query,
+                                    kg_claims=kg_claim_results,
+                                    reranked_chunks=reranked_chunks,
+                                    scored_perspectives=scored,
+                                    subject_ids=subject_ids,
+                                    subject_resolution_mode=resolution_mode,
+                                )
+                            )
+                    except RuntimeError:
+                        # Pas de loop en cours : creer une
+                        _strategy_decision = _asyncio.run(
+                            analyze_response_strategy(
+                                question=query,
+                                kg_claims=kg_claim_results,
+                                reranked_chunks=reranked_chunks,
+                                scored_perspectives=scored,
+                                subject_ids=subject_ids,
+                                subject_resolution_mode=resolution_mode,
+                            )
+                        )
+
+                    _total_persp_ms = int((_time.time() - _persp_start) * 1000)
+
+                    logger.info(
+                        f"[PERSPECTIVE:COSTS] neo4j_load_ms={_load_ms} "
+                        f"scoring_ms={_score_ms} total_ms={_total_persp_ms} "
+                        f"perspectives={len(perspectives)}"
+                    )
+
+                    # 4. Appliquer la decision
+                    if _strategy_decision and _strategy_decision.strategy == "structured":
+                        signal_policy.response_mode = ResponseMode.PERSPECTIVE
+                        signal_policy.candidate_mode = ResponseMode.PERSPECTIVE
+                        signal_policy.response_mode_reason = (
+                            f"llm_strategy: {_strategy_decision.reasoning[:100]}"
+                        )
+                        logger.info(
+                            f"[PERSPECTIVE:DECISION] structured "
+                            f"(confidence={_strategy_decision.confidence}, "
+                            f"llm_ms={_strategy_decision.llm_latency_ms})"
+                        )
+                    else:
+                        logger.info(
+                            f"[PERSPECTIVE:DECISION] direct "
+                            f"(downgraded={_strategy_decision.downgraded if _strategy_decision else False}, "
+                            f"veto={_strategy_decision.veto_reason if _strategy_decision else 'none'})"
+                        )
+                else:
+                    logger.info(
+                        f"[PERSPECTIVE:CONSULT] no perspectives loaded for "
+                        f"{len(subject_ids)} subjects"
+                    )
+            else:
+                logger.info("[PERSPECTIVE:CONSULT] no subject resolved")
+
+        except Exception as e:
+            logger.warning(f"[PERSPECTIVE:CONSULT] Failed (non-blocking): {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+
+    # ══════════════════════════════════════════════════════════════
+    # V3 Response Mode — branchement du graph_context_text par mode
+    # ══════════════════════════════════════════════════════════════
     resolved_mode = signal_policy.response_mode
 
     # Override admin/benchmark si fourni
@@ -1331,15 +1472,16 @@ def search_documents(
         logger.info(f"[MODE:STRUCTURED_FACT] Facts block injected ({len(graph_context_text)} chars)")
 
     elif resolved_mode == ResponseMode.PERSPECTIVE:
-        # Preuves groupees par axes thematiques (questions ouvertes)
+        # Preuves groupees par axes thematiques
+        # Reutilise les Perspectives deja consultees/scorees en amont
+        # pour eviter un double chargement Neo4j.
         try:
             from knowbase.perspectives.runtime import assemble_perspective_context
             graph_context_text, perspective_metadata = assemble_perspective_context(
                 question=query,
-                question_embedding=query_vector,
-                kg_claim_results=kg_claim_results,
-                reranked_chunks=reranked_chunks,
-                tenant_id=tenant_id,
+                scored_perspectives=_perspectives_consulted,
+                subject_ids=_perspectives_subject_ids,
+                subject_resolution_mode=_perspectives_resolution_mode,
             )
             if not perspective_metadata.get("activated"):
                 # Fallback DIRECT si Perspectives insuffisantes

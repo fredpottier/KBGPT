@@ -13,8 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
-import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -149,21 +148,8 @@ def load_perspectives(
 
 
 # ---------------------------------------------------------------------------
-# 3. Scoring multi-signaux
+# 3. Scoring multi-signaux (purement structurel + semantique)
 # ---------------------------------------------------------------------------
-
-def _extract_key_terms(question: str) -> List[str]:
-    """Extrait les termes cles d'une question pour le keyword matching."""
-    # Acronymes (2-6 lettres majuscules)
-    acronyms = re.findall(r'\b[A-Z]{2,6}\b', question)
-    # Termes techniques (mots > 4 chars, pas des stop words)
-    stop = {"dans", "pour", "avec", "quel", "quels", "quelle", "quelles",
-            "comment", "pourquoi", "entre", "depuis", "cette", "sont", "fait",
-            "from", "with", "what", "which", "about", "that", "this", "have"}
-    words = re.findall(r'\b\w{4,}\b', question.lower())
-    terms = [w for w in words if w not in stop]
-    return list(set(acronyms + terms))
-
 
 def score_perspectives(
     question_embedding: List[float],
@@ -171,22 +157,24 @@ def score_perspectives(
     perspectives: List[Perspective],
 ) -> List[ScoredPerspective]:
     """
-    Score chaque Perspective contre la question (multi-signaux).
+    Score chaque Perspective contre la question.
 
-    Signaux :
-    - Cosine similarity (embedding Perspective vs question)
-    - Tension bonus (+0.15 si tension_count > 0)
-    - Evolution bonus (+0.10 si evolution data)
-    - Diversity bonus (+0.10 si doc_count >= 3)
-    - Coverage weight (coverage_ratio * 0.20)
-    - Keyword overlap bonus (+0.10 par terme, max +0.30)
+    Signaux UNIQUEMENT semantiques et structurels :
+    - Cosine similarity entre embedding Perspective et embedding question
+      (E5-large multilingue, donc cross-lingue par construction)
+    - Tension bonus (+0.15 si tension_count > 0)         [structurel]
+    - Evolution bonus (+0.10 si evolution data presente) [structurel]
+    - Diversity bonus (+0.10 si doc_count >= 3)          [structurel]
+    - Coverage weight (coverage_ratio * 0.20)            [structurel]
+
+    AUCUN keyword matching, AUCUNE liste de mots, AUCUNE stoplist.
+    Le signal lexical est implicite dans l'embedding multilingue.
     """
-    question_terms = _extract_key_terms(question)
     q_vec = np.array(question_embedding) if question_embedding else None
 
     scored = []
     for p in perspectives:
-        # Semantic score
+        # Semantic score (cross-lingue par construction via E5-large)
         semantic = 0.0
         if q_vec is not None and p.embedding:
             p_vec = np.array(p.embedding)
@@ -194,31 +182,18 @@ def score_perspectives(
             norms = np.linalg.norm(q_vec) * np.linalg.norm(p_vec)
             semantic = float(dot / norms) if norms > 0 else 0.0
 
-        # Bonuses
+        # Bonuses structurels (basees sur les metadonnees Perspective, pas la question)
         tension_bonus = 0.15 if p.tension_count > 0 else 0.0
         evolution_bonus = 0.10 if (p.added_claim_count > 0 or p.changed_claim_count > 0) else 0.0
         diversity_bonus = 0.10 if p.doc_count >= 3 else 0.0
         coverage_weight = p.coverage_ratio * 0.20
 
-        # Keyword overlap
-        keyword_matches = 0
-        for term in question_terms:
-            term_lower = term.lower()
-            if any(term_lower in rt.lower() for rt in p.representative_texts):
-                keyword_matches += 1
-            elif term_lower in p.label.lower():
-                keyword_matches += 1
-            elif any(term_lower in kw.lower() for kw in p.keywords):
-                keyword_matches += 1
-        keyword_bonus = 0.10 * min(keyword_matches, 3)
-
-        total = semantic + tension_bonus + evolution_bonus + diversity_bonus + coverage_weight + keyword_bonus
+        total = semantic + tension_bonus + evolution_bonus + diversity_bonus + coverage_weight
 
         scored.append(ScoredPerspective(
             perspective=p,
             relevance_score=total,
             semantic_score=semantic,
-            keyword_overlap=keyword_matches,
         ))
 
     return sorted(scored, key=lambda s: -s.relevance_score)

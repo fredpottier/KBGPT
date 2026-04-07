@@ -219,7 +219,6 @@ class ScoredPerspective:
     perspective: Perspective
     relevance_score: float = 0.0
     semantic_score: float = 0.0
-    keyword_overlap: int = 0
 
 
 __all__ = ["Perspective", "PerspectiveConfig", "ScoredPerspective"]

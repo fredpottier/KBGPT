@@ -262,21 +262,22 @@ def cluster_claims(
 # 4. Labellisation LLM
 # ---------------------------------------------------------------------------
 
-LABEL_PROMPT = """Analyse ces claims extraits de documents techniques et identifie le THEME commun.
+LABEL_PROMPT = """Analyze these claims and identify the COMMON THEME that unites them.
 
-Claims representatifs :
+Representative claims:
 {claims_text}
 
-Facets associees : {facets_text}
+Associated facets: {facets_text}
 
-Reponds en JSON strict :
-{{"label": "theme en 3-5 mots", "description": "1 phrase descriptive", "negative_boundary": "ce que ce theme n'est PAS", "keywords": ["mot1", "mot2", "mot3", "mot4", "mot5"]}}
+Respond in strict JSON:
+{{"label": "theme in 3-5 words", "description": "1 descriptive sentence", "negative_boundary": "what this theme is NOT", "keywords": ["word1", "word2", "word3", "word4", "word5"]}}
 
-REGLES :
-- Le label doit etre GENERIQUE (pas de nom de produit specifique)
-- La description doit etre comprehensible hors contexte
-- Les keywords doivent permettre le matching semantique
-- Reponds UNIQUEMENT en JSON, pas de texte avant/apres"""
+RULES:
+- The label must be GENERIC (no specific product or proper name)
+- The description must be understandable out of context
+- The keywords must enable semantic matching
+- IMPORTANT: respond in the SAME LANGUAGE as the claims (auto-detect)
+- Respond ONLY with the JSON object, no surrounding text"""
 
 
 async def label_perspective_llm(
