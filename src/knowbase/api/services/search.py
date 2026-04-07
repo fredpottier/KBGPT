@@ -1283,65 +1283,56 @@ def search_documents(
 
             from knowbase.perspectives.scorer import (
                 resolve_subject_ids_from_claims,
-                load_perspectives,
+                load_all_perspectives,
                 score_perspectives,
             )
             from knowbase.perspectives.strategy_analyzer import analyze_response_strategy
             import asyncio as _asyncio
 
-            # 1. Resoudre les sujets
+            # 1. Resoudre les sujets (signal de boost, pas filtre)
             subject_ids, resolution_mode = resolve_subject_ids_from_claims(
                 kg_claim_results, tenant_id
             )
             _perspectives_subject_ids = subject_ids
             _perspectives_resolution_mode = resolution_mode
 
-            if subject_ids:
-                # 2. Charger et scorer les Perspectives (lightweight)
-                _load_start = _time.time()
-                perspectives = load_perspectives(subject_ids, tenant_id)
-                _load_ms = int((_time.time() - _load_start) * 1000)
+            # 2. Charger TOUTES les Perspectives du tenant (theme-scoped V2)
+            #    Le subject_id est utilise comme boost dans le scoring, pas comme filtre.
+            _load_start = _time.time()
+            perspectives = load_all_perspectives(tenant_id)
+            _load_ms = int((_time.time() - _load_start) * 1000)
 
-                if perspectives:
-                    _score_start = _time.time()
-                    scored = score_perspectives(query_vector, query, perspectives)
-                    _score_ms = int((_time.time() - _score_start) * 1000)
-                    _perspectives_consulted = scored
+            if perspectives:
+                _score_start = _time.time()
+                scored = score_perspectives(
+                    question_embedding=query_vector,
+                    question=query,
+                    perspectives=perspectives,
+                    boost_subject_ids=subject_ids,
+                )
+                _score_ms = int((_time.time() - _score_start) * 1000)
+                _perspectives_consulted = scored
 
-                    # 3. LLM decisionnel informe
-                    try:
-                        loop = _asyncio.get_event_loop()
-                        if loop.is_running():
-                            # Dans un contexte deja async : creer une nouvelle loop
-                            # pour l'appel sync (search_documents est sync)
-                            import concurrent.futures
-                            with concurrent.futures.ThreadPoolExecutor() as executor:
-                                future = executor.submit(
-                                    lambda: _asyncio.new_event_loop().run_until_complete(
-                                        analyze_response_strategy(
-                                            question=query,
-                                            kg_claims=kg_claim_results,
-                                            reranked_chunks=reranked_chunks,
-                                            scored_perspectives=scored,
-                                            subject_ids=subject_ids,
-                                            subject_resolution_mode=resolution_mode,
-                                        )
+                # 3. LLM decisionnel informe
+                try:
+                    loop = _asyncio.get_event_loop()
+                    if loop.is_running():
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(
+                                lambda: _asyncio.new_event_loop().run_until_complete(
+                                    analyze_response_strategy(
+                                        question=query,
+                                        kg_claims=kg_claim_results,
+                                        reranked_chunks=reranked_chunks,
+                                        scored_perspectives=scored,
+                                        subject_ids=subject_ids,
+                                        subject_resolution_mode=resolution_mode,
                                     )
                                 )
-                                _strategy_decision = future.result(timeout=30)
-                        else:
-                            _strategy_decision = _asyncio.run(
-                                analyze_response_strategy(
-                                    question=query,
-                                    kg_claims=kg_claim_results,
-                                    reranked_chunks=reranked_chunks,
-                                    scored_perspectives=scored,
-                                    subject_ids=subject_ids,
-                                    subject_resolution_mode=resolution_mode,
-                                )
                             )
-                    except RuntimeError:
-                        # Pas de loop en cours : creer une
+                            _strategy_decision = future.result(timeout=30)
+                    else:
                         _strategy_decision = _asyncio.run(
                             analyze_response_strategy(
                                 question=query,
@@ -1352,40 +1343,46 @@ def search_documents(
                                 subject_resolution_mode=resolution_mode,
                             )
                         )
-
-                    _total_persp_ms = int((_time.time() - _persp_start) * 1000)
-
-                    logger.info(
-                        f"[PERSPECTIVE:COSTS] neo4j_load_ms={_load_ms} "
-                        f"scoring_ms={_score_ms} total_ms={_total_persp_ms} "
-                        f"perspectives={len(perspectives)}"
+                except RuntimeError:
+                    _strategy_decision = _asyncio.run(
+                        analyze_response_strategy(
+                            question=query,
+                            kg_claims=kg_claim_results,
+                            reranked_chunks=reranked_chunks,
+                            scored_perspectives=scored,
+                            subject_ids=subject_ids,
+                            subject_resolution_mode=resolution_mode,
+                        )
                     )
 
-                    # 4. Appliquer la decision
-                    if _strategy_decision and _strategy_decision.strategy == "structured":
-                        signal_policy.response_mode = ResponseMode.PERSPECTIVE
-                        signal_policy.candidate_mode = ResponseMode.PERSPECTIVE
-                        signal_policy.response_mode_reason = (
-                            f"llm_strategy: {_strategy_decision.reasoning[:100]}"
-                        )
-                        logger.info(
-                            f"[PERSPECTIVE:DECISION] structured "
-                            f"(confidence={_strategy_decision.confidence}, "
-                            f"llm_ms={_strategy_decision.llm_latency_ms})"
-                        )
-                    else:
-                        logger.info(
-                            f"[PERSPECTIVE:DECISION] direct "
-                            f"(downgraded={_strategy_decision.downgraded if _strategy_decision else False}, "
-                            f"veto={_strategy_decision.veto_reason if _strategy_decision else 'none'})"
-                        )
+                _total_persp_ms = int((_time.time() - _persp_start) * 1000)
+
+                logger.info(
+                    f"[PERSPECTIVE:COSTS] neo4j_load_ms={_load_ms} "
+                    f"scoring_ms={_score_ms} total_ms={_total_persp_ms} "
+                    f"perspectives={len(perspectives)}"
+                )
+
+                # 4. Appliquer la decision
+                if _strategy_decision and _strategy_decision.strategy == "structured":
+                    signal_policy.response_mode = ResponseMode.PERSPECTIVE
+                    signal_policy.candidate_mode = ResponseMode.PERSPECTIVE
+                    signal_policy.response_mode_reason = (
+                        f"llm_strategy: {_strategy_decision.reasoning[:100]}"
+                    )
+                    logger.info(
+                        f"[PERSPECTIVE:DECISION] structured "
+                        f"(confidence={_strategy_decision.confidence}, "
+                        f"llm_ms={_strategy_decision.llm_latency_ms})"
+                    )
                 else:
                     logger.info(
-                        f"[PERSPECTIVE:CONSULT] no perspectives loaded for "
-                        f"{len(subject_ids)} subjects"
+                        f"[PERSPECTIVE:DECISION] direct "
+                        f"(downgraded={_strategy_decision.downgraded if _strategy_decision else False}, "
+                        f"veto={_strategy_decision.veto_reason if _strategy_decision else 'none'})"
                     )
             else:
-                logger.info("[PERSPECTIVE:CONSULT] no subject resolved")
+                logger.info("[PERSPECTIVE:CONSULT] no perspectives loaded")
 
         except Exception as e:
             logger.warning(f"[PERSPECTIVE:CONSULT] Failed (non-blocking): {e}")

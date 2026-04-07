@@ -1,31 +1,34 @@
 # src/knowbase/perspectives/builder.py
 """
-PerspectiveBuilder — Construction batch des Perspectives depuis le KG.
+PerspectiveBuilder V2 — Construction theme-scoped des Perspectives.
 
 Algorithme :
-1. Collecte des claims d'un sujet (via doc_id join)
-2. Vecteurs composites (facet membership + embedding)
-3. Clustering agglomeratif
-4. Filtrage qualite
-5. Labellisation LLM (Haiku)
-6. Metriques
-7. Embedding composite (25% label + 75% claims centroid)
+1. Charger TOUS les claims du tenant (avec embeddings, doc_id, facets)
+2. Reduction UMAP (1024 -> 15 dim) sur les embeddings
+3. Clustering HDBSCAN par densite
+4. Pour chaque cluster valide :
+   - Filtrer qualite (>= min_doc_count)
+   - Calculer linked_subject_ids via doc_id -> DocumentContext -> Subject
+   - Labellisation LLM (Haiku)
+   - Embedding composite (label + claims centroid)
+   - Metriques (claim_count, doc_count, tension_count)
+5. Persister les Perspectives + relations dans Neo4j
 
-Reutilise les patterns de facets/consolidator.py et facets/prototype_builder.py.
-Ne cree pas son propre client LLM — utilise llm_router existant.
+Aucun hardcoding lexical, aucune liste de mots, aucun pattern domaine.
+Multilingue par construction (E5-large embeddings).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import time
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.spatial.distance import pdist
 
 from .models import Perspective, PerspectiveConfig
 
@@ -33,47 +36,26 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# 1. Collecte
+# 1. Chargement des claims
 # ---------------------------------------------------------------------------
 
-def collect_claims_for_subject(
-    driver, tenant_id: str, subject_id: str,
-) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """
-    Recupere les claims d'un sujet avec leurs facets et embeddings.
-
-    Le chemin est : SubjectAnchor <-[:ABOUT_SUBJECT]- DocumentContext (doc_id)
-                    Claim (doc_id) — jointure par propriete doc_id
-
-    Returns:
-        (claims, doc_ids) ou claims = [{claim_id, text, doc_id, facet_ids, facet_names, embedding, claim_type}]
-    """
+def load_all_claims_with_embeddings(
+    driver, tenant_id: str,
+) -> List[Dict[str, Any]]:
+    """Charge tous les claims du tenant avec embeddings, doc_id et facets."""
+    logger.info(f"[PERSPECTIVE:BUILD] Loading all claims for tenant={tenant_id}...")
     with driver.session() as session:
-        # Trouver les doc_ids du sujet (SubjectAnchor ou ComparableSubject)
         result = session.run("""
-            OPTIONAL MATCH (sa:SubjectAnchor {subject_id: $sid})<-[:ABOUT_SUBJECT]-(dc1:DocumentContext)
-            OPTIONAL MATCH (cs:ComparableSubject {subject_id: $sid})<-[:ABOUT_COMPARABLE]-(dc2:DocumentContext)
-            WITH collect(DISTINCT dc1.doc_id) + collect(DISTINCT dc2.doc_id) AS all_doc_ids
-            RETURN [x IN all_doc_ids WHERE x IS NOT NULL] AS doc_ids
-        """, sid=subject_id)
-        doc_ids = result.single()["doc_ids"]
-
-        if not doc_ids:
-            return [], []
-
-        # Recuperer les claims avec facets
-        result = session.run("""
-            UNWIND $doc_ids AS did
-            MATCH (c:Claim {tenant_id: $tid, doc_id: did})
+            MATCH (c:Claim {tenant_id: $tid})
+            WHERE c.embedding IS NOT NULL
             OPTIONAL MATCH (c)-[:BELONGS_TO_FACET]->(f:Facet)
             RETURN c.claim_id AS claim_id,
                    c.text AS text,
                    c.doc_id AS doc_id,
-                   c.claim_type AS claim_type,
                    c.confidence AS confidence,
-                   collect(DISTINCT f.facet_id) AS facet_ids,
+                   c.embedding AS embedding,
                    collect(DISTINCT f.facet_name) AS facet_names
-        """, doc_ids=doc_ids, tid=tenant_id)
+        """, tid=tenant_id)
 
         claims = []
         for r in result:
@@ -81,286 +63,183 @@ def collect_claims_for_subject(
                 "claim_id": r["claim_id"],
                 "text": r["text"] or "",
                 "doc_id": r["doc_id"] or "",
-                "claim_type": r["claim_type"] or "",
                 "confidence": r["confidence"] or 0.5,
-                "facet_ids": [f for f in r["facet_ids"] if f],
+                "embedding": r["embedding"],
                 "facet_names": [f for f in r["facet_names"] if f],
             })
 
-        # Recuperer les embeddings
-        result = session.run("""
-            UNWIND $doc_ids AS did
-            MATCH (c:Claim {tenant_id: $tid, doc_id: did})
-            WHERE c.embedding IS NOT NULL
-            RETURN c.claim_id AS claim_id, c.embedding AS embedding
-        """, doc_ids=doc_ids, tid=tenant_id)
+    logger.info(f"[PERSPECTIVE:BUILD] Loaded {len(claims)} claims")
+    return claims
 
-        embedding_map = {}
+
+# ---------------------------------------------------------------------------
+# 2. Mapping doc_id -> sujets
+# ---------------------------------------------------------------------------
+
+def load_doc_to_subjects_map(driver, tenant_id: str) -> Dict[str, List[Tuple[str, str]]]:
+    """
+    Construit un mapping doc_id -> [(subject_id, subject_name), ...]
+
+    Le sujet d'un doc peut etre un SubjectAnchor (via ABOUT_SUBJECT) ou un
+    ComparableSubject (via ABOUT_COMPARABLE).
+    """
+    logger.info("[PERSPECTIVE:BUILD] Loading doc -> subjects map...")
+    doc_to_subjects: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+
+    with driver.session() as session:
+        # SubjectAnchors
+        result = session.run("""
+            MATCH (sa:SubjectAnchor)<-[:ABOUT_SUBJECT]-(dc:DocumentContext)
+            RETURN sa.subject_id AS sid, sa.canonical_name AS name, dc.doc_id AS doc_id
+        """)
         for r in result:
-            embedding_map[r["claim_id"]] = r["embedding"]
+            if r["doc_id"] and r["sid"]:
+                doc_to_subjects[r["doc_id"]].append((r["sid"], r["name"] or ""))
 
-        for claim in claims:
-            claim["embedding"] = embedding_map.get(claim["claim_id"])
-
-        # Recuperer les tensions internes
+        # ComparableSubjects
         result = session.run("""
-            UNWIND $doc_ids AS did
-            MATCH (c1:Claim {tenant_id: $tid, doc_id: did})-[r:CONTRADICTS|REFINES|QUALIFIES]->(c2:Claim {tenant_id: $tid})
-            WHERE c2.doc_id IN $doc_ids
-            RETURN c1.claim_id AS from_id, c2.claim_id AS to_id, type(r) AS rel_type
-        """, doc_ids=doc_ids, tid=tenant_id)
+            MATCH (cs:ComparableSubject {tenant_id: $tid})<-[:ABOUT_COMPARABLE]-(dc:DocumentContext)
+            RETURN cs.subject_id AS sid, cs.canonical_name AS name, dc.doc_id AS doc_id
+        """, tid=tenant_id)
+        for r in result:
+            if r["doc_id"] and r["sid"]:
+                doc_to_subjects[r["doc_id"]].append((r["sid"], r["name"] or ""))
 
-        tensions = [(r["from_id"], r["to_id"], r["rel_type"]) for r in result]
-        logger.info(
-            f"[PERSPECTIVE:COLLECT] subject={subject_id}: "
-            f"{len(claims)} claims, {len(doc_ids)} docs, "
-            f"{len(embedding_map)} embeddings, {len(tensions)} tensions"
-        )
-
-    return claims, doc_ids
+    logger.info(f"[PERSPECTIVE:BUILD] Doc->subjects map: {len(doc_to_subjects)} docs")
+    return dict(doc_to_subjects)
 
 
 # ---------------------------------------------------------------------------
-# 2. Vecteurs composites
+# 3. Tensions entre claims
 # ---------------------------------------------------------------------------
 
-def build_composite_vectors(
-    claims: List[Dict], config: PerspectiveConfig,
-) -> Tuple[np.ndarray, List[str]]:
-    """
-    Construit des vecteurs composites pour le clustering.
-
-    Combine facet membership (one-hot) et embedding semantique.
-    """
-    # Inventaire des facets
-    all_facets = sorted(set(
-        fid for c in claims for fid in c.get("facet_ids", [])
-    ))
-    facet_to_idx = {f: i for i, f in enumerate(all_facets)}
-    n_facets = len(all_facets)
-
-    # Claims avec au moins un embedding OU une facet
-    valid_claims = []
-    for c in claims:
-        has_emb = c.get("embedding") is not None
-        has_facet = bool(c.get("facet_ids"))
-        if has_emb or has_facet:
-            valid_claims.append(c)
-
-    if not valid_claims:
-        return np.array([]), []
-
-    # Determiner la dimension d'embedding
-    emb_dim = 0
-    for c in valid_claims:
-        if c.get("embedding"):
-            emb_dim = len(c["embedding"])
-            break
-
-    vectors = []
-    claim_ids = []
-    for c in valid_claims:
-        # Vecteur facet (one-hot)
-        facet_vec = np.zeros(n_facets) if n_facets > 0 else np.array([])
-        for fid in c.get("facet_ids", []):
-            if fid in facet_to_idx:
-                facet_vec[facet_to_idx[fid]] = 1.0
-
-        # Vecteur embedding
-        if c.get("embedding") and emb_dim > 0:
-            emb_vec = np.array(c["embedding"])
-        elif emb_dim > 0:
-            emb_vec = np.zeros(emb_dim)
-        else:
-            emb_vec = np.array([])
-
-        # Composite : normaliser puis ponderer
-        if n_facets > 0 and np.linalg.norm(facet_vec) > 0:
-            facet_vec = facet_vec / np.linalg.norm(facet_vec)
-        if emb_dim > 0 and np.linalg.norm(emb_vec) > 0:
-            emb_vec = emb_vec / np.linalg.norm(emb_vec)
-
-        composite = np.concatenate([
-            facet_vec * config.facet_weight,
-            emb_vec * config.embedding_weight,
-        ])
-        vectors.append(composite)
-        claim_ids.append(c["claim_id"])
-
-    return np.array(vectors), claim_ids
+def load_tensions_map(driver, tenant_id: str) -> Dict[str, set]:
+    """Construit un mapping claim_id -> set(claim_ids en tension)."""
+    tensions: Dict[str, set] = defaultdict(set)
+    with driver.session() as session:
+        result = session.run("""
+            MATCH (c1:Claim {tenant_id: $tid})-[r:CONTRADICTS|REFINES|QUALIFIES]->(c2:Claim)
+            RETURN c1.claim_id AS from_id, c2.claim_id AS to_id
+        """, tid=tenant_id)
+        for r in result:
+            if r["from_id"] and r["to_id"]:
+                tensions[r["from_id"]].add(r["to_id"])
+                tensions[r["to_id"]].add(r["from_id"])
+    return dict(tensions)
 
 
 # ---------------------------------------------------------------------------
-# 3. Clustering
+# 4. UMAP + HDBSCAN
 # ---------------------------------------------------------------------------
 
-def cluster_claims(
-    vectors: np.ndarray,
-    claim_ids: List[str],
+def reduce_and_cluster(
+    embeddings: np.ndarray,
     config: PerspectiveConfig,
-) -> Dict[int, List[str]]:
-    """
-    Clustering agglomeratif des claims.
-
-    Returns:
-        Dict cluster_label -> [claim_ids]
-    """
-    if len(vectors) < config.min_cluster_size:
-        return {0: claim_ids}
-
-    # Distance cosine
-    distances = pdist(vectors, metric="cosine")
-    # Remplacer les NaN (vecteurs nuls)
-    distances = np.nan_to_num(distances, nan=1.0)
-
-    Z = linkage(distances, method="average")
-
-    # Determiner le nombre de clusters adaptatif
-    n_claims = len(claim_ids)
-    if n_claims < 30:
-        target = config.target_clusters_min
-    elif n_claims < 100:
-        target = min(config.target_clusters_min + 2, config.target_clusters_max)
-    else:
-        target = config.target_clusters_max
-
-    labels = fcluster(Z, t=target, criterion="maxclust")
-
-    # Regrouper
-    clusters: Dict[int, List[str]] = defaultdict(list)
-    for cid, label in zip(claim_ids, labels):
-        clusters[int(label)].append(cid)
-
-    # Fusionner les petits clusters
-    merged = {}
-    small_claims = []
-    for label, members in clusters.items():
-        if len(members) >= config.min_cluster_size:
-            merged[label] = members
-        else:
-            small_claims.extend(members)
-
-    # Assigner les orphelins au cluster le plus proche
-    if small_claims and merged:
-        # Calculer les centroids des clusters valides
-        id_to_idx = {cid: i for i, cid in enumerate(claim_ids)}
-        for cid in small_claims:
-            best_label = min(merged.keys(), key=lambda l: len(merged[l]))
-            merged[best_label].append(cid)
-
-    if not merged:
-        merged = {0: claim_ids}
+) -> np.ndarray:
+    """Reduction UMAP puis clustering HDBSCAN."""
+    import umap
+    import hdbscan
 
     logger.info(
-        f"[PERSPECTIVE:CLUSTER] {len(claim_ids)} claims -> {len(merged)} clusters "
-        f"(sizes: {[len(v) for v in merged.values()]})"
+        f"[PERSPECTIVE:BUILD] UMAP {embeddings.shape[1]}D -> {config.umap_n_components}D..."
     )
-    return merged
+    start = time.time()
+    reducer = umap.UMAP(
+        n_components=config.umap_n_components,
+        n_neighbors=config.umap_n_neighbors,
+        min_dist=config.umap_min_dist,
+        metric="cosine",
+        random_state=42,
+    )
+    reduced = reducer.fit_transform(embeddings)
+    logger.info(f"[PERSPECTIVE:BUILD] UMAP done in {time.time() - start:.1f}s")
+
+    logger.info(
+        f"[PERSPECTIVE:BUILD] HDBSCAN min_cluster_size={config.hdbscan_min_cluster_size}..."
+    )
+    start = time.time()
+    clusterer = hdbscan.HDBSCAN(
+        min_cluster_size=config.hdbscan_min_cluster_size,
+        min_samples=config.hdbscan_min_samples,
+        metric="euclidean",
+        cluster_selection_method="eom",
+    )
+    labels = clusterer.fit_predict(reduced)
+    logger.info(f"[PERSPECTIVE:BUILD] HDBSCAN done in {time.time() - start:.1f}s")
+
+    return labels
 
 
 # ---------------------------------------------------------------------------
-# 4. Labellisation LLM
+# 5. Labellisation LLM
 # ---------------------------------------------------------------------------
 
-LABEL_PROMPT = """Analyze these claims and identify the COMMON THEME that unites them.
+LABEL_PROMPT = """Analyze these claims and identify the THEMATIC AXIS that unites them.
 
-Representative claims:
+Sample claims:
 {claims_text}
 
 Associated facets: {facets_text}
 
-Respond in strict JSON:
-{{"label": "theme in 3-5 words", "description": "1 descriptive sentence", "negative_boundary": "what this theme is NOT", "keywords": ["word1", "word2", "word3", "word4", "word5"]}}
+Respond in strict JSON only:
+{{"label": "thematic axis in 3-6 words", "description": "1 short sentence", "keywords": ["kw1", "kw2", "kw3", "kw4", "kw5"]}}
 
 RULES:
-- The label must be GENERIC (no specific product or proper name)
-- The description must be understandable out of context
-- The keywords must enable semantic matching
-- IMPORTANT: respond in the SAME LANGUAGE as the claims (auto-detect)
-- Respond ONLY with the JSON object, no surrounding text"""
+- Label MUST be a thematic axis (e.g., "Authorization & Access Control", "Data Lifecycle Management", "Logistics Planning"), NOT a product or proper name
+- Avoid SAP-specific or domain-specific names unless they describe the theme itself
+- Description in the SAME LANGUAGE as the claims (auto-detect)
+- 5 keywords for semantic matching
+- Respond ONLY with valid JSON, no markdown, no surrounding text"""
 
 
-async def label_perspective_llm(
-    claims_sample: List[str],
-    facet_names: List[str],
+def label_cluster_with_llm(
+    sample_claims: List[str], dominant_facets: List[Tuple[str, int]],
 ) -> Dict[str, Any]:
-    """
-    Labellise un cluster de claims via LLM (Haiku).
-
-    Utilise le llm_router existant (pas de client LLM propre).
-    """
-    from knowbase.common.llm_router import get_llm_router, TaskType
-
-    claims_text = "\n".join(f"- {c[:200]}" for c in claims_sample[:7])
-    facets_text = ", ".join(facet_names[:5]) if facet_names else "aucune"
+    """Labellise un cluster via LLM (Haiku directement, pas via llm_router)."""
+    claims_text = "\n".join(f"- {c[:200]}" for c in sample_claims[:7])
+    facets_text = ", ".join(f"{f}({n})" for f, n in dominant_facets[:3]) or "none"
 
     prompt = LABEL_PROMPT.format(claims_text=claims_text, facets_text=facets_text)
 
     try:
-        router = get_llm_router()
-        response = await router.acomplete(
-            task_type=TaskType.KNOWLEDGE_EXTRACTION,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=256,
-        )
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if anthropic_key:
+            import anthropic
+            client = anthropic.Anthropic(api_key=anthropic_key)
+            haiku_model = os.environ.get(
+                "OSMOSIS_SYNTHESIS_MODEL", "claude-haiku-4-5-20251001"
+            )
+            response = client.messages.create(
+                model=haiku_model,
+                max_tokens=200,
+                temperature=0.0,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text if response.content else ""
+        else:
+            # Fallback Qwen via llm_router (qualite moindre)
+            from knowbase.common.llm_router import get_llm_router, TaskType
+            import asyncio
+            router = get_llm_router()
+            text = asyncio.run(router.acomplete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=200,
+            ))
 
-        json_match = re.search(r'\{[\s\S]*\}', response)
-        if json_match:
-            data = json.loads(json_match.group())
+        m = re.search(r'\{[\s\S]*\}', text)
+        if m:
+            data = json.loads(m.group())
             return {
-                "label": data.get("label", "Unknown"),
+                "label": data.get("label", "Unlabeled"),
                 "description": data.get("description", ""),
-                "negative_boundary": data.get("negative_boundary", ""),
                 "keywords": data.get("keywords", []),
             }
     except Exception as e:
-        logger.warning(f"[PERSPECTIVE:LABEL] LLM labelling failed: {e}")
+        logger.warning(f"[PERSPECTIVE:LABEL] LLM call failed: {e}")
 
-    return {"label": "Unlabeled", "description": "", "negative_boundary": "", "keywords": []}
-
-
-# ---------------------------------------------------------------------------
-# 5. Metriques
-# ---------------------------------------------------------------------------
-
-def compute_perspective_metrics(
-    claims: List[Dict],
-    cluster_claim_ids: List[str],
-    all_tensions: List[Tuple],
-    total_subject_claims: int,
-) -> Dict[str, Any]:
-    """Calcule les metriques d'une Perspective."""
-    cluster_set = set(cluster_claim_ids)
-    cluster_claims = [c for c in claims if c["claim_id"] in cluster_set]
-
-    doc_ids = set(c["doc_id"] for c in cluster_claims if c["doc_id"])
-    tension_count = sum(
-        1 for from_id, to_id, _ in all_tensions
-        if from_id in cluster_set or to_id in cluster_set
-    )
-
-    # Facets dominantes
-    facet_counter = Counter()
-    for c in cluster_claims:
-        for fn in c.get("facet_names", []):
-            facet_counter[fn] += 1
-    facet_ids = list(set(fid for c in cluster_claims for fid in c.get("facet_ids", [])))
-
-    # Claims representatifs (les plus confiants)
-    sorted_claims = sorted(cluster_claims, key=lambda c: c.get("confidence", 0.5), reverse=True)
-    representative = sorted_claims[:8]
-
-    return {
-        "claim_count": len(cluster_claims),
-        "doc_count": len(doc_ids),
-        "tension_count": tension_count,
-        "coverage_ratio": len(cluster_claims) / max(total_subject_claims, 1),
-        "source_facet_ids": facet_ids,
-        "representative_claim_ids": [c["claim_id"] for c in representative],
-        "representative_texts": [c["text"][:200] for c in representative],
-        "top_facet_names": [name for name, _ in facet_counter.most_common(3)],
-    }
+    return {"label": "Unlabeled", "description": "", "keywords": []}
 
 
 # ---------------------------------------------------------------------------
@@ -371,13 +250,13 @@ def compute_perspective_embedding(
     label: str,
     keywords: List[str],
     representative_texts: List[str],
-    claims: List[Dict],
-    cluster_claim_ids: List[str],
+    cluster_claim_embeddings: List[np.ndarray],
 ) -> Optional[List[float]]:
     """
     Calcule l'embedding composite : 25% label + 75% claims centroid.
 
-    Utilise le sentence_transformer existant (E5-large).
+    Le label est encode via E5-large, le centroid est calcule sur les
+    embeddings deja disponibles dans les claims.
     """
     try:
         from knowbase.common.clients import get_sentence_transformer
@@ -385,28 +264,16 @@ def compute_perspective_embedding(
 
         # Label embedding
         label_text = f"passage: {label}. {' '.join(keywords[:5])}"
-        label_vec = model.encode([label_text])[0]
+        label_vec = np.array(model.encode([label_text])[0])
 
-        # Claims centroid (claims avec embedding dans le KG)
-        cluster_set = set(cluster_claim_ids)
-        claim_embeddings = []
-        for c in claims:
-            if c["claim_id"] in cluster_set and c.get("embedding"):
-                claim_embeddings.append(np.array(c["embedding"]))
-
-        if claim_embeddings:
-            centroid = np.mean(claim_embeddings, axis=0)
+        # Claims centroid (depuis les embeddings deja en memoire)
+        if cluster_claim_embeddings:
+            centroid = np.mean(np.array(cluster_claim_embeddings), axis=0)
         else:
-            # Fallback : encoder les textes representatifs
-            texts = [f"passage: {t}" for t in representative_texts[:5]]
-            if texts:
-                vecs = model.encode(texts)
-                centroid = np.mean(vecs, axis=0)
-            else:
-                centroid = label_vec
+            centroid = label_vec
 
         # Composite : 25% label + 75% centroid
-        composite = 0.25 * np.array(label_vec) + 0.75 * np.array(centroid)
+        composite = 0.25 * label_vec + 0.75 * centroid
         norm = np.linalg.norm(composite)
         if norm > 0:
             composite = composite / norm
@@ -418,95 +285,151 @@ def compute_perspective_embedding(
 
 
 # ---------------------------------------------------------------------------
-# 7. Pipeline complet
+# 7. Pipeline complet (theme-scoped global)
 # ---------------------------------------------------------------------------
 
-async def build_perspectives_for_subject(
+def build_all_perspectives(
     driver,
     tenant_id: str,
-    subject_id: str,
-    subject_name: str,
-    config: PerspectiveConfig = PerspectiveConfig(),
+    config: Optional[PerspectiveConfig] = None,
     skip_llm: bool = False,
 ) -> Tuple[List[Perspective], Dict[str, List[str]]]:
     """
-    Construit les Perspectives pour un sujet.
+    Construit toutes les Perspectives theme-scoped pour un tenant.
 
-    Args:
-        driver: Neo4j driver
-        tenant_id: Tenant ID
-        subject_id: Subject ID
-        subject_name: Nom du sujet
-        config: Configuration du builder
-        skip_llm: Si True, ne pas labelliser (pour debug clustering)
-
-    Returns:
-        (perspectives, claim_assignments) ou claim_assignments = {perspective_id: [claim_ids]}
+    Retourne (perspectives, claim_assignments)
+    ou claim_assignments = {perspective_id: [claim_ids]}
     """
-    # 1. Collecte
-    claims, doc_ids = collect_claims_for_subject(driver, tenant_id, subject_id)
-    if len(claims) < config.min_subject_claims:
-        logger.info(f"[PERSPECTIVE:BUILD] subject={subject_name}: {len(claims)} claims < seuil {config.min_subject_claims}, skip")
+    config = config or PerspectiveConfig()
+
+    # 1. Charger toutes les donnees
+    claims = load_all_claims_with_embeddings(driver, tenant_id)
+    if not claims:
+        logger.warning("[PERSPECTIVE:BUILD] No claims found")
         return [], {}
 
-    # Tensions internes
-    with driver.session() as session:
-        result = session.run("""
-            UNWIND $doc_ids AS did
-            MATCH (c1:Claim {tenant_id: $tid, doc_id: did})-[r:CONTRADICTS|REFINES|QUALIFIES]->(c2:Claim {tenant_id: $tid})
-            WHERE c2.doc_id IN $doc_ids
-            RETURN c1.claim_id AS from_id, c2.claim_id AS to_id, type(r) AS rel_type
-        """, doc_ids=doc_ids, tid=tenant_id)
-        tensions = [(r["from_id"], r["to_id"], r["rel_type"]) for r in result]
+    doc_to_subjects = load_doc_to_subjects_map(driver, tenant_id)
+    tensions_map = load_tensions_map(driver, tenant_id)
 
-    # 2. Vecteurs composites
-    vectors, valid_claim_ids = build_composite_vectors(claims, config)
-    if len(vectors) == 0:
-        logger.warning(f"[PERSPECTIVE:BUILD] subject={subject_name}: aucun vecteur composite, skip")
-        return [], {}
+    # 2. Construire la matrice d'embeddings
+    embeddings = np.array([c["embedding"] for c in claims])
+    logger.info(f"[PERSPECTIVE:BUILD] Embeddings matrix: {embeddings.shape}")
 
     # 3. Clustering
-    clusters = cluster_claims(vectors, valid_claim_ids, config)
+    labels = reduce_and_cluster(embeddings, config)
 
-    # 4. Construire les Perspectives
-    perspectives = []
-    claim_assignments = {}
+    unique_labels = set(labels.tolist())
+    n_clusters = len(unique_labels) - (1 if -1 in unique_labels else 0)
+    n_noise = int(np.sum(labels == -1))
+    logger.info(
+        f"[PERSPECTIVE:BUILD] Clustering: {n_clusters} clusters, "
+        f"{n_noise} noise ({n_noise/len(claims)*100:.1f}%)"
+    )
 
-    for cluster_label, cluster_claim_ids in clusters.items():
+    # 4. Trier les clusters par taille (les plus gros d'abord)
+    cluster_sizes = []
+    for cid in unique_labels:
+        if cid == -1:
+            continue
+        size = int(np.sum(labels == cid))
+        cluster_sizes.append((int(cid), size))
+    cluster_sizes.sort(key=lambda x: -x[1])
+
+    # 5. Pour chaque cluster, construire la Perspective
+    perspectives: List[Perspective] = []
+    claim_assignments: Dict[str, List[str]] = {}
+
+    n_to_process = min(len(cluster_sizes), config.max_clusters_to_label)
+    logger.info(
+        f"[PERSPECTIVE:BUILD] Processing top {n_to_process} clusters "
+        f"(filter: doc_count >= {config.min_doc_count})"
+    )
+
+    for idx, (cluster_id, _) in enumerate(cluster_sizes[:n_to_process], 1):
+        # Recuperer les claims du cluster
+        cluster_indices = [i for i in range(len(claims)) if labels[i] == cluster_id]
+        cluster_claims = [claims[i] for i in cluster_indices]
+        cluster_embeddings = [np.array(c["embedding"]) for c in cluster_claims]
+
+        # Filtres qualite
+        doc_ids = set(c["doc_id"] for c in cluster_claims if c["doc_id"])
+        n_docs = len(doc_ids)
+
+        if n_docs < config.min_doc_count:
+            logger.debug(
+                f"  [{idx}/{n_to_process}] Cluster {cluster_id} dropped: "
+                f"only {n_docs} docs (min={config.min_doc_count})"
+            )
+            continue
+
+        if config.drop_clusters_with_single_doc and n_docs == 1:
+            continue
+
         # Metriques
-        metrics = compute_perspective_metrics(claims, cluster_claim_ids, tensions, len(claims))
+        claim_count = len(cluster_claims)
+        cluster_claim_ids = set(c["claim_id"] for c in cluster_claims)
+        tension_count = sum(
+            1 for cid in cluster_claim_ids
+            if cid in tensions_map and tensions_map[cid] & cluster_claim_ids
+        )
 
-        # Labellisation
+        # Facets dominantes
+        facet_counter = Counter()
+        for c in cluster_claims:
+            for fn in c["facet_names"]:
+                facet_counter[fn] += 1
+        dominant_facets = facet_counter.most_common(5)
+        dominant_facet_names = [f for f, _ in dominant_facets]
+
+        # Claims representatifs (top par confidence, diversifies)
+        sorted_claims = sorted(cluster_claims, key=lambda c: -(c.get("confidence") or 0.5))
+        representative = sorted_claims[:config.n_representative_claims]
+        representative_texts = [c["text"][:300] for c in representative]
+        representative_claim_ids = [c["claim_id"] for c in representative]
+
+        # Linked subjects (via doc_id -> subject)
+        linked_subjects: Dict[str, str] = {}
+        for doc_id in doc_ids:
+            for sid, sname in doc_to_subjects.get(doc_id, []):
+                if sid not in linked_subjects:
+                    linked_subjects[sid] = sname
+
+        linked_subject_ids = list(linked_subjects.keys())
+        linked_subject_names = [linked_subjects[sid] for sid in linked_subject_ids]
+
+        # Labellisation LLM
         if skip_llm:
             label_data = {
-                "label": f"Cluster {cluster_label} ({metrics['top_facet_names'][0] if metrics['top_facet_names'] else 'mixed'})",
+                "label": f"Cluster {cluster_id} ({dominant_facet_names[0] if dominant_facet_names else 'mixed'})",
                 "description": "",
-                "negative_boundary": "",
-                "keywords": metrics["top_facet_names"],
+                "keywords": dominant_facet_names[:5],
             }
         else:
-            label_data = await label_perspective_llm(
-                metrics["representative_texts"],
-                metrics["top_facet_names"],
-            )
+            label_data = label_cluster_with_llm(representative_texts, dominant_facets)
+
+        logger.info(
+            f"  [{idx}/{n_to_process}] Cluster {cluster_id}: "
+            f"{claim_count} claims, {n_docs} docs, "
+            f"{len(linked_subject_ids)} subjects, {tension_count} tensions "
+            f"-> {label_data['label']}"
+        )
 
         # Creer la Perspective
         p = Perspective.create_new(
             tenant_id=tenant_id,
-            subject_id=subject_id,
-            subject_name=subject_name,
             label=label_data["label"],
-            description=label_data["description"],
-            negative_boundary=label_data["negative_boundary"],
-            keywords=label_data["keywords"],
+            cluster_id_in_run=cluster_id,
+            description=label_data.get("description", ""),
+            keywords=label_data.get("keywords", []),
         )
-        p.claim_count = metrics["claim_count"]
-        p.doc_count = metrics["doc_count"]
-        p.tension_count = metrics["tension_count"]
-        p.coverage_ratio = metrics["coverage_ratio"]
-        p.source_facet_ids = metrics["source_facet_ids"]
-        p.representative_claim_ids = metrics["representative_claim_ids"]
-        p.representative_texts = metrics["representative_texts"]
+        p.claim_count = claim_count
+        p.doc_count = n_docs
+        p.tension_count = tension_count
+        p.dominant_facet_names = dominant_facet_names
+        p.representative_claim_ids = representative_claim_ids
+        p.representative_texts = representative_texts
+        p.linked_subject_ids = linked_subject_ids
+        p.linked_subject_names = linked_subject_names
 
         # Importance score
         import math
@@ -516,19 +439,17 @@ async def build_perspectives_for_subject(
             + 0.5 * p.tension_count
         )
 
-        # Embedding (optionnel — peut echouer si pas de sentence_transformer)
+        # Embedding composite
         if not skip_llm:
             p.embedding = compute_perspective_embedding(
-                p.label, p.keywords, p.representative_texts,
-                claims, cluster_claim_ids,
+                p.label, p.keywords, representative_texts, cluster_embeddings,
             )
 
         perspectives.append(p)
-        claim_assignments[p.perspective_id] = cluster_claim_ids
+        claim_assignments[p.perspective_id] = [c["claim_id"] for c in cluster_claims]
 
     logger.info(
-        f"[PERSPECTIVE:BUILD] subject={subject_name}: "
-        f"{len(perspectives)} perspectives construites "
-        f"(claims: {[p.claim_count for p in perspectives]})"
+        f"[PERSPECTIVE:BUILD] Done: {len(perspectives)} perspectives created "
+        f"(claims totaux: {sum(p.claim_count for p in perspectives)})"
     )
     return perspectives, claim_assignments

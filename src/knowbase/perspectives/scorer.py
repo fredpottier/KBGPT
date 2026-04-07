@@ -1,12 +1,15 @@
 # src/knowbase/perspectives/scorer.py
 """
-Scoring et selection des Perspectives au runtime.
+Scoring et selection des Perspectives V2 (theme-scoped) au runtime.
 
-Responsabilites :
-1. Resoudre les subject_ids a partir des claims KG
-2. Charger les Perspectives depuis Neo4j
-3. Scorer chaque Perspective contre la question (multi-signaux)
-4. Selectionner les top 3-5
+Differences avec la V1 :
+- Plus de filtre par subject_id : on charge TOUTES les Perspectives du tenant
+- Le subject identifie devient un BONUS (Perspectives qui touchent ce sujet
+  via TOUCHES_SUBJECT sont boostees), pas un filtre dur
+- La selection se fait purement sur le scoring semantique + signaux structurels
+
+Cette approche permet de repondre a des questions cross-subject qui touchent
+plusieurs ComparableSubjects (ex: "comparaison sécurité S/4HANA vs CPE").
 """
 
 from __future__ import annotations
@@ -21,14 +24,14 @@ from .models import Perspective, ScoredPerspective
 
 logger = logging.getLogger(__name__)
 
-# Hard gate semantique : une Perspective avec semantic_score < HARD_GATE
-# ne peut pas etre selectionnee, sauf si tension_count >= TENSION_EXCEPTION
+
+# Hard gate semantique
 SEMANTIC_HARD_GATE = 0.15
 TENSION_EXCEPTION_THRESHOLD = 2
 
 
 # ---------------------------------------------------------------------------
-# 1. Resolution des subject_ids
+# 1. Resolution des subject_ids (signal de boost, pas filtre)
 # ---------------------------------------------------------------------------
 
 def resolve_subject_ids_from_claims(
@@ -36,21 +39,15 @@ def resolve_subject_ids_from_claims(
     tenant_id: str,
 ) -> Tuple[List[str], str]:
     """
-    Extrait les subject_ids depuis les claims KG.
+    Identifie les subject_ids touches par les claims KG d'une question.
 
-    Regles :
-    - Max 3 sujets retenus
-    - Score minimal : sujet lie a >= 3 claims
-    - Tie-break : par nombre de claims decroissant
-    - Fallback si 0 sujet ou ambiguite forte
-
-    Returns:
-        (subject_ids, resolution_mode) ou resolution_mode = "single" | "multi" | "fallback"
+    Ces subject_ids servent de SIGNAL de boost pour le scoring,
+    pas de filtre dur. Une question peut tres bien avoir une reponse
+    valide via des Perspectives qui touchent d'autres sujets.
     """
     if not kg_claim_results:
         return [], "fallback"
 
-    # Collecter les doc_ids des claims
     doc_ids = set()
     for claim in kg_claim_results:
         doc_id = claim.get("doc_id") or claim.get("source_file", "")
@@ -60,7 +57,6 @@ def resolve_subject_ids_from_claims(
     if not doc_ids:
         return [], "fallback"
 
-    # Requete Neo4j pour trouver les SubjectAnchors lies a ces doc_ids
     try:
         from neo4j import GraphDatabase
         uri = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
@@ -73,14 +69,11 @@ def resolve_subject_ids_from_claims(
                 UNWIND $doc_ids AS did
                 MATCH (dc:DocumentContext {doc_id: did})-[:ABOUT_SUBJECT]->(sa:SubjectAnchor)
                 WITH sa.subject_id AS sid, sa.canonical_name AS name, count(DISTINCT did) AS doc_match
-                WHERE doc_match >= 1
                 RETURN sid, name, doc_match
                 ORDER BY doc_match DESC
                 LIMIT 5
             """, doc_ids=list(doc_ids))
-
             candidates = [dict(r) for r in result]
-
         driver.close()
     except Exception as e:
         logger.warning(f"[PERSPECTIVE:RESOLVE] Neo4j query failed: {e}")
@@ -89,16 +82,8 @@ def resolve_subject_ids_from_claims(
     if not candidates:
         return [], "fallback"
 
-    # Filtrer : au moins 3 claims (approxime par doc_match >= 1 pour l'instant)
-    # et verifier que des Perspectives existent
     subject_ids = [c["sid"] for c in candidates[:3]]
-
-    if len(subject_ids) == 1:
-        mode = "single"
-    elif len(subject_ids) > 1:
-        mode = "multi"
-    else:
-        mode = "fallback"
+    mode = "single" if len(subject_ids) == 1 else ("multi" if len(subject_ids) > 1 else "fallback")
 
     logger.info(
         f"[PERSPECTIVE:RESOLVE] mode={mode}, subjects={[c['name'] for c in candidates[:3]]}"
@@ -107,17 +92,16 @@ def resolve_subject_ids_from_claims(
 
 
 # ---------------------------------------------------------------------------
-# 2. Chargement des Perspectives
+# 2. Chargement des Perspectives (toutes, sans filtre subject)
 # ---------------------------------------------------------------------------
 
-def load_perspectives(
-    subject_ids: List[str],
-    tenant_id: str,
-) -> List[Perspective]:
-    """Charge les Perspectives depuis Neo4j pour les sujets donnes."""
-    if not subject_ids:
-        return []
+def load_all_perspectives(tenant_id: str) -> List[Perspective]:
+    """
+    Charge TOUTES les Perspectives d'un tenant.
 
+    Plus de filtre par subject_id : la couche V2 est theme-scoped,
+    le filtrage par sujet se fait via le boost de scoring si pertinent.
+    """
     try:
         from neo4j import GraphDatabase
         uri = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
@@ -127,19 +111,16 @@ def load_perspectives(
 
         with driver.session() as session:
             result = session.run("""
-                UNWIND $sids AS sid
-                MATCH (p:Perspective {tenant_id: $tid, subject_id: sid})
+                MATCH (p:Perspective {tenant_id: $tid})
                 RETURN p
-            """, sids=subject_ids, tid=tenant_id)
-
+            """, tid=tenant_id)
             perspectives = []
             for record in result:
                 node = record["p"]
                 props = dict(node)
                 perspectives.append(Perspective.from_neo4j_record(props))
-
         driver.close()
-        logger.info(f"[PERSPECTIVE:LOAD] {len(perspectives)} perspectives chargees pour {len(subject_ids)} sujets")
+        logger.info(f"[PERSPECTIVE:LOAD] {len(perspectives)} perspectives loaded for tenant={tenant_id}")
         return perspectives
 
     except Exception as e:
@@ -148,33 +129,34 @@ def load_perspectives(
 
 
 # ---------------------------------------------------------------------------
-# 3. Scoring multi-signaux (purement structurel + semantique)
+# 3. Scoring multi-signaux
 # ---------------------------------------------------------------------------
 
 def score_perspectives(
     question_embedding: List[float],
     question: str,
     perspectives: List[Perspective],
+    boost_subject_ids: List[str] = None,
 ) -> List[ScoredPerspective]:
     """
     Score chaque Perspective contre la question.
 
-    Signaux UNIQUEMENT semantiques et structurels :
-    - Cosine similarity entre embedding Perspective et embedding question
-      (E5-large multilingue, donc cross-lingue par construction)
-    - Tension bonus (+0.15 si tension_count > 0)         [structurel]
-    - Evolution bonus (+0.10 si evolution data presente) [structurel]
-    - Diversity bonus (+0.10 si doc_count >= 3)          [structurel]
-    - Coverage weight (coverage_ratio * 0.20)            [structurel]
+    Signaux :
+    - Cosine similarity entre embedding Perspective et question (E5-large multilingue)
+    - Tension bonus (+0.15 si tension_count > 0)
+    - Diversity bonus (+0.10 si doc_count >= 3)
+    - Importance weight (importance_score normalise * 0.10)
+    - Subject overlap bonus (+0.20 si la Perspective touche un sujet identifie)
 
-    AUCUN keyword matching, AUCUNE liste de mots, AUCUNE stoplist.
-    Le signal lexical est implicite dans l'embedding multilingue.
+    Le subject overlap est un BOOST, pas un filtre. Une Perspective sans
+    overlap reste eligible si son score semantique est suffisant.
     """
     q_vec = np.array(question_embedding) if question_embedding else None
+    boost_set = set(boost_subject_ids or [])
 
     scored = []
     for p in perspectives:
-        # Semantic score (cross-lingue par construction via E5-large)
+        # Semantic score (cross-lingue par construction)
         semantic = 0.0
         if q_vec is not None and p.embedding:
             p_vec = np.array(p.embedding)
@@ -182,18 +164,29 @@ def score_perspectives(
             norms = np.linalg.norm(q_vec) * np.linalg.norm(p_vec)
             semantic = float(dot / norms) if norms > 0 else 0.0
 
-        # Bonuses structurels (basees sur les metadonnees Perspective, pas la question)
+        # Bonuses structurels
         tension_bonus = 0.15 if p.tension_count > 0 else 0.0
-        evolution_bonus = 0.10 if (p.added_claim_count > 0 or p.changed_claim_count > 0) else 0.0
         diversity_bonus = 0.10 if p.doc_count >= 3 else 0.0
-        coverage_weight = p.coverage_ratio * 0.20
 
-        total = semantic + tension_bonus + evolution_bonus + diversity_bonus + coverage_weight
+        # Importance (log-normalise)
+        import math
+        importance_norm = min(p.importance_score / 10.0, 1.0)  # cap a 10
+        importance_bonus = importance_norm * 0.10
+
+        # Subject overlap : boost si la Perspective touche au moins un sujet identifie
+        subject_bonus = 0.0
+        if boost_set and p.linked_subject_ids:
+            overlap = boost_set.intersection(set(p.linked_subject_ids))
+            if overlap:
+                subject_bonus = 0.20
+
+        total = semantic + tension_bonus + diversity_bonus + importance_bonus + subject_bonus
 
         scored.append(ScoredPerspective(
             perspective=p,
             relevance_score=total,
             semantic_score=semantic,
+            subject_overlap_bonus=subject_bonus,
         ))
 
     return sorted(scored, key=lambda s: -s.relevance_score)
@@ -211,16 +204,18 @@ def select_perspectives(
     """
     Selectionne les Perspectives les plus pertinentes.
 
-    Hard gate : semantic_score < 0.15 → rejet (sauf tension forte).
-    Toujours garder celles avec tensions meme si score faible.
+    Hard gate : semantic_score < 0.15 -> rejet (sauf tension forte ou subject overlap).
     """
     selected = []
 
     for sp in scored:
-        # Hard gate semantique
         if sp.semantic_score < SEMANTIC_HARD_GATE:
+            # Exception 1 : tension forte
             if sp.perspective.tension_count >= TENSION_EXCEPTION_THRESHOLD:
-                pass  # Exception : garder malgre score faible
+                pass
+            # Exception 2 : subject overlap (Perspective specifiquement liee au sujet de la question)
+            elif sp.subject_overlap_bonus > 0:
+                pass
             else:
                 continue
 

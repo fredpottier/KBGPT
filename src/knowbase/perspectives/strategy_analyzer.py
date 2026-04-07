@@ -149,15 +149,24 @@ def build_evidence_summary(
             if len(semantic_scores) >= 2 else 0.0
         )
 
-        coverage_cumulative = sum(
-            sp.perspective.coverage_ratio for sp in scored_perspectives[:5]
+        # Couverture cumulative : nombre total de claims dans les top 5 Perspectives
+        # (proxy de "matiere disponible" pour la decision)
+        cumulative_claims = sum(
+            sp.perspective.claim_count for sp in scored_perspectives[:5]
         )
+
+        # Diversite documentaire cumulative
+        cumulative_docs = len(set(
+            doc for sp in scored_perspectives[:5]
+            for doc in (sp.perspective.linked_subject_names or [])
+        ))
 
         perspectives_topology.update({
             "top_semantic_scores": [round(s, 3) for s in top_scores],
             "scored_above_mean": scored_above_mean,
             "dominance_gap": round(dominance_gap, 3),
-            "coverage_cumulative": round(coverage_cumulative, 2),
+            "cumulative_claims_top5": cumulative_claims,
+            "distinct_subjects_in_top5": cumulative_docs,
         })
 
     summary: Dict[str, Any] = {
@@ -222,30 +231,33 @@ STRATEGY_PROMPT = """You decide between two response strategies for a user quest
 - "direct": atomic answer based on retrieved chunks alone (RAG default, safe)
 - "structured": answer organized by multiple thematic axes (Perspectives injected)
 
-CORE PRINCIPLE: prefer "direct" by default. Only choose "structured" when the
-question CLEARLY asks for a synthesis across multiple distinct dimensions of a
-broad topic. The evidence topology is a secondary signal — the primary signal
-is the question's rhetorical scope.
+CORE PRINCIPLE: choose "structured" when the question would benefit from a
+multi-axis answer, EITHER because the question is rhetorically broad, OR
+because answering it requires synthesizing information from multiple
+documents/subjects/aspects.
 
 DIRECT — choose this when the question asks for:
 - A specific value, threshold, version, name, identifier, or code
 - A yes/no answer
-- The definition or function of a single component, tool, report, or concept
-- "What does X do?" / "What is X for?" / "What is X?" — even if X is broad
-- A single fact, even if it requires combining a few sources to reconstruct
-- An identification or lookup ("which X handles Y?")
-- A procedure or "how to use X" for a single component
+- The definition or function of a SINGLE specific component, tool, report
+- A single fact lookup ("which X handles Y?")
+- A procedure or "how to use X" for ONE specific component
 
-STRUCTURED — choose this ONLY when the question asks for:
-- An overview/summary of an entire broad topic ("overview of X", "what does X bring", "key points of X")
-- A comparison between multiple aspects, versions, or approaches
+STRUCTURED — choose this when the question asks for:
+- An overview/summary of a topic ("overview of X", "what does X bring", "key points of X")
+- A comparison between multiple aspects, versions, sources, or documents
 - An impact analysis touching multiple distinct dimensions
-- The "main aspects/dimensions/concerns" of a broad topic
-- A panoramic exploration that explicitly covers multiple angles
+- The "main aspects/dimensions/concerns" of a topic
+- A panoramic exploration covering multiple angles
+- "Common concepts" / "shared elements" / "differences between X and Y"
+- A synthesis question that explicitly mentions multiple sources/versions/subjects
+- An "enumeration of workstreams/areas/concerns" question
 
-KEY DISCRIMINATOR: a question about a single component/tool/concept is DIRECT
-even if the evidence is dispersed. Dispersion alone does not justify structuring
-— it may just mean the corpus stores the information across multiple files.
+KEY DISCRIMINATORS:
+- If the question MENTIONS multiple sources/versions/documents (e.g. "guides 2022 et 2023", "across versions") -> structured
+- If the question asks for "common", "shared", "differences", "across", "between" -> structured
+- If evidence_summary shows the question touches MANY perspectives with similar scores
+  AND the evidence is dispersed across many docs, lean toward structured
 
 QUESTION:
 {question}
@@ -253,17 +265,14 @@ QUESTION:
 EVIDENCE SUMMARY (structural topology only, no raw content):
 {evidence_summary_json}
 
-Respond in strict JSON only (no surrounding text, no markdown, no explanation outside JSON):
+Respond in strict JSON only (no surrounding text, no markdown):
 {{
   "strategy": "direct" | "structured",
   "confidence": "high" | "medium" | "low",
-  "reasoning": "one sentence citing primarily the question's scope"
+  "reasoning": "one sentence citing the primary signal"
 }}
 
-IMPORTANT:
-- Default to "direct". Only choose "structured" if the question explicitly seeks multi-dimensional synthesis.
-- A question asking "what does X do" or "what is X for" is ALWAYS direct, regardless of evidence dispersion.
-- Your answer must be valid JSON, nothing else."""
+Your answer must be valid JSON, nothing else."""
 
 
 async def analyze_response_strategy(

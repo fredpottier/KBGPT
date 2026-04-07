@@ -125,9 +125,10 @@ class ClaimFirstSchema:
         "POSSIBLE_EQUIVALENT",  # SubjectAnchor → SubjectAnchor (INV-9)
         "HAS_AXIS_VALUE",    # DocumentContext → ApplicabilityAxis (INV-26)
         "SIMILAR_TO",        # Entity → Entity (V1.4: uncertain merge, soft-link)
-        "HAS_PERSPECTIVE",   # SubjectAnchor/ComparableSubject → Perspective
+        "HAS_PERSPECTIVE",   # [V1 legacy] SubjectAnchor/ComparableSubject → Perspective
         "INCLUDES_CLAIM",    # Perspective → Claim
-        "SPANS_FACET",       # Perspective → Facet
+        "SPANS_FACET",       # [V1 legacy] Perspective → Facet
+        "TOUCHES_SUBJECT",   # [V2] Perspective → SubjectAnchor/ComparableSubject (theme-scoped)
     ]
 
     # Contraintes (unicité)
