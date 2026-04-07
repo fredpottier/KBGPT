@@ -824,3 +824,106 @@ Ce benchmark doit être exécuté **avant** de considérer l'architecture comme 
 - **Pas de modification du retrieval existant** : le RAG + KG expansion reste identique. Les Perspectives interviennent APRÈS
 - **Pas de nouveau pipeline d'ingestion** : les Perspectives sont construites à partir des claims et facets existants
 - **Pas de rupture avec l'architecture V3** : les Perspectives s'ajoutent comme un 5e ResponseMode, avec le même pattern (Stage A candidature → Stage B validation → fallback DIRECT)
+
+---
+
+## 19. Parcours empirique (V1 → V2) et apprentissages
+
+L'ADR initial décrivait une architecture **subject-scoped** : pour chaque ComparableSubject, on construisait 4-8 Perspectives par clustering des claims liés à ce sujet. Cette V1 a été implémentée puis testée, et un parcours diagnostic en plusieurs phases a invalidé cette approche au profit d'une refonte vers une architecture **theme-scoped**.
+
+### Phase A1 — Diagnostic des Perspectives sélectionnées (V1)
+
+**Constat** : sur 8 questions test variées (panoramiques, factuelles, méta-corpus), les **5 mêmes "méga-Perspectives"** sortaient en top 5 du scoring sémantique :
+1. Gestion et Conformité Système (ABAP, 4508 claims)
+2. Migration vers S/4HANA (SAP, 4199 claims)
+3. Migration et modernisation ERP (S/4HANA, 4167 claims)
+4. Gestion des configurations système (S/4HANA, 4229 claims)
+5. Planification et validation de mise à jour (SAP, 3840 claims)
+
+**Effet "Perspective hégémonique"** : les méta-Perspectives absorbaient toute question via une signature sémantique trop large. Aucune Perspective spécialisée (Sécurité, Authentification, Innovations) ne pouvait émerger.
+
+### Phase A2 — Sous-clustering hiérarchique (échec)
+
+**Hypothèse H1** : le clustering subject-scoped est trop plat ; un sous-clustering hiérarchique des méta-Perspectives ferait émerger les axes spécialisés.
+
+**Test** : sous-clustering HDBSCAN sur les 3 plus grosses Perspectives.
+
+**Résultat** : reproduit la pathologie. Distribution `[4142, 329, 10, 10, 8, 4, 4, 1]` — un méga-cluster qui absorbe 92% + des outliers incohérents. Pas de sous-axes propres.
+
+**H1 invalidée.**
+
+### Phase A3 — Isolation thématique des claims
+
+**Hypothèse H2** : les axes thématiques **existent** dans le corpus mais sont noyés dans la structure subject-scoped.
+
+**Test** : pour 5 thèmes diagnostiques (sécurité authentification, autorisation, encryption, outils migration, gouvernance données), récupérer les claims contenant des mots-clés *exclusivement à but diagnostic* et mesurer leur cohérence sémantique en isolation.
+
+**Résultat** :
+
+| Thème | Claims | Docs | Cohésion (distance moyenne au centroïde) |
+|---|---|---|---|
+| Sécurité authentification | 311 | 18 | 0.087 |
+| Sécurité autorisation | 552 | 16 | 0.090 |
+| Sécurité encryption | 108 | 8 | 0.090 |
+| Outils migration | 280 | 18 | 0.109 |
+| Gouvernance données | 523 | 9 | 0.099 |
+
+**Tous les sous-corpus thématiques isolés sont très cohérents** (0.087-0.110, bien en-dessous du seuil 0.15). **H2 confirmée** : les axes existent, mais l'architecture subject-scoped les rend invisibles. La voie C (Perspectives transversales theme-scoped) est validée empiriquement.
+
+### Phase A4 — Clustering global du corpus
+
+**Validation finale** : HDBSCAN sur les 15 566 claims du corpus, sans facets, sans subjects, juste UMAP 1024D → 15D + clustering par densité.
+
+**Résultat** : **123 clusters thématiques** émergent naturellement, distribution équilibrée (top cluster = 970 claims = 6% du corpus), 40.9% de noise (claims trop atomiques pour former des thèmes — restent accessibles via RAG). Plus de pathologie de méga-cluster.
+
+### Phase A4-bis — Validation labels + couverture cross-doc
+
+**Labellisation Haiku des top 27 clusters** : labels propres et exploitables :
+- Authorization Objects and Access Control (188 claims)
+- User Authentication and Authorization Controls (127 claims)
+- Role-Based Access Control and Authorization (107 claims)
+- Authentication and Access Control (98 claims)
+- Platform Security and User Management (111 claims)
+- Data Lifecycle Management and Retention (121 claims)
+- ... et 21 autres axes thématiques
+
+**Couverture cross-doc des Security Guides** : 61.4% des claims des 2 Security Guides (2022 + 2023) sont dans des clusters thématiques. **82 clusters touchent les 2 Security Guides** simultanément. Suffisant pour répondre à des questions cross-doc réelles.
+
+### Phase B — Refonte complète vers theme-scoped
+
+Sur la base des verdicts ci-dessus, refonte complète en 7 sous-phases :
+
+| Sous-phase | Livrable |
+|---|---|
+| **B1** | Modèle `Perspective` theme-scoped : `subject_id` → `linked_subject_ids` (calculé), `cluster_id_in_run`, `dominant_facet_names` (info dérivée) |
+| **B2** | `PerspectiveBuilder` global : charge tous les claims du tenant, UMAP+HDBSCAN, labellisation Haiku, calcul `linked_subject_ids` via doc_id → subject |
+| **B3** | `Scorer` adapté : `load_all_perspectives()` sans filtre subject, scoring avec `subject_overlap_bonus` (signal de boost, pas filtre dur) |
+| **B4** | Schéma Neo4j : ajout relation `(:Perspective)-[:TOUCHES_SUBJECT]->(:SubjectAnchor\|:ComparableSubject)` |
+| **B5** | Migration : 60 Perspectives V2 créées, 6740 claims liés, 740 liens vers sujets |
+| **B6** | **Re-ranking question-dépendant des claims** : au runtime, pour chaque Perspective sélectionnée, re-trier ses claims selon leur similarité à la question (vs `representative_texts` figés au build). +270ms par question PERSPECTIVE |
+| **B7** | Corrections cosmétiques : format des citations `[[doc:ID]]` propre, durcissement du seuil de hint tension (évite faux positifs), règles strictes de citation dans le prompt synthèse |
+
+### Validation finale (avant benchmarks)
+
+**Question test critique** : *"Quels sont les concepts de sécurité communs aux guides SAP S/4HANA 2022 et 2023 ?"*
+
+| Système | Concepts identifiés | Sources distinctes |
+|---|---|---|
+| RAG seul | 1 (User mgmt ABAP) | 2 docs |
+| OSMOSIS V1 (subject-scoped) | 3 (manque Fiori roles) | 1-2 docs |
+| OSMOSIS V2 sans rerank | 3 | 3 docs |
+| **OSMOSIS V2 + B6 + B7** | **7** | **6 docs** |
+
+OSMOSIS trouve maintenant en mode PERSPECTIVE des informations que le RAG seul ne remonte pas, en croisant claims de plusieurs documents qui partagent le même axe thématique transversal.
+
+### Apprentissages clés
+
+1. **Une architecture peut être conceptuellement juste mais empiriquement impraticable.** La V1 subject-scoped était cohérente sur le papier mais produisait des Perspectives hégémoniques inutilisables. C'est le test empirique qui a tranché, pas la réflexion théorique.
+
+2. **Les claims existent, l'architecture les cache.** La même matière première (15 566 claims, embeddings E5-large) produit des résultats opposés selon qu'on cluster par sujet ou globalement. Le choix architectural est plus déterminant que le choix algorithmique.
+
+3. **Le re-ranking question-dépendant est essentiel.** Sans la Phase B6, OSMOSIS injectait les claims les plus *importants* de chaque cluster, pas les plus *pertinents* pour la question. Cette nuance a doublé le contenu informationnel des réponses.
+
+4. **HDBSCAN + UMAP est suffisant** pour faire émerger des thèmes propres dans un corpus mono-domaine, sans hardcoding lexical et sans BERTopic. La compression sémantique n'est pas un blocage si on clustérise globalement par densité plutôt que par target_k fixe.
+
+5. **Les hints de structuration doivent être conservateurs.** Un hint trop sensible (signaler une tension dès qu'une perspective en contient) génère des faux positifs visibles côté utilisateur. Phase B7 a durci les seuils.
