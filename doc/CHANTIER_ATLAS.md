@@ -279,3 +279,59 @@ Plan de migration en 4 sprints :
 ### Phase 3
 - Score de satisfaction sur la comprehension du corpus
 - % de questions Chat auxquelles un article existant contribue
+
+---
+
+## 7. Reflexion avril 2026 — vers un Atlas narratif (Q&A en cours)
+
+Le modele "1 entite = 1 article" decrit ci-dessus produit un Atlas plat : fiches isolees, sans hierarchie de sens, homepage incomprehensible (taxonomie facettes -> entites). Les entites SAP sont techniques (S_TABU_NAM, /SCMTMS/...), l'utilisateur entreprise arrive sans intention precise, le volume est trop petit pour masquer la dilution. Le pattern Wikipedia ne marche pas tel quel.
+
+Avec la couche **Perspectives V2** (60 clusters thematiques transversaux issus de la refonte Phase B) on tient enfin la matiere premiere d'un Atlas **narratif** : un article = un sujet macro, ses sections = Perspectives V2 apparentees, les entites deviennent des points de support cliquables, pas le sujet de l'article.
+
+### Decisions prises
+
+**Q1 — Volume cible : 50-100 articles, pas 10-15.**
+10-15 serait trop peu pour 20 docs de centaines de pages. L'ordre de grandeur emerge du croisement Perspectives x Subjects (~600 paires theoriques, ~50-100 substantielles). Les sujets s'entrelacent : "Securite dans S/4HANA", "Migration ECC vers S/4HANA", "S/4HANA CPE" sont 3 articles distincts qui partagent en partie la meme matiere, comme Wikipedia. Le mot "S/4HANA" devient un noeud de reference croisee entre articles, pas un article en soi.
+
+**Q2 — Decouverte 100% emergente.**
+Pas d'admin qui definit les sujets : il serait biaise par son propre rapport a la connaissance (un tech selectionnerait securite/infra/migration, un fonctionnel selectionnerait les processus metier). Decouverte par graph community detection (Leiden/Louvain) sur le graphe biparti Perspective <-> Subject deja disponible via TOUCHES_SUBJECT. Chaque communaute dense = un NarrativeTopic candidat avec une signature thematique ET un ancrage produit.
+
+**Q3 — Regeneration tout-ou-rien avec dette structurelle.**
+Pas de delta-update partiel sur le texte (sinon patchwork incoherent). Trigger composite : nouvelle perspective touchee, nouveau subject, nouvelle tension, delta claims > 20%, etc. Garde-fou anti-derive : chaque article a un compteur de "dette structurelle" qui s'accumule a chaque mini-trigger non declencheur. Si la dette depasse un seuil, regeneration forcee meme sans trigger individuel. Tant que rien d'utile n'arrive, rien ne bouge ; quand quelque chose change vraiment, regeneration complete. Pas de derive narrative.
+
+### Nouveau type d'objet : NarrativeTopic
+
+NarrativeTopic = communaute dense dans le graphe biparti Perspective <-> Subject. Defini par :
+- un ou plusieurs Subjects (ancrage produit)
+- une ou plusieurs Perspectives (sections naturelles)
+- un focus thematique (signature de la communaute)
+
+Exemples possibles : "Securite dans SAP S/4HANA" [theme x produit], "Migration ECC vers S/4HANA" [transition produit-a-produit], "Outils de migration SAP" [angle outillage transverse], "Conformite GDPR dans SAP" [theme transverse].
+
+### Questions encore ouvertes
+
+**Q4 — Criteres de qualite editoriale.** Comment ecarter les NarrativeTopics faibles parmi les ~600 paires theoriques ? Pistes : min_claims (~30), min_docs (~3), min_cohesion semantique, min_representativite. Pas de reponse arretee.
+
+**Q5 — Sections d'intro/conclusion.** Les Perspectives sont les sections du milieu. L'intro et la conclusion d'un article narratif n'existent dans aucune Perspective — il faut les generer par LLM, ce qui reintroduit un risque d'hallucination en bordure. A encadrer. Pas de reponse arretee.
+
+**Q6 — Liens inter-articles.** Deux pistes evaluees :
+
+*Piste 1 — cliquable = creer si manquant.* Si le LLM tague un mot cliquable et que la fiche n'existe pas, on la cree a la demande. Risques : faux positifs (mot tagge sans matiere reelle dans le KG), collisions de nom (S4 HANA cliquable cree un doublon de S/4HANA existant), Atlas imprevisible (deux instances OSMOSIS sur le meme corpus produisent des Atlas differents au fil des clics). Ecartee.
+
+*Piste 2 — table des matieres d'abord.* Decider en amont quels NarrativeTopics deviennent des pages, identifier les entites majeures de chaque page, construire le graphe de dependance complet AVANT d'ecrire la premiere ligne. Pipeline naturel :
+
+1. Community detection sur Perspective <-> Subject -> liste des NarrativeTopics candidats
+2. Filtrage qualite (Q4) -> liste figee des articles a produire
+3. Pour chaque NarrativeTopic, identification des entites majeures liees (top entites par frequence dans les claims du topic)
+4. Construction du graphe de dependance inter-articles : chaque entite majeure d'un topic est-elle elle-meme un topic de la TOC ? Si oui -> lien. Sinon -> pas de lien (ou lien vers une fiche de support entite, pas un article narratif)
+5. Generation article par article, syntaxe contrainte `[[Topic:slug]]` que le LLM ne peut utiliser que sur des slugs presents dans la TOC. Post-processing rejette tout lien hors-TOC.
+
+Avantages : pas de trous, pas de doublons, pas d'articles vides, structure stable, le LLM ne peut pas inventer de cibles. Le mode "1 entite = 1 fiche" du chantier originel reprend du sens : il devient le **reservoir de fiches de support** pour les entites citees mais qui n'ont pas leur propre article narratif. **Piste 2 retenue comme direction de travail.**
+
+Point ouvert sur Piste 2 : comment matcher "S/4HANA" dans le texte genere avec l'entree "sap-s4hana" de la TOC sans rater les variantes (S4HANA, S/4 HANA, SAP S/4HANA Cloud). Probablement via la table d'alias d'entites deja presente dans le KG (canonical_name + aliases). A valider au moment de l'implementation.
+
+### Articulation avec les sections 1-6
+
+Les sections 1 a 6 de ce document decrivent le modele "1 entite = 1 article" originel. Elles ne sont pas a jeter : elles definissent precisement le **reservoir de fiches de support** que l'Atlas narratif consommera. Le point de bascule est la **nature du pivot** : NarrativeTopic (50-100) au-dessus, Entity (2200) en-dessous comme couche de fiches.
+
+Quand on reviendra sur ce chantier (post-benchmarks), repartir de cette section 7, pas des sections 1-6 figees.
