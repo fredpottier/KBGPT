@@ -342,7 +342,7 @@ async def run_ragas_benchmark(
             "description": req.description,
         },
         job_id=job_id,
-        job_timeout=7200,  # 2h max
+        job_timeout=14400,  # 4h max
         result_ttl=3600,
     )
 
@@ -576,7 +576,7 @@ async def run_t2t5_benchmark(
             "compare_rag": req.compare_rag,
         },
         job_id=job_id,
-        job_timeout=7200,
+        job_timeout=14400,
         result_ttl=3600,
     )
 
@@ -782,6 +782,6 @@ async def run_robustness_benchmark(req: RobustnessRunRequest):
     q.enqueue(
         "benchmark.evaluators.robustness_diagnostic.run_benchmark_job",
         kwargs={"redis_url": REDIS_URL, "tag": req.tag, "description": req.description},
-        job_id=job_id, job_timeout=7200, result_ttl=3600,
+        job_id=job_id, job_timeout=14400, result_ttl=3600,
     )
     return {"job_id": job_id, "message": "Benchmark robustesse lance"}

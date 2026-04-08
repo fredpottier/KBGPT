@@ -193,9 +193,9 @@ def collect_live(questions_path: str, api_base: str = "http://localhost:8000") -
 
     questions = questions_data if isinstance(questions_data, list) else questions_data.get("questions", [])
 
-    # Auth
-    token = _get_token(api_base)
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    # Auth (token auto-refresh)
+    from benchmark.evaluators._auth import TokenManager
+    token_mgr = TokenManager(api_base)
 
     samples = []
     for i, q_item in enumerate(questions):
@@ -206,6 +206,10 @@ def collect_live(questions_path: str, api_base: str = "http://localhost:8000") -
         logger.info(f"[{i + 1}/{len(questions)}] {question[:80]}...")
 
         try:
+            headers = {
+                "Authorization": f"Bearer {token_mgr.get()}",
+                "Content-Type": "application/json",
+            }
             resp = requests.post(
                 f"{api_base}/api/search",
                 json={
@@ -311,7 +315,20 @@ def run_ragas_evaluation(
     concurrency = int(os.getenv("RAGAS_CONCURRENCY", "3"))
 
     # Evaluer chaque metrique en parallele sur tous les samples
-    per_sample = [{"question": s["question"][:100]} for s in valid_samples]
+    # NOTE: on stocke question + answer complets + quelques metadonnees pour
+    # permettre une analyse post-mortem fidele. Pas de troncature arbitraire.
+    per_sample = [
+        {
+            "question_id": s.get("question_id") or s.get("_task_name", "") + f"_{i}",
+            "question": s["question"],
+            "answer": s.get("answer", ""),
+            "answer_length": len(s.get("answer", "")),
+            "reference": s.get("reference", ""),
+            "sources_used": s.get("metadata", {}).get("doc_ids", []) if isinstance(s.get("metadata"), dict) else [],
+            "_task_name": s.get("_task_name", ""),
+        }
+        for i, s in enumerate(valid_samples)
+    ]
     metric_totals: dict[str, list[float]] = {k: [] for k in metrics_map}
 
     for metric_name, metric in metrics_map.items():
@@ -792,7 +809,7 @@ def _update_redis_state(redis_url: str, state: dict):
 def _call_osmosis_api(
     question: str,
     api_base: str,
-    token: str,
+    token_mgr,
     use_kg: bool = True,
 ) -> dict:
     """Call OSMOSIS search API and return {question, contexts, answer, metadata}."""
@@ -805,7 +822,7 @@ def _call_osmosis_api(
         "use_latest": True,
     }
     headers = {
-        "Authorization": f"Bearer {token}",
+        "Authorization": f"Bearer {token_mgr.get()}",
         "Content-Type": "application/json",
     }
     resp = requests.post(
@@ -850,7 +867,7 @@ def _get_api_token(api_base: str) -> str:
 def _collect_api_samples(
     tasks: list[dict],
     api_base: str,
-    token: str,
+    token_mgr,
     redis_url: str,
     use_kg: bool = True,
     phase_label: str = "api_call",
@@ -891,7 +908,7 @@ def _collect_api_samples(
         })
 
         try:
-            sample = _call_osmosis_api(question, api_base, token, use_kg=use_kg)
+            sample = _call_osmosis_api(question, api_base, token_mgr, use_kg=use_kg)
             # Ajouter la reference (ground truth) si disponible
             reference = q_item.get("expected_answer", q_item.get("ground_truth", ""))
             if isinstance(reference, dict):
@@ -949,13 +966,15 @@ def run_benchmark_job(
             "progress": 0,
             "total": 0,
         })
-        token = _get_api_token(api_base)
+        from benchmark.evaluators._auth import TokenManager
+        token_mgr = TokenManager(api_base)
+        token_mgr.get()  # force initial fetch to fail fast if creds are wrong
 
         # ── Phase 1 : API calls OSMOSIS ─────────────────────────────
         osmosis_samples = _collect_api_samples(
             tasks=prof["tasks"],
             api_base=api_base,
-            token=token,
+            token_mgr=token_mgr,
             redis_url=redis_url,
             use_kg=True,
             phase_label="api_call",
@@ -1004,7 +1023,7 @@ def run_benchmark_job(
             rag_samples = _collect_api_samples(
                 tasks=prof["tasks"],
                 api_base=api_base,
-                token=token,
+                token_mgr=token_mgr,
                 redis_url=redis_url,
                 use_kg=False,
                 phase_label="rag_baseline",

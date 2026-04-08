@@ -408,22 +408,34 @@ CATEGORY_JUDGE_CRITERIA = {
 }
 
 _llm_judge_client = None
+_judge_failure_count = 0
+_judge_success_count = 0
 
 def _get_llm_judge_client():
-    """Retourne le client OpenAI pour le LLM-juge (meme modele que la synthese)."""
+    """Retourne le client OpenAI pour le LLM-juge.
+
+    IMPORTANT : le juge utilise gpt-4o-mini par defaut. Pour le changer,
+    definir explicitement OSMOSIS_JUDGE_MODEL=xxx. On n'herite PAS de
+    OSMOSIS_SYNTHESIS_MODEL car celui-ci peut etre un modele Anthropic
+    (Claude) qui n'est pas compatible avec le client OpenAI.
+    """
     global _llm_judge_client
     if _llm_judge_client is not None:
         return _llm_judge_client
 
     openai_key = os.getenv("OPENAI_API_KEY", "")
-    if openai_key:
-        try:
-            from openai import OpenAI
-            _llm_judge_client = OpenAI(api_key=openai_key)
-            return _llm_judge_client
-        except Exception:
-            pass
-    return None
+    if not openai_key:
+        logger.warning("[JUDGE] OPENAI_API_KEY not set — LLM judge unavailable, will fall back to keyword evaluators")
+        return None
+
+    try:
+        from openai import OpenAI
+        _llm_judge_client = OpenAI(api_key=openai_key)
+        logger.info(f"[JUDGE] LLM judge initialized (model={os.getenv('OSMOSIS_JUDGE_MODEL', 'gpt-4o-mini')})")
+        return _llm_judge_client
+    except Exception as e:
+        logger.warning(f"[JUDGE] Failed to create OpenAI client: {e}")
+        return None
 
 
 def evaluate_with_llm_judge(
@@ -447,6 +459,19 @@ def evaluate_with_llm_judge(
     expected = ground_truth.get("expected_behavior", "")
     evidence = ground_truth.get("evidence_claim", ground_truth.get("correct_fact", ""))
 
+    # Pre-traitement LOCAL au juge : convertir les marqueurs techniques
+    # [[SOURCE:Doc|p.X]] (utilises par le frontend pour les SourcePills)
+    # en format lisible (Doc, p. X) pour que le juge reconnaisse les citations.
+    # NE modifie PAS la reponse retournee a l'utilisateur ni celle stockee
+    # dans le rapport per_sample.
+    from benchmark.evaluators._judge_preprocess import preprocess_answer_for_judge
+    judge_answer = preprocess_answer_for_judge(answer)
+
+    # Truncature augmentee de 400 a 3000 chars. Avec 400 chars Haiku ne voyait
+    # que l'en-tete et le debut du premier point, jamais le contenu factuel
+    # substantiel. 3000 chars couvrent ~95% des reponses.
+    MAX_JUDGE_CHARS = 3000
+
     prompt = f"""You are a strict benchmark evaluator for a document analysis system.
 
 Question: "{question[:200]}"
@@ -456,8 +481,8 @@ Expected behavior: {expected}
 
 Evaluation criteria: {criteria}
 
-Actual answer (first 400 chars):
-"{answer[:400]}"
+Actual answer:
+"{judge_answer[:MAX_JUDGE_CHARS]}"
 
 Rate the answer from 0 to 100:
 - 0-20: Completely wrong, irrelevant, or hallucinates
@@ -466,31 +491,57 @@ Rate the answer from 0 to 100:
 - 70-90: Good, mostly correct and grounded in sources
 - 90-100: Excellent, fully addresses with evidence
 
-Reply with ONLY a number (0-100)."""
+Reply in this exact format on two lines:
+SCORE: <number 0-100>
+REASON: <one short sentence explaining the score, max 25 words>"""
 
     try:
-        judge_model = os.getenv("OSMOSIS_JUDGE_MODEL", os.getenv("OSMOSIS_SYNTHESIS_MODEL", "gpt-4o-mini"))
+        # IMPORTANT : ne PAS fallback sur OSMOSIS_SYNTHESIS_MODEL (qui peut etre
+        # un modele Anthropic/Claude non compatible avec le client OpenAI).
+        # Defaut hardcode a gpt-4o-mini qui fonctionne avec le client OpenAI.
+        judge_model = os.getenv("OSMOSIS_JUDGE_MODEL", "gpt-4o-mini")
         resp = client.chat.completions.create(
             model=judge_model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=5,
+            max_tokens=80,  # score + short reason
             temperature=0.0,
         )
         raw = resp.choices[0].message.content.strip()
         import re as _re
-        m = _re.search(r"\d+", raw)
-        score = int(m.group()) / 100.0 if m else 0.0
+        # Parse SCORE: NN and REASON: ... format
+        score_m = _re.search(r"SCORE\s*:\s*(\d+)", raw, _re.IGNORECASE)
+        reason_m = _re.search(r"REASON\s*:\s*(.+?)(?:$|\n)", raw, _re.IGNORECASE | _re.DOTALL)
+        if score_m:
+            score = int(score_m.group(1)) / 100.0
+        else:
+            # Fallback : chercher juste un nombre
+            m = _re.search(r"\d+", raw)
+            score = int(m.group()) / 100.0 if m else 0.0
         score = min(1.0, max(0.0, score))
+        reason = reason_m.group(1).strip() if reason_m else ""
 
+        global _judge_success_count
+        _judge_success_count += 1
         return {
             "category": category,
             "score": round(score, 3),
             "judge_model": judge_model,
             "judge_raw": raw,
+            "judge_reason": reason,
         }
 
     except Exception as e:
-        logger.debug(f"[JUDGE] LLM judge failed: {e}")
+        # VISIBLE : warning au lieu de debug. Si le juge plante, on doit le
+        # voir immediatement dans les logs, pas le decouvrir 5 jours plus tard
+        # en explorant les rapports.
+        global _judge_failure_count
+        _judge_failure_count += 1
+        if _judge_failure_count <= 3:
+            logger.warning(f"[JUDGE] LLM judge call failed: {type(e).__name__}: {e}")
+        elif _judge_failure_count == 4:
+            logger.warning(f"[JUDGE] 4+ consecutive judge failures — further errors suppressed")
+        if _judge_failure_count % 50 == 0:
+            logger.warning(f"[JUDGE] {_judge_failure_count} total failures so far (success={_judge_success_count})")
         return None
 
 
@@ -710,9 +761,11 @@ def run_benchmark_job(
 
             per_sample.append({
                 "question_id": question_id,
-                "question": question[:200],
+                "question": question,
                 "category": category,
-                "answer": answer[:500],
+                "answer": answer,  # reponse complete (pas de troncature — utile pour analyse post-mortem)
+                "answer_length": len(answer) if answer else 0,
+                "sources_used": sources if isinstance(sources, list) else [],
                 "evaluation": evaluation,
             })
 
@@ -734,6 +787,25 @@ def run_benchmark_job(
     # Aggregation
     scores = aggregate_scores(per_sample)
     duration_s = round(time.time() - job_start, 1)
+
+    # Stats d'usage du juge (visibilite critique — voir bug decouvert 08/04 ou
+    # le juge etait silencieusement casse pendant 5 jours)
+    total_judge_calls = _judge_success_count + _judge_failure_count
+    if total_judge_calls > 0:
+        success_pct = 100 * _judge_success_count / total_judge_calls
+        logger.info(
+            f"[JUDGE] LLM judge stats : {_judge_success_count} ok / "
+            f"{_judge_failure_count} failed ({success_pct:.1f}% success) — "
+            f"model={os.getenv('OSMOSIS_JUDGE_MODEL', 'gpt-4o-mini')}"
+        )
+        if success_pct < 80:
+            logger.warning(
+                f"[JUDGE] WARNING : LLM judge success rate below 80% — "
+                f"most evaluations fell back to keyword evaluators. "
+                f"Check OPENAI_API_KEY and OSMOSIS_JUDGE_MODEL env vars."
+            )
+    else:
+        logger.warning("[JUDGE] No LLM judge calls attempted — all questions used keyword evaluators")
 
     logger.info(f"[ROBUSTESSE] Completed in {duration_s}s — scores: {scores}")
 

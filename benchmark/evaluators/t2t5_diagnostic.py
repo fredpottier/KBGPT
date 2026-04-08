@@ -69,12 +69,18 @@ def _get_llm_judge():
 
 def _llm_judge_t2(client, question: str, claim1_text: str, claim2_text: str, answer: str) -> dict | None:
     """LLM-juge pour T2 : evalue both_sides, tension, sources (scores 0-100)."""
+    # Pre-traitement LOCAL au juge : convertir [[SOURCE:...]] en (Doc, p. X)
+    # Voir benchmark/evaluators/_judge_preprocess.py pour le contrat.
+    from benchmark.evaluators._judge_preprocess import preprocess_answer_for_judge
+    judge_answer = preprocess_answer_for_judge(answer)
+    MAX_JUDGE_CHARS = 3000
+
     prompt = (
         'You are a benchmark evaluator for a document contradiction detection system.\n\n'
         f'Question: "{question[:200]}"\n\n'
         f'Claim 1 (from document A): "{claim1_text[:150]}"\n'
         f'Claim 2 (from document B): "{claim2_text[:150]}"\n\n'
-        f'The system produced this answer (first 1500 chars):\n"{answer[:1500]}"\n\n'
+        f'The system produced this answer:\n"{judge_answer[:MAX_JUDGE_CHARS]}"\n\n'
         'Rate each aspect from 0 to 100:\n'
         '1. both_sides: Does the answer present information from BOTH claims? Even paraphrased, '
         'in a different language, or summarized — if BOTH perspectives are covered, score high.\n'
@@ -107,10 +113,15 @@ def _llm_judge_t2(client, question: str, claim1_text: str, claim2_text: str, ans
 
 def _llm_judge_t5(client, question: str, category: str, answer: str) -> dict | None:
     """LLM-juge pour T5 : evalue chain_coverage et multi_doc (scores 0-100)."""
+    # Pre-traitement LOCAL au juge (voir _judge_preprocess.py pour le contrat)
+    from benchmark.evaluators._judge_preprocess import preprocess_answer_for_judge
+    judge_answer = preprocess_answer_for_judge(answer)
+    MAX_JUDGE_CHARS = 3000
+
     prompt = (
         'You are a benchmark evaluator for a cross-document analysis system.\n\n'
         f'Question: "{question[:200]}"\nCategory: {category}\n\n'
-        f'The system produced this answer (first 1500 chars):\n"{answer[:1500]}"\n\n'
+        f'The system produced this answer:\n"{judge_answer[:MAX_JUDGE_CHARS]}"\n\n'
         'Rate each aspect from 0 to 100:\n'
         '1. chain_coverage: How well does the answer cover facts from multiple documents to '
         'build a complete answer? A good answer connects information across sources and covers '
@@ -480,7 +491,7 @@ def _get_api_token(api_base: str) -> str:
 def _call_osmosis_api(
     question: str,
     api_base: str,
-    token: str,
+    token_mgr,
     use_kg: bool = True,
 ) -> dict:
     """Appelle l'API OSMOSIS search et retourne la reponse structuree."""
@@ -493,7 +504,7 @@ def _call_osmosis_api(
         "use_latest": True,
     }
     headers = {
-        "Authorization": f"Bearer {token}",
+        "Authorization": f"Bearer {token_mgr.get()}",
         "Content-Type": "application/json",
     }
     resp = requests.post(
@@ -649,7 +660,9 @@ def run_benchmark_job(
             "progress": 0,
             "total": 0,
         })
-        token = _get_api_token(api_base)
+        from benchmark.evaluators._auth import TokenManager
+        token_mgr = TokenManager(api_base)
+        token_mgr.get()  # fail fast if creds invalid
 
         # ── Phase 1 : Load questions ────────────────────────────────
         all_questions: list[dict] = []
@@ -685,22 +698,7 @@ def run_benchmark_job(
         judge_mode = "hybrid" if judge_client else "keyword"
         logger.info(f"[T2T5:BENCH] Evaluation mode: {judge_mode}")
 
-        def _refresh_token():
-            try:
-                r = requests.post(f"{api_base}/api/auth/login",
-                                  json={"email": "admin@example.com", "password": "admin123"}, timeout=10)
-                if r.status_code == 200:
-                    return r.json().get("access_token", "")
-            except:
-                pass
-            return token
-
         for i, q_item in enumerate(all_questions):
-            # Refresh token toutes les 40 questions (expire apres ~30min)
-            if i > 0 and i % 40 == 0:
-                token = _refresh_token()
-                logger.info(f"[T2T5:BENCH] Token refreshed at question {i}")
-
             question = q_item.get("question", "")
             if not question:
                 continue
@@ -716,7 +714,7 @@ def run_benchmark_job(
 
             try:
                 # Call API
-                api_result = _call_osmosis_api(question, api_base, token)
+                api_result = _call_osmosis_api(question, api_base, token_mgr)
 
                 # Evaluate
                 task_type = q_item.get("_task_type", "")
@@ -777,12 +775,12 @@ def run_benchmark_job(
 
                 per_sample.append({
                     "question_id": q_item.get("question_id", f"q_{i}"),
-                    "question": question[:200],
+                    "question": question,
                     "task_name": q_item.get("_task_name", ""),
                     "evaluation": evaluation,
-                    "answer": api_result["answer"][:500],
-                    "ground_truth": q_item.get("ground_truth", {}),
+                    "answer": api_result["answer"],  # reponse complete (pas de troncature)
                     "answer_length": len(api_result["answer"]),
+                    "ground_truth": q_item.get("ground_truth", {}),
                     "chunks_retrieved": api_result["chunks_retrieved"],
                     "sources_used": api_result["sources_used"],
                     "latency_ms": api_result["latency_ms"],
@@ -832,11 +830,6 @@ def run_benchmark_job(
             rag_per_sample = []
             rag_errors = 0
             for i, q_item in enumerate(all_questions):
-                # Token refresh toutes les 40 questions
-                if i > 0 and i % 40 == 0:
-                    token = _refresh_token()
-                    logger.info(f"[T2T5:BENCH:RAG] Token refreshed at question {i}")
-
                 question = q_item.get("question", "")
                 if not question:
                     continue
@@ -851,7 +844,7 @@ def run_benchmark_job(
                 })
 
                 try:
-                    api_result = _call_osmosis_api(question, api_base, token, use_kg=False)
+                    api_result = _call_osmosis_api(question, api_base, token_mgr, use_kg=False)
                     task_type = q_item.get("_task_type", "")
                     ground_truth = q_item.get("ground_truth", {})
                     category = q_item.get("category", "")
@@ -891,8 +884,9 @@ def run_benchmark_job(
 
                     rag_per_sample.append({
                         "question_id": q_item.get("question_id", f"q_{i}"),
-                        "question": question[:200],
-                        "answer": api_result["answer"][:500],
+                        "question": question,
+                        "answer": api_result["answer"],  # reponse complete
+                        "answer_length": len(api_result["answer"]),
                         "sources_used": api_result["sources_used"],
                         "evaluation": evaluation,
                     })
