@@ -300,6 +300,26 @@ class SubjectResolverV2:
                 )
                 continue
 
+        # Exclure de la liste des canonicals injectes au LLM les entrees qui
+        # sont en fait des alias connus (apparaissent comme cles dans
+        # canonical_aliases). Ces entrees ne doivent pas etre proposees comme
+        # canonical final — elles doivent etre resolues vers leur canonical
+        # cible via le post-processing. Defensive strategy pour gerer les
+        # incoherences dans context_defaults.json (ex: "RISE with SAP" present
+        # a la fois dans product_gazetteer et dans canonical_aliases).
+        alias_keys_lower = {k.lower() for k in aliases.keys()}
+        n_before = len(products_set)
+        products_set = {
+            p: None for p in products_set
+            if p.lower() not in alias_keys_lower
+        }
+        n_removed = n_before - len(products_set)
+        if n_removed > 0:
+            logger.debug(
+                f"[SubjectResolverV2] Removed {n_removed} alias entries from "
+                f"canonicals list (they will be resolved via post-processing)"
+            )
+
         # Trier par longueur croissante (parents hierarchiques en premier)
         products_list = sorted(products_set.keys(), key=lambda s: (len(s), s))
 
@@ -365,6 +385,11 @@ class SubjectResolverV2:
         if resolver_output is None:
             self._stats["parse_errors"] += 1
             return SubjectResolverOutput.create_abstain("Failed to parse LLM response"), None
+
+        # Post-processing : resoudre les alias connus vers leurs canonicals
+        # (defensive : si le LLM retourne un alias comme label de subject, on
+        # le remplace par la forme canonique finale)
+        resolver_output = self._apply_canonical_aliases(resolver_output)
 
         # Post-processing déterministe (règles DomainContext)
         resolver_output = self._apply_reclassification_rules(resolver_output, title)
@@ -728,6 +753,56 @@ IMPORTANT :
             return obj
 
         return normalize_evidence_spans(data)
+
+    def _apply_canonical_aliases(
+        self,
+        resolver_output: SubjectResolverOutput,
+    ) -> SubjectResolverOutput:
+        """Resolu les alias du gazetteer vers leurs canonicals finaux.
+
+        Defensive post-processing : si le LLM retourne un label qui est en
+        realite un alias connu (present dans canonical_aliases), on le remplace
+        par la forme canonique finale. Exemple : "RISE with SAP" ->
+        "SAP S/4HANA Cloud Private Edition".
+
+        Cette normalisation est appliquee au comparable_subject uniquement
+        (pas aux axis_values, qui peuvent legitimement contenir des variantes).
+
+        Matching case-insensitive pour robustesse.
+        """
+        if resolver_output is None or resolver_output.comparable_subject is None:
+            return resolver_output
+
+        ctx = self._get_gazetteer_context()
+        aliases = ctx.get("aliases", {})
+        if not aliases:
+            return resolver_output
+
+        # Index case-insensitive pour lookup
+        aliases_ci = {k.lower(): v for k, v in aliases.items()}
+
+        current_label = resolver_output.comparable_subject.label or ""
+        resolved = aliases_ci.get(current_label.lower())
+        if resolved and resolved != current_label:
+            logger.info(
+                f"[SubjectResolverV2] Alias resolution : '{current_label}' -> '{resolved}'"
+            )
+            # Pydantic model : on doit creer une nouvelle instance avec le label mis a jour
+            from knowbase.claimfirst.models.subject_resolver_output import (
+                ComparableSubjectOutput,
+            )
+            new_cs = ComparableSubjectOutput(
+                label=resolved,
+                confidence=resolver_output.comparable_subject.confidence,
+                rationale=(
+                    f"[alias resolved from '{current_label}'] "
+                    + (resolver_output.comparable_subject.rationale or "")
+                )[:240],
+                support=resolver_output.comparable_subject.support,
+            )
+            resolver_output.comparable_subject = new_cs
+
+        return resolver_output
 
     def _apply_reclassification_rules(
         self,
