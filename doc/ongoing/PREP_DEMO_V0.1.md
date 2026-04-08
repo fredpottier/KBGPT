@@ -328,6 +328,21 @@ Essentiellement 0. Les fixes utiles sont déjà en place. Le fix du juge était 
 - **Première action** : lire le ratio `[JUDGE] LLM judge stats : N ok / M failed` dans les logs de fin de run Robustness. Si `failed > 0`, les warnings `[JUDGE] LLM judge call failed: ...` auront détaillé la cause dans les logs.
 - **Deuxième action** : `rescore_robustness.py` pour re-juger offline sans relancer le bench.
 
+**Fix ComparableSubject complété (08/04 soir)** :
+
+La seule régression réelle identifiée par le LLM-juge sémantique était `temporal_evolution` (-16.8 pts). Investigation approfondie :
+
+1. **Fix branché** : `SubjectResolverV2` utilise maintenant le `product_gazetteer` du domain pack + les `canonical_aliases` (cf. `[futur]_DETTE_COMPARABLE_SUBJECT.md`)
+2. **Script de re-résolution offline** : `app/scripts/resolve_subjects.py` permet de régénérer les ComparableSubjects + AxisValues + propager vers Qdrant pour les documents déjà ingérés, sans re-ingestion
+3. **Résultat** : 23 DocumentContexts ré-résolus, 3 `ComparableSubject` distincts (`SAP S/4HANA`, `SAP S/4HANA Cloud Private Edition`, `SAP Cloud ALM`), 22 `AxisValues` persistés (release_id, edition), 7072/7629 chunks Qdrant populés avec `axis_release_id`
+4. **Constat** : **le fix structurel est nécessaire mais insuffisant** pour résoudre `temporal_evolution`. Test empirique post-fix : pour une question *"différences Security Guide 2022 vs 2023"*, le retrieval continue à ignorer les chunks 2022 parce qu'il est purement sémantique + rerank, sans contrainte structurelle *"doit couvrir les deux versions"*. Le `strategy_analyzer` détecte bien la nature cross-version en narratif mais ne l'exporte pas en filtres structurés.
+
+**Chantier identifié post-fix : Retrieval par Query Decomposition** (cf. `doc/ongoing/[futur]_RETRIEVAL_QUERY_DECOMPOSITION.md`).
+
+Le fix pour que `temporal_evolution` bénéficie réellement de l'infrastructure en place est un **nouveau composant `QueryDecomposer`** en amont du retrieval : LLM qui détecte les questions de comparaison/énumération/chronologie → décompose en N sous-questions → lance N retrievals indépendants → réconcilie dans un contexte structuré pour le synthétiseur. Pattern connu en RAG moderne (*Self-Ask, IRCoT, Sub-question Decomposition*). **Généralise au-delà du cross-version** : comparaison entre variantes produit, études cliniques, versions de loi, campagnes marketing, etc. Totalement domain-agnostic.
+
+**Estimation chantier** : 1-2h pour un prototype de validation, 1-2 jours pour une intégration propre + observabilité + tests cross-domain. Ce n'est PAS un blocker MUST HAVE pour la démo V0.1, mais ce sera probablement le chantier le plus impactant en termes de qualité de réponse pour les questions complexes.
+
 **Problème confirmé empiriquement le 08/04** après analyse question par question des rapports T2/T5 et Robustness pre/post Perspective Layer. La cause des régressions observées n'est **ni** la couche Perspective elle-même (jamais déclenchée sur Robustness, et correctement déclenchée sur T2/T5), **ni** l'override TENSION (trop peu fréquent sur T2/T5 — 3.3% — pour expliquer une baisse de 13% globale). La vraie cause est le **durcissement des règles de style** introduit en Phase B7 dans `config/synthesis_prompts.yaml`, qui affecte les modes DIRECT, TENSION et PERSPECTIVE.
 
 **Les règles problématiques** (présentes à l'identique dans les templates DIRECT et TENSION) :

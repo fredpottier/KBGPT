@@ -58,6 +58,9 @@ from knowbase.claimfirst.models.comparable_subject import ComparableSubject
 from knowbase.claimfirst.resolution.subject_resolver_v2 import SubjectResolverV2
 from knowbase.domain_packs.registry import get_pack_registry
 
+QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "knowbase_chunks_v2")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
@@ -209,6 +212,74 @@ def link_dc_to_subject(driver, doc_id: str, canonical_name: str, tenant_id: str)
         )
 
 
+def propagate_axis_to_qdrant(
+    doc_id: str, release_id: Optional[str], edition: Optional[str]
+) -> int:
+    """Propage les axis_values vers les chunks Qdrant du document.
+
+    Le retriever filtre sur `axis_release_id` dans le payload Qdrant
+    (cf. src/knowbase/api/services/retriever.py:91), pas via Neo4j.
+    Il faut donc populer ce champ sur tous les chunks du doc_id cible
+    pour que le filtrage "use_latest" et les comparaisons cross-version
+    fonctionnent.
+
+    Utilise l'API Qdrant set_payload avec un filter par doc_id.
+
+    Returns:
+        Nombre de chunks affectes (0 si aucun axis a propager ou si
+        l'appel echoue).
+    """
+    if not release_id and not edition:
+        return 0
+
+    import requests
+
+    payload_to_set = {}
+    if release_id:
+        payload_to_set["axis_release_id"] = release_id
+    if edition:
+        payload_to_set["axis_edition"] = edition
+
+    # set_payload API : applique payload aux points matchant le filter
+    try:
+        # D'abord, compter combien de chunks vont etre affectes
+        count_resp = requests.post(
+            f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}/points/count",
+            json={
+                "filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}
+            },
+            timeout=10,
+        )
+        count_resp.raise_for_status()
+        n_chunks = count_resp.json()["result"]["count"]
+        if n_chunks == 0:
+            logger.debug(f"  Qdrant: no chunks found for doc_id={doc_id}")
+            return 0
+
+        # Puis appliquer le payload
+        update_resp = requests.post(
+            f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}/points/payload?wait=true",
+            json={
+                "payload": payload_to_set,
+                "filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]},
+            },
+            timeout=30,
+        )
+        update_resp.raise_for_status()
+        result = update_resp.json()
+        if result.get("status") == "ok":
+            logger.info(
+                f"  Qdrant: updated {n_chunks} chunks with {payload_to_set}"
+            )
+            return n_chunks
+        else:
+            logger.warning(f"  Qdrant update returned status={result.get('status')}")
+            return 0
+    except Exception as e:
+        logger.warning(f"  Qdrant propagation failed for {doc_id}: {e}")
+        return 0
+
+
 def persist_axis_values(
     driver, doc_id: str, axis_values: List, tenant_id: str
 ) -> int:
@@ -278,6 +349,13 @@ def persist_axis_values(
             qualifiers_json=_json.dumps(qualifiers, ensure_ascii=False),
             n_fields=len(fields),
         )
+
+    # Propager aussi vers Qdrant pour que le retrieval puisse filtrer
+    # sur axis_release_id et axis_edition au niveau des chunks.
+    release_id = qualifiers.get("release_id") or qualifiers.get("publication_year")
+    edition = qualifiers.get("edition")
+    propagate_axis_to_qdrant(doc_id, release_id, edition)
+
     return len(fields)
 
 
