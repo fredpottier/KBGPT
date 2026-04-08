@@ -34,7 +34,9 @@ OSMOSIS est développé avec des moyens limités : pas d'open bar tokens, pas d'
 
 *Ces items ne sont pas des préférences. Chacun porte un risque d'échec visible et direct du démo s'il n'est pas fait. Ne pas lancer la démo tant que cette section n'est pas complète.*
 
-### M1. Fixer la dette ComparableSubject
+### M1. Fixer la dette ComparableSubject — ✅ FAIT (08/04 soir)
+
+> **Statut** : complété. `SubjectResolverV2` utilise désormais le `product_gazetteer` + `canonical_aliases` du domain pack. Script `app/scripts/resolve_subjects.py` permet la re-résolution offline. Résultat sur le corpus SAP : 3 ComparableSubjects distincts (S/4HANA, S/4HANA Cloud Private Edition, SAP Cloud ALM), 22 AxisValues persistés, 7072/7629 chunks Qdrant populés avec `axis_release_id`. Voir section S5b pour la suite (Query Decomposer).
 
 **Problème** : actuellement le KG ne contient qu'un seul `ComparableSubject` (`SAP S/4HANA Cloud Private Edition`) qui agglomère tous les produits du corpus. Le `SubjectResolverV2` n'utilise pas le `product_gazetteer` du domain pack (528 produits SAP avec hiérarchie correcte) qui existe déjà.
 
@@ -172,19 +174,55 @@ Le pire est que **ça ne génère pas d'erreur**. Le système tournera, produira
 
 ---
 
-### Récapitulatif MUST HAVE
+### M7. Query Decomposer — intégration propre 🆕 *promu MUST HAVE 08/04*
 
-| Item | Effort | Dépendance |
-|---|---|---|
-| M1. Fix ComparableSubject | 1-2 j | — |
-| M2. `build_perspectives` dans post-import | 4-8 h | — |
-| M3. Externalisation stopwords multilingues | 4-8 h | — |
-| M4. Dry-run corpus externe de test | 1-2 j | M1, M2, M3 |
-| M5. Stabiliser benchmarks baseline | 1 j (attente) | — |
-| M6. Runbook ingestion externe | 2-4 h | — |
-| **Total estimé** | **4-6 jours** de travail focalisé | |
+**Problème** : OSMOSIS échoue actuellement sur les questions complexes décomposables (comparaisons cross-version, énumérations multi-entités, chronologies multi-périodes) parce que le retrieval est purement sémantique + rerank, sans capacité à lancer **plusieurs sous-recherches indépendantes** puis à réconcilier. La régression réelle `temporal_evolution` (-16.8 pts mesurée par le LLM-juge sémantique) en est le symptôme direct : même avec les `AxisValues` propagés, le retrieval ne couvre pas les deux versions simultanément.
 
-**Ordre recommandé** : M1 et M2 en parallèle (indépendants), puis M3 (indépendant aussi mais à valider après M1+M2), puis M5 en laissant tourner pendant M6, puis M4 en dernier (validation finale).
+**Pourquoi c'est désormais MUST HAVE** : prototype validé le 08/04 (`benchmark/probes/prototype_query_decomposer.py`) sur cross-version SAP + cas non-existant (version 2025 absente du corpus). Le pattern fonctionne, est domain-agnostic (s'applique à études cliniques, versions de loi, campagnes marketing, etc.), et constitue **le différenciateur principal** vs Microsoft GraphRAG sur les questions complexes. Présenter la démo V0.1 sans Query Decomposer reviendrait à amputer OSMOSIS de sa vraie force argumentative.
+
+**Ce qu'il faut faire** :
+1. Créer `src/knowbase/api/services/query_decomposer.py` à partir du prototype, mode shadow (déclenché uniquement sur signal de complexité/comparaison/énumération en amont du retrieval principal)
+2. **Principe d'intégrité** : si une sous-requête n'a pas de matière dans le KG, refuser de répondre globalement et **proposer une clarification interactive** (ex: *"Je peux répondre pour les versions 2022 et 2023 mais pas 2025. Voulez-vous que je traite uniquement les versions disponibles ?"*). Cf. ADR section 4bis dans `[futur]_RETRIEVAL_QUERY_DECOMPOSITION.md`.
+3. Observabilité : log par sous-question (texte, axes injectés, nombre de chunks ramenés, score de confiance), traçabilité dans le cockpit
+4. Fallback DIRECT propre si la décomposition retourne 0 sous-questions ou si toutes échouent
+5. Tests cross-domain : vérifier que le prompt de décomposition ne contient aucun biais SAP
+
+**Effort estimé** : 1-2 jours pour une intégration propre + observabilité + tests.
+
+**Référence** : `doc/ongoing/[futur]_RETRIEVAL_QUERY_DECOMPOSITION.md` (incl. section 4bis sur le principe d'intégrité).
+
+**Validation** : sur le corpus SAP, la question *"différences Security Guide 2022 vs 2023"* doit ramener des chunks des **deux** versions. Sur la question *"différences 2022 vs 2025"* (2025 absent), le système doit refuser proprement et proposer une reformulation.
+
+---
+
+### Récapitulatif MUST HAVE — *révisé 08/04 soir*
+
+| Item | Effort | Statut | Dépendance |
+|---|---|---|---|
+| M1. Fix ComparableSubject | 1-2 j | ✅ **FAIT** (08/04) | — |
+| M2. `build_perspectives` dans post-import | 4-8 h | ⏳ | — |
+| M3. Externalisation stopwords multilingues | 4-8 h | ⏳ | — |
+| **M7. Query Decomposer (intégration propre)** 🆕 | 1-2 j | ⏳ | — |
+| M5. Stabiliser benchmarks baseline | 1 j (attente) | 🟡 juge fixé, à relancer | — |
+| M6. Runbook ingestion externe | 2-4 h | ⏳ | — |
+| **M8. Doc cadrage interlocuteur** 🆕 (ex-S4) | 2-3 h | ⏳ | — |
+| M4. Dry-run corpus externe de test | 1-2 j | ⏳ | M2, M3, M7 |
+| **Total estimé** | **~7-9 jours** de travail focalisé | | |
+
+**Promotions 08/04 soir** :
+- **M1** est complété (gazetteer branché, 23 DCs ré-résolus, AxisValues propagés Qdrant, 60 Perspectives rebuilt)
+- **M7 Query Decomposer** promu MUST HAVE : prototype validé sur cross-version + cas impossibles. Impact qualité majeur sur questions complexes décomposables (comparaisons, énumérations, chronologies). Hors de question de présenter la démo sans ce différenciateur vs Microsoft GraphRAG. Cf. `doc/ongoing/[futur]_RETRIEVAL_QUERY_DECOMPOSITION.md`. **Inclut** : intégration shadow dans le retrieval, principe d'intégrité (refus + clarification interactive sur sous-requêtes vides), observabilité par sous-question, fallback DIRECT propre.
+- **M8 Doc cadrage** (ex-S4) promu MUST HAVE : structurant pour la préparation, doit être écrit AVANT le dry-run pour cadrer ce qu'on cherche à valider.
+
+**Ordre recommandé révisé** :
+1. **J1 matin** : lancer M5 en async (benchmarks tournent en arrière-plan), démarrer M2 + M3 en parallèle
+2. **J1-J2** : finir M2+M3, démarrer M7 Query Decomposer
+3. **J3-J4** : M7 (intégration + tests + observabilité)
+4. **J4 soir** : M6 Runbook + M8 Doc cadrage (en parallèle, courts)
+5. **J5-J6** : M4 Dry-run corpus externe non-SAP (validation finale)
+6. **J7+** : buffer pour fixes découverts au dry-run
+
+**Contexte temporel** : la démo, si elle a lieu, ne se fera pas avant 2 semaines minimum. Cela donne la marge pour intégrer M7 proprement plutôt qu'à la va-vite.
 
 ---
 
@@ -239,7 +277,7 @@ Le pire est que **ça ne génère pas d'erreur**. Le système tournera, produira
 
 ---
 
-### S4. Documentation de cadrage pour l'interlocuteur
+### ~~S4~~ → **M8. Documentation de cadrage pour l'interlocuteur** — *promu MUST HAVE 08/04*
 
 **Problème** : la démo sera d'autant plus crédible qu'elle est cadrée clairement dès le départ. Un interlocuteur qui découvre les limitations pendant la démo est un interlocuteur déçu ; un interlocuteur qui les connaît à l'avance est un interlocuteur qui juge le système sur ce qu'il promet, pas sur ce qu'il ne prétend pas être.
 
