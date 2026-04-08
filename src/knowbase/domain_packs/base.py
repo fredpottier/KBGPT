@@ -185,5 +185,61 @@ class DomainPack(ABC):
         defaults = self._load_defaults_json()
         return defaults.get("entity_stoplist", [])
 
+    def get_product_gazetteer(self) -> List[str]:
+        """Liste de canonicals d'entités du domaine (produits, concepts stables).
+
+        Cette liste est utilisee par le SubjectResolver pour contraindre le
+        choix du ComparableSubject a des canonicals connus du domaine, evitant
+        la derive et les doublons (ex: "S/4HANA" vs "SAP S/4HANA" vs "S/4HANA
+        Cloud Private Edition" tous traites comme des entites differentes).
+
+        IMPORTANT : la liste doit etre ordonnee du MOINS specifique au PLUS
+        specifique quand il y a une hierarchie implicite. Exemple pour SAP :
+            - "SAP S/4HANA" (parent)
+            - "SAP S/4HANA Cloud" (enfant)
+            - "SAP S/4HANA Cloud Private Edition" (petit-enfant)
+            - "SAP S/4HANA Cloud Public Edition" (petit-enfant)
+        Le SubjectResolver prefererera le PLUS COURT match quand plusieurs
+        canonicals correspondent.
+
+        Un pack qui n'a pas de gazetteer explicite retourne une liste vide —
+        le resolver revient alors a son comportement LLM libre (comportement
+        historique, avant cette feature).
+
+        Charge depuis la cle 'product_gazetteer' du context_defaults.json.
+        """
+        defaults = self._load_defaults_json()
+        gazetteer = defaults.get("product_gazetteer", [])
+        if not isinstance(gazetteer, list):
+            logger.warning(
+                f"[DomainPack:{self.name}] product_gazetteer is not a list, ignoring"
+            )
+            return []
+        return [str(item).strip() for item in gazetteer if item]
+
+    def get_canonical_aliases(self) -> dict:
+        """Table d'alias -> canonical pour la resolution d'entites.
+
+        Permet de mapper des variantes communes (acronymes, orthographes
+        alternatives) vers leur forme canonique preferee. Utilise conjointement
+        avec le product_gazetteer par le SubjectResolver.
+
+        Exemple pour SAP :
+            {"S/4": "SAP S/4HANA", "S4HC": "SAP S/4HANA Cloud", "PCE":
+             "SAP S/4HANA Cloud Private Edition"}
+
+        Retourne un dict vide si le pack n'en fournit pas.
+
+        Charge depuis la cle 'canonical_aliases' du context_defaults.json.
+        """
+        defaults = self._load_defaults_json()
+        aliases = defaults.get("canonical_aliases", {})
+        if not isinstance(aliases, dict):
+            logger.warning(
+                f"[DomainPack:{self.name}] canonical_aliases is not a dict, ignoring"
+            )
+            return {}
+        return {str(k): str(v) for k, v in aliases.items() if k and v}
+
 
 __all__ = ["DomainPack", "DomainEntityExtractor"]

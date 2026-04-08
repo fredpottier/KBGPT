@@ -224,6 +224,7 @@ class SubjectResolverV2:
         self,
         tenant_id: str = "default",
         llm_client: Any = None,
+        domain_packs: Optional[List[Any]] = None,
     ):
         """
         Initialise le resolver v2.
@@ -231,9 +232,16 @@ class SubjectResolverV2:
         Args:
             tenant_id: Tenant ID
             llm_client: Client LLM (optionnel, utilise LLMRouter si None)
+            domain_packs: Liste de DomainPack explicites (optionnel, pour tests).
+                Si None, charges automatiquement via le registry en utilisant
+                tenant_id.
         """
         self.tenant_id = tenant_id
         self._llm_client = llm_client
+        self._explicit_packs = domain_packs
+
+        # Gazetteer agrege (cache lazy — voir _get_gazetteer_context)
+        self._gazetteer_cache: Optional[Dict[str, Any]] = None
 
         # Stats
         self._stats = {
@@ -243,6 +251,68 @@ class SubjectResolverV2:
             "parse_errors": 0,
             "validation_errors": 0,
         }
+
+    def _get_gazetteer_context(self) -> Dict[str, Any]:
+        """Retourne le gazetteer agrege des domain packs actifs (avec cache).
+
+        Charge lazily au premier appel. Agrège tous les active_packs du tenant
+        (ou les packs explicites fournis au constructor) et construit :
+        - products : liste unique de canonicals, triee par longueur croissante
+          (les plus courts en premier pour que le LLM prefere les parents
+          hierarchiques quand plusieurs matchent)
+        - aliases : dict fusionne de tous les canonical_aliases des packs
+
+        Returns:
+            dict {"products": list[str], "aliases": dict[str, str]}.
+            Dict vide si aucun pack n'a de gazetteer.
+        """
+        if self._gazetteer_cache is not None:
+            return self._gazetteer_cache
+
+        # Charger les packs actifs
+        packs = self._explicit_packs
+        if packs is None:
+            try:
+                from knowbase.domain_packs.registry import get_pack_registry
+                registry = get_pack_registry()
+                packs = registry.get_active_packs(self.tenant_id) or []
+            except Exception as e:
+                logger.warning(
+                    f"[SubjectResolverV2] Could not load domain packs: {e} — "
+                    f"resolver will run without gazetteer context"
+                )
+                self._gazetteer_cache = {"products": [], "aliases": {}}
+                return self._gazetteer_cache
+
+        # Agreger
+        products_set: Dict[str, None] = {}  # ordered dict for unique + stable order
+        aliases: Dict[str, str] = {}
+        for pack in packs:
+            try:
+                gaz = pack.get_product_gazetteer()
+                for item in gaz:
+                    products_set[item] = None
+                aliases.update(pack.get_canonical_aliases())
+            except Exception as e:
+                logger.warning(
+                    f"[SubjectResolverV2] Error reading gazetteer from pack "
+                    f"{getattr(pack, 'name', '?')}: {e}"
+                )
+                continue
+
+        # Trier par longueur croissante (parents hierarchiques en premier)
+        products_list = sorted(products_set.keys(), key=lambda s: (len(s), s))
+
+        self._gazetteer_cache = {
+            "products": products_list,
+            "aliases": aliases,
+        }
+        if products_list:
+            logger.info(
+                f"[SubjectResolverV2] Gazetteer loaded : {len(products_list)} "
+                f"canonical products, {len(aliases)} aliases (tenant={self.tenant_id})"
+            )
+        return self._gazetteer_cache
 
     def resolve(
         self,
@@ -353,7 +423,7 @@ class SubjectResolverV2:
         Returns:
             Prompt utilisateur formaté
         """
-        return USER_PROMPT_TEMPLATE.format(
+        base_prompt = USER_PROMPT_TEMPLATE.format(
             filename=filename,
             title=title,
             header_snippets_json=json.dumps(header_snippets, ensure_ascii=False),
@@ -361,6 +431,159 @@ class SubjectResolverV2:
             global_view_excerpt=global_view_excerpt,
             candidates_json=json.dumps(candidates, ensure_ascii=False),
         )
+
+        # Injection du gazetteer du domaine (domain pack actif) en section USER
+        # (pas system — le prompt system reste domain-agnostic par construction).
+        # Le LLM recoit une liste de canonicals connus et doit preferer ceux-ci
+        # quand ils matchent. Le gazetteer est PRE-FILTRE sur la pertinence au
+        # document courant pour eviter un prompt geant et biaiser correctement
+        # le LLM vers les canonicals qui ont une chance de matcher.
+        document_context = self._build_relevance_context(
+            candidates=candidates,
+            filename=filename,
+            title=title,
+            header_snippets=header_snippets,
+            cover_snippets=cover_snippets,
+            global_view_excerpt=global_view_excerpt,
+        )
+        gazetteer_section = self._build_gazetteer_section(document_context)
+        if gazetteer_section:
+            return base_prompt + "\n\n" + gazetteer_section
+        return base_prompt
+
+    def _build_relevance_context(
+        self,
+        candidates: List[str],
+        filename: str,
+        title: str,
+        header_snippets: List[str],
+        cover_snippets: List[str],
+        global_view_excerpt: str,
+    ) -> str:
+        """Concatene tout le contexte textuel disponible pour filtrage lexical.
+
+        Utilise pour pre-filtrer le gazetteer : ne garder que les canonicals
+        dont au moins une partie significative apparait dans ce contexte.
+        """
+        parts = [filename, title]
+        parts.extend(candidates)
+        parts.extend(header_snippets)
+        parts.extend(cover_snippets)
+        if global_view_excerpt:
+            parts.append(global_view_excerpt[:2000])
+        return " ".join(str(p) for p in parts if p).lower()
+
+    @staticmethod
+    def _canonical_matches_context(canonical: str, context_lower: str) -> bool:
+        """Teste si un canonical est pertinent pour le document courant.
+
+        Un canonical est pertinent si tous ses mots significatifs (>=3 chars,
+        non-stopword) apparaissent dans le contexte. C'est volontairement
+        permissif : on prefere inclure trop plutot que rater un match.
+        """
+        # Mots significatifs du canonical (on ignore les mots courts)
+        STOPWORDS = {"sap", "the", "and", "for", "with", "in", "of", "on", "to", "a", "an"}
+        words = [w for w in re.split(r"[\s\-_/]+", canonical.lower()) if len(w) >= 3]
+        if not words:
+            return False
+        # Retirer les stopwords, mais si tous les mots sont des stopwords,
+        # on garde le canonical tel quel (ex: "SAP FI" => ["sap", "fi"], tous
+        # filtrés, on test alors la chaine entiere)
+        significant = [w for w in words if w not in STOPWORDS]
+        if not significant:
+            # Tous stopwords — test la chaine complete (ex: "SAP FI")
+            return canonical.lower() in context_lower
+        # Tous les mots significatifs doivent apparaitre dans le contexte
+        return all(w in context_lower for w in significant)
+
+    def _build_gazetteer_section(self, document_context: str = "") -> str:
+        """Construit la section `KNOWN CANONICAL ENTITIES` a ajouter au user prompt.
+
+        Filtre le gazetteer pour ne garder que les canonicals pertinents pour
+        le document courant (au moins un mot significatif present dans le
+        contexte textuel du document). Cela evite un prompt geant et biaise
+        correctement le LLM vers les canonicals qui ont une chance de matcher.
+
+        Retourne une chaine vide si :
+        - aucun pack actif n'a de gazetteer
+        - aucun canonical ne matche le contexte du document
+        """
+        ctx = self._get_gazetteer_context()
+        products = ctx.get("products", [])
+        aliases = ctx.get("aliases", {})
+
+        if not products:
+            return ""
+
+        # Pre-filtrage par pertinence lexicale
+        if document_context:
+            relevant = [p for p in products if self._canonical_matches_context(p, document_context)]
+        else:
+            relevant = products
+
+        if not relevant:
+            logger.debug(
+                "[SubjectResolverV2] No relevant canonical matches document context, "
+                "falling back to top 50 shortest canonicals"
+            )
+            relevant = products[:50]
+
+        # Cap final pour protection : 80 canonicals max injectes
+        MAX_PRODUCTS = 80
+        products_display = relevant[:MAX_PRODUCTS]
+        truncated_note = ""
+        if len(relevant) > MAX_PRODUCTS:
+            truncated_note = f"\n(+ {len(relevant) - MAX_PRODUCTS} other relevant canonicals not shown)"
+
+        products_lines = "\n".join(f"- {p}" for p in products_display)
+
+        # Alias : inclure seulement ceux dont la valeur (canonical) est dans
+        # les relevants ou dont la cle (alias) apparait dans le contexte
+        relevant_aliases = {}
+        if aliases:
+            relevant_canonicals_set = set(products_display)
+            for alias, canonical in aliases.items():
+                if canonical in relevant_canonicals_set:
+                    relevant_aliases[alias] = canonical
+                elif document_context and alias.lower() in document_context:
+                    relevant_aliases[alias] = canonical
+
+        aliases_text = ""
+        if relevant_aliases:
+            MAX_ALIASES = 30
+            alias_lines = "\n".join(
+                f"- {alias} -> {canonical}"
+                for alias, canonical in list(relevant_aliases.items())[:MAX_ALIASES]
+            )
+            aliases_text = f"\n\nRelevant alias mapping (use them to resolve variants to their canonical form):\n{alias_lines}"
+
+        section = f"""KNOWN CANONICAL ENTITIES IN THIS DOMAIN (filtered to those relevant to this document):
+The following is a catalogue of canonical entities known in the current
+domain, pre-filtered to keep only those that share keywords with the
+document context. When a candidate in the input MATCHES one of these
+canonicals (exactly, via an alias, or as a superstring/substring), you
+SHOULD use the catalogue canonical as the label of the COMPARABLE_SUBJECT
+rather than inventing a new one.
+
+When multiple canonicals match, prefer the SHORTEST one (which is typically
+the parent in a hierarchy). For example, if the document is a general
+guide discussing "Product X" but mentions a deployment variant like
+"Product X Cloud Edition" in passing, the subject is "Product X", not the
+variant. The variant should be classified as an AXIS_VALUE with role
+`applicability_scope` or `revision`.
+
+Relevant canonicals for this document (sorted shortest first):
+{products_lines}{truncated_note}{aliases_text}
+
+IMPORTANT :
+- This catalogue is advisory, not mandatory. If no canonical clearly fits
+  the document, fall back to the standard decomposition rules.
+- Deployment variants, editions, sub-products are AXIS_VALUES, not
+  subjects — the subject is the parent product they belong to.
+- Always cite your decision via evidence from the document (title,
+  filename, headers) as usual, whether or not you use a catalogue canonical.
+"""
+        return section
 
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
         """
