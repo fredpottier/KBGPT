@@ -172,6 +172,7 @@ Une fois qu'on a un `QueryDecomposer`, on peut couvrir plusieurs classes de ques
 | **causal_decomposition** | *"Pourquoi X implique Y ?"* | 3 sub-queries : *"qu'est-ce que X"*, *"qu'est-ce que Y"*, *"quel lien X/Y"* |
 | **perspective** | *"Comment différents acteurs voient le projet ?"* | Sub-queries par acteur/persona si connus, sinon fallback |
 | **simple** | *"Quelle est la règle de sécurité pour le login ?"* | Pas de décomposition, retrieval direct |
+| **clarification_needed** | *"Compare la version 2022 et 2024"* (et 2024 n'existe pas dans le corpus) | Pas de retrieval. Réponse de clarification avec alternatives valides. Voir section 4bis pour le détail du pattern |
 
 **Note importante** : la distinction entre `simple` et les autres types est la décision critique du `QueryDecomposer`. Sur-décomposer une question simple ajoute du coût et de la latence sans gain. Sous-décomposer une question complexe manque l'opportunité. Le prompt du decomposer doit être **conservateur par défaut** et ne décomposer que si le signal est clair.
 
@@ -256,6 +257,181 @@ Un retrieval sémantique sans AxisValues peut fonctionner dans le cas simple, ma
 
 ---
 
+## 4bis. Comportement face aux requêtes impossibles — principe d'intégrité
+
+### Le principe
+
+OSMOSIS doit respecter un invariant strict : **ne jamais inventer une information, ne jamais induire le lecteur en erreur par une formulation ambiguë**. C'est le pendant utilisateur du principe *evidence-locked* qui régit déjà l'extraction et la synthèse.
+
+Concrètement, quand un utilisateur pose une question qui mentionne explicitement des éléments **qui n'existent pas dans le corpus** (versions, entités, périodes...), OSMOSIS doit :
+
+1. **Détecter l'impossibilité** structurellement, pas la dissimuler
+2. **Signaler clairement** ce qui n'est pas disponible
+3. **Proposer les alternatives valides** présentes dans le corpus
+4. **Ne pas substituer silencieusement** un élément voisin à celui demandé
+5. **Permettre à l'utilisateur de reformuler** ou de poursuivre avec ce qui est possible
+
+### Test empirique réalisé (08/04 soir)
+
+Un test sur le prototype a comparé les comportements DECOMPOSED vs MONO-QUERY actuel face à une question de comparaison entre une version existante (2022) et une version inexistante (2024) sur le corpus SAP.
+
+**Question testée** :
+```
+Quelles sont les principales différences dans la description des permissions
+d'accès entre la version 2022 et 2024 du Guide de Sécurité SAP ?
+```
+
+**Comportement DECOMPOSED (prototype)** :
+```
+sub_queries:
+  q1 : scope_filter {release_id: 2022} → 11 chunks (10 × 2022)
+  q2 : scope_filter {release_id: 2024} → 0 chunks
+
+Synthèse : "les informations pour la version 2024 ne sont pas fournies
+            dans les documents fournis. Par conséquent, nous ne pouvons
+            pas comparer les descriptions des permissions d'accès entre
+            les deux versions. Pour la version 2022, [...]"
+```
+
+**Comportement MONO-QUERY (baseline actuelle)** :
+```
+"## ⚠️ Avertissement préalable... aucun 'Guide de Sécurité SAP 2024' n'est
+explicitement disponible..."
+
+Puis, juste après :
+"## Éléments comparables : 2022 vs 2023"
+[suit une comparaison 2022 vs 2023 alors que l'utilisateur demandait 2024]
+```
+
+### Le verdict
+
+| Critère | DECOMPOSED | MONO-QUERY |
+|---|:---:|:---:|
+| Détecte l'absence de la version | ✅ | ✅ |
+| **Ne fabrique pas de comparaison fictive** | **✅** | **❌ substitue 2023 à 2024** |
+| Reste utile sur ce qu'il a (2022) | ✅ | ✅ |
+| Honnêteté pour un utilisateur qui scanne rapidement | ✅ | ⚠️ avertissement enterré sous une réponse trompeuse |
+
+Le comportement MONO-QUERY actuel **viole le principe d'intégrité** : un utilisateur qui scanne rapidement la réponse y voit une comparaison structurée et peut facilement croire qu'il a la réponse à sa question, alors qu'il lit en fait une réponse à une **autre question** que le système a inventée pour lui faire plaisir. L'avertissement existe mais il est enterré sous une réponse en apparence complète.
+
+Le comportement DECOMPOSED est **fail-honest** : il dit clairement *"je ne peux pas comparer parce que 2024 n'existe pas dans le corpus"*. C'est suffisant pour l'intégrité, mais on peut faire mieux côté UX.
+
+### Comportement cible — Clarification interactive
+
+Le comportement idéal pour ce cas n'est pas juste "refuser honnêtement", c'est **proposer une voie de continuation à l'utilisateur**. Pattern proposé :
+
+```
+Question utilisateur :
+  "Différences entre Security Guide 2022 et 2024 ?"
+                        ↓
+[QueryDecomposer]
+                        ↓
+Pré-validation : 2024 ∉ known_axes → impossible_filter détecté
+                        ↓
+QueryPlan {
+  plan_type: "clarification_needed",
+  unavailable_filters: [{ axis: "release_id", value: "2024" }],
+  available_alternatives: ["1809", "2021", "2023", "2025", "2023 FPS03", "2023 SPS04"],
+  reasoning: "version 2024 not present in corpus"
+}
+                        ↓
+Réponse OSMOSIS (pas un contenu factuel, mais un dialogue) :
+  "Je ne peux pas répondre directement à votre question : la version 2024
+   du Security Guide n'est pas présente dans le corpus.
+
+   Voici les versions disponibles : 2021, 2022, 2023, 2025.
+
+   Souhaitez-vous :
+     [a] Comparer 2022 avec une version disponible (2023, 2025...) ?
+     [b] Voir uniquement ce qui est documenté pour la version 2022 ?
+     [c] Reformuler votre question ?"
+                        ↓
+[L'utilisateur répond, ou reformule]
+                        ↓
+Si choix [b] : fallback automatique en mode DIRECT sur la version 2022
+Si choix [a] avec une version : retour en mode comparison avec les bonnes versions
+Si choix [c] : nouvelle décomposition sur la nouvelle question
+```
+
+Ce pattern :
+
+- **Garantit l'intégrité** : pas d'invention, pas de substitution
+- **Garde l'utilisateur engagé** : il reçoit des options claires plutôt qu'un mur de "désolé"
+- **Préserve la valeur** : si l'utilisateur ne veut que la version disponible, on n'a pas besoin de relancer un nouveau pipeline complet — on bascule simplement de mode `comparison` vers mode `simple` sur la sub-query qui a fonctionné
+
+### Implications architecturales
+
+Pour supporter ce comportement, le `QueryDecomposer` doit acquérir deux nouvelles capacités :
+
+**1. Validation pré-retrieval contre les axis values connus du KG**
+
+Avant d'émettre les sub-queries, le decomposer interroge le KG (ou utilise le contexte fourni au prompt) pour vérifier que **chaque valeur d'axis mentionnée dans un scope_filter existe réellement dans le corpus**. C'est une simple intersection ensembliste — pas coûteux, pas LLM-based, déterministe.
+
+```python
+# Pseudo-code
+def validate_query_plan(plan: QueryPlan, known_axes: dict[str, set]) -> ValidationResult:
+    impossible = []
+    for sq in plan.sub_queries:
+        for axis_key, axis_value in sq.scope_filter.items():
+            if axis_value not in known_axes.get(axis_key, set()):
+                impossible.append((axis_key, axis_value))
+    return ValidationResult(
+        is_valid=(len(impossible) == 0),
+        impossible_filters=impossible,
+        available_alternatives={ax: list(known_axes[ax]) for ax in {k for k,_ in impossible}},
+    )
+```
+
+**2. Nouveau type de QueryPlan : `clarification_needed`**
+
+Ajouter aux 4 types existants (`simple`, `comparison`, `enumeration`, `chronological`) un nouveau type **`clarification_needed`** qui correspond à *"j'ai compris la question mais je ne peux pas l'exécuter telle quelle, voici pourquoi et voici les options"*.
+
+Ce type nécessite un nouveau template de réponse côté synthesizer :
+
+```yaml
+CLARIFICATION:
+  Tu es un assistant qui aide l'utilisateur à reformuler sa question quand
+  elle n'est pas exécutable telle quelle. Ne fabrique JAMAIS de réponse,
+  ne substitue JAMAIS un élément à un autre. Présente sobrement :
+    - ce qui n'est pas disponible (et pourquoi)
+    - les alternatives valides présentes dans le corpus
+    - une proposition de reformulation
+```
+
+**3. Gestion de l'état conversationnel** (plus ambitieux)
+
+Pour que l'utilisateur puisse répondre *"oui, montre-moi juste pour 2022"*, il faut que le système retienne le `QueryPlan` initial et reconnaisse que la nouvelle requête est une **sélection** parmi les alternatives proposées. C'est plus complexe : ça touche à la session, à la mémoire conversationnelle, à la gestion du dialogue. Ce n'est pas le scope du chantier de retrieval, mais c'est un pré-requis pour offrir un vrai dialogue de clarification fluide.
+
+**Approche pragmatique pour la première implémentation** :
+
+- v1 : produire un `clarification_needed` qui retourne directement la réponse de clarification, sans gérer la suite du dialogue. L'utilisateur reformule manuellement sa question. C'est déjà mieux que le comportement actuel.
+- v2 : ajouter la mémoire conversationnelle légère (les 1-2 derniers `QueryPlan` de la session) et la détection d'une "réponse de l'utilisateur à une clarification".
+
+### Pattern généralisable au-delà des versions
+
+Cette logique de clarification interactive vaut pour **n'importe quel scope_filter impossible**, pas juste les versions :
+
+| Cas | Décompose en | Si valeur impossible |
+|---|---|---|
+| *"Compare la régulation française et japonaise"* | filter par `region` | si `region: "japonaise"` n'existe pas → propose les régions présentes |
+| *"Différences entre la phase 2 et phase 4 de l'essai X"* | filter par `status` | si phase 4 n'existe pas → propose les phases présentes |
+| *"Entre la campagne 2024 et 2026"* | filter par `temporal` | si 2026 n'existe pas → propose les années présentes |
+| *"Différences entre Pfizer et XYZ-Pharma sur l'étude Y"* | filter par entité produit | si XYZ-Pharma absent → propose les entités présentes |
+
+**Aucun de ces cas n'est domain-specific.** La logique est : *"l'utilisateur a explicité un axis value qui n'existe pas, on lui dit lequel, on propose les valeurs présentes pour cet axis."* C'est strictement structurel.
+
+### Question ouverte ajoutée à la liste
+
+**Q3 (révisée)** : Gestion du cas *"décomposer a produit 0 résultat utile sur une sub-query"*. Trois sous-cas à distinguer :
+
+- **Cas A — l'axis value n'existait pas dans le corpus** (ex: version 2024 inexistante) : déclencher le mode `clarification_needed` avec les alternatives. **Détectable pré-retrieval** par validation contre les known_axes.
+- **Cas B — l'axis value existe mais aucun chunk pertinent à la sub-question** (ex: la version existe mais ne couvre pas le sujet demandé) : produire une réponse partielle qui dit *"sur 2022 j'ai trouvé X, sur 2023 le corpus ne contient pas d'information spécifique au sujet"*. **Détectable post-retrieval** seulement.
+- **Cas C — toutes les sub-queries sont vides** (ex: décomposition complètement hors-corpus) : abstain global avec proposition de reformulation.
+
+Ces trois sous-cas méritent des messages utilisateur différents et un traitement distinct dans le synthesizer.
+
+---
+
 ## 5. Plan d'implémentation
 
 ### Étape 0 — Prototype de validation (1-2h, sans toucher au pipeline)
@@ -337,7 +513,7 @@ Un script Python standalone :
 
 1. **Cache du QueryPlan** : si la même question est posée plusieurs fois (ou très proche), faut-il cacher le plan ? Clé de cache : hash de la question + état du KG (AxisValues disponibles)
 2. **Déduplication inter-subqueries** : si deux sub-queries retournent le même chunk, faut-il le compter deux fois ou une fois ? Impacte la taille du contexte et le coût de synthèse
-3. **Gestion du cas "décomposer a produit 0 résultat utile sur une sub-query"** : fallback sur retrieval classique ? Abstain ? Signaler à l'utilisateur ?
+3. **Gestion du cas "décomposer a produit 0 résultat utile sur une sub-query"** : voir section 4bis qui traite ce point en détail. Trois sous-cas distincts (A : axis value inexistante → `clarification_needed` ; B : axis value présente mais sujet non couvert → réponse partielle honnête ; C : décomposition complètement vide → abstain global). Pattern recommandé : **clarification interactive** plutôt que substitution silencieuse, pour respecter le principe d'intégrité d'OSMOSIS (jamais d'invention, jamais d'induction en erreur par formulation ambiguë).
 4. **Nombre maximum de sub-queries** : limite hard pour éviter les décompositions pathologiques. Proposition : 5 maximum, au-delà on rejette et on fallback
 5. **Profondeur de décomposition** : une sub-query peut-elle être elle-même décomposée ? (multi-level) Proposition : non dans un premier temps, KISS
 6. **Interaction avec PERSPECTIVE** : si le decomposer propose 3 sub-queries et que le retriever active PERSPECTIVE sur chacune, on a 3 sets de Perspectives. Comment les agréger dans la synthèse finale ? À définir

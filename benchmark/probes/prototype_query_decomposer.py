@@ -52,6 +52,11 @@ TEST_QUESTIONS = [
     "Quelles sont les principales differences dans la description des permissions "
     "d'acces entre la version 2022 et 2023 du Guide de Securite SAP ?",
 
+    # Comparison avec une version qui n'existe PAS dans le corpus (2024)
+    # — test du comportement face a une demande impossible
+    "Quelles sont les principales differences dans la description des permissions "
+    "d'acces entre la version 2022 et 2024 du Guide de Securite SAP ?",
+
     # Comparison non-version (variantes produit)
     "Compare SAP S/4HANA et SAP S/4HANA Cloud Private Edition sur les aspects "
     "de gouvernance des donnees.",
