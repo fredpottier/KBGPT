@@ -209,6 +209,78 @@ def link_dc_to_subject(driver, doc_id: str, canonical_name: str, tenant_id: str)
         )
 
 
+def persist_axis_values(
+    driver, doc_id: str, axis_values: List, tenant_id: str
+) -> int:
+    """Persiste les AxisValues du resolver sur le DocumentContext.
+
+    Structure de stockage : applicability_frame_json et qualifiers_json
+    sont mis a jour pour que les autres composants du pipeline puissent
+    les lire (FrameBuilder, ApplicabilityAxisDetector, etc.).
+
+    Note : cette persistance est simplifiee par rapport au flow normal du
+    FrameBuilder (pas de evidence_unit_ids, pas de AuthorityContract). Elle
+    est destinee au re-run offline des AxisValues apres fix du ComparableSubject.
+    """
+    import json as _json
+
+    if not axis_values:
+        return 0
+
+    # Mapper discriminating_role -> field_name standard
+    role_to_field = {
+        "temporal": "publication_year",
+        "revision": "release_id",
+        "geographic": "region",
+        "applicability_scope": "edition",
+        "status": "status",
+    }
+
+    fields = []
+    qualifiers = {}
+    for av in axis_values:
+        role_str = av.discriminating_role.value if hasattr(av.discriminating_role, "value") else str(av.discriminating_role)
+        field_name = role_to_field.get(role_str, role_str)
+        fields.append({
+            "field_name": field_name,
+            "value_raw": av.value_raw,
+            "value_normalized": av.value_raw,  # pas de normalisation sophistiquee ici
+            "discriminating_role": role_str,
+            "confidence": av.confidence,
+            "reasoning": av.rationale,
+            "source": "subject_resolver_v2_rerun",
+        })
+        qualifiers[field_name] = av.value_raw
+
+    frame_json = {
+        "doc_id": doc_id,
+        "fields": fields,
+        "unknowns": [],
+        "method": "subject_resolver_v2_rerun",
+        "validation_notes": [
+            f"Rebuilt from SubjectResolverV2 rerun (offline) — "
+            f"{len(fields)} axis values persisted, no FrameBuilder evidence-locking"
+        ],
+    }
+
+    with driver.session() as session:
+        session.run(
+            """
+            MATCH (dc:DocumentContext {doc_id: $doc_id, tenant_id: $tenant_id})
+            SET dc.applicability_frame_json = $frame_json,
+                dc.qualifiers_json = $qualifiers_json,
+                dc.applicability_frame_method = 'subject_resolver_v2_rerun',
+                dc.applicability_frame_field_count = $n_fields
+            """,
+            doc_id=doc_id,
+            tenant_id=tenant_id,
+            frame_json=_json.dumps(frame_json, ensure_ascii=False),
+            qualifiers_json=_json.dumps(qualifiers, ensure_ascii=False),
+            n_fields=len(fields),
+        )
+    return len(fields)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════════════════
@@ -256,8 +328,10 @@ def main():
             "abstained": 0,
             "errors": 0,
             "file_not_found": 0,
+            "axis_values_persisted": 0,
         }
         canonical_counts: Dict[str, int] = {}
+        axis_role_counts: Dict[str, int] = {}
 
         for i, dc in enumerate(dcs, 1):
             doc_id = dc["doc_id"]
@@ -325,9 +399,26 @@ def main():
             stats["resolved"] += 1
             canonical_counts[canonical] = canonical_counts.get(canonical, 0) + 1
 
+            # Extraire les axis_values pour logging et persistance
+            axis_values = output.axis_values if output else []
+            if axis_values:
+                axis_summary = ", ".join(
+                    f"{av.discriminating_role.value if hasattr(av.discriminating_role,'value') else av.discriminating_role}={av.value_raw}"
+                    for av in axis_values
+                )
+                logger.info(f"  AXIS_VALUES → {axis_summary}")
+                for av in axis_values:
+                    role = av.discriminating_role.value if hasattr(av.discriminating_role,'value') else str(av.discriminating_role)
+                    axis_role_counts[role] = axis_role_counts.get(role, 0) + 1
+            else:
+                logger.info(f"  AXIS_VALUES → (none)")
+
             if not args.dry_run:
                 upsert_comparable_subject(driver, new_cs)
                 link_dc_to_subject(driver, doc_id, canonical, args.tenant)
+                if axis_values:
+                    n = persist_axis_values(driver, doc_id, axis_values, args.tenant)
+                    stats["axis_values_persisted"] += n
 
         # Rapport final
         print("\n" + "=" * 78)
@@ -342,6 +433,13 @@ def main():
         print(f"Unique canonical subjects ({len(canonical_counts)}) :")
         for canonical, count in sorted(canonical_counts.items(), key=lambda x: -x[1]):
             print(f"  {count:3d} × {canonical}")
+
+        print()
+        print(f"Axis values persisted : {stats['axis_values_persisted']}")
+        if axis_role_counts:
+            print(f"Axis roles distribution :")
+            for role, count in sorted(axis_role_counts.items(), key=lambda x: -x[1]):
+                print(f"  {count:3d} × {role}")
 
         if args.dry_run:
             print("\n[DRY-RUN] No changes written to the graph.")
