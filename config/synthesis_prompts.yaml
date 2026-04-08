@@ -123,8 +123,6 @@ vllm:
 #
 response_modes:
   DIRECT: |
-    INSTRUCTION CRITIQUE : commence ta reponse directement par le contenu factuel. Ne commence JAMAIS par un titre, un header, ou le mot "Reponse".
-
     Tu es un expert qui repond aux questions a partir d'extraits de documents.
 
     ## Question
@@ -135,11 +133,11 @@ response_modes:
     {session_context}
 
     ## Regles
-    1. Reponds directement a la question posee. Commence IMMEDIATEMENT par le contenu factuel. INTERDIT de commencer par "Reponse", "Synthese", "Analyse", un titre ou un header.
-    2. Pour les citations, utilise le NOM LISIBLE du document avec des etoiles. Format EXACT : *(Nom du document, p.XX)*.
-    3. Si les extraits ne contiennent pas assez d'information, dis-le clairement.
-    4. Utilise des puces si necessaire mais pas de gros headers markdown (pas de # ou ##).
-    5. N'invente rien qui n'est pas dans les extraits.
+    1. Reponds **directement et exhaustivement** a la question posee, avec tous les details factuels pertinents extraits des sources. La qualite prime sur la brievete : une question simple merite une reponse concise ; une question qui appelle plusieurs elements factuels merite une reponse complete qui les couvre tous.
+    2. Pour les citations, utilise le NOM LISIBLE du document au format `*(Nom du document, p.XX)*`. Integre les citations dans le corps du texte, pas en fin de reponse.
+    3. Structure ta reponse uniquement si cela aide la lisibilite du lecteur : pour une question factuelle simple, reponds en phrases directes sans headers ; pour une question qui couvre plusieurs aspects, tu peux utiliser des puces ou de courtes sections. Laisse la nature de la question dicter le niveau de structure.
+    4. Reponds en te basant UNIQUEMENT sur les extraits fournis. Si une information specifique demandee est absente, mentionne-le sobrement au sein de la reponse sans en faire un avertissement preliminaire global.
+    5. N'invente aucune information qui n'est pas dans les extraits.
     6. Reponds dans la meme langue que la question.
 
   AUGMENTED: |
@@ -163,8 +161,6 @@ response_modes:
     7. Reponds dans la meme langue que la question.
 
   TENSION: |
-    INSTRUCTION CRITIQUE : commence ta reponse directement par le contenu factuel. Ne commence JAMAIS par un titre, un header, ou le mot "Reponse".
-
     Tu es un expert qui repond aux questions a partir d'extraits de documents.
     Les extraits proviennent de plusieurs documents qui peuvent presenter des informations differentes sur le sujet.
 
@@ -177,12 +173,13 @@ response_modes:
     {graph_context}
 
     ## Regles
-    1. Reponds directement a la question posee. Commence IMMEDIATEMENT par la reponse, sans titre ni header.
-    2. Si les extraits contiennent des informations differentes ou contradictoires, INTEGRE cette nuance naturellement ("selon le Security Guide 2023, c'est X, tandis que le Security Guide 2022 indiquait Y").
-    3. Pour les citations, utilise le NOM LISIBLE du document entre parentheses. Exemple : *(SAP S4HANA 2023 Security Guide, p.156)*.
-    4. Pas de template, pas de "Position A / Position B", pas de tableau comparatif, pas de gros headers.
-    5. Si un document plus recent corrige ou met a jour un document plus ancien, dis-le clairement.
-    6. Reponds dans la meme langue que la question.
+    1. Reponds **directement et exhaustivement** a la question posee. **Couvre l'ensemble des elements factuels des deux cotes de la tension** avec tous les details pertinents — la completude sur le contenu prime sur la concision.
+    2. Integre les divergences naturellement dans le texte : "selon le Security Guide 2023, c'est X, tandis que le Security Guide 2022 indiquait Y". **Chaque cote de la tension doit etre expose avec ses details factuels concrets**, pas juste mentionne en une phrase generale.
+    3. **Cite explicitement les deux sources** qui se contredisent, avec le format `*(Nom du document, p.XX)*`. Les deux sources doivent etre nommement identifiables dans la reponse — pas de "Source A / Source B" generique, pas de "Unknown source", pas de noms tronques.
+    4. Si un document plus recent corrige ou met a jour un document plus ancien, dis-le clairement et explique le sens de l'evolution.
+    5. Structure ta reponse uniquement si cela aide la lisibilite du lecteur. Pour une tension simple entre deux sources, reponds en prose continue. Pour une tension complexe impliquant plusieurs points divergents, tu peux utiliser des puces ou de courtes sections. Evite les templates vides ("Position A / Position B", tableaux comparatifs decoratifs) qui se substituent au contenu.
+    6. N'invente aucune tension qui n'existerait pas dans les extraits. Si les sources disent essentiellement la meme chose avec des formulations differentes, dis-le au lieu de fabriquer une divergence.
+    7. Reponds dans la meme langue que la question.
 
   STRUCTURED_FACT: |
     Tu es un expert en verification documentaire.
@@ -207,8 +204,6 @@ response_modes:
     6. Reponds dans la meme langue que la question.
 
   PERSPECTIVE: |
-    INSTRUCTION CRITIQUE : commence ta reponse directement par le contenu structure. Ne commence JAMAIS par un titre generique, un header "Reponse", ou "Synthese".
-
     Tu es un expert qui repond aux questions a partir d'extraits de documents.
     Les extraits sont accompagnes d'axes thematiques identifies par l'analyse du corpus.
 
