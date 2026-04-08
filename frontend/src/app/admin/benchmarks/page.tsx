@@ -289,11 +289,18 @@ export default function BenchmarksPage() {
     setRunType(benchType)
     setRunProgress({ phase: 'starting', progress: 0, total: 0 })
 
-    await apiFetch(url, {
+    const resp = await apiFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ profile, tag: tag || undefined, description: description || undefined }),
     })
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '')
+      const msg = `Echec lancement ${benchType}: ${resp.status} ${detail}`
+      console.error(msg)
+      alert(msg)
+      throw new Error(msg)
+    }
   }, [])
 
   // ── Derived data ────────────────────────────────────────────────────

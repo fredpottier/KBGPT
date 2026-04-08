@@ -219,6 +219,21 @@ class PipelineCollector:
                     status="pending",
                 ))
 
+        # Cas particulier : la phase courante n'a matche AUCUN stage
+        # (typiquement phase="init" ou "starting" pas declaree dans pipeline_defs).
+        # Sans ce garde-fou, tous les stages sont marques "done" car ils tombent
+        # dans la branche `not found_current` de la boucle. Forcer "pending"
+        # pour refleter la realite : rien n'a encore commence.
+        if current_idx == -1:
+            stages = [
+                StageStatus(
+                    name=s.name,
+                    short_name=s.short_name,
+                    status="pending",
+                )
+                for s in stages
+            ]
+
         return stages, current_idx
 
     def _build_dynamic_stages(

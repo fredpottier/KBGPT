@@ -85,6 +85,8 @@ class KnowledgeStatus:
     neo4j_claims: int = 0
     neo4j_entities: int = 0
     neo4j_facets: int = 0
+    neo4j_perspectives: int = 0
+    neo4j_subjects: int = 0
     neo4j_relations: int = 0
     neo4j_contradictions: int = 0
     last_refresh: Optional[str] = None
@@ -135,6 +137,23 @@ class T2T5Report:
 
 
 @dataclass
+class RobustnessReport:
+    global_score: float = 0.0
+    causal_why_score: float = 0.0
+    conditional_score: float = 0.0
+    false_premise_score: float = 0.0
+    hypothetical_score: float = 0.0
+    multi_hop_score: float = 0.0
+    negation_score: float = 0.0
+    set_list_score: float = 0.0
+    synthesis_large_score: float = 0.0
+    temporal_evolution_score: float = 0.0
+    unanswerable_score: float = 0.0
+    total_evaluated: int = 0
+    timestamp: str = ""
+
+
+@dataclass
 class SmartEvent:
     timestamp: str
     severity: str  # info|warning|critical
@@ -154,6 +173,7 @@ class CockpitState:
     llm_balances: LLMBalanceStatus = field(default_factory=LLMBalanceStatus)
     ragas: Optional[RagasReport] = None
     t2t5: Optional[T2T5Report] = None
+    robustness: Optional[RobustnessReport] = None
     events: list[SmartEvent] = field(default_factory=list)
 
     def to_json(self) -> str:

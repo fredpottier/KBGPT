@@ -560,9 +560,14 @@ export function OverviewTab({
         isRunning={isRunning}
         runProgress={runProgress}
         onLaunchAll={async () => {
+          // Sequential, awaited — sinon les setStates s'ecrasent et les
+          // erreurs (ex: 409 stale state) sont silencieuses.
           for (const bt of ['ragas', 't2t5', 'robustness']) {
-            onLaunch(bt, selectedProfile, tag, description)
-            // Small delay so each request is dispatched
+            try {
+              await onLaunch(bt, selectedProfile, tag, description)
+            } catch (err) {
+              console.error(`[LaunchAll] Failed to launch ${bt}:`, err)
+            }
             await new Promise(r => setTimeout(r, 500))
           }
         }}

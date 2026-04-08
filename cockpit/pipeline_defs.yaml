@@ -141,6 +141,28 @@ pipelines:
       - "starting"
     run_id_field: "job_id"
 
+  benchmark-robustness:
+    display_name: "ROBUSTESSE"
+    redis_key: "osmose:benchmark:robustness:state"
+    redis_type: json
+    stages:
+      - name: "API + Evaluation"
+        short: "Eval"
+        phase_match: "api_eval"
+        iterable: true
+        progress_fields:
+          done: "progress"
+          total: "total"
+      - name: "Rapport"
+        short: "Rpt"
+        phase_match: "report"
+    started_field: null
+    status_field: "status"
+    active_when:
+      - "running"
+      - "starting"
+    run_id_field: "job_id"
+
   benchmark-t2t5:
     display_name: "T2/T5 DIAGNOSTIC"
     redis_key: "osmose:benchmark:t2t5:state"

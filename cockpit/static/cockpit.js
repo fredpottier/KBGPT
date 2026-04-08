@@ -134,7 +134,7 @@
         renderPipelines(s.pipelines || []);
         renderContainers(s.container_groups);
         renderKnowledge(s.knowledge);
-        renderQuality(s.ragas, s.t2t5);
+        renderQuality(s.ragas, s.t2t5, s.robustness);
         renderEvents(s.events);
     }
 
@@ -651,12 +651,14 @@
                     NEO4J
                 </div>
                 <div class="knowledge-tiles">
+                    ${tile(k.neo4j_nodes, 'nodes')}
                     ${tile(k.neo4j_claims, 'claims', 'highlight')}
                     ${tile(k.neo4j_entities, 'entities')}
-                    ${tile(k.neo4j_facets, 'facets')}
                     ${tile(k.neo4j_relations, 'relations')}
+                    ${tile(k.neo4j_subjects, 'subjects')}
+                    ${tile(k.neo4j_facets, 'facets')}
+                    ${tile(k.neo4j_perspectives, 'perspectives')}
                     ${tile(k.neo4j_contradictions, 'contrad.', k.neo4j_contradictions > 0 ? 'contradictions' : '')}
-                    ${tile(k.neo4j_nodes, 'nodes')}
                 </div>
             </div>
         `;
@@ -684,9 +686,78 @@
         </div>`;
     }
 
-    function renderQuality(ragas, t2t5) {
+    // Arc SVG semi-circulaire (270°) — path d'un arc entre deux angles (0 = 12h, clockwise)
+    function arcPath(cx, cy, r, startAngle, endAngle) {
+        const x1 = cx + r * Math.sin(startAngle);
+        const y1 = cy - r * Math.cos(startAngle);
+        const x2 = cx + r * Math.sin(endAngle);
+        const y2 = cy - r * Math.cos(endAngle);
+        const largeArc = (endAngle - startAngle) > Math.PI ? 1 : 0;
+        return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+    }
+
+    // Jauge SVG semi-circulaire (identique au composant ScoreGauge.tsx du frontend)
+    function qualityGauge(label, value, countSuffix, size) {
+        if (value == null) value = 0;
+        size = size || 100;
+        const cx = size / 2;
+        const cy = size / 2;
+        const radius = size / 2 - 12;
+        const strokeWidth = 10;
+        const startAngle = -Math.PI * 0.75;
+        const endAngle = Math.PI * 0.75;
+        const valueAngle = startAngle + (endAngle - startAngle) * Math.min(Math.max(value, 0), 1);
+
+        const pct = Math.round(value * 100);
+        const color = value >= 0.7 ? '#22c55e' : value >= 0.5 ? '#eab308' : '#ef4444';
+        const bgPath = arcPath(cx, cy, radius, startAngle, endAngle);
+        const gaugeHeight = Math.round(size * 0.78);
+        const fontSize = Math.round(size * 0.28);
+
+        // Arc de valeur seulement si > 0 (evite path degenere)
+        let valueArc = '';
+        if (value > 0.001) {
+            const valPath = arcPath(cx, cy, radius, startAngle, valueAngle);
+            valueArc = `<path d="${valPath}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round"/>`;
+        }
+
+        const suffix = countSuffix
+            ? `<span style="color:var(--text-tertiary);font-size:11px;margin-left:4px;font-family:var(--font-mono);">${countSuffix}</span>`
+            : '';
+
+        return `<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;">
+            <svg width="${size}" height="${gaugeHeight}" viewBox="0 0 ${size} ${gaugeHeight}" style="overflow:visible;">
+                <path d="${bgPath}" fill="none" stroke="#1e1e3a" stroke-width="${strokeWidth}" stroke-linecap="round"/>
+                ${valueArc}
+                <text x="${cx}" y="${cy + fontSize * 0.35}" text-anchor="middle"
+                    font-family="var(--font-mono)" font-size="${fontSize}" font-weight="700" fill="${color}">
+                    ${pct}
+                </text>
+            </svg>
+            <div style="font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--text-secondary);text-align:center;margin-top:-4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">
+                ${label}${suffix}
+            </div>
+        </div>`;
+    }
+
+    // Score global T2/T5 : moyenne des metriques principales (equivalent frontend benchmarks)
+    function t2t5GlobalScore(t2t5) {
+        const metrics = [
+            t2t5.tension_mentioned,
+            t2t5.both_sides_surfaced,
+            t2t5.both_sources_cited,
+            t2t5.proactive_detection,
+            t2t5.chain_coverage,
+            t2t5.multi_doc_cited,
+        ].filter(v => v != null);
+        if (metrics.length === 0) return null;
+        return metrics.reduce((a, b) => a + b, 0) / metrics.length;
+    }
+
+    function renderQuality(ragas, t2t5, robustness) {
         const ragasEl = document.getElementById('ragas-section');
         const t2t5El = document.getElementById('t2t5-section');
+        const robEl = document.getElementById('robustness-section');
         if (!ragasEl || !t2t5El) return;
 
         // ── RAGAS section ──
@@ -711,33 +782,52 @@
             ragasEl.innerHTML = `<div style="color:red;font-size:11px;">RAGAS error: ${err.message}</div>`;
         }
 
-        // ── T2/T5 section ──
+        // ── T2/T5 + Robustesse : 2 jauges SVG cote a cote dans t2t5-section ──
+        // (robustness-section est laisse vide, tout est rendu dans t2t5-section)
         try {
-            if (!t2t5 || t2t5.total_evaluated === 0) {
-                t2t5El.innerHTML = '<div style="color:var(--text-tertiary);font-size:15px;padding:8px 0;">Pas de rapport T2/T5</div>';
-            } else {
-                let tHtml = `<div style="border-top:1px solid var(--border-dim);padding-top:10px;margin-top:12px;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                        <span style="font-family:var(--font-sans);font-size:16px;font-weight:600;color:var(--text-primary);">T2/T5 Contradictions</span>
-                        <span style="font-family:var(--font-mono);font-size:14px;color:var(--text-tertiary);">${t2t5.total_evaluated}q</span>
-                    </div>`;
-                tHtml += qualityBar('Tension mentionnee', t2t5.tension_mentioned);
-                tHtml += qualityBar('2 cotes presentes', t2t5.both_sides_surfaced);
-                tHtml += qualityBar('2 sources citees', t2t5.both_sources_cited);
-                tHtml += qualityBar('Detection proactive', t2t5.proactive_detection);
-                tHtml += qualityBar('Couverture chaines', t2t5.chain_coverage);
-                tHtml += qualityBar('Multi-doc cite', t2t5.multi_doc_cited);
+            const hasT2 = t2t5 && t2t5.total_evaluated > 0;
+            const hasRob = robustness && robustness.total_evaluated > 0;
 
-                if (t2t5.timestamp) {
-                    const ts = t2t5.timestamp.replace('T', ' ').split('.')[0];
-                    tHtml += `<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-tertiary);text-align:right;margin-top:4px;">${escapeHtml(ts)}</div>`;
+            if (!hasT2 && !hasRob) {
+                t2t5El.innerHTML = '<div style="color:var(--text-tertiary);font-size:15px;padding:8px 0;">Pas de rapport T2/T5 ni Robustesse</div>';
+            } else {
+                let html = `<div style="border-top:1px solid var(--border-dim);padding-top:12px;margin-top:10px;">
+                    <div style="display:flex;gap:8px;justify-content:space-around;align-items:flex-start;">`;
+
+                if (hasT2) {
+                    const globalT2 = t2t5GlobalScore(t2t5);
+                    html += qualityGauge('T2/T5', globalT2 != null ? globalT2 : 0, `${t2t5.total_evaluated}q`, 92);
+                } else {
+                    html += '<div style="flex:1;text-align:center;color:var(--text-tertiary);font-size:12px;padding:30px 0;">Pas de T2/T5</div>';
                 }
-                tHtml += '</div>';
-                t2t5El.innerHTML = tHtml;
+
+                if (hasRob) {
+                    html += qualityGauge('Robustesse', robustness.global_score, `${robustness.total_evaluated}q`, 92);
+                } else {
+                    html += '<div style="flex:1;text-align:center;color:var(--text-tertiary);font-size:12px;padding:30px 0;">Pas de Robustesse</div>';
+                }
+
+                html += '</div>';
+
+                // Timestamps en petit, sur une ligne
+                const t2ts = hasT2 && t2t5.timestamp ? t2t5.timestamp.replace('T', ' ').split('.')[0] : '';
+                const robts = hasRob && robustness.timestamp ? robustness.timestamp.replace('T', ' ').split('.')[0] : '';
+                if (t2ts || robts) {
+                    html += `<div style="display:flex;justify-content:space-around;font-family:var(--font-mono);font-size:10px;color:var(--text-tertiary);margin-top:4px;">
+                        <span>${escapeHtml(t2ts)}</span>
+                        <span>${escapeHtml(robts)}</span>
+                    </div>`;
+                }
+
+                html += '</div>';
+                t2t5El.innerHTML = html;
             }
         } catch (err) {
-            t2t5El.innerHTML = `<div style="color:red;font-size:11px;">T2/T5 error: ${err.message}</div>`;
+            t2t5El.innerHTML = `<div style="color:red;font-size:11px;">Gauges error: ${err.message}</div>`;
         }
+
+        // robustness-section : vide maintenant (tout est dans t2t5-section)
+        if (robEl) robEl.innerHTML = '';
     }
 
     // ── W6: Events ────────────────────────────────────────────────

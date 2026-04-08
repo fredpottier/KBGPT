@@ -26,6 +26,7 @@ from cockpit.collectors.burst_collector import BurstCollector
 from cockpit.collectors.knowledge_collector import KnowledgeCollector
 from cockpit.collectors.llm_budget_collector import LLMBudgetCollector
 from cockpit.collectors.ragas_collector import RagasCollector
+from cockpit.collectors.robustness_collector import RobustnessCollector
 from cockpit.collectors.t2t5_collector import T2T5Collector
 from cockpit.engine.eta import ETAEngine
 from cockpit.engine.events import SmartEventEngine
@@ -52,6 +53,7 @@ class Aggregator:
         self.llm_collector = LLMBudgetCollector()
         self.ragas_collector = RagasCollector()
         self.t2t5_collector = T2T5Collector()
+        self.robustness_collector = RobustnessCollector()
         self.eta_engine = ETAEngine()
         self.event_engine = SmartEventEngine()
 
@@ -147,6 +149,7 @@ class Aggregator:
             try:
                 self._state.ragas = self.ragas_collector.collect()
                 self._state.t2t5 = self.t2t5_collector.collect()
+                self._state.robustness = self.robustness_collector.collect()
                 self._last_ragas_ts = now
             except Exception as e:
                 logger.warning(f"[COCKPIT:AGG] Quality collect failed: {e}")

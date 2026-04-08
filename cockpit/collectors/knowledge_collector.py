@@ -79,6 +79,8 @@ class KnowledgeCollector:
             "neo4j_claims": "MATCH (n:Claim) RETURN count(n) as c",
             "neo4j_entities": "MATCH (n:Entity) RETURN count(n) as c",
             "neo4j_facets": "MATCH (n:Facet) RETURN count(n) as c",
+            "neo4j_perspectives": "MATCH (n:Perspective) RETURN count(n) as c",
+            "neo4j_subjects": "MATCH (n:ComparableSubject) RETURN count(n) as c",
             "neo4j_relations": "MATCH ()-[r]->() RETURN count(r) as c",
             "neo4j_contradictions": "MATCH (:Claim)-[r:CONTRADICTS]->(:Claim) RETURN count(r) as c",
         }
