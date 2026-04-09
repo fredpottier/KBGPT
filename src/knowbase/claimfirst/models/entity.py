@@ -250,7 +250,16 @@ def strip_version_qualifier(name: str) -> Tuple[str, Optional[str]]:
 # Cette liste ne contient que ce que NI l'IDF NI les heuristiques ne peuvent attraper :
 # faux acronymes, chiffres romains, acronymes 2-chars ambigus.
 
-ENTITY_STOPLIST = frozenset({
+# ── Entity Stoplist V3 — residuelle minimale + stopwords spaCy multilingues ──
+#
+# Architecture :
+# 1. ENTITY_STOPLIST_RESIDUAL : termes que NI spaCy NI l'IDF ne peuvent attraper
+#    (faux acronymes, chiffres romains, noms universellement trop vagues)
+# 2. spaCy stopwords multilingues (74 langues) : mots-outils grammaticaux
+#    charges dynamiquement selon les langues du corpus
+# 3. IDF dynamique (corpus_stats.py) : noms generiques mono-mot
+
+ENTITY_STOPLIST_RESIDUAL = frozenset({
     # ── Faux acronymes et chiffres romains ────────────────────────────────
     # Mots anglais courts qui passent le filtre ^[A-Z]{2,5}$
     "as", "new", "up", "non", "map", "fix", "key", "end",
@@ -260,29 +269,6 @@ ENTITY_STOPLIST = frozenset({
     # Acronymes 2-chars ambigus
     "nt", "fn", "cg", "bv", "ck", "zo", "nc", "iu",
 
-    # ── Mots-outils EN universels (JAMAIS des entites, aucun domaine) ─────
-    # Deictiques, pronoms, articles
-    "it", "its", "itself", "this", "that", "these", "those",
-    "a", "an", "the", "some", "any", "all", "each", "every",
-    "one", "other", "another",
-    # Pronoms personnels + possessifs
-    "he", "she", "we", "they", "you", "me", "him", "us", "them",
-    "his", "her", "our", "your", "their", "my",
-    # Relatifs / interrogatifs
-    "which", "where", "when", "how", "what", "who", "whom",
-    # Prepositions
-    "to", "of", "in", "on", "at", "by", "for", "with", "from",
-    "into", "onto", "upon", "about", "between", "through",
-    "over", "under", "after", "before", "during", "without",
-    # Conjonctions, negations, adverbes
-    "and", "or", "but", "not", "no", "nor", "yet", "so",
-    "if", "then", "else", "because", "since", "while", "although",
-    "also", "than", "very", "only", "just",
-    "here", "there", "now", "already", "still",
-    # Verbes courts generiques
-    "use", "used", "uses", "using", "set", "get", "run", "put", "let",
-    "made", "make", "take", "give", "keep", "need", "needs", "needed",
-
     # ── Noms universellement trop vagues (filet de securite sans IDF) ─────
     "system", "systems", "information", "data", "service", "services",
     "process", "document", "user", "users", "application",
@@ -290,7 +276,71 @@ ENTITY_STOPLIST = frozenset({
     "element", "elements", "component", "result", "results",
     "file", "files", "option", "options", "method",
     "step", "steps", "case", "action", "entry",
+    "use", "used", "uses", "using", "set", "get", "run",
+    "make", "need", "needs",
 })
+
+
+def _build_entity_stoplist() -> frozenset:
+    """Construit la stoplist complete : residuelle + stopwords spaCy multilingues."""
+    combined = set(ENTITY_STOPLIST_RESIDUAL)
+    try:
+        from knowbase.common.stopwords import get_corpus_stopwords
+        # Charge les stopwords des langues detectees dans le corpus (Neo4j)
+        # Fallback sur EN+FR si le corpus est vide ou Neo4j indisponible
+        spacy_sw = get_corpus_stopwords()
+        combined.update(spacy_sw)
+    except Exception:
+        # Fallback si spaCy indisponible (tests locaux sans spaCy)
+        # Ensemble EN+FR complet pour ne pas perdre le filtrage de base
+        combined.update({
+            # EN — deictiques, pronoms, articles
+            "it", "its", "itself", "this", "that", "these", "those",
+            "a", "an", "the", "some", "any", "all", "each", "every",
+            "one", "other", "another",
+            # EN — pronoms personnels + possessifs
+            "he", "she", "we", "they", "you", "me", "him", "us", "them",
+            "his", "her", "our", "your", "their", "my",
+            # EN — relatifs / interrogatifs
+            "which", "where", "when", "how", "what", "who", "whom",
+            # EN — prepositions
+            "to", "of", "in", "on", "at", "by", "for", "with", "from",
+            "into", "onto", "upon", "about", "between", "through",
+            "over", "under", "after", "before", "during", "without",
+            # EN — conjonctions, negations, adverbes
+            "and", "or", "but", "not", "no", "nor", "yet", "so",
+            "if", "then", "else", "because", "since", "while", "although",
+            "also", "than", "very", "only", "just",
+            "here", "there", "now", "already", "still",
+            # EN — verbes courts
+            "put", "let", "made", "take", "give", "keep", "needed",
+            # FR — articles, determinants, pronoms
+            "ce", "cette", "ces", "cet", "un", "une", "le", "la", "les",
+            "de", "du", "des", "au", "aux", "en", "et", "est",
+            "que", "qui", "dans", "pour", "par", "sur", "avec",
+            "son", "sa", "ses", "ou", "ne", "pas", "plus", "se",
+            "il", "elle", "on", "nous", "vous", "ils", "elles",
+            "quelque", "quelques", "tout", "tous", "toute", "toutes",
+            "chaque", "autre", "autres",
+        })
+    return frozenset(combined)
+
+
+# Lazy-init : construit au premier acces
+_entity_stoplist_cache: frozenset | None = None
+
+
+def _get_entity_stoplist() -> frozenset:
+    global _entity_stoplist_cache
+    if _entity_stoplist_cache is None:
+        _entity_stoplist_cache = _build_entity_stoplist()
+    return _entity_stoplist_cache
+
+
+# ENTITY_STOPLIST reste l'API publique (retro-compatible tests + entity_extractor)
+# Property-like via __getattr__ ne marche pas sur un module frozenset,
+# donc on utilise une variable qui sera initialisee au premier import.
+ENTITY_STOPLIST = _build_entity_stoplist()
 
 # Patterns indiquant un fragment de phrase (pas une entité)
 PHRASE_FRAGMENT_INDICATORS = frozenset({
