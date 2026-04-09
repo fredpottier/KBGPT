@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -891,8 +891,8 @@ def search_documents(
     # Utiliser la requête enrichie pour l'embedding (delegue a retriever)
     query_vector = embed_query(enriched_query, embedding_model)
 
-    # Query Decomposition — detecte et decompose les questions multi-facettes
-    from .query_decomposer import decompose_query
+    # Query Decomposition V2 — detecte comparison/cross-version/enumeration/multi-facettes
+    from .query_decomposer import decompose_query, check_plan_integrity, build_integrity_message
     decomposition = decompose_query(enriched_query)
 
     # Signal-driven KG injection : le KG detecte les signaux, le RAG reste pur par defaut
@@ -937,16 +937,115 @@ def search_documents(
         release_filter=release_id,
     )
 
-    # Multi-facet retrieval : si la question a ete decomposee, retriever chaque sous-query
-    # et fusionner les chunks (deduplication par chunk_id, garder le meilleur score)
-    if decomposition.is_decomposed:
+    # Multi-facet / comparison retrieval V2 : si la question a ete decomposee,
+    # retriever chaque sous-query avec son propre scope_filter (release_id, etc.)
+    # puis fusionner les chunks (deduplication par chunk_id, garder le meilleur score)
+    plan = decomposition.plan  # QueryPlan V2 (None pour legacy)
+
+    if decomposition.is_decomposed and plan and plan.is_decomposed:
+        # V2 path : utiliser les SubQuery avec scope_filter
         seen_chunk_ids = set()
         for chunk in retrieval_result.chunks:
             cid = chunk.get("chunk_id") or chunk.get("id") or id(chunk)
             seen_chunk_ids.add(cid)
 
         extra_chunks = []
-        for sub_query in decomposition.sub_queries[1:]:  # skip [0] = original query
+        retrieval_counts: dict[str, int] = {}
+        # Tag les chunks initiaux avec leur sub_query_group
+        for chunk in retrieval_result.chunks:
+            chunk["_sub_query_group"] = plan.sub_queries[0].id if plan.sub_queries else "q0"
+        retrieval_counts[plan.sub_queries[0].id if plan.sub_queries else "q0"] = len(retrieval_result.chunks)
+
+        for sq in plan.sub_queries[1:]:  # skip [0] = premiere sous-query (deja fait)
+            try:
+                # Extraire le release_filter specifique de cette sous-query
+                sq_release = (
+                    sq.scope_filter.get("axis_release_id")
+                    or sq.scope_filter.get("release_id")
+                ) if sq.scope_filter else None
+
+                sub_vector = embed_query(sq.text, embedding_model)
+                sub_result = _retrieve_chunks(
+                    question=sq.text,
+                    query_vector=sub_vector,
+                    qdrant_client=qdrant_client,
+                    settings=settings,
+                    top_k=TOP_K // len(plan.sub_queries),  # budget equitable
+                    score_threshold=SCORE_THRESHOLD,
+                    solution_filter=solution,
+                    release_filter=sq_release or release_id,  # scope_filter prioritaire
+                )
+
+                sq_count = 0
+                for chunk in sub_result.chunks:
+                    cid = chunk.get("chunk_id") or chunk.get("id") or id(chunk)
+                    if cid not in seen_chunk_ids:
+                        seen_chunk_ids.add(cid)
+                        chunk["_sub_query_group"] = sq.id
+                        extra_chunks.append(chunk)
+                        retrieval_result.docs_involved.add(
+                            chunk.get("doc_id", chunk.get("source_file", ""))
+                        )
+                    sq_count += 1
+                retrieval_counts[sq.id] = sq_count
+
+            except Exception as e:
+                logger.warning(f"[DECOMPOSE] Sub-query {sq.id} retrieval failed: {e}")
+                retrieval_counts[sq.id] = 0
+
+        # Integrity check : verifier que chaque sous-query a des resultats
+        plan = check_plan_integrity(plan, retrieval_counts)
+
+        if plan.integrity_issue == "partial_coverage":
+            # Clarification interactive : on renvoie le message au lieu de synthetiser
+            integrity_msg = build_integrity_message(plan)
+            logger.info(f"[DECOMPOSE:INTEGRITY] Partial coverage detected, returning clarification")
+            return {
+                "status": "clarification_needed",
+                "results": retrieval_result.chunks[:5],  # quelques chunks pour contexte
+                "synthesis": {"synthesized_answer": integrity_msg},
+                "response_mode": "CLARIFICATION",
+                "query_plan": {
+                    "plan_type": plan.plan_type,
+                    "sub_queries": [
+                        {"id": sq.id, "text": sq.text, "scope_filter": sq.scope_filter,
+                         "chunk_count": sq.chunk_count, "has_results": sq.has_results}
+                        for sq in plan.sub_queries
+                    ],
+                    "integrity_issue": plan.integrity_issue,
+                },
+            }
+        elif plan.integrity_issue == "no_results_at_all":
+            integrity_msg = build_integrity_message(plan)
+            return {
+                "status": "no_results",
+                "results": [],
+                "synthesis": {"synthesized_answer": integrity_msg},
+                "response_mode": "CLARIFICATION",
+                "message": integrity_msg,
+            }
+
+        if extra_chunks:
+            retrieval_result.chunks.extend(extra_chunks)
+            retrieval_result.chunks = rerank_chunks(
+                query, retrieval_result.chunks, top_k=TOP_K
+            )
+            logger.info(
+                f"[DECOMPOSE:V2] {plan.plan_type} — added {len(extra_chunks)} extra chunks from "
+                f"{len(plan.sub_queries) - 1} sub-queries "
+                f"(counts: {retrieval_counts}), "
+                f"total docs: {len(retrieval_result.docs_involved)}"
+            )
+
+    elif decomposition.is_decomposed:
+        # V1 fallback : sous-queries textuelles sans scope_filter
+        seen_chunk_ids = set()
+        for chunk in retrieval_result.chunks:
+            cid = chunk.get("chunk_id") or chunk.get("id") or id(chunk)
+            seen_chunk_ids.add(cid)
+
+        extra_chunks = []
+        for sub_query in decomposition.sub_queries[1:]:
             try:
                 sub_vector = embed_query(sub_query, embedding_model)
                 sub_result = _retrieve_chunks(
@@ -954,7 +1053,7 @@ def search_documents(
                     query_vector=sub_vector,
                     qdrant_client=qdrant_client,
                     settings=settings,
-                    top_k=TOP_K // 2,  # moitie du budget par sous-query
+                    top_k=TOP_K // 2,
                     score_threshold=SCORE_THRESHOLD,
                     solution_filter=solution,
                     release_filter=release_id,
@@ -971,13 +1070,12 @@ def search_documents(
                 logger.warning(f"[DECOMPOSE] Sub-query retrieval failed: {e}")
 
         if extra_chunks:
-            # Fusionner : chunks originaux + extras, tronquer au budget total
             retrieval_result.chunks.extend(extra_chunks)
             retrieval_result.chunks = rerank_chunks(
                 query, retrieval_result.chunks, top_k=TOP_K
             )
             logger.info(
-                f"[DECOMPOSE] Added {len(extra_chunks)} extra chunks from "
+                f"[DECOMPOSE:V1] Added {len(extra_chunks)} extra chunks from "
                 f"{len(decomposition.sub_queries) - 1} sub-queries, "
                 f"total docs: {len(retrieval_result.docs_involved)}"
             )
@@ -1554,6 +1652,20 @@ def search_documents(
             "reasoning_trace": ["question_context_gap → UNANSWERABLE"],
         }
 
+    # Query Decomposition V2 : injecter un hint de synthese si plan comparison/enumeration
+    if plan and plan.is_decomposed and plan.synthesis_strategy in ("compare", "chronological"):
+        _sq_labels = ", ".join(
+            sq.rationale or sq.text[:60] for sq in plan.sub_queries
+        )
+        synthesis_hint = (
+            f"\n## Contexte structurel de la question\n"
+            f"Cette question a ete decomposee en {len(plan.sub_queries)} sous-questions "
+            f"({plan.plan_type}). Les chunks ci-dessous couvrent : {_sq_labels}. "
+            f"Structure ta reponse en comparant explicitement ces axes point par point. "
+            f"Si un axe n'est pas couvert par les chunks, dis-le clairement.\n"
+        )
+        session_context_text = synthesis_hint + session_context_text
+
     # Generate synthesized response + instrumented answer in parallel (if both needed)
     if use_instrumented:
         from .instrumented_answer_builder import build_instrumented_answer
@@ -1660,6 +1772,19 @@ def search_documents(
         response["signal_report"] = {
             "signals": [{"type": s.type, "strength": s.strength} for s in signal_report.signals],
             "claims_analyzed": signal_report.claims_analyzed,
+        }
+
+    # Query Decomposition V2 : ajouter le plan dans la reponse (observabilite)
+    if plan and plan.is_decomposed:
+        response["query_plan"] = {
+            "plan_type": plan.plan_type,
+            "synthesis_strategy": plan.synthesis_strategy,
+            "reasoning": plan.reasoning,
+            "sub_queries": [
+                {"id": sq.id, "text": sq.text, "scope_filter": sq.scope_filter,
+                 "rationale": sq.rationale, "chunk_count": sq.chunk_count}
+                for sq in plan.sub_queries
+            ],
         }
 
     # ContradictionEnvelope dans la reponse (pour debug/frontend)

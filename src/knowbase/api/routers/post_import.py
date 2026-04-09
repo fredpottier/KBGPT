@@ -180,6 +180,14 @@ STEPS = [
         estimated_duration="5 - 30min",
         requires_llm=True,
     ),
+    StepInfo(
+        id="build_perspectives",
+        name="Construction Perspectives V2",
+        description="Reconstruit les Perspectives thématiques (HDBSCAN sur embeddings claims, labellisation LLM, linking sujets). Skippé si moins de 50 nouveaux claims depuis le dernier build.",
+        order=13,
+        estimated_duration="3 - 10min",
+        requires_llm=True,
+    ),
 ]
 
 STEPS_BY_ID = {s.id: s for s in STEPS}
@@ -406,6 +414,8 @@ def _execute_step(step_id: str, tenant_id: str, on_progress=None) -> dict:
         return _run_c4_relations(tenant_id, progress)
     elif step_id == "c6_pivots":
         return _run_c6_pivots(tenant_id, progress)
+    elif step_id == "build_perspectives":
+        return _run_build_perspectives(tenant_id, progress)
     else:
         raise ValueError(f"Étape inconnue: {step_id}")
 
@@ -1239,6 +1249,65 @@ def _run_c6_pivots(tenant_id: str, progress=None) -> dict:
         "updated": persist_stats.updated,
         "counts_before": counts_before,
         "counts_after": counts_after,
+    }
+
+
+def _run_build_perspectives(tenant_id: str, progress=None) -> dict:
+    """Reconstruit les Perspectives V2 (HDBSCAN + labellisation LLM).
+
+    Skip conditionnel : si moins de MIN_NEW_CLAIMS nouveaux claims depuis
+    le dernier build, on saute l'etape (evite le cout inutile a chaque petit ajout).
+    """
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+
+    _p = progress or (lambda pct, detail="": None)
+    MIN_NEW_CLAIMS = int(os.environ.get("PERSPECTIVE_MIN_NEW_CLAIMS", "50"))
+
+    driver = get_neo4j_client().driver
+
+    # --- Staleness check ---
+    _p(5, "Verification staleness Perspectives...")
+    with driver.session() as session:
+        # Dernier build
+        result = session.run(
+            "MATCH (p:Perspective) WHERE p.tenant_id = $tid "
+            "RETURN max(p.updated_at) AS last_build",
+            tid=tenant_id,
+        ).single()
+        last_build = result["last_build"] if result else None
+
+        if last_build:
+            # Compter les claims crees apres le dernier build
+            new_claims = session.run(
+                "MATCH (c:Claim {tenant_id: $tid}) "
+                "WHERE c.created_at > $lb RETURN count(c) AS cnt",
+                tid=tenant_id, lb=last_build,
+            ).single()["cnt"]
+        else:
+            # Jamais de build → forcer
+            new_claims = MIN_NEW_CLAIMS + 1
+
+    if new_claims < MIN_NEW_CLAIMS:
+        msg = f"Skip: seulement {new_claims} nouveaux claims (seuil: {MIN_NEW_CLAIMS})"
+        logger.info(f"[POST-IMPORT:PERSPECTIVES] {msg}")
+        _p(100, msg)
+        return {"skipped": True, "new_claims": new_claims, "threshold": MIN_NEW_CLAIMS}
+
+    # --- Build ---
+    _p(15, f"{new_claims} nouveaux claims detectes, lancement build Perspectives...")
+
+    from knowbase.perspectives.orchestrator import run_perspective_engine
+    stats = run_perspective_engine(
+        tenant_id=tenant_id,
+        dry_run=False,
+        skip_llm=False,
+    )
+
+    _p(100, f"{stats.get('perspectives', 0)} perspectives, {stats.get('claims_linked', 0)} claims lies")
+    return {
+        "skipped": False,
+        "new_claims_trigger": new_claims,
+        **stats,
     }
 
 
