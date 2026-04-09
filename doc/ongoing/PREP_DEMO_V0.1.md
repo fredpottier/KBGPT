@@ -200,14 +200,14 @@ Le pire est que **ça ne génère pas d'erreur**. Le système tournera, produira
 | Item | Effort | Statut | Dépendance |
 |---|---|---|---|
 | M1. Fix ComparableSubject | 1-2 j | ✅ **FAIT** (08/04) | — |
-| M2. `build_perspectives` dans post-import | 4-8 h | ⏳ | — |
-| M3. Externalisation stopwords multilingues | 4-8 h | ⏳ | — |
-| **M7. Query Decomposer (intégration propre)** 🆕 | 1-2 j | ⏳ | — |
-| M5. Stabiliser benchmarks baseline | 1 j (attente) | 🟡 juge fixé, à relancer | — |
-| M6. Runbook ingestion externe | 2-4 h | ⏳ | — |
-| **M8. Doc cadrage interlocuteur** 🆕 (ex-S4) | 2-3 h | ⏳ | — |
-| M4. Dry-run corpus externe de test | 1-2 j | ⏳ | M2, M3, M7 |
-| **Total estimé** | **~7-9 jours** de travail focalisé | | |
+| M2. `build_perspectives` dans post-import | 4-8 h | ✅ **FAIT** (09/04) — order=13, skip conditionnel, testé | — |
+| M3. Stopwords multilingues | 4-8 h | ✅ **FAIT** (09/04) — IDF dynamique + spaCy 74 langues + détection corpus auto | — |
+| **M7. Query Decomposer (intégration propre)** 🆕 | 1-2 j | ✅ **FAIT** (09/04) — V2 intégré search.py, scope_filter, intégrité, observabilité | — |
+| M5. Stabiliser benchmarks baseline | 1 j (attente) | 🔄 **EN COURS** (09/04) — Robustness+T2/T5+RAGAS lancés | — |
+| M6. Runbook ingestion externe | 2-4 h | ⏳ déprioritisé (date démo non fixée) | — |
+| **M8. Doc cadrage interlocuteur** 🆕 (ex-S4) | 2-3 h | ⏳ déprioritisé (date démo non fixée) | — |
+| M4. Dry-run corpus externe de test | 1-2 j | ⏳ débloqué (M2+M3+M7 ✅) | M2, M3, M7 |
+| **Total estimé** | **~7-9 jours** → **~3-4j restants** (M4+M5+M6+M8) | | |
 
 **Promotions 08/04 soir** :
 - **M1** est complété (gazetteer branché, 23 DCs ré-résolus, AxisValues propagés Qdrant, 60 Perspectives rebuilt)
@@ -504,15 +504,15 @@ Dans les deux cas, le résultat s'éloigne de ce qu'attendent les judges des ben
 
 ### Récapitulatif SHOULD HAVE
 
-| Item | Effort |
-|---|---|
-| S1. Keywords de détection linguistique externalisés | 1 j |
-| S2. Consolidation `CANONICAL_PREDICATES` | 1-2 h |
-| S3. Instrumentation staleness Perspective | 2-3 h |
-| S4. Doc de cadrage interlocuteur | 2-3 h |
-| S5b. Calibrer override TENSION (régressions Robustness) | 1-2 h |
-| S5. Sanity check langue pré-ingestion | 2-4 h |
-| **Total estimé** | **~2-3 jours** supplémentaires |
+| Item | Effort | Statut |
+|---|---|---|
+| S1. Keywords de détection linguistique externalisés | 1 j | ⏳ |
+| S2. Consolidation `CANONICAL_PREDICATES` | 1-2 h | ✅ **FAIT** (09/04) — `constants.py` centralisé |
+| S3. Instrumentation staleness Perspective | 2-3 h | ✅ **FAIT** (09/04) — `PerspectiveStaleness` dans `/api/claimfirst/stats` |
+| ~~S4. Doc de cadrage interlocuteur~~ | — | → promu M8 (MUST HAVE) |
+| S5b. ~~Calibrer override TENSION~~ | — | Résolu par investigation juge cassé (cf. section S5b détaillée) |
+| S5. Sanity check langue pré-ingestion | 2-4 h | 🟡 Partiellement couvert par M3 (détection auto des langues corpus) |
+| **Total estimé** | **~1-2 jours** restants (S1 + S5) | |
 
 ---
 
