@@ -457,9 +457,30 @@ export function OverviewTab({
   const robParaphrase = extractScore(robustnessReport, ['scores', 'paraphrase_score'])
   const robNegation = extractScore(robustnessReport, ['scores', 'negation_score'])
 
-  // ── Compute deltas vs RAG pur (from recentRuns) ────────────────────
+  // ── Compute deltas vs RAG pur ──────────────────────────────────────
+  // Calcul sur les scores globaux (memes metriques) pour coherence avec l'onglet dedie
+
+  // RAGAS : delta vs RAG pur du dernier run avec baseline
+  const ragasRagPurFaith = extractScore(ragasReport, ['systems', 'baseline', 'scores', 'faithfulness'])
+  const ragasRagPurCtxRel = extractScore(ragasReport, ['systems', 'baseline', 'scores', 'context_relevance'])
+  const ragasRagPurMetrics = [ragasRagPurFaith, ragasRagPurCtxRel].filter(v => v != null) as number[]
+  const ragasRagPurGlobal = ragasRagPurMetrics.length > 0 ? ragasRagPurMetrics.reduce((a, b) => a + b, 0) / ragasRagPurMetrics.length : null
+  const ragasDeltaVsRag = ragasGlobalScore != null && ragasRagPurGlobal != null ? ragasGlobalScore - ragasRagPurGlobal : null
+
+  // T2/T5 : delta vs RAG pur du dernier run avec scores_rag (meme calcul global)
+  const t2t5RagScores = t2t5Report?.scores_rag ?? null
+  const t2t5RagAllMetrics = t2t5RagScores
+    ? [t2t5RagScores.both_sides_surfaced, t2t5RagScores.tension_mentioned, t2t5RagScores.both_sources_cited,
+       t2t5RagScores.chain_coverage, t2t5RagScores.multi_doc_cited, t2t5RagScores.proactive_detection]
+        .filter((v: number | undefined) => v != null) as number[]
+    : []
+  const t2t5RagGlobal = t2t5RagAllMetrics.length > 0 ? t2t5RagAllMetrics.reduce((a, b) => a + b, 0) / t2t5RagAllMetrics.length : null
+  const t2t5DeltaVsRag = t2t5GlobalScore != null && t2t5RagGlobal != null ? t2t5GlobalScore - t2t5RagGlobal : null
 
   function latestDelta(type: string): number | null {
+    if (type === 'ragas') return ragasDeltaVsRag
+    if (type === 't2t5') return t2t5DeltaVsRag
+    // Robustness : pas de RAG pur, fallback recentRuns
     const run = recentRuns?.find(r => r.type === type)
     return run?.delta ?? null
   }

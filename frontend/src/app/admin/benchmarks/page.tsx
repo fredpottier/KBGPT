@@ -855,8 +855,8 @@ function ContradictionsTab({
             {scores.total_evaluated ?? scores.t2_count + scores.t5_count ?? '--'} questions
             {latest?.duration_s ? ` — ${Math.round(latest.duration_s)}s` : ''}
           </Text>
-          {baseGlobal > 0 && (
-            <DeltaBadge current={globalScore} baseline={baseGlobal} />
+          {(ragGlobal != null || baseGlobal > 0) && (
+            <DeltaBadge current={globalScore} baseline={ragGlobal ?? baseGlobal} />
           )}
         </VStack>
       </HStack>
