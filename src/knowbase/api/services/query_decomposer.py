@@ -539,6 +539,126 @@ def build_integrity_message(plan: QueryPlan) -> str:
     return "\n".join(msg_parts)
 
 
+# ── QD-6 : Chainage iteratif (IRCoT / Self-Ask) ──────────────────────────────
+
+MAX_ITERATIONS = 2  # max cycles de refinement apres la premiere passe
+
+ITERATIVE_REFINE_PROMPT = """You are analyzing retrieved document chunks to decide if additional information is needed.
+
+Original question: "{question}"
+
+Current sub-queries and their results:
+{sub_query_summary}
+
+Based on the chunks retrieved so far, do you need additional targeted searches to fully answer the original question?
+
+Rules:
+- Only request additional searches if there is a CLEAR, SPECIFIC gap
+- Do NOT request searches for information that is already covered
+- Do NOT request more than 2 additional searches
+- If the current chunks are sufficient, return an empty list
+- Be CONSERVATIVE: additional searches add latency and cost
+
+Return ONLY a JSON object:
+{{
+  "needs_more": true/false,
+  "reasoning": "short explanation",
+  "additional_queries": [
+    {{"id": "r1", "text": "specific follow-up question", "scope_filter": {{}}, "rationale": "what gap this fills"}}
+  ]
+}}"""
+
+
+def evaluate_retrieval_completeness(
+    question: str,
+    plan: QueryPlan,
+    retrieval_summaries: dict[str, str],
+) -> list[SubQuery]:
+    """QD-6 : Evalue si le retrieval est complet et propose des sous-queries supplementaires.
+
+    Args:
+        question: Question originale
+        plan: Plan de decomposition actuel
+        retrieval_summaries: {sub_query_id: "N chunks, top topics: X, Y, Z"}
+
+    Returns:
+        Liste de SubQuery supplementaires (vide si retrieval suffisant)
+    """
+    import time
+
+    # Construire le resume des sous-queries
+    summary_lines = []
+    for sq in plan.sub_queries:
+        summary = retrieval_summaries.get(sq.id, "0 chunks")
+        scope_info = f" (filter: {sq.scope_filter})" if sq.scope_filter else ""
+        summary_lines.append(f"- {sq.id}: {sq.text[:80]}{scope_info} → {summary}")
+
+    sub_query_summary = "\n".join(summary_lines)
+
+    prompt = ITERATIVE_REFINE_PROMPT.format(
+        question=question,
+        sub_query_summary=sub_query_summary,
+    )
+
+    provider = os.getenv("OSMOSIS_SYNTHESIS_PROVIDER", "anthropic")
+    model = os.getenv("OSMOSIS_DECOMPOSER_MODEL", "claude-haiku-4-5-20251001" if provider != "openai" else "gpt-4o-mini")
+
+    _stats["llm_calls"] += 1
+    t0 = time.time()
+
+    try:
+        if provider == "openai":
+            from openai import OpenAI
+            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+            resp = client.chat.completions.create(
+                model=model, max_tokens=300, temperature=0.0,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = resp.choices[0].message.content
+        else:
+            import anthropic
+            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+            resp = client.messages.create(
+                model=model, max_tokens=300, temperature=0.0,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = resp.content[0].text
+
+        elapsed = round(time.time() - t0, 2)
+
+        # Parse JSON
+        m = re.search(r"\{[\s\S]*\}", raw)
+        if not m:
+            return []
+        data = json.loads(m.group())
+
+        if not data.get("needs_more", False):
+            logger.info(f"[DECOMPOSE:ITERATIVE] Retrieval sufficient ({elapsed}s): {data.get('reasoning','')[:80]}")
+            return []
+
+        additional = []
+        for sq_data in data.get("additional_queries", [])[:2]:
+            additional.append(SubQuery(
+                id=sq_data.get("id", f"r{len(additional)+1}"),
+                text=sq_data.get("text", ""),
+                scope_filter=sq_data.get("scope_filter") or {},
+                rationale=sq_data.get("rationale", ""),
+            ))
+
+        if additional:
+            logger.info(
+                f"[DECOMPOSE:ITERATIVE] {len(additional)} follow-up queries requested ({elapsed}s): "
+                f"{[(sq.id, sq.text[:50]) for sq in additional]}"
+            )
+
+        return additional
+
+    except Exception as e:
+        _stats["llm_errors"] += 1
+        logger.warning(f"[DECOMPOSE:ITERATIVE] Evaluation failed: {e}")
+        return []
+
+
 # ── Main entry point ─────────────────────────────────────────────────────────
 
 

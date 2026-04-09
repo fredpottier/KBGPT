@@ -956,26 +956,71 @@ def search_documents(
             chunk["_sub_query_group"] = plan.sub_queries[0].id if plan.sub_queries else "q0"
         retrieval_counts[plan.sub_queries[0].id if plan.sub_queries else "q0"] = len(retrieval_result.chunks)
 
+        # QD-4 : Retrieval adaptatif — budget et seuil ajustes par sous-query
+        ADAPTIVE_MIN_CHUNKS = 3      # seuil pour retry avec budget elargi
+        ADAPTIVE_EXPANDED_TOP_K = TOP_K  # budget elargi = budget total
+        ADAPTIVE_RELAXED_THRESHOLD = max(SCORE_THRESHOLD - 0.05, 0.50)
+
         for sq in plan.sub_queries[1:]:  # skip [0] = premiere sous-query (deja fait)
             try:
                 # QD-2 : scope_filter domain-agnostic → axis_filters dict
-                # Le LLM decomposeur produit des cles correspondant aux axes connus du corpus
-                # (ex: release_id, edition, study_phase, jurisdiction...).
-                # Le retriever mappe chaque cle vers "axis_{key}" dans Qdrant.
                 sq_axis_filters = sq.scope_filter if sq.scope_filter else None
 
                 sub_vector = embed_query(sq.text, embedding_model)
+                base_top_k = TOP_K // len(plan.sub_queries)
+
                 sub_result = _retrieve_chunks(
                     question=sq.text,
                     query_vector=sub_vector,
                     qdrant_client=qdrant_client,
                     settings=settings,
-                    top_k=TOP_K // len(plan.sub_queries),  # budget equitable
+                    top_k=base_top_k,
                     score_threshold=SCORE_THRESHOLD,
                     solution_filter=solution,
                     axis_filters=sq_axis_filters,
                     release_filter=release_id if not sq_axis_filters else None,
                 )
+
+                # QD-4 : si trop peu de chunks, retry adaptatif
+                if len(sub_result.chunks) < ADAPTIVE_MIN_CHUNKS:
+                    # Strategie 1 : elargir le budget (plus de chunks)
+                    sub_result_expanded = _retrieve_chunks(
+                        question=sq.text,
+                        query_vector=sub_vector,
+                        qdrant_client=qdrant_client,
+                        settings=settings,
+                        top_k=ADAPTIVE_EXPANDED_TOP_K,
+                        score_threshold=ADAPTIVE_RELAXED_THRESHOLD,
+                        solution_filter=solution,
+                        axis_filters=sq_axis_filters,
+                        release_filter=release_id if not sq_axis_filters else None,
+                    )
+                    if len(sub_result_expanded.chunks) > len(sub_result.chunks):
+                        logger.info(
+                            f"[DECOMPOSE:ADAPTIVE] {sq.id}: {len(sub_result.chunks)} → "
+                            f"{len(sub_result_expanded.chunks)} chunks after expanding "
+                            f"(top_k {base_top_k}→{ADAPTIVE_EXPANDED_TOP_K}, "
+                            f"threshold {SCORE_THRESHOLD}→{ADAPTIVE_RELAXED_THRESHOLD})"
+                        )
+                        sub_result = sub_result_expanded
+
+                    # Strategie 2 : si toujours peu ET scope_filter actif, retry sans filtre
+                    if len(sub_result.chunks) < ADAPTIVE_MIN_CHUNKS and sq_axis_filters:
+                        sub_result_unfiltered = _retrieve_chunks(
+                            question=sq.text,
+                            query_vector=sub_vector,
+                            qdrant_client=qdrant_client,
+                            settings=settings,
+                            top_k=base_top_k,
+                            score_threshold=SCORE_THRESHOLD,
+                            solution_filter=solution,
+                        )
+                        if len(sub_result_unfiltered.chunks) > len(sub_result.chunks):
+                            logger.info(
+                                f"[DECOMPOSE:ADAPTIVE] {sq.id}: axis_filter removed, "
+                                f"{len(sub_result.chunks)} → {len(sub_result_unfiltered.chunks)} chunks"
+                            )
+                            sub_result = sub_result_unfiltered
 
                 sq_count = 0
                 for chunk in sub_result.chunks:
@@ -1037,6 +1082,97 @@ def search_documents(
                 f"(counts: {retrieval_counts}), "
                 f"total docs: {len(retrieval_result.docs_involved)}"
             )
+
+        # QD-6 : Chainage iteratif — evaluer si le retrieval est complet
+        # et lancer des sous-queries supplementaires si necessaire
+        if plan.plan_type in ("comparison", "enumeration", "chronological") and not plan.integrity_issue:
+            try:
+                from .query_decomposer import evaluate_retrieval_completeness, MAX_ITERATIONS
+
+                for iteration in range(MAX_ITERATIONS):
+                    # Construire un resume par sous-query
+                    retrieval_summaries = {}
+                    for sq in plan.sub_queries:
+                        sq_chunks = [c for c in retrieval_result.chunks if c.get("_sub_query_group") == sq.id]
+                        if sq_chunks:
+                            top_terms = set()
+                            for c in sq_chunks[:3]:
+                                text = (c.get("text") or "")[:100]
+                                top_terms.update(w for w in text.split()[:5] if len(w) > 4)
+                            retrieval_summaries[sq.id] = f"{len(sq_chunks)} chunks, topics: {', '.join(list(top_terms)[:5])}"
+                        else:
+                            retrieval_summaries[sq.id] = "0 chunks"
+
+                    follow_ups = evaluate_retrieval_completeness(
+                        query, plan, retrieval_summaries
+                    )
+
+                    if not follow_ups:
+                        break  # retrieval suffisant
+
+                    # Retriever les follow-ups
+                    for sq in follow_ups:
+                        try:
+                            sq_axis_filters = sq.scope_filter if sq.scope_filter else None
+                            fup_vector = embed_query(sq.text, embedding_model)
+                            fup_result = _retrieve_chunks(
+                                question=sq.text,
+                                query_vector=fup_vector,
+                                qdrant_client=qdrant_client,
+                                settings=settings,
+                                top_k=TOP_K // 4,
+                                score_threshold=SCORE_THRESHOLD,
+                                solution_filter=solution,
+                                axis_filters=sq_axis_filters,
+                            )
+                            for chunk in fup_result.chunks:
+                                cid = chunk.get("chunk_id") or chunk.get("id") or id(chunk)
+                                if cid not in seen_chunk_ids:
+                                    seen_chunk_ids.add(cid)
+                                    chunk["_sub_query_group"] = sq.id
+                                    retrieval_result.chunks.append(chunk)
+                                    retrieval_result.docs_involved.add(
+                                        chunk.get("doc_id", chunk.get("source_file", ""))
+                                    )
+                            plan.sub_queries.append(sq)
+                            logger.info(
+                                f"[DECOMPOSE:ITERATIVE] iter={iteration+1}, {sq.id}: "
+                                f"+{len(fup_result.chunks)} chunks"
+                            )
+                        except Exception as e:
+                            logger.warning(f"[DECOMPOSE:ITERATIVE] {sq.id} failed: {e}")
+
+                    # Re-rank apres ajout des follow-ups
+                    retrieval_result.chunks = rerank_chunks(
+                        query, retrieval_result.chunks, top_k=TOP_K
+                    )
+            except Exception as e:
+                logger.debug(f"[DECOMPOSE:ITERATIVE] Skipped: {e}")
+
+        # QD-5 : A/B shadow mode — comparer decompose vs mono-query (logging only)
+        # On compare le set de doc_ids couverts, pas la qualite des reponses
+        try:
+            mono_doc_ids = set()
+            for chunk in retrieval_result.chunks[:TOP_K]:
+                did = chunk.get("doc_id", chunk.get("source_file", ""))
+                if did:
+                    mono_doc_ids.add(did)
+            # Le retrieval initial (avant decomposition) = premiere sous-query
+            initial_doc_ids = set()
+            for chunk in retrieval_result.chunks:
+                if chunk.get("_sub_query_group") == (plan.sub_queries[0].id if plan.sub_queries else ""):
+                    did = chunk.get("doc_id", chunk.get("source_file", ""))
+                    if did:
+                        initial_doc_ids.add(did)
+            decomposed_doc_ids = retrieval_result.docs_involved
+            new_docs = decomposed_doc_ids - initial_doc_ids
+            logger.info(
+                f"[DECOMPOSE:AB] Shadow comparison — "
+                f"mono_docs={len(initial_doc_ids)}, decomposed_docs={len(decomposed_doc_ids)}, "
+                f"new_docs_from_decomposition={len(new_docs)}: {list(new_docs)[:5]}"
+            )
+        except Exception:
+            pass
 
     elif decomposition.is_decomposed:
         # V1 fallback : sous-queries textuelles sans scope_filter
