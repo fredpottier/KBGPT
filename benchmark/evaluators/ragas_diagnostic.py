@@ -890,26 +890,20 @@ def _collect_api_samples(
             logger.warning(f"[RAGAS:BENCH] Error loading {qfile}: {e}")
 
     total = len(all_questions)
-    logger.info(f"[RAGAS:BENCH] Collecting {total} samples via API (use_kg={use_kg}, phase={phase_label})")
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    api_concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "10"))
+    logger.info(f"[RAGAS:BENCH] Collecting {total} samples via API (use_kg={use_kg}, phase={phase_label}, concurrency={api_concurrency})")
 
     samples = []
-    for i, q_item in enumerate(all_questions):
+    _progress = [0]
+
+    def _collect_one(i, q_item):
         question = q_item.get("question", q_item.get("query", ""))
         if not question:
-            continue
-
-        # Mise a jour Redis
-        _update_redis_state(redis_url, {
-            "status": "running",
-            "phase": phase_label,
-            "progress": i,
-            "total": total,
-            "current_question": question[:100],
-        })
+            return None
 
         try:
             sample = _call_osmosis_api(question, api_base, token_mgr, use_kg=use_kg)
-            # Ajouter la reference (ground truth) si disponible
             reference = q_item.get("expected_answer", q_item.get("ground_truth", ""))
             if isinstance(reference, dict):
                 chain = reference.get("chain", [])
@@ -919,10 +913,30 @@ def _collect_api_samples(
                     reference = reference.get("text", reference.get("answer", ""))
             sample["reference"] = reference or ""
             sample["_task_name"] = q_item.get("_task_name", "")
-            samples.append(sample)
+
+            _progress[0] += 1
+            if _progress[0] % 5 == 0 or _progress[0] == total:
+                _update_redis_state(redis_url, {
+                    "status": "running",
+                    "phase": phase_label,
+                    "progress": _progress[0],
+                    "total": total,
+                    "current_question": question[:100],
+                })
+            return sample
         except Exception as e:
             logger.warning(f"[RAGAS:BENCH] API call failed for q={question[:60]}: {e}")
-            continue
+            return None
+
+    with ThreadPoolExecutor(max_workers=api_concurrency) as executor:
+        futures = {
+            executor.submit(_collect_one, i, q): i
+            for i, q in enumerate(all_questions)
+        }
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                samples.append(result)
 
     logger.info(f"[RAGAS:BENCH] Collected {len(samples)}/{total} samples")
     return samples
