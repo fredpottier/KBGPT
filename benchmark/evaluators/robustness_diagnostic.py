@@ -711,38 +711,39 @@ def run_benchmark_job(
 
     per_sample = []
     errors = 0
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    def _refresh_token():
-        try:
-            r = requests.post(f"{api_base}/api/auth/login",
-                              json={"email": "admin@example.com", "password": "admin123"}, timeout=10)
-            if r.status_code == 200:
-                return r.json().get("access_token", "")
-        except:
-            pass
-        return token
+    concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "10"))
+    logger.info(f"[ROBUSTESSE] Concurrency: {concurrency} workers (set BENCHMARK_CONCURRENCY to change)")
 
-    for i, q_item in enumerate(all_questions):
-        # Refresh token toutes les 50 questions (expire apres ~30min)
-        if i > 0 and i % 50 == 0:
-            token = _refresh_token()
-            logger.info(f"[ROBUSTESSE] Token refreshed at question {i}")
+    _token_lock = threading.Lock()
+    _progress_counter = [0]  # mutable for closure
+    _token_container = [token]  # mutable for closure
 
+    def _refresh_token_safe():
+        with _token_lock:
+            try:
+                r = requests.post(f"{api_base}/api/auth/login",
+                                  json={"email": "admin@example.com", "password": "admin123"}, timeout=10)
+                if r.status_code == 200:
+                    _token_container[0] = r.json().get("access_token", "")
+            except:
+                pass
+            return _token_container[0]
+
+    def _process_question(i, q_item):
         question = q_item.get("question", "")
         category = q_item.get("category", "")
         question_id = q_item.get("question_id", f"q_{i}")
         ground_truth = q_item.get("ground_truth", {})
 
-        _update_redis_state(redis_url, {
-            "status": "running",
-            "phase": "api_eval",
-            "progress": i,
-            "total": len(all_questions),
-            "current_question": question[:100],
-        })
+        # Token refresh toutes les 50 questions (thread-safe)
+        if i > 0 and i % 50 == 0:
+            _refresh_token_safe()
 
         try:
-            api_result = _call_osmosis_api(question, api_base, token)
+            api_result = _call_osmosis_api(question, api_base, _token_container[0])
             answer = api_result["answer"]
             sources = api_result["sources_used"]
 
@@ -752,37 +753,62 @@ def run_benchmark_job(
                 evaluation = evaluate_with_llm_judge(answer, question, category, ground_truth)
 
             if evaluation is None:
-                # Fallback keyword (ou unanswerable qui reste keyword)
                 evaluator = KEYWORD_EVALUATORS.get(category)
                 if evaluator:
                     evaluation = evaluator(answer, sources, ground_truth)
                 else:
                     evaluation = {"category": category, "score": 0.0, "error": f"Unknown category: {category}"}
 
-            per_sample.append({
+            result = {
                 "question_id": question_id,
                 "question": question,
                 "category": category,
-                "answer": answer,  # reponse complete (pas de troncature — utile pour analyse post-mortem)
+                "answer": answer,
                 "answer_length": len(answer) if answer else 0,
                 "sources_used": sources if isinstance(sources, list) else [],
                 "evaluation": evaluation,
-            })
+            }
+
+            # Progress update (thread-safe via GIL for simple increment)
+            _progress_counter[0] += 1
+            if _progress_counter[0] % 5 == 0 or _progress_counter[0] == len(all_questions):
+                _update_redis_state(redis_url, {
+                    "status": "running",
+                    "phase": "api_eval",
+                    "progress": _progress_counter[0],
+                    "total": len(all_questions),
+                    "current_question": question[:100],
+                })
 
             logger.info(
-                f"[ROBUSTESSE] [{i+1}/{len(all_questions)}] {question_id} "
+                f"[ROBUSTESSE] [{_progress_counter[0]}/{len(all_questions)}] {question_id} "
                 f"({category}) — score={evaluation.get('score', '?')}"
             )
+            return result, False
 
         except Exception as e:
-            errors += 1
-            per_sample.append({
+            logger.warning(f"[ROBUSTESSE] Error on {question_id}: {e}")
+            return {
                 "question_id": question_id,
                 "question": question[:200],
                 "category": category,
                 "evaluation": {"error": str(e)[:200], "category": category},
-            })
-            logger.warning(f"[ROBUSTESSE] Error on {question_id}: {e}")
+            }, True
+
+    # Execution parallele
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = {
+            executor.submit(_process_question, i, q): i
+            for i, q in enumerate(all_questions)
+        }
+        for future in as_completed(futures):
+            result, is_error = future.result()
+            per_sample.append(result)
+            if is_error:
+                errors += 1
+
+    # Trier par question_id pour un rapport stable
+    per_sample.sort(key=lambda s: s.get("question_id", ""))
 
     # Aggregation
     scores = aggregate_scores(per_sample)

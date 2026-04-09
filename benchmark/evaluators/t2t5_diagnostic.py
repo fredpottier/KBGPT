@@ -691,32 +691,27 @@ def run_benchmark_job(
 
         logger.info(f"[T2T5:BENCH] Loaded {total} questions")
 
-        # ── Phase 2 : API calls + evaluation ────────────────────────
+        # ── Phase 2 : API calls + evaluation (parallelise) ─────────
         per_sample: list[dict] = []
         errors = 0
         judge_client = _get_llm_judge()
         judge_mode = "hybrid" if judge_client else "keyword"
-        logger.info(f"[T2T5:BENCH] Evaluation mode: {judge_mode}")
 
-        for i, q_item in enumerate(all_questions):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "10"))
+        logger.info(f"[T2T5:BENCH] Evaluation mode: {judge_mode}, concurrency: {concurrency}")
+
+        _progress_counter = [0]
+
+        def _process_t2t5(i, q_item):
             question = q_item.get("question", "")
             if not question:
-                continue
-
-            _update_redis_state(redis_url, {
-                "status": "running",
-                "profile": profile,
-                "phase": "api_eval",
-                "progress": i,
-                "total": total,
-                "current_question": question[:100],
-            })
+                return None, False
 
             try:
-                # Call API
                 api_result = _call_osmosis_api(question, api_base, token_mgr)
 
-                # Evaluate
                 task_type = q_item.get("_task_type", "")
                 ground_truth = q_item.get("ground_truth", {})
                 grading_rules = q_item.get("grading_rules", {})
@@ -728,8 +723,6 @@ def run_benchmark_job(
                         api_result["sources_used"],
                         ground_truth,
                     )
-                    # LLM-juge enrichissement T2 — uniquement both_sides_surfaced
-                    # tension_mentioned et both_sources_cited fonctionnent bien en keyword
                     if judge_client and api_result["answer"]:
                         claim1_text = ground_truth.get("claim1", {}).get("text", "")
                         claim2_text = ground_truth.get("claim2", {}).get("text", "")
@@ -742,7 +735,6 @@ def run_benchmark_job(
                             evaluation["judge_model"] = LLM_JUDGE_MODEL
 
                 elif task_type == "T5":
-                    # Determine category from task field or category field
                     if not category:
                         task_field = q_item.get("task", "")
                         if "cross_doc" in task_field:
@@ -759,8 +751,6 @@ def run_benchmark_job(
                         grading_rules,
                         category,
                     )
-                    # LLM-juge enrichissement T5 — uniquement chain_coverage
-                    # multi_doc_cited fonctionne bien en keyword (doc prefixes)
                     if judge_client and api_result["answer"] and category in ("cross_doc_chain", "multi_source_synthesis"):
                         llm_scores = _llm_judge_t5(
                             judge_client, question, category, api_result["answer"]
@@ -769,38 +759,58 @@ def run_benchmark_job(
                             evaluation["keyword_chain_coverage"] = evaluation["chain_coverage"]
                             evaluation["chain_coverage"] = llm_scores["chain_coverage"]
                             evaluation["judge_model"] = LLM_JUDGE_MODEL
-
                 else:
                     evaluation = {"task_type": "unknown"}
 
-                per_sample.append({
+                _progress_counter[0] += 1
+                if _progress_counter[0] % 5 == 0 or _progress_counter[0] == total:
+                    _update_redis_state(redis_url, {
+                        "status": "running", "profile": profile,
+                        "phase": "api_eval", "progress": _progress_counter[0],
+                        "total": total, "current_question": question[:100],
+                    })
+
+                logger.info(
+                    f"[T2T5:BENCH] [{_progress_counter[0]}/{total}] {q_item.get('question_id', '')} "
+                    f"— {task_type} evaluated"
+                )
+
+                return {
                     "question_id": q_item.get("question_id", f"q_{i}"),
                     "question": question,
                     "task_name": q_item.get("_task_name", ""),
                     "evaluation": evaluation,
-                    "answer": api_result["answer"],  # reponse complete (pas de troncature)
+                    "answer": api_result["answer"],
                     "answer_length": len(api_result["answer"]),
                     "ground_truth": q_item.get("ground_truth", {}),
                     "chunks_retrieved": api_result["chunks_retrieved"],
                     "sources_used": api_result["sources_used"],
                     "latency_ms": api_result["latency_ms"],
-                })
-
-                logger.info(
-                    f"[T2T5:BENCH] [{i + 1}/{total}] {q_item.get('question_id', '')} "
-                    f"— {task_type} evaluated"
-                )
+                }, False
 
             except Exception as e:
                 logger.warning(f"[T2T5:BENCH] Error on q={question[:60]}: {e}")
-                errors += 1
-                per_sample.append({
+                return {
                     "question_id": q_item.get("question_id", f"q_{i}"),
                     "question": question[:200],
                     "task_name": q_item.get("_task_name", ""),
                     "evaluation": {"task_type": q_item.get("_task_type", ""), "error": str(e)[:200]},
                     "error": str(e)[:200],
-                })
+                }, True
+
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = {
+                executor.submit(_process_t2t5, i, q): i
+                for i, q in enumerate(all_questions)
+            }
+            for future in as_completed(futures):
+                result, is_error = future.result()
+                if result is not None:
+                    per_sample.append(result)
+                    if is_error:
+                        errors += 1
+
+        per_sample.sort(key=lambda s: s.get("question_id", ""))
 
         # ── Phase 3 : Aggregation & Report ──────────────────────────
         _update_redis_state(redis_url, {

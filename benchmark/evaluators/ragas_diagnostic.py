@@ -312,7 +312,7 @@ def run_ragas_evaluation(
     )
 
     start = time.time()
-    concurrency = int(os.getenv("RAGAS_CONCURRENCY", "3"))
+    concurrency = int(os.getenv("RAGAS_CONCURRENCY", "8"))
 
     # Evaluer chaque metrique en parallele sur tous les samples
     # NOTE: on stocke question + answer complets + quelques metadonnees pour
