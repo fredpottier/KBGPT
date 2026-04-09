@@ -108,6 +108,14 @@ class AvailableDocument(BaseModel):
     cached_at: Optional[str] = None
 
 
+class PerspectiveStaleness(BaseModel):
+    """Indicateur de fraicheur de la couche Perspective V2."""
+    perspective_count: int = 0
+    last_build: str | None = None  # ISO datetime
+    new_claims_since_build: int = 0
+    status: str = "unknown"  # fresh | stale | warning | no_perspectives
+
+
 class ClaimFirstStatsResponse(BaseModel):
     """Statistiques détaillées du pipeline."""
     # Counts par type
@@ -123,6 +131,9 @@ class ClaimFirstStatsResponse(BaseModel):
     avg_claim_confidence: float = 0.0
     claims_with_units: int = 0
     claims_total: int = 0
+
+    # Perspective staleness
+    perspective_staleness: PerspectiveStaleness | None = None
 
 
 # =============================================================================
@@ -716,6 +727,41 @@ async def get_claimfirst_stats(
                     response.claims_total = record["total"] or 0
             except Exception:
                 pass
+
+            # Perspective staleness
+            try:
+                result = session.run("""
+                    MATCH (p:Perspective {tenant_id: $tid})
+                    WITH count(p) AS pcount, max(p.updated_at) AS last_build
+                    OPTIONAL MATCH (c:Claim {tenant_id: $tid})
+                    WHERE last_build IS NOT NULL AND c.created_at > last_build
+                    RETURN pcount, last_build, count(c) AS new_claims
+                """, tid=tenant_id)
+                record = result.single()
+                if record:
+                    pcount = record["pcount"] or 0
+                    last_build = record["last_build"]
+                    new_claims = record["new_claims"] or 0
+
+                    if pcount == 0:
+                        status = "no_perspectives"
+                    elif new_claims < 50:
+                        status = "fresh"
+                    elif new_claims < 200:
+                        status = "warning"
+                    else:
+                        status = "stale"
+
+                    response.perspective_staleness = PerspectiveStaleness(
+                        perspective_count=pcount,
+                        last_build=last_build if isinstance(last_build, str) else (
+                            last_build.isoformat() if last_build else None
+                        ),
+                        new_claims_since_build=new_claims,
+                        status=status,
+                    )
+            except Exception as e:
+                logger.debug(f"[ClaimFirst] Perspective staleness query failed: {e}")
 
         driver.close()
 
