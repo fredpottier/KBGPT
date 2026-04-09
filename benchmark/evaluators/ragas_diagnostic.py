@@ -312,7 +312,10 @@ def run_ragas_evaluation(
     )
 
     start = time.time()
-    concurrency = int(os.getenv("RAGAS_CONCURRENCY", "15"))
+    # Concurrency pour les appels OpenAI juge — plus conservateur que pour
+    # les appels API OSMOSIS car la lib openai fait des retries exponentiels
+    # qui deadlock avec trop de concurrency (observe empiriquement a 15)
+    concurrency = int(os.getenv("RAGAS_CONCURRENCY", "5"))
 
     # Evaluer chaque metrique en parallele sur tous les samples
     # NOTE: on stocke question + answer complets + quelques metadonnees pour
