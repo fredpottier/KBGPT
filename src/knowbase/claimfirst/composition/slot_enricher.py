@@ -22,44 +22,12 @@ from knowbase.claimfirst.models.entity import is_valid_entity_name
 
 # ============================================================================
 # Prédicats canoniques — copie locale pour éviter l'import lourd de
-# claim_extractor (qui tire assertion_unit_indexer → structural → yaml, etc.)
-# Source of truth : claim_extractor.CANONICAL_PREDICATES
+# Constantes centralisees — source unique dans constants.py
 # ============================================================================
-
-_CANONICAL_PREDICATES = frozenset({
-    "USES", "REQUIRES", "BASED_ON", "SUPPORTS", "ENABLES",
-    "PROVIDES", "EXTENDS", "REPLACES", "PART_OF",
-    "INTEGRATED_IN", "COMPATIBLE_WITH", "CONFIGURES",
-})
-
-_PREDICATE_NORMALIZATION_MAP = {
-    "USE": "USES", "CAN_USE": "USES", "LEVERAGES": "USES",
-    "ADOPTS": "USES", "USED_FOR": "USES", "ARE_USED_TO": "USES",
-    "CAN_BE_USED_VIA": "USES", "ACHIEVED_VIA": "USES",
-    "DEPENDS_ON": "REQUIRES", "RELIES_ON": "REQUIRES", "NEEDS": "REQUIRES",
-    "COMPLIES_WITH": "REQUIRES",
-    "IS_BASED_ON": "BASED_ON", "RUNS_ON": "BASED_ON",
-    "RUNS_IN": "BASED_ON", "HOSTED_IN": "BASED_ON",
-    "SUPPORTED_BY": "SUPPORTS",
-    "ACTIVATES": "ENABLES", "ALLOW": "ENABLES", "ALLOWS": "ENABLES",
-    "ENABLING": "ENABLES",
-    "OFFERS": "PROVIDES", "DELIVERS": "PROVIDES", "BRINGS": "PROVIDES",
-    "IS_OFFERED_BY": "PROVIDES", "OFFERED_BY": "PROVIDES",
-    "IS_PROVIDED_BY": "PROVIDES",
-    "IS_INTEGRATED_IN": "INTEGRATED_IN", "INTEGRATES": "INTEGRATED_IN",
-    "INTEGRATED_WITH": "INTEGRATED_IN", "INTEGRATES_WITH": "INTEGRATED_IN",
-    "EMBEDDED_IN": "INTEGRATED_IN", "INSTALLED_ON": "INTEGRATED_IN",
-    "IS_PART_OF": "PART_OF", "IS_A_MODULE_IN": "PART_OF",
-    "IS_A_COMPONENT_OF": "PART_OF", "INCLUDED_IN": "PART_OF",
-    "IS_INCLUDED_IN": "PART_OF", "IS_A_FEATURE_IN": "PART_OF",
-    "IS_A_FEATURE_OF": "PART_OF", "ARE_FEATURES_OF": "PART_OF",
-    "IS_A_NEW_FEATURE_IN": "PART_OF", "FOUND_IN": "PART_OF",
-    "SUPERSEDES": "REPLACES", "MIGRATES": "REPLACES",
-    "CAN_BE_MIGRATED_TO": "REPLACES", "CONVERTED_TO": "REPLACES",
-    "IS_AN_ADD_ON_FOR": "EXTENDS",
-    "CO-DEPLOYED_WITH": "COMPATIBLE_WITH", "CONNECTS_WITH": "COMPATIBLE_WITH",
-    "MANAGED_BY": "CONFIGURES", "MANAGES": "CONFIGURES",
-}
+from knowbase.claimfirst.constants import (
+    CANONICAL_PREDICATES as _CANONICAL_PREDICATES,
+    PREDICATE_NORMALIZATION_MAP as _PREDICATE_NORMALIZATION_MAP,
+)
 
 
 def _normalize_predicate(raw_predicate: str) -> Optional[str]:

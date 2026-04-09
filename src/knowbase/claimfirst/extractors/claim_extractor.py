@@ -44,54 +44,11 @@ logger = logging.getLogger(__name__)
 # PRÉDICATS CANONIQUES — Liste fermée pour structured_form
 # ============================================================================
 
-CANONICAL_PREDICATES = frozenset({
-    "USES", "REQUIRES", "BASED_ON", "SUPPORTS", "ENABLES",
-    "PROVIDES", "EXTENDS", "REPLACES", "PART_OF",
-    "INTEGRATED_IN", "COMPATIBLE_WITH", "CONFIGURES",
-})
-
-# Mapping statique pour synonymes évidents (Layer B)
-# Le prompt durci (Layer A) devrait capturer 90%+, ceci rattrape le reste
-PREDICATE_NORMALIZATION_MAP = {
-    # → USES
-    "USE": "USES", "CAN_USE": "USES", "LEVERAGES": "USES",
-    "ADOPTS": "USES", "USED_FOR": "USES", "ARE_USED_TO": "USES",
-    "CAN_BE_USED_VIA": "USES", "ACHIEVED_VIA": "USES",
-    # → REQUIRES
-    "DEPENDS_ON": "REQUIRES", "RELIES_ON": "REQUIRES", "NEEDS": "REQUIRES",
-    "COMPLIES_WITH": "REQUIRES",
-    # → BASED_ON
-    "IS_BASED_ON": "BASED_ON", "RUNS_ON": "BASED_ON",
-    "RUNS_IN": "BASED_ON", "HOSTED_IN": "BASED_ON",
-    # → SUPPORTS
-    "SUPPORTED_BY": "SUPPORTS",
-    # → ENABLES
-    "ACTIVATES": "ENABLES", "ALLOW": "ENABLES", "ALLOWS": "ENABLES",
-    "ENABLING": "ENABLES",
-    # → PROVIDES
-    "OFFERS": "PROVIDES", "DELIVERS": "PROVIDES", "BRINGS": "PROVIDES",
-    "IS_OFFERED_BY": "PROVIDES", "OFFERED_BY": "PROVIDES",
-    "IS_PROVIDED_BY": "PROVIDES",
-    # → INTEGRATED_IN
-    "IS_INTEGRATED_IN": "INTEGRATED_IN", "INTEGRATES": "INTEGRATED_IN",
-    "INTEGRATED_WITH": "INTEGRATED_IN", "INTEGRATES_WITH": "INTEGRATED_IN",
-    "EMBEDDED_IN": "INTEGRATED_IN", "INSTALLED_ON": "INTEGRATED_IN",
-    # → PART_OF
-    "IS_PART_OF": "PART_OF", "IS_A_MODULE_IN": "PART_OF",
-    "IS_A_COMPONENT_OF": "PART_OF", "INCLUDED_IN": "PART_OF",
-    "IS_INCLUDED_IN": "PART_OF", "IS_A_FEATURE_IN": "PART_OF",
-    "IS_A_FEATURE_OF": "PART_OF", "ARE_FEATURES_OF": "PART_OF",
-    "IS_A_NEW_FEATURE_IN": "PART_OF", "FOUND_IN": "PART_OF",
-    # → REPLACES
-    "SUPERSEDES": "REPLACES", "MIGRATES": "REPLACES",
-    "CAN_BE_MIGRATED_TO": "REPLACES", "CONVERTED_TO": "REPLACES",
-    # → EXTENDS
-    "IS_AN_ADD_ON_FOR": "EXTENDS",
-    # → COMPATIBLE_WITH
-    "CO-DEPLOYED_WITH": "COMPATIBLE_WITH", "CONNECTS_WITH": "COMPATIBLE_WITH",
-    # → CONFIGURES
-    "MANAGED_BY": "CONFIGURES", "MANAGES": "CONFIGURES",
-}
+# Constantes centralisees — source unique dans constants.py
+from knowbase.claimfirst.constants import (
+    CANONICAL_PREDICATES,
+    PREDICATE_NORMALIZATION_MAP,
+)
 
 
 def normalize_predicate(raw_predicate: str) -> Optional[str]:

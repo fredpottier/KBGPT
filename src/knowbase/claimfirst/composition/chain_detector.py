@@ -38,20 +38,11 @@ MAX_EDGES_PER_KEY_CROSS_DOC = 5
 MAX_EDGES_PER_DOC_PAIR = 50
 
 # Prédicats canoniques — seuls les claims avec ces prédicats participent aux chaînes
-_CANONICAL_PREDICATES = frozenset({
-    "USES", "REQUIRES", "BASED_ON", "SUPPORTS", "ENABLES",
-    "PROVIDES", "EXTENDS", "REPLACES", "PART_OF",
-    "INTEGRATED_IN", "COMPATIBLE_WITH", "CONFIGURES",
-})
-
-# Priorité des prédicats pour le ranking cross-doc
-# Plus le score est haut, plus le prédicat est structurant
-PREDICATE_PRIORITY = {
-    "REQUIRES": 4, "REPLACES": 4, "PART_OF": 4, "INTEGRATED_IN": 4,
-    "BASED_ON": 3, "EXTENDS": 3, "COMPATIBLE_WITH": 3,
-    "USES": 2, "SUPPORTS": 2, "ENABLES": 2,
-    "PROVIDES": 1, "CONFIGURES": 1,
-}
+# Constantes centralisees — source unique dans constants.py
+from knowbase.claimfirst.constants import (
+    CANONICAL_PREDICATES as _CANONICAL_PREDICATES,
+    PREDICATE_PRIORITY,
+)
 
 
 @dataclass
