@@ -413,8 +413,6 @@ async def _eval_metric_parallel(
     async def eval_one(idx: int, kwargs: dict):
         nonlocal done_count, fallback_count
         async with semaphore:
-            # Petit delai entre les requetes pour eviter le rate limiting OpenAI
-            await asyncio.sleep(0.5 * (idx % concurrency))
             try:
                 result = await asyncio.to_thread(metric.score, **kwargs)
                 score = result.value if hasattr(result, "value") else float(result)
@@ -500,7 +498,8 @@ def _get_ragas_providers():
 
     client = AsyncOpenAI()  # lit OPENAI_API_KEY depuis l'env
 
-    llm = llm_factory("gpt-4o-mini", client=client)
+    ragas_model = os.getenv("RAGAS_JUDGE_MODEL", "gpt-4o-mini")
+    llm = llm_factory(ragas_model, client=client)
     embeddings = OpenAIEmbeddings(client=client, model="text-embedding-3-small")
 
     return llm, embeddings
