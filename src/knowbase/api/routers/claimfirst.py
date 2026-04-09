@@ -135,6 +135,9 @@ class ClaimFirstStatsResponse(BaseModel):
     # Perspective staleness
     perspective_staleness: PerspectiveStaleness | None = None
 
+    # Query Decomposer stats (QD-3)
+    decomposer_stats: Dict[str, Any] | None = None
+
 
 # =============================================================================
 # Temporal Query Schemas (Applicability Axis)
@@ -762,6 +765,13 @@ async def get_claimfirst_stats(
                     )
             except Exception as e:
                 logger.debug(f"[ClaimFirst] Perspective staleness query failed: {e}")
+
+            # Query Decomposer stats (QD-3)
+            try:
+                from knowbase.api.services.query_decomposer import get_decomposer_stats
+                response.decomposer_stats = get_decomposer_stats()
+            except Exception:
+                pass
 
         driver.close()
 

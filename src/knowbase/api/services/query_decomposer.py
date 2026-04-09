@@ -83,27 +83,81 @@ class QueryDecomposition:
 
 
 def _get_known_axis_values() -> dict[str, list[str]]:
-    """Interroge Neo4j pour les AxisValues connus du corpus."""
+    """Detecte les axes de discrimination connus du corpus.
+
+    Domain-agnostic : les axes sont decouverts dynamiquement, pas hardcodes.
+    Exemples selon le domaine :
+    - SAP : {"release_id": ["2021","2022","2023"], "edition": ["PCE","RISE"]}
+    - Biomedical : {"study_phase": ["Phase I","Phase II"], "population": ["adult","pediatric"]}
+    - Legal : {"jurisdiction": ["FR","DE","EU"], "effective_date": ["2020","2023"]}
+
+    Strategie en 2 etapes :
+    1. Neo4j ApplicabilityAxis (axis_key + known_values)
+    2. Qdrant : echantillon des champs axis_* pour decouvrir des axes non-Neo4j
+    """
+    axes: dict[str, list[str]] = {}
+
+    # 1. Neo4j ApplicabilityAxis
     try:
         from knowbase.common.clients.neo4j_client import get_neo4j_client
         driver = get_neo4j_client().driver
-        axes: dict[str, list[str]] = {}
         with driver.session() as session:
             result = session.run(
-                "MATCH (av:AxisValue) "
-                "RETURN av.discriminating_role AS role, collect(DISTINCT av.value) AS vals"
+                "MATCH (a:ApplicabilityAxis) "
+                "RETURN a.axis_key AS key, a.known_values AS vals"
             )
             for record in result:
-                role = record["role"]
-                vals = sorted(record["vals"])
-                if role and vals:
-                    axes[role] = vals
-        if axes:
-            logger.debug(f"[DECOMPOSE] Known axes from KG: {axes}")
-        return axes
+                key = record["key"]
+                vals = record["vals"]
+                if key and vals:
+                    # Filtrer les valeurs nulles/vides
+                    clean_vals = sorted([v for v in vals if v and str(v).strip()])
+                    if clean_vals:
+                        axes[key] = clean_vals
     except Exception as e:
-        logger.debug(f"[DECOMPOSE] Failed to load axes from KG: {e}")
-        return {}
+        logger.debug(f"[DECOMPOSE] Neo4j axis query failed: {e}")
+
+    # 2. Qdrant : echantillonner des champs axis_* pour completer
+    try:
+        from knowbase.retrieval.qdrant_layer_r import get_qdrant_client
+        from knowbase.config.settings import get_settings
+        settings = get_settings()
+        client = get_qdrant_client()
+        collection = settings.qdrant_collection
+
+        results, _ = client.scroll(
+            collection_name=collection,
+            limit=100,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        from collections import defaultdict
+        qdrant_axes: dict[str, set[str]] = defaultdict(set)
+        for point in results:
+            for key, value in point.payload.items():
+                if key.startswith("axis_") and value and str(value).strip():
+                    # Retirer le prefixe "axis_" pour avoir la cle brute
+                    axis_key = key[5:]  # "axis_release_id" → "release_id"
+                    qdrant_axes[axis_key].add(str(value))
+
+        # Fusionner : Qdrant complete Neo4j (valeurs que Neo4j n'a pas)
+        for axis_key, vals in qdrant_axes.items():
+            if axis_key in axes:
+                existing = set(axes[axis_key])
+                merged = sorted(existing | vals)
+                if len(merged) > len(axes[axis_key]):
+                    axes[axis_key] = merged
+            else:
+                axes[axis_key] = sorted(vals)
+
+    except Exception as e:
+        logger.debug(f"[DECOMPOSE] Qdrant axis discovery failed: {e}")
+
+    if axes:
+        logger.info(f"[DECOMPOSE] Known axes: {{{', '.join(f'{k}: {len(v)} values' for k, v in axes.items())}}}")
+
+    return axes
 
 
 # ── Structural detection (no LLM) ────────────────────────────────────────────
@@ -292,17 +346,40 @@ def _parse_plan_json(raw: str, original_question: str) -> QueryPlan:
     )
 
 
+# ── Metriques globales (QD-3) ─────────────────────────────────────────────────
+
+_stats = {
+    "total_queries": 0,
+    "decomposed": 0,
+    "simple": 0,
+    "llm_calls": 0,
+    "llm_errors": 0,
+    "integrity_issues": 0,
+    "by_plan_type": {},  # {"comparison": N, "enumeration": N, ...}
+}
+
+
+def get_decomposer_stats() -> dict:
+    """Retourne les metriques du decomposeur (pour cockpit/monitoring)."""
+    return dict(_stats)
+
+
 def _decompose_llm(question: str, known_axes: dict[str, list[str]]) -> QueryPlan:
     """Decomposition via LLM (Haiku par defaut, OpenAI en fallback)."""
+    import time
     user_prompt = _build_user_prompt(question, known_axes)
     provider = os.getenv("OSMOSIS_SYNTHESIS_PROVIDER", "anthropic")
+    model = os.getenv("OSMOSIS_DECOMPOSER_MODEL", "claude-haiku-4-5-20251001" if provider != "openai" else "gpt-4o-mini")
+
+    _stats["llm_calls"] += 1
+    t0 = time.time()
 
     try:
         if provider == "openai":
             from openai import OpenAI
             client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
             resp = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=model,
                 max_tokens=500,
                 temperature=0.0,
                 messages=[
@@ -315,7 +392,7 @@ def _decompose_llm(question: str, known_axes: dict[str, list[str]]) -> QueryPlan
             import anthropic
             client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
             resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=model,
                 max_tokens=500,
                 temperature=0.0,
                 system=DECOMPOSER_SYSTEM_PROMPT,
@@ -323,10 +400,27 @@ def _decompose_llm(question: str, known_axes: dict[str, list[str]]) -> QueryPlan
             )
             raw = resp.content[0].text
 
-        return _parse_plan_json(raw, question)
+        elapsed = round(time.time() - t0, 2)
+        logger.info(
+            f"[DECOMPOSE:LLM] model={model}, elapsed={elapsed}s, "
+            f"question_len={len(question)}, response_len={len(raw)}"
+        )
+
+        plan = _parse_plan_json(raw, question)
+
+        # Enforce MAX_SUB_QUERIES
+        if len(plan.sub_queries) > MAX_SUB_QUERIES:
+            logger.warning(
+                f"[DECOMPOSE] LLM returned {len(plan.sub_queries)} sub-queries, "
+                f"truncating to {MAX_SUB_QUERIES}"
+            )
+            plan.sub_queries = plan.sub_queries[:MAX_SUB_QUERIES]
+
+        return plan
 
     except Exception as e:
-        logger.warning(f"[DECOMPOSE] LLM decomposition failed: {e}")
+        _stats["llm_errors"] += 1
+        logger.warning(f"[DECOMPOSE] LLM decomposition failed ({model}): {e}")
         return QueryPlan(original_question=question)
 
 
@@ -365,6 +459,8 @@ def check_plan_integrity(
 
     if not empty_sqs:
         return plan  # Tout est couvert
+
+    _stats["integrity_issues"] += 1
 
     if not filled_sqs:
         # Aucune sous-query n'a de resultats
@@ -453,9 +549,15 @@ def try_decompose(query: str) -> QueryPlan:
         QueryPlan avec is_decomposed=True si decomposition effectuee,
         ou plan_type="simple" + single sub_query sinon.
     """
+    import time
+    t0 = time.time()
+    _stats["total_queries"] += 1
+
     question_type = _detect_question_type(query)
 
     if question_type == "simple":
+        _stats["simple"] += 1
+        logger.debug(f"[DECOMPOSE] simple ({len(query)} chars)")
         return QueryPlan(
             original_question=query,
             plan_type="simple",
@@ -468,9 +570,13 @@ def try_decompose(query: str) -> QueryPlan:
         plan = _decompose_llm(query, known_axes)
 
         if plan.is_decomposed:
+            _stats["decomposed"] += 1
+            _stats["by_plan_type"][plan.plan_type] = _stats["by_plan_type"].get(plan.plan_type, 0) + 1
+            elapsed = round(time.time() - t0, 2)
             logger.info(
-                f"[DECOMPOSE] {plan.plan_type} plan with {len(plan.sub_queries)} sub-queries: "
-                f"{[(sq.id, sq.scope_filter) for sq in plan.sub_queries]}"
+                f"[DECOMPOSE] {plan.plan_type} plan — {len(plan.sub_queries)} sub-queries, "
+                f"axes={list(known_axes.keys())}, elapsed={elapsed}s, "
+                f"filters={[sq.scope_filter for sq in plan.sub_queries if sq.scope_filter]}"
             )
             return plan
 
@@ -479,9 +585,13 @@ def try_decompose(query: str) -> QueryPlan:
         plan = _decompose_llm(query, {})
         if plan.is_decomposed:
             plan.plan_type = "multi_facet"
+            _stats["decomposed"] += 1
+            _stats["by_plan_type"]["multi_facet"] = _stats["by_plan_type"].get("multi_facet", 0) + 1
             return plan
 
-    # Fallback : pas de decomposition
+    # Fallback : pas de decomposition (LLM n'a pas decompose malgre la detection)
+    _stats["simple"] += 1
+    logger.info(f"[DECOMPOSE] detected={question_type} but LLM kept simple ({len(query)} chars)")
     return QueryPlan(
         original_question=query,
         plan_type="simple",

@@ -64,6 +64,7 @@ def retrieve_chunks(
     score_threshold: float = SCORE_THRESHOLD,
     solution_filter: str | None = None,
     release_filter: str | None = None,
+    axis_filters: dict[str, str] | None = None,
     doc_filter: list[str] | None = None,
 ) -> RetrievalResult:
     """
@@ -71,6 +72,11 @@ def retrieve_chunks(
 
     Retourne les memes chunks qu'un RAG classique.
     Zero KG, zero enrichissement, zero modification.
+
+    Args:
+        axis_filters: Filtres d'axes domain-agnostic (ex: {"release_id": "2023", "edition": "RISE"}).
+                      Chaque cle est mappee vers un FieldCondition sur "axis_{key}" dans Qdrant.
+                      Prioritaire sur release_filter si les deux sont fournis.
     """
     # Construction du filtre
     must_not_conditions = []
@@ -86,7 +92,17 @@ def retrieve_chunks(
             FieldCondition(key="solution.main", match=MatchValue(value=solution_filter))
         )
 
-    if release_filter:
+    # Domain-agnostic axis filters (QD-2) — prioritaire sur release_filter
+    if axis_filters:
+        for axis_key, axis_value in axis_filters.items():
+            if axis_value:
+                # Convention Qdrant : "axis_{discriminating_role}" (ex: axis_release_id, axis_edition)
+                qdrant_key = f"axis_{axis_key}" if not axis_key.startswith("axis_") else axis_key
+                must_conditions.append(
+                    FieldCondition(key=qdrant_key, match=MatchValue(value=axis_value))
+                )
+    elif release_filter:
+        # Backward compat : release_filter simple (ancien comportement)
         must_conditions.append(
             FieldCondition(key="axis_release_id", match=MatchValue(value=release_filter))
         )

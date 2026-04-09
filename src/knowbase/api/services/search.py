@@ -958,11 +958,11 @@ def search_documents(
 
         for sq in plan.sub_queries[1:]:  # skip [0] = premiere sous-query (deja fait)
             try:
-                # Extraire le release_filter specifique de cette sous-query
-                sq_release = (
-                    sq.scope_filter.get("axis_release_id")
-                    or sq.scope_filter.get("release_id")
-                ) if sq.scope_filter else None
+                # QD-2 : scope_filter domain-agnostic → axis_filters dict
+                # Le LLM decomposeur produit des cles correspondant aux axes connus du corpus
+                # (ex: release_id, edition, study_phase, jurisdiction...).
+                # Le retriever mappe chaque cle vers "axis_{key}" dans Qdrant.
+                sq_axis_filters = sq.scope_filter if sq.scope_filter else None
 
                 sub_vector = embed_query(sq.text, embedding_model)
                 sub_result = _retrieve_chunks(
@@ -973,7 +973,8 @@ def search_documents(
                     top_k=TOP_K // len(plan.sub_queries),  # budget equitable
                     score_threshold=SCORE_THRESHOLD,
                     solution_filter=solution,
-                    release_filter=sq_release or release_id,  # scope_filter prioritaire
+                    axis_filters=sq_axis_filters,
+                    release_filter=release_id if not sq_axis_filters else None,
                 )
 
                 sq_count = 0
@@ -1652,19 +1653,62 @@ def search_documents(
             "reasoning_trace": ["question_context_gap → UNANSWERABLE"],
         }
 
-    # Query Decomposition V2 : injecter un hint de synthese si plan comparison/enumeration
-    if plan and plan.is_decomposed and plan.synthesis_strategy in ("compare", "chronological"):
-        _sq_labels = ", ".join(
-            sq.rationale or sq.text[:60] for sq in plan.sub_queries
-        )
+    # QD-1 : Synthese structuree — contexte groupe par sous-question
+    # Au lieu de passer les chunks en vrac, on construit un contexte structure
+    # qui aide le synthetiseur a comparer point par point
+    if plan and plan.is_decomposed and plan.synthesis_strategy in ("compare", "chronological", "aggregate"):
+        # Regrouper les chunks par sous-question grace au tag _sub_query_group
+        sq_by_id = {sq.id: sq for sq in plan.sub_queries}
+        grouped_sections = []
+        ungrouped_chunks = []
+
+        for sq in plan.sub_queries:
+            sq_chunks = [c for c in reranked_chunks if c.get("_sub_query_group") == sq.id]
+            if sq_chunks:
+                label = sq.rationale or sq.text[:80]
+                scope_info = ""
+                if sq.scope_filter:
+                    scope_info = " (" + ", ".join(f"{k}={v}" for k, v in sq.scope_filter.items()) + ")"
+                grouped_sections.append(
+                    f"=== {sq.id}: {label}{scope_info} ==="
+                )
+
+        # Chunks sans tag (retrieval initial avant decomposition)
+        n_ungrouped = sum(1 for c in reranked_chunks if not c.get("_sub_query_group"))
+
+        strategy_instructions = {
+            "compare": (
+                "Structure ta reponse en comparant explicitement les groupes point par point. "
+                "Pour chaque aspect, indique ce que dit chaque groupe. "
+                "Si un groupe n'a pas d'information sur un aspect, dis-le clairement."
+            ),
+            "chronological": (
+                "Structure ta reponse chronologiquement en montrant l'evolution entre les groupes. "
+                "Pour chaque aspect, montre comment il a change d'un groupe a l'autre."
+            ),
+            "aggregate": (
+                "Synthetise les informations de tous les groupes en un tout coherent. "
+                "Si des groupes se contredisent ou apportent des nuances, mentionne-le."
+            ),
+        }
+
         synthesis_hint = (
             f"\n## Contexte structurel de la question\n"
-            f"Cette question a ete decomposee en {len(plan.sub_queries)} sous-questions "
-            f"({plan.plan_type}). Les chunks ci-dessous couvrent : {_sq_labels}. "
-            f"Structure ta reponse en comparant explicitement ces axes point par point. "
-            f"Si un axe n'est pas couvert par les chunks, dis-le clairement.\n"
+            f"Cette question a ete decomposee en {len(plan.sub_queries)} sous-questions ({plan.plan_type}).\n"
+            f"Les chunks ci-dessous sont groupes par sous-question :\n"
+            + "\n".join(f"- {s}" for s in grouped_sections) + "\n"
+            + (f"- ({n_ungrouped} chunks non-groupes du retrieval initial)\n" if n_ungrouped else "")
+            + f"\n**Instruction** : {strategy_instructions.get(plan.synthesis_strategy, strategy_instructions['compare'])}\n"
         )
         session_context_text = synthesis_hint + session_context_text
+
+        # Trier les chunks pour que le synthetiseur les recoit groupes
+        def _sq_sort_key(chunk):
+            group = chunk.get("_sub_query_group", "zzz")
+            sq_order = {sq.id: i for i, sq in enumerate(plan.sub_queries)}
+            return sq_order.get(group, 999)
+
+        reranked_chunks = sorted(reranked_chunks, key=_sq_sort_key)
 
     # Generate synthesized response + instrumented answer in parallel (if both needed)
     if use_instrumented:
