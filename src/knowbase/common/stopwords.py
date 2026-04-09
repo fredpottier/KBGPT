@@ -91,7 +91,15 @@ def get_stopwords(lang_codes: list[str] | tuple[str, ...] | None = None) -> froz
 
 
 def _detect_corpus_languages() -> list[str]:
-    """Detecte les langues presentes dans le corpus via Neo4j DocumentContext."""
+    """Detecte les langues presentes dans le corpus.
+
+    Strategie en 2 etapes :
+    1. Query Neo4j DocumentContext.language (si le champ existe)
+    2. Sinon, echantillonne des chunks Qdrant et detecte via fasttext
+
+    Retourne la liste des codes ISO 639-1 detectes, ou DEFAULT_LANGS en fallback.
+    """
+    # Tentative 1 : Neo4j (si le champ language est persiste)
     try:
         from knowbase.common.clients.neo4j_client import get_neo4j_client
         driver = get_neo4j_client().driver
@@ -105,10 +113,64 @@ def _detect_corpus_languages() -> list[str]:
             if record and record["langs"]:
                 langs = [l for l in record["langs"] if isinstance(l, str) and len(l) == 2]
                 if langs:
-                    logger.info(f"[STOPWORDS] Corpus languages detected: {langs}")
+                    logger.info(f"[STOPWORDS] Corpus languages from Neo4j: {langs}")
                     return langs
     except Exception as e:
-        logger.debug(f"[STOPWORDS] Could not detect corpus languages: {e}")
+        logger.debug(f"[STOPWORDS] Neo4j language detection failed: {e}")
+
+    # Tentative 2 : echantillonner des chunks Qdrant + fasttext
+    try:
+        from knowbase.retrieval.qdrant_layer_r import get_qdrant_client
+        from knowbase.config.settings import get_settings
+
+        settings = get_settings()
+        client = get_qdrant_client()
+        collection = settings.qdrant_collection
+
+        results, _ = client.scroll(
+            collection_name=collection,
+            limit=50,  # petit echantillon
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        if not results:
+            return list(DEFAULT_LANGS)
+
+        # Detection de langue sur les textes des chunks
+        from collections import Counter
+        lang_counts: Counter = Counter()
+
+        try:
+            from knowbase.semantic.utils.language_detector import get_language_detector
+            detector = get_language_detector(settings.semantic)
+            for point in results:
+                text = point.payload.get("text", "")
+                if text and len(text) > 30:
+                    lang = detector.detect(text)
+                    if lang and len(lang) == 2:
+                        lang_counts[lang] += 1
+        except Exception:
+            # fasttext indisponible — fallback simple par heuristique
+            for point in results:
+                text = (point.payload.get("text", "") or "").lower()
+                if any(w in text for w in ["le ", "la ", "les ", "des ", "une "]):
+                    lang_counts["fr"] += 1
+                if any(w in text for w in ["the ", "and ", "for ", "with "]):
+                    lang_counts["en"] += 1
+
+        if lang_counts:
+            # Garder les langues qui representent > 5% des chunks
+            total = sum(lang_counts.values())
+            langs = [lang for lang, count in lang_counts.items()
+                     if count / total > 0.05]
+            if langs:
+                logger.info(f"[STOPWORDS] Corpus languages from Qdrant sampling: {langs} (from {lang_counts})")
+                return langs
+
+    except Exception as e:
+        logger.debug(f"[STOPWORDS] Qdrant language detection failed: {e}")
+
     return list(DEFAULT_LANGS)
 
 

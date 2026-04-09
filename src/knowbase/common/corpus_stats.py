@@ -152,9 +152,19 @@ def is_in_corpus(term: str) -> bool:
 
 
 def invalidate_cache() -> None:
-    """Force le recalcul au prochain appel (utile apres une ingestion)."""
+    """Force le recalcul au prochain appel (utile apres une ingestion).
+
+    Invalide aussi le cache stopwords multilingues car une nouvelle ingestion
+    peut introduire des documents dans une nouvelle langue.
+    """
     global _idf_cache, _df_cache, _corpus_size, _total_chunks
     _idf_cache = None
     _df_cache = None
     _corpus_size = 0
     _total_chunks = 0
+    # Invalider aussi les stopwords (nouvelle langue possible)
+    try:
+        from knowbase.common.stopwords import invalidate_cache as invalidate_stopwords
+        invalidate_stopwords()
+    except Exception:
+        pass

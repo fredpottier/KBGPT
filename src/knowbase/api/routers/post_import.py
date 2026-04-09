@@ -368,6 +368,16 @@ def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
 
     total_duration = round(time.time() - pipeline_start, 1)
 
+    # Invalider les caches corpus-dependants (IDF + stopwords multilingues)
+    # car l'ingestion peut avoir modifie la distribution du corpus ou ajoute
+    # des documents dans une nouvelle langue
+    try:
+        from knowbase.common.corpus_stats import invalidate_cache as invalidate_corpus_stats
+        invalidate_corpus_stats()
+        logger.info("[PostImport] Caches corpus_stats + stopwords invalides")
+    except Exception:
+        pass
+
     _update_state(
         tenant_id, running=False, all_steps=steps,
         completed=[r["step_id"] for r in results if r["status"] == "success"],
