@@ -251,17 +251,45 @@ def strip_version_qualifier(name: str) -> Tuple[str, Optional[str]]:
 # faux acronymes, chiffres romains, acronymes 2-chars ambigus.
 
 ENTITY_STOPLIST = frozenset({
-    # Mots anglais courts qui se deguisent en acronymes 2-5 lettres
-    # (passent le filtre acronyme ^[A-Z]{2,5}$ mais ne sont pas des acronymes)
+    # ── Faux acronymes et chiffres romains ────────────────────────────────
+    # Mots anglais courts qui passent le filtre ^[A-Z]{2,5}$
     "as", "new", "up", "non", "map", "fix", "key", "end",
     "add", "top", "per", "via", "due", "own", "old",
-    # Chiffres romains (passent ^[A-Z]{2,5}$ mais ne sont pas des entites)
+    # Chiffres romains
     "ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii",
-    # Acronymes 2-chars ambigus (aucun sens metier connu)
+    # Acronymes 2-chars ambigus
     "nt", "fn", "cg", "bv", "ck", "zo", "nc", "iu",
-    # Deictiques/pronoms universels qui echappent aux heuristiques
+
+    # ── Mots-outils EN universels (JAMAIS des entites, aucun domaine) ─────
+    # Deictiques, pronoms, articles
     "it", "its", "itself", "this", "that", "these", "those",
-    "a", "an", "the",
+    "a", "an", "the", "some", "any", "all", "each", "every",
+    "one", "other", "another",
+    # Pronoms personnels + possessifs
+    "he", "she", "we", "they", "you", "me", "him", "us", "them",
+    "his", "her", "our", "your", "their", "my",
+    # Relatifs / interrogatifs
+    "which", "where", "when", "how", "what", "who", "whom",
+    # Prepositions
+    "to", "of", "in", "on", "at", "by", "for", "with", "from",
+    "into", "onto", "upon", "about", "between", "through",
+    "over", "under", "after", "before", "during", "without",
+    # Conjonctions, negations, adverbes
+    "and", "or", "but", "not", "no", "nor", "yet", "so",
+    "if", "then", "else", "because", "since", "while", "although",
+    "also", "than", "very", "only", "just",
+    "here", "there", "now", "already", "still",
+    # Verbes courts generiques
+    "use", "used", "uses", "using", "set", "get", "run", "put", "let",
+    "made", "make", "take", "give", "keep", "need", "needs", "needed",
+
+    # ── Noms universellement trop vagues (filet de securite sans IDF) ─────
+    "system", "systems", "information", "data", "service", "services",
+    "process", "document", "user", "users", "application",
+    "value", "values", "type", "object", "item", "items",
+    "element", "elements", "component", "result", "results",
+    "file", "files", "option", "options", "method",
+    "step", "steps", "case", "action", "entry",
 })
 
 # Patterns indiquant un fragment de phrase (pas une entité)
