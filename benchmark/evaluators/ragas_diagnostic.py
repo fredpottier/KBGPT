@@ -486,21 +486,33 @@ def _get_fallback_metric(original_metric, metric_name: str):
     return None
 
 
+_ragas_client = None  # singleton pour eviter l'epuisement du pool de connexions
+
+
 def _get_ragas_providers():
     """Configure le LLM et embeddings pour RAGAS v0.4+.
 
-    Utilise AsyncOpenAI (requis par ragas collections metrics).
+    Utilise un AsyncOpenAI singleton (requis par ragas collections metrics).
     GPT-4o-mini comme evaluateur : rapide, pas cher, different du LLM de synthese.
+
+    Le client est reutilise entre les evaluations OSMOSIS et RAG pour eviter
+    l'epuisement du pool de connexions httpx (cause de "Connection error"
+    quand on enchaine deux evaluations de 100 samples avec haute concurrency).
     """
+    global _ragas_client
     from openai import AsyncOpenAI
     from ragas.llms import llm_factory
     from ragas.embeddings import OpenAIEmbeddings
 
-    client = AsyncOpenAI()  # lit OPENAI_API_KEY depuis l'env
+    if _ragas_client is None:
+        _ragas_client = AsyncOpenAI(
+            max_retries=5,
+            timeout=60.0,
+        )
 
     ragas_model = os.getenv("RAGAS_JUDGE_MODEL", "gpt-4o-mini")
-    llm = llm_factory(ragas_model, client=client)
-    embeddings = OpenAIEmbeddings(client=client, model="text-embedding-3-small")
+    llm = llm_factory(ragas_model, client=_ragas_client)
+    embeddings = OpenAIEmbeddings(client=_ragas_client, model="text-embedding-3-small")
 
     return llm, embeddings
 
@@ -1043,6 +1055,11 @@ def run_benchmark_job(
             )
 
             if rag_samples:
+                # Petit delai pour laisser le pool httpx se stabiliser
+                # entre les deux evaluations (evite "Connection error")
+                import time as _time
+                _time.sleep(2)
+
                 _update_redis_state(redis_url, {
                     "status": "running",
                     "profile": profile,
