@@ -196,17 +196,61 @@ def build_evidence_summary(
 # Veto minimal cote code (garde-fou integrite)
 # ============================================================================
 
+def _is_factual_simple_question(question: str) -> bool:
+    """Detecte les questions factuelles simples qui ne beneficient pas du mode PERSPECTIVE.
+
+    Questions qui demandent UN fait precis, une definition, un identifiant, un code.
+    Ces questions doivent rester en DIRECT meme si le KG est riche.
+    """
+    q_lower = question.lower().strip()
+
+    # Patterns de questions factuelles simples
+    simple_patterns = [
+        r"^quel(?:le)?\s+(?:est|sont)\s+(?:la|le|l['']\s*)\s*\w+\s+(?:sap\s+)?note",
+        r"^quel(?:le)?\s+(?:est|sont)\s+(?:la|le|l['']\s*)\s*(?:objet|code|numero|url|version|patch|transaction)",
+        r"^quel\s+\w+\s+(?:est|faut|doit)",
+        r"^qu['']\s*est[- ]ce\s+que\s+(?:le|la|l['']\s*)\s*\w{2,15}\s",
+        r"^(?:est-ce|faut-il|doit-on|peut-on|y a-t-il)",
+        r"^(?:which|what|how many|is there|does|can)\s",
+        r"(?:sap\s+note|transaction|authorization\s+object|objet\s+d)",
+    ]
+
+    import re
+    for pattern in simple_patterns:
+        if re.search(pattern, q_lower):
+            return True
+
+    # Question courte sans mots-cles de breadth
+    breadth_markers = [
+        "overview", "vue d", "ensemble", "principaux", "principales",
+        "aspects", "dimensions", "comparison", "comparaison",
+        "differences", "common", "shared", "across", "entre",
+        "impact", "panorama", "synthesis", "synthese", "resume",
+        "fonctionnalites", "fonctionnalit",
+    ]
+    if len(question) < 100 and not any(m in q_lower for m in breadth_markers):
+        return True
+
+    return False
+
+
 def _check_minimal_veto(
     summary: Dict[str, Any],
     scored_perspectives: List[ScoredPerspective],
+    question: str = "",
 ) -> Optional[str]:
     """
     Veto structurel minimal : meme si le LLM dit "structured",
-    le code refuse dans certains cas ou la matiere est objectivement insuffisante.
+    le code refuse dans certains cas ou la matiere est objectivement insuffisante,
+    ou la question est trop simple pour beneficier du mode PERSPECTIVE.
 
     Returns:
         Raison du veto si applicable, None sinon.
     """
+    # Question factuelle simple → DIRECT (pas besoin d'axes thematiques)
+    if question and _is_factual_simple_question(question):
+        return f"factual_simple_question"
+
     # Pas assez de Perspectives scorees
     if len(scored_perspectives) < 2:
         return f"too_few_perspectives_loaded ({len(scored_perspectives)})"
@@ -310,8 +354,8 @@ async def analyze_response_strategy(
     summary_json = json.dumps(summary, ensure_ascii=False, indent=2)
     summary_size = len(summary_json)
 
-    # 2. Veto minimal pre-LLM (economie d'appel si materiel insuffisant)
-    veto = _check_minimal_veto(summary, scored_perspectives)
+    # 2. Veto minimal pre-LLM (economie d'appel si materiel insuffisant ou question simple)
+    veto = _check_minimal_veto(summary, scored_perspectives, question=question)
     if veto:
         logger.info(f"[PERSPECTIVE:VETO] Pre-LLM veto: {veto}")
         return StrategyDecision(
@@ -406,7 +450,7 @@ async def analyze_response_strategy(
 
     # 6. Veto minimal post-LLM (si structured mais conditions plancher non remplies)
     if final_strategy == "structured":
-        veto = _check_minimal_veto(summary, scored_perspectives)
+        veto = _check_minimal_veto(summary, scored_perspectives, question=question)
         if veto:
             final_strategy = "direct"
             logger.info(f"[PERSPECTIVE:VETO] Post-LLM veto: {veto}")
