@@ -572,7 +572,7 @@ export function RobustnessTab({ reports, onLaunch, isRunning, runProgress }: Rob
                               px={1}
                               rounded="sm"
                             >
-                              baseline
+                              ref
                             </Badge>
                           )}
                         </HStack>

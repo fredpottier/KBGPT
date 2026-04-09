@@ -234,7 +234,7 @@ function ScoreCard({
             >
               {deltaInfo.text}
             </Text>
-            <Text fontSize="10px" color={tokens.textMuted}>vs baseline</Text>
+            <Text fontSize="10px" color={tokens.textMuted}>vs RAG pur</Text>
           </HStack>
         </VStack>
       </HStack>
@@ -457,7 +457,7 @@ export function OverviewTab({
   const robParaphrase = extractScore(robustnessReport, ['scores', 'paraphrase_score'])
   const robNegation = extractScore(robustnessReport, ['scores', 'negation_score'])
 
-  // ── Compute deltas vs baseline (from recentRuns) ────────────────────
+  // ── Compute deltas vs RAG pur (from recentRuns) ────────────────────
 
   function latestDelta(type: string): number | null {
     const run = recentRuns?.find(r => r.type === type)

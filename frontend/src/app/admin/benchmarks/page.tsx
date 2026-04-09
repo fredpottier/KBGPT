@@ -124,7 +124,7 @@ const TABS: { key: TabKey; label: string; Icon: React.ElementType; accent: strin
   { key: 'ragas', label: 'RAGAS', Icon: FiBarChart2, accent: T.accentRagas },
   { key: 'contradictions', label: 'Contradictions', Icon: FiAlertTriangle, accent: T.accentContra },
   { key: 'robustness', label: 'Robustesse', Icon: FiShield, accent: T.accentRobust },
-  // Onglet Comparaison supprime — les deltas vs baseline sont dans chaque onglet
+  // Onglet Comparaison supprime — les deltas vs RAG pur sont dans chaque onglet
 ]
 
 const PROFILES = [
@@ -320,30 +320,43 @@ export default function BenchmarksPage() {
     return [...robustnessReports].sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0]
   }, [robustnessReports])
 
+  // Delta vs RAG pur : trouver le dernier run avec donnees RAG pour chaque benchmark
+  const ragPurScores = useMemo(() => {
+    // RAGAS : dernier run avec systems.baseline
+    const ragasWithRag = [...ragasReports]
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .find(r => r.systems?.baseline?.scores?.faithfulness != null)
+    // T2/T5 : dernier run avec scores_rag
+    const t2WithRag = [...t2t5Reports]
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .find(r => r.scores_rag != null)
+    return {
+      ragasFaith: ragasWithRag?.systems?.baseline?.scores?.faithfulness ?? null,
+      ragasCtxRel: ragasWithRag?.systems?.baseline?.scores?.context_relevance ?? null,
+      t2BothSurfaced: t2WithRag?.scores_rag?.both_sides_surfaced ?? null,
+    }
+  }, [ragasReports, t2t5Reports])
+
   const recentRuns = useMemo(() => {
     const runs: Array<{ type: string; tag: string; score: number; delta: number | null; timestamp: string; filename: string; synthesis_model?: string }> = []
 
-    const ragasSorted = [...ragasReports].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-    const baselineRagasScore = ragasSorted[0]?.systems?.osmosis?.scores?.faithfulness ?? null
-
+    // RAGAS : delta vs RAG pur faithfulness (si disponible)
     for (const r of ragasReports) {
       const s = r.systems?.osmosis?.scores?.faithfulness ?? 0
-      const delta = baselineRagasScore != null ? s - baselineRagasScore : null
+      const delta = ragPurScores.ragasFaith != null ? s - ragPurScores.ragasFaith : null
       runs.push({ type: 'ragas', tag: r.tag || '', score: s, delta, timestamp: r.timestamp, filename: r.filename, synthesis_model: (r as any).synthesis_model })
     }
 
-    const t2Sorted = [...t2t5Reports].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-    const baselineT2Score = t2Sorted[0]?.scores?.both_sides_surfaced ?? null
-
+    // T2/T5 : delta vs RAG pur both_sides_surfaced (si disponible)
     for (const r of t2t5Reports) {
       const s = r.scores?.both_sides_surfaced ?? 0
-      const delta = baselineT2Score != null ? s - baselineT2Score : null
+      const delta = ragPurScores.t2BothSurfaced != null ? s - ragPurScores.t2BothSurfaced : null
       runs.push({ type: 't2t5', tag: r.tag || '', score: s, delta, timestamp: r.timestamp, filename: r.filename, synthesis_model: (r as any).synthesis_model })
     }
 
+    // Robustness : pas de RAG pur disponible, delta vs premier run
     const robSorted = [...robustnessReports].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
     const baselineRobScore = robSorted[0]?.scores?.global_score ?? null
-
     for (const r of robustnessReports) {
       const s = r.scores?.global_score ?? 0
       const delta = baselineRobScore != null ? s - baselineRobScore : null
@@ -352,7 +365,7 @@ export default function BenchmarksPage() {
 
     runs.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
     return runs.slice(0, 5)
-  }, [ragasReports, t2t5Reports, robustnessReports])
+  }, [ragasReports, t2t5Reports, robustnessReports, ragPurScores])
 
   // ══════════════════════════════════════════════════════════════════════
   //  RENDER
@@ -462,7 +475,7 @@ export default function BenchmarksPage() {
         />
       )}
 
-      {/* Onglet Comparaison supprime — deltas vs baseline dans chaque onglet */}
+      {/* Onglet Comparaison supprime — deltas vs RAG pur dans chaque onglet */}
     </Box>
   )
 }
@@ -494,10 +507,12 @@ function RagasTab({
     [reports],
   )
 
-  const baseline = useMemo(() =>
-    reports.length > 0 ? [...reports].sort((a, b) => a.timestamp.localeCompare(b.timestamp))[0] : null,
-    [reports],
-  )
+  // RAG pur : trouver le dernier run qui contient systems.baseline (RAG pur)
+  const ragPurRef = useMemo(() => {
+    return [...reports]
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .find(r => r.systems?.baseline?.scores?.faithfulness != null) ?? null
+  }, [reports])
 
   const latest = sorted[0] ?? null
   const detail = latestDetail ?? latest
@@ -506,8 +521,9 @@ function RagasTab({
   const ctxRel = osm?.scores?.context_relevance ?? 0
   const diag = osm?.diagnostic
 
-  const baseFaith = baseline?.systems?.osmosis?.scores?.faithfulness ?? null
-  const baseCtxRel = baseline?.systems?.osmosis?.scores?.context_relevance ?? null
+  // Delta vs RAG pur (au lieu du premier run historique)
+  const baseFaith = ragPurRef?.systems?.baseline?.scores?.faithfulness ?? null
+  const baseCtxRel = ragPurRef?.systems?.baseline?.scores?.context_relevance ?? null
 
   // Diagnostic badge config
   const diagLabel = diag?.level ?? 'Inconnu'
@@ -1106,7 +1122,7 @@ function ComparisonTab() {
           </Text>
           <Text fontSize="13px" color={T.textSecondary} textAlign="center" maxW="500px" lineHeight="1.7">
             La comparaison detaillee est disponible directement dans chaque onglet
-            (RAGAS, Contradictions, Robustesse) via les deltas vs baseline dans les
+            (RAGAS, Contradictions, Robustesse) via les deltas vs RAG pur dans les
             tableaux historiques.
           </Text>
           <Text fontSize="11px" color={T.textMuted} textAlign="center" maxW="450px">
@@ -1132,7 +1148,7 @@ function DeltaBadge({ current, baseline }: { current: number; baseline: number }
       <Text fontSize="11px" fontFamily="'Fira Code', monospace" fontWeight="600" color={info.color}>
         {info.text}
       </Text>
-      <Text fontSize="10px" color={T.textMuted}>vs baseline</Text>
+      <Text fontSize="10px" color={T.textMuted}>vs RAG pur</Text>
     </HStack>
   )
 }

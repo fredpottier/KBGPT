@@ -5,7 +5,7 @@ import { Box, HStack, Text } from '@chakra-ui/react'
 interface MetricBarProps {
   label: string
   value: number          // 0.0 - 1.0
-  delta?: number | null  // vs baseline, in pp
+  delta?: number | null  // vs RAG pur, in pp
   count?: number         // number of questions
 }
 
