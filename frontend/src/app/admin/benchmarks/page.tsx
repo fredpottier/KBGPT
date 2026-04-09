@@ -618,7 +618,7 @@ function RagasTab({
                   const rowOsm = row.systems?.osmosis
                   const f = rowOsm?.scores?.faithfulness ?? 0
                   const c = rowOsm?.scores?.context_relevance ?? 0
-                  const isBase = row === baseline
+                  const isBase = row === ragPurRef
                   const dF = baseFaith != null ? f - baseFaith : null
                   const dC = baseCtxRel != null ? c - baseCtxRel : null
 
