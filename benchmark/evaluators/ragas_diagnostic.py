@@ -312,7 +312,7 @@ def run_ragas_evaluation(
     )
 
     start = time.time()
-    concurrency = int(os.getenv("RAGAS_CONCURRENCY", "8"))
+    concurrency = int(os.getenv("RAGAS_CONCURRENCY", "15"))
 
     # Evaluer chaque metrique en parallele sur tous les samples
     # NOTE: on stocke question + answer complets + quelques metadonnees pour
@@ -891,7 +891,7 @@ def _collect_api_samples(
 
     total = len(all_questions)
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    api_concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "10"))
+    api_concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "15"))
     logger.info(f"[RAGAS:BENCH] Collecting {total} samples via API (use_kg={use_kg}, phase={phase_label}, concurrency={api_concurrency})")
 
     samples = []

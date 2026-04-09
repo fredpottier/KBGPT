@@ -699,7 +699,7 @@ def run_benchmark_job(
 
         import threading
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "10"))
+        concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "15"))
         logger.info(f"[T2T5:BENCH] Evaluation mode: {judge_mode}, concurrency: {concurrency}")
 
         _progress_counter = [0]
