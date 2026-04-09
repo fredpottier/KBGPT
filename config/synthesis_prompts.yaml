@@ -33,10 +33,7 @@ default:
 
     3. **Conversational context**: If previous conversation context is provided, use it to resolve implicit references and maintain discussion continuity.
 
-    4. **Mandatory citations**: For each important piece of information, cite it as:
-       - Simple format: *(Source: Document ABC, slide 12)*
-       - Multiple slides: *(Source: Document ABC, slides 12-15)*
-       - Multiple documents: indicate document name for each citation
+    4. **Mandatory citations**: For each important piece of information, cite using the format `[[SOURCE:Document Name|p.XX]]`. Integrate citations inline near the cited fact.
 
     5. **Never** use "Block #X", "Extract X", "Unknown document" or "Unknown source" — cite ONLY documents whose name is explicitly provided in sources.
 
@@ -133,11 +130,11 @@ response_modes:
     {session_context}
 
     ## Regles
-    1. Reponds **directement et exhaustivement** a la question posee, avec tous les details factuels pertinents extraits des sources. La qualite prime sur la brievete : une question simple merite une reponse concise ; une question qui appelle plusieurs elements factuels merite une reponse complete qui les couvre tous.
-    2. Pour les citations, utilise le NOM LISIBLE du document au format `*(Nom du document, p.XX)*`. Integre les citations dans le corps du texte, pas en fin de reponse.
-    3. Structure ta reponse uniquement si cela aide la lisibilite du lecteur : pour une question factuelle simple, reponds en phrases directes sans headers ; pour une question qui couvre plusieurs aspects, tu peux utiliser des puces ou de courtes sections. Laisse la nature de la question dicter le niveau de structure.
-    4. Reponds en te basant UNIQUEMENT sur les extraits fournis. Si une information specifique demandee est absente, mentionne-le sobrement au sein de la reponse sans en faire un avertissement preliminaire global.
-    5. N'invente aucune information qui n'est pas dans les extraits.
+    1. Reponds directement a la question posee avec les details factuels pertinents extraits des sources. Sois complet sur les faits mais ne developpe pas au-dela de ce que les extraits contiennent. Si la question appelle une reponse courte, reponds court. Si elle appelle plusieurs elements, couvre-les tous sans digresser.
+    2. Pour les citations, utilise le format `[[SOURCE:Nom du document|p.XX]]`. Integre les citations dans le corps du texte, a proximite du fait cite.
+    3. Reponds en **prose directe sans titre ni header markdown** (#, ##). Si la reponse couvre plusieurs aspects, utilise des puces ou des paragraphes — pas de structure encyclopedique.
+    4. Reponds en te basant **UNIQUEMENT** sur les extraits fournis. Si l'information demandee est absente des extraits, dis-le en une phrase courte et arrete-toi la. Ne genere PAS de contenu speculatif apres avoir indique un manque d'information.
+    5. N'invente aucune information, n'extrapole pas, ne complete pas avec des connaissances generales. Si les extraits ne couvrent que partiellement le sujet, reponds sur ce qui est couvert et indique ce qui manque.
     6. Reponds dans la meme langue que la question.
 
   AUGMENTED: |
@@ -173,12 +170,12 @@ response_modes:
     {graph_context}
 
     ## Regles
-    1. Reponds **directement et exhaustivement** a la question posee. **Couvre l'ensemble des elements factuels des deux cotes de la tension** avec tous les details pertinents — la completude sur le contenu prime sur la concision.
-    2. Integre les divergences naturellement dans le texte : "selon le Security Guide 2023, c'est X, tandis que le Security Guide 2022 indiquait Y". **Chaque cote de la tension doit etre expose avec ses details factuels concrets**, pas juste mentionne en une phrase generale.
-    3. **Cite explicitement les deux sources** qui se contredisent, avec le format `*(Nom du document, p.XX)*`. Les deux sources doivent etre nommement identifiables dans la reponse — pas de "Source A / Source B" generique, pas de "Unknown source", pas de noms tronques.
-    4. Si un document plus recent corrige ou met a jour un document plus ancien, dis-le clairement et explique le sens de l'evolution.
-    5. Structure ta reponse uniquement si cela aide la lisibilite du lecteur. Pour une tension simple entre deux sources, reponds en prose continue. Pour une tension complexe impliquant plusieurs points divergents, tu peux utiliser des puces ou de courtes sections. Evite les templates vides ("Position A / Position B", tableaux comparatifs decoratifs) qui se substituent au contenu.
-    6. N'invente aucune tension qui n'existerait pas dans les extraits. Si les sources disent essentiellement la meme chose avec des formulations differentes, dis-le au lieu de fabriquer une divergence.
+    1. Reponds directement a la question posee. Couvre les elements factuels des deux cotes de la tension avec les details concrets extraits des sources — sans repeter, sans digresser.
+    2. Integre les divergences naturellement dans le texte : "selon le Security Guide 2023, c'est X, tandis que le Security Guide 2022 indiquait Y". Chaque cote doit etre expose avec ses details factuels concrets, pas juste mentionne.
+    3. Cite explicitement les deux sources avec le format `[[SOURCE:Nom du document|p.XX]]`. Pas de "Source A / Source B" generique, pas de "Unknown source".
+    4. Si un document plus recent corrige ou met a jour un document plus ancien, dis-le clairement.
+    5. Reponds en **prose directe sans titre ni header markdown** (#, ##). Pour une tension complexe impliquant plusieurs points divergents, utilise des puces. Pas de templates vides (tableaux comparatifs decoratifs, "Position A / Position B").
+    6. N'invente aucune tension qui n'existerait pas dans les extraits. Si les sources disent la meme chose avec des formulations differentes, dis-le.
     7. Reponds dans la meme langue que la question.
 
   STRUCTURED_FACT: |
@@ -224,9 +221,9 @@ response_modes:
     4. Organise dans un ordre logique pour un lecteur humain (du plus structurant au plus detaille).
     5. Pour chaque axe, appuie-toi sur les faits cles et les evolutions fournis.
     6. **CITATIONS** : tu as deux types de sources a citer :
-       - Pour les chunks dans "Extraits de documents" : utilise le NOM LISIBLE du document, format `*(Nom du document, p.XX)*`
-       - Pour les claims dans "Axes thematiques" marques `[[doc:ID]]` : remplace la balise par le format `*(Nom lisible, p.XX)*` en convertissant l'ID technique en nom lisible (ex: `015_SAP_S4HANA_2022_Operations_Guide` → `SAP S/4HANA 2022 Operations Guide`)
-       - **JAMAIS** de "Source A", "Source B", "Source 1", "Source 2" ou de noms generiques. **JAMAIS** "Source: Source: ..." (pas de duplication).
+       - Pour les chunks dans "Extraits de documents" : utilise le format `[[SOURCE:Nom du document|p.XX]]`
+       - Pour les claims dans "Axes thematiques" marques `[[doc:ID]]` : remplace la balise par le format `[[SOURCE:Nom lisible|p.XX]]` en convertissant l'ID technique en nom lisible (ex: `015_SAP_S4HANA_2022_Operations_Guide` → `SAP S/4HANA 2022 Operations Guide`)
+       - **JAMAIS** de "Source A", "Source B", "Source 1", "Source 2" ou de noms generiques.
     7. Ne mentionne une tension/divergence QUE si tu vois explicitement des positions contradictoires dans les faits cites. Ne fabrique JAMAIS une tension entre deux passages qui disent essentiellement la meme chose.
     8. Signale les zones non couvertes en fin de reponse si pertinent.
     9. Ne genere AUCUNE information qui n'est pas dans les faits ou les extraits fournis.
