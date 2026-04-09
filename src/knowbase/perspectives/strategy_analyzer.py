@@ -220,15 +220,12 @@ def _is_factual_simple_question(question: str) -> bool:
         if re.search(pattern, q_lower):
             return True
 
-    # Question courte sans mots-cles de breadth
-    breadth_markers = [
-        "overview", "vue d", "ensemble", "principaux", "principales",
-        "aspects", "dimensions", "comparison", "comparaison",
-        "differences", "common", "shared", "across", "entre",
-        "impact", "panorama", "synthesis", "synthese", "resume",
-        "fonctionnalites", "fonctionnalit",
-    ]
-    if len(question) < 100 and not any(m in q_lower for m in breadth_markers):
+    # Question courte : les questions < 80 chars qui ne matchent aucun pattern
+    # factuel sont probablement des lookups simples. Les questions ouvertes/larges
+    # tendent a etre plus longues car elles decrivent un perimetre.
+    # Pas de liste de mots-cles (serait FR/EN-specifique) — on laisse le LLM
+    # decisionnel gerer la nuance pour les questions moyennes/longues.
+    if len(question) < 80:
         return True
 
     return False
