@@ -237,92 +237,31 @@ def strip_version_qualifier(name: str) -> Tuple[str, Optional[str]]:
     return stripped, None
 
 
-# Stoplist métier (termes trop génériques)
+# ── Entity Stoplist V2 — liste résiduelle minimale (~30 items) ─────────────
+#
+# AVANT (V1) : 308 items FR+EN couvrant mots-outils + noms generiques + faux acronymes
+# APRES (V2) : ~30 items universels + filtrage IDF dynamique pour les noms generiques
+#
+# Les mots-outils (articles, pronoms, prepositions) sont deja couverts par :
+# - _FUNCTION_WORDS (ligne ~343) pour les multi-mots
+# - PHRASE_FRAGMENT_INDICATORS (ligne ~329) pour les fragments
+# - Le check IDF dans is_valid_entity_name() pour les mono-mots generiques
+#
+# Cette liste ne contient que ce que NI l'IDF NI les heuristiques ne peuvent attraper :
+# faux acronymes, chiffres romains, acronymes 2-chars ambigus.
+
 ENTITY_STOPLIST = frozenset({
-    # Termes génériques anglais (singuliers)
-    "system", "information", "data", "service", "process",
-    "document", "section", "table", "figure", "example",
-    "user", "customer", "administrator", "admin",
-    "application", "software", "platform", "solution",
-    "request", "response", "error", "warning", "message",
-    "value", "parameter", "option", "setting", "configuration",
-    "feature", "function", "method", "operation",
-    "file", "folder", "directory", "path",
-    "time", "date", "version", "number", "id", "identifier",
-    "type", "kind", "category", "class", "group",
-    "note", "tip", "important", "warning", "caution",
-    "object", "item", "element", "component", "module",
-    "content", "detail", "details", "summary", "overview",
-    "result", "results", "output", "input", "entry",
-    "case", "scenario", "instance", "example", "sample",
-    "step", "steps", "action", "task", "activity",
-    # Pluriels courants (manquants, détectés par audit qualité v1.6.1)
-    "systems", "services", "processes", "documents", "applications",
-    "users", "customers", "administrators", "items", "elements",
-    "components", "modules", "functions", "objects", "features",
-    "files", "operations", "methods", "parameters", "options",
-    "settings", "configurations", "values", "messages", "entries",
-    "tasks", "activities", "actions", "solutions", "platforms",
-    # Termes suffisamment génériques pour être du bruit dans tout domaine
-    "integration", "monitoring", "report", "reports",
-    # Mots anglais courants qui se déguisent en acronymes 2-5 lettres
+    # Mots anglais courts qui se deguisent en acronymes 2-5 lettres
     # (passent le filtre acronyme ^[A-Z]{2,5}$ mais ne sont pas des acronymes)
     "as", "new", "up", "non", "map", "fix", "key", "end",
     "add", "top", "per", "via", "due", "own", "old",
-    # Chiffres romains (passent ^[A-Z]{2,5}$ mais ne sont pas des entités)
+    # Chiffres romains (passent ^[A-Z]{2,5}$ mais ne sont pas des entites)
     "ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii",
-    # Acronymes 2-chars ambigus (aucun sens métier connu dans aucune langue)
-    # NB: on garde les acronymes qui PEUVENT être valides (DM=Diabetes Mellitus,
-    # PM=Post-Mortem, BC=Breast Cancer, etc.)
+    # Acronymes 2-chars ambigus (aucun sens metier connu)
     "nt", "fn", "cg", "bv", "ck", "zo", "nc", "iu",
-
-    # Termes déictiques et articles (NE JAMAIS être des entités)
-    "this", "that", "these", "those",
-    "it", "its", "itself",
+    # Deictiques/pronoms universels qui echappent aux heuristiques
+    "it", "its", "itself", "this", "that", "these", "those",
     "a", "an", "the",
-    "some", "any", "all", "each", "every",
-    "one", "other", "another",
-
-    # Prépositions anglaises (mots-outils, jamais des entities)
-    "to", "of", "in", "on", "at", "by", "for", "with", "from",
-    "into", "onto", "upon", "about", "between", "through",
-    "over", "under", "after", "before", "during", "without",
-    # Conjonctions et négations
-    "and", "or", "but", "not", "no", "nor", "yet", "so",
-    "if", "then", "else", "because", "since", "while", "although",
-    # Adverbes courants
-    "also", "than", "very", "only", "just",
-    "here", "there", "now", "already", "still",
-    # Verbes trop courts / génériques (formes simples, pas des noms propres)
-    "use", "used", "uses", "using",
-    "set", "get", "run", "put", "let",
-    "made", "make", "take", "give", "keep",
-    "need", "needs", "needed",
-    # Pronoms et déterminants manquants
-    "he", "she", "we", "they", "you", "me", "him", "us", "them",
-    "his", "her", "our", "your", "their", "my",
-    "which", "where", "when", "how", "what", "who", "whom",
-
-    # Termes génériques français
-    "système", "information", "donnée", "service", "processus",
-    "document", "section", "tableau", "figure", "exemple",
-    "utilisateur", "client", "administrateur",
-    "application", "logiciel", "plateforme", "solution",
-    "requête", "réponse", "erreur", "avertissement",
-    "valeur", "paramètre", "option", "configuration",
-    "fonctionnalité", "fonction", "méthode", "opération",
-    "fichier", "dossier", "répertoire", "chemin",
-    "temps", "date", "version", "numéro", "identifiant",
-    "objet", "élément", "composant", "module",
-    "contenu", "détail", "détails", "résumé", "aperçu",
-    "résultat", "résultats", "sortie", "entrée",
-    "cas", "scénario", "instance", "exemple", "échantillon",
-    "étape", "étapes", "action", "tâche", "activité",
-    # Termes déictiques français
-    "ce", "cette", "ces", "cet",
-    "un", "une", "le", "la", "les",
-    "quelque", "quelques", "tout", "tous", "toute", "toutes",
-    "chaque", "autre", "autres",
 })
 
 # Patterns indiquant un fragment de phrase (pas une entité)
@@ -389,9 +328,21 @@ def is_valid_entity_name(name: str, ner_sourced: bool = False) -> bool:
     name_stripped = name.strip()
     normalized = Entity.normalize(name)
 
-    # Vérifier stoplist EN PREMIER (même les acronymes comme "IS", "OF", "TO")
+    # Vérifier stoplist residuelle (faux acronymes, chiffres romains, deictiques)
     if normalized in ENTITY_STOPLIST:
         return False
+
+    # IDF check pour les entites mono-mot : filtrer les termes trop generiques
+    # dans le corpus actuel (ex: "system", "document", "service")
+    # Ne s'applique PAS aux multi-mots ("access control", "data model" restent valides)
+    words_count = len(normalized.split())
+    if words_count == 1 and len(normalized) >= 3:
+        try:
+            from knowbase.common.corpus_stats import is_generic_by_idf, is_corpus_large_enough
+            if is_corpus_large_enough() and is_generic_by_idf(normalized, threshold=1.2):
+                return False
+        except Exception:
+            pass  # corpus_stats indisponible (tests, premier import) → on laisse passer
 
     # Ponctuation de phrase (virgule, point-virgule, point) → c'est une phrase
     # Exclure les . dans les versions/nombres (ex: "S/4HANA 2.0")

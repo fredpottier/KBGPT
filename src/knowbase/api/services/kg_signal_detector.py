@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from collections import Counter
+# Counter supprime — IDF mutualisé dans corpus_stats.py
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -244,123 +244,77 @@ def _detect_exactness(qs_crossdoc_data: list[dict]) -> Signal | None:
 
 # ── Signal 5 : Question-Context Gap ─────────────────────────────────
 
-# Stopwords universels FR+EN (domain-agnostic)
-_STOPWORDS = frozenset({
-    # FR
-    "le", "la", "les", "de", "du", "des", "un", "une", "et", "en", "est",
-    "que", "qui", "dans", "pour", "par", "sur", "avec", "ce", "cette", "ces",
-    "son", "sa", "ses", "au", "aux", "ou", "ne", "pas", "plus", "se", "il",
-    "elle", "on", "nous", "vous", "ils", "elles", "etre", "avoir", "faire",
-    "dit", "peut", "doit", "sont", "ont", "faut", "tout", "tous", "bien",
-    "aussi", "entre", "comme", "mais", "donc", "car", "si", "quand",
-    "comment", "quel", "quelle", "quels", "quelles",
-    # EN
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
-    "should", "may", "might", "can", "could", "must", "of", "in", "to",
-    "for", "with", "on", "at", "from", "by", "about", "as", "into", "through",
-    "during", "before", "after", "above", "below", "between", "each", "every",
-    "both", "all", "any", "few", "more", "most", "other", "some", "such",
-    "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very",
-    "and", "but", "or", "if", "while", "that", "this", "what", "which",
-    "who", "whom", "how", "when", "where", "why", "it", "its", "they",
-    "their", "them", "there", "here",
-})
-
-# Cache IDF global (calcule une fois a partir du corpus Qdrant)
-_idf_cache: dict[str, float] | None = None
-_idf_corpus_size: int = 0
+# IDF mutualisé — remplace la liste figée _STOPWORDS (149 items FR+EN)
+# Le filtrage se fait désormais par seuil IDF dans _extract_specific_terms()
+from knowbase.common.corpus_stats import get_corpus_idf, get_corpus_size, is_in_corpus
 
 
 def _tokenize_simple(text: str) -> list[str]:
-    """Tokenisation basique multilingue : lowercase, split, filtre stopwords + courts."""
-    words = re.findall(r"[a-zA-ZÀ-ÿ0-9_/-]{3,}", text.lower())
-    return [w for w in words if w not in _STOPWORDS]
+    """Tokenisation basique multilingue : lowercase, split, filtre courts."""
+    return re.findall(r"[a-zA-ZÀ-ÿ0-9_/-]{3,}", text.lower())
 
 
-def _get_corpus_idf() -> dict[str, float]:
-    """Retourne l'IDF du corpus (calcule une fois, cache en memoire)."""
-    global _idf_cache, _idf_corpus_size
+def _is_foreign_stopword(term: str, question_lang: str | None = None) -> bool:
+    """Verifie si un terme est un stopword dans la langue de la question.
 
-    if _idf_cache is not None:
-        return _idf_cache
-
-    # Calculer l'IDF a partir de Qdrant (tous les chunks)
+    Utilise les stopwords built-in de spaCy comme oracle de derniere instance
+    pour distinguer un mot-outil etranger d'un vrai terme manquant.
+    """
+    if not question_lang:
+        return False
     try:
-        from knowbase.retrieval.qdrant_layer_r import get_qdrant_client
+        from spacy.lang import get_lang_class
+        lang_cls = get_lang_class(question_lang)
+        return term.lower() in lang_cls.Defaults.stop_words
+    except Exception:
+        return False
+
+
+def _detect_question_language(question: str) -> str | None:
+    """Detection de langue legere sur la question (fasttext si disponible)."""
+    try:
+        from knowbase.semantic.utils.language_detector import get_language_detector
         from knowbase.config.settings import get_settings
-
         settings = get_settings()
-        client = get_qdrant_client()
-        collection = settings.qdrant_collection
-
-        # Compter le nombre total de chunks
-        info = client.get_collection(collection)
-        total_chunks = info.points_count
-        if total_chunks == 0:
-            _idf_cache = {}
-            return _idf_cache
-
-        # Echantillonner des chunks pour construire l'IDF
-        # On ne peut pas lire tous les chunks — on en prend un echantillon
-        from qdrant_client.models import ScrollRequest
-        sample_size = min(total_chunks, 2000)
-        results, _ = client.scroll(
-            collection_name=collection,
-            limit=sample_size,
-            with_payload=True,
-            with_vectors=False,
-        )
-
-        doc_freq: Counter = Counter()
-        n_docs = len(results)
-
-        for point in results:
-            text = point.payload.get("text", "")
-            tokens = set(_tokenize_simple(text))
-            for token in tokens:
-                doc_freq[token] += 1
-
-        # Calculer IDF : log(N / df) — les termes rares ont un IDF eleve
-        _idf_cache = {}
-        for token, df in doc_freq.items():
-            _idf_cache[token] = math.log(n_docs / df) if df > 0 else 0
-        _idf_corpus_size = n_docs
-
-        logger.info(f"[SIGNAL:GAP] IDF index built: {len(_idf_cache)} terms from {n_docs} chunks")
-
-    except Exception as e:
-        logger.warning(f"[SIGNAL:GAP] Failed to build IDF index: {e}")
-        _idf_cache = {}
-
-    return _idf_cache
+        detector = get_language_detector(settings.semantic)
+        return detector.detect(question)
+    except Exception:
+        return None
 
 
 def _extract_specific_terms(question: str, top_n: int = 5, min_idf: float = 2.0) -> list[str]:
     """Extrait les termes les plus specifiques de la question (IDF eleve = rare dans le corpus).
 
-    Args:
-        question: La question utilisateur
-        top_n: Nombre max de termes a retourner
-        min_idf: IDF minimum pour qu'un terme soit considere "specifique"
-                 (les termes tres courants dans le corpus sont exclus)
+    Post-review : les termes absents du corpus ne sont plus automatiquement
+    consideres comme "tres specifiques". Distinction :
+    - Absent ET stopword dans la langue question → ignore (mot-outil etranger)
+    - Absent ET PAS stopword → conserve comme gap potentiel (ex: "TLS 1.3")
     """
-    idf = _get_corpus_idf()
+    idf = get_corpus_idf()
     tokens = _tokenize_simple(question)
 
     if not idf:
-        # Fallback sans IDF : garder les tokens non-stopwords de 4+ chars
+        # Fallback sans IDF : garder les tokens de 4+ chars
         return [t for t in tokens if len(t) >= 4][:top_n]
 
-    # Scorer chaque token par son IDF (plus eleve = plus specifique)
+    corpus_n = get_corpus_size()
+    question_lang = _detect_question_language(question)
+
     scored = []
     for token in set(tokens):
-        idf_score = idf.get(token, math.log(_idf_corpus_size + 1))  # terme inconnu = tres specifique
-        # Filtrer les termes trop communs dans le corpus
-        if idf_score >= min_idf:
-            scored.append((token, idf_score))
+        idf_score = idf.get(token)
 
-    # Trier par IDF decroissant et garder les top_n
+        if idf_score is not None:
+            # Terme present dans le corpus : filtrer par seuil IDF
+            if idf_score >= min_idf:
+                scored.append((token, idf_score))
+        else:
+            # Terme ABSENT du corpus : stopword etranger ou vrai gap ?
+            if _is_foreign_stopword(token, question_lang):
+                continue  # mot-outil etranger (ex: "che" en italien)
+            # Vrai terme absent = gap potentiel, score eleve
+            scored.append((token, math.log(corpus_n + 1)))
+
     scored.sort(key=lambda x: x[1], reverse=True)
     return [t for t, _ in scored[:top_n]]
 

@@ -157,25 +157,8 @@ def retrieve_chunks(
     )
 
 
-# Stopwords FR+EN pour le filtrage BM25
-_BM25_STOPWORDS = frozenset({
-    # FR
-    "le", "la", "les", "un", "une", "des", "de", "du", "au", "aux", "ce", "cet",
-    "cette", "ces", "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses",
-    "notre", "votre", "leur", "nos", "vos", "leurs", "qui", "que", "quoi", "dont",
-    "est", "sont", "dans", "pour", "par", "sur", "avec", "sans", "sous", "entre",
-    "quel", "quelle", "quels", "quelles", "comment", "combien", "quel", "quand",
-    "pas", "plus", "moins", "peut", "doit", "fait", "sont", "avoir", "etre",
-    "faut", "tout", "tous", "toute", "toutes", "autre", "autres", "meme", "aussi",
-    "comme", "bien", "tres", "trop", "peu", "beaucoup", "chez", "vers", "apres",
-    "avant", "depuis", "entre", "selon", "lors", "des", "aux",
-    # EN
-    "the", "and", "for", "are", "but", "not", "you", "all", "can", "had", "her",
-    "was", "one", "our", "out", "has", "his", "how", "its", "may", "new", "now",
-    "old", "see", "way", "who", "did", "get", "let", "say", "she", "too", "use",
-    "what", "which", "when", "where", "with", "this", "that", "from", "have",
-    "been", "will", "into", "does", "than", "them", "then", "they", "each",
-})
+# Liste fixe _BM25_STOPWORDS supprimee — remplacee par IDF dynamique via corpus_stats
+from knowbase.common.corpus_stats import is_generic_by_idf, is_corpus_large_enough
 
 
 def _extract_bm25_keywords(question: str) -> list[str]:
@@ -194,7 +177,11 @@ def _extract_bm25_keywords(question: str) -> list[str]:
         """Score de specificite technique. 0 = pas technique."""
         if len(w) <= 2:
             return 0
-        if w.lower() in _BM25_STOPWORDS:
+        # IDF dynamique : mot tres frequent dans le corpus = pas technique
+        if is_corpus_large_enough() and is_generic_by_idf(w.lower(), threshold=1.5):
+            return 0
+        # Micro-heuristique fallback : mots courts purement alphabetiques sans signal
+        if not is_corpus_large_enough() and len(w) <= 3 and w.isalpha() and w.islower():
             return 0
         score = 0
         if '/' in w or '_' in w:     # /SCWM/R_BW..., SAP_WFRT

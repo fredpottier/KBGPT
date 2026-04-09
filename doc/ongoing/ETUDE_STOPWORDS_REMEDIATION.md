@@ -1,6 +1,7 @@
 # Étude des listes de stopwords OSMOSIS — Rôle, usage, remédiations
 
 *Document d'analyse pour review externe. Rédigé le 2026-04-09.*
+*Révisé le 2026-04-09 après review ChatGPT — corrections intégrées (voir section 7).*
 
 ---
 
@@ -380,3 +381,63 @@ def is_technical(w: str, corpus_idf: dict) -> int:
 4. **Entités multi-mots** : "use case", "data model", "access control" contiennent des mots qui seraient filtrés individuellement ("use", "data", "access"). Le filtre doit-il s'appliquer uniquement aux entités mono-mot ? Ou vérifier que **au moins un mot** du candidat multi-mots est "significatif" ?
 
 5. **Coût spaCy en ingestion** : actuellement ~0.1ms/mot, mais sur une ingestion de 100 docs avec des milliers de candidats entités, le total peut monter à quelques secondes. Acceptable ?
+
+---
+
+## 7. Corrections post-review (ChatGPT, 09/04)
+
+### 7.1 Rétrogradation du POS tagging
+
+**Feedback** : le POS tagger ne filtre PAS les noms génériques ("system", "data", "process" → NOUN). Il ne couvre que les mots-outils grammaticaux (articles, pronoms, prépositions). C'est un complément utile, pas un pilier.
+
+**Correction** : POS passe de "Niveau 1 (pilier)" à **"complément optionnel"**. L'IDF reste le seul vrai moteur pour les 3 listes. Le POS tagger est utilisé uniquement pour les entités mono-mot comme garde-fou supplémentaire — pas pour les listes 2 et 3 où il n'apporte rien de plus que l'IDF.
+
+**Impact sur l'estimation** : suppression de la Phase 4 "POS tagger wrapper" (-3h). L'effort total passe de ~9h à ~6h.
+
+### 7.2 "Terme absent du corpus = ignorer" — correction critique
+
+**Feedback** : ma proposition `if idf_score is None: continue` supprime la détection de gap pour les termes réellement absents du corpus. Exemple : question sur "TLS 1.3" alors que le corpus ne parle que de "TLS 1.2" → le gap disparaît silencieusement.
+
+**Correction** : ne PAS ignorer aveuglément les termes absents. Distinguer deux cas :
+
+```python
+def _is_foreign_stopword(term: str, question_lang: str, corpus_langs: set[str]) -> bool:
+    """Un terme est un stopword etranger s'il appartient aux stopwords
+    d'une langue detectee dans la question mais absente du corpus."""
+    # Utilise les stopwords built-in de spaCy (maintenance communautaire, 25+ langues)
+    try:
+        from spacy.lang import get_lang_class
+        lang_cls = get_lang_class(question_lang)
+        return term.lower() in lang_cls.Defaults.stop_words
+    except Exception:
+        return False
+```
+
+**Nouveau comportement** :
+- Terme absent du corpus ET identifié comme stopword dans la langue de la question → **ignorer** (c'est un mot-outil étranger, ex: "che" en italien)
+- Terme absent du corpus ET PAS un stopword connu → **conserver comme gap** (c'est potentiellement un vrai terme manquant, ex: "TLS 1.3")
+
+Ce mécanisme utilise les stopwords intégrés de spaCy (maintenus par la communauté, 25+ langues) comme **oracle de dernière instance** — pas comme filtre principal. C'est la bonne utilisation des listes de stopwords : un dictionnaire de référence pour trancher les cas ambigus, pas un filtre en ligne de production.
+
+### 7.3 Sécurisation corpus-dépendant
+
+**Feedback** : l'IDF rend le filtrage dépendant de la distribution du corpus. Dans un corpus SAP, "SAP" pourrait être filtré car très fréquent.
+
+**Correction** : en pratique, "SAP" seul n'est jamais une entité utile — ce sont les entités composées ("SAP S/4HANA", "SAP HANA") qui comptent. Pour sécuriser quand même :
+
+1. **Seuil plancher de corpus** : l'IDF n'est activé que si le corpus contient > 20 documents. En dessous, la liste résiduelle seule est utilisée.
+2. **Protection entités multi-mots** : le filtre IDF ne s'applique qu'aux entités **mono-mot**. Pour les entités multi-mots, vérifier qu'**au moins un mot** a un IDF significatif (réponse à la question ouverte n°4).
+
+### 7.4 Arbitrage LLM — décision de ne PAS l'intégrer
+
+**Feedback** : utiliser un LLM pour classifier les entités ambiguës (ex: `Is "system" a meaningful entity in this context? YES/NO`).
+
+**Pourquoi non** : l'extraction d'entités est déjà faite par un LLM. La stoplist est un filtre POST-LLM sur les candidats extraits. Ajouter un second appel LLM pour chaque candidat entité serait coûteux (des centaines de candidats par document × $0.001/appel) pour un gain marginal par rapport à l'IDF (quasi-gratuit, temps CPU uniquement). Le bon endroit pour améliorer la qualité des entités est le **prompt d'extraction** lui-même, pas un filtre post-hoc par LLM.
+
+### 7.5 Synthèse révisée
+
+| Liste | Solution v1 (doc initial) | Solution v2 (post-review) |
+|---|---|---|
+| `_STOPWORDS` | IDF seul, termes absents ignorés | IDF seul, termes absents = gap sauf si stopword langue question |
+| `_BM25_STOPWORDS` | IDF seul | IDF seul + micro-heuristique fallback (mots courts alpha) |
+| `ENTITY_STOPLIST` | POS (pilier) + IDF + résiduel 30 | IDF (pilier) + POS (complément mono-mot) + résiduel 30 |
