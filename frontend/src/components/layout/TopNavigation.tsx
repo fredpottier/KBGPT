@@ -38,6 +38,7 @@ import {
   FiCpu,
   FiArchive,
   FiBook,
+  FiBookOpen,
   FiEdit,
   FiFilter,
 } from 'react-icons/fi'
@@ -67,8 +68,9 @@ const navigationConfig = {
     icon: FiGlobe,
     isDropdown: true,
     items: [
-      { label: 'Accueil', href: '/wiki', icon: FiHome },
-      { label: 'Articles', href: '/wiki/articles', icon: FiBook },
+      { label: 'Atlas narratif', href: '/atlas', icon: FiBookOpen },
+      { label: 'Wiki (legacy)', href: '/wiki', icon: FiHome },
+      { label: 'Articles wiki', href: '/wiki/articles', icon: FiBook },
     ],
   },
   documents: {
@@ -220,7 +222,7 @@ export default function TopNavigation() {
     if (section === 'chat') return pathname?.startsWith('/chat')
     if (section === 'compare') return pathname?.startsWith('/compare')
     if (section === 'verify') return pathname?.startsWith('/verify')
-    if (section === 'wiki') return pathname?.startsWith('/wiki')
+    if (section === 'wiki') return pathname?.startsWith('/wiki') || pathname?.startsWith('/atlas')
     if (section === 'documents') return pathname?.startsWith('/documents')
     if (section === 'admin') return pathname?.startsWith('/admin')
     return false
