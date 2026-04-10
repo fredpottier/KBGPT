@@ -328,19 +328,20 @@ def run_ragas_evaluation(
             "answer_length": len(s.get("answer", "")),
             "reference": s.get("reference", ""),
             "sources_used": s.get("metadata", {}).get("doc_ids", []) if isinstance(s.get("metadata"), dict) else [],
+            "response_mode": s.get("response_mode", "DIRECT"),
+            "has_graph_context": bool(s.get("graph_context_text")),
             "_task_name": s.get("_task_name", ""),
         }
         for i, s in enumerate(valid_samples)
     ]
     metric_totals: dict[str, list[float]] = {k: [] for k in metrics_map}
 
+    # Tronquer les reponses longues pour eviter max_tokens GPT-4o-mini (3072 output)
+    MAX_RESPONSE_CHARS = 2000
+    MAX_CONTEXT_CHARS = 1500  # par chunk
+
     for metric_name, metric in metrics_map.items():
         logger.info(f"  Evaluating {metric_name} on {len(valid_samples)} samples (concurrency={concurrency})...")
-
-        # Preparer les kwargs pour chaque sample
-        # Tronquer les reponses longues pour eviter max_tokens GPT-4o-mini (3072 output)
-        MAX_RESPONSE_CHARS = 2000
-        MAX_CONTEXT_CHARS = 1500  # par chunk
 
         all_kwargs = []
         for s in valid_samples:
@@ -367,7 +368,6 @@ def run_ragas_evaluation(
                     "retrieved_contexts": contexts,
                 })
 
-        # Evaluer en parallele avec asyncio semaphore
         scores = asyncio.run(_eval_metric_parallel(metric, all_kwargs, concurrency, metric_name))
 
         for i, score in enumerate(scores):
@@ -377,6 +377,58 @@ def run_ragas_evaluation(
 
         ok_count = sum(1 for s in scores if s is not None)
         logger.info(f"  {metric_name}: {ok_count}/{len(valid_samples)} OK")
+
+    # ── Piste 2 : faithfulness_total (chunks + graph_context_text) ────────
+    # Uniquement pour les samples OSMOSIS (pas RAG baseline) qui ont du graph context
+    samples_with_kg = [s for s in valid_samples if s.get("graph_context_text")]
+    if samples_with_kg and label == "OSMOSIS":
+        logger.info(
+            f"  [PISTE2] Evaluating faithfulness_total on {len(samples_with_kg)} samples "
+            f"with graph context (chunks + KG as evidence)..."
+        )
+        from ragas.metrics.collections import Faithfulness
+        faith_total_metric = Faithfulness(llm=llm)
+
+        # Construire les kwargs avec contexts etendus (chunks + graph_context_text)
+        total_kwargs = []
+        total_indices = []  # indices dans valid_samples
+        for i, s in enumerate(valid_samples):
+            if not s.get("graph_context_text"):
+                continue
+            response = s["answer"]
+            if len(response) > MAX_RESPONSE_CHARS:
+                response = response[:MAX_RESPONSE_CHARS] + "..."
+            # Contextes etendus : chunks + graph_context_text comme contexte additionnel
+            contexts = [c[:MAX_CONTEXT_CHARS] for c in s["contexts"]]
+            kg_text = s["graph_context_text"][:3000]  # cap pour eviter explosion tokens
+            contexts_total = contexts + [kg_text]
+
+            total_kwargs.append({
+                "user_input": s["question"],
+                "response": response,
+                "retrieved_contexts": contexts_total,
+            })
+            total_indices.append(i)
+
+        total_scores = asyncio.run(
+            _eval_metric_parallel(faith_total_metric, total_kwargs, concurrency, "faithfulness_total")
+        )
+
+        faith_total_values = []
+        for j, score in enumerate(total_scores):
+            idx = total_indices[j]
+            per_sample[idx]["faithfulness_total"] = round(score, 4) if score is not None else None
+            if score is not None:
+                faith_total_values.append(score)
+
+        if faith_total_values:
+            avg_faith_total = round(sum(faith_total_values) / len(faith_total_values), 4)
+            metric_totals["faithfulness_total"] = faith_total_values
+            logger.info(
+                f"  [PISTE2] faithfulness_total: {avg_faith_total:.4f} "
+                f"(vs faithfulness_chunks: {metric_totals.get('faithfulness', [0])[0] if metric_totals.get('faithfulness') else '?'}) "
+                f"on {len(faith_total_values)} samples with KG context"
+            )
 
     duration = time.time() - start
     logger.info(f"Total RAGAS evaluation: {duration:.0f}s ({duration/len(valid_samples):.1f}s/sample)")
@@ -853,14 +905,21 @@ def _call_osmosis_api(
     synthesis = data.get("synthesis", {})
     answer = synthesis.get("synthesized_answer", "") if isinstance(synthesis, dict) else ""
 
+    # Capturer le graph_context_text injecte dans le prompt (piste 2 RAGAS)
+    graph_context_text = data.get("graph_context_text", "")
+    response_mode = data.get("response_mode", "DIRECT")
+
     return {
         "question": question,
         "contexts": contexts,
         "answer": answer,
+        "graph_context_text": graph_context_text,
+        "response_mode": response_mode,
         "metadata": {
             "doc_ids": list(set(r.get("source_file", "") for r in results if isinstance(r, dict))),
             "scores": [r.get("score", 0) for r in results[:10] if isinstance(r, dict)],
-            "has_kg_context": bool(data.get("graph_context")),
+            "has_kg_context": bool(graph_context_text),
+            "response_mode": response_mode,
             "use_kg": use_kg,
         },
     }

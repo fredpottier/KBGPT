@@ -1930,6 +1930,11 @@ def search_documents(
         },
     }
 
+    # Exposer le graph_context_text injecte dans le prompt de synthese (piste 2 RAGAS)
+    # Permet au benchmark de construire un "faith_total" incluant le KG comme evidence
+    if graph_context_text:
+        response["graph_context_text"] = graph_context_text
+
     if instrumented_answer is not None:
         response["instrumented_answer"] = instrumented_answer.model_dump(by_alias=True)
         response["instrumented_metadata"] = build_metadata
