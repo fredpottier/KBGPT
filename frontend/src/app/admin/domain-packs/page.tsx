@@ -279,7 +279,7 @@ export default function DomainPacksPage() {
                       <StatNumber fontSize="lg" color="orange.400">
                         {(packStats.aliases_resolved || 0).toLocaleString()}
                       </StatNumber>
-                      <StatHelpText fontSize="xs">entites renommees (ex: BTP → SAP Business Technology Platform)</StatHelpText>
+                      <StatHelpText fontSize="xs">entites renommees via les alias canoniques</StatHelpText>
                     </Stat>
                     <Stat size="sm">
                       <StatLabel fontSize="xs" color="text.muted">Gazetteer matchs</StatLabel>
