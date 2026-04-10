@@ -226,6 +226,14 @@ def _discover_packs(registry: PackRegistry) -> None:
     except Exception as e:
         logger.warning(f"[PackRegistry] Error loading enterprise_sap pack: {e}")
 
+    try:
+        from knowbase.domain_packs.regulatory import RegulatoryPack
+        registry.register(RegulatoryPack(), builtin=True)
+    except ImportError:
+        logger.debug("[PackRegistry] Regulatory pack not available")
+    except Exception as e:
+        logger.warning(f"[PackRegistry] Error loading regulatory pack: {e}")
+
     # 2. Packs installés via upload (dans data/packs/)
     try:
         from knowbase.domain_packs.pack_manager import get_pack_manager
