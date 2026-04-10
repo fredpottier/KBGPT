@@ -465,13 +465,21 @@ async def _eval_metric_parallel(
     done_count = 0
     fallback_count = 0
 
+    SAMPLE_TIMEOUT = 30  # secondes max par sample (evite deadlock retry OpenAI)
+
     async def eval_one(idx: int, kwargs: dict):
         nonlocal done_count, fallback_count
         async with semaphore:
             try:
-                result = await asyncio.to_thread(metric.score, **kwargs)
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(metric.score, **kwargs),
+                    timeout=SAMPLE_TIMEOUT,
+                )
                 score = result.value if hasattr(result, "value") else float(result)
                 results[idx] = score
+            except asyncio.TimeoutError:
+                logger.warning(f"  {metric_name}[{idx}] timeout ({SAMPLE_TIMEOUT}s)")
+                results[idx] = None
             except Exception as e:
                 err_msg = str(e)
                 # Detecter les echecs max_tokens → fallback GPT-4o

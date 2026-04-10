@@ -62,11 +62,20 @@ class SmartEventEngine:
         return events
 
     def _check_containers(self, state: CockpitState) -> list[SmartEvent]:
-        """1 event par container problématique (down ou unhealthy)."""
+        """1 event par container problématique (down ou unhealthy).
+
+        Les domain packs arretes sont ignores : ils sont optionnels
+        et un pack desactive ne doit pas generer d'alerte.
+        """
         events = []
         for group in state.container_groups:
+            # Les domain packs down sont normaux (desactivation volontaire)
+            is_domain_pack_group = group.name == "domain packs"
+
             for c in group.containers:
                 if c.status == "down":
+                    if is_domain_pack_group:
+                        continue  # pack desactive = pas d'alerte
                     events.append(SmartEvent(
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         severity="critical",
