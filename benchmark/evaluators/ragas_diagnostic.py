@@ -465,7 +465,7 @@ async def _eval_metric_parallel(
     done_count = 0
     fallback_count = 0
 
-    SAMPLE_TIMEOUT = 30  # secondes max par sample (evite deadlock retry OpenAI)
+    SAMPLE_TIMEOUT = 120  # secondes max par sample (30s trop court — 54% timeout)
 
     async def eval_one(idx: int, kwargs: dict):
         nonlocal done_count, fallback_count
