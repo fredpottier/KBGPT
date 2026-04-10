@@ -487,7 +487,13 @@ def _backup_benchmark(backup_dir: Path, log_lines: list) -> dict:
 
         with tarfile.open(tar_path, "w:gz") as tar:
             for f in benchmark_files:
-                arcname = str(f.relative_to(benchmark_dir.parent))
+                # Fichiers sous /app/benchmark/ → arcname relatif a /app
+                # Fichiers sous /data/benchmark/ → arcname sous data_benchmark/
+                try:
+                    arcname = str(f.relative_to(benchmark_dir.parent))
+                except ValueError:
+                    # Fichier hors de /app (ex: /data/benchmark/results/)
+                    arcname = "data_benchmark/" + f.name
                 tar.add(str(f), arcname=arcname)
 
         file_size = tar_path.stat().st_size
@@ -809,10 +815,21 @@ def _restore_benchmark(backup_dir: Path, log_lines: list) -> dict:
             extract_dir = Path(".")
 
         with tarfile.open(tar_path, "r:gz") as tar:
-            tar.extractall(path=str(extract_dir))
+            for member in tar.getmembers():
+                if member.name.startswith("data_benchmark/"):
+                    # Fichiers provenant de /data/benchmark/results/
+                    target_dir = Path("/data/benchmark/results")
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    member.name = member.name.replace("data_benchmark/", "")
+                    tar.extract(member, path=str(target_dir))
+                else:
+                    tar.extract(member, path=str(extract_dir))
 
         benchmark_dir = extract_dir / "benchmark"
         count = len(list(benchmark_dir.rglob("*"))) if benchmark_dir.exists() else 0
+        data_results = Path("/data/benchmark/results")
+        if data_results.exists():
+            count += len(list(data_results.glob("*.json")))
 
         msg = f"[Benchmark] Restaure — {count} fichiers"
         log_lines.append(msg)
