@@ -58,6 +58,17 @@ class NarrativeTopic:
     doc_count: int = 0
     narrative_label: str = ""  # genere par LLM
     narrative_summary: str = ""
+    reading_order: int = 0  # position dans le parcours de lecture
+
+
+@dataclass
+class TopicLink:
+    """Lien narratif entre deux NarrativeTopics."""
+    from_topic: str
+    to_topic: str
+    relation_type: str  # chains_to, refines, complements, qualifies, contradicts
+    weight: int  # nombre de relations cross-doc
+    narrative_role: str = ""  # "leads_to", "details", "complements", "nuances", "tensions"
 
 
 # ── Graph extraction ──────────────────────────────────────────────────────────
@@ -166,6 +177,111 @@ def detect_communities(
     return topics
 
 
+# ── Inter-topic links ─────────────────────────────────────────────────────────
+
+# Mapping type de relation KG → role narratif
+RELATION_TO_NARRATIVE_ROLE = {
+    "CHAINS_TO": "leads_to",       # ce topic mene a celui-la (sequence)
+    "REFINES": "details",          # ce topic precise celui-la (zoom)
+    "COMPLEMENTS": "complements",  # ces topics se completent
+    "QUALIFIES": "nuances",        # ce topic nuance celui-la (conditions)
+    "CONTRADICTS": "tensions",     # ces topics se contredisent
+    "EVOLVES_TO": "leads_to",      # evolution temporelle
+    "SPECIALIZES": "details",      # specialisation
+}
+
+
+def detect_inter_topic_links(
+    driver, topics: list[NarrativeTopic], tenant_id: str
+) -> list[TopicLink]:
+    """Detecte les liens entre topics via les relations cross-doc entre claims."""
+    from collections import defaultdict
+
+    # Mapper perspective_id -> topic_id
+    persp_to_topic = {}
+    for t in topics:
+        for pid in t.perspectives:
+            persp_to_topic[pid] = t.topic_id
+
+    rel_types = ["CHAINS_TO", "REFINES", "CONTRADICTS", "QUALIFIES", "COMPLEMENTS", "EVOLVES_TO", "SPECIALIZES"]
+    cross_counts: dict[tuple, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+    with driver.session() as session:
+        for rel_type in rel_types:
+            result = session.run(f"""
+                MATCH (p1:Perspective {{tenant_id: $tid}})-[:INCLUDES_CLAIM]->(c1:Claim)
+                      -[:{rel_type}]->
+                      (c2:Claim)<-[:INCLUDES_CLAIM]-(p2:Perspective {{tenant_id: $tid}})
+                WHERE p1 <> p2
+                RETURN p1.perspective_id AS pid1, p2.perspective_id AS pid2, count(*) AS cnt
+            """, tid=tenant_id)
+            for rec in result:
+                t1 = persp_to_topic.get(rec["pid1"])
+                t2 = persp_to_topic.get(rec["pid2"])
+                if t1 and t2 and t1 != t2:
+                    key = (min(t1, t2), max(t1, t2))
+                    cross_counts[key][rel_type] += rec["cnt"]
+
+    # Construire les TopicLinks
+    links = []
+    for (tid1, tid2), rels in cross_counts.items():
+        # Le role narratif dominant = celui avec le plus de relations
+        dominant_rel = max(rels, key=rels.get)
+        narrative_role = RELATION_TO_NARRATIVE_ROLE.get(dominant_rel, "related")
+        total_weight = sum(rels.values())
+
+        links.append(TopicLink(
+            from_topic=tid1,
+            to_topic=tid2,
+            relation_type=dominant_rel,
+            weight=total_weight,
+            narrative_role=narrative_role,
+        ))
+
+    links.sort(key=lambda l: l.weight, reverse=True)
+    logger.info(f"Inter-topic links: {len(links)} (from {len(cross_counts)} topic pairs)")
+    return links
+
+
+def compute_reading_order(topics: list[NarrativeTopic], links: list[TopicLink]) -> None:
+    """Calcule un ordre de lecture base sur le graphe inter-topics.
+
+    Strategie : topological sort approximatif sur les liens "leads_to" (CHAINS_TO).
+    Les topics sources (peu de liens entrants) sont lus en premier.
+    Les topics puits (beaucoup de liens entrants) sont lus en dernier.
+    Fallback par nombre de claims decroissant si pas de structure claire.
+    """
+    import networkx as nx
+
+    # Construire un digraphe pondere par les leads_to
+    DG = nx.DiGraph()
+    topic_ids = {t.topic_id for t in topics}
+    for t in topics:
+        DG.add_node(t.topic_id, claims=t.claim_count)
+
+    for link in links:
+        if link.narrative_role == "leads_to" and link.from_topic in topic_ids and link.to_topic in topic_ids:
+            DG.add_edge(link.from_topic, link.to_topic, weight=link.weight)
+
+    # Trier par in-degree (sources d'abord) puis par claims decroissant
+    scored = []
+    for t in topics:
+        in_deg = DG.in_degree(t.topic_id) if t.topic_id in DG else 0
+        out_deg = DG.out_degree(t.topic_id) if t.topic_id in DG else 0
+        # Score : sources (out > in) d'abord, hubs (out ~ in) ensuite, puits (in > out) a la fin
+        # A claims egal, les plus gros topics passent avant
+        source_score = out_deg - in_deg
+        scored.append((t, -source_score, -t.claim_count))
+
+    scored.sort(key=lambda x: (x[1], x[2]))
+
+    for order, (t, _, _) in enumerate(scored):
+        t.reading_order = order
+        logger.debug(f"  Reading order {order}: {t.topic_id} ({t.narrative_label[:40]})")
+
+    logger.info(f"Reading order computed for {len(topics)} topics")
+
+
 def filter_topics(
     topics: list[NarrativeTopic],
     min_perspectives: int = MIN_PERSPECTIVES,
@@ -232,9 +348,14 @@ Return ONLY a JSON object:
 
 # ── Persistence ───────────────────────────────────────────────────────────────
 
-def persist_topics(driver, topics: list[NarrativeTopic], tenant_id: str) -> dict:
-    """Persister les NarrativeTopics dans Neo4j."""
-    stats = {"created": 0, "perspective_links": 0, "subject_links": 0}
+def persist_topics(
+    driver,
+    topics: list[NarrativeTopic],
+    links: list[TopicLink],
+    tenant_id: str,
+) -> dict:
+    """Persister les NarrativeTopics + liens inter-topics dans Neo4j."""
+    stats = {"created": 0, "perspective_links": 0, "subject_links": 0, "inter_topic_links": 0}
 
     with driver.session() as session:
         # Cleanup anciens topics
@@ -258,6 +379,7 @@ def persist_topics(driver, topics: list[NarrativeTopic], tenant_id: str) -> dict
                     subject_count: $n_subj,
                     perspective_labels: $persp_labels,
                     subject_names: $subj_names,
+                    reading_order: $order,
                     created_at: datetime()
                 })
             """,
@@ -265,6 +387,7 @@ def persist_topics(driver, topics: list[NarrativeTopic], tenant_id: str) -> dict
                 label=t.narrative_label, summary=t.narrative_summary,
                 claims=t.claim_count, n_persp=len(t.perspectives), n_subj=len(t.subjects),
                 persp_labels=t.perspective_labels, subj_names=t.subject_names,
+                order=t.reading_order,
             )
             stats["created"] += 1
 
@@ -285,6 +408,22 @@ def persist_topics(driver, topics: list[NarrativeTopic], tenant_id: str) -> dict
                     CREATE (nt)-[:ANCHORED_TO]->(sa)
                 """, tid=t.topic_id, tenant=tenant_id, sid=sid)
                 stats["subject_links"] += 1
+
+        # Liens inter-topics (NARRATIVE_LINK)
+        for link in links:
+            session.run("""
+                MATCH (nt1:NarrativeTopic {topic_id: $from_tid, tenant_id: $tenant})
+                MATCH (nt2:NarrativeTopic {topic_id: $to_tid, tenant_id: $tenant})
+                CREATE (nt1)-[:NARRATIVE_LINK {
+                    relation_type: $rel_type,
+                    narrative_role: $role,
+                    weight: $weight
+                }]->(nt2)
+            """,
+                from_tid=link.from_topic, to_tid=link.to_topic, tenant=tenant_id,
+                rel_type=link.relation_type, role=link.narrative_role, weight=link.weight,
+            )
+            stats["inter_topic_links"] += 1
 
     return stats
 
@@ -338,17 +477,24 @@ def main():
         logger.warning("No NarrativeTopics after filtering — aborting")
         return
 
-    # 5. LLM labelling
+    # 5. Inter-topic links
+    logger.info(f"\nDetecting inter-topic links...")
+    links = detect_inter_topic_links(driver, topics, args.tenant)
+
+    # 6. Reading order
+    compute_reading_order(topics, links)
+
+    # 7. LLM labelling
     logger.info(f"\nLabelling {len(topics)} topics...")
     label_topics_llm(topics, skip_llm=args.skip_llm)
 
-    # 6. Display
+    # 8. Display
     logger.info(f"\n{'='*60}")
     logger.info(f"NARRATIVE TOPICS: {len(topics)}")
     logger.info(f"{'='*60}")
-    for t in topics:
+    for t in sorted(topics, key=lambda t: t.reading_order):
         logger.info(
-            f"\n{t.topic_id}: {t.narrative_label}"
+            f"\n[{t.reading_order}] {t.topic_id}: {t.narrative_label}"
             f"\n  {len(t.perspectives)}P x {len(t.subjects)}S = {t.claim_count} claims"
             f"\n  Subjects: {t.subject_names}"
             f"\n  Perspectives: {t.perspective_labels[:3]}{'...' if len(t.perspective_labels) > 3 else ''}"
@@ -356,10 +502,21 @@ def main():
         if t.narrative_summary:
             logger.info(f"  Summary: {t.narrative_summary}")
 
-    # 7. Persist
+    if links:
+        logger.info(f"\n{'='*60}")
+        logger.info(f"INTER-TOPIC LINKS: {len(links)}")
+        logger.info(f"{'='*60}")
+        for link in links[:15]:
+            from_label = next((t.narrative_label for t in topics if t.topic_id == link.from_topic), "?")[:30]
+            to_label = next((t.narrative_label for t in topics if t.topic_id == link.to_topic), "?")[:30]
+            logger.info(
+                f"  {from_label} --[{link.narrative_role}:{link.weight}]--> {to_label}"
+            )
+
+    # 9. Persist
     if not args.dry_run:
-        logger.info(f"\nPersisting {len(topics)} topics to Neo4j...")
-        stats = persist_topics(driver, topics, args.tenant)
+        logger.info(f"\nPersisting {len(topics)} topics + {len(links)} links to Neo4j...")
+        stats = persist_topics(driver, topics, links, args.tenant)
         logger.info(f"Persisted: {stats}")
     else:
         logger.info("\n[DRY RUN] Skipping persistence")
