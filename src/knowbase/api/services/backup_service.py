@@ -426,10 +426,40 @@ def _backup_extraction_cache(backup_dir: Path, include_cache: bool, log_lines: l
         return {"status": "error", "file_count": 0, "size_bytes": 0, "error": str(e)}
 
 
+def _backup_config(backup_dir: Path, log_lines: list) -> dict:
+    """Backup des fichiers de configuration YAML (prompts, feature flags, etc.)."""
+    config_dir = Path("/app/config")
+    if not config_dir.exists():
+        config_dir = Path("config")
+    if not config_dir.exists():
+        log_lines.append("[Config] Repertoire inexistant")
+        return {"status": "skipped", "file_count": 0, "size_bytes": 0}
+
+    config_files = list(config_dir.glob("*.yaml")) + list(config_dir.glob("*.yml")) + list(config_dir.glob("*.json"))
+    if not config_files:
+        return {"status": "success", "file_count": 0, "size_bytes": 0}
+
+    try:
+        tar_path = backup_dir / "config.tar.gz"
+        log_lines.append(f"[Config] Compression de {len(config_files)} fichiers...")
+        with tarfile.open(tar_path, "w:gz") as tar:
+            for f in config_files:
+                arcname = str(f.relative_to(config_dir.parent))
+                tar.add(str(f), arcname=arcname)
+
+        file_size = tar_path.stat().st_size
+        msg = f"[Config] OK — {len(config_files)} fichiers ({_format_size(file_size)})"
+        log_lines.append(msg)
+        return {"status": "success", "file_count": len(config_files), "size_bytes": file_size}
+
+    except Exception as e:
+        log_lines.append(f"[Config] ERREUR — {e}")
+        return {"status": "error", "file_count": 0, "size_bytes": 0, "error": str(e)}
+
+
 def _backup_benchmark(backup_dir: Path, log_lines: list) -> dict:
     """Backup du repertoire benchmark (resultats, questions, scripts)."""
     benchmark_dir = Path("/app/benchmark")
-    # Fallback : chercher dans le volume monte
     if not benchmark_dir.exists():
         benchmark_dir = Path("benchmark")
     if not benchmark_dir.exists():
@@ -440,6 +470,12 @@ def _backup_benchmark(backup_dir: Path, log_lines: list) -> dict:
     benchmark_files = []
     for ext in ["*.json", "*.py", "*.yaml", "*.md"]:
         benchmark_files.extend(benchmark_dir.rglob(ext))
+
+    # Inclure aussi les resultats dans /data/benchmark/results/ (volume monte)
+    data_results = Path("/data/benchmark/results")
+    if data_results.exists():
+        for f in data_results.glob("*.json"):
+            benchmark_files.append(f)
 
     if not benchmark_files:
         log_lines.append("[Benchmark] Aucun fichier")
@@ -708,19 +744,31 @@ def _restore_redis(backup_dir: Path, log_lines: list) -> dict:
 
 
 def _restore_extraction_cache(backup_dir: Path, log_lines: list) -> dict:
-    """Restore extraction cache depuis tar.gz."""
+    """Restore extraction cache depuis tar.gz.
+
+    PURGE le repertoire cache avant restauration pour eviter les fichiers
+    orphelins d'un ancien corpus.
+    """
     tar_path = backup_dir / "extraction_cache.tar.gz"
     if not tar_path.exists():
         log_lines.append("[Cache] Pas de fichier extraction_cache.tar.gz, skip")
         return {"status": "skipped"}
 
     try:
+        # Purger le cache existant AVANT restauration
+        if CACHE_DIR.exists():
+            existing = list(CACHE_DIR.glob("*.v5cache.json")) + list(CACHE_DIR.glob("*.npz")) + list(CACHE_DIR.glob("*.knowcache.json"))
+            if existing:
+                log_lines.append(f"[Cache] Purge de {len(existing)} fichiers existants...")
+                for f in existing:
+                    f.unlink()
+
         log_lines.append("[Cache] Extraction du cache...")
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         with tarfile.open(tar_path, "r:gz") as tar:
             tar.extractall(path=str(CACHE_DIR))
 
-        count = len(list(CACHE_DIR.glob("*.v5cache.json"))) + len(list(CACHE_DIR.glob("*.npz")))
+        count = len(list(CACHE_DIR.glob("*.v5cache.json"))) + len(list(CACHE_DIR.glob("*.npz"))) + len(list(CACHE_DIR.glob("*.knowcache.json")))
 
         msg = f"[Cache] Restauré — {count} fichiers"
         log_lines.append(msg)
@@ -735,15 +783,27 @@ def _restore_extraction_cache(backup_dir: Path, log_lines: list) -> dict:
 
 
 def _restore_benchmark(backup_dir: Path, log_lines: list) -> dict:
-    """Restore benchmark depuis tar.gz."""
+    """Restore benchmark depuis tar.gz.
+
+    PURGE les resultats existants avant restauration pour eviter les
+    resultats orphelins d'anciens runs.
+    """
     tar_path = backup_dir / "benchmark.tar.gz"
     if not tar_path.exists():
         log_lines.append("[Benchmark] Pas de fichier benchmark.tar.gz, skip")
         return {"status": "skipped"}
 
     try:
+        # Purger les resultats existants AVANT restauration
+        for results_dir in [Path("/data/benchmark/results"), Path("/app/benchmark/results")]:
+            if results_dir.exists():
+                existing = list(results_dir.glob("*.json"))
+                if existing:
+                    log_lines.append(f"[Benchmark] Purge de {len(existing)} resultats dans {results_dir}...")
+                    for f in existing:
+                        f.unlink()
+
         log_lines.append("[Benchmark] Extraction du benchmark...")
-        # Extraire dans /app/ (racine du projet dans le container)
         extract_dir = Path("/app")
         if not extract_dir.exists():
             extract_dir = Path(".")
@@ -1074,6 +1134,10 @@ class BackupService:
         log_lines.append("[6/6] Backup Benchmark...")
         self._update_job_progress(job_id, "running", "[6/6] Backup Benchmark...", log_lines)
         manifest_data["components"]["benchmark"] = _backup_benchmark(backup_dir, log_lines)
+
+        # Note : les config YAML (synthesis_prompts, llm_models, etc.) ne sont PAS
+        # backupes car ils font partie de la solution (versionnes dans git),
+        # pas du corpus. Ils sont identiques quel que soit le corpus ingere.
 
         # Finaliser
         duration = time.time() - start_time
