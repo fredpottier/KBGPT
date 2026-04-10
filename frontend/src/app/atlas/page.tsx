@@ -118,7 +118,7 @@ export default function AtlasPage() {
           {data.introduction && (
             <Text
               color="var(--text-secondary)" fontSize="md" maxW="800px"
-              lineHeight="1.7" px={4}
+              lineHeight="1.7" px={4} textAlign="left"
             >
               {data.introduction}
             </Text>

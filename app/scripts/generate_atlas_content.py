@@ -166,16 +166,16 @@ Here are representative extracts:
 
 {texts_block}
 
-Write a clear, informative section (3-5 paragraphs) that:
-1. Synthesizes the key information from these extracts into a coherent narrative
-2. Covers the main points without being exhaustive — prioritize what matters most
-3. Uses precise technical language appropriate to the domain
-4. Is written in the same language as the extracts (if French, write in French; if English, write in English)
-5. Does NOT add information not present in the extracts
-6. Does NOT use headers or titles (the section title is already provided)
-7. Flows naturally as prose, not bullet points
+Redige une section claire et informative (3-5 paragraphes) qui :
+1. Synthetise les informations cles de ces extraits en un recit coherent
+2. Couvre les points principaux sans etre exhaustif — priorise ce qui compte le plus
+3. Utilise un langage technique precis adapte au domaine
+4. Est redigee en FRANCAIS (meme si les extraits sont en anglais, la synthese doit etre en francais)
+5. N'ajoute AUCUNE information absente des extraits
+6. N'utilise PAS de titres ni de headers (le titre de la section est deja fourni)
+7. S'ecoule naturellement en prose, pas en puces
 
-Return ONLY the section text, no preamble."""
+Retourne UNIQUEMENT le texte de la section, sans preambule."""
 
     try:
         resp = client.messages.create(
@@ -192,21 +192,21 @@ def generate_executive_summary(client, model: str, topic_data: dict) -> str:
     """Genere le resume executif d'un article."""
     persp_labels = [p["label"] for p in topic_data["perspectives"]]
 
-    prompt = f"""Write a concise executive summary (80-120 words) for this knowledge article.
+    prompt = f"""Redige un resume executif concis (80-120 mots, EN FRANCAIS) pour cet article.
 
-Article title: {topic_data['label']}
-Subjects: {topic_data['subjects']}
-Sections covered: {json.dumps(persp_labels)}
-Total verified claims: {topic_data['claims']}
-Source documents: {len(topic_data['doc_ids'])}
+Titre de l'article : {topic_data['label']}
+Sujets : {topic_data['subjects']}
+Sections couvertes : {json.dumps(persp_labels)}
+Nombre de faits verifies : {topic_data['claims']}
+Documents source : {len(topic_data['doc_ids'])}
 
-The summary should:
-1. State what this article covers and why it matters
-2. Mention the key aspects (sections) briefly
-3. Be written in the same language as the section titles
-4. Be direct and informative — no filler
+Le resume doit :
+1. Indiquer ce que couvre cet article et pourquoi c'est important
+2. Mentionner brievement les aspects cles (sections)
+3. Etre redige en FRANCAIS
+4. Etre direct et informatif — pas de remplissage
 
-Return ONLY the summary text."""
+Retourne UNIQUEMENT le texte du resume."""
 
     try:
         resp = client.messages.create(
@@ -224,25 +224,25 @@ def generate_homepage_intro(client, model: str, roots: list[dict], themes: list[
     roots_desc = "\n".join(f"- {r['name']} ({r['n_topics']} chapters, {r['claims']} claims)" for r in roots)
     themes_desc = "\n".join(f"- {t['label']} ({t['claims']} claims, crosses {t['n_topics']} chapters)" for t in themes)
 
-    prompt = f"""Write an introduction (150-200 words) for a knowledge atlas homepage.
+    prompt = f"""Redige une introduction (150-200 mots, EN FRANCAIS) pour la page d'accueil d'un atlas documentaire.
 
-This atlas covers {stats['total_docs']} documents containing {stats['total_claims']} verified facts.
+Cet atlas couvre {stats['total_docs']} documents contenant {stats['total_claims']} faits verifies.
 
-Product structure (reading by product):
+Structure par produit :
 {roots_desc}
 
-Thematic structure (reading by theme):
+Structure par theme :
 {themes_desc}
 
-The introduction should:
-1. Welcome the reader and explain what this atlas contains
-2. Briefly describe the two reading modes (by product, by theme)
-3. Highlight that the content is synthesized from verified source documents
-4. Be written in the same language as the roots/themes above
-5. Be inviting and professional, not technical
-6. NOT list all topics — just give the reader a sense of what to expect
+L'introduction doit :
+1. Accueillir le lecteur et expliquer ce que contient cet atlas
+2. Decrire brievement les deux modes de lecture (par produit, par theme)
+3. Souligner que le contenu est synthetise a partir de documents source verifies
+4. Etre redigee en FRANCAIS
+5. Etre accueillante et professionnelle, pas trop technique
+6. NE PAS lister tous les topics — donner au lecteur une idee de ce qu'il trouvera
 
-Return ONLY the introduction text."""
+Retourne UNIQUEMENT le texte de l'introduction."""
 
     try:
         resp = client.messages.create(
