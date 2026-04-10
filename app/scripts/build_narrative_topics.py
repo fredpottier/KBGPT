@@ -48,6 +48,16 @@ TENANT_ID = "default"
 # ── Data models ───────────────────────────────────────────────────────────────
 
 @dataclass
+class AtlasRoot:
+    """Level 0 — Sujet federateur (ComparableSubject ou SubjectAnchor generique)."""
+    root_id: str
+    canonical_name: str
+    topic_ids: list[str] = field(default_factory=list)
+    claim_count: int = 0
+    affinity: float = 0.0  # % des perspectives couvertes
+
+
+@dataclass
 class NarrativeTopic:
     topic_id: str
     perspectives: list[str]  # perspective_ids
@@ -59,6 +69,7 @@ class NarrativeTopic:
     narrative_label: str = ""  # genere par LLM
     narrative_summary: str = ""
     reading_order: int = 0  # position dans le parcours de lecture
+    atlas_root_id: str = ""  # level 0 parent
 
 
 @dataclass
@@ -123,6 +134,133 @@ def filter_generic_subjects(
 
     logger.info(f"Subjects: {len(subjects)} -> {len(kept)} (filtre > {threshold:.0%})")
     return kept, removed
+
+
+# ── Atlas hierarchy (level 0) ─────────────────────────────────────────────────
+
+
+def build_atlas_roots(
+    topics: list[NarrativeTopic],
+    generic_subjects: dict,
+    all_edges: list[dict],
+    n_perspectives: int,
+) -> list[AtlasRoot]:
+    """Construit les level 0 de l'Atlas a partir des sujets generiques filtres.
+
+    Chaque sujet generique (> GENERIC_THRESHOLD des perspectives) devient un
+    AtlasRoot candidat. Les topics sont rattaches au root le plus specifique
+    dont ils partagent la majorite des perspectives.
+
+    Strategie de selection des roots :
+    - Exclure les sujets trop vagues ("SAP" tout court)
+    - Garder les sujets qui discriminent au moins un topic (pas 100% sur tous)
+    - Fusionner les quasi-doublons (S/4HANA vs S/4HANA 2023 Feature Scope)
+    """
+    if not generic_subjects:
+        return []
+
+    # Calculer l'affinite topic x sujet generique
+    affinities: dict[str, dict[str, float]] = {}  # {root_sid: {topic_id: ratio}}
+    for sid, info in generic_subjects.items():
+        affinities[sid] = {}
+        for t in topics:
+            count = sum(1 for e in all_edges if e["p_id"] in set(t.perspectives) and e["s_id"] == sid)
+            ratio = count / len(t.perspectives) if t.perspectives else 0
+            affinities[sid][t.topic_id] = ratio
+
+    # Strategie de selection des roots :
+    # 1. Exclure les sujets 100% uniformes (SAP, SAP S/4HANA) — pas de signal
+    # 2. Exclure les sujets purement techniques (ABAP, Feature Scope) — pas narratifs
+    # 3. Garder le sujet-produit le plus specifique qui couvre > 50% des topics
+    #
+    # Heuristique domain-agnostic : un bon root est un NOM DE PRODUIT (contient
+    # des majuscules, souvent multi-mots) pas un terme technique generique.
+    # On ne hardcode aucun nom — on filtre par structure.
+
+    candidate_roots = []
+    for sid, info in generic_subjects.items():
+        ratios = list(affinities[sid].values())
+        min_ratio = min(ratios) if ratios else 1.0
+        n_topics_covered = sum(1 for r in ratios if r > 0.5)
+
+        # Exclure 100% uniforme (pas de discrimination)
+        if min_ratio >= 0.95:
+            logger.debug(f"  Root skip (uniform): {info['name']}")
+            continue
+
+        # Exclure les termes mono-mot generiques (ABAP, ERP, RFC...)
+        # Un bon root est typiquement multi-mots ou contient un slash/tiret
+        name_words = info["name"].split()
+        if len(name_words) == 1 and info["name"].isalpha():
+            logger.debug(f"  Root skip (single generic word): {info['name']}")
+            continue
+
+        candidate_roots.append({
+            "sid": sid, "name": info["name"],
+            "coverage": info["n_persp"] / n_perspectives,
+            "n_topics": n_topics_covered,
+            "min_ratio": min_ratio,
+        })
+
+    # Trier par nombre de topics couverts (desc) puis specificite (coverage asc)
+    candidate_roots.sort(key=lambda r: (-r["n_topics"], r["coverage"]))
+
+    # Garder le meilleur root (ou le plus general en fallback)
+    if not candidate_roots:
+        fallback = max(generic_subjects.items(), key=lambda x: x[1]["n_persp"])
+        logger.info(f"  No product root found, using: {fallback[1]['name']}")
+        candidate_roots = [{"sid": fallback[0], "name": fallback[1]["name"],
+                            "coverage": fallback[1]["n_persp"] / n_perspectives,
+                            "n_topics": len(topics), "min_ratio": 0.8}]
+
+    # Dedupliquer : garder le root le plus specifique qui couvre le plus de topics
+    selected_roots = []
+    covered_topics: set[str] = set()
+    for root in candidate_roots:
+        root_topics = {tid for tid, r in affinities[root["sid"]].items() if r > 0.5}
+        new_topics = root_topics - covered_topics
+        if new_topics:
+            selected_roots.append(root)
+            covered_topics.update(root_topics)
+
+    # Construire les AtlasRoot
+    roots = []
+    for root_info in selected_roots:
+        sid = root_info["sid"]
+        root = AtlasRoot(
+            root_id=f"atlas_{sid[-8:]}",
+            canonical_name=root_info["name"],
+            affinity=root_info["coverage"],
+        )
+
+        # Rattacher les topics (affinite > 50%)
+        for t in topics:
+            ratio = affinities[sid].get(t.topic_id, 0)
+            if ratio > 0.5:
+                root.topic_ids.append(t.topic_id)
+                root.claim_count += t.claim_count
+                t.atlas_root_id = root.root_id
+
+        roots.append(root)
+
+    # Topics orphelins (pas rattaches a un root) → creer un root "Transversal"
+    orphans = [t for t in topics if not t.atlas_root_id]
+    if orphans:
+        transversal = AtlasRoot(
+            root_id="atlas_transversal",
+            canonical_name="Themes transversaux",
+            topic_ids=[t.topic_id for t in orphans],
+            claim_count=sum(t.claim_count for t in orphans),
+        )
+        for t in orphans:
+            t.atlas_root_id = transversal.root_id
+        roots.append(transversal)
+
+    logger.info(f"Atlas roots: {len(roots)}")
+    for r in roots:
+        logger.info(f"  {r.canonical_name}: {len(r.topic_ids)} topics, {r.claim_count} claims ({r.affinity:.0%})")
+
+    return roots
 
 
 # ── Community detection ───────────────────────────────────────────────────────
@@ -352,19 +490,44 @@ def persist_topics(
     driver,
     topics: list[NarrativeTopic],
     links: list[TopicLink],
+    roots: list[AtlasRoot],
     tenant_id: str,
 ) -> dict:
-    """Persister les NarrativeTopics + liens inter-topics dans Neo4j."""
-    stats = {"created": 0, "perspective_links": 0, "subject_links": 0, "inter_topic_links": 0}
+    """Persister les AtlasRoots + NarrativeTopics + liens dans Neo4j."""
+    stats = {"roots": 0, "created": 0, "perspective_links": 0, "subject_links": 0, "inter_topic_links": 0}
 
     with driver.session() as session:
-        # Cleanup anciens topics
-        deleted = session.run(
+        # Cleanup
+        deleted_nt = session.run(
             "MATCH (nt:NarrativeTopic {tenant_id: $tid}) DETACH DELETE nt RETURN count(nt) AS cnt",
             tid=tenant_id,
         ).single()["cnt"]
-        if deleted:
-            logger.info(f"Deleted {deleted} previous NarrativeTopics")
+        deleted_ar = session.run(
+            "MATCH (ar:AtlasRoot {tenant_id: $tid}) DETACH DELETE ar RETURN count(ar) AS cnt",
+            tid=tenant_id,
+        ).single()["cnt"]
+        if deleted_nt or deleted_ar:
+            logger.info(f"Deleted {deleted_nt} NarrativeTopics + {deleted_ar} AtlasRoots")
+
+        # AtlasRoots (level 0)
+        for root in roots:
+            session.run("""
+                CREATE (ar:AtlasRoot {
+                    root_id: $rid,
+                    tenant_id: $tenant,
+                    canonical_name: $name,
+                    topic_count: $n_topics,
+                    claim_count: $claims,
+                    affinity: $affinity,
+                    created_at: datetime()
+                })
+            """,
+                rid=root.root_id, tenant=tenant_id,
+                name=root.canonical_name,
+                n_topics=len(root.topic_ids), claims=root.claim_count,
+                affinity=root.affinity,
+            )
+            stats["roots"] += 1
 
         for t in topics:
             # Creer le node
@@ -408,6 +571,14 @@ def persist_topics(
                     CREATE (nt)-[:ANCHORED_TO]->(sa)
                 """, tid=t.topic_id, tenant=tenant_id, sid=sid)
                 stats["subject_links"] += 1
+
+            # Lier au AtlasRoot (level 0 → level 1)
+            if t.atlas_root_id:
+                session.run("""
+                    MATCH (ar:AtlasRoot {root_id: $rid, tenant_id: $tenant})
+                    MATCH (nt:NarrativeTopic {topic_id: $tid, tenant_id: $tenant})
+                    CREATE (ar)-[:HAS_CHAPTER {reading_order: $order}]->(nt)
+                """, rid=t.atlas_root_id, tid=t.topic_id, tenant=tenant_id, order=t.reading_order)
 
         # Liens inter-topics (NARRATIVE_LINK)
         for link in links:
@@ -477,30 +648,40 @@ def main():
         logger.warning("No NarrativeTopics after filtering — aborting")
         return
 
-    # 5. Inter-topic links
+    # 5. Atlas hierarchy (level 0)
+    logger.info(f"\nBuilding Atlas hierarchy...")
+    roots = build_atlas_roots(topics, removed, edges, len(perspectives))
+
+    # 6. Inter-topic links
     logger.info(f"\nDetecting inter-topic links...")
     links = detect_inter_topic_links(driver, topics, args.tenant)
 
-    # 6. Reading order
+    # 7. Reading order
     compute_reading_order(topics, links)
 
-    # 7. LLM labelling
+    # 8. LLM labelling
     logger.info(f"\nLabelling {len(topics)} topics...")
     label_topics_llm(topics, skip_llm=args.skip_llm)
 
-    # 8. Display
+    # 9. Display
     logger.info(f"\n{'='*60}")
-    logger.info(f"NARRATIVE TOPICS: {len(topics)}")
+    logger.info(f"ATLAS STRUCTURE")
     logger.info(f"{'='*60}")
-    for t in sorted(topics, key=lambda t: t.reading_order):
-        logger.info(
-            f"\n[{t.reading_order}] {t.topic_id}: {t.narrative_label}"
-            f"\n  {len(t.perspectives)}P x {len(t.subjects)}S = {t.claim_count} claims"
-            f"\n  Subjects: {t.subject_names}"
-            f"\n  Perspectives: {t.perspective_labels[:3]}{'...' if len(t.perspective_labels) > 3 else ''}"
+
+    for root in roots:
+        root_topics = sorted(
+            [t for t in topics if t.atlas_root_id == root.root_id],
+            key=lambda t: t.reading_order,
         )
-        if t.narrative_summary:
-            logger.info(f"  Summary: {t.narrative_summary}")
+        logger.info(f"\n{root.canonical_name} ({root.claim_count} claims)")
+        for t in root_topics:
+            logger.info(
+                f"  [{t.reading_order:>2}] {t.narrative_label}"
+                f"\n       {len(t.perspectives)}P x {len(t.subjects)}S = {t.claim_count} claims"
+                f"\n       Subjects: {t.subject_names}"
+            )
+            if t.narrative_summary:
+                logger.info(f"       {t.narrative_summary[:100]}")
 
     if links:
         logger.info(f"\n{'='*60}")
@@ -513,10 +694,10 @@ def main():
                 f"  {from_label} --[{link.narrative_role}:{link.weight}]--> {to_label}"
             )
 
-    # 9. Persist
+    # 10. Persist
     if not args.dry_run:
-        logger.info(f"\nPersisting {len(topics)} topics + {len(links)} links to Neo4j...")
-        stats = persist_topics(driver, topics, links, args.tenant)
+        logger.info(f"\nPersisting {len(roots)} roots + {len(topics)} topics + {len(links)} links...")
+        stats = persist_topics(driver, topics, links, roots, args.tenant)
         logger.info(f"Persisted: {stats}")
     else:
         logger.info("\n[DRY RUN] Skipping persistence")
