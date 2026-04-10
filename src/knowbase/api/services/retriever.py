@@ -212,9 +212,39 @@ def _extract_bm25_keywords(question: str) -> list[str]:
             score += 1
         return score
 
-    # Scorer et trier par specificite
-    scored = [(w, is_technical(w)) for w in words]
-    scored = [(w, s) for w, s in scored if s > 0]
+    # Detecter les noms composes (sequences de mots capitalises consecutifs)
+    # "Business Data Cloud" → un seul terme technique score=3
+    # Domain-agnostic : fonctionne pour "Extended Warehouse Management", "Phase III Trial", etc.
+    compound_terms = []
+    i = 0
+    while i < len(words):
+        if words[i][0].isupper() and words[i][1:].islower() and words[i].isalpha() and len(words[i]) > 2:
+            # Debut potentiel d'un nom compose
+            compound = [words[i]]
+            j = i + 1
+            while j < len(words) and words[j][0].isupper() and words[j].isalpha() and len(words[j]) > 1:
+                compound.append(words[j])
+                j += 1
+            if len(compound) >= 2:
+                compound_terms.append((" ".join(compound), 3))  # score 3 = meme que ALL_CAPS
+                i = j
+                continue
+        i += 1
+
+    # Scorer les mots individuels
+    scored = []
+    for i, w in enumerate(words):
+        s = is_technical(w)
+        # Le premier mot de la question a souvent une majuscule contextuelle
+        # (debut de phrase) → ne pas le scorer comme "nom propre" s'il n'a
+        # aucun autre signal technique (/, _, chiffre, ALL_CAPS, camelCase)
+        if i == 0 and s == 1 and w[0].isupper() and w[1:].islower() and w.isalpha():
+            s = 0
+        if s > 0:
+            scored.append((w, s))
+
+    # Fusionner les noms composes et les mots individuels
+    scored.extend(compound_terms)
     scored.sort(key=lambda x: x[1], reverse=True)
 
     # Garder max 4 termes (le AND de MatchText est restrictif)
