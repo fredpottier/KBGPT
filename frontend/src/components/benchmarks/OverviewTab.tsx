@@ -433,12 +433,15 @@ export function OverviewTab({
 
   // ── Extract scores ──────────────────────────────────────────────────
 
-  const ragasFaithfulness = extractScore(ragasReport, ['systems', 'osmosis', 'scores', 'faithfulness'])
+  const ragasFaithChunks = extractScore(ragasReport, ['systems', 'osmosis', 'scores', 'faithfulness'])
+  const ragasFaithTotal = extractScore(ragasReport, ['systems', 'osmosis', 'scores', 'faithfulness_total'])
+  // Utiliser faith_total si disponible (mesure correcte incluant le KG)
+  const ragasFaithfulness = ragasFaithTotal ?? ragasFaithChunks
   const ragasContextRelevance = extractScore(ragasReport, ['systems', 'osmosis', 'scores', 'context_relevance'])
   const ragasSampleCount = ragasReport?.systems?.osmosis?.sample_count
   const ragasDiagnostic = ragasReport?.systems?.osmosis?.diagnostic
 
-  // Score global RAGAS = moyenne faithfulness + context_relevance
+  // Score global RAGAS = moyenne faithfulness (total si dispo) + context_relevance
   const ragasAllMetrics = [ragasFaithfulness, ragasContextRelevance].filter(v => v != null) as number[]
   const ragasGlobalScore = ragasAllMetrics.length > 0 ? ragasAllMetrics.reduce((a, b) => a + b, 0) / ragasAllMetrics.length : null
 

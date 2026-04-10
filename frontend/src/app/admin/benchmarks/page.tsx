@@ -517,7 +517,10 @@ function RagasTab({
   const latest = sorted[0] ?? null
   const detail = latestDetail ?? latest
   const osm = detail?.systems?.osmosis
-  const faith = osm?.scores?.faithfulness ?? 0
+  const faithChunks = osm?.scores?.faithfulness ?? 0
+  const faithTotal = osm?.scores?.faithfulness_total ?? null
+  // Afficher faith_total si disponible (mesure correcte incluant le KG), sinon faith_chunks
+  const faith = faithTotal ?? faithChunks
   const ctxRel = osm?.scores?.context_relevance ?? 0
   const diag = osm?.diagnostic
 
@@ -554,13 +557,18 @@ function RagasTab({
 
         <Card accent={T.accentRagas} flex={1} minW="280px">
           <HStack spacing={6} align="center">
-            <ScoreGauge value={faith} label="Faithfulness" color={T.accentRagas} size={130} target={0.85} />
+            <ScoreGauge value={faith} label={faithTotal != null ? "Faith (total)" : "Faithfulness"} color={T.accentRagas} size={130} target={0.85} />
             <VStack align="start" spacing={2} flex={1}>
               <Text fontSize="xs" fontWeight="700" color={T.accentRagas} textTransform="uppercase">
-                Fidelite des reponses
+                {faithTotal != null ? "Fidelite totale (chunks + KG)" : "Fidelite des reponses"}
               </Text>
               {baseFaith != null && (
                 <DeltaBadge current={faith} baseline={baseFaith} />
+              )}
+              {faithTotal != null && (
+                <Text fontSize="10px" color={T.textMuted}>
+                  chunks seuls : {Math.round(faithChunks * 100)}%
+                </Text>
               )}
             </VStack>
           </HStack>
