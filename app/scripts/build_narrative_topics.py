@@ -188,12 +188,10 @@ def build_atlas_roots(
             logger.debug(f"  Root skip (uniform): {info['name']}")
             continue
 
-        # Exclure les termes mono-mot generiques (ABAP, ERP, RFC...)
-        # Un bon root est typiquement multi-mots ou contient un slash/tiret
-        name_words = info["name"].split()
-        if len(name_words) == 1 and info["name"].isalpha():
-            logger.debug(f"  Root skip (single generic word): {info['name']}")
-            continue
+        # NOTE: pas de filtre sur la forme du nom (mono-mot, etc.)
+        # Un sujet mono-mot peut etre un bon root dans un autre domaine
+        # (ex: "Oncology", "Diabetes", "GDPR"). Seul le critere structurel
+        # (discrimination) compte.
 
         candidate_roots.append({
             "sid": sid, "name": info["name"],
@@ -202,8 +200,9 @@ def build_atlas_roots(
             "min_ratio": min_ratio,
         })
 
-    # Trier par nombre de topics couverts (desc) puis specificite (coverage asc)
-    candidate_roots.sort(key=lambda r: (-r["n_topics"], r["coverage"]))
+    # Trier par specificite (coverage asc = plus discriminant d'abord)
+    # A specificite egale, celui qui couvre le plus de topics
+    candidate_roots.sort(key=lambda r: (r["coverage"], -r["n_topics"]))
 
     # Garder le meilleur root (ou le plus general en fallback)
     if not candidate_roots:
@@ -213,15 +212,19 @@ def build_atlas_roots(
                             "coverage": fallback[1]["n_persp"] / n_perspectives,
                             "n_topics": len(topics), "min_ratio": 0.8}]
 
-    # Dedupliquer : garder le root le plus specifique qui couvre le plus de topics
+    # Dedupliquer : garder le root le plus specifique, puis ajouter un second
+    # root seulement s'il couvre au moins MIN_NEW_TOPICS topics non deja couverts
+    MIN_NEW_TOPICS = 3  # un root doit apporter au moins 3 topics nouveaux
     selected_roots = []
     covered_topics: set[str] = set()
     for root in candidate_roots:
         root_topics = {tid for tid, r in affinities[root["sid"]].items() if r > 0.5}
         new_topics = root_topics - covered_topics
-        if new_topics:
+        if len(new_topics) >= MIN_NEW_TOPICS or not selected_roots:
             selected_roots.append(root)
             covered_topics.update(root_topics)
+        else:
+            logger.debug(f"  Root skip (only {len(new_topics)} new topics): {root['name']}")
 
     # Construire les AtlasRoot
     roots = []
