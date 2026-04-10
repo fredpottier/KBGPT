@@ -172,20 +172,9 @@ class SmartEventEngine:
                     message=f"OpenAI credit bas ${state.llm_balances.openai_balance:.2f}",
                 ))
 
-        if state.llm_balances.anthropic_balance is not None:
-            if state.llm_balances.anthropic_status == "critical":
-                events.append(SmartEvent(
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    severity="critical",
-                    category="budget",
-                    message=f"Claude ${state.llm_balances.anthropic_balance:.2f}",
-                ))
-            elif state.llm_balances.anthropic_status == "low":
-                events.append(SmartEvent(
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    severity="warning",
-                    category="budget",
-                    message=f"Claude credit bas ${state.llm_balances.anthropic_balance:.2f}",
-                ))
+        # NOTE: Anthropic n'expose pas de endpoint pour verifier le solde.
+        # Les events Claude credit sont supprimes car ils generaient de
+        # fausses alertes (balance toujours None → jamais declenches, ou
+        # valeur fictive du collector → fausse alerte).
 
         return events
