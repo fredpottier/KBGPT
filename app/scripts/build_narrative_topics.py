@@ -140,111 +140,100 @@ def filter_generic_subjects(
 
 
 def build_atlas_roots(
+    driver,
     topics: list[NarrativeTopic],
-    generic_subjects: dict,
-    all_edges: list[dict],
-    n_perspectives: int,
+    tenant_id: str,
 ) -> list[AtlasRoot]:
-    """Construit les level 0 de l'Atlas a partir des sujets generiques filtres.
+    """Construit les level 0 de l'Atlas.
 
-    Chaque sujet generique (> GENERIC_THRESHOLD des perspectives) devient un
-    AtlasRoot candidat. Les topics sont rattaches au root le plus specifique
-    dont ils partagent la majorite des perspectives.
+    Strategie : utiliser les primary_subject des DocumentContexts comme roots.
+    C'est le signal le plus fiable car il reflete la vraie repartition des
+    documents dans le corpus, independamment du domaine.
 
-    Strategie de selection des roots :
-    - Exclure les sujets trop vagues ("SAP" tout court)
-    - Garder les sujets qui discriminent au moins un topic (pas 100% sur tous)
-    - Fusionner les quasi-doublons (S/4HANA vs S/4HANA 2023 Feature Scope)
+    Chaque primary_subject avec au moins 1 document devient un AtlasRoot.
+    Les topics sont rattaches au root dont les perspectives proviennent
+    majoritairement des documents de ce subject.
     """
-    if not generic_subjects:
+    # 1. Recuperer les primary_subjects et leurs documents
+    from collections import defaultdict
+    doc_subjects: dict[str, list[str]] = defaultdict(list)  # {subject: [doc_ids]}
+
+    with driver.session() as session:
+        result = session.run("""
+            MATCH (dc:DocumentContext {tenant_id: $tid})
+            WHERE dc.primary_subject IS NOT NULL
+            RETURN dc.primary_subject AS subject, collect(dc.doc_id) AS doc_ids
+        """, tid=tenant_id)
+        for rec in result:
+            if rec["subject"]:
+                doc_subjects[rec["subject"]] = rec["doc_ids"]
+
+    if not doc_subjects:
+        logger.warning("  No primary_subjects in DocumentContexts")
         return []
 
-    # Calculer l'affinite topic x sujet generique
-    affinities: dict[str, dict[str, float]] = {}  # {root_sid: {topic_id: ratio}}
-    for sid, info in generic_subjects.items():
-        affinities[sid] = {}
-        for t in topics:
-            count = sum(1 for e in all_edges if e["p_id"] in set(t.perspectives) and e["s_id"] == sid)
-            ratio = count / len(t.perspectives) if t.perspectives else 0
-            affinities[sid][t.topic_id] = ratio
+    logger.info(f"  Primary subjects from corpus:")
+    for subj, docs in sorted(doc_subjects.items(), key=lambda x: len(x[1]), reverse=True):
+        logger.info(f"    {len(docs):>3} docs | {subj}")
 
-    # Strategie de selection des roots :
-    # 1. Exclure les sujets 100% uniformes (SAP, SAP S/4HANA) — pas de signal
-    # 2. Exclure les sujets purement techniques (ABAP, Feature Scope) — pas narratifs
-    # 3. Garder le sujet-produit le plus specifique qui couvre > 50% des topics
-    #
-    # Heuristique domain-agnostic : un bon root est un NOM DE PRODUIT (contient
-    # des majuscules, souvent multi-mots) pas un terme technique generique.
-    # On ne hardcode aucun nom — on filtre par structure.
+    # 2. Pour chaque topic, determiner de quels documents viennent ses claims
+    # Perspective → Claims → source documents
+    persp_docs: dict[str, set[str]] = defaultdict(set)
+    with driver.session() as session:
+        result = session.run("""
+            MATCH (p:Perspective {tenant_id: $tid})-[:INCLUDES_CLAIM]->(c:Claim)
+            RETURN p.perspective_id AS pid, collect(DISTINCT c.doc_id) AS doc_ids
+        """, tid=tenant_id)
+        for rec in result:
+            persp_docs[rec["pid"]] = set(rec["doc_ids"])
 
-    candidate_roots = []
-    for sid, info in generic_subjects.items():
-        ratios = list(affinities[sid].values())
-        min_ratio = min(ratios) if ratios else 1.0
-        n_topics_covered = sum(1 for r in ratios if r > 0.5)
+    # 3. Calculer l'affinite topic x primary_subject
+    # Affinite = proportion des documents du topic qui appartiennent a ce subject
+    topic_affinities: dict[str, dict[str, float]] = {}  # {topic_id: {subject: ratio}}
+    for t in topics:
+        t_docs = set()
+        for pid in t.perspectives:
+            t_docs.update(persp_docs.get(pid, set()))
 
-        # Exclure 100% uniforme (pas de discrimination)
-        if min_ratio >= 0.95:
-            logger.debug(f"  Root skip (uniform): {info['name']}")
-            continue
+        topic_affinities[t.topic_id] = {}
+        for subj, subj_docs in doc_subjects.items():
+            overlap = t_docs & set(subj_docs)
+            ratio = len(overlap) / len(t_docs) if t_docs else 0
+            topic_affinities[t.topic_id][subj] = ratio
 
-        # NOTE: pas de filtre sur la forme du nom (mono-mot, etc.)
-        # Un sujet mono-mot peut etre un bon root dans un autre domaine
-        # (ex: "Oncology", "Diabetes", "GDPR"). Seul le critere structurel
-        # (discrimination) compte.
-
-        candidate_roots.append({
-            "sid": sid, "name": info["name"],
-            "coverage": info["n_persp"] / n_perspectives,
-            "n_topics": n_topics_covered,
-            "min_ratio": min_ratio,
-        })
-
-    # Trier par specificite (coverage asc = plus discriminant d'abord)
-    # A specificite egale, celui qui couvre le plus de topics
-    candidate_roots.sort(key=lambda r: (r["coverage"], -r["n_topics"]))
-
-    # Garder le meilleur root (ou le plus general en fallback)
-    if not candidate_roots:
-        fallback = max(generic_subjects.items(), key=lambda x: x[1]["n_persp"])
-        logger.info(f"  No product root found, using: {fallback[1]['name']}")
-        candidate_roots = [{"sid": fallback[0], "name": fallback[1]["name"],
-                            "coverage": fallback[1]["n_persp"] / n_perspectives,
-                            "n_topics": len(topics), "min_ratio": 0.8}]
-
-    # Dedupliquer : garder le root le plus specifique, puis ajouter un second
-    # root seulement s'il couvre au moins MIN_NEW_TOPICS topics non deja couverts
-    MIN_NEW_TOPICS = 3  # un root doit apporter au moins 3 topics nouveaux
-    selected_roots = []
-    covered_topics: set[str] = set()
-    for root in candidate_roots:
-        root_topics = {tid for tid, r in affinities[root["sid"]].items() if r > 0.5}
-        new_topics = root_topics - covered_topics
-        if len(new_topics) >= MIN_NEW_TOPICS or not selected_roots:
-            selected_roots.append(root)
-            covered_topics.update(root_topics)
-        else:
-            logger.debug(f"  Root skip (only {len(new_topics)} new topics): {root['name']}")
-
-    # Construire les AtlasRoot
+    # 4. Construire les AtlasRoot a partir des primary_subjects
+    # Creer un root par primary_subject (au moins 1 doc)
     roots = []
-    for root_info in selected_roots:
-        sid = root_info["sid"]
-        root = AtlasRoot(
-            root_id=f"atlas_{sid[-8:]}",
-            canonical_name=root_info["name"],
-            affinity=root_info["coverage"],
-        )
+    for subj, subj_docs in sorted(doc_subjects.items(), key=lambda x: len(x[1]), reverse=True):
+        roots.append(AtlasRoot(
+            root_id=f"atlas_{hash(subj) % 100000000:08x}",
+            canonical_name=subj,
+            affinity=len(subj_docs),
+        ))
 
-        # Rattacher les topics (affinite > 50%)
-        for t in topics:
-            ratio = affinities[sid].get(t.topic_id, 0)
-            if ratio > 0.5:
-                root.topic_ids.append(t.topic_id)
-                root.claim_count += t.claim_count
-                t.atlas_root_id = root.root_id
+    # 5. Assigner chaque topic au root le PLUS SPECIFIQUE
+    # Pour chaque topic, trouver le root avec lequel il a la plus haute affinite.
+    # En cas d'egalite, preferer le root le plus specifique (moins de docs = plus specifique).
+    for t in topics:
+        best_root = None
+        best_score = -1
+        for root in roots:
+            ratio = topic_affinities.get(t.topic_id, {}).get(root.canonical_name, 0)
+            if ratio > 0:
+                # Score = affinite * specificite (inverse du nb de docs)
+                specificity = 1.0 / root.affinity if root.affinity > 0 else 0
+                score = ratio * specificity
+                if score > best_score:
+                    best_score = score
+                    best_root = root
 
-        roots.append(root)
+        if best_root and best_score > 0:
+            best_root.topic_ids.append(t.topic_id)
+            best_root.claim_count += t.claim_count
+            t.atlas_root_id = best_root.root_id
+
+    # Retirer les roots sans topics
+    roots = [r for r in roots if r.topic_ids]
 
     # Topics orphelins (pas rattaches a un root) → creer un root "Transversal"
     orphans = [t for t in topics if not t.atlas_root_id]
@@ -651,9 +640,9 @@ def main():
         logger.warning("No NarrativeTopics after filtering — aborting")
         return
 
-    # 5. Atlas hierarchy (level 0)
+    # 5. Atlas hierarchy (level 0 from DocumentContext primary_subjects)
     logger.info(f"\nBuilding Atlas hierarchy...")
-    roots = build_atlas_roots(topics, removed, edges, len(perspectives))
+    roots = build_atlas_roots(driver, topics, args.tenant)
 
     # 6. Inter-topic links
     logger.info(f"\nDetecting inter-topic links...")
