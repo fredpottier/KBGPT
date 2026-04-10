@@ -1739,7 +1739,9 @@ def search_documents(
             graph_context_text = f"\n\n## Signal-driven analysis\n{signal_context}" + graph_context_text
 
     # Signal de confiance retrieval — prevenir le LLM si les chunks sont peu pertinents
-    if reranked_chunks:
+    # Note : en mode DIRECT, on n'injecte PAS de warning car cela pollue le graph_context_text
+    # et fait baisser la faithfulness (le LLM devient trop prudent et produit des reponses vagues)
+    if resolved_mode not in (ResponseMode.DIRECT, ResponseMode.AUGMENTED) and reranked_chunks:
         chunk_scores = [c.get("score", 0) for c in reranked_chunks if c.get("score")]
         avg_score = sum(chunk_scores) / len(chunk_scores) if chunk_scores else 0
         max_score = max(chunk_scores) if chunk_scores else 0
