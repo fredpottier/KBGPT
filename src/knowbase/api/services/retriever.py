@@ -212,32 +212,10 @@ def _extract_bm25_keywords(question: str) -> list[str]:
             score += 1
         return score
 
-    # Gazetteer matching : si un domain pack est actif, chercher les produits/entites
-    # connus dans la question. Score eleve car match exact sur un terme du domaine.
-    # Domain-agnostic : chaque pack fournit son propre gazetteer.
-    gazetteer_matches = []
-    try:
-        from knowbase.domain_packs.registry import get_pack_registry
-        registry = get_pack_registry()
-        packs = registry.get_active_packs("default")
-        if packs:
-            question_lower = cleaned.lower()
-            for pack in packs:
-                # Gazetteer : noms de produits/entites connus
-                for product in pack.get_product_gazetteer():
-                    prod_lower = product.lower()
-                    if len(prod_lower) > 3 and prod_lower in question_lower:
-                        gazetteer_matches.append((product, 6))  # score 6 = plus haut que tout
-                # Aliases : noms alternatifs
-                for alias, canonical in pack.get_canonical_aliases().items():
-                    alias_lower = alias.lower()
-                    if len(alias_lower) > 3 and alias_lower in question_lower:
-                        gazetteer_matches.append((alias, 6))
-            if gazetteer_matches:
-                # Garder le match le plus long (eviter "ALM" si "Cloud ALM" matche aussi)
-                gazetteer_matches.sort(key=lambda x: len(x[0]), reverse=True)
-    except Exception:
-        pass  # domain pack indisponible = pas de boost gazetteer
+    # NOTE: Gazetteer BM25 boost teste et rollback (10/04/2026).
+    # Le boost score=6 sur les noms de produits du domain pack ramenait des chunks
+    # contenant le nom du produit mais pas pertinents → context_relevance -4.7 pts.
+    # A revisiter avec un score plus bas ou un declenchement conditionnel.
 
     # Detecter les noms composes (sequences de mots capitalises consecutifs)
     # "Business Data Cloud" → un seul terme technique score=3
@@ -270,9 +248,8 @@ def _extract_bm25_keywords(question: str) -> list[str]:
         if s > 0:
             scored.append((w, s))
 
-    # Fusionner : gazetteer (priorite max) > noms composes > mots individuels
+    # Fusionner : noms composes > mots individuels
     scored.extend(compound_terms)
-    scored.extend(gazetteer_matches)
     scored.sort(key=lambda x: x[1], reverse=True)
 
     # Garder max 4 termes (le AND de MatchText est restrictif)
