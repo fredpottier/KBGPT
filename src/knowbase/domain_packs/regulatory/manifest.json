@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "name": "regulatory",
+  "display_name": "Regulatory & Legal",
+  "description": "NER for legal/regulatory documents. Detects regulations, laws, compliance standards, regulatory bodies via GLiNER zero-shot NER with a regulatory gazetteer.",
+  "version": "1.0.0",
+  "author": "OSMOSE",
+  "min_core_version": "2.0.0",
+  "container": {
+    "port": 9102,
+    "health_endpoint": "/health",
+    "extract_endpoint": "/extract",
+    "memory_limit": "1g",
+    "build_args": {}
+  },
+  "provides": {
+    "entity_types": [
+      "REGULATION",
+      "LEGAL_STANDARD",
+      "REGULATORY_BODY",
+      "COMPLIANCE_FRAMEWORK",
+      "LEGAL_INSTRUMENT",
+      "JURISDICTION"
+    ],
+    "ner_model": "urchade/gliner_medium-v2.1",
+    "ner_model_size_mb": 209
+  }
+}
