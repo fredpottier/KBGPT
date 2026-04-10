@@ -682,7 +682,7 @@ export default function BackupPage() {
             </Center>
           ) : backupList && backupList.backups.length > 0 ? (
             <VStack spacing={3} align="stretch">
-              {backupList.backups.map((backup, i) => (
+              {[...backupList.backups].sort((a, b) => (b.created_at || b.name).localeCompare(a.created_at || a.name)).map((backup, i) => (
                 <BackupCard
                   key={backup.name}
                   backup={backup}
