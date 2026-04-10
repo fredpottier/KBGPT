@@ -594,4 +594,11 @@ export const api = {
         timeout: 1800000,  // 30 min max
       }),
   },
+
+  // Atlas — Narrative knowledge atlas (dual-axis: product + theme)
+  atlas: {
+    homepage: () => apiClient.get('/atlas/homepage'),
+    topics: () => apiClient.get('/atlas/topics'),
+    topic: (topicId: string) => apiClient.get(`/atlas/topic/${topicId}`),
+  },
 }

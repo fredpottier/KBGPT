@@ -51,10 +51,19 @@ export default function AtlasArticlePage() {
 
   useEffect(() => {
     if (!topicId) return
-    api.get(`/atlas/topic/${topicId}`)
-      .then(res => setArticle(res.data))
-      .catch(err => console.error('Article load error:', err))
-      .finally(() => setLoading(false))
+    async function load() {
+      try {
+        const res = await api.atlas.topic(topicId)
+        if (res.success && res.data) {
+          setArticle(res.data as AtlasArticle)
+        }
+      } catch (err) {
+        console.error('Article load error:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
   }, [topicId])
 
   if (loading) {

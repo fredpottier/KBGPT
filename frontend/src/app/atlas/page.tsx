@@ -48,10 +48,19 @@ export default function AtlasPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.get('/atlas/homepage')
-      .then(res => setData(res.data))
-      .catch(err => console.error('Atlas load error:', err))
-      .finally(() => setLoading(false))
+    async function load() {
+      try {
+        const res = await api.atlas.homepage()
+        if (res.success && res.data) {
+          setData(res.data as AtlasHomepage)
+        }
+      } catch (err) {
+        console.error('Atlas load error:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
   }, [])
 
   if (loading) {
