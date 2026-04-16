@@ -1,449 +1,485 @@
+#!/usr/bin/env python3
 """
-Téléchargement du corpus pré-éclampsie depuis PMC + Thermo Fisher.
+Telechargement du corpus preeclampsie — structure par controverses cliniques.
 
-Usage:
-    python app/scripts/download_preeclampsia_corpus.py
-    python app/scripts/download_preeclampsia_corpus.py --output-dir data/corpus/preeclampsia
+10 clusters de controverses, chacun avec des etudes qui se referencent,
+se contredisent et s'enchainent. Optimise pour maximiser les cross-docs
+et les tensions detectables par OSMOSIS.
+
+Usage :
+    python app/scripts/download_preeclampsia_corpus.py --output data/burst/PreEclampsia --max 200
+    python app/scripts/download_preeclampsia_corpus.py --dry-run
+    python app/scripts/download_preeclampsia_corpus.py --cluster 1  # Un seul cluster
+
+Note : NCBI rate-limit a 3 req/s sans API key, 10 req/s avec.
 """
+from __future__ import annotations
 
 import argparse
-import io
 import json
+import logging
 import os
 import re
-import sys
 import time
 from pathlib import Path
-from typing import Optional
-from xml.etree import ElementTree as ET
-
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import requests
 
-# ===========================================================================
-# PMC IDs identifiés
-# ===========================================================================
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [CORPUS] %(message)s")
+logger = logging.getLogger("corpus-downloader")
 
-PMC_IDS = [
-    # Ratio sFlt-1/PlGF — diagnostic/prédiction
-    "PMC11202363",  # Dynamic prediction model using sFlt-1/PLGF ratio
-    "PMC4369131",   # Implementation of sFlt-1/PlGF ratio for prediction
-    "PMC10500221",  # Predictive value of sFlt-1/PlGF ratio (update review)
-    "PMC7006116",   # Diagnostic accuracy of sFlt1/PlGF ratio
-    "PMC11239699",  # sFlt1/PlGF considering hypertensive status
-    "PMC8870556",   # sFlt-1/PlGF ratio in clinical routine (real-world)
-    "PMC7098437",   # Combining biomarkers — Angiogenic-Placental Syndrome
-    "PMC5736685",   # Evaluation of sFlt-1/PlGF for predicting & improving
+EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+NCBI_API_KEY = os.getenv("NCBI_API_KEY", "")
+RATE_DELAY = 0.35 if NCBI_API_KEY else 1.1
 
-    # Pathophysiologie
-    "PMC8884164",   # Imbalances in circulating angiogenic factors
-    "PMC3063446",   # Angiogenic Factors and Preeclampsia
-    "PMC4515231",   # Imbalance in angiogenic/anti-angiogenic factors
-    "PMC6472952",   # Pre-eclampsia: pathogenesis, diagnostics and therapies
-    "PMC12452302",  # Understanding Preeclampsia: pathophysiology, biomarkers
 
-    # Screening 1er trimestre
-    "PMC9361843",   # First-trimester sequential screening (multicenter)
-    "PMC9507456",   # Reviewing accuracy of first trimester screening
-    "PMC7235780",   # Diagnostic performance uterine artery + risk factors
-    "PMC8913542",   # Prediction using uterine artery Doppler and PAPP-A
-    "PMC12461270",  # First-trimester prediction using PAPP-A and MAP
+# ═══════════════════════════════════════════════════════════════════════════════
+# 10 Clusters de controverses cliniques
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    # Revues / Guidelines / HTA
-    "PMC11131432",  # Biomarkers for Early Prediction: Comprehensive Review
-    "PMC8649230",   # Decision threshold Kryptor sFlt-1/PlGF (BRAHMS)
-    "PMC10241193",  # PlGF-based biomarker testing (Health Technology Assessment)
-    "PMC9962022",   # Recent advances in predicting, preventing, managing PE
-
-    # Extras
-    "PMC10928726",  # PE37 study protocol (screening with sFlt1/PlGF)
-    "PMC9413067",   # Prediction model using machine learning (China)
-    "PMC4127237",   # Early Prediction of Preeclampsia
-    "PMC3407628",   # Early Detection of Maternal Risk
-    "PMC12476626",  # Non-coding RNAs as diagnostic biomarkers
-    "PMC2846114",   # Change in angiogenic factors between trimesters
+CLUSTERS = [
+    # ── Cluster 1 : La guerre du dosage aspirine ──────────────────────
+    {
+        "id": 1,
+        "name": "Aspirin dosage controversy",
+        "prefix": "ASP",
+        "target": 20,
+        "description": "CLASP 1994 (inefficace) → ASPRE 2017 (150mg) → NICE/FIGO → ASAPP 2024 (162mg vs 81mg)",
+        "queries": [
+            # Etudes anciennes contradictoires
+            '("CLASP" OR "Collaborative Low-dose Aspirin") AND preeclampsia AND aspirin',
+            # ASPRE trial (reference)
+            '("ASPRE" OR "Combined Multimarker Screening and Randomized Patient Treatment") AND aspirin AND preeclampsia AND "150 mg"',
+            # Comparaison dosages
+            '(preeclampsia OR pre-eclampsia) AND aspirin AND ("81 mg" OR "150 mg" OR "162 mg") AND (dose OR dosage OR comparison) AND "open access"[filter]',
+            # Meta-analyses aspirine
+            '(preeclampsia OR pre-eclampsia) AND aspirin AND prevention AND ("systematic review"[pt] OR "meta-analysis"[pt]) AND "open access"[filter]',
+            # Timing aspirine (avant/apres 16 SA)
+            '(preeclampsia OR pre-eclampsia) AND aspirin AND ("gestational age" OR timing OR "16 weeks" OR "first trimester") AND prevention AND "open access"[filter]',
+            # Risque hemorragique
+            '(preeclampsia OR pre-eclampsia) AND aspirin AND (bleeding OR "placental abruption" OR safety OR "adverse effect") AND "open access"[filter]',
+        ],
+    },
+    # ── Cluster 2 : PlGF seul vs ratio sFlt-1/PlGF ───────────────────
+    {
+        "id": 2,
+        "name": "PlGF alone vs sFlt-1/PlGF ratio",
+        "prefix": "RAT",
+        "target": 20,
+        "description": "PROGNOSIS (ratio 38) vs NICE (PlGF seul) vs Kryptor (autres seuils)",
+        "queries": [
+            # PROGNOSIS study (Roche, seuil 38)
+            '("PROGNOSIS" OR "Prediction of Short-Term Outcome") AND (sFlt-1 OR PlGF) AND preeclampsia',
+            # PlGF seul (approche UK)
+            '(preeclampsia OR pre-eclampsia) AND "PlGF" AND (alone OR "single marker" OR triage) AND (diagnosis OR prediction) AND "open access"[filter]',
+            # Ratio sFlt-1/PlGF (approche EU)
+            '(preeclampsia OR pre-eclampsia) AND "sFlt-1/PlGF" AND (ratio OR cutoff OR threshold) AND "open access"[filter]',
+            # Kryptor vs Elecsys (head-to-head)
+            '(preeclampsia OR pre-eclampsia) AND (Kryptor OR Elecsys OR BRAHMS OR Roche) AND (sFlt-1 OR PlGF) AND (comparison OR validation) AND "open access"[filter]',
+            # Revues systematiques sur les seuils
+            '(preeclampsia OR pre-eclampsia) AND (sFlt-1 OR PlGF) AND (threshold OR "cut-off" OR "rule-out" OR "rule-in") AND "open access"[filter]',
+        ],
+    },
+    # ── Cluster 3 : FMF screening vs ACOG risk factors ────────────────
+    {
+        "id": 3,
+        "name": "FMF algorithm vs ACOG screening",
+        "prefix": "SCR",
+        "target": 20,
+        "description": "Combined T1 screening (FMF) vs risk factor checklist (ACOG)",
+        "queries": [
+            # FMF algorithm (Nicolaides)
+            '("Fetal Medicine Foundation" OR FMF) AND preeclampsia AND (screening OR prediction OR algorithm) AND "first trimester" AND "open access"[filter]',
+            # ACOG risk factors
+            '(preeclampsia OR pre-eclampsia) AND (ACOG OR "American College") AND ("risk factor" OR screening OR guideline) AND "open access"[filter]',
+            # PAPP-A + uterine artery Doppler
+            '(preeclampsia OR pre-eclampsia) AND (PAPP-A OR "pregnancy-associated plasma protein") AND ("uterine artery" OR doppler) AND prediction AND "open access"[filter]',
+            # Comparaison approches
+            '(preeclampsia OR pre-eclampsia) AND ("first trimester screening" OR "combined screening") AND (performance OR "detection rate" OR comparison) AND "open access"[filter]',
+            # MAP (mean arterial pressure) en screening
+            '(preeclampsia OR pre-eclampsia) AND ("mean arterial pressure" OR MAP) AND screening AND "first trimester" AND "open access"[filter]',
+        ],
+    },
+    # ── Cluster 4 : Definition de la preeclampsie ─────────────────────
+    {
+        "id": 4,
+        "name": "Preeclampsia definition controversy",
+        "prefix": "DEF",
+        "target": 15,
+        "description": "ISSHP 2018 vs ACOG 2020 vs NICE 2019 — proteinurie obligatoire ?",
+        "queries": [
+            # ISSHP definition
+            '(ISSHP OR "International Society for the Study of Hypertension in Pregnancy") AND preeclampsia AND (definition OR classification OR criteria) AND "open access"[filter]',
+            # Definitions et classifications
+            '(preeclampsia OR pre-eclampsia) AND (definition OR classification OR diagnostic criteria) AND (review OR consensus) AND "open access"[filter]',
+            # PE sans proteinurie
+            '(preeclampsia OR pre-eclampsia) AND ("without proteinuria" OR "non-proteinuric" OR "atypical") AND "open access"[filter]',
+            # Hypertensive disorders classification
+            '("hypertensive disorders of pregnancy" OR "gestational hypertension") AND classification AND (preeclampsia OR pre-eclampsia) AND "open access"[filter]',
+        ],
+    },
+    # ── Cluster 5 : Delivery timing ───────────────────────────────────
+    {
+        "id": 5,
+        "name": "Delivery timing controversy",
+        "prefix": "DEL",
+        "target": 15,
+        "description": "HYPITAT-II (expectatif) vs PHOENIX (PlGF-guided) vs seuils 34/37 SA",
+        "queries": [
+            # HYPITAT trials
+            '(HYPITAT OR "Hypertension and Pre-Eclampsia Intervention Trial At Term") AND preeclampsia AND delivery AND "open access"[filter]',
+            # PHOENIX trial
+            '(PHOENIX OR "Placental Growth Factor to Assess and Manage") AND preeclampsia AND delivery AND "open access"[filter]',
+            # Timing delivery PE precoce
+            '(preeclampsia OR pre-eclampsia) AND ("timing of delivery" OR "expectant management" OR "planned delivery") AND ("early onset" OR preterm) AND "open access"[filter]',
+            # PlGF-guided management
+            '(preeclampsia OR pre-eclampsia) AND PlGF AND (management OR "clinical decision" OR "guided delivery") AND "open access"[filter]',
+        ],
+    },
+    # ── Cluster 6 : MgSO4 protocoles ─────────────────────────────────
+    {
+        "id": 6,
+        "name": "MgSO4 protocols controversy",
+        "prefix": "MGS",
+        "target": 15,
+        "description": "Magpie Trial → Zuspan vs Pritchard → duree optimale",
+        "queries": [
+            # Magpie Trial
+            '("Magpie Trial" OR "magnesium sulphate" OR "magnesium sulfate") AND (eclampsia OR preeclampsia) AND ("clinical trial"[pt]) AND "open access"[filter]',
+            # Zuspan vs Pritchard
+            '("magnesium sulfate" OR "magnesium sulphate") AND (Zuspan OR Pritchard) AND (protocol OR regimen OR comparison) AND preeclampsia AND "open access"[filter]',
+            # Duree traitement
+            '("magnesium sulfate" OR "magnesium sulphate") AND preeclampsia AND (duration OR "postpartum" OR "maintenance dose") AND "open access"[filter]',
+        ],
+    },
+    # ── Cluster 7 : Biomarqueurs emergents vs etablis ─────────────────
+    {
+        "id": 7,
+        "name": "Emerging vs established biomarkers",
+        "prefix": "EMB",
+        "target": 20,
+        "description": "sFlt-1/PlGF (standard) vs cfDNA, PP13, ADAM12, machine learning",
+        "queries": [
+            # Cell-free DNA/RNA
+            '(preeclampsia OR pre-eclampsia) AND ("cell-free DNA" OR "cell-free RNA" OR cfDNA OR "liquid biopsy") AND (prediction OR biomarker) AND "open access"[filter]',
+            # PP13, ADAM12 (biomarqueurs abandonnes?)
+            '(preeclampsia OR pre-eclampsia) AND (PP13 OR ADAM12 OR "placental protein 13") AND (biomarker OR prediction) AND "open access"[filter]',
+            # Multi-biomarqueurs et combinaisons
+            '(preeclampsia OR pre-eclampsia) AND ("multi-marker" OR "combined biomarker" OR "multivariate") AND prediction AND "open access"[filter]',
+            # Machine learning / IA prediction
+            '(preeclampsia OR pre-eclampsia) AND ("machine learning" OR "artificial intelligence" OR "deep learning") AND prediction AND "open access"[filter]',
+            # NT-proBNP et biomarqueurs cardiaques
+            '(preeclampsia OR pre-eclampsia) AND ("NT-proBNP" OR troponin OR "cardiac biomarker") AND "open access"[filter]',
+        ],
+    },
+    # ── Cluster 8 : PE precoce vs tardive ─────────────────────────────
+    {
+        "id": 8,
+        "name": "Early-onset vs late-onset: two diseases?",
+        "prefix": "ELO",
+        "target": 20,
+        "description": "Hypothese des 2 entites → physiopathologies → biomarqueurs → management differents",
+        "queries": [
+            # Early vs late onset
+            '(preeclampsia OR pre-eclampsia) AND ("early-onset" OR "late-onset" OR "early onset" OR "late onset") AND (pathophysiology OR mechanism OR comparison) AND "open access"[filter]',
+            # Placental vs maternal PE
+            '(preeclampsia OR pre-eclampsia) AND ("placental" OR "maternal") AND (subtype OR phenotype OR "two-stage") AND "open access"[filter]',
+            # Biomarqueurs differents selon le type
+            '(preeclampsia OR pre-eclampsia) AND ("early-onset" OR "late-onset") AND (biomarker OR sFlt-1 OR PlGF) AND (difference OR comparison) AND "open access"[filter]',
+            # Physiopathologie revues recentes
+            '(preeclampsia OR pre-eclampsia) AND (pathophysiology OR pathogenesis) AND ("endothelial dysfunction" OR angiogenesis OR "oxidative stress") AND review[pt] AND "open access"[filter]',
+        ],
+    },
+    # ── Cluster 9 : Calcium et supplementation ────────────────────────
+    {
+        "id": 9,
+        "name": "Calcium supplementation controversy",
+        "prefix": "CAL",
+        "target": 15,
+        "description": "WHO recommande vs ACOG ne recommande pas, contexte geographique",
+        "queries": [
+            # Calcium et PE
+            '(preeclampsia OR pre-eclampsia) AND (calcium OR "calcium supplementation") AND prevention AND "open access"[filter]',
+            # WHO guidelines calcium
+            '(preeclampsia OR pre-eclampsia) AND calcium AND (WHO OR "World Health Organization" OR guideline) AND "open access"[filter]',
+            # Etudes par population (pays en developpement)
+            '(preeclampsia OR pre-eclampsia) AND calcium AND ("low income" OR "developing country" OR Africa OR "low calcium intake") AND "open access"[filter]',
+        ],
+    },
+    # ── Cluster 10 : PE et risque cardiovasculaire long-terme ─────────
+    {
+        "id": 10,
+        "name": "PE and long-term cardiovascular risk",
+        "prefix": "CVR",
+        "target": 20,
+        "description": "PE → risque CV x4 → suivi recommande mais peu fait → guidelines AHA/ESC",
+        "queries": [
+            # PE et risque CV
+            '(preeclampsia OR pre-eclampsia) AND ("cardiovascular risk" OR "cardiovascular disease" OR "long-term outcome") AND (postpartum OR "follow-up") AND "open access"[filter]',
+            # Hypertension post-PE
+            '(preeclampsia OR pre-eclampsia) AND (hypertension OR "chronic hypertension") AND ("long term" OR "years after" OR "future risk") AND "open access"[filter]',
+            # AHA/ESC guidelines
+            '(preeclampsia OR pre-eclampsia) AND ("American Heart Association" OR AHA OR ESC OR "European Society of Cardiology") AND "cardiovascular" AND "open access"[filter]',
+            # Suivi post-partum
+            '(preeclampsia OR pre-eclampsia) AND ("postpartum follow-up" OR "postnatal care" OR "postpartum surveillance") AND cardiovascular AND "open access"[filter]',
+            # HELLP et consequences long-terme
+            '("HELLP syndrome" OR (preeclampsia AND severe)) AND ("long-term" OR outcome OR "years after") AND "open access"[filter]',
+        ],
+    },
 ]
 
-# ===========================================================================
-# Thermo Fisher / BRAHMS documents
-# ===========================================================================
 
-THERMOFISHER_DOCS = [
-    {
-        "id": "TF_lit_review_pe_ratio",
-        "title": "Pre-eclampsia diagnosis and prognosis - Literature Review (Thermo Fisher BRAHMS)",
-        "url": "https://documents.thermofisher.com/TFS-Assets/CDD/Reference-Materials/Lit_Review_PNS_PE_Ratio-Ratio-BMKT001314.1_EN_OUS-SCREEN-v6.pdf",
-        "type": "pdf",
-    },
-    {
-        "id": "TF_lit_review_1st_trimester",
-        "title": "First trimester pre-eclampsia screening - Literature Review (Thermo Fisher BRAHMS)",
-        "url": "https://documents.thermofisher.com/TFS-Assets/CDD/Reference-Materials/Lit_Review_PNS_PE_1stT_BMKT001300.1_EN_OUS-v8-Final.pdf",
-        "type": "pdf",
-    },
-    {
-        "id": "TF_datasheet_us_pe",
-        "title": "PlGF and sFlt-1 assays on KRYPTOR - US Datasheet (Thermo Fisher BRAHMS)",
-        "url": "https://documents.thermofisher.com/TFS-Assets/CDD/Datasheets/Datasheet-US-pre-eclampsia-Diagnosis-BMKT001031.2%20EN-SCREEN.pdf",
-        "type": "pdf",
-    },
-    {
-        "id": "TF_brochure_pe",
-        "title": "Preeclampsia Management Brochure (Thermo Fisher BRAHMS)",
-        "url": "https://documents.thermofisher.com/TFS-Assets/CDD/brochures/Brochure-US-PNS-Pre-eclampsia-Diagnosis-BMKT001029.2-EN-SCREEN.pdf",
-        "type": "pdf",
-    },
-    {
-        "id": "TF_datasheet_ous_plgf_sflt1",
-        "title": "Pre-eclampsia throughout pregnancy PAPP-A PlGF sFlt-1 (Thermo Fisher BRAHMS OUS)",
-        "url": "https://documents.thermofisher.com/TFS-Assets/CDD/Datasheets/PNS_datasheet_PlGF_sFlt-1_BMKT001066.2_EN_OUS%20(1).pdf",
-        "type": "pdf",
-    },
-    {
-        "id": "TF_fda_clearance",
-        "title": "FDA Clearance Document BRAHMS sFlt-1 PlGF KRYPTOR (DEN220027)",
-        "url": "https://www.accessdata.fda.gov/cdrh_docs/pdf22/DEN220027.pdf",
-        "type": "pdf",
-    },
-]
-
-THERMOFISHER_PAGES = [
-    {
-        "id": "TF_clinical_solutions",
-        "title": "PreClara Ratio sFlt-1 PlGF for Preeclampsia Management - Clinical Solutions (Thermo Fisher)",
-        "url": "https://www.thermofisher.com/us/en/home/clinical/diagnostic-testing/brahms/prenatal-screening/preeclampsia-screening/clinical-solutions.html",
-    },
-    {
-        "id": "TF_understanding_pe",
-        "title": "Understanding Preeclampsia (Thermo Fisher Scientific)",
-        "url": "https://www.thermofisher.com/us/en/home/clinical/diagnostic-testing/brahms/prenatal-screening/preeclampsia-screening/understanding-preeclampsia.html",
-    },
-    {
-        "id": "TF_lab_solutions",
-        "title": "BRAHMS Lab Solutions Preeclampsia Management (Thermo Fisher)",
-        "url": "https://www.thermofisher.com/us/en/home/clinical/diagnostic-testing/brahms/prenatal-screening/preeclampsia-screening/lab-solutions.html",
-    },
-]
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fonctions NCBI
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
-# ===========================================================================
-# PMC Download
-# ===========================================================================
+def _api_params() -> dict:
+    p = {"retmode": "json"}
+    if NCBI_API_KEY:
+        p["api_key"] = NCBI_API_KEY
+    return p
 
-PMC_API = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-PMC_OA_API = "https://www.ncbi.nlm.nih.gov/pmc/oai/oai.cgi"
 
-
-def fetch_pmc_article(pmc_id: str) -> Optional[dict]:
-    """Fetch un article PMC via l'API efetch (XML full text)."""
-    numeric_id = pmc_id.replace("PMC", "")
-
-    # Essayer l'API efetch d'abord
-    url = f"{PMC_API}/efetch.fcgi?db=pmc&id={numeric_id}&rettype=xml"
+def search_pmc(query: str, max_results: int = 20) -> list[str]:
+    params = {**_api_params(), "db": "pmc", "term": query, "retmax": max_results, "sort": "relevance"}
     try:
-        resp = requests.get(url, timeout=30)
-        if resp.status_code != 200:
-            print(f"  [WARN] HTTP {resp.status_code} for {pmc_id}")
-            return None
-
-        root = ET.fromstring(resp.content)
-        article = root.find(".//article")
-        if article is None:
-            print(f"  [WARN] No <article> in XML for {pmc_id}")
-            return None
-
-        # Extraire le titre
-        title_el = article.find(".//article-title")
-        title = "".join(title_el.itertext()).strip() if title_el is not None else pmc_id
-
-        # Extraire l'abstract
-        abstract_parts = []
-        for abstract in article.findall(".//abstract"):
-            for p in abstract.findall(".//p"):
-                text = "".join(p.itertext()).strip()
-                if text:
-                    abstract_parts.append(text)
-        abstract = "\n\n".join(abstract_parts)
-
-        # Extraire le body
-        body_parts = []
-        for body in article.findall(".//body"):
-            for sec in body.findall(".//sec"):
-                sec_title = sec.find("title")
-                if sec_title is not None:
-                    body_parts.append(f"\n## {''.join(sec_title.itertext()).strip()}\n")
-                for p in sec.findall(".//p"):
-                    text = "".join(p.itertext()).strip()
-                    if text:
-                        body_parts.append(text)
-
-        body = "\n\n".join(body_parts)
-
-        # Extraire les auteurs
-        authors = []
-        for contrib in article.findall(".//contrib[@contrib-type='author']"):
-            surname = contrib.find("name/surname")
-            given = contrib.find("name/given-names")
-            if surname is not None:
-                name = "".join(surname.itertext())
-                if given is not None:
-                    name = "".join(given.itertext()) + " " + name
-                authors.append(name)
-
-        # Extraire le journal et l'année
-        journal_el = article.find(".//journal-title")
-        journal = "".join(journal_el.itertext()).strip() if journal_el is not None else ""
-        year_el = article.find(".//pub-date/year")
-        year = "".join(year_el.itertext()).strip() if year_el is not None else ""
-
-        return {
-            "pmc_id": pmc_id,
-            "title": title,
-            "authors": authors,
-            "journal": journal,
-            "year": year,
-            "abstract": abstract,
-            "body": body,
-        }
-
+        resp = requests.get(f"{EUTILS_BASE}/esearch.fcgi", params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        ids = data.get("esearchresult", {}).get("idlist", [])
+        count = data.get("esearchresult", {}).get("count", "0")
+        logger.info(f"    Search: {count} total, {len(ids)} returned")
+        return ids
     except Exception as e:
-        print(f"  [ERROR] {pmc_id}: {e}")
-        return None
+        logger.error(f"    Search failed: {e}")
+        return []
 
 
-def article_to_markdown(article: dict) -> str:
-    """Convertit un article en Markdown."""
-    parts = [f"# {article['title']}\n"]
-
-    if article.get("authors"):
-        parts.append(f"**Authors:** {', '.join(article['authors'][:10])}\n")
-    if article.get("journal"):
-        parts.append(f"**Journal:** {article['journal']}")
-    if article.get("year"):
-        parts.append(f"**Year:** {article['year']}")
-    parts.append(f"**PMC ID:** {article['pmc_id']}\n")
-
-    if article.get("abstract"):
-        parts.append("## Abstract\n")
-        parts.append(article["abstract"])
-
-    if article.get("body"):
-        parts.append("\n" + article["body"])
-
-    return "\n\n".join(parts)
-
-
-def sanitize_filename(title: str, pmc_id: str) -> str:
-    """Crée un nom de fichier propre."""
-    clean = re.sub(r'[^\w\s-]', '', title.lower())
-    clean = re.sub(r'\s+', '_', clean.strip())
-    clean = clean[:80]
-    return f"{pmc_id}_{clean}"
-
-
-# ===========================================================================
-# Thermo Fisher Download
-# ===========================================================================
-
-def fetch_thermofisher_page(url: str) -> Optional[str]:
-    """Extrait le contenu textuel d'une page web Thermo Fisher."""
+def fetch_metadata(pmc_ids: list[str]) -> list[dict]:
+    if not pmc_ids:
+        return []
+    params = {**_api_params(), "db": "pmc", "id": ",".join(pmc_ids)}
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        resp = requests.get(url, headers=headers, timeout=30)
-        if resp.status_code != 200:
-            return None
-
-        from html.parser import HTMLParser
-
-        class TextExtractor(HTMLParser):
-            def __init__(self):
-                super().__init__()
-                self.text_parts = []
-                self.skip_tags = {"script", "style", "nav", "footer", "header"}
-                self.current_skip = 0
-
-            def handle_starttag(self, tag, attrs):
-                if tag in self.skip_tags:
-                    self.current_skip += 1
-                if tag in ("h1", "h2", "h3"):
-                    self.text_parts.append(f"\n## ")
-                elif tag == "p":
-                    self.text_parts.append("\n\n")
-                elif tag == "li":
-                    self.text_parts.append("\n- ")
-
-            def handle_endtag(self, tag):
-                if tag in self.skip_tags:
-                    self.current_skip -= 1
-
-            def handle_data(self, data):
-                if self.current_skip <= 0:
-                    text = data.strip()
-                    if text:
-                        self.text_parts.append(text + " ")
-
-        parser = TextExtractor()
-        parser.feed(resp.text)
-        text = "".join(parser.text_parts)
-
-        # Nettoyer
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        text = re.sub(r' {2,}', ' ', text)
-        return text.strip()
-
+        resp = requests.get(f"{EUTILS_BASE}/esummary.fcgi", params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        results = []
+        for uid, info in data.get("result", {}).items():
+            if uid == "uids":
+                continue
+            results.append({
+                "pmc_id": f"PMC{uid}",
+                "title": info.get("title", ""),
+                "source": info.get("source", ""),
+                "pubdate": info.get("pubdate", ""),
+            })
+        return results
     except Exception as e:
-        print(f"  [ERROR] Page fetch: {e}")
-        return None
+        logger.error(f"    Metadata failed: {e}")
+        return []
 
 
-def fetch_pdf_text(url: str) -> Optional[str]:
-    """Télécharge un PDF et en extrait le texte (fallback: juste les métadonnées)."""
+def download_pdf(pmc_id: str, output_path: Path) -> bool:
+    """Telecharge le PDF via l'API OA (tar.gz FTP) puis fallback Europe PMC."""
+    import io
+    import tarfile
+
+    # Methode 1 : API OA → FTP tar.gz → extraire le PDF
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        resp = requests.get(url, headers=headers, timeout=60)
-        if resp.status_code != 200:
-            print(f"  [WARN] HTTP {resp.status_code} for PDF")
-            return None
+        oa_resp = requests.get(
+            f"https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id={pmc_id}",
+            timeout=15,
+        )
+        if oa_resp.status_code == 200:
+            ftp_match = re.search(r'href="(ftp://[^"]+\.tar\.gz)"', oa_resp.text)
+            if ftp_match:
+                https_url = ftp_match.group(1).replace(
+                    "ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/",
+                    "https://ftp.ncbi.nlm.nih.gov/pub/pmc/",
+                )
+                resp = requests.get(https_url, timeout=120, headers={
+                    "User-Agent": "OSMOSIS-Corpus-Builder/1.0 (mailto:fredpottier@gmail.com)"
+                })
+                if resp.status_code == 200 and len(resp.content) > 1000:
+                    with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:gz") as tar:
+                        for member in tar.getmembers():
+                            if member.name.lower().endswith(".pdf"):
+                                pdf_file = tar.extractfile(member)
+                                if pdf_file:
+                                    pdf_content = pdf_file.read()
+                                    if pdf_content[:5].startswith(b"%PDF") and len(pdf_content) > 10000:
+                                        output_path.write_bytes(pdf_content)
+                                        return True
+    except Exception:
+        pass
 
-        # Essayer PyPDF si disponible
-        try:
-            import pypdf
-            reader = pypdf.PdfReader(io.BytesIO(resp.content))
-            text_parts = []
-            for page in reader.pages:
-                text = page.extract_text()
-                if text:
-                    text_parts.append(text)
-            if text_parts:
-                return "\n\n".join(text_parts)
-        except ImportError:
-            pass
+    # Methode 2 : Europe PMC direct
+    try:
+        url = f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmc_id}&blobtype=pdf"
+        resp = requests.get(url, timeout=60, headers={
+            "User-Agent": "OSMOSIS-Corpus-Builder/1.0 (mailto:fredpottier@gmail.com)"
+        })
+        if resp.status_code == 200 and resp.content[:5].startswith(b"%PDF") and len(resp.content) > 10000:
+            output_path.write_bytes(resp.content)
+            return True
+    except Exception:
+        pass
 
-        # Fallback: sauvegarder le PDF et indiquer qu'il faudra le traiter
-        return f"[PDF document - {len(resp.content)} bytes - requires OCR/extraction pipeline]"
-
-    except Exception as e:
-        print(f"  [ERROR] PDF fetch: {e}")
-        return None
+    return False
 
 
-# ===========================================================================
-# Main
-# ===========================================================================
+def sanitize(title: str, max_len: int = 70) -> str:
+    clean = re.sub(r'[<>:"/\\|?*\'\u2019\u2018\u201c\u201d]', '', title)
+    clean = re.sub(r'\s+', '_', clean).strip('_')
+    clean = re.sub(r'[^\w\-.]', '', clean)
+    return clean[:max_len]
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--output-dir", default="data/corpus/preeclampsia")
-    parser.add_argument("--pending-dir", default="data/burst/pending")
-    args = parser.parse_args()
 
-    output_dir = Path(args.output_dir)
-    pending_dir = Path(args.pending_dir)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pipeline
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def build_corpus(
+    output_dir: Path,
+    max_total: int = 200,
+    dry_run: bool = False,
+    cluster_filter: int | None = None,
+):
     output_dir.mkdir(parents=True, exist_ok=True)
-    pending_dir.mkdir(parents=True, exist_ok=True)
 
-    total_files = 0
+    manifest = []
+    total_downloaded = 0
+    total_failed = 0
+    seen_ids: set[str] = set()
 
-    # === PMC Articles ===
-    print(f"\n{'='*60}")
-    print(f"Téléchargement de {len(PMC_IDS)} articles PMC")
-    print(f"{'='*60}")
+    clusters_to_process = CLUSTERS
+    if cluster_filter is not None:
+        clusters_to_process = [c for c in CLUSTERS if c["id"] == cluster_filter]
 
-    for i, pmc_id in enumerate(PMC_IDS, 1):
-        print(f"\n[{i}/{len(PMC_IDS)}] {pmc_id}...")
-        article = fetch_pmc_article(pmc_id)
-        if not article:
-            print(f"  [SKIP] Pas de contenu")
+    for cluster in clusters_to_process:
+        if total_downloaded >= max_total:
+            break
+
+        cid = cluster["id"]
+        prefix = cluster["prefix"]
+        target = cluster["target"]
+        name = cluster["name"]
+
+        logger.info(f"\n{'='*70}")
+        logger.info(f"CLUSTER {cid}: {name} (target: {target} docs)")
+        logger.info(f"  {cluster['description']}")
+
+        cluster_downloaded = 0
+        cluster_ids: list[str] = []
+
+        # Collecter les IDs de toutes les sous-requetes du cluster
+        for qi, query in enumerate(cluster["queries"]):
+            if cluster_downloaded >= target:
+                break
+
+            remaining = target - cluster_downloaded
+            logger.info(f"  Query {qi+1}/{len(cluster['queries'])}: {query[:70]}...")
+
+            time.sleep(RATE_DELAY)
+            pmc_ids = search_pmc(query, max_results=min(remaining + 5, 30))
+
+            # Deduplication globale
+            new_ids = [pid for pid in pmc_ids if pid not in seen_ids]
+            seen_ids.update(pmc_ids)
+            cluster_ids.extend(new_ids)
+
+        # Deduplicate cluster_ids
+        cluster_ids = list(dict.fromkeys(cluster_ids))[:target]
+        logger.info(f"  → {len(cluster_ids)} unique IDs for cluster {cid}")
+
+        if not cluster_ids:
             continue
 
-        md = article_to_markdown(article)
+        # Fetch metadata en batch
+        time.sleep(RATE_DELAY)
+        all_meta = fetch_metadata(cluster_ids)
 
-        # Vérifier que le contenu a de la substance
-        if len(md) < 500:
-            print(f"  [SKIP] Contenu trop court ({len(md)} chars)")
-            continue
+        # Download
+        for meta in all_meta:
+            if total_downloaded >= max_total or cluster_downloaded >= target:
+                break
 
-        filename = sanitize_filename(article["title"], pmc_id)
+            pmc_id = meta["pmc_id"]
+            title = meta.get("title", "untitled")
+            year = meta.get("pubdate", "")[:4] or "XXXX"
 
-        # Sauvegarder dans corpus
-        corpus_path = output_dir / f"{filename}.md"
-        corpus_path.write_text(md, encoding="utf-8")
+            idx = total_downloaded + 1
+            filename = f"{prefix}_{idx:03d}_{year}_{sanitize(title)}.pdf"
+            filepath = output_dir / filename
 
-        # Copier dans pending pour import
-        pending_path = pending_dir / f"{filename}.md"
-        pending_path.write_text(md, encoding="utf-8")
+            if dry_run:
+                logger.info(f"  DRY: {pmc_id} | {year} | {title[:55]}")
+                manifest.append({
+                    **meta, "cluster": cid, "cluster_name": name,
+                    "filename": filename, "status": "dry_run",
+                })
+                total_downloaded += 1
+                cluster_downloaded += 1
+                continue
 
-        print(f"  OK: {article['title'][:60]}... ({len(md)} chars)")
-        total_files += 1
+            if filepath.exists():
+                total_downloaded += 1
+                cluster_downloaded += 1
+                continue
 
-        # Rate limit PMC API
-        time.sleep(0.5)
+            time.sleep(RATE_DELAY)
+            if download_pdf(pmc_id, filepath):
+                size_kb = filepath.stat().st_size // 1024
+                logger.info(f"  OK [{cluster_downloaded+1}/{target}]: {filename[:50]} ({size_kb}KB)")
+                manifest.append({
+                    **meta, "cluster": cid, "cluster_name": name,
+                    "filename": filename, "status": "ok", "size_kb": size_kb,
+                })
+                total_downloaded += 1
+                cluster_downloaded += 1
+            else:
+                logger.warning(f"  FAIL: {pmc_id}")
+                manifest.append({
+                    **meta, "cluster": cid, "cluster_name": name,
+                    "filename": filename, "status": "failed",
+                })
+                total_failed += 1
 
-    # === Thermo Fisher Pages ===
-    print(f"\n{'='*60}")
-    print(f"Extraction de {len(THERMOFISHER_PAGES)} pages Thermo Fisher")
-    print(f"{'='*60}")
+        logger.info(f"  Cluster {cid} done: {cluster_downloaded}/{target}")
 
-    for i, doc in enumerate(THERMOFISHER_PAGES, 1):
-        print(f"\n[{i}/{len(THERMOFISHER_PAGES)}] {doc['title'][:60]}...")
-        content = fetch_thermofisher_page(doc["url"])
-        if not content or len(content) < 200:
-            print(f"  [SKIP] Pas de contenu exploitable")
-            continue
+    # Manifest
+    manifest_path = output_dir / "manifest.json"
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "total_downloaded": total_downloaded,
+            "total_failed": total_failed,
+            "clusters": [{
+                "id": c["id"], "name": c["name"], "prefix": c["prefix"],
+                "target": c["target"], "description": c["description"],
+            } for c in clusters_to_process],
+            "articles": manifest,
+        }, f, indent=2, ensure_ascii=False)
 
-        md = f"# {doc['title']}\n\n**Source:** Thermo Fisher Scientific\n**URL:** {doc['url']}\n\n{content}"
-        filename = doc["id"]
-
-        corpus_path = output_dir / f"{filename}.md"
-        corpus_path.write_text(md, encoding="utf-8")
-        pending_path = pending_dir / f"{filename}.md"
-        pending_path.write_text(md, encoding="utf-8")
-
-        print(f"  OK: {len(md)} chars")
-        total_files += 1
-
-    # === Thermo Fisher PDFs ===
-    print(f"\n{'='*60}")
-    print(f"Téléchargement de {len(THERMOFISHER_DOCS)} PDFs Thermo Fisher")
-    print(f"{'='*60}")
-
-    for i, doc in enumerate(THERMOFISHER_DOCS, 1):
-        print(f"\n[{i}/{len(THERMOFISHER_DOCS)}] {doc['title'][:60]}...")
-        content = fetch_pdf_text(doc["url"])
-        if not content or len(content) < 200:
-            print(f"  [SKIP] Pas de contenu exploitable")
-            continue
-
-        if content.startswith("[PDF document"):
-            print(f"  [INFO] PDF brut sauvegardé (pas de PyPDF)")
-            # Sauvegarder quand même avec les métadonnées
-            md = f"# {doc['title']}\n\n**Source:** Thermo Fisher Scientific / BRAHMS\n**URL:** {doc['url']}\n**Type:** PDF Technical Document\n\n{content}"
-        else:
-            md = f"# {doc['title']}\n\n**Source:** Thermo Fisher Scientific / BRAHMS\n**URL:** {doc['url']}\n**Type:** PDF Technical Document\n\n{content}"
-
-        filename = doc["id"]
-        corpus_path = output_dir / f"{filename}.md"
-        corpus_path.write_text(md, encoding="utf-8")
-        pending_path = pending_dir / f"{filename}.md"
-        pending_path.write_text(md, encoding="utf-8")
-
-        print(f"  OK: {len(md)} chars")
-        total_files += 1
-
-    # === Résumé ===
-    print(f"\n{'='*60}")
-    print(f"CORPUS PRÉ-ÉCLAMPSIE TERMINÉ")
-    print(f"{'='*60}")
-    print(f"Fichiers créés: {total_files}")
-    print(f"Corpus: {output_dir}")
-    print(f"Pending: {pending_dir}")
+    # Summary par cluster
+    logger.info(f"\n{'='*70}")
+    logger.info(f"SUMMARY")
+    from collections import Counter
+    by_cluster = Counter(a["cluster"] for a in manifest if a.get("status") in ("ok", "dry_run"))
+    for c in clusters_to_process:
+        count = by_cluster.get(c["id"], 0)
+        logger.info(f"  Cluster {c['id']:2d} [{c['prefix']}] {c['name'][:40]:40s} {count}/{c['target']}")
+    logger.info(f"  TOTAL: {total_downloaded} downloaded, {total_failed} failed")
+    logger.info(f"  Manifest: {manifest_path}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Download preeclampsia corpus from PMC")
+    parser.add_argument("--output", default="data/burst/PreEclampsia")
+    parser.add_argument("--max", type=int, default=200)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--cluster", type=int, default=None, help="Download only one cluster (1-10)")
+    args = parser.parse_args()
+
+    build_corpus(Path(args.output), max_total=args.max, dry_run=args.dry_run, cluster_filter=args.cluster)
