@@ -394,35 +394,48 @@ export default function AdminSettingsPage() {
   const [purgeSchema, setPurgeSchema] = useState(false)
   const [recreateSchema, setRecreateSchema] = useState(false)
 
-  // LLM Mode Query
-  const { data: llmModeStatus, refetch: refetchLlmMode } = useQuery<LlmModeStatus>({
-    queryKey: ['admin', 'llm-mode-status'],
+  // LLM Config V2 Query
+  const { data: llmConfig } = useQuery<any>({
+    queryKey: ['admin', 'llm-config'],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE_URL}/api/admin/settings/llm-mode/status`, { headers: getAuthHeaders() })
-      if (!res.ok) return { mode: 'normal' as const, synthesis_model: '', judge_model: '' }
+      const res = await fetch(`${API_BASE_URL}/api/admin/settings/llm-config`, { headers: getAuthHeaders() })
+      if (!res.ok) return null
+      return res.json()
+    },
+    refetchInterval: 15000,
+  })
+
+  const { data: llmConfigStatus } = useQuery<any>({
+    queryKey: ['admin', 'llm-config-status'],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/api/admin/settings/llm-config/status`, { headers: getAuthHeaders() })
+      if (!res.ok) return null
       return res.json()
     },
     refetchInterval: 10000,
   })
 
-  const setLlmModeMutation = useMutation({
-    mutationFn: async (mode: string) => {
-      const res = await fetch(`${API_BASE_URL}/api/admin/settings/llm-mode`, {
-        method: 'PUT',
+  const applyPresetMutation = useMutation({
+    mutationFn: async (preset: string) => {
+      const res = await fetch(`${API_BASE_URL}/api/admin/settings/llm-config/preset`, {
+        method: 'POST',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode }),
+        body: JSON.stringify({ preset }),
       })
       if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
       return res.json()
     },
     onSuccess: (data) => {
-      toast({ title: 'Mode LLM change', description: `Mode: ${data.mode}`, status: 'success', duration: 3000 })
-      queryClient.invalidateQueries({ queryKey: ['admin', 'llm-mode-status'] })
+      toast({ title: 'Preset applique', description: `${data.preset} (${data.usages_configured} usages)`, status: 'success', duration: 3000 })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'llm-config'] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'llm-config-status'] })
     },
     onError: (err: any) => {
       toast({ title: 'Erreur', description: err.message, status: 'error', duration: 5000 })
     },
   })
+
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   // EC2 Burst Status Query
   const { data: burstStatus, refetch: refetchBurst } = useQuery<BurstStatus>({
@@ -611,20 +624,20 @@ export default function AdminSettingsPage() {
       </MotionBox>
 
       <VStack spacing={6} align="stretch">
-        {/* LLM Mode Section */}
+        {/* LLM Configuration V2 */}
         <SectionCard
-          title="Mode LLM"
-          subtitle="Routage des appels LLM (cloud / local)"
+          title="Configuration LLM"
+          subtitle="Routage par usage — presets et configuration avancee"
           icon={FiCpu}
           delay={0.05}
         >
           <VStack spacing={4} align="stretch">
-            {/* Mode Selector */}
+            {/* Preset Selector */}
             <SimpleGrid columns={3} spacing={3}>
               {[
-                { value: 'normal', label: 'Normal', desc: 'APIs cloud (Haiku, gpt-4o-mini, EC2)', color: 'gray' },
-                { value: 'partial_local', label: 'Partial Local', desc: 'Ollama local, burst = EC2 only', color: 'orange' },
-                { value: 'full_local', label: 'Full Local', desc: 'Tout local (GPU exclusif au burst)', color: 'red' },
+                { value: 'eco', label: 'Eco', desc: 'Tout local (Ollama), $0/mois', color: 'orange' },
+                { value: 'balanced', label: 'Balanced', desc: 'DeepInfra cloud + local juge/embeddings', color: 'green' },
+                { value: 'max_quality', label: 'Max Quality', desc: 'DeepInfra 235B partout', color: 'purple' },
               ].map((opt) => (
                 <Box
                   key={opt.value}
@@ -632,14 +645,14 @@ export default function AdminSettingsPage() {
                   rounded="lg"
                   cursor="pointer"
                   border="2px solid"
-                  borderColor={llmModeStatus?.mode === opt.value ? `${opt.color}.500` : 'border.default'}
-                  bg={llmModeStatus?.mode === opt.value ? `${opt.color}.500` + '15' : 'transparent'}
+                  borderColor={llmConfigStatus?.preset === opt.value ? `${opt.color}.500` : 'border.default'}
+                  bg={llmConfigStatus?.preset === opt.value ? `${opt.color}.500` + '15' : 'transparent'}
                   _hover={{ borderColor: `${opt.color}.400`, bg: `${opt.color}.500` + '10' }}
-                  onClick={() => setLlmModeMutation.mutate(opt.value)}
-                  opacity={setLlmModeMutation.isPending ? 0.6 : 1}
+                  onClick={() => applyPresetMutation.mutate(opt.value)}
+                  opacity={applyPresetMutation.isPending ? 0.6 : 1}
                   transition="all 0.2s"
                 >
-                  <Text fontWeight="bold" fontSize="sm" color={llmModeStatus?.mode === opt.value ? `${opt.color}.300` : 'text.primary'}>
+                  <Text fontWeight="bold" fontSize="sm" color={llmConfigStatus?.preset === opt.value ? `${opt.color}.300` : 'text.primary'}>
                     {opt.label}
                   </Text>
                   <Text fontSize="xs" color="text.secondary" mt={1}>
@@ -649,64 +662,71 @@ export default function AdminSettingsPage() {
               ))}
             </SimpleGrid>
 
-            {/* Status indicators */}
-            {llmModeStatus && llmModeStatus.mode !== 'normal' && (
+            {/* Status */}
+            {llmConfigStatus && (
               <HStack spacing={4} px={2}>
                 <HStack spacing={2}>
                   <Icon
-                    as={llmModeStatus.ollama_available ? FiCheckCircle : FiXCircle}
-                    color={llmModeStatus.ollama_available ? 'green.400' : 'red.400'}
+                    as={llmConfigStatus.ollama_available ? FiCheckCircle : FiXCircle}
+                    color={llmConfigStatus.ollama_available ? 'green.400' : 'red.400'}
                     boxSize={4}
                   />
                   <Text fontSize="sm" color="text.secondary">
-                    Ollama {llmModeStatus.ollama_available ? 'OK' : 'indisponible'}
+                    Ollama {llmConfigStatus.ollama_available ? 'OK' : 'indisponible'}
                   </Text>
                 </HStack>
-                {llmModeStatus.synthesis_model && (
-                  <Text fontSize="sm" color="text.muted">
-                    Synthese: {llmModeStatus.synthesis_model}
-                  </Text>
+                {llmConfigStatus.burst_active && (
+                  <Badge colorScheme="red" fontSize="xs">BURST ACTIF</Badge>
                 )}
-                {llmModeStatus.judge_model && (
-                  <Text fontSize="sm" color="text.muted">
-                    Juge: {llmModeStatus.judge_model}
-                  </Text>
+                {llmConfigStatus.v2_enabled && (
+                  <Badge colorScheme="green" fontSize="xs">V2 ACTIVE</Badge>
                 )}
-              </HStack>
-            )}
-
-            {/* Burst warning for Full Local */}
-            {llmModeStatus?.burst_active && llmModeStatus?.burst_provider === 'local' && (
-              <HStack bg="red.500" bg-opacity="0.1" p={3} rounded="md" spacing={2}>
-                <Icon as={FiAlertTriangle} color="red.400" />
-                <Text fontSize="sm" color="red.300">
-                  GPU occupe par le burst — search et benchmark indisponibles
+                {!llmConfigStatus.v2_enabled && (
+                  <Badge colorScheme="gray" fontSize="xs">V1 (legacy)</Badge>
+                )}
+                <Text fontSize="xs" color="text.muted">
+                  Preset: {llmConfigStatus.preset || 'custom'}
                 </Text>
               </HStack>
             )}
 
-            {/* Guide de recommandation par operation */}
-            <Box bg="whiteAlpha.50" border="1px solid" borderColor="whiteAlpha.100" rounded="lg" p={4}>
-              <Text fontSize="sm" fontWeight="bold" color="text.primary" mb={2}>
-                Quel mode pour quelle operation ?
-              </Text>
-              <VStack spacing={1} align="stretch">
-                {[
-                  { op: 'Chat / Search', mode: 'Normal ou Partial Local', detail: 'Synthese via Haiku (cloud) ou Qwen local (Ollama)' },
-                  { op: 'Benchmark (RAGAS, T2/T5)', mode: 'Partial Local', detail: 'Juge M-Prometheus local, synthese Ollama. Pas de burst pendant le bench.' },
-                  { op: 'Atlas (generation contenu)', mode: 'Normal ou Partial Local', detail: 'Sequentiel via Ollama ou Haiku. Pas besoin du GPU burst.' },
-                  { op: 'Import Burst (extraction caches)', mode: 'Burst Local (Full Local)', detail: 'vLLM local sur GPU. Bloque search/benchmark pendant le burst.' },
-                  { op: 'ClaimFirst (extraction claims)', mode: 'Burst Local (Full Local)', detail: 'vLLM local parallele (10 req.). Repasser en Partial apres.' },
-                  { op: 'Post-import (facettes, perspectives)', mode: 'Partial Local', detail: 'Sequentiel via Ollama. Arreter vLLM pour liberer le GPU.' },
-                ].map((item, i) => (
-                  <HStack key={i} spacing={3} py={1} borderBottom={i < 5 ? '1px solid' : 'none'} borderColor="whiteAlpha.50">
-                    <Text fontSize="xs" color="text.muted" minW="180px">{item.op}</Text>
-                    <Text fontSize="xs" fontWeight="bold" color="orange.300" minW="140px">{item.mode}</Text>
-                    <Text fontSize="xs" color="text.secondary">{item.detail}</Text>
-                  </HStack>
+            {/* Advanced toggle */}
+            <Button size="xs" variant="ghost" onClick={() => setShowAdvanced(!showAdvanced)} color="text.muted">
+              {showAdvanced ? 'Masquer' : 'Afficher'} la configuration par usage
+            </Button>
+
+            {/* Per-usage config (advanced) */}
+            {showAdvanced && llmConfig?.families && (
+              <VStack spacing={3} align="stretch">
+                {Object.entries(llmConfig.families as Record<string, any[]>).map(([family, configs]) => (
+                  <Box key={family} bg="whiteAlpha.50" border="1px solid" borderColor="whiteAlpha.100" rounded="lg" p={3}>
+                    <Text fontSize="xs" fontWeight="bold" color="text.primary" mb={2} textTransform="uppercase">
+                      {family === 'search' ? 'Search (temps reel)' :
+                       family === 'batch' ? 'Batch (ingestion/post-import)' :
+                       family === 'dedicated' ? 'Dedies (pinned)' : 'Taches legeres'}
+                    </Text>
+                    {configs.map((c: any) => (
+                      <HStack key={c.usage_id} spacing={3} py={1} borderBottom="1px solid" borderColor="whiteAlpha.50">
+                        <Text fontSize="xs" color="text.muted" minW="160px">{c.usage_id}</Text>
+                        <Badge
+                          colorScheme={c.runtime === 'deepinfra' ? 'blue' : c.runtime === 'ollama_local' ? 'orange' : c.runtime === 'openai' ? 'green' : 'gray'}
+                          fontSize="9px"
+                          minW="80px"
+                          textAlign="center"
+                        >
+                          {c.runtime}
+                        </Badge>
+                        <Text fontSize="xs" color="text.secondary" flex={1} isTruncated>{c.model}</Text>
+                        {c.pinned && <Badge colorScheme="red" fontSize="9px">PINNED</Badge>}
+                        {c.burst_eligible && <Badge colorScheme="purple" fontSize="9px">BURST</Badge>}
+                        {c.compatibility === 'degraded' && <Badge colorScheme="orange" fontSize="9px">DEGRADE</Badge>}
+                        {c.compatibility === 'incompatible' && <Badge colorScheme="red" fontSize="9px">INCOMPAT</Badge>}
+                      </HStack>
+                    ))}
+                  </Box>
                 ))}
               </VStack>
-            </Box>
+            )}
           </VStack>
         </SectionCard>
 

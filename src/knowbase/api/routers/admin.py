@@ -2620,4 +2620,160 @@ async def get_llm_mode_status(
     )
 
 
+# ============================================================================
+# V2 — Configuration LLM par usage (Architecture 4 couches)
+# ============================================================================
+
+
+@router.get("/settings/llm-config")
+async def get_llm_config(
+    admin: dict = Depends(require_admin),
+):
+    """Retourne la configuration LLM par usage (toutes les configs)."""
+    from knowbase.common.llm_config import get_usage_config_store, check_compatibility
+
+    store = get_usage_config_store()
+    configs = store.get_all_configs()
+    preset = store._detect_active_preset(configs)
+    emb = store.get_embedding_state()
+
+    # Grouper par famille
+    families = {
+        "search": ["search_simple", "search_crossdoc", "search_tension"],
+        "batch": ["claim_extraction", "entity_resolution", "relation_extraction",
+                   "crossdoc_reasoning", "perspective_generation", "canonicalization"],
+        "dedicated": ["judge_primary", "vision_analysis", "embeddings"],
+        "lightweight": ["classification", "enrichment"],
+    }
+
+    result = {
+        "preset": preset,
+        "embedding_state": emb.to_dict(),
+        "families": {},
+        "configs": {},
+    }
+
+    for family, usage_ids in families.items():
+        family_configs = []
+        for uid_str in usage_ids:
+            from knowbase.common.llm_config import UsageId
+            try:
+                uid = UsageId(uid_str)
+            except ValueError:
+                continue
+            contract = configs.get(uid)
+            if contract:
+                compat = check_compatibility(contract.runtime, contract)
+                family_configs.append({
+                    **contract.to_dict(),
+                    "compatibility": compat.value,
+                })
+        result["families"][family] = family_configs
+
+    for uid, contract in configs.items():
+        compat = check_compatibility(contract.runtime, contract)
+        result["configs"][uid.value] = {
+            **contract.to_dict(),
+            "compatibility": compat.value,
+        }
+
+    return result
+
+
+@router.put("/settings/llm-config/{usage_id}")
+async def update_llm_config(
+    usage_id: str,
+    request: dict,
+    admin: dict = Depends(require_admin),
+):
+    """Met a jour la config d'un usage. Valide le contrat avant persistence."""
+    from knowbase.common.llm_config import UsageId, get_usage_config_store
+
+    try:
+        uid = UsageId(usage_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Usage inconnu: {usage_id}")
+
+    store = get_usage_config_store()
+    try:
+        updated = store.set_config(uid, request, updated_by=admin.get("email", "admin"))
+        return {"success": True, "config": updated.to_dict()}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/settings/llm-config/preset")
+async def apply_llm_preset(
+    request: dict,
+    admin: dict = Depends(require_admin),
+):
+    """Applique un preset (eco/balanced/max_quality)."""
+    from knowbase.common.llm_config import get_usage_config_store
+
+    preset = request.get("preset", "")
+    store = get_usage_config_store()
+    try:
+        configs = store.apply_preset(preset, updated_by=admin.get("email", "admin"))
+        return {
+            "success": True,
+            "preset": preset,
+            "usages_configured": len(configs),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/settings/llm-config/snapshot")
+async def get_llm_config_snapshot(
+    admin: dict = Depends(require_admin),
+):
+    """Snapshot fige de la config — pour benchmark reports."""
+    from knowbase.common.llm_config import get_usage_config_store
+    store = get_usage_config_store()
+    return store.snapshot()
+
+
+@router.get("/settings/llm-config/status")
+async def get_llm_config_status():
+    """Etat temps reel (public, pour l'indicateur top menu)."""
+    import os
+    from knowbase.common.llm_config import get_usage_config_store
+
+    store = get_usage_config_store()
+    configs = store.get_all_configs()
+    preset = store._detect_active_preset(configs)
+
+    # Verifier Ollama
+    ollama_available = False
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    try:
+        import httpx
+        with httpx.Client(timeout=3.0) as client:
+            resp = client.get(f"{ollama_url}/api/tags")
+            ollama_available = resp.status_code == 200
+    except Exception:
+        pass
+
+    # Verifier burst actif
+    burst_active = False
+    try:
+        from knowbase.ingestion.burst.provider_switch import get_burst_state_from_redis
+        state = get_burst_state_from_redis()
+        burst_active = bool(state and state.get("active"))
+    except Exception:
+        pass
+
+    # Compter les runtimes
+    from collections import Counter
+    runtimes = Counter(c.runtime.value for c in configs.values())
+
+    return {
+        "preset": preset,
+        "ollama_available": ollama_available,
+        "burst_active": burst_active,
+        "runtimes": dict(runtimes),
+        "v2_enabled": os.getenv("OSMOSIS_USE_V2_CONFIG", "0") == "1",
+    }
+
+
 __all__ = ["router"]

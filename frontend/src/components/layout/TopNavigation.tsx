@@ -198,48 +198,46 @@ const NavDropdown = ({ label, icon, items, isActive }: NavDropdownProps) => {
 function LlmModeIndicator() {
   const router = useRouter()
   const { data: status } = useQuery({
-    queryKey: ['llm-mode-indicator'],
+    queryKey: ['llm-config-indicator'],
     queryFn: async () => {
       const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
-      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
-      const headers: Record<string, string> = {}
-      if (token) headers['Authorization'] = `Bearer ${token}`
       try {
-        const res = await fetch(`${apiBase}/api/admin/settings/llm-mode/current`, { headers })
+        const res = await fetch(`${apiBase}/api/admin/settings/llm-config/status`)
         if (!res.ok) return null
-        return res.json() as Promise<{ mode: string }>
+        return res.json() as Promise<{ preset: string; burst_active: boolean; v2_enabled: boolean }>
       } catch { return null }
     },
     refetchInterval: 15000,
     staleTime: 10000,
   })
 
-  if (!status || status.mode === 'normal') return null
+  if (!status) return null
 
-  const isPartial = status.mode === 'partial_local'
-  const color = isPartial ? 'orange' : 'red'
-  const label = isPartial ? 'LOCAL' : 'BURST LOCAL'
+  // Couleur selon preset
+  const presetColors: Record<string, { color: string; label: string }> = {
+    'eco': { color: 'orange', label: 'ECO' },
+    'balanced': { color: 'green', label: 'BALANCED' },
+    'max_quality': { color: 'purple', label: 'MAX' },
+    'custom': { color: 'blue', label: 'CUSTOM' },
+  }
+
+  const preset = presetColors[status.preset || 'balanced'] || presetColors['balanced']
+
+  // Burst override
+  if (status.burst_active) {
+    return (
+      <Badge colorScheme="red" variant="subtle" fontSize="xs" px={2} py={0.5} rounded="md"
+        cursor="pointer" onClick={() => router.push('/admin/settings')} _hover={{ opacity: 0.8 }}>
+        <HStack spacing={1}><Icon as={FiCpu} boxSize={3} /><Text>BURST</Text></HStack>
+      </Badge>
+    )
+  }
 
   return (
-    <Badge
-      colorScheme={color}
-      variant="subtle"
-      fontSize="xs"
-      px={2}
-      py={0.5}
-      rounded="md"
-      cursor="pointer"
-      onClick={() => router.push('/admin/settings')}
-      _hover={{ opacity: 0.8 }}
-      title={isPartial
-        ? 'Mode Local — LLM via Ollama, burst EC2 only'
-        : 'Mode Burst Local — tout local, GPU exclusif au burst'
-      }
-    >
-      <HStack spacing={1}>
-        <Icon as={FiCpu} boxSize={3} />
-        <Text>{label}</Text>
-      </HStack>
+    <Badge colorScheme={preset.color} variant="subtle" fontSize="xs" px={2} py={0.5} rounded="md"
+      cursor="pointer" onClick={() => router.push('/admin/settings')} _hover={{ opacity: 0.8 }}
+      title={`Preset ${status.preset} — Cliquer pour configurer`}>
+      <HStack spacing={1}><Icon as={FiCpu} boxSize={3} /><Text>{preset.label}</Text></HStack>
     </Badge>
   )
 }
