@@ -1453,24 +1453,28 @@ class LLMRouter:
         return response.choices[0].message.content or ""
 
     def _get_deepinfra_client(self):
-        """Client OpenAI pointe vers DeepInfra."""
+        """Client OpenAI pointe vers DeepInfra avec retry 429."""
         if self._deepinfra_client is None:
             from openai import OpenAI
             api_key = os.getenv("DEEPINFRA_API_KEY", "")
             self._deepinfra_client = OpenAI(
                 api_key=api_key,
                 base_url="https://api.deepinfra.com/v1/openai",
+                max_retries=5,      # Retry sur 429 (auto-scaling DeepInfra)
+                timeout=120.0,
             )
         return self._deepinfra_client
 
     def _get_deepinfra_async_client(self):
-        """Client async OpenAI pointe vers DeepInfra."""
+        """Client async OpenAI pointe vers DeepInfra avec retry 429."""
         if self._deepinfra_async_client is None:
             from openai import AsyncOpenAI
             api_key = os.getenv("DEEPINFRA_API_KEY", "")
             self._deepinfra_async_client = AsyncOpenAI(
                 api_key=api_key,
                 base_url="https://api.deepinfra.com/v1/openai",
+                max_retries=5,
+                timeout=120.0,
             )
         return self._deepinfra_async_client
 

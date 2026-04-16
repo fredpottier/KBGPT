@@ -16,11 +16,11 @@ task_models:
   # DeepInfra Qwen3-235B : MoE 235B, $0.071/$0.10 per M tokens — meilleur rapport qualite/prix
   long_summary: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
-  # Enrichissement de contenu court
-  enrichment: "qwen3.5:9b-q8_0"
+  # Enrichissement de contenu court (table summaries, slot enrichment)
+  enrichment: "Qwen/Qwen3-14B"
 
   # Classification binaire rapide (oui/non, etc.)
-  classification: "qwen3.5:9b-q8_0"
+  classification: "Qwen/Qwen3-14B"
 
   # Canonicalisation de noms (domain-agnostic)
   canonicalization: "Qwen/Qwen2.5-72B-Instruct"
@@ -29,7 +29,7 @@ task_models:
   rfp_question_analysis: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
   # Traduction de langue (tâche simple et peu coûteuse)
-  translation: "qwen3.5:9b-q8_0"
+  translation: "Qwen/Qwen3-14B"
 
   # Extraction de connaissance structurée (concepts, facts, entities, relations) depuis blocs sémantiques
   # DeepInfra Qwen2.5-72B : meilleure qualite extraction que le 14B local, $0.12/$0.39 per M

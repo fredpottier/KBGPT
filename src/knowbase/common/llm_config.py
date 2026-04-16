@@ -315,20 +315,20 @@ def _build_defaults_balanced() -> Dict[str, UsageContract]:
             model="intfloat/multilingual-e5-large",
             pinned=True,
         ),
-        # Taches legeres
+        # Taches legeres — DeepInfra aussi (Qwen3-14B, rapide et pas cher)
         UsageId.CLASSIFICATION: UsageContract(
-            usage_id=UsageId.CLASSIFICATION, runtime=RuntimeTarget.OLLAMA_LOCAL,
-            model="qwen3.5:9b-q8_0",
+            usage_id=UsageId.CLASSIFICATION, runtime=RuntimeTarget.DEEPINFRA,
+            model="Qwen/Qwen3-14B",
             temperature=0.0, max_tokens=100,
-            degradation_policy=DegradationPolicy.FALLBACK_CLOUD,
-            fallback_targets=[RuntimeTarget.DEEPINFRA],
+            degradation_policy=DegradationPolicy.FALLBACK_LOCAL,
+            fallback_targets=[RuntimeTarget.OLLAMA_LOCAL],
         ),
         UsageId.ENRICHMENT: UsageContract(
-            usage_id=UsageId.ENRICHMENT, runtime=RuntimeTarget.OLLAMA_LOCAL,
-            model="qwen3.5:9b-q8_0",
+            usage_id=UsageId.ENRICHMENT, runtime=RuntimeTarget.DEEPINFRA,
+            model="Qwen/Qwen3-14B",
             temperature=0.2, max_tokens=500,
-            degradation_policy=DegradationPolicy.FALLBACK_CLOUD,
-            fallback_targets=[RuntimeTarget.DEEPINFRA],
+            degradation_policy=DegradationPolicy.FALLBACK_LOCAL,
+            fallback_targets=[RuntimeTarget.OLLAMA_LOCAL],
         ),
     }
 
