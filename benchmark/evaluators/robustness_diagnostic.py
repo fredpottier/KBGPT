@@ -423,18 +423,30 @@ def _get_llm_judge_client():
     if _llm_judge_client is not None:
         return _llm_judge_client
 
-    openai_key = os.getenv("OPENAI_API_KEY", "")
-    if not openai_key:
-        logger.warning("[JUDGE] OPENAI_API_KEY not set — LLM judge unavailable, will fall back to keyword evaluators")
-        return None
+    judge_provider = os.getenv("ROBUSTNESS_JUDGE_PROVIDER", os.getenv("T2T5_JUDGE_PROVIDER", "openai"))
 
     try:
         from openai import OpenAI
-        _llm_judge_client = OpenAI(api_key=openai_key)
-        logger.info(f"[JUDGE] LLM judge initialized (model={os.getenv('OSMOSIS_JUDGE_MODEL', 'gpt-4o-mini')})")
+
+        if judge_provider == "ollama":
+            ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+            _llm_judge_client = OpenAI(
+                base_url=f"{ollama_url}/v1",
+                api_key="ollama",
+            )
+            model = os.getenv("ROBUSTNESS_JUDGE_MODEL", os.getenv("T2T5_JUDGE_MODEL_NAME", "m-prometheus-14b"))
+            logger.info(f"[JUDGE] Ollama judge initialized: {model} at {ollama_url}")
+        else:
+            openai_key = os.getenv("OPENAI_API_KEY", "")
+            if not openai_key:
+                logger.warning("[JUDGE] OPENAI_API_KEY not set — LLM judge unavailable")
+                return None
+            _llm_judge_client = OpenAI(api_key=openai_key)
+            logger.info(f"[JUDGE] OpenAI judge initialized (model={os.getenv('OSMOSIS_JUDGE_MODEL', 'gpt-4o-mini')})")
+
         return _llm_judge_client
     except Exception as e:
-        logger.warning(f"[JUDGE] Failed to create OpenAI client: {e}")
+        logger.warning(f"[JUDGE] Failed to create judge client: {e}")
         return None
 
 
@@ -496,10 +508,11 @@ SCORE: <number 0-100>
 REASON: <one short sentence explaining the score, max 25 words>"""
 
     try:
-        # IMPORTANT : ne PAS fallback sur OSMOSIS_SYNTHESIS_MODEL (qui peut etre
-        # un modele Anthropic/Claude non compatible avec le client OpenAI).
-        # Defaut hardcode a gpt-4o-mini qui fonctionne avec le client OpenAI.
-        judge_model = os.getenv("OSMOSIS_JUDGE_MODEL", "gpt-4o-mini")
+        judge_provider = os.getenv("ROBUSTNESS_JUDGE_PROVIDER", os.getenv("T2T5_JUDGE_PROVIDER", "openai"))
+        if judge_provider == "ollama":
+            judge_model = os.getenv("ROBUSTNESS_JUDGE_MODEL", os.getenv("T2T5_JUDGE_MODEL_NAME", "m-prometheus-14b"))
+        else:
+            judge_model = os.getenv("OSMOSIS_JUDGE_MODEL", "gpt-4o-mini")
         resp = client.chat.completions.create(
             model=judge_model,
             messages=[{"role": "user", "content": prompt}],
@@ -589,9 +602,10 @@ def _call_osmosis_api(question: str, api_base: str, token: str = "") -> dict:
             "use_graph_first": True,
             "use_kg_traversal": True,
             "use_latest": True,
+            "skip_tension_summary": True,
         },
         headers=headers,
-        timeout=120,
+        timeout=300,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -714,8 +728,16 @@ def run_benchmark_job(
     import threading
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "15"))
-    logger.info(f"[ROBUSTESSE] Concurrency: {concurrency} workers (set BENCHMARK_CONCURRENCY to change)")
+    is_local_judge = os.getenv("T2T5_JUDGE_PROVIDER") == "ollama"
+    collect_concurrency = int(os.getenv("BENCHMARK_COLLECT_CONCURRENCY", "15"))
+    judge_concurrency = 1 if is_local_judge else int(os.getenv("BENCHMARK_CONCURRENCY", "15"))
+    logger.info(f"[ROBUSTESSE] Collect concurrency: {collect_concurrency}, Judge concurrency: {judge_concurrency}")
+
+    # ══════════════════════════════════════════════════════════════
+    # COLLECTE-FIRST, EVAL-AFTER : toutes les collectes (synthese)
+    # d'abord, puis toutes les evaluations (juge). Minimise les swaps
+    # de modele Ollama en mode local (1 swap au lieu de 250).
+    # ══════════════════════════════════════════════════════════════
 
     _token_lock = threading.Lock()
     _progress_counter = [0]  # mutable for closure
@@ -732,13 +754,14 @@ def run_benchmark_job(
                 pass
             return _token_container[0]
 
-    def _process_question(i, q_item):
+    # ── Phase 2a : Collecte API + evaluation keyword (synthese) ──
+
+    def _collect_question(i, q_item):
         question = q_item.get("question", "")
         category = q_item.get("category", "")
         question_id = q_item.get("question_id", f"q_{i}")
         ground_truth = q_item.get("ground_truth", {})
 
-        # Token refresh toutes les 50 questions (thread-safe)
         if i > 0 and i % 50 == 0:
             _refresh_token_safe()
 
@@ -747,17 +770,11 @@ def run_benchmark_job(
             answer = api_result["answer"]
             sources = api_result["sources_used"]
 
-            # LLM-juge pour les categories cross-lingue, keyword pour unanswerable
-            evaluation = None
-            if category in LLM_JUDGE_CATEGORIES:
-                evaluation = evaluate_with_llm_judge(answer, question, category, ground_truth)
-
-            if evaluation is None:
-                evaluator = KEYWORD_EVALUATORS.get(category)
-                if evaluator:
-                    evaluation = evaluator(answer, sources, ground_truth)
-                else:
-                    evaluation = {"category": category, "score": 0.0, "error": f"Unknown category: {category}"}
+            # Keyword evaluation (deterministe, pas de LLM)
+            evaluator = KEYWORD_EVALUATORS.get(category)
+            keyword_eval = evaluator(answer, sources, ground_truth) if evaluator else {
+                "category": category, "score": 0.0, "error": f"Unknown category: {category}"
+            }
 
             result = {
                 "question_id": question_id,
@@ -766,15 +783,15 @@ def run_benchmark_job(
                 "answer": answer,
                 "answer_length": len(answer) if answer else 0,
                 "sources_used": sources if isinstance(sources, list) else [],
-                "evaluation": evaluation,
+                "ground_truth": ground_truth,
+                "evaluation": keyword_eval,
             }
 
-            # Progress update (thread-safe via GIL for simple increment)
             _progress_counter[0] += 1
-            if _progress_counter[0] % 5 == 0 or _progress_counter[0] == len(all_questions):
+            if _progress_counter[0] % 10 == 0 or _progress_counter[0] == len(all_questions):
                 _update_redis_state(redis_url, {
                     "status": "running",
-                    "phase": "api_eval",
+                    "phase": "api_collect",
                     "progress": _progress_counter[0],
                     "total": len(all_questions),
                     "current_question": question[:100],
@@ -782,7 +799,7 @@ def run_benchmark_job(
 
             logger.info(
                 f"[ROBUSTESSE] [{_progress_counter[0]}/{len(all_questions)}] {question_id} "
-                f"({category}) — score={evaluation.get('score', '?')}"
+                f"({category}) — collected"
             )
             return result, False
 
@@ -795,10 +812,10 @@ def run_benchmark_job(
                 "evaluation": {"error": str(e)[:200], "category": category},
             }, True
 
-    # Execution parallele
-    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+    logger.info(f"[ROBUSTESSE] Phase 2a: Collecting {len(all_questions)} answers (synthesis model)...")
+    with ThreadPoolExecutor(max_workers=collect_concurrency) as executor:
         futures = {
-            executor.submit(_process_question, i, q): i
+            executor.submit(_collect_question, i, q): i
             for i, q in enumerate(all_questions)
         }
         for future in as_completed(futures):
@@ -806,6 +823,57 @@ def run_benchmark_job(
             per_sample.append(result)
             if is_error:
                 errors += 1
+
+    logger.info(f"[ROBUSTESSE] Phase 2a complete: {len(per_sample)} samples collected")
+
+    # ── Phase 2b : Evaluation LLM juge (1 seul swap Ollama) ──
+
+    judge_client = _get_llm_judge_client()
+    if judge_client:
+        _update_redis_state(redis_url, {
+            "status": "running",
+            "phase": "llm_judge",
+            "progress": 0,
+            "total": len(per_sample),
+            "current_question": "LLM judge evaluation...",
+        })
+        logger.info(f"[ROBUSTESSE] Phase 2b: LLM judge on {len(per_sample)} samples...")
+
+        judged = 0
+        for sample in per_sample:
+            if sample.get("evaluation", {}).get("error"):
+                continue
+
+            category = sample.get("category", "")
+            if category not in LLM_JUDGE_CATEGORIES:
+                continue
+
+            answer = sample.get("answer", "")
+            question = sample.get("question", "")
+            ground_truth = sample.get("ground_truth", {})
+
+            if not answer:
+                continue
+
+            llm_eval = evaluate_with_llm_judge(answer, question, category, ground_truth)
+            if llm_eval:
+                sample["evaluation"] = llm_eval
+
+            judged += 1
+            if judged % 10 == 0:
+                _update_redis_state(redis_url, {
+                    "status": "running",
+                    "phase": "llm_judge",
+                    "progress": judged,
+                    "total": len(per_sample),
+                })
+                logger.info(f"[ROBUSTESSE] Judge progress: {judged}/{len(per_sample)}")
+
+        logger.info(f"[ROBUSTESSE] Phase 2b complete: {judged} samples judged")
+
+    # Cleanup temp fields
+    for sample in per_sample:
+        sample.pop("ground_truth", None)
 
     # Trier par question_id pour un rapport stable
     per_sample.sort(key=lambda s: s.get("question_id", ""))

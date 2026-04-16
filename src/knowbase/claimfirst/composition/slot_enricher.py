@@ -274,6 +274,10 @@ class SlotEnricher:
                     for item in parsed:
                         idx = item.get("index")
                         sf = item.get("structured_form")
+                        try:
+                            idx = int(idx) if idx is not None else None
+                        except (ValueError, TypeError):
+                            continue
                         if idx is None or idx < 1 or idx > len(batch):
                             continue
 
@@ -316,6 +320,10 @@ class SlotEnricher:
                 for item in parsed:
                     idx = item.get("index")
                     sf = item.get("structured_form")
+                    try:
+                        idx = int(idx) if idx is not None else None
+                    except (ValueError, TypeError):
+                        continue
                     if idx is None or idx < 1 or idx > len(batch_claim_refs):
                         continue
 

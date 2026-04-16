@@ -85,7 +85,14 @@ class TopicLink:
 # ── Graph extraction ──────────────────────────────────────────────────────────
 
 def extract_bipartite_graph(driver, tenant_id: str) -> tuple[dict, dict, list[dict]]:
-    """Extraire le graphe biparti Perspective -[TOUCHES_SUBJECT]-> SubjectAnchor."""
+    """Extraire le graphe biparti Perspective -[TOUCHES_SUBJECT]-> SubjectAnchor.
+
+    Chaque lien est pondéré par IDF : les subjects partagés par beaucoup de
+    Perspectives ont un poids faible (ne discriminent pas), ceux partagés par
+    peu de Perspectives ont un poids élevé (discriminants).
+    """
+    import math
+
     with driver.session() as session:
         result = session.run("""
             MATCH (p:Perspective {tenant_id: $tid})-[r:TOUCHES_SUBJECT]->(sa:SubjectAnchor)
@@ -94,11 +101,11 @@ def extract_bipartite_graph(driver, tenant_id: str) -> tuple[dict, dict, list[di
                    sa.subject_id AS s_id, sa.canonical_name AS s_name, r.weight AS weight
         """, tid=tenant_id)
 
-        edges = []
+        raw_edges = []
         perspectives = {}
         subjects = {}
         for rec in result:
-            edges.append({
+            raw_edges.append({
                 "p_id": rec["p_id"], "s_id": rec["s_id"],
                 "weight": rec["weight"] or 1.0,
             })
@@ -108,12 +115,39 @@ def extract_bipartite_graph(driver, tenant_id: str) -> tuple[dict, dict, list[di
                 subjects[rec["s_id"]] = {"name": rec["s_name"], "n_persp": 0}
 
         # Compter les perspectives par subject
-        for e in edges:
+        for e in raw_edges:
             subjects[e["s_id"]]["n_persp"] += 1
+
+    # Pondérer par IDF : poids = log(N / n_persp_du_subject)
+    # Un subject lié à 45/60 perspectives = log(60/45) = 0.29 (faible)
+    # Un subject lié à 2/60 perspectives = log(60/2) = 3.4 (fort)
+    n_persp = len(perspectives)
+    edges = []
+    for e in raw_edges:
+        n_sharing = subjects[e["s_id"]]["n_persp"]
+        idf = math.log(n_persp / max(n_sharing, 1)) if n_persp > 0 else 1.0
+        edges.append({
+            "p_id": e["p_id"],
+            "s_id": e["s_id"],
+            "weight": e["weight"] * idf,
+        })
+
+    # Log top subjects par IDF
+    subj_idf = sorted(
+        [(s["name"], s["n_persp"], math.log(n_persp / max(s["n_persp"], 1)))
+         for s in subjects.values()],
+        key=lambda x: x[2],
+    )
+    logger.info(f"IDF subjects (low = generic, high = discriminant):")
+    for name, n, idf in subj_idf[:5]:
+        logger.info(f"  IDF={idf:.2f} ({n}/{n_persp} persp) {name}")
+    logger.info("  ...")
+    for name, n, idf in subj_idf[-5:]:
+        logger.info(f"  IDF={idf:.2f} ({n}/{n_persp} persp) {name}")
 
     logger.info(
         f"Graphe biparti: {len(perspectives)} perspectives x {len(subjects)} subjects "
-        f"= {len(edges)} edges"
+        f"= {len(edges)} edges (IDF-weighted)"
     )
     return perspectives, subjects, edges
 
@@ -212,17 +246,40 @@ def build_atlas_roots(
         ))
 
     # 5. Assigner chaque topic au root le PLUS SPECIFIQUE
-    # Pour chaque topic, trouver le root avec lequel il a la plus haute affinite.
-    # En cas d'egalite, preferer le root le plus specifique (moins de docs = plus specifique).
+    # Strategie hybride :
+    # a) Match direct par subject_names du topic (signal fort)
+    # b) Fallback sur proportion de documents (signal faible)
     for t in topics:
         best_root = None
         best_score = -1
+
+        # a) Match direct : les subject_names du topic mentionnent un root ?
+        topic_subjects_lower = {s.lower() for s in t.subject_names}
+        topic_subjects_joined = " ".join(topic_subjects_lower)
         for root in roots:
-            ratio = topic_affinities.get(t.topic_id, {}).get(root.canonical_name, 0)
-            if ratio > 0:
-                # Score = affinite * specificite (inverse du nb de docs)
-                specificity = 1.0 / root.affinity if root.affinity > 0 else 0
-                score = ratio * specificity
+            root_lower = root.canonical_name.lower()
+            # Match : le root apparaît dans un subject, ou un subject contient le root
+            matches = sum(1 for s in topic_subjects_lower
+                          if root_lower in s or s in root_lower)
+            # Aussi vérifier les mots-clés du root dans les subjects concaténés
+            root_words = set(root_lower.split())
+            if len(root_words) >= 2:
+                word_matches = sum(1 for w in root_words if w in topic_subjects_joined)
+                if word_matches >= len(root_words) * 0.6:
+                    matches += 1
+            if matches > 0:
+                direct_score = 100.0 * matches
+                if direct_score > best_score:
+                    best_score = direct_score
+                    best_root = root
+
+        # b) Fallback : proportion de documents
+        if best_root is None:
+            for root in roots:
+                ratio = topic_affinities.get(t.topic_id, {}).get(root.canonical_name, 0)
+                if ratio > 0:
+                    specificity = 1.0 / root.affinity if root.affinity > 0 else 0
+                    score = ratio * specificity
                 if score > best_score:
                     best_score = score
                     best_root = root
@@ -436,14 +493,12 @@ def label_topics_llm(topics: list[NarrativeTopic], skip_llm: bool = False) -> No
         return
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        from knowbase.common.llm_router import get_llm_router, TaskType
+        router = get_llm_router()
     except Exception:
-        logger.warning("Anthropic unavailable, using fallback labels")
+        logger.warning("LLM router unavailable, using fallback labels")
         label_topics_llm(topics, skip_llm=True)
         return
-
-    model = os.environ.get("OSMOSIS_DECOMPOSER_MODEL", "claude-haiku-4-5-20251001")
 
     for t in topics:
         prompt = f"""Generate a short narrative title (max 8 words) and a one-sentence summary for this knowledge topic.
@@ -459,12 +514,14 @@ Return ONLY a JSON object:
 {{"title": "...", "summary": "..."}}"""
 
         try:
-            resp = client.messages.create(
-                model=model, max_tokens=100, temperature=0.0,
+            raw = router.complete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
                 messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=100,
             )
             import re
-            m = re.search(r"\{[\s\S]*\}", resp.content[0].text)
+            m = re.search(r"\{[\s\S]*\}", raw)
             if m:
                 data = json.loads(m.group())
                 t.narrative_label = data.get("title", "")

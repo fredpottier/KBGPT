@@ -933,11 +933,53 @@ async def process_batch(
                 detail="Aucun batch actif."
             )
 
-        if orchestrator.state.status != BurstStatus.READY:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Batch pas prêt. Statut actuel: {orchestrator.state.status.value}"
+        # En mode full_local, on peut traiter directement apres prepare (pas d'EC2)
+        from knowbase.common.llm_router import get_llm_router, LlmMode
+        llm_mode = get_llm_router()._get_llm_mode()
+        is_full_local = llm_mode == LlmMode.FULL_LOCAL
+
+        if is_full_local:
+            # Accept PREPARING status — pas besoin d'EC2, le GPU local suffit
+            if orchestrator.state.status not in (BurstStatus.READY, BurstStatus.PREPARING):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Batch pas prêt. Statut actuel: {orchestrator.state.status.value}"
+                )
+            # Forcer le status a READY pour que le batch puisse demarrer
+            if orchestrator.state.status == BurstStatus.PREPARING:
+                orchestrator.state.status = BurstStatus.READY
+                logger.info("[BURST:PROCESS] Full Local mode — skipped EC2, status forced to READY")
+
+            # Auto-start vLLM local si pas deja actif
+            from knowbase.ingestion.burst.provider_switch import (
+                get_burst_state_from_redis, start_local_vllm,
+                is_local_vllm_running, activate_burst_providers,
+                _unload_all_ollama_models, VLLM_LOCAL_PORT, VLLM_LOCAL_CONTAINER,
             )
+            redis_state = get_burst_state_from_redis()
+            if not (redis_state and redis_state.get("active")):
+                if is_local_vllm_running():
+                    activate_burst_providers(
+                        vllm_url=f"http://{VLLM_LOCAL_CONTAINER}:8000",
+                        embeddings_url="",
+                        vllm_model="Qwen/Qwen2.5-14B-Instruct-AWQ",
+                    )
+                    logger.info("[BURST:PROCESS] vLLM container found, burst activated")
+                else:
+                    logger.info("[BURST:PROCESS] Auto-starting vLLM local...")
+                    _unload_all_ollama_models()
+                    vllm_result = start_local_vllm()
+                    if not vllm_result.get("success"):
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"vLLM local start failed: {vllm_result.get('error')}"
+                        )
+        else:
+            if orchestrator.state.status != BurstStatus.READY:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Batch pas prêt. Statut actuel: {orchestrator.state.status.value}"
+                )
 
         # Lancer le traitement en arrière-plan (async)
         import asyncio
@@ -963,7 +1005,12 @@ async def process_batch(
             )
 
             if not burst_check.get('burst_mode'):
-                logger.warning("[BURST:PROCESS] ⚠️ BURST MODE NOT ACTIVE - LLM calls will go to OpenAI/Anthropic!")
+                from knowbase.common.llm_router import get_llm_router as _get_router, LlmMode as _LlmMode
+                _mode = _get_router()._get_llm_mode()
+                if _mode in (_LlmMode.PARTIAL_LOCAL, _LlmMode.FULL_LOCAL):
+                    logger.info(f"[BURST:PROCESS] Mode {_mode.value} — LLM calls routed to Ollama local (no EC2 burst)")
+                else:
+                    logger.warning("[BURST:PROCESS] ⚠️ BURST MODE NOT ACTIVE - LLM calls will go to OpenAI/Anthropic!")
 
             # Lock pour les mises à jour d'état partagé
             state_lock = asyncio.Lock()
@@ -2088,6 +2135,75 @@ async def stop_standalone(
     except Exception as e:
         logger.error(f"Erreur stop_standalone: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Burst Local — vLLM sur GPU local (mode Full Local)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+    "/local/start",
+    summary="Demarrer le burst local (vLLM sur GPU local)",
+)
+async def start_local_burst(
+    admin: dict = Depends(require_admin),
+):
+    """Lance un container Docker vLLM sur le GPU local.
+
+    Pre-requis : mode Full Local actif, Docker accessible, GPU disponible.
+    Ollama sera indisponible pendant le burst.
+    """
+    from knowbase.ingestion.burst.provider_switch import start_local_vllm, is_local_vllm_running
+
+    if is_local_vllm_running():
+        raise HTTPException(status_code=409, detail="Le burst local est deja actif")
+
+    result = start_local_vllm()
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+    return {
+        "success": True,
+        "container_id": result.get("container_id"),
+        "url": result.get("url"),
+        "message": "vLLM local demarre — GPU occupe, Ollama indisponible",
+    }
+
+
+@router.post(
+    "/local/stop",
+    summary="Arreter le burst local",
+)
+async def stop_local_burst(
+    admin: dict = Depends(require_admin),
+):
+    """Arrete le container vLLM local et libere le GPU pour Ollama."""
+    from knowbase.ingestion.burst.provider_switch import stop_local_vllm
+
+    result = stop_local_vllm()
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+    return {
+        "success": True,
+        "message": "vLLM local arrete — GPU libere, Ollama peut reprendre",
+    }
+
+
+@router.get(
+    "/local/status",
+    summary="Statut du burst local",
+)
+async def local_burst_status():
+    """Retourne si le container vLLM local tourne."""
+    from knowbase.ingestion.burst.provider_switch import is_local_vllm_running, VLLM_LOCAL_URL
+
+    running = is_local_vllm_running()
+    return {
+        "running": running,
+        "url": VLLM_LOCAL_URL if running else None,
+    }
 
 
 __all__ = ["router"]

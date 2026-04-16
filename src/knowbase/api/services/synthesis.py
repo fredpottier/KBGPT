@@ -436,110 +436,25 @@ def synthesize_response(
     start_time = time.time()
 
     try:
-        # Choix du provider de synthese via env (default: anthropic)
-        synthesis_provider = os.environ.get("OSMOSIS_SYNTHESIS_PROVIDER", "anthropic")
-
-        openai_key = os.environ.get("OPENAI_API_KEY", "")
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-
-        synthesized_via = None
-
-        # Tier 0 : OpenAI (si configure comme provider principal)
-        if synthesis_provider == "openai" and openai_key:
-            try:
-                from openai import OpenAI
-                oai_client = OpenAI(api_key=openai_key)
-                oai_model = os.environ.get("OSMOSIS_SYNTHESIS_MODEL", "gpt-4o-mini")
-                response = oai_client.chat.completions.create(
-                    model=oai_model,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_MSG},
-                        {"role": "user", "content": prompt},
-                    ],
-                    max_tokens=2000,
-                    temperature=0.3,
-                    logprobs=True,
-                    top_logprobs=5,
-                )
-                synthesized_answer = response.choices[0].message.content or ""
-                synthesized_via = "openai"
-
-                # Calcul entropie logprobs pour detection hallucination
-                entropy_score = _compute_logprob_entropy(response)
-
-                logger.info(
-                    f"[SYNTHESIS] OpenAI {oai_model} completed in "
-                    f"{(time.time() - start_time) * 1000:.0f}ms, "
-                    f"{len(synthesized_answer)} chars, entropy={entropy_score:.3f}"
-                )
-                try:
-                    from knowbase.common.token_tracker import track_tokens
-                    track_tokens(
-                        model=oai_model,
-                        task_type="synthesis",
-                        input_tokens=response.usage.prompt_tokens if response.usage else 0,
-                        output_tokens=response.usage.completion_tokens if response.usage else 0,
-                        context="synthesis_chat",
-                    )
-                except Exception:
-                    pass
-            except Exception as e:
-                logger.warning(f"[SYNTHESIS] OpenAI failed, falling back: {e}")
-
-        # Tier 1 : Claude Haiku (default ou fallback)
-        if not synthesized_via and anthropic_key:
-            try:
-                import anthropic
-                client = anthropic.Anthropic(api_key=anthropic_key)
-                haiku_model = os.environ.get("OSMOSIS_SYNTHESIS_MODEL" if synthesis_provider == "anthropic" else "_IGNORE_", "claude-haiku-4-5-20251001")
-                response = client.messages.create(
-                    model=haiku_model,
-                    max_tokens=2000,
-                    system=SYSTEM_MSG,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                )
-                synthesized_answer = response.content[0].text if response.content else ""
-                synthesized_via = "anthropic"
-                logger.info(
-                    f"[SYNTHESIS] Claude {haiku_model} completed in "
-                    f"{(time.time() - start_time) * 1000:.0f}ms, "
-                    f"{len(synthesized_answer)} chars"
-                )
-                # Track tokens pour le cockpit
-                try:
-                    from knowbase.common.token_tracker import track_tokens
-                    track_tokens(
-                        model=haiku_model,
-                        task_type="synthesis",
-                        input_tokens=response.usage.input_tokens,
-                        output_tokens=response.usage.output_tokens,
-                        context="synthesis_chat",
-                    )
-                except Exception:
-                    pass
-            except Exception as e:
-                logger.warning(f"[SYNTHESIS] Claude API failed, falling back to local LLM: {e}")
-                pass  # Fall through to Tier 2
-
-        if not synthesized_via:
-            # Tier 2 : Fallback LLM local (Qwen via routeur)
-            router = get_llm_router()
-            messages = [
-                {"role": "system", "content": SYSTEM_MSG},
-                {"role": "user", "content": prompt}
-            ]
-            synthesized_answer = router.complete(
-                task_type=TaskType.LONG_TEXT_SUMMARY,
-                messages=messages,
-                temperature=0.3,
-                max_tokens=2000
-            )
-            logger.info(
-                f"[SYNTHESIS] Local LLM completed in "
-                f"{(time.time() - start_time) * 1000:.0f}ms, "
-                f"{len(synthesized_answer)} chars"
-            )
+        # Appel LLM via le routeur centralisé
+        # Le routeur gère automatiquement : mode local (Ollama), burst (vLLM EC2),
+        # ou cloud (OpenAI/Anthropic) selon le setting admin llm_mode.
+        router = get_llm_router()
+        messages = [
+            {"role": "system", "content": SYSTEM_MSG},
+            {"role": "user", "content": prompt}
+        ]
+        synthesized_answer = router.complete(
+            task_type=TaskType.LONG_TEXT_SUMMARY,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=2000
+        )
+        logger.info(
+            f"[SYNTHESIS] LLM completed in "
+            f"{(time.time() - start_time) * 1000:.0f}ms, "
+            f"{len(synthesized_answer)} chars"
+        )
 
         elapsed_ms = (time.time() - start_time) * 1000
         logger.info(f"[SYNTHESIS] LLM call completed in {elapsed_ms:.0f}ms, response: {len(synthesized_answer)} chars")

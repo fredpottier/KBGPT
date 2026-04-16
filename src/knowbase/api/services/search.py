@@ -12,6 +12,7 @@ from sentence_transformers import SentenceTransformer
 from knowbase.config.settings import Settings
 from knowbase.common.clients import rerank_chunks
 from knowbase.common.logging import setup_logging
+from knowbase.common.llm_router import get_llm_router, TaskType
 from .synthesis import synthesize_response
 from .retriever import embed_query, retrieve_chunks as _retrieve_chunks
 from .kg_signal_detector import detect_signals, SignalReport
@@ -62,24 +63,13 @@ def _summarize_tension_pairs(pairs: list[dict]) -> list[dict]:
     prompt = "\n".join(prompt_lines)
 
     try:
-        if provider == "anthropic":
-            import anthropic
-            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-            model = os.environ.get("OSMOSIS_SYNTHESIS_MODEL", "claude-haiku-4-5-20251001")
-            resp = client.messages.create(
-                model=model, max_tokens=500, temperature=0.0,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = resp.content[0].text
-        else:
-            from openai import OpenAI
-            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
-            model = os.environ.get("OSMOSIS_SYNTHESIS_MODEL", "gpt-4o-mini")
-            resp = client.chat.completions.create(
-                model=model, max_tokens=500, temperature=0.0,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = resp.choices[0].message.content
+        router = get_llm_router()
+        raw = router.complete(
+            task_type=TaskType.LONG_TEXT_SUMMARY,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=500,
+        )
 
         # Parser le JSON
         raw = raw.strip()
@@ -829,6 +819,7 @@ def search_documents(
     release_id: str | None = None,  # 🔄 Phase B: Filtre par release
     use_latest: bool = True,  # 🔄 Phase B: Boost latest version
     response_mode_override: str | None = None,  # 🎯 V3: Override du mode (admin/benchmark)
+    skip_tension_summary: bool = False,  # 📊 Benchmark: skip les appels LLM pour résumés de tensions
 ) -> dict[str, Any]:
     """
     Recherche sémantique avec enrichissement Knowledge Graph (OSMOSE) et contexte conversationnel.
@@ -1990,10 +1981,12 @@ def search_documents(
             })
 
         # Generer des resumes humains pour les tensions (1 appel LLM batch)
-        try:
-            tension_pairs = _summarize_tension_pairs(tension_pairs)
-        except Exception as e:
-            logger.warning(f"[TENSION] Summary generation failed (non-blocking): {e}")
+        # Skippé en mode benchmark (skip_tension_summary=True) pour économiser les crédits LLM
+        if not skip_tension_summary:
+            try:
+                tension_pairs = _summarize_tension_pairs(tension_pairs)
+            except Exception as e:
+                logger.warning(f"[TENSION] Summary generation failed (non-blocking): {e}")
 
         response["contradiction_envelope"] = {
             "has_tension": True,

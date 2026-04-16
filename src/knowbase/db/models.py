@@ -1063,6 +1063,56 @@ class DomainContext(Base):
         return f"<DomainContext(tenant_id='{self.tenant_id}', industry='{self.industry}')>"
 
 
+# ============================================================================
+# System Settings - Configuration système persistante
+# ============================================================================
+
+
+class SystemSetting(Base):
+    """
+    Paramètres système persistants (clé/valeur JSON).
+
+    Stocke les settings admin durables (mode LLM, config burst, etc.)
+    avec PostgreSQL comme source de vérité et cache Redis devant.
+
+    Usage:
+        - Clé "llm_mode" : {"mode": "normal"|"partial_local"|"full_local", ...}
+        - Clé future : extensible pour d'autres settings admin
+    """
+
+    __tablename__ = "system_settings"
+
+    key = Column(
+        String(100),
+        primary_key=True,
+        comment="Clé unique du paramètre (ex: llm_mode)"
+    )
+
+    value = Column(
+        Text,
+        nullable=False,
+        default="{}",
+        comment="Valeur JSON du paramètre"
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        comment="Date de dernière modification"
+    )
+
+    updated_by = Column(
+        String(100),
+        nullable=True,
+        comment="Email de l'admin ayant modifié le paramètre"
+    )
+
+    def __repr__(self) -> str:
+        return f"<SystemSetting(key='{self.key}', updated_at={self.updated_at})>"
+
+
 __all__ = [
     "EntityTypeRegistry",
     "DocumentType",
@@ -1071,5 +1121,6 @@ __all__ = [
     "AuditLog",
     "Session",
     "SessionMessage",
-    "DomainContext"
+    "DomainContext",
+    "SystemSetting",
 ]

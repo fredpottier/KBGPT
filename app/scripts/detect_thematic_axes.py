@@ -132,14 +132,12 @@ def label_axes_llm(axes: list[ThematicAxis], skip_llm: bool = False) -> None:
         return
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        from knowbase.common.llm_router import get_llm_router, TaskType
+        router = get_llm_router()
     except Exception:
-        logger.warning("Anthropic unavailable, using fallback labels")
+        logger.warning("LLM router unavailable, using fallback labels")
         label_axes_llm(axes, skip_llm=True)
         return
-
-    model = os.environ.get("OSMOSIS_DECOMPOSER_MODEL", "claude-haiku-4-5-20251001")
 
     for ax in axes:
         prompt = (
@@ -150,11 +148,13 @@ def label_axes_llm(axes: list[ThematicAxis], skip_llm: bool = False) -> None:
             f"common thread. Return ONLY the label, nothing else."
         )
         try:
-            resp = client.messages.create(
-                model=model, max_tokens=30, temperature=0.0,
+            raw = router.complete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
                 messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=30,
             )
-            ax.label = resp.content[0].text.strip().strip('"').strip("'")
+            ax.label = raw.strip().strip('"').strip("'")
             logger.info(f"  {ax.axis_id}: {ax.label} ({len(ax.perspective_ids)}P, {ax.claim_count} claims)")
         except Exception as e:
             logger.warning(f"  {ax.axis_id}: LLM failed: {e}")

@@ -91,6 +91,24 @@ class SessionManager:
 
         logger.info(f"[SessionManager] Initialized with max_tokens={max_token_limit}")
 
+    def _get_langchain_llm(self):
+        """Retourne le LLM langchain adapté au mode LLM actif (local ou cloud)."""
+        from knowbase.common.llm_router import get_llm_router, LlmMode
+        mode = get_llm_router()._get_llm_mode()
+
+        if mode in (LlmMode.PARTIAL_LOCAL, LlmMode.FULL_LOCAL):
+            local_model = get_llm_router()._get_local_model_for_task(
+                __import__("knowbase.common.llm_router", fromlist=["TaskType"]).TaskType.LONG_TEXT_SUMMARY
+            )
+            ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+            try:
+                from langchain_ollama import ChatOllama
+                return ChatOllama(model=local_model, base_url=ollama_url, temperature=0)
+            except ImportError:
+                logger.warning("[SessionManager] langchain_ollama not installed, falling back to ChatOpenAI")
+
+        return ChatOpenAI(model=self.summary_model, temperature=0)
+
     # =========================================================================
     # Session CRUD
     # =========================================================================
@@ -419,11 +437,8 @@ class SessionManager:
             ConversationSummaryBufferMemory configuré
         """
         if session_id not in self._memory_cache:
-            # Créer nouveau memory
-            llm = ChatOpenAI(
-                model=self.summary_model,
-                temperature=0
-            )
+            # Créer le LLM langchain selon le mode actif
+            llm = self._get_langchain_llm()
 
             memory = ConversationSummaryBufferMemory(
                 llm=llm,

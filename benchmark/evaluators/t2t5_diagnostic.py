@@ -46,104 +46,201 @@ logger = logging.getLogger("t2t5-diagnostic")
 # ═══════════════════════════════════════════════════════════════════════
 
 _llm_judge_client = None
-LLM_JUDGE_MODEL = "gpt-4o-mini"
+# Configurable via env :
+#   T2T5_JUDGE_PROVIDER = "openai" (defaut) ou "ollama"
+#   T2T5_JUDGE_MODEL_NAME = "gpt-4o-mini" (defaut) ou "m-prometheus-14b"
+LLM_JUDGE_PROVIDER = os.getenv("T2T5_JUDGE_PROVIDER", "openai")
+LLM_JUDGE_MODEL = os.getenv("T2T5_JUDGE_MODEL_NAME", "gpt-4o-mini")
 
 
 def _get_llm_judge():
-    """Retourne un client OpenAI si OPENAI_API_KEY est disponible, sinon None."""
-    global _llm_judge_client
+    """Retourne un client OpenAI-compatible (OpenAI API ou Ollama local)."""
+    global _llm_judge_client, LLM_JUDGE_PROVIDER, LLM_JUDGE_MODEL
     if _llm_judge_client is not None:
         return _llm_judge_client
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        return None
-    try:
-        from openai import OpenAI
-        _llm_judge_client = OpenAI(api_key=api_key)
-        logger.info(f"[T2T5] LLM judge initialized ({LLM_JUDGE_MODEL})")
-        return _llm_judge_client
-    except Exception as e:
-        logger.warning(f"[T2T5] LLM judge unavailable: {e}")
-        return None
+
+    LLM_JUDGE_PROVIDER = os.getenv("T2T5_JUDGE_PROVIDER", "openai")
+    LLM_JUDGE_MODEL = os.getenv("T2T5_JUDGE_MODEL_NAME", "gpt-4o-mini")
+
+    if LLM_JUDGE_PROVIDER == "ollama":
+        ollama_url = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
+        try:
+            from openai import OpenAI
+            _llm_judge_client = OpenAI(
+                api_key="ollama",
+                base_url=f"{ollama_url}/v1",
+            )
+            logger.info(f"[T2T5] LLM judge initialized (Ollama: {LLM_JUDGE_MODEL} at {ollama_url})")
+            return _llm_judge_client
+        except Exception as e:
+            logger.warning(f"[T2T5] Ollama judge unavailable: {e}")
+            return None
+    else:
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            return None
+        try:
+            from openai import OpenAI
+            _llm_judge_client = OpenAI(api_key=api_key)
+            logger.info(f"[T2T5] LLM judge initialized (OpenAI: {LLM_JUDGE_MODEL})")
+            return _llm_judge_client
+        except Exception as e:
+            logger.warning(f"[T2T5] LLM judge unavailable: {e}")
+            return None
 
 
 def _llm_judge_t2(client, question: str, claim1_text: str, claim2_text: str, answer: str) -> dict | None:
-    """LLM-juge pour T2 : evalue both_sides, tension, sources (scores 0-100)."""
-    # Pre-traitement LOCAL au juge : convertir [[SOURCE:...]] en (Doc, p. X)
-    # Voir benchmark/evaluators/_judge_preprocess.py pour le contrat.
+    """LLM-juge evidence-based pour T2 : vérifie la couverture de chaque claim.
+
+    Approche : le LLM extrait (YES/NO par claim), le code calcule le score.
+    Plus stable et déterministe que le scoring 0-100 subjectif.
+    """
     from benchmark.evaluators._judge_preprocess import preprocess_answer_for_judge
     judge_answer = preprocess_answer_for_judge(answer)
     MAX_JUDGE_CHARS = 3000
 
     prompt = (
-        'You are a benchmark evaluator for a document contradiction detection system.\n\n'
-        f'Question: "{question[:200]}"\n\n'
-        f'Claim 1 (from document A): "{claim1_text[:150]}"\n'
-        f'Claim 2 (from document B): "{claim2_text[:150]}"\n\n'
-        f'The system produced this answer:\n"{judge_answer[:MAX_JUDGE_CHARS]}"\n\n'
-        'Rate each aspect from 0 to 100:\n'
-        '1. both_sides: Does the answer present information from BOTH claims? Even paraphrased, '
-        'in a different language, or summarized — if BOTH perspectives are covered, score high.\n'
-        '2. tension: Does the answer acknowledge a difference, evolution, tension, contradiction, '
-        'or divergence between sources? Look for words like "however", "but", "cependant", '
-        '"toutefois", "differs", "changed", "evolution" in ANY language.\n'
-        '3. sources: Does the answer reference or cite multiple source documents? '
-        'Look for any mention of document names, years, guide names, version numbers.\n\n'
-        'Reply with ONLY three numbers (0-100) separated by commas.\n'
-        'Example: 85,70,60'
+        'You are verifying if a system answer covers specific claims from a document corpus.\n\n'
+        f'Question asked: "{question[:200]}"\n\n'
+        'CLAIMS THAT SHOULD BE COVERED:\n'
+        f'- Claim 1: "{claim1_text[:200]}"\n'
+        f'- Claim 2: "{claim2_text[:200]}"\n\n'
+        f'SYSTEM ANSWER:\n"{judge_answer[:MAX_JUDGE_CHARS]}"\n\n'
+        'For each item below, answer YES or NO:\n'
+        '1. claim1_covered: Does the answer mention or paraphrase the content of Claim 1? '
+        '(even in a different language, summarized, or with different wording)\n'
+        '2. claim2_covered: Does the answer mention or paraphrase the content of Claim 2? '
+        '(even in a different language, summarized, or with different wording)\n'
+        '3. tension_acknowledged: Does the answer acknowledge a difference, divergence, '
+        'tension, or contradiction between the two claims? '
+        '(look for "however", "but", "cependant", "toutefois", "en revanche", "differs", "unlike")\n'
+        '4. multiple_sources: Does the answer reference or cite 2+ different source documents?\n\n'
+        'Reply with ONLY four answers (YES or NO) separated by commas.\n'
+        'Example: YES,YES,YES,NO'
     )
     try:
         resp = client.chat.completions.create(
-            model=LLM_JUDGE_MODEL, max_tokens=10, temperature=0.0,
+            model=LLM_JUDGE_MODEL,
+            max_tokens=30, temperature=0.0,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = resp.choices[0].message.content.strip()
-        parts = [float(x.strip()) for x in raw.split(",")]
-        if len(parts) >= 3:
+        # Parser YES/NO — prendre les 4 premiers tokens YES ou NO
+        tokens = [t.strip().upper().rstrip(".,;") for t in raw.split(",")]
+        bools = [t.startswith("YES") for t in tokens[:4]]
+
+        if len(bools) >= 4:
+            c1, c2, tension, sources = bools[0], bools[1], bools[2], bools[3]
+
+            # Scoring déterministe basé sur la couverture
+            claims_covered = sum([c1, c2])
+            if claims_covered == 2:
+                both_sides = 1.0
+            elif claims_covered == 1:
+                both_sides = 0.3  # partiel = pénalisé, pas 0.5
+            else:
+                both_sides = 0.0
+
             return {
-                "both_sides_surfaced": round(min(parts[0], 100) / 100.0, 3),
-                "tension_mentioned": round(min(parts[1], 100) / 100.0, 3),
-                "both_sources_cited": round(min(parts[2], 100) / 100.0, 3),
+                "both_sides_surfaced": both_sides,
+                "tension_mentioned": 1.0 if tension else 0.0,
+                "both_sources_cited": 1.0 if sources else 0.0,
+                "claim1_coverage": 1.0 if c1 else 0.0,
+                "claim2_coverage": 1.0 if c2 else 0.0,
                 "judge_raw": raw,
+                "judge_model": LLM_JUDGE_MODEL,
             }
     except Exception as e:
         logger.debug(f"[T2T5] LLM judge T2 error: {e}")
     return None
 
 
-def _llm_judge_t5(client, question: str, category: str, answer: str) -> dict | None:
-    """LLM-juge pour T5 : evalue chain_coverage et multi_doc (scores 0-100)."""
-    # Pre-traitement LOCAL au juge (voir _judge_preprocess.py pour le contrat)
+def _llm_judge_t5(client, question: str, category: str, answer: str, ground_truth: dict = None) -> dict | None:
+    """LLM-juge evidence-based pour T5 : vérifie la couverture de chaque élément de la chain.
+
+    Approche : le LLM vérifie YES/NO par claim de la chain, le code calcule la couverture.
+    """
     from benchmark.evaluators._judge_preprocess import preprocess_answer_for_judge
     judge_answer = preprocess_answer_for_judge(answer)
     MAX_JUDGE_CHARS = 3000
 
-    prompt = (
-        'You are a benchmark evaluator for a cross-document analysis system.\n\n'
-        f'Question: "{question[:200]}"\nCategory: {category}\n\n'
-        f'The system produced this answer:\n"{judge_answer[:MAX_JUDGE_CHARS]}"\n\n'
-        'Rate each aspect from 0 to 100:\n'
-        '1. chain_coverage: How well does the answer cover facts from multiple documents to '
-        'build a complete answer? A good answer connects information across sources and covers '
-        'the main aspects asked in the question.\n'
-        '2. multi_doc: Does the answer reference or cite multiple source documents? '
-        'Look for any document names, years, or version references.\n\n'
-        'Reply with ONLY two numbers (0-100) separated by commas.\n'
-        'Example: 75,80'
-    )
+    # Extraire les claims de la chain depuis le ground_truth
+    chain = []
+    if ground_truth:
+        chain = ground_truth.get("chain", [])
+
+    if chain:
+        # Mode evidence-based : vérifier chaque claim de la chain
+        claims_text = "\n".join(
+            f'- Claim {i+1} (from {c.get("doc_id", "?")[:40]}): "{c.get("text", "")[:150]}"'
+            for i, c in enumerate(chain)
+        )
+        checks = "\n".join(
+            f'{i+1}. claim{i+1}_covered: Does the answer mention or paraphrase Claim {i+1}? (YES/NO)'
+            for i in range(len(chain))
+        )
+        n_claims = len(chain)
+
+        prompt = (
+            'You are verifying if a system answer covers specific facts from multiple documents.\n\n'
+            f'Question asked: "{question[:200]}"\n\n'
+            f'CLAIMS THAT SHOULD BE COVERED (from {n_claims} different documents):\n'
+            f'{claims_text}\n\n'
+            f'SYSTEM ANSWER:\n"{judge_answer[:MAX_JUDGE_CHARS]}"\n\n'
+            f'For each claim, answer YES or NO (is it covered in the answer, even paraphrased or in a different language?):\n'
+            f'{checks}\n'
+            f'{n_claims+1}. multiple_sources: Does the answer cite or reference 2+ different source documents? (YES/NO)\n\n'
+            f'Reply with ONLY {n_claims+1} answers (YES or NO) separated by commas.\n'
+            f'Example: {"YES," * n_claims}NO'
+        )
+    else:
+        # Fallback : ancien prompt si pas de ground_truth
+        prompt = (
+            'You are a benchmark evaluator for a cross-document analysis system.\n\n'
+            f'Question: "{question[:200]}"\nCategory: {category}\n\n'
+            f'The system produced this answer:\n"{judge_answer[:MAX_JUDGE_CHARS]}"\n\n'
+            'Rate each aspect from 0 to 100:\n'
+            '1. chain_coverage: How well does the answer cover facts from multiple documents?\n'
+            '2. multi_doc: Does the answer reference multiple source documents?\n\n'
+            'Reply with ONLY two numbers (0-100) separated by commas.\nExample: 75,80'
+        )
+
     try:
         resp = client.chat.completions.create(
-            model=LLM_JUDGE_MODEL, max_tokens=10, temperature=0.0,
+            model=LLM_JUDGE_MODEL,
+            max_tokens=30, temperature=0.0,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = resp.choices[0].message.content.strip()
-        parts = [float(x.strip()) for x in raw.split(",")]
-        if len(parts) >= 2:
-            return {
-                "chain_coverage": round(min(parts[0], 100) / 100.0, 3),
-                "multi_doc_cited": round(min(parts[1], 100) / 100.0, 3),
-                "judge_raw": raw,
-            }
+
+        if chain:
+            # Parser YES/NO evidence-based
+            tokens = [t.strip().upper().rstrip(".,;") for t in raw.split(",")]
+            bools = [t.startswith("YES") for t in tokens[:len(chain) + 1]]
+
+            if len(bools) >= len(chain) + 1:
+                claims_covered = sum(bools[:len(chain)])
+                sources = bools[len(chain)]
+
+                coverage = claims_covered / len(chain)
+
+                return {
+                    "chain_coverage": round(coverage, 3),
+                    "multi_doc_cited": 1.0 if sources else 0.0,
+                    "claims_covered": claims_covered,
+                    "claims_total": len(chain),
+                    "judge_raw": raw,
+                    "judge_model": LLM_JUDGE_MODEL,
+                }
+        else:
+            # Fallback : parser scores 0-100
+            parts = [float(x.strip()) for x in raw.split(",")]
+            if len(parts) >= 2:
+                return {
+                    "chain_coverage": round(min(parts[0], 100) / 100.0, 3),
+                    "multi_doc_cited": round(min(parts[1], 100) / 100.0, 3),
+                    "judge_raw": raw,
+                }
     except Exception as e:
         logger.debug(f"[T2T5] LLM judge T5 error: {e}")
     return None
@@ -277,8 +374,9 @@ def evaluate_t2(answer: str, sources_used: list[str], ground_truth: dict) -> dic
     claim2 = ground_truth.get("claim2", {})
 
     # 1. both_sides_surfaced — check keywords from both claims
-    c1_keywords = extract_keywords(claim1.get("text", ""))
-    c2_keywords = extract_keywords(claim2.get("text", ""))
+    # Keywords: curated (si presentes) + extraites du texte
+    c1_keywords = set(claim1.get("keywords", [])) | extract_keywords(claim1.get("text", ""))
+    c2_keywords = set(claim2.get("keywords", [])) | extract_keywords(claim2.get("text", ""))
 
     c1_matched = c1_keywords & answer_words
     c2_matched = c2_keywords & answer_words
@@ -286,8 +384,10 @@ def evaluate_t2(answer: str, sources_used: list[str], ground_truth: dict) -> dic
     c1_coverage = len(c1_matched) / len(c1_keywords) if c1_keywords else 0
     c2_coverage = len(c2_matched) / len(c2_keywords) if c2_keywords else 0
 
-    c1_surfaced = c1_coverage >= 0.5
-    c2_surfaced = c2_coverage >= 0.5
+    # Seuil adaptatif : au moins 3 mots OU 40% de couverture (le plus permissif)
+    # Evite de penaliser les claims longues (beaucoup de keywords = seuil % trop strict)
+    c1_surfaced = len(c1_matched) >= 3 or c1_coverage >= 0.4
+    c2_surfaced = len(c2_matched) >= 3 or c2_coverage >= 0.4
 
     if c1_surfaced and c2_surfaced:
         both_sides = 1.0
@@ -433,7 +533,9 @@ def evaluate_t5(
         result["chain_coverage"] = 0.0  # N/A
         result["multi_doc_cited"] = min(len(unique_docs) / 2, 1.0)
         result["proactive_detection"] = proactive
-        result["both_sides_surfaced"] = 1.0 if (c1_cov >= 0.4 and c2_cov >= 0.4) else 0.0
+        result["both_sides_surfaced"] = 1.0 if (
+            (len(c1_matched) >= 3 or c1_cov >= 0.4) and (len(c2_matched) >= 3 or c2_cov >= 0.4)
+        ) else 0.0
         result["docs_cited"] = len(unique_docs)
 
     elif category == "multi_source_synthesis":
@@ -502,6 +604,7 @@ def _call_osmosis_api(
         "use_graph_first": use_kg,
         "use_kg_traversal": use_kg,
         "use_latest": True,
+        "skip_tension_summary": True,
     }
     headers = {
         "Authorization": f"Bearer {token_mgr.get()}",
@@ -511,7 +614,7 @@ def _call_osmosis_api(
         f"{api_base}/api/search",
         json=payload,
         headers=headers,
-        timeout=120,
+        timeout=180,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -692,19 +795,46 @@ def run_benchmark_job(
         logger.info(f"[T2T5:BENCH] Loaded {total} questions")
 
         # ── Phase 2 : API calls + evaluation (parallelise) ─────────
+        # Note: contrairement a RAGAS (collecte-first, eval-after), T2/T5
+        # evalue chaque question immediatement apres l'appel API. En mode local,
+        # cela cause un swap Ollama par question (synthese → juge → synthese).
+        # Acceptable car Ollama swap automatiquement (~5-10s), et T2/T5 est
+        # sequentiel par nature (1 question a la fois pour le juge).
         per_sample: list[dict] = []
         errors = 0
+
+        # Retry judge init (Ollama peut mettre quelques secondes a charger le modele)
         judge_client = _get_llm_judge()
+        if not judge_client:
+            import time as _time
+            logger.warning("[T2T5:BENCH] Judge unavailable on first try, retrying in 10s...")
+            _time.sleep(10)
+            _llm_judge_client = None  # Reset singleton pour retry
+            judge_client = _get_llm_judge()
+
         judge_mode = "hybrid" if judge_client else "keyword"
+        if not judge_client:
+            logger.error("[T2T5:BENCH] ⚠️ LLM JUDGE UNAVAILABLE — falling back to keyword-only mode. Scores will be less accurate.")
 
         import threading
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        concurrency = int(os.getenv("BENCHMARK_CONCURRENCY", "15"))
-        logger.info(f"[T2T5:BENCH] Evaluation mode: {judge_mode}, concurrency: {concurrency}")
+        # Concurrence collecte : haute si synthese cloud (DeepInfra), basse si Ollama local
+        # Concurrence juge : toujours 1 si Ollama (sequentiel)
+        is_local_judge = os.getenv("T2T5_JUDGE_PROVIDER") == "ollama"
+        collect_concurrency = int(os.getenv("BENCHMARK_COLLECT_CONCURRENCY", "15"))
+        judge_concurrency = 1 if is_local_judge else int(os.getenv("BENCHMARK_CONCURRENCY", "15"))
+        logger.info(f"[T2T5:BENCH] Evaluation mode: {judge_mode}, collect_concurrency: {collect_concurrency}, judge_concurrency: {judge_concurrency}")
+
+        # ══════════════════════════════════════════════════════════════
+        # COLLECTE-FIRST, EVAL-AFTER : toutes les collectes (synthese)
+        # d'abord, puis toutes les evaluations (juge). Minimise les swaps
+        # de modele Ollama en mode local (1 swap au lieu de 80).
+        # ══════════════════════════════════════════════════════════════
 
         _progress_counter = [0]
 
-        def _process_t2t5(i, q_item):
+        # ── Phase 2a : Collecte API + evaluation keyword (synthese) ──
+        def _collect_and_keyword_eval(i, q_item):
             question = q_item.get("question", "")
             if not question:
                 return None, False
@@ -723,16 +853,6 @@ def run_benchmark_job(
                         api_result["sources_used"],
                         ground_truth,
                     )
-                    if judge_client and api_result["answer"]:
-                        claim1_text = ground_truth.get("claim1", {}).get("text", "")
-                        claim2_text = ground_truth.get("claim2", {}).get("text", "")
-                        llm_scores = _llm_judge_t2(
-                            judge_client, question, claim1_text, claim2_text, api_result["answer"]
-                        )
-                        if llm_scores:
-                            evaluation["keyword_both_sides"] = evaluation["both_sides_surfaced"]
-                            evaluation["both_sides_surfaced"] = llm_scores["both_sides_surfaced"]
-                            evaluation["judge_model"] = LLM_JUDGE_MODEL
 
                 elif task_type == "T5":
                     if not category:
@@ -751,14 +871,6 @@ def run_benchmark_job(
                         grading_rules,
                         category,
                     )
-                    if judge_client and api_result["answer"] and category in ("cross_doc_chain", "multi_source_synthesis"):
-                        llm_scores = _llm_judge_t5(
-                            judge_client, question, category, api_result["answer"]
-                        )
-                        if llm_scores:
-                            evaluation["keyword_chain_coverage"] = evaluation["chain_coverage"]
-                            evaluation["chain_coverage"] = llm_scores["chain_coverage"]
-                            evaluation["judge_model"] = LLM_JUDGE_MODEL
                 else:
                     evaluation = {"task_type": "unknown"}
 
@@ -766,13 +878,13 @@ def run_benchmark_job(
                 if _progress_counter[0] % 5 == 0 or _progress_counter[0] == total:
                     _update_redis_state(redis_url, {
                         "status": "running", "profile": profile,
-                        "phase": "api_eval", "progress": _progress_counter[0],
+                        "phase": "api_collect", "progress": _progress_counter[0],
                         "total": total, "current_question": question[:100],
                     })
 
                 logger.info(
                     f"[T2T5:BENCH] [{_progress_counter[0]}/{total}] {q_item.get('question_id', '')} "
-                    f"— {task_type} evaluated"
+                    f"— {task_type} collected"
                 )
 
                 return {
@@ -786,6 +898,8 @@ def run_benchmark_job(
                     "chunks_retrieved": api_result["chunks_retrieved"],
                     "sources_used": api_result["sources_used"],
                     "latency_ms": api_result["latency_ms"],
+                    "_task_type": task_type,
+                    "_category": category,
                 }, False
 
             except Exception as e:
@@ -796,11 +910,14 @@ def run_benchmark_job(
                     "task_name": q_item.get("_task_name", ""),
                     "evaluation": {"task_type": q_item.get("_task_type", ""), "error": str(e)[:200]},
                     "error": str(e)[:200],
+                    "_task_type": q_item.get("_task_type", ""),
+                    "_category": "",
                 }, True
 
-        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        logger.info(f"[T2T5:BENCH] Phase 2a: Collecting {total} answers (synthesis model)...")
+        with ThreadPoolExecutor(max_workers=collect_concurrency) as executor:
             futures = {
-                executor.submit(_process_t2t5, i, q): i
+                executor.submit(_collect_and_keyword_eval, i, q): i
                 for i, q in enumerate(all_questions)
             }
             for future in as_completed(futures):
@@ -809,6 +926,70 @@ def run_benchmark_job(
                     per_sample.append(result)
                     if is_error:
                         errors += 1
+
+        logger.info(f"[T2T5:BENCH] Phase 2a complete: {len(per_sample)} samples collected")
+
+        # ── Phase 2b : Evaluation LLM juge (1 seul swap Ollama ici) ──
+        if judge_client:
+            _update_redis_state(redis_url, {
+                "status": "running", "profile": profile,
+                "phase": "llm_judge", "progress": 0,
+                "total": len(per_sample),
+                "current_question": "LLM judge evaluation...",
+            })
+            logger.info(f"[T2T5:BENCH] Phase 2b: LLM judge on {len(per_sample)} samples (judge model: {LLM_JUDGE_MODEL})...")
+
+            judged = 0
+            for sample in per_sample:
+                if sample.get("error"):
+                    continue
+
+                task_type = sample.get("_task_type", "")
+                evaluation = sample["evaluation"]
+                answer = sample.get("answer", "")
+                question = sample.get("question", "")
+                ground_truth = sample.get("ground_truth", {})
+                category = sample.get("_category", "")
+
+                if not answer:
+                    continue
+
+                if task_type == "T2":
+                    claim1_text = ground_truth.get("claim1", {}).get("text", "")
+                    claim2_text = ground_truth.get("claim2", {}).get("text", "")
+                    llm_scores = _llm_judge_t2(
+                        judge_client, question, claim1_text, claim2_text, answer
+                    )
+                    if llm_scores:
+                        evaluation["keyword_both_sides"] = evaluation["both_sides_surfaced"]
+                        evaluation["both_sides_surfaced"] = llm_scores["both_sides_surfaced"]
+                        evaluation["judge_model"] = LLM_JUDGE_MODEL
+
+                elif task_type == "T5" and category in ("cross_doc_chain", "multi_source_synthesis"):
+                    llm_scores = _llm_judge_t5(
+                        judge_client, question, category, answer,
+                        ground_truth=ground_truth,
+                    )
+                    if llm_scores:
+                        evaluation["keyword_chain_coverage"] = evaluation["chain_coverage"]
+                        evaluation["chain_coverage"] = llm_scores["chain_coverage"]
+                        evaluation["judge_model"] = LLM_JUDGE_MODEL
+
+                judged += 1
+                if judged % 10 == 0:
+                    _update_redis_state(redis_url, {
+                        "status": "running", "profile": profile,
+                        "phase": "llm_judge", "progress": judged,
+                        "total": len(per_sample),
+                    })
+                    logger.info(f"[T2T5:BENCH] Judge progress: {judged}/{len(per_sample)}")
+
+            logger.info(f"[T2T5:BENCH] Phase 2b complete: {judged} samples judged")
+
+        # Cleanup temp fields
+        for sample in per_sample:
+            sample.pop("_task_type", None)
+            sample.pop("_category", None)
 
         per_sample.sort(key=lambda s: s.get("question_id", ""))
 

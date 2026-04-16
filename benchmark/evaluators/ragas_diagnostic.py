@@ -519,9 +519,17 @@ _fallback_metrics_cache: dict[str, Any] = {}
 
 
 def _get_fallback_metric(original_metric, metric_name: str):
-    """Cree une metrique identique mais avec GPT-4o (plus de tokens) pour les cas longs."""
+    """Cree une metrique identique mais avec un modele plus capable pour les cas longs.
+
+    En mode cloud : GPT-4o (plus de tokens que gpt-4o-mini).
+    En mode Ollama : pas de fallback (meme modele, retourne None).
+    """
     if metric_name in _fallback_metrics_cache:
         return _fallback_metrics_cache[metric_name]
+
+    # Pas de fallback en mode Ollama (un seul modele local)
+    if os.getenv("RAGAS_JUDGE_PROVIDER", "openai") == "ollama":
+        return None
 
     try:
         from openai import AsyncOpenAI
@@ -555,27 +563,61 @@ _ragas_client = None  # singleton pour eviter l'epuisement du pool de connexions
 def _get_ragas_providers():
     """Configure le LLM et embeddings pour RAGAS v0.4+.
 
-    Utilise un AsyncOpenAI singleton (requis par ragas collections metrics).
-    GPT-4o-mini comme evaluateur : rapide, pas cher, different du LLM de synthese.
+    Supporte deux providers pour le juge :
+    - "openai" (defaut) : gpt-4o-mini via API OpenAI
+    - "ollama" : M-Prometheus-14B via Ollama (API OpenAI-compatible)
 
     Le client est reutilise entre les evaluations OSMOSIS et RAG pour eviter
-    l'epuisement du pool de connexions httpx (cause de "Connection error"
-    quand on enchaine deux evaluations de 100 samples avec haute concurrency).
+    l'epuisement du pool de connexions httpx.
+
+    Les embeddings restent sur OpenAI (text-embedding-3-small) en V1 — cout
+    negligeable (~$0.01/benchmark). Migration vers e5-large local en V2.
     """
     global _ragas_client
     from openai import AsyncOpenAI
     from ragas.llms import llm_factory
     from ragas.embeddings import OpenAIEmbeddings
 
-    if _ragas_client is None:
-        _ragas_client = AsyncOpenAI(
-            max_retries=5,
-            timeout=60.0,
-        )
+    judge_provider = os.getenv("RAGAS_JUDGE_PROVIDER", "openai")
 
-    ragas_model = os.getenv("RAGAS_JUDGE_MODEL", "gpt-4o-mini")
+    if judge_provider == "ollama":
+        # Mode local : Ollama expose une API OpenAI-compatible sur /v1
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+        ragas_model = os.getenv("RAGAS_JUDGE_MODEL", "m-prometheus-14b")
+        if _ragas_client is None:
+            _ragas_client = AsyncOpenAI(
+                base_url=f"{ollama_url}/v1",
+                api_key="ollama",  # Ollama n'exige pas de clé
+                max_retries=3,
+                timeout=120.0,  # Ollama est plus lent que gpt-4o-mini
+            )
+        logger.info(f"[RAGAS] Using Ollama judge: {ragas_model} at {ollama_url}")
+    else:
+        # Mode cloud : OpenAI standard
+        ragas_model = os.getenv("RAGAS_JUDGE_MODEL", "gpt-4o-mini")
+        if _ragas_client is None:
+            _ragas_client = AsyncOpenAI(
+                max_retries=5,
+                timeout=60.0,
+            )
+
     llm = llm_factory(ragas_model, client=_ragas_client)
-    embeddings = OpenAIEmbeddings(client=_ragas_client, model="text-embedding-3-small")
+
+    # Embeddings : local e5-large en mode Ollama, OpenAI sinon
+    if judge_provider == "ollama":
+        try:
+            from langchain_community.embeddings import HuggingFaceEmbeddings as LCHFEmb
+            from ragas.embeddings import LangchainEmbeddingsWrapper
+            emb_model = os.getenv("RAGAS_EMBEDDINGS_MODEL", "intfloat/multilingual-e5-large")
+            hf_emb = LCHFEmb(model_name=emb_model)
+            embeddings = LangchainEmbeddingsWrapper(hf_emb)
+            logger.info(f"[RAGAS] Using local embeddings: {emb_model}")
+        except Exception as e:
+            logger.warning(f"[RAGAS] Local embeddings failed ({e}), falling back to OpenAI")
+            embeddings_client = AsyncOpenAI(max_retries=3, timeout=30.0)
+            embeddings = OpenAIEmbeddings(client=embeddings_client, model="text-embedding-3-small")
+    else:
+        embeddings = OpenAIEmbeddings(client=_ragas_client, model="text-embedding-3-small")
 
     return llm, embeddings
 
@@ -894,6 +936,7 @@ def _call_osmosis_api(
         "use_graph_first": use_kg,
         "use_kg_traversal": use_kg,
         "use_latest": True,
+        "skip_tension_summary": True,  # Benchmark : pas besoin des résumés de tensions
     }
     headers = {
         "Authorization": f"Bearer {token_mgr.get()}",
@@ -1065,14 +1108,20 @@ def run_benchmark_job(
         token_mgr = TokenManager(api_base)
         token_mgr.get()  # force initial fetch to fail fast if creds are wrong
 
-        # ── Phase 1 : API calls OSMOSIS ─────────────────────────────
+        # ══════════════════════════════════════════════════════════════
+        # COLLECTE-FIRST : toutes les collectes d'abord, évaluations ensuite.
+        # Cela minimise les swaps de modèle Ollama en mode local :
+        #   Collectes (synthèse Qwen) → 1 seul swap → Évaluations (juge M-Prometheus)
+        # ══════════════════════════════════════════════════════════════
+
+        # ── Phase 1 : Collecte OSMOSIS (synthèse) ───────────────────
         osmosis_samples = _collect_api_samples(
             tasks=prof["tasks"],
             api_base=api_base,
             token_mgr=token_mgr,
             redis_url=redis_url,
             use_kg=True,
-            phase_label="api_call",
+            phase_label="api_call_osmosis",
         )
 
         if not osmosis_samples:
@@ -1082,11 +1131,47 @@ def run_benchmark_job(
             })
             return
 
-        # ── Phase 2 : RAGAS eval OSMOSIS ────────────────────────────
+        # ── Phase 2 : Collecte RAG baseline (même modèle, pas de swap) ─
+        rag_samples = None
+        if compare_rag:
+            _update_redis_state(redis_url, {
+                "status": "running",
+                "profile": profile,
+                "phase": "api_call_rag",
+                "progress": 0,
+                "total": len(osmosis_samples),
+                "current_question": "Collecting RAG baseline...",
+            })
+
+            # Force token refresh (le token a pu expirer pendant la collecte OSMOSIS)
+            token_mgr._token = None
+            logger.info("[RAGAS:BENCH] Token refreshed before RAG baseline collection")
+
+            # Concurrence réduite pour le baseline
+            import os as _os
+            saved_concurrency = _os.environ.get("BENCHMARK_CONCURRENCY")
+            _os.environ["BENCHMARK_CONCURRENCY"] = "5"
+
+            rag_samples = _collect_api_samples(
+                tasks=prof["tasks"],
+                api_base=api_base,
+                token_mgr=token_mgr,
+                redis_url=redis_url,
+                use_kg=False,
+                phase_label="api_call_rag",
+            )
+
+            # Restaurer la concurrence
+            if saved_concurrency:
+                _os.environ["BENCHMARK_CONCURRENCY"] = saved_concurrency
+            else:
+                _os.environ.pop("BENCHMARK_CONCURRENCY", None)
+
+        # ── Phase 3 : Évaluation OSMOSIS (juge — swap Ollama ici) ──
         _update_redis_state(redis_url, {
             "status": "running",
             "profile": profile,
-            "phase": "ragas_eval",
+            "phase": "ragas_eval_osmosis",
             "progress": 0,
             "total": len(osmosis_samples),
             "current_question": "Evaluating OSMOSIS samples...",
@@ -1103,50 +1188,29 @@ def run_benchmark_job(
             logger.error(f"[RAGAS:BENCH] OSMOSIS evaluation failed: {eval_err}")
             osmosis_result = {"scores": {}, "per_sample": [], "error": str(eval_err)[:200]}
 
-        # ── Phase 3 : RAG baseline (optionnel) ─────────────────────
+        # ── Phase 4 : Évaluation RAG (même juge, pas de swap) ──────
         rag_result = None
-        if compare_rag:
+        if compare_rag and rag_samples:
+            import time as _time
+            _time.sleep(2)  # Stabiliser le pool httpx entre les deux évaluations
+
             _update_redis_state(redis_url, {
                 "status": "running",
                 "profile": profile,
-                "phase": "rag_baseline",
+                "phase": "ragas_eval_rag",
                 "progress": 0,
-                "total": len(osmosis_samples),
-                "current_question": "Collecting RAG baseline...",
+                "total": len(rag_samples),
+                "current_question": "Evaluating RAG baseline...",
             })
-
-            rag_samples = _collect_api_samples(
-                tasks=prof["tasks"],
-                api_base=api_base,
-                token_mgr=token_mgr,
-                redis_url=redis_url,
-                use_kg=False,
-                phase_label="rag_baseline",
-            )
-
-            if rag_samples:
-                # Petit delai pour laisser le pool httpx se stabiliser
-                # entre les deux evaluations (evite "Connection error")
-                import time as _time
-                _time.sleep(2)
-
-                _update_redis_state(redis_url, {
-                    "status": "running",
-                    "profile": profile,
-                    "phase": "rag_eval",
-                    "progress": 0,
-                    "total": len(rag_samples),
-                    "current_question": "Evaluating RAG baseline...",
-                })
-                try:
-                    rag_result = run_ragas_evaluation(
-                        rag_samples,
-                        label="RAG",
-                        use_reference=use_reference,
-                    )
-                except Exception as eval_err:
-                    logger.error(f"[RAGAS:BENCH] RAG evaluation failed: {eval_err}")
-                    rag_result = {"scores": {}, "per_sample": [], "error": str(eval_err)[:200]}
+            try:
+                rag_result = run_ragas_evaluation(
+                    rag_samples,
+                    label="RAG",
+                    use_reference=use_reference,
+                )
+            except Exception as eval_err:
+                logger.error(f"[RAGAS:BENCH] RAG evaluation failed: {eval_err}")
+                rag_result = {"scores": {}, "per_sample": [], "error": str(eval_err)[:200]}
 
         # ── Phase 4 : Report ────────────────────────────────────────
         _update_redis_state(redis_url, {
@@ -1181,11 +1245,19 @@ def run_benchmark_job(
             "synthesis_model": synthesis_model,
             "synthesis_provider": synthesis_provider,
             "duration_s": duration_s,
+            # Format legacy (compatibilité)
             "scores_osmosis": osmosis_result.get("scores", {}),
             "scores_rag": rag_result.get("scores", {}) if rag_result else None,
             "osmosis": osmosis_result,
             "baseline": rag_result,
             "per_sample": osmosis_result.get("per_sample", []),
+            # Format frontend (systems.osmosis / systems.baseline)
+            "systems": {
+                "osmosis": osmosis_result,
+                "baseline": rag_result,
+            } if rag_result else {
+                "osmosis": osmosis_result,
+            },
         }
 
         with open(report_path, "w", encoding="utf-8") as f:

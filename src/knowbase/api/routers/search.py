@@ -99,6 +99,7 @@ def search(
         release_id=request.release_id,
         use_latest=request.use_latest,
         response_mode_override=request.response_mode,
+        skip_tension_summary=request.skip_tension_summary,
     )
 
 

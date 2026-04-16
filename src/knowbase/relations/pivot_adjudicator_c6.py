@@ -137,18 +137,14 @@ class PivotAdjudicatorC6:
         )
 
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-            model = os.environ.get("OSMOSIS_NLI_MODEL", "claude-haiku-4-5-20251001")
-
-            response = client.messages.create(
-                model=model,
-                max_tokens=500,
+            from knowbase.common.llm_router import get_llm_router, TaskType
+            router = get_llm_router()
+            text = router.complete(
+                task_type=TaskType.FAST_CLASSIFICATION,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-            )
-
-            text = response.content[0].text.strip()
+                max_tokens=500,
+            ).strip()
             if text.startswith("```"):
                 text = text.split("```")[1]
                 if text.startswith("json"):

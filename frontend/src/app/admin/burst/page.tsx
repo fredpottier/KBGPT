@@ -395,6 +395,20 @@ export default function BurstAdminPage() {
     enabled: !!status?.instance_ip,
   })
 
+  // LLM Mode — detecter full_local pour skip EC2
+  const { data: llmMode } = useQuery<{ mode: string }>({
+    queryKey: ['admin', 'llm-mode'],
+    queryFn: async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/admin/settings/llm-mode`, { headers: getAuthHeaders() })
+        if (!res.ok) return { mode: 'normal' }
+        return res.json()
+      } catch { return { mode: 'normal' } }
+    },
+    staleTime: 30000,
+  })
+  const isFullLocal = llmMode?.mode === 'full_local'
+
   // Mutations
   const prepareMutation = useMutation({
     mutationFn: async () => {
@@ -503,8 +517,9 @@ export default function BurstAdminPage() {
   const isInfraStarting = infraStartingStates.includes(currentStatus)
   const terminalStates = ['idle', 'completed', 'failed', 'cancelled', 'no_batch']
   const canPrepare = terminalStates.includes(currentStatus)
-  const canStart = currentStatus === 'preparing'
-  const canProcess = currentStatus === 'ready'
+  const canStart = currentStatus === 'preparing' && !isFullLocal
+  // En mode full_local, on peut traiter directement apres prepare (skip EC2)
+  const canProcess = currentStatus === 'ready' || (isFullLocal && currentStatus === 'preparing')
   const isProcessing = currentStatus === 'processing'
   const canCancel = status?.active && !terminalStates.includes(currentStatus)
 
@@ -540,6 +555,19 @@ export default function BurstAdminPage() {
         </Box>
       )}
 
+      {/* Full Local Mode Banner */}
+      {isFullLocal && (
+        <Box bg="red.900" border="1px solid" borderColor="red.600" rounded="lg" px={3} py={2} mb={3}>
+          <HStack spacing={2}>
+            <Icon as={FiCpu} color="red.400" />
+            <Text fontSize="sm" color="red.200">
+              Mode Full Local — Le burst utilise le GPU local (Ollama). Pas d'EC2 necessaire.
+              {currentStatus === 'preparing' && ' Passez directement a l\'etape 3.'}
+            </Text>
+          </HStack>
+        </Box>
+      )}
+
       {/* Action Buttons + Document Counters on same line */}
       <Flex gap={2} mb={3} flexWrap="wrap" align="center" justify="space-between" bg="whiteAlpha.50" rounded="lg" p={2} border="1px solid" borderColor="whiteAlpha.100">
         {/* Left: Action Buttons - Nav color theme (indigo family) */}
@@ -565,15 +593,17 @@ export default function BurstAdminPage() {
             onClick={() => startMutation.mutate()}
             isLoading={startMutation.isPending || isInfraStarting}
             loadingText="Démarrage..."
-            isDisabled={!canStart && !isInfraStarting}
-            bg={(canStart || isInfraStarting) ? '#6366F1' : '#4338CA'}
+            isDisabled={isFullLocal || (!canStart && !isInfraStarting)}
+            bg={isFullLocal ? '#2D3748' : (canStart || isInfraStarting) ? '#6366F1' : '#4338CA'}
             color="white"
-            opacity={(canStart || isInfraStarting) ? 1 : 0.7}
-            _hover={(canStart || isInfraStarting) ? { bg: '#818CF8', transform: 'translateY(-1px)', boxShadow: '0 0 15px rgba(99, 102, 241, 0.5)' } : {}}
-            _disabled={{ bg: '#4338CA', color: 'whiteAlpha.700', opacity: 0.7, cursor: 'not-allowed' }}
+            opacity={isFullLocal ? 0.4 : (canStart || isInfraStarting) ? 1 : 0.7}
+            _hover={isFullLocal ? {} : (canStart || isInfraStarting) ? { bg: '#818CF8', transform: 'translateY(-1px)', boxShadow: '0 0 15px rgba(99, 102, 241, 0.5)' } : {}}
+            _disabled={{ bg: isFullLocal ? '#2D3748' : '#4338CA', color: 'whiteAlpha.500', opacity: isFullLocal ? 0.4 : 0.7, cursor: 'not-allowed' }}
             transition="all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
+            title={isFullLocal ? 'Mode Full Local — pas d\'EC2, le GPU local est utilisé' : undefined}
+            textDecoration={isFullLocal ? 'line-through' : undefined}
           >
-            2. Démarrer
+            2. Démarrer EC2
           </Button>
           <Button
             size="sm"

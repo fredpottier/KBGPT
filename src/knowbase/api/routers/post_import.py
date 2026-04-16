@@ -267,7 +267,7 @@ async def run_pipeline(
             run_pipeline_job,
             ordered_steps,
             tenant_id,
-            job_timeout="45m",
+            job_timeout="3h",  # 8561 paires contradictions = ~1h, + C4/C6/perspectives
         )
 
         return PipelineStartResponse(
@@ -300,10 +300,74 @@ async def cancel_pipeline(
 # ============================================================================
 
 
+def _ensure_vllm_for_full_local() -> bool:
+    """En mode full_local, s'assure que vLLM local tourne pour le parallelisme.
+
+    Si vLLM n'est pas actif, le lance automatiquement et active le burst provider.
+    Retourne True si vLLM est actif (lance ou deja present), False sinon (fallback Ollama).
+    """
+    try:
+        from knowbase.common.llm_router import get_llm_router, LlmMode
+        mode = get_llm_router()._get_llm_mode()
+        if mode != LlmMode.FULL_LOCAL:
+            return False
+
+        # Verifier si le burst est deja actif via Redis
+        from knowbase.ingestion.burst.provider_switch import (
+            get_burst_state_from_redis,
+            start_local_vllm,
+            is_local_vllm_running,
+            activate_burst_providers,
+            _unload_all_ollama_models,
+            VLLM_LOCAL_PORT,
+            VLLM_LOCAL_CONTAINER,
+        )
+
+        redis_state = get_burst_state_from_redis()
+        if redis_state and redis_state.get("active"):
+            logger.info("[PostImport] vLLM burst already active — using it")
+            return True
+
+        # vLLM container deja lance mais burst pas active?
+        if is_local_vllm_running():
+            logger.info("[PostImport] vLLM container running, activating burst provider...")
+            activate_burst_providers(
+                vllm_url=f"http://{VLLM_LOCAL_CONTAINER}:8000",
+                embeddings_url="",
+                vllm_model="Qwen/Qwen2.5-14B-Instruct-AWQ",
+            )
+            return True
+
+        # Lancer vLLM automatiquement
+        logger.info("[PostImport] Mode full_local — lancement automatique vLLM local...")
+        _unload_all_ollama_models()
+        result = start_local_vllm()
+        if result.get("success"):
+            logger.info(f"[PostImport] vLLM local demarre (container: {result.get('container_id')})")
+            return True
+        else:
+            logger.warning(f"[PostImport] vLLM start failed: {result.get('error')} — fallback Ollama")
+            return False
+
+    except Exception as e:
+        logger.warning(f"[PostImport] vLLM auto-start failed: {e} — fallback Ollama")
+        return False
+
+
 def run_pipeline_job(steps: List[str], tenant_id: str) -> dict:
-    """Job RQ — exécute les étapes séquentiellement."""
+    """Job RQ — exécute les étapes séquentiellement.
+
+    En mode full_local, lance automatiquement vLLM local pour le parallelisme.
+    """
     results: List[dict] = []
     pipeline_start = time.time()
+
+    # Auto-start vLLM en mode full_local (parallelisme pour C4/C6/perspectives)
+    vllm_active = _ensure_vllm_for_full_local()
+    if vllm_active:
+        logger.info("[PostImport] Pipeline using vLLM local (parallel mode)")
+    else:
+        logger.info("[PostImport] Pipeline using Ollama (sequential mode)")
 
     _update_state(tenant_id, running=True, all_steps=steps, completed=[])
 

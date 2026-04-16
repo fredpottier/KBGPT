@@ -12,7 +12,7 @@ from knowbase.api.services.audit_service import get_audit_service
 from knowbase.api.services.knowledge_graph_service import KnowledgeGraphService
 from knowbase.api.dependencies import require_admin, get_tenant_id
 from knowbase.db import get_db
-from knowbase.db.models import AuditLog
+from knowbase.db.models import AuditLog, SystemSetting
 from knowbase.common.logging import setup_logging
 from knowbase.config.settings import get_settings
 from sqlalchemy.orm import Session
@@ -2436,6 +2436,188 @@ async def batch_archive(
     except Exception as e:
         logger.error(f"[ARCHIVER] Erreur batch archivage: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Settings LLM Mode — Normal / Partial Local / Full Local
+# ============================================================================
+
+
+class LlmModeRequest(BaseModel):
+    """Requête pour changer le mode LLM."""
+    mode: str = Field(
+        ...,
+        description="Mode LLM: 'normal' | 'partial_local' | 'full_local'",
+        pattern="^(normal|partial_local|full_local)$"
+    )
+
+
+class LlmModeResponse(BaseModel):
+    """Réponse du mode LLM actuel."""
+    mode: str
+    synthesis_model: str
+    judge_model: str
+
+
+class LlmModeStatusResponse(BaseModel):
+    """État temps réel du mode LLM."""
+    mode: str
+    synthesis_model: str
+    judge_model: str
+    ollama_available: bool
+    burst_active: bool
+    burst_provider: Optional[str] = None
+
+
+@router.get("/settings/llm-mode/current")
+async def get_llm_mode_current(
+    db: Session = Depends(get_db),
+):
+    """Retourne le mode LLM actuel (endpoint public, pas de role admin requis).
+    Utilise par l'indicateur top menu visible sur toutes les pages."""
+    import json as _json
+
+    setting = db.query(SystemSetting).filter(
+        SystemSetting.key == "llm_mode"
+    ).first()
+
+    mode = "normal"
+    if setting:
+        data = _json.loads(setting.value)
+        mode = data.get("mode", "normal")
+
+    return {"mode": mode}
+
+
+@router.get("/settings/llm-mode", response_model=LlmModeResponse)
+async def get_llm_mode(
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Retourne le mode LLM actuel (normal, partial_local, full_local)."""
+    import json as _json
+
+    setting = db.query(SystemSetting).filter(
+        SystemSetting.key == "llm_mode"
+    ).first()
+
+    if setting:
+        data = _json.loads(setting.value)
+    else:
+        data = {"mode": "normal"}
+
+    # Lire les modèles depuis la config YAML
+    from knowbase.common.llm_router import get_llm_router
+    router_instance = get_llm_router()
+    local_config = router_instance._config.get("local_mode", {})
+
+    return LlmModeResponse(
+        mode=data.get("mode", "normal"),
+        synthesis_model=local_config.get("default_model", "qwen2.5:14b"),
+        judge_model=local_config.get("judge_model", "m-prometheus-14b"),
+    )
+
+
+@router.put("/settings/llm-mode", response_model=LlmModeResponse)
+async def set_llm_mode(
+    request: LlmModeRequest,
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Change le mode LLM. Persiste en PostgreSQL et invalide le cache Redis."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    valid_modes = {"normal", "partial_local", "full_local"}
+    if request.mode not in valid_modes:
+        raise HTTPException(status_code=400, detail=f"Mode invalide. Valeurs acceptées: {valid_modes}")
+
+    # Upsert dans PostgreSQL
+    setting = db.query(SystemSetting).filter(
+        SystemSetting.key == "llm_mode"
+    ).first()
+
+    value_json = _json.dumps({"mode": request.mode})
+
+    if setting:
+        setting.value = value_json
+        setting.updated_at = datetime.now(timezone.utc)
+        setting.updated_by = admin.get("email", "admin")
+    else:
+        setting = SystemSetting(
+            key="llm_mode",
+            value=value_json,
+            updated_by=admin.get("email", "admin"),
+        )
+        db.add(setting)
+
+    db.commit()
+
+    # Invalider le cache Redis + mémoire du llm_router
+    from knowbase.common.llm_router import get_llm_router
+    get_llm_router().invalidate_llm_mode_cache()
+
+    logger.info(f"[ADMIN:LLM_MODE] Mode changé → {request.mode} par {admin.get('email', '?')}")
+
+    local_config = get_llm_router()._config.get("local_mode", {})
+    return LlmModeResponse(
+        mode=request.mode,
+        synthesis_model=local_config.get("default_model", "qwen2.5:14b"),
+        judge_model=local_config.get("judge_model", "m-prometheus-14b"),
+    )
+
+
+@router.get("/settings/llm-mode/status", response_model=LlmModeStatusResponse)
+async def get_llm_mode_status(
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """État temps réel : mode actif, Ollama up/down, burst en cours."""
+    import json as _json
+    import os
+
+    setting = db.query(SystemSetting).filter(
+        SystemSetting.key == "llm_mode"
+    ).first()
+    mode = "normal"
+    if setting:
+        data = _json.loads(setting.value)
+        mode = data.get("mode", "normal")
+
+    # Vérifier Ollama
+    ollama_available = False
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    try:
+        import httpx
+        with httpx.Client(timeout=3.0) as client:
+            resp = client.get(f"{ollama_url}/api/tags")
+            ollama_available = resp.status_code == 200
+    except Exception:
+        pass
+
+    # Vérifier burst actif
+    burst_active = False
+    burst_provider = None
+    try:
+        from knowbase.ingestion.burst.provider_switch import get_burst_state_from_redis
+        state = get_burst_state_from_redis()
+        if state and state.get("active"):
+            burst_active = True
+            burst_provider = state.get("provider", "ec2")
+    except Exception:
+        pass
+
+    from knowbase.common.llm_router import get_llm_router
+    local_config = get_llm_router()._config.get("local_mode", {})
+
+    return LlmModeStatusResponse(
+        mode=mode,
+        synthesis_model=local_config.get("default_model", "qwen2.5:14b"),
+        judge_model=local_config.get("judge_model", "m-prometheus-14b"),
+        ollama_available=ollama_available,
+        burst_active=burst_active,
+        burst_provider=burst_provider,
+    )
 
 
 __all__ = ["router"]

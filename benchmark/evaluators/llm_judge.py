@@ -37,6 +37,7 @@ def call_judge(
 
     is_qwen = "qwen" in model.lower() or model.startswith("Qwen/")
     is_claude = "claude" in model.lower()
+    is_ollama = ":" in model and "/" not in model and not model.startswith(("gpt-", "claude-"))
 
     try:
         if is_claude:
@@ -65,9 +66,12 @@ def call_judge(
             _usage = _resp_data.get("usage", {})
             tokens = _usage.get("input_tokens", 0) + _usage.get("output_tokens", 0)
         else:
-            # OpenAI-compatible (GPT ou Qwen/vLLM) — import lazy
+            # OpenAI-compatible (GPT, Qwen/vLLM, ou Ollama) — import lazy
             from openai import OpenAI  # noqa: import only when needed
-            if is_qwen:
+            if is_ollama:
+                ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+                client = OpenAI(api_key="ollama", base_url=f"{ollama_url}/v1")
+            elif is_qwen:
                 vllm_url = os.environ.get("VLLM_URL", "http://18.194.28.167:8000")
                 client = OpenAI(api_key="EMPTY", base_url=f"{vllm_url}/v1")
             else:

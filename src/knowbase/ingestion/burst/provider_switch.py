@@ -594,3 +594,285 @@ def check_instance_health_with_spot(
         logger.debug(f"[BURST:HEALTH] Health check failed: {e}")
 
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Burst Local — vLLM sur GPU local (mode Full Local)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+VLLM_LOCAL_CONTAINER = "osmose-vllm-local"
+VLLM_LOCAL_PORT = 8001  # Port different du port app (8000)
+VLLM_LOCAL_URL = f"http://localhost:{VLLM_LOCAL_PORT}"
+
+
+def _unload_all_ollama_models() -> int:
+    """Decharge TOUS les modeles Ollama de la VRAM pour liberer le GPU.
+
+    Appelle GET /api/ps pour lister les modeles charges, puis POST /api/generate
+    avec keep_alive=0 pour chacun. Retourne le nombre de modeles decharges.
+    """
+    import requests as _requests
+
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    unloaded = 0
+
+    try:
+        # Lister les modeles en VRAM
+        resp = _requests.get(f"{ollama_url}/api/ps", timeout=5)
+        if resp.status_code != 200:
+            logger.warning(f"[BURST:LOCAL] Cannot list Ollama models: HTTP {resp.status_code}")
+            return 0
+
+        models = resp.json().get("models", [])
+        if not models:
+            logger.info("[BURST:LOCAL] No Ollama models loaded in VRAM — GPU already free")
+            return 0
+
+        # Decharger chaque modele
+        for m in models:
+            model_name = m.get("name", "")
+            if not model_name:
+                continue
+            try:
+                logger.info(f"[BURST:LOCAL] Unloading Ollama model: {model_name}")
+                _requests.post(
+                    f"{ollama_url}/api/generate",
+                    json={"model": model_name, "keep_alive": 0},
+                    timeout=10,
+                )
+                unloaded += 1
+            except Exception as e:
+                logger.warning(f"[BURST:LOCAL] Failed to unload {model_name}: {e}")
+
+        logger.info(f"[BURST:LOCAL] Unloaded {unloaded}/{len(models)} Ollama models — VRAM freed")
+
+    except Exception as e:
+        logger.warning(f"[BURST:LOCAL] Ollama unload failed: {e}")
+
+    return unloaded
+
+
+def start_local_vllm(
+    model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ",
+    gpu_utilization: float = 0.75,
+    max_model_len: int = 8192,
+    max_num_seqs: int = 16,
+) -> Dict[str, Any]:
+    """Lance un container Docker vLLM local sur le GPU.
+
+    Pre-requis :
+    - Docker accessible depuis le container (docker.sock monte)
+    - GPU NVIDIA disponible (--gpus all)
+
+    Etapes :
+    1. Verifier mode Full Local
+    2. Decharger TOUS les modeles Ollama (liberer la VRAM)
+    3. Arreter un eventuel container vLLM existant
+    4. Lancer le container vLLM
+    5. Attendre health check
+    6. Activer le burst via provider_switch
+
+    Returns:
+        {"success": bool, "container_id": str, "url": str, "ollama_unloaded": int, "error": str}
+    """
+    import subprocess
+    import time
+
+    result: Dict[str, Any] = {
+        "success": False, "container_id": None, "url": VLLM_LOCAL_URL,
+        "ollama_unloaded": 0, "error": None,
+    }
+
+    # 1. Verifier que le mode est Full Local
+    try:
+        from knowbase.common.llm_router import get_llm_router, LlmMode
+        mode = get_llm_router()._get_llm_mode()
+        if mode != LlmMode.FULL_LOCAL:
+            result["error"] = f"Burst local requires Full Local mode (current: {mode.value})"
+            return result
+    except Exception as e:
+        result["error"] = f"Cannot check LLM mode: {e}"
+        return result
+
+    # 2. Decharger TOUS les modeles Ollama pour liberer la VRAM
+    result["ollama_unloaded"] = _unload_all_ollama_models()
+    if result["ollama_unloaded"] > 0:
+        logger.info(f"[BURST:LOCAL] Waiting 5s for Ollama to release VRAM...")
+        time.sleep(5)
+
+    # 2b. Decharger le modele d'embeddings du worker (e5-large) pour liberer la VRAM
+    try:
+        from knowbase.common.clients.embeddings import get_embedding_manager
+        emb = get_embedding_manager()
+        if hasattr(emb, 'unload_model'):
+            emb.unload_model()
+            logger.info("[BURST:LOCAL] Embedding model unloaded from GPU")
+            time.sleep(2)
+        elif hasattr(emb, '_model') and emb._model is not None:
+            import gc, torch
+            emb._model = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            logger.info("[BURST:LOCAL] Embedding model forcefully unloaded + CUDA cache cleared")
+            time.sleep(2)
+    except Exception as e:
+        logger.warning(f"[BURST:LOCAL] Could not unload embedding model: {e}")
+
+    # 3. Arreter un eventuel container vLLM local existant
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", VLLM_LOCAL_CONTAINER],
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        pass
+
+    quantization = "awq_marlin" if "AWQ" in model else "auto"
+
+    # Volume HuggingFace cache : le chemin hote doit etre en format Docker.
+    # Depuis un container Docker Desktop Windows, le chemin hote C:\Users\X
+    # est accessible via /c/Users/X ou //c/Users/X.
+    hf_cache_host = os.getenv("HF_CACHE_HOST_PATH", "/c/Users/fredp/.cache/huggingface")
+
+    # Reseau Docker : meme reseau que le worker pour que le health check
+    # fonctionne via le nom de container (pas host.docker.internal)
+    docker_network = os.getenv("DOCKER_NETWORK", "knowbase_network")
+
+    cmd = [
+        "docker", "run", "-d",
+        "--name", VLLM_LOCAL_CONTAINER,
+        "--gpus", "all",
+        "--network", docker_network,
+        "-p", f"{VLLM_LOCAL_PORT}:8000",
+        "--shm-size", "2g",
+        "-v", f"{hf_cache_host}:/root/.cache/huggingface",
+        "vllm/vllm-openai:v0.9.2",
+        "--model", model,
+        "--quantization", quantization,
+        "--gpu-memory-utilization", str(gpu_utilization),
+        "--max-model-len", str(max_model_len),
+        "--max-num-seqs", str(max_num_seqs),
+        # IMPORTANT: chunked prefill corrompt la generation JSON structuree
+        # de Qwen2.5-14B-AWQ dans vLLM v0.9+ (0 claims extraites avec,
+        # 34 claims sans sur le meme doc). Desactiver jusqu'a fix upstream.
+        "--no-enable-chunked-prefill",
+    ]
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if proc.returncode != 0:
+            result["error"] = f"Docker run failed: {proc.stderr[:300]}"
+            return result
+        result["container_id"] = proc.stdout.strip()[:12]
+        logger.info(f"[BURST:LOCAL] Container started: {result['container_id']}")
+    except Exception as e:
+        result["error"] = f"Docker run exception: {e}"
+        return result
+
+    # 4. Attendre que vLLM soit healthy
+    health_url = f"http://{VLLM_LOCAL_CONTAINER}:8000"
+    max_wait = 72  # 72 x 5s = 360s
+    logger.info(f"[BURST:LOCAL] Waiting for vLLM health at {health_url} (max {max_wait*5}s)...")
+    for i in range(max_wait):
+        time.sleep(5)
+        # Verifier que le container tourne encore
+        try:
+            check = subprocess.run(
+                ["docker", "inspect", "--format={{.State.Running}}", VLLM_LOCAL_CONTAINER],
+                capture_output=True, text=True, timeout=5,
+            )
+            if check.stdout.strip() != "true":
+                # Container crash — lire les logs avant d'abandonner
+                logs = subprocess.run(
+                    ["docker", "logs", "--tail", "20", VLLM_LOCAL_CONTAINER],
+                    capture_output=True, text=True, timeout=10,
+                )
+                result["error"] = f"vLLM container crashed: {logs.stderr[-300:] if logs.stderr else logs.stdout[-300:]}"
+                logger.error(f"[BURST:LOCAL] Container crashed at {(i+1)*5}s: {result['error']}")
+                return result
+        except Exception:
+            pass
+
+        if _quick_health_check(health_url, timeout=5):
+            logger.info(f"[BURST:LOCAL] vLLM healthy after {(i+1)*5}s")
+            result["success"] = True
+            break
+
+        if (i + 1) % 12 == 0:  # Log toutes les 60s
+            logger.info(f"[BURST:LOCAL] Still waiting... {(i+1)*5}s elapsed")
+    else:
+        # Timeout — ne PAS supprimer le container (garder pour debug)
+        result["error"] = f"vLLM did not become healthy within {max_wait*5}s (container kept for debug: docker logs {VLLM_LOCAL_CONTAINER})"
+        logger.error(f"[BURST:LOCAL] Timeout — container kept alive for inspection")
+        return result
+
+    # 5. Activer le burst via le provider_switch standard
+    activation = activate_burst_providers(
+        vllm_url=f"http://{VLLM_LOCAL_CONTAINER}:8000",
+        embeddings_url="",  # Embeddings en CPU local, pas de TEI
+        vllm_model=model,
+    )
+    if not activation.get("llm_router"):
+        result["error"] = f"Burst activation failed: {activation.get('errors', [])}"
+        result["success"] = False
+        stop_local_vllm()
+        return result
+
+    # 6. Marquer le provider comme "local" dans Redis
+    r = _get_redis_client()
+    if r:
+        try:
+            state_raw = r.get(REDIS_BURST_STATE_KEY)
+            if state_raw:
+                state = json.loads(state_raw)
+                state["provider"] = "local"
+                r.setex(REDIS_BURST_STATE_KEY, 86400, json.dumps(state))
+        except Exception:
+            pass
+
+    logger.info(f"[BURST:LOCAL] vLLM local ACTIVE: {model} on port {VLLM_LOCAL_PORT}")
+    return result
+
+
+def stop_local_vllm() -> Dict[str, Any]:
+    """Arrete le container vLLM local et restaure le mode normal."""
+    import subprocess
+
+    result: Dict[str, Any] = {"success": False, "error": None}
+
+    # 1. Desactiver le burst
+    try:
+        deactivate_burst_providers()
+    except Exception as e:
+        logger.warning(f"[BURST:LOCAL] Deactivation warning: {e}")
+
+    # 2. Arreter le container
+    try:
+        proc = subprocess.run(
+            ["docker", "rm", "-f", VLLM_LOCAL_CONTAINER],
+            capture_output=True, text=True, timeout=15,
+        )
+        if proc.returncode == 0:
+            logger.info("[BURST:LOCAL] Container stopped and removed")
+            result["success"] = True
+        else:
+            result["error"] = f"Docker rm failed: {proc.stderr[:200]}"
+    except Exception as e:
+        result["error"] = f"Docker rm exception: {e}"
+
+    logger.info("[BURST:LOCAL] vLLM local STOPPED — Ollama can resume")
+    return result
+
+
+def is_local_vllm_running() -> bool:
+    """Verifie si le container vLLM local tourne."""
+    import subprocess
+    try:
+        proc = subprocess.run(
+            ["docker", "inspect", "--format={{.State.Running}}", VLLM_LOCAL_CONTAINER],
+            capture_output=True, text=True, timeout=5,
+        )
+        return proc.stdout.strip() == "true"
+    except Exception:
+        return False

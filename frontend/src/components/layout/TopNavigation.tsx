@@ -18,7 +18,8 @@ import {
   Image,
 } from '@chakra-ui/react'
 import { ChevronDownIcon } from '@chakra-ui/icons'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { usePathname, useRouter } from 'next/navigation'
 import NextLink from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
@@ -189,6 +190,60 @@ const NavDropdown = ({ label, icon, items, isActive }: NavDropdownProps) => {
   )
 }
 
+/**
+ * Indicateur mode LLM dans le top menu.
+ * Normal = rien, Partial Local = orange, Full Local = rouge.
+ * Cliquable → page Admin > Settings.
+ */
+function LlmModeIndicator() {
+  const router = useRouter()
+  const { data: status } = useQuery({
+    queryKey: ['llm-mode-indicator'],
+    queryFn: async () => {
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+      const headers: Record<string, string> = {}
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      try {
+        const res = await fetch(`${apiBase}/api/admin/settings/llm-mode/current`, { headers })
+        if (!res.ok) return null
+        return res.json() as Promise<{ mode: string }>
+      } catch { return null }
+    },
+    refetchInterval: 15000,
+    staleTime: 10000,
+  })
+
+  if (!status || status.mode === 'normal') return null
+
+  const isPartial = status.mode === 'partial_local'
+  const color = isPartial ? 'orange' : 'red'
+  const label = isPartial ? 'LOCAL' : 'BURST LOCAL'
+
+  return (
+    <Badge
+      colorScheme={color}
+      variant="subtle"
+      fontSize="xs"
+      px={2}
+      py={0.5}
+      rounded="md"
+      cursor="pointer"
+      onClick={() => router.push('/admin/settings')}
+      _hover={{ opacity: 0.8 }}
+      title={isPartial
+        ? 'Mode Local — LLM via Ollama, burst EC2 only'
+        : 'Mode Burst Local — tout local, GPU exclusif au burst'
+      }
+    >
+      <HStack spacing={1}>
+        <Icon as={FiCpu} boxSize={3} />
+        <Text>{label}</Text>
+      </HStack>
+    </Badge>
+  )
+}
+
 export default function TopNavigation() {
   const pathname = usePathname()
   const router = useRouter()
@@ -309,6 +364,7 @@ export default function TopNavigation() {
         {/* Right side - Theme toggle + User menu */}
         {isAuthenticated ? (
           <HStack spacing={3}>
+            <LlmModeIndicator />
             <ThemeToggle />
             <Menu>
               <MenuButton

@@ -73,6 +73,13 @@ class TaskType(Enum):
     KNOWLEDGE_EXTRACTION = "knowledge_extraction" # Extraction structurée concepts/facts/entities/relations
 
 
+class LlmMode(Enum):
+    """Modes de fonctionnement LLM (persisté en PostgreSQL, caché en Redis)."""
+    NORMAL = "normal"               # Cloud complet (Haiku, gpt-4o-mini, EC2 Spot)
+    PARTIAL_LOCAL = "partial_local"  # Ollama local sauf burst (burst = EC2 only)
+    FULL_LOCAL = "full_local"        # Tout local y compris burst (vLLM local GPU-exclusif)
+
+
 class LLMRouter:
     """
     Routeur intelligent pour les appels LLM selon le type de tâche.
@@ -80,6 +87,8 @@ class LLMRouter:
     Supporte le mode Burst pour déporter les appels LLM vers EC2 Spot.
     En mode Burst, toutes les tâches texte sont redirigées vers vLLM distant,
     sauf Vision qui reste sur GPT-4o.
+
+    Supporte le mode Local (partial/full) pour router vers Ollama local.
     """
 
     def __init__(self, config_path: Optional[Path] = None):
@@ -99,11 +108,20 @@ class LLMRouter:
         self._burst_vllm_served_model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ"  # Nom exposé par vLLM (served_model_name)
         self._vllm_max_context: int = 16384  # Limite contexte vLLM (16K Qwen2.5, 32K Qwen3)
 
+        # === DeepInfra (API OpenAI-compatible) ===
+        self._deepinfra_client = None
+        self._deepinfra_async_client = None
+
         # === Gate Redis pour vLLM (partage inter-processus) ===
         self._redis_burst_cache: Optional[Dict[str, Any]] = None
         self._redis_burst_cache_time: float = 0
         self._redis_burst_cache_ttl: float = 5.0  # Cache TTL en secondes
         self._vllm_first_down_time: Dict[str, float] = {}  # url → timestamp première détection down
+
+        # === Gate Mode Local (PostgreSQL → Redis cache) ===
+        self._local_mode_cache: Optional[str] = None  # "normal" | "partial_local" | "full_local"
+        self._local_mode_cache_time: float = 0
+        self._local_mode_cache_ttl: float = 5.0  # Cache TTL en secondes
 
         # Configuration dynamique
         self._config = self._load_config(config_path)
@@ -217,7 +235,120 @@ class LLMRouter:
             providers["ollama"] = False
             logger.debug(f"✗ Ollama provider indisponible: {e}")
 
+        # Test DeepInfra (API OpenAI-compatible)
+        deepinfra_key = os.getenv("DEEPINFRA_API_KEY", "").strip()
+        if deepinfra_key:
+            providers["deepinfra"] = True
+            logger.info("✓ DeepInfra provider disponible")
+        else:
+            providers["deepinfra"] = False
+            logger.debug("✗ DeepInfra provider non configuré (DEEPINFRA_API_KEY manquant)")
+
         return providers
+
+    # =========================================================================
+    # Mode Local — Gate Ollama (PostgreSQL → Redis cache)
+    # =========================================================================
+
+    def _get_llm_mode(self) -> LlmMode:
+        """Retourne le mode LLM actif (cache Redis 5s, source PostgreSQL).
+
+        Lecture hiérarchique :
+        1. Cache mémoire (TTL 5s)
+        2. Redis osmose:settings:llm_mode (TTL 5s)
+        3. PostgreSQL table system_settings (source de vérité)
+        4. Fallback NORMAL si rien n'est configuré
+        """
+        now = time.time()
+
+        # 1. Cache mémoire
+        if self._local_mode_cache is not None:
+            if (now - self._local_mode_cache_time) < self._local_mode_cache_ttl:
+                return LlmMode(self._local_mode_cache)
+
+        # 2. Cache Redis
+        try:
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            import redis as redis_lib
+            r = redis_lib.from_url(redis_url, decode_responses=True, socket_timeout=1)
+            cached = r.get("osmose:settings:llm_mode")
+
+            if cached:
+                mode_str = cached
+            else:
+                # 3. Lire PostgreSQL et peupler le cache Redis
+                mode_str = self._read_llm_mode_from_db()
+                r.setex("osmose:settings:llm_mode", 30, mode_str)  # Cache Redis 30s
+
+            # Mettre en cache mémoire
+            self._local_mode_cache = mode_str
+            self._local_mode_cache_time = now
+            return LlmMode(mode_str)
+
+        except Exception as e:
+            logger.debug(f"[LLM_ROUTER:LOCAL] Cache read failed: {e}")
+            # Fallback sur le cache mémoire si disponible
+            if self._local_mode_cache is not None:
+                return LlmMode(self._local_mode_cache)
+            return LlmMode.NORMAL
+
+    def _read_llm_mode_from_db(self) -> str:
+        """Lit le mode LLM depuis PostgreSQL (source de vérité)."""
+        try:
+            from knowbase.db.base import SessionLocal
+            from knowbase.db.models import SystemSetting
+            db = SessionLocal()
+            try:
+                setting = db.query(SystemSetting).filter(
+                    SystemSetting.key == "llm_mode"
+                ).first()
+                if setting:
+                    data = json.loads(setting.value)
+                    return data.get("mode", "normal")
+            finally:
+                db.close()
+        except Exception as e:
+            logger.debug(f"[LLM_ROUTER:LOCAL] DB read failed: {e}")
+        return "normal"
+
+    def invalidate_llm_mode_cache(self):
+        """Invalide le cache du mode LLM (appelé après PUT /admin/settings/llm-mode)."""
+        self._local_mode_cache = None
+        self._local_mode_cache_time = 0
+        try:
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            import redis as redis_lib
+            r = redis_lib.from_url(redis_url, decode_responses=True, socket_timeout=1)
+            r.delete("osmose:settings:llm_mode")
+        except Exception:
+            pass
+
+    def _get_local_model_for_task(self, task_type: TaskType) -> str:
+        """Retourne le modèle Ollama local pour une tâche donnée.
+
+        Priorité :
+        1. Env var OSMOSIS_LOCAL_SYNTHESIS_MODEL (override global)
+        2. config/llm_models.yaml → local_mode.task_overrides[task_name]
+        3. config/llm_models.yaml → local_mode.default_model
+        4. Fallback "qwen2.5:14b"
+        """
+        # Override env var (priorité max)
+        env_model = os.getenv("OSMOSIS_LOCAL_SYNTHESIS_MODEL")
+        if env_model:
+            return env_model
+
+        local_config = self._config.get("local_mode", {})
+        task_name = task_type.value
+
+        # Override par tâche
+        overrides = local_config.get("task_overrides", {})
+        if overrides and task_name in overrides:
+            override = overrides[task_name]
+            if override:  # Peut être None si commenté
+                return override
+
+        # Modèle par défaut
+        return local_config.get("default_model", "qwen2.5:14b")
 
     # =========================================================================
     # Mode Burst - Basculement dynamique vers EC2 Spot
@@ -729,8 +860,9 @@ class LLMRouter:
 
         try:
             # === Gate Redis : vérifier si vLLM actif via Redis (inter-processus) ===
-            # Cette gate permet au worker de savoir que vLLM est actif même si
-            # enable_burst_mode() a été appelé dans un autre processus (app)
+            # PRIORITE 1 : Burst vLLM (EC2 ou local) a priorite sur tout.
+            # En mode full_local, le burst local utilise vLLM sur le GPU,
+            # donc Ollama n'est PAS disponible pendant le burst.
             if task_type != TaskType.VISION:  # Vision reste TOUJOURS sur GPT-4o
                 redis_state = self._get_vllm_state_from_redis()
                 logger.debug(f"[LLM_ROUTER:GATE] Redis check: found={redis_state is not None}, local_burst={self._burst_mode}")
@@ -769,13 +901,24 @@ class LLMRouter:
                     logger.info(f"[LLM_ROUTER:BURST] ✅ Text task → {self._burst_endpoint} ({self._burst_model})")
                     return self._call_burst_vllm(messages, temperature, max_tokens, task_type, **kwargs)
 
-            # === Mode Normal (pas de burst) ===
-            # ATTENTION: On arrive ici seulement si burst mode n'est PAS actif
-            logger.info(f"[LLM_ROUTER] No burst mode - routing to {provider} (model={model})")
+            # === Gate Mode Local : Ollama pour tout sauf Vision (PRIORITE 2) ===
+            # S'applique UNIQUEMENT quand aucun burst n'est actif.
+            # Pendant un burst, c'est vLLM qui traite (gate Redis ci-dessus).
+            llm_mode = self._get_llm_mode()
+            if llm_mode in (LlmMode.PARTIAL_LOCAL, LlmMode.FULL_LOCAL):
+                if task_type != TaskType.VISION:
+                    local_model = self._get_local_model_for_task(task_type)
+                    logger.info(f"[LLM_ROUTER:LOCAL] {task_type.value} → Ollama ({local_model}) [mode={llm_mode.value}]")
+                    return self._call_ollama(local_model, messages, temperature, max_tokens, task_type, **kwargs)
+
+            # === Mode Normal (pas de burst, pas de mode local) ===
+            logger.info(f"[LLM_ROUTER] Normal mode - routing to {provider} (model={model})")
             if provider == "openai":
                 return self._call_openai(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "anthropic":
                 return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "deepinfra":
+                return self._call_deepinfra(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "ollama":
                 return self._call_ollama(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "sagemaker":
@@ -810,7 +953,15 @@ class LLMRouter:
                 )
                 raise
 
-            # Fallback d'urgence UNIQUEMENT si pas en burst mode (ni local ni Redis)
+            # Fallback d'urgence UNIQUEMENT en mode normal (pas local, pas burst)
+            llm_mode_for_fallback = self._get_llm_mode()
+            if llm_mode_for_fallback in (LlmMode.PARTIAL_LOCAL, LlmMode.FULL_LOCAL):
+                logger.error(
+                    f"[LLM_ROUTER:LOCAL] ❌ Ollama call failed, NO fallback to cloud. "
+                    f"(mode={llm_mode_for_fallback.value}) Error: {e}"
+                )
+                raise
+
             default_model = self._config.get("default_model", "gpt-4o")
             if model != default_model:
                 logger.info(f"[LLM_ROUTER] Fallback emergency to {default_model}")
@@ -855,8 +1006,7 @@ class LLMRouter:
 
         try:
             # === Gate Redis : vérifier si vLLM actif via Redis (inter-processus) ===
-            # Cette gate permet au worker de savoir que vLLM est actif même si
-            # enable_burst_mode() a été appelé dans un autre processus (app)
+            # PRIORITE 1 : Burst vLLM (EC2 ou local) a priorite sur tout.
             if task_type != TaskType.VISION:  # Vision reste TOUJOURS sur GPT-4o
                 redis_state = self._get_vllm_state_from_redis()
                 logger.debug(f"[LLM_ROUTER:GATE] Redis check: found={redis_state is not None}, local_burst={self._burst_mode}")
@@ -895,15 +1045,25 @@ class LLMRouter:
                     logger.info(f"[LLM_ROUTER:ASYNC:BURST] ✅ Text task → {self._burst_endpoint} ({self._burst_model})")
                     return await self._call_burst_vllm_async(messages, temperature, max_tokens, task_type, **kwargs)
 
-            # === Mode Normal (pas de burst) ===
-            # ATTENTION: On arrive ici seulement si burst mode n'est PAS actif
-            logger.info(f"[LLM_ROUTER:ASYNC] No burst mode - routing to {provider} (model={model})")
+            # === Gate Mode Local : Ollama pour tout sauf Vision (PRIORITE 2) ===
+            # S'applique UNIQUEMENT quand aucun burst n'est actif.
+            llm_mode = self._get_llm_mode()
+            if llm_mode in (LlmMode.PARTIAL_LOCAL, LlmMode.FULL_LOCAL):
+                if task_type != TaskType.VISION:
+                    local_model = self._get_local_model_for_task(task_type)
+                    logger.info(f"[LLM_ROUTER:LOCAL:ASYNC] {task_type.value} → Ollama ({local_model}) [mode={llm_mode.value}]")
+                    return await self._call_ollama_async(local_model, messages, temperature, max_tokens, task_type, **kwargs)
+
+            # === Mode Normal (pas de burst, pas de mode local) ===
+            logger.info(f"[LLM_ROUTER:ASYNC] Normal mode - routing to {provider} (model={model})")
             if provider == "openai":
                 return await self._call_openai_async(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "anthropic":
                 # TODO: Implémenter version async pour Anthropic si nécessaire
                 logger.warning("[LLM_ROUTER:ASYNC] Anthropic async not implemented, falling back to sync")
                 return self._call_anthropic(model, messages, temperature, max_tokens, task_type, **kwargs)
+            elif provider == "deepinfra":
+                return await self._call_deepinfra_async(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "ollama":
                 return await self._call_ollama_async(model, messages, temperature, max_tokens, task_type, **kwargs)
             elif provider == "sagemaker":
@@ -940,7 +1100,15 @@ class LLMRouter:
                 )
                 raise
 
-            # Fallback d'urgence UNIQUEMENT si pas en burst mode (ni local ni Redis)
+            # Fallback d'urgence UNIQUEMENT en mode normal (pas local, pas burst)
+            llm_mode_for_fallback = self._get_llm_mode()
+            if llm_mode_for_fallback in (LlmMode.PARTIAL_LOCAL, LlmMode.FULL_LOCAL):
+                logger.error(
+                    f"[LLM_ROUTER:LOCAL:ASYNC] ❌ Ollama call failed, NO fallback to cloud. "
+                    f"(mode={llm_mode_for_fallback.value}) Error: {e}"
+                )
+                raise
+
             default_model = self._config.get("default_model", "gpt-4o")
             if model != default_model:
                 logger.info(f"[LLM_ROUTER:ASYNC] Fallback emergency to {default_model}")
@@ -1011,6 +1179,58 @@ class LLMRouter:
             # Tracking pour analyse des coûts
             track_tokens(model, task_type.value, prompt_tokens, completion_tokens)
 
+        return response.choices[0].message.content or ""
+
+    def _get_deepinfra_client(self):
+        """Client OpenAI pointe vers DeepInfra."""
+        if self._deepinfra_client is None:
+            from openai import OpenAI
+            api_key = os.getenv("DEEPINFRA_API_KEY", "")
+            self._deepinfra_client = OpenAI(
+                api_key=api_key,
+                base_url="https://api.deepinfra.com/v1/openai",
+            )
+        return self._deepinfra_client
+
+    def _get_deepinfra_async_client(self):
+        """Client async OpenAI pointe vers DeepInfra."""
+        if self._deepinfra_async_client is None:
+            from openai import AsyncOpenAI
+            api_key = os.getenv("DEEPINFRA_API_KEY", "")
+            self._deepinfra_async_client = AsyncOpenAI(
+                api_key=api_key,
+                base_url="https://api.deepinfra.com/v1/openai",
+            )
+        return self._deepinfra_async_client
+
+    def _call_deepinfra(self, model, messages, temperature, max_tokens, task_type, **kwargs):
+        """Appel vers DeepInfra (API OpenAI-compatible)."""
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference', 'json_schema']}
+        client = self._get_deepinfra_client()
+        response = client.chat.completions.create(
+            model=model, messages=messages,
+            temperature=temperature, max_tokens=max_tokens,
+            **api_kwargs
+        )
+        if response.usage:
+            track_tokens(f"deepinfra/{model}", task_type.value,
+                         response.usage.prompt_tokens, response.usage.completion_tokens)
+            logger.info(f"[TOKENS:DEEPINFRA] {model} - In: {response.usage.prompt_tokens}, Out: {response.usage.completion_tokens}")
+        return response.choices[0].message.content or ""
+
+    async def _call_deepinfra_async(self, model, messages, temperature, max_tokens, task_type, **kwargs):
+        """Appel async vers DeepInfra."""
+        api_kwargs = {k: v for k, v in kwargs.items() if k not in ['model_preference', 'json_schema']}
+        client = self._get_deepinfra_async_client()
+        response = await client.chat.completions.create(
+            model=model, messages=messages,
+            temperature=temperature, max_tokens=max_tokens,
+            **api_kwargs
+        )
+        if response.usage:
+            track_tokens(f"deepinfra/{model}", task_type.value,
+                         response.usage.prompt_tokens, response.usage.completion_tokens)
+            logger.info(f"[TOKENS:DEEPINFRA:ASYNC] {model} - In: {response.usage.prompt_tokens}, Out: {response.usage.completion_tokens}")
         return response.choices[0].message.content or ""
 
     def _call_anthropic(

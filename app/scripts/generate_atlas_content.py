@@ -140,9 +140,9 @@ def load_topic_content(driver, topic_id: str, tenant_id: str) -> dict:
 # ── LLM generation ───────────────────────────────────────────────────────────
 
 def get_llm_client(model: str):
-    """Retourne un client Anthropic configure."""
-    import anthropic
-    return anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    """Retourne le llm_router (compatibilité avec l'ancien API Anthropic)."""
+    from knowbase.common.llm_router import get_llm_router
+    return get_llm_router()
 
 
 def generate_section(client, model: str, perspective: dict, topic_label: str) -> str:
@@ -178,11 +178,13 @@ Redige une section claire et informative (3-5 paragraphes) qui :
 Retourne UNIQUEMENT le texte de la section, sans preambule."""
 
     try:
-        resp = client.messages.create(
-            model=model, max_tokens=1000, temperature=0.3,
+        from knowbase.common.llm_router import TaskType
+        return client.complete(
+            task_type=TaskType.LONG_TEXT_SUMMARY,
             messages=[{"role": "user", "content": prompt}],
-        )
-        return resp.content[0].text.strip()
+            temperature=0.3,
+            max_tokens=1000,
+        ).strip()
     except Exception as e:
         logger.warning(f"  Section generation failed: {e}")
         return ""
@@ -209,11 +211,13 @@ Le resume doit :
 Retourne UNIQUEMENT le texte du resume."""
 
     try:
-        resp = client.messages.create(
-            model=model, max_tokens=300, temperature=0.3,
+        from knowbase.common.llm_router import TaskType
+        return client.complete(
+            task_type=TaskType.LONG_TEXT_SUMMARY,
             messages=[{"role": "user", "content": prompt}],
-        )
-        return resp.content[0].text.strip()
+            temperature=0.3,
+            max_tokens=300,
+        ).strip()
     except Exception as e:
         logger.warning(f"  Summary generation failed: {e}")
         return topic_data.get("summary", "")
@@ -245,11 +249,13 @@ L'introduction doit :
 Retourne UNIQUEMENT le texte de l'introduction."""
 
     try:
-        resp = client.messages.create(
-            model=model, max_tokens=500, temperature=0.3,
+        from knowbase.common.llm_router import TaskType
+        return client.complete(
+            task_type=TaskType.LONG_TEXT_SUMMARY,
             messages=[{"role": "user", "content": prompt}],
-        )
-        return resp.content[0].text.strip()
+            temperature=0.3,
+            max_tokens=500,
+        ).strip()
     except Exception as e:
         logger.warning(f"  Homepage intro generation failed: {e}")
         return ""

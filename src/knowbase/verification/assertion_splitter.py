@@ -91,29 +91,12 @@ class AssertionSplitter:
         prompt = SPLIT_ASSERTIONS_PROMPT.format(text=text)
 
         try:
-            # Utiliser OpenAI directement si configure (evite fallback Ollama)
-            import os
-            provider = os.getenv("OSMOSIS_SYNTHESIS_PROVIDER", "")
-            openai_key = os.getenv("OPENAI_API_KEY", "")
-
-            if provider == "openai" and openai_key:
-                from openai import AsyncOpenAI
-                oai = AsyncOpenAI(api_key=openai_key)
-                oai_model = os.getenv("OSMOSIS_SYNTHESIS_MODEL", "gpt-4o-mini")
-                oai_resp = await oai.chat.completions.create(
-                    model=oai_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                    max_tokens=4096,
-                )
-                response = oai_resp.choices[0].message.content or ""
-            else:
-                response = await self.llm_router.acomplete(
-                    task_type=TaskType.KNOWLEDGE_EXTRACTION,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                    max_tokens=4096
-                )
+            response = await self.llm_router.acomplete(
+                task_type=TaskType.KNOWLEDGE_EXTRACTION,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=4096
+            )
 
             assertions = self._parse_response(response, text)
             logger.info(f"[ASSERTION_SPLITTER] Extracted {len(assertions)} assertions from text")

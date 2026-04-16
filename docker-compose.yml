@@ -66,7 +66,7 @@ services:
       - ./tests:/app/tests
       - ./poc:/app/poc
       - ./benchmark:/app/benchmark  # Benchmark — resultats, questions, scripts (inclus dans les backups)
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # Domain Packs — lecture seule (build via docker API)
+      - /var/run/docker.sock:/var/run/docker.sock  # Domain Packs — lecture/écriture pour lancer les sidecars
     networks:
       - knowbase_net
     working_dir: /app
@@ -101,6 +101,11 @@ services:
       KNOWBASE_DATA_DIR: /data
       REDIS_URL: redis://redis:6379/0
       OSMOSIS_API_URL: http://app:8000
+      T2T5_JUDGE_PROVIDER: ollama
+      T2T5_JUDGE_MODEL_NAME: m-prometheus-14b
+      RAGAS_JUDGE_PROVIDER: ollama
+      RAGAS_JUDGE_MODEL: m-prometheus-14b
+      OLLAMA_URL: http://host.docker.internal:11434
       DEV_MODE: "false"  # Mode production: worker tourne en continu (10 jobs avant reload)
 
       # ========== CONFIGURATION TIMEOUT CENTRALISÉE ==========
@@ -132,6 +137,7 @@ services:
       - ./tests:/app/tests
       - ./poc:/app/poc
       - ./benchmark:/app/benchmark
+      - /var/run/docker.sock:/var/run/docker.sock  # Domain Packs — lancer les sidecars NER
     networks:
       - knowbase_net
     working_dir: /app

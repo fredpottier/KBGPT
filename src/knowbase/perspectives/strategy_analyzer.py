@@ -377,34 +377,16 @@ async def analyze_response_strategy(
     response = ""
     llm_latency_ms = 0
     try:
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if anthropic_key:
-            import anthropic
-            client = anthropic.Anthropic(api_key=anthropic_key)
-            haiku_model = os.environ.get(
-                "OSMOSIS_SYNTHESIS_MODEL", "claude-haiku-4-5-20251001"
-            )
-            llm_start = time.time()
-            api_response = client.messages.create(
-                model=haiku_model,
-                max_tokens=300,
-                temperature=0.0,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            response = api_response.content[0].text if api_response.content else ""
-            llm_latency_ms = int((time.time() - llm_start) * 1000)
-        else:
-            # Fallback : llm_router (Qwen local) si pas de cle Anthropic
-            from knowbase.common.llm_router import get_llm_router, TaskType
-            router = get_llm_router()
-            llm_start = time.time()
-            response = await router.acomplete(
-                task_type=TaskType.KNOWLEDGE_EXTRACTION,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                max_tokens=300,
-            )
-            llm_latency_ms = int((time.time() - llm_start) * 1000)
+        from knowbase.common.llm_router import get_llm_router, TaskType
+        router = get_llm_router()
+        llm_start = time.time()
+        response = await router.acomplete(
+            task_type=TaskType.KNOWLEDGE_EXTRACTION,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=300,
+        )
+        llm_latency_ms = int((time.time() - llm_start) * 1000)
     except Exception as e:
         logger.warning(f"[PERSPECTIVE:STRATEGY] LLM call failed: {e}")
         return StrategyDecision(

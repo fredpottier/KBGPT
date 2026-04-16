@@ -28,6 +28,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from knowbase.common.llm_router import get_llm_router, TaskType
+
 logger = logging.getLogger("query-decomposer")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -375,34 +377,20 @@ def _decompose_llm(question: str, known_axes: dict[str, list[str]]) -> QueryPlan
     t0 = time.time()
 
     try:
-        if provider == "openai":
-            from openai import OpenAI
-            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
-            resp = client.chat.completions.create(
-                model=model,
-                max_tokens=500,
-                temperature=0.0,
-                messages=[
-                    {"role": "system", "content": DECOMPOSER_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-            raw = resp.choices[0].message.content
-        else:
-            import anthropic
-            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-            resp = client.messages.create(
-                model=model,
-                max_tokens=500,
-                temperature=0.0,
-                system=DECOMPOSER_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-            raw = resp.content[0].text
+        router = get_llm_router()
+        raw = router.complete(
+            task_type=TaskType.FAST_CLASSIFICATION,
+            messages=[
+                {"role": "system", "content": DECOMPOSER_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+            max_tokens=500,
+        )
 
         elapsed = round(time.time() - t0, 2)
         logger.info(
-            f"[DECOMPOSE:LLM] model={model}, elapsed={elapsed}s, "
+            f"[DECOMPOSE:LLM] elapsed={elapsed}s, "
             f"question_len={len(question)}, response_len={len(raw)}"
         )
 
@@ -420,7 +408,7 @@ def _decompose_llm(question: str, known_axes: dict[str, list[str]]) -> QueryPlan
 
     except Exception as e:
         _stats["llm_errors"] += 1
-        logger.warning(f"[DECOMPOSE] LLM decomposition failed ({model}): {e}")
+        logger.warning(f"[DECOMPOSE] LLM decomposition failed: {e}")
         return QueryPlan(original_question=question)
 
 
@@ -607,22 +595,13 @@ def evaluate_retrieval_completeness(
     t0 = time.time()
 
     try:
-        if provider == "openai":
-            from openai import OpenAI
-            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
-            resp = client.chat.completions.create(
-                model=model, max_tokens=300, temperature=0.0,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = resp.choices[0].message.content
-        else:
-            import anthropic
-            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-            resp = client.messages.create(
-                model=model, max_tokens=300, temperature=0.0,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = resp.content[0].text
+        router = get_llm_router()
+        raw = router.complete(
+            task_type=TaskType.FAST_CLASSIFICATION,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=300,
+        )
 
         elapsed = round(time.time() - t0, 2)
 
