@@ -351,6 +351,243 @@ class LLMRouter:
         return local_config.get("default_model", "qwen2.5:14b")
 
     # =========================================================================
+    # V2 — Routing par UsageId (Architecture 4 couches)
+    # Feature flag : OSMOSIS_USE_V2_CONFIG=1 pour activer
+    # =========================================================================
+
+    # Bridge temporaire UsageId → TaskType (dette technique, a supprimer en Phase 6)
+    _USAGE_TO_TASK = None  # Lazy init pour eviter import circulaire
+
+    @classmethod
+    def _get_usage_to_task_map(cls):
+        if cls._USAGE_TO_TASK is None:
+            from knowbase.common.llm_config import UsageId
+            cls._USAGE_TO_TASK = {
+                UsageId.SEARCH_SIMPLE: TaskType.LONG_TEXT_SUMMARY,
+                UsageId.SEARCH_CROSSDOC: TaskType.LONG_TEXT_SUMMARY,
+                UsageId.SEARCH_TENSION: TaskType.LONG_TEXT_SUMMARY,
+                UsageId.CLAIM_EXTRACTION: TaskType.KNOWLEDGE_EXTRACTION,
+                UsageId.ENTITY_RESOLUTION: TaskType.CANONICALIZATION,
+                UsageId.RELATION_EXTRACTION: TaskType.KNOWLEDGE_EXTRACTION,
+                UsageId.CROSSDOC_REASONING: TaskType.KNOWLEDGE_EXTRACTION,
+                UsageId.PERSPECTIVE_GENERATION: TaskType.LONG_TEXT_SUMMARY,
+                UsageId.CANONICALIZATION: TaskType.CANONICALIZATION,
+                UsageId.JUDGE_PRIMARY: TaskType.KNOWLEDGE_EXTRACTION,
+                UsageId.VISION_ANALYSIS: TaskType.VISION,
+                UsageId.CLASSIFICATION: TaskType.FAST_CLASSIFICATION,
+                UsageId.ENRICHMENT: TaskType.SHORT_ENRICHMENT,
+                UsageId.EMBEDDINGS: TaskType.KNOWLEDGE_EXTRACTION,
+            }
+        return cls._USAGE_TO_TASK
+
+    def complete_usage(
+        self,
+        usage_id: "UsageId",
+        messages: List[Dict[str, Any]],
+        temperature: float = None,
+        max_tokens: int = None,
+        **kwargs,
+    ) -> str:
+        """Point d'entree V2 — route selon le contrat d'usage.
+
+        Lit la config depuis UsageConfigStore (PostgreSQL → Redis → memoire).
+        Applique la politique de degradation et le burst scoping.
+        """
+        from knowbase.common.llm_config import (
+            UsageId, RuntimeTarget, DegradationPolicy,
+            get_usage_config_store,
+        )
+
+        store = get_usage_config_store()
+        contract = store.get_config(usage_id)
+
+        # Override temperature/max_tokens si fournis
+        temp = temperature if temperature is not None else contract.temperature
+        tokens = max_tokens if max_tokens is not None else contract.max_tokens
+
+        logger.info(
+            f"[LLM_ROUTER:V2] {usage_id.value} → {contract.runtime.value} "
+            f"({contract.model[:40]}) [batch={contract.is_batch}]"
+        )
+
+        try:
+            # 1. Pinned → dispatch direct (jamais overridden)
+            if contract.pinned:
+                return self._dispatch_v2(contract, messages, temp, tokens, **kwargs)
+
+            # 2. Burst override (SEULEMENT si burst_eligible ET burst actif ET dans scope)
+            if contract.burst_eligible:
+                burst_state = self._get_vllm_state_from_redis()
+                if burst_state and burst_state.get("active"):
+                    is_healthy = burst_state.get("healthy", False)
+                    if not is_healthy:
+                        raise VLLMUnavailableError(
+                            burst_state.get("vllm_url", "unknown"),
+                            "vLLM configured but DOWN"
+                        )
+                    burst_scope = burst_state.get("burst_scope", [])
+                    if not burst_scope or usage_id.value in burst_scope:
+                        init_ok = self._ensure_burst_client_for_redis_state(burst_state)
+                        if init_ok:
+                            logger.info(f"[LLM_ROUTER:V2:BURST] {usage_id.value} → vLLM burst")
+                            return self._call_burst_vllm(
+                                messages, temp, tokens,
+                                self._get_usage_to_task_map().get(usage_id, TaskType.KNOWLEDGE_EXTRACTION),
+                                **kwargs
+                            )
+
+            # 3. Dispatch normal selon le contrat
+            return self._dispatch_v2(contract, messages, temp, tokens, **kwargs)
+
+        except Exception as e:
+            # Politique de degradation explicite
+            if contract.degradation_policy == DegradationPolicy.RETRY_THEN_FAIL:
+                # Retry 1 fois
+                try:
+                    logger.warning(f"[LLM_ROUTER:V2] Retry {usage_id.value} after error: {e}")
+                    return self._dispatch_v2(contract, messages, temp, tokens, **kwargs)
+                except Exception:
+                    pass
+
+            elif contract.degradation_policy == DegradationPolicy.FALLBACK_CLOUD:
+                for fallback_rt in contract.fallback_targets:
+                    try:
+                        logger.warning(
+                            f"[LLM_ROUTER:V2] Fallback {usage_id.value} → {fallback_rt.value}"
+                        )
+                        # Utiliser le modele du preset Balanced pour ce runtime
+                        from knowbase.common.llm_config import _build_defaults_balanced
+                        balanced = _build_defaults_balanced()
+                        balanced_contract = balanced.get(usage_id)
+                        if balanced_contract:
+                            return self._dispatch_v2(balanced_contract, messages, temp, tokens, **kwargs)
+                    except Exception:
+                        continue
+
+            elif contract.degradation_policy == DegradationPolicy.FALLBACK_LOCAL:
+                try:
+                    logger.warning(f"[LLM_ROUTER:V2] Fallback {usage_id.value} → ollama_local")
+                    return self._call_ollama("qwen2.5:14b", messages, temp, tokens,
+                                            self._get_usage_to_task_map().get(usage_id, TaskType.KNOWLEDGE_EXTRACTION),
+                                            **kwargs)
+                except Exception:
+                    pass
+
+            # FAIL ou tous les fallbacks ont echoue
+            logger.error(f"[LLM_ROUTER:V2] {usage_id.value} FAILED: {e}")
+            raise
+
+    async def acomplete_usage(
+        self,
+        usage_id: "UsageId",
+        messages: List[Dict[str, Any]],
+        temperature: float = None,
+        max_tokens: int = None,
+        **kwargs,
+    ) -> str:
+        """Version async de complete_usage()."""
+        from knowbase.common.llm_config import (
+            UsageId, RuntimeTarget, DegradationPolicy,
+            get_usage_config_store,
+        )
+
+        store = get_usage_config_store()
+        contract = store.get_config(usage_id)
+
+        temp = temperature if temperature is not None else contract.temperature
+        tokens = max_tokens if max_tokens is not None else contract.max_tokens
+
+        logger.info(
+            f"[LLM_ROUTER:V2:ASYNC] {usage_id.value} → {contract.runtime.value} "
+            f"({contract.model[:40]})"
+        )
+
+        try:
+            if contract.pinned:
+                return await self._dispatch_v2_async(contract, messages, temp, tokens, **kwargs)
+
+            if contract.burst_eligible:
+                burst_state = self._get_vllm_state_from_redis()
+                if burst_state and burst_state.get("active"):
+                    is_healthy = burst_state.get("healthy", False)
+                    if not is_healthy:
+                        raise VLLMUnavailableError(
+                            burst_state.get("vllm_url", "unknown"),
+                            "vLLM configured but DOWN"
+                        )
+                    burst_scope = burst_state.get("burst_scope", [])
+                    if not burst_scope or usage_id.value in burst_scope:
+                        init_ok = self._ensure_burst_client_for_redis_state(burst_state)
+                        if init_ok:
+                            return await self._call_burst_vllm_async(
+                                messages, temp, tokens,
+                                self._get_usage_to_task_map().get(usage_id, TaskType.KNOWLEDGE_EXTRACTION),
+                                **kwargs
+                            )
+
+            return await self._dispatch_v2_async(contract, messages, temp, tokens, **kwargs)
+
+        except Exception as e:
+            if contract.degradation_policy == DegradationPolicy.RETRY_THEN_FAIL:
+                try:
+                    return await self._dispatch_v2_async(contract, messages, temp, tokens, **kwargs)
+                except Exception:
+                    pass
+            elif contract.degradation_policy == DegradationPolicy.FALLBACK_CLOUD:
+                for fallback_rt in contract.fallback_targets:
+                    try:
+                        from knowbase.common.llm_config import _build_defaults_balanced
+                        balanced = _build_defaults_balanced()
+                        balanced_contract = balanced.get(usage_id)
+                        if balanced_contract:
+                            return await self._dispatch_v2_async(balanced_contract, messages, temp, tokens, **kwargs)
+                    except Exception:
+                        continue
+            elif contract.degradation_policy == DegradationPolicy.FALLBACK_LOCAL:
+                try:
+                    return await self._call_ollama_async("qwen2.5:14b", messages, temp, tokens,
+                                                         self._get_usage_to_task_map().get(usage_id, TaskType.KNOWLEDGE_EXTRACTION),
+                                                         **kwargs)
+                except Exception:
+                    pass
+            logger.error(f"[LLM_ROUTER:V2:ASYNC] {usage_id.value} FAILED: {e}")
+            raise
+
+    def _dispatch_v2(self, contract, messages, temperature, max_tokens, **kwargs):
+        """Dispatch V2 selon le RuntimeTarget du contrat."""
+        from knowbase.common.llm_config import RuntimeTarget
+        task_type = self._get_usage_to_task_map().get(contract.usage_id, TaskType.KNOWLEDGE_EXTRACTION)
+
+        if contract.runtime == RuntimeTarget.OLLAMA_LOCAL:
+            return self._call_ollama(contract.model, messages, temperature, max_tokens, task_type, **kwargs)
+        elif contract.runtime == RuntimeTarget.DEEPINFRA:
+            return self._call_deepinfra(contract.model, messages, temperature, max_tokens, task_type, **kwargs)
+        elif contract.runtime == RuntimeTarget.OPENAI:
+            return self._call_openai(contract.model, messages, temperature, max_tokens, task_type, **kwargs)
+        elif contract.runtime == RuntimeTarget.GPU_DIRECT:
+            raise ValueError("GPU_DIRECT runtime is for embeddings only, not LLM calls")
+        elif contract.runtime == RuntimeTarget.BURST_VLLM:
+            return self._call_burst_vllm(messages, temperature, max_tokens, task_type, **kwargs)
+        else:
+            raise ValueError(f"Unknown runtime: {contract.runtime}")
+
+    async def _dispatch_v2_async(self, contract, messages, temperature, max_tokens, **kwargs):
+        """Dispatch V2 async."""
+        from knowbase.common.llm_config import RuntimeTarget
+        task_type = self._get_usage_to_task_map().get(contract.usage_id, TaskType.KNOWLEDGE_EXTRACTION)
+
+        if contract.runtime == RuntimeTarget.OLLAMA_LOCAL:
+            return await self._call_ollama_async(contract.model, messages, temperature, max_tokens, task_type, **kwargs)
+        elif contract.runtime == RuntimeTarget.DEEPINFRA:
+            return await self._call_deepinfra_async(contract.model, messages, temperature, max_tokens, task_type, **kwargs)
+        elif contract.runtime == RuntimeTarget.OPENAI:
+            return await self._call_openai_async(contract.model, messages, temperature, max_tokens, task_type, **kwargs)
+        elif contract.runtime == RuntimeTarget.BURST_VLLM:
+            return await self._call_burst_vllm_async(messages, temperature, max_tokens, task_type, **kwargs)
+        else:
+            raise ValueError(f"Unknown runtime: {contract.runtime}")
+
+    # =========================================================================
     # Mode Burst - Basculement dynamique vers EC2 Spot
     # =========================================================================
 
@@ -823,6 +1060,28 @@ class LLMRouter:
         provider = self._get_provider_for_model(model)
         return self._available_providers.get(provider, False)
 
+    def _task_type_to_usage(self, task_type: TaskType) -> Optional["UsageId"]:
+        """Reverse mapping TaskType → UsageId pour le bridge V2.
+
+        Retourne le UsageId par defaut pour un TaskType. Le mapping est
+        approximatif car TaskType est plus grossier que UsageId.
+        """
+        try:
+            from knowbase.common.llm_config import UsageId
+            return {
+                TaskType.LONG_TEXT_SUMMARY: UsageId.SEARCH_SIMPLE,
+                TaskType.KNOWLEDGE_EXTRACTION: UsageId.CLAIM_EXTRACTION,
+                TaskType.CANONICALIZATION: UsageId.CANONICALIZATION,
+                TaskType.FAST_CLASSIFICATION: UsageId.CLASSIFICATION,
+                TaskType.SHORT_ENRICHMENT: UsageId.ENRICHMENT,
+                TaskType.VISION: UsageId.VISION_ANALYSIS,
+                TaskType.METADATA_EXTRACTION: UsageId.CLASSIFICATION,
+                TaskType.TRANSLATION: UsageId.CLASSIFICATION,
+                TaskType.RFP_QUESTION_ANALYSIS: UsageId.SEARCH_SIMPLE,
+            }.get(task_type)
+        except Exception:
+            return None
+
     def complete(
         self,
         task_type: TaskType,
@@ -844,6 +1103,12 @@ class LLMRouter:
         Returns:
             Contenu de la réponse du modèle
         """
+        # V2 bridge : si feature flag actif, deleguer au routing par UsageId
+        if os.getenv("OSMOSIS_USE_V2_CONFIG", "0") == "1":
+            usage_id = self._task_type_to_usage(task_type)
+            if usage_id:
+                return self.complete_usage(usage_id, messages, temperature, max_tokens, **kwargs)
+
         model = self._get_model_for_task(task_type)
         provider = self._get_provider_for_model(model)
 
@@ -990,6 +1255,12 @@ class LLMRouter:
         Returns:
             Contenu de la réponse du modèle
         """
+        # V2 bridge : si feature flag actif, deleguer au routing par UsageId
+        if os.getenv("OSMOSIS_USE_V2_CONFIG", "0") == "1":
+            usage_id = self._task_type_to_usage(task_type)
+            if usage_id:
+                return await self.acomplete_usage(usage_id, messages, temperature, max_tokens, **kwargs)
+
         model = self._get_model_for_task(task_type)
         provider = self._get_provider_for_model(model)
 
@@ -2194,3 +2465,23 @@ async def complete_with_schema_async(
         max_tokens,
         json_schema=json_schema
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# V2 — Fonctions de convenance par UsageId
+# Feature flag : OSMOSIS_USE_V2_CONFIG=1 pour activer
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _use_v2() -> bool:
+    """Feature flag pour activer le routing V2."""
+    return os.getenv("OSMOSIS_USE_V2_CONFIG", "0") == "1"
+
+
+def complete_for_usage(usage_id: "UsageId", messages: List[Dict[str, Any]], **kwargs) -> str:
+    """Appel LLM via le systeme V2 (par usage)."""
+    return get_llm_router().complete_usage(usage_id, messages, **kwargs)
+
+
+async def acomplete_for_usage(usage_id: "UsageId", messages: List[Dict[str, Any]], **kwargs) -> str:
+    """Appel LLM async via le systeme V2 (par usage)."""
+    return await get_llm_router().acomplete_usage(usage_id, messages, **kwargs)
