@@ -1120,6 +1120,14 @@ def run_benchmark_job(
         if not synthesis_model:
             synthesis_model = "claude-haiku-4-5-20251001" if synthesis_provider == "anthropic" else "gpt-4o-mini"
 
+        # V2 config snapshot (reproductibilite benchmark)
+        config_snapshot = None
+        try:
+            from knowbase.common.llm_config import get_usage_config_store
+            config_snapshot = get_usage_config_store().snapshot()
+        except Exception:
+            pass
+
         report_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "profile": profile,
@@ -1136,6 +1144,7 @@ def run_benchmark_job(
             "per_sample": per_sample,
             "per_sample_rag": rag_per_sample,
             "errors": errors,
+            "config_snapshot": config_snapshot,
         }
 
         with open(report_path, "w", encoding="utf-8") as f:
