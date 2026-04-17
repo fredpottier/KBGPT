@@ -73,6 +73,12 @@ class SearchRequest(BaseModel):
         description="Override du mode de reponse (DIRECT, AUGMENTED, TENSION, STRUCTURED_FACT). Auto-detect si non specifie."
     )
 
+    # 📊 Benchmark mode : skip les appels LLM coûteux non nécessaires pour l'évaluation
+    skip_tension_summary: bool = Field(
+        default=False,
+        description="Skip la génération de résumés de tensions (économise les crédits LLM pendant les benchmarks)"
+    )
+
     class Config:
         json_schema_extra = {
             "example": {

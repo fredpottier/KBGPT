@@ -21,6 +21,7 @@ class BurstStatus:
     instance_id: Optional[str] = None
     instance_type: Optional[str] = None
     instance_state: Optional[str] = None  # état AWS brut (running|pending|stopping)
+    instance_region: Optional[str] = None
     uptime_s: Optional[int] = None
     vllm_healthy: bool = False
     tei_healthy: bool = False

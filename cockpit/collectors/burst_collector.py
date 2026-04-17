@@ -16,7 +16,7 @@ from typing import Optional
 import redis
 
 from cockpit.config import (
-    AWS_REGION, AWS_EC2_TAG_KEY, AWS_EC2_TAG_VALUE,
+    AWS_REGION, AWS_BURST_REGIONS, AWS_EC2_TAG_KEY, AWS_EC2_TAG_VALUE,
     AWS_SCAN_CACHE_TTL, REDIS_URL,
 )
 from cockpit.models import BurstStatus
@@ -32,7 +32,7 @@ except ImportError:
 
 class BurstCollector:
     def __init__(self):
-        self._ec2 = None
+        self._ec2_clients: dict = {}
         self._cache: Optional[BurstStatus] = None
         self._cache_ts: float = 0
         self._redis: Optional[redis.Redis] = None
@@ -41,12 +41,12 @@ class BurstCollector:
         self._prev_gen_tokens: float = 0
         self._prev_tokens_ts: float = 0
 
-    def _get_ec2(self):
+    def _get_ec2(self, region: str = AWS_REGION):
         if not BOTO3_AVAILABLE:
             return None
-        if self._ec2 is None:
-            self._ec2 = boto3.client("ec2", region_name=AWS_REGION)
-        return self._ec2
+        if region not in self._ec2_clients:
+            self._ec2_clients[region] = boto3.client("ec2", region_name=region)
+        return self._ec2_clients[region]
 
     def _get_redis(self) -> redis.Redis:
         if self._redis is None:
@@ -59,12 +59,11 @@ class BurstCollector:
         if self._cache and (now - self._cache_ts) < AWS_SCAN_CACHE_TTL:
             return self._cache
 
-        ec2 = self._get_ec2()
-        if ec2 is None:
+        if not BOTO3_AVAILABLE:
             return BurstStatus(active=False, status="off")
 
-        # 1. Interroger AWS EC2 — seule source de vérité
-        instance = self._discover_from_aws(ec2)
+        # 1. Interroger AWS EC2 — seule source de vérité (multi-région)
+        instance = self._discover_from_aws_multi_region()
 
         if not instance:
             self._cache = BurstStatus(active=False, status="off")
@@ -110,6 +109,7 @@ class BurstCollector:
             instance_id=instance.get("instance_id"),
             instance_type=instance.get("instance_type"),
             instance_state=aws_state,
+            instance_region=instance.get("region"),
             uptime_s=uptime_s,
             vllm_healthy=vllm_ok,
             tei_healthy=tei_ok,
@@ -127,8 +127,19 @@ class BurstCollector:
         self._cache_ts = now
         return result
 
-    def _discover_from_aws(self, ec2) -> Optional[dict]:
-        """Scanne EC2 pour trouver l'instance Burst."""
+    def _discover_from_aws_multi_region(self) -> Optional[dict]:
+        """Scanne EC2 dans toutes les régions burst configurées."""
+        for region in AWS_BURST_REGIONS:
+            ec2 = self._get_ec2(region)
+            if ec2 is None:
+                continue
+            result = self._discover_from_aws(ec2, region)
+            if result:
+                return result
+        return None
+
+    def _discover_from_aws(self, ec2, region: str) -> Optional[dict]:
+        """Scanne EC2 pour trouver l'instance Burst dans une région."""
         try:
             response = ec2.describe_instances(Filters=[
                 {"Name": "instance-state-name", "Values": ["running", "pending", "stopping"]},
@@ -145,9 +156,10 @@ class BurstCollector:
                             "instance_type": inst.get("InstanceType", ""),
                             "state": inst["State"]["Name"],
                             "launch_time": inst.get("LaunchTime"),
+                            "region": region,
                         }
         except Exception as e:
-            logger.warning(f"[COCKPIT:BURST] AWS scan failed: {e}")
+            logger.warning(f"[COCKPIT:BURST] AWS scan {region} failed: {e}")
 
         return None
 

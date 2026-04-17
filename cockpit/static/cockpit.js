@@ -184,6 +184,7 @@
         }
         const metaParts = [];
         if (b.instance_type) metaParts.push(b.instance_type);
+        if (b.instance_region) metaParts.push(b.instance_region);
         if (b.uptime_s != null) metaParts.push(`up ${fmtUptime(b.uptime_s)}`);
         if (metaParts.length > 0) {
             html += `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);margin-bottom:8px">${metaParts.join(' · ')}</div>`;

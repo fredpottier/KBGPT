@@ -195,38 +195,22 @@ RULES:
 def label_cluster_with_llm(
     sample_claims: List[str], dominant_facets: List[Tuple[str, int]],
 ) -> Dict[str, Any]:
-    """Labellise un cluster via LLM (Haiku directement, pas via llm_router)."""
+    """Labellise un cluster via llm_router (vLLM burst > Ollama > Anthropic)."""
     claims_text = "\n".join(f"- {c[:200]}" for c in sample_claims[:7])
     facets_text = ", ".join(f"{f}({n})" for f, n in dominant_facets[:3]) or "none"
 
     prompt = LABEL_PROMPT.format(claims_text=claims_text, facets_text=facets_text)
 
     try:
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if anthropic_key:
-            import anthropic
-            client = anthropic.Anthropic(api_key=anthropic_key)
-            haiku_model = os.environ.get(
-                "OSMOSIS_SYNTHESIS_MODEL", "claude-haiku-4-5-20251001"
-            )
-            response = client.messages.create(
-                model=haiku_model,
-                max_tokens=200,
-                temperature=0.0,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text = response.content[0].text if response.content else ""
-        else:
-            # Fallback Qwen via llm_router (qualite moindre)
-            from knowbase.common.llm_router import get_llm_router, TaskType
-            import asyncio
-            router = get_llm_router()
-            text = asyncio.run(router.acomplete(
-                task_type=TaskType.KNOWLEDGE_EXTRACTION,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                max_tokens=200,
-            ))
+        from knowbase.common.llm_router import get_llm_router, TaskType
+        router = get_llm_router()
+        result = router.complete(
+            task_type=TaskType.KNOWLEDGE_EXTRACTION,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=200,
+        )
+        text = result.text if hasattr(result, "text") else str(result)
 
         m = re.search(r'\{[\s\S]*\}', text)
         if m:

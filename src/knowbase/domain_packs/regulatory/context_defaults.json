@@ -254,5 +254,19 @@
     "UK GDPR": "UK Data Protection Act 2018",
     "DPA 2018": "UK Data Protection Act 2018",
     "Australia AI Framework": "Australia AI Ethics Framework"
-  }
+  },
+  "domain_terms": [
+    "consumer", "controller", "processor", "deployer", "provider",
+    "importer", "operator", "recipient", "subprocessor", "notifier",
+    "complainant", "applicant", "registrant",
+    "CCPA", "DSA", "GDPR", "PIPL", "LGPD", "DPDP", "CPRA",
+    "profiling", "pseudonymisation", "anonymisation",
+    "discrimination", "bias", "privacy", "consent",
+    "interoperability", "portability", "erasure", "rectification",
+    "transparency", "accountability", "lawfulness", "fairness",
+    "sandbox", "certification", "accreditation", "notification",
+    "infringement", "penalty", "sanction", "fine",
+    "jurisdiction", "extraterritoriality", "sovereignty",
+    "surveillance", "biometrics", "encryption", "cybersecurity"
+  ]
 }

@@ -90,6 +90,9 @@ RUN mkdir -p /app/config
 
 # Créer un utilisateur non-root pour l'exécution
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+# Ajouter appuser au groupe root (GID 0) pour accès Docker socket
+# Docker Desktop (Windows/macOS) expose le socket en root:root (GID 0)
+RUN usermod -aG root appuser
 RUN chown -R appuser:appuser /app
 RUN mkdir -p /data && chown -R appuser:appuser /data
 

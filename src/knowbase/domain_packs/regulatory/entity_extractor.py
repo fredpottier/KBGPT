@@ -87,8 +87,12 @@ class RegulatoryEntityExtractor(DomainEntityExtractor):
             new_entities = []
             candidate_map: Dict[str, List[str]] = {}
 
+            import uuid
+
             for ent_data in data.get("entities", []):
                 entity = Entity(
+                    entity_id=f"entity_{uuid.uuid4().hex[:12]}",
+                    tenant_id=domain_context.tenant_id if hasattr(domain_context, 'tenant_id') else "default",
                     name=ent_data["name"],
                     entity_type=EntityType.CONCEPT,
                     source="domain_pack_regulatory",

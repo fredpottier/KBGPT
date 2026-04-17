@@ -35,6 +35,9 @@ OSMOSIS_API_URL = os.getenv("OSMOSIS_API_URL", "http://localhost:8000")
 
 # AWS
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
+AWS_BURST_REGIONS = [r.strip() for r in os.getenv(
+    "AWS_BURST_REGIONS", "eu-central-1,eu-west-3"
+).split(",")]
 AWS_EC2_TAG_KEY = "Project"
 AWS_EC2_TAG_VALUE = "KnowWhere"
 AWS_SCAN_CACHE_TTL = 15  # secondes

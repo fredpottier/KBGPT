@@ -58,6 +58,15 @@ CLUSTERS = [
             '(preeclampsia OR pre-eclampsia) AND aspirin AND ("gestational age" OR timing OR "16 weeks" OR "first trimester") AND prevention AND "open access"[filter]',
             # Risque hemorragique
             '(preeclampsia OR pre-eclampsia) AND aspirin AND (bleeding OR "placental abruption" OR safety OR "adverse effect") AND "open access"[filter]',
+            # ── Queries complementaires pour atteindre 20 (cluster 1 shortfall) ──
+            # Guidelines (NICE, FIGO, USPSTF)
+            '(preeclampsia OR pre-eclampsia) AND aspirin AND (NICE OR FIGO OR USPSTF OR ACOG OR WHO) AND (guideline OR recommendation) AND "open access"[filter]',
+            # Populations specifiques (haut risque)
+            '(preeclampsia OR pre-eclampsia) AND aspirin AND ("high risk" OR nulliparous OR "previous preeclampsia" OR "chronic hypertension") AND "open access"[filter]',
+            # Mecanisme d action de l aspirine
+            '(preeclampsia OR pre-eclampsia) AND aspirin AND (thromboxane OR platelet OR "COX-1" OR mechanism) AND "open access"[filter]',
+            # Aspirine low-dose general
+            '(preeclampsia OR pre-eclampsia) AND "low-dose aspirin" AND ("clinical trial" OR RCT OR randomized) AND "open access"[filter]',
         ],
     },
     # ── Cluster 2 : PlGF seul vs ratio sFlt-1/PlGF ───────────────────
@@ -105,7 +114,7 @@ CLUSTERS = [
         "id": 4,
         "name": "Preeclampsia definition controversy",
         "prefix": "DEF",
-        "target": 15,
+        "target": 20,
         "description": "ISSHP 2018 vs ACOG 2020 vs NICE 2019 — proteinurie obligatoire ?",
         "queries": [
             # ISSHP definition
@@ -123,7 +132,7 @@ CLUSTERS = [
         "id": 5,
         "name": "Delivery timing controversy",
         "prefix": "DEL",
-        "target": 15,
+        "target": 20,
         "description": "HYPITAT-II (expectatif) vs PHOENIX (PlGF-guided) vs seuils 34/37 SA",
         "queries": [
             # HYPITAT trials
@@ -141,7 +150,7 @@ CLUSTERS = [
         "id": 6,
         "name": "MgSO4 protocols controversy",
         "prefix": "MGS",
-        "target": 15,
+        "target": 20,
         "description": "Magpie Trial → Zuspan vs Pritchard → duree optimale",
         "queries": [
             # Magpie Trial
@@ -195,7 +204,7 @@ CLUSTERS = [
         "id": 9,
         "name": "Calcium supplementation controversy",
         "prefix": "CAL",
-        "target": 15,
+        "target": 20,
         "description": "WHO recommande vs ACOG ne recommande pas, contexte geographique",
         "queries": [
             # Calcium et PE
@@ -314,10 +323,11 @@ def download_pdf(pmc_id: str, output_path: Path) -> bool:
     except Exception:
         pass
 
-    # Methode 2 : Europe PMC direct
+    # Methode 2 : Europe PMC pdf=render (fonctionne depuis que NCBI a ajoute le PoW challenge
+    # en 2025 sur les URLs /pmc/articles/*/pdf/). ptpmcrender.fcgi est deprecie / ferme en HTTP/2.
     try:
-        url = f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmc_id}&blobtype=pdf"
-        resp = requests.get(url, timeout=60, headers={
+        url = f"https://europepmc.org/articles/{pmc_id}?pdf=render"
+        resp = requests.get(url, timeout=60, allow_redirects=True, headers={
             "User-Agent": "OSMOSIS-Corpus-Builder/1.0 (mailto:fredpottier@gmail.com)"
         })
         if resp.status_code == 200 and resp.content[:5].startswith(b"%PDF") and len(resp.content) > 10000:
@@ -390,9 +400,9 @@ def build_corpus(
             seen_ids.update(pmc_ids)
             cluster_ids.extend(new_ids)
 
-        # Deduplicate cluster_ids
-        cluster_ids = list(dict.fromkeys(cluster_ids))[:target]
-        logger.info(f"  → {len(cluster_ids)} unique IDs for cluster {cid}")
+        # Deduplicate cluster_ids — conserver +50% pour avoir du buffer en cas d'echecs
+        cluster_ids = list(dict.fromkeys(cluster_ids))[: target + max(5, target // 2)]
+        logger.info(f"  → {len(cluster_ids)} unique IDs for cluster {cid} (target={target}, buffer inclus)")
 
         if not cluster_ids:
             continue
