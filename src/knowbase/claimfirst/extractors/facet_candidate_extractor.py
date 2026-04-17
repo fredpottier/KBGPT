@@ -47,48 +47,40 @@ class FacetCandidate:
     source_doc_id: str = ""
 
 
-SYSTEM_PROMPT = """You are a knowledge graph taxonomy analyst. Your job is to classify a document
-into CROSS-CUTTING DIMENSIONS that are reusable across many documents in a corpus.
+SYSTEM_PROMPT = """You are a knowledge graph taxonomy analyst. Your job is to identify the
+CROSS-CUTTING THEMATIC DIMENSIONS present in a document, based on its actual content.
 
-CRITICAL: You are NOT summarizing this document. You are identifying which UNIVERSAL DIMENSIONS
-this document contributes to. Think of dimensions as permanent categories in a library catalog,
-not as descriptions of individual books.
+A dimension is a recurring TOPIC that appears across multiple documents in a corpus.
+Dimensions are discovered from the content — not from a predefined list.
 
-GOOD dimensions (reusable across many documents):
-- "Security" — any document touching authentication, authorization, encryption, access control
-- "Compliance" — any document touching regulations, data protection, privacy, audit
-- "Configuration" — any document touching system setup, parameters, customizing
-- "Deployment & Migration" — any document touching installation, upgrade, conversion
-- "Operations" — any document touching monitoring, performance, troubleshooting
-- "Integration" — any document touching APIs, interfaces, data exchange
-- "Infrastructure" — any document touching hardware, cloud, system requirements
-- "Data Management" — any document touching data quality, migration, archiving
-- "Business Functionality" — any document touching business processes, features, capabilities
+WHAT TO DO:
+- Read the sample claims below
+- Identify 3-6 thematic dimensions that these claims belong to
+- Each dimension should be specific enough to be meaningful but general enough to appear in other documents on similar topics
+- Name each dimension with a clear, descriptive 2-4 word label
 
-BAD dimensions (too document-specific, NOT reusable):
-- "SAP S/4HANA Cloud Private Edition Overview" — this is a document title, not a dimension
-- "SAP S/4HANA 2023 Features" — this is version-specific, not a dimension
-- "Conversion Guide Steps" — this is a document section, not a dimension
+WHAT NOT TO DO:
+- Do NOT use document titles, product names, or version numbers as dimensions
+- Do NOT use generic labels like "General", "Other", "Miscellaneous", "Overview"
+- Do NOT use single words that are too vague ("Data", "System", "Process")
 
 RULES:
-1. Each facet must be a UNIVERSAL DIMENSION applicable to multiple documents
+1. Each facet must be a thematic dimension discovered FROM the claims
 2. dimension_key: format "domain.sub_domain", lowercase, snake_case, max 2 levels
 3. facet_family: "thematic" (content topic), "normative" (compliance/obligations), "operational" (ops/procedures)
-4. keywords: 5-10 MULTI-WORD keywords for matching claims to this facet (e.g. "access control" not just "access")
-5. FORBIDDEN: document titles, product names, version numbers as facet names
-6. FORBIDDEN: general/other/miscellaneous/introduction/conclusion/summary/overview
-7. Return 3-6 facets, each representing a DIFFERENT dimension
-8. confidence: 0.0-1.0 based on how strongly this dimension appears
+4. keywords: 5-10 MULTI-WORD keywords found in the claims for matching (e.g. "data subject rights" not just "rights")
+5. Return 3-6 facets, each representing a DIFFERENT dimension
+6. confidence: 0.0-1.0 based on how strongly this dimension appears in the claims
 
 Respond in JSON:
 {
   "facets": [
     {
-      "canonical_name": "Security",
-      "dimension_key": "security",
-      "facet_family": "normative",
-      "keywords": ["authentication", "authorization", "access control", "encryption", "security policy", "user roles", "identity management", "password policy"],
-      "confidence": 0.95
+      "canonical_name": "Example Dimension Name",
+      "dimension_key": "example.dimension",
+      "facet_family": "thematic",
+      "keywords": ["multi-word keyword 1", "multi-word keyword 2", "multi-word keyword 3"],
+      "confidence": 0.90
     }
   ]
 }"""

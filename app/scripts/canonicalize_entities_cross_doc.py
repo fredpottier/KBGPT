@@ -226,12 +226,21 @@ def build_candidate_edges(
             edges.append((eid1, eid2, method, conf))
 
     # --- Méthode A : Alias Identity Match ---
+    # FIX C.2 : rejeter les edges sub-concept (alias strictement contenu dans
+    # le nom) — ex: "processing of personal data" ayant "personal data" en
+    # alias ne doit PAS fusionner avec Entity("personal data"), car c'est une
+    # relation de specialisation, pas de synonymie.
     for e in entities:
         aliases = e.get("aliases") or []
+        e_norm = e["normalized_name"]
         for alias in aliases:
             if not _alias_passes_quality(alias):
                 continue
             norm_alias = _normalize(alias)
+            # Sub-concept filter : si alias est une sous-chaine stricte du nom,
+            # c'est une relation X ⊂ Y (sub-concept), pas une synonymie.
+            if norm_alias and norm_alias != e_norm and norm_alias in e_norm:
+                continue
             # L'alias normalisé correspond-il au normalized_name d'une autre Entity ?
             targets = norm_index.get(norm_alias, [])
             for target_id in targets:
@@ -245,6 +254,7 @@ def build_candidate_edges(
                 _add_edge(e["entity_id"], target_id, "alias_identity", 0.95)
 
     # Alias bidirectionnel : aussi vérifier alias_index → normalized_name
+    # FIX C.2 : meme check sub-concept en sens inverse.
     for e in entities:
         norm_name = e["normalized_name"]
         # Quelles Entity ont un alias qui se normalise en notre normalized_name ?
@@ -257,9 +267,22 @@ def build_candidate_edges(
                 continue
             if not _types_compatible(e["entity_type"], other["entity_type"]):
                 continue
+            # Sub-concept filter reverse : si le nom de e est sous-chaine du
+            # nom de other, alors other a un alias qui denote un sous-concept
+            # de lui-meme (ex: other="processing of personal data" a alias
+            # "personal data"). Ne pas bridger.
+            other_norm = other["normalized_name"]
+            if norm_name and norm_name != other_norm and norm_name in other_norm:
+                continue
             _add_edge(e["entity_id"], other_id, "alias_identity", 0.95)
 
     # --- Méthode B : Prefix Dedup data-driven ---
+    # FIX C.2 : filtre data-driven "target generique" — si la singleton cible
+    # a >5x plus de claims que la source prefixee, c'est un concept autonome
+    # etabli dans le corpus, pas une abreviation de la source specifique.
+    # Ex: "Data processing"(7) → "Processing"(196) : Processing est un concept
+    # autonome, bloquer. Source.claim_count=0 exempte (no-op cleanup).
+    PREFIX_GENERIC_RATIO = 5.0
     for e in entities:
         tokens = e["normalized_name"].split()
         if len(tokens) < 2:
@@ -271,6 +294,7 @@ def build_candidate_edges(
         if not stripped:
             continue
         targets = norm_index.get(stripped, [])
+        source_claims = e.get("claim_count", 0) or 0
         for target_id in targets:
             if target_id == e["entity_id"]:
                 continue
@@ -278,6 +302,10 @@ def build_candidate_edges(
             if not target:
                 continue
             if not _types_compatible(e["entity_type"], target["entity_type"]):
+                continue
+            # Filtre generique : target utilise >>> que source → concept autonome
+            target_claims = target.get("claim_count", 0) or 0
+            if source_claims > 0 and target_claims > source_claims * PREFIX_GENERIC_RATIO:
                 continue
             _add_edge(e["entity_id"], target_id, "prefix_dedup", 0.90)
 
@@ -455,11 +483,15 @@ def choose_canonical(
     """
     Élit le canonical_name et entity_type pour un groupe.
 
-    Scoring multi-critères :
-      +2 si nom contient un prefix de marque ET la version sans prefix est dans le groupe
-      +1 si nom a plus de tokens que la médiane du groupe
-      +1 si plus grand doc_count
-      +claim_count_normalized (claim_count / max_claim_count, poids 0.5)
+    Scoring multi-critères (revision C.2 — claim_count dominant) :
+      +10 * (claim_count / max_claim_count) : poids DOMINANT
+      +2 si nom contient un prefix de marque ET variante sans prefix dans le groupe
+      +1 si plus grand doc_count (diversite des sources)
+
+    Le token-count (ancien +1 si > median) est retire : il faisait gagner les
+    fragments NP ("of the AI system in the") sur les noms reellement utilises.
+    Le tiebreaker (anciennement len(name) max) est inverse : on prefere le nom
+    le plus COURT a score egal (canonical propre, pas fragment).
 
     Returns:
         (canonical_name, entity_type, best_method)
@@ -472,10 +504,6 @@ def choose_canonical(
     # Nom normalisé de chaque membre
     norm_names_in_group = {m["normalized_name"] for m in members}
 
-    # Token counts
-    token_counts = [len(m["normalized_name"].split()) for m in members]
-    median_tokens = sorted(token_counts)[len(token_counts) // 2]
-
     # Max doc_count et claim_count
     max_doc_count = max((len(m.get("source_doc_ids") or []) for m in members), default=1)
     max_claim_count = max((m.get("claim_count", 0) for m in members), default=1)
@@ -487,31 +515,28 @@ def choose_canonical(
         score = 0.0
         tokens = m["normalized_name"].split()
 
+        # DOMINANT: claim_count normalise (poids 10.0, max 10 points)
+        claim_count = m.get("claim_count", 0)
+        score += 10.0 * (claim_count / max_claim_count)
+
         # +2 si prefix de marque avec la variante sans prefix dans le groupe
+        # (ex: "Apple iPhone" gagne sur "iPhone" quand les deux sont presents)
         if len(tokens) >= 2:
             stripped = " ".join(tokens[1:])
             if stripped in norm_names_in_group:
                 score += 2.0
 
-        # +1 si plus de tokens que la médiane
-        if len(tokens) > median_tokens:
-            score += 1.0
-
-        # +1 si plus grand doc_count
+        # +1 si plus grand doc_count (diversite des sources)
         doc_count = len(m.get("source_doc_ids") or [])
         if doc_count == max_doc_count and max_doc_count > 0:
             score += 1.0
 
-        # +claim_count normalisé (poids 0.5)
-        claim_count = m.get("claim_count", 0)
-        score += 0.5 * (claim_count / max_claim_count)
-
         scores[m["entity_id"]] = score
 
-    # Élu = score max (en cas d'égalité, le name le plus long gagne)
+    # Elu = score max (tiebreaker: name le plus COURT, ie le plus generique/canonique)
     best_eid = max(
         group,
-        key=lambda eid: (scores.get(eid, 0), len(entities_by_id[eid]["name"])),
+        key=lambda eid: (scores.get(eid, 0), -len(entities_by_id[eid]["name"])),
     )
     best = entities_by_id[best_eid]
     canonical_name = best["name"]
@@ -1023,6 +1048,114 @@ def merge_duplicate_canonicals(session, tenant_id: str, dry_run: bool = True) ->
 
 
 # ---------------------------------------------------------------------------
+# Phase 5.5 — Validation LLM (pont vers merge_validator)
+# ---------------------------------------------------------------------------
+
+
+def _llm_validate_groups(
+    final_group_sets: List[Set[str]],
+    entities_by_id: Dict[str, dict],
+    edges: List[Tuple[str, str, str, float]],
+    batch_size: int,
+) -> Tuple[List[Set[str]], Dict[frozenset, str]]:
+    """
+    Soumet les groupes candidats au LLMMergeValidator.
+
+    Retourne :
+        - La liste filtree des groupes approuves (merge ou partial_merge)
+        - Un dict {frozenset(entity_ids) → canonical_name} pour les overrides LLM
+    """
+    from knowbase.claimfirst.canonicalization.merge_validator import (
+        LLMMergeValidator,
+        MergeCandidate,
+        MergeMember,
+    )
+
+    # Construire les candidats au format validator
+    candidates: List[MergeCandidate] = []
+    for idx, group_set in enumerate(final_group_sets):
+        members = []
+        max_conf = 0.0
+        # Meilleure confidence du groupe (max des edges internes)
+        for eid1, eid2, _, conf in edges:
+            if eid1 in group_set and eid2 in group_set and conf > max_conf:
+                max_conf = conf
+        for eid in group_set:
+            e = entities_by_id[eid]
+            members.append(
+                MergeMember(
+                    entity_id=eid,
+                    name=e["name"],
+                    claim_count=e.get("claim_count", 0) or 0,
+                    entity_type=e.get("entity_type", "other"),
+                )
+            )
+        # Ignorer les "groupes" a 1 seul membre — rien a fusionner
+        if len(members) < 2:
+            continue
+        candidates.append(
+            MergeCandidate(
+                group_id=idx,
+                members=members,
+                source_method="cross_doc",
+                max_confidence=max_conf,
+            )
+        )
+
+    if not candidates:
+        return final_group_sets, {}
+
+    logger.info(
+        f"[OSMOSE] Phase 5.5 — Validation LLM : {len(candidates)} groupes a valider"
+    )
+    validator = LLMMergeValidator(batch_size=batch_size)
+    decisions = validator.validate_groups(candidates)
+
+    # Construire dict group_id → decision
+    dec_by_gid = {d.group_id: d for d in decisions}
+
+    approved: List[Set[str]] = []
+    canon_override: Dict[frozenset, str] = {}
+    stats_merge = 0
+    stats_separate = 0
+    stats_partial = 0
+    for idx, group_set in enumerate(final_group_sets):
+        if len(group_set) < 2:
+            # Groupe a 1 membre : on le garde tel quel (pas de fusion possible)
+            approved.append(group_set)
+            continue
+        dec = dec_by_gid.get(idx)
+        if dec is None:
+            # Pas de decision : fallback conservative, pas de fusion
+            stats_separate += 1
+            continue
+        if dec.decision == "merge" and dec.approved_entity_ids:
+            approved.append(set(dec.approved_entity_ids))
+            if dec.canonical:
+                canon_override[frozenset(dec.approved_entity_ids)] = dec.canonical
+            stats_merge += 1
+        elif dec.decision == "partial_merge" and dec.approved_entity_ids:
+            # Partial : on ne garde que le sous-groupe approuve
+            if len(dec.approved_entity_ids) >= 2:
+                approved.append(set(dec.approved_entity_ids))
+                if dec.canonical:
+                    canon_override[
+                        frozenset(dec.approved_entity_ids)
+                    ] = dec.canonical
+                stats_partial += 1
+        else:
+            # keep_separate
+            stats_separate += 1
+
+    logger.info(
+        f"[OSMOSE] Phase 5.5 resultats : "
+        f"{stats_merge} merge, {stats_partial} partial, {stats_separate} rejected"
+    )
+
+    return approved, canon_override
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1041,6 +1174,10 @@ def main():
     parser.add_argument("--prefix-threshold", type=int,
                         default=PREFIX_FREQUENCY_THRESHOLD,
                         help=f"Seuil de fréquence prefix (default: {PREFIX_FREQUENCY_THRESHOLD})")
+    parser.add_argument("--skip-llm-validation", action="store_true",
+                        help="Skip LLM validation (DANGEROUS, tests only)")
+    parser.add_argument("--llm-batch-size", type=int, default=8,
+                        help="Taille des batches LLM (default: 8)")
     args = parser.parse_args()
 
     if args.execute:
@@ -1097,11 +1234,29 @@ def main():
                 final_group_sets.extend(sub_groups)
             logger.info(f"  → {len(final_group_sets)} groupes (après type-split)")
 
+            # Phase 5.5 — Validation LLM (OBLIGATOIRE sauf --skip-llm-validation)
+            # Chaque groupe candidat (hors variantes orthographiques pures) est
+            # soumis a Qwen2.5-72B (DeepInfra) pour decision merge/keep_separate/
+            # partial_merge. Filtre les faux positifs du clustering.
+            llm_canonicals: Dict[frozenset, str] = {}  # group_key → canonical LLM
+            if not args.skip_llm_validation and final_group_sets:
+                final_group_sets, llm_canonicals = _llm_validate_groups(
+                    final_group_sets, entities_by_id, edges, args.llm_batch_size
+                )
+                logger.info(
+                    f"  → {len(final_group_sets)} groupes apres validation LLM"
+                )
+
             # Phase 6 — Élection
             logger.info("[OSMOSE] Phase 6 — Élection canonical_name + entity_type...")
             final_groups: List[dict] = []
             for group_set in final_group_sets:
                 cname, etype, method = choose_canonical(group_set, entities_by_id, edges)
+                # Override du nom canonique si le LLM en a propose un explicite
+                llm_override = llm_canonicals.get(frozenset(group_set))
+                if llm_override:
+                    cname = llm_override
+                    method = f"{method}+llm_validated"
                 final_groups.append({
                     "canonical_name": cname,
                     "entity_type": etype,

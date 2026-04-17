@@ -84,6 +84,152 @@ def purge_old_facets(session, tenant_id: str) -> int:
     return record["deleted"] if record else 0
 
 
+def _consolidate_facets_llm(registry) -> int:
+    """
+    Consolide les facettes near-duplicates via pré-clustering embedding + validation LLM.
+
+    Scalable : ne dépend pas de la taille totale de la liste.
+    1. Encode tous les noms de facettes via sentence-transformers
+    2. Pré-cluster par cosine similarity (seuil 0.75)
+    3. Pour chaque cluster de 2+ candidats, demande au LLM de valider le merge
+    4. Applique les merges validés dans le registre
+    """
+    from knowbase.common.llm_router import get_llm_router, TaskType
+    import json as _json
+
+    all_facets = registry.get_all_facets()
+    if len(all_facets) < 2:
+        return 0
+
+    names = [f.facet_name for f in all_facets]
+    keys = [f.domain for f in all_facets]
+    logger.info(f"  Consolidation: {len(names)} facettes à analyser")
+
+    # 1. Pré-cluster par similarité textuelle (SequenceMatcher)
+    # Plus adapté que les embeddings pour les noms courts de facettes
+    from difflib import SequenceMatcher
+    SIMILARITY_THRESHOLD = 0.75
+
+    parent = list(range(len(names)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            ratio = SequenceMatcher(None, names[i].lower(), names[j].lower()).ratio()
+            if ratio >= SIMILARITY_THRESHOLD:
+                union(i, j)
+
+    # Construire les groupes
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for i in range(len(names)):
+        groups[find(i)].append(i)
+
+    merge_candidates = {k: v for k, v in groups.items() if len(v) >= 2}
+    logger.info(f"  Pré-clustering: {len(merge_candidates)} groupes de near-duplicates")
+
+    if not merge_candidates:
+        return 0
+
+    # 3. Validation LLM par groupe
+    router = get_llm_router()
+    total_merges = 0
+
+    for group_id, members in merge_candidates.items():
+        member_names = [names[i] for i in members]
+        member_docs = [all_facets[i].source_doc_count for i in members]
+
+        prompt_lines = [
+            f'- "{member_names[j]}" (docs={member_docs[j]})'
+            for j in range(len(members))
+        ]
+
+        try:
+            result = router.complete(
+                task_type=TaskType.METADATA_EXTRACTION,
+                messages=[
+                    {"role": "system", "content": (
+                        "You consolidate near-duplicate facet names. "
+                        "Given a group of similar names, decide if they should be merged. "
+                        "If yes, pick the best canonical name. If some are distinct, keep them separate.\n\n"
+                        "Output JSON only: {\"merge\": true/false, \"canonical\": \"Best Name\", "
+                        "\"members_to_merge\": [0, 1, 2]} (indices in the input list)\n"
+                        "If merge=false, output {\"merge\": false}"
+                    )},
+                    {"role": "user", "content": (
+                        f"Should these {len(members)} facets be merged?\n\n"
+                        + "\n".join(prompt_lines)
+                    )},
+                ],
+                max_tokens=200,
+                temperature=0.1,
+            )
+
+            text = result.text if hasattr(result, "text") else str(result)
+            # Parse JSON from response
+            text = text.strip()
+            if "```" in text:
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+            data = _json.loads(text.strip())
+
+            if data.get("merge") and data.get("canonical"):
+                canonical = data["canonical"]
+                indices_to_merge = data.get("members_to_merge", list(range(len(members))))
+                keys_to_merge = [keys[members[j]] for j in indices_to_merge if j < len(members)]
+                target_key = keys[members[0]]
+
+                # Appliquer le merge dans le registre
+                for k in keys_to_merge:
+                    if k != target_key:
+                        registry.merge_facets(target_key, k, canonical_name=canonical)
+                        total_merges += 1
+
+                logger.info(
+                    f"  Merge: {[member_names[j] for j in indices_to_merge]} "
+                    f"→ \"{canonical}\""
+                )
+            else:
+                logger.info(f"  No merge: {member_names[:3]}...")
+
+        except Exception as e:
+            logger.warning(f"  LLM merge check failed for {member_names[:2]}: {e}")
+
+    return total_merges
+
+
+def _consolidate_facets_levenshtein(registry) -> int:
+    """Fallback : consolidation par Levenshtein si embeddings indisponibles."""
+    from difflib import SequenceMatcher
+
+    all_facets = registry.get_all_facets()
+    names = [(f.dimension_key, f.canonical_name) for f in all_facets]
+    merges = 0
+
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            ratio = SequenceMatcher(None, names[i][1].lower(), names[j][1].lower()).ratio()
+            if ratio > 0.85:
+                try:
+                    registry.merge_facets(names[i][0], names[j][0], canonical_name=names[i][1])
+                    merges += 1
+                    logger.info(f"  Levenshtein merge: \"{names[j][1]}\" → \"{names[i][1]}\" (ratio={ratio:.2f})")
+                except Exception:
+                    pass
+    return merges
+
+
 def main():
     parser = argparse.ArgumentParser(description="Reconstruit le FacetRegistry depuis Neo4j")
     parser.add_argument("--execute", action="store_true", help="Executer (sinon dry-run)")
@@ -148,47 +294,31 @@ def main():
         logger.info(f"[{i}/{len(docs)}] {doc_id[:60]}...")
 
         try:
-            # Creer un DocumentContext minimal
-            from dataclasses import dataclass, field as dc_field
-            from typing import List
+            from knowbase.claimfirst.extractors.facet_candidate_extractor import (
+                _build_user_prompt,
+                _parse_llm_response,
+                SYSTEM_PROMPT,
+            )
+            from knowbase.common.llm_router import get_llm_router, TaskType
 
-            @dataclass
-            class MinimalDocContext:
-                doc_id: str
-                raw_subjects: List[str] = dc_field(default_factory=list)
+            router = get_llm_router()
+            user_prompt = _build_user_prompt(title, "", sample_claims)
 
-            ctx = MinimalDocContext(doc_id=doc_id)
-
-            # Extraire les facettes candidates (1 appel LLM)
-            candidates = extractor.extract(
-                doc_context=ctx,
-                doc_title=title,
-                doc_summary="",
-                claims=None,  # On passe les claims via sample_claims dans le prompt
+            result = router.complete(
+                task_type=TaskType.METADATA_EXTRACTION,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=500,
+                temperature=0.3,
             )
 
-            # Mais l'extracteur n'utilise pas les claims si on ne les passe pas
-            # Donc on utilise _build_with_llm directement via le prompt
-            if not candidates and sample_claims:
-                # Retry avec les claims
-                from knowbase.claimfirst.extractors.facet_candidate_extractor import (
-                    _build_user_prompt,
-                    _parse_llm_response,
-                    SYSTEM_PROMPT,
-                )
-                from knowbase.common.llm_router import get_llm_router, TaskType
-
-                router = get_llm_router()
-                user_prompt = _build_user_prompt(title, "", sample_claims)
-                result = router.complete(
-                    task_type=TaskType.METADATA_EXTRACTION,
-                    system_prompt=SYSTEM_PROMPT,
-                    user_prompt=user_prompt,
-                    max_tokens=500,
-                    temperature=0.3,
-                )
-                if result and result.text:
-                    candidates = _parse_llm_response(result.text, doc_id)
+            candidates = []
+            if result:
+                text = result.text if hasattr(result, 'text') else str(result)
+                if text:
+                    candidates = _parse_llm_response(text, doc_id)
 
             if candidates:
                 registry.register_candidates(candidates)
@@ -203,6 +333,11 @@ def main():
         except Exception as e:
             logger.error(f"  -> Erreur: {e}")
             errors += 1
+
+    # Phase 1.5 : Consolidation LLM des near-duplicates
+    logger.info("\nConsolidation des facettes near-duplicates...")
+    merge_count = _consolidate_facets_llm(registry)
+    logger.info(f"  → {merge_count} merges appliqués")
 
     # Persister
     logger.info("\nPersistance des facettes dans Neo4j...")

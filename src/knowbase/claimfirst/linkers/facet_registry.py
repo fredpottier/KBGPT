@@ -11,6 +11,7 @@ Seed facets injectées au premier load si registre vide.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from knowbase.claimfirst.models.facet import (
@@ -66,8 +67,8 @@ class FacetRegistry:
     NEAR-DUPLICATES : détectés mais PAS mergés (INV-9).
     """
 
-    PROMOTION_THRESHOLD = 3
-    DIVERSITY_MIN_FAMILIES = 2  # titres de documents distincts minimum
+    PROMOTION_THRESHOLD = 2  # Abaissé de 3 à 2 pour couvrir plus de facettes cross-doc
+    DIVERSITY_MIN_FAMILIES = 1  # Abaissé de 2 à 1 (le doc_id suffit comme diversité)
 
     NEAR_DUP_LEVENSHTEIN_MAX = 3
     NEAR_DUP_KEYWORDS_OVERLAP_MIN = 0.6
@@ -77,10 +78,16 @@ class FacetRegistry:
         self._near_duplicates: List[Tuple[str, str, float]] = []  # (key1, key2, score)
         self._modified_keys: set = set()  # dimension_keys modifiées depuis load
         self.tenant_id = tenant_id
+        # Anti-drift : mapping alias_root → canonical_root, issu des CanonicalFacetRoot
+        # nodes crees par consolidate_facet_roots.py. Permet de redirigier les
+        # candidats proposes par le LLM vers la racine canonique au moment de
+        # l'import, evitant la ré-fragmentation.
+        self._canonical_root_aliases: Dict[str, str] = {}
 
     def load_from_neo4j(self, neo4j_driver=None) -> None:
         """
         Charge facettes existantes depuis Neo4j.
+        Charge aussi les CanonicalFacetRoot pour l'anti-drift.
         Si registre vide, injecte seed facets.
         """
         if neo4j_driver:
@@ -102,8 +109,22 @@ class FacetRegistry:
                             logger.debug(f"Skipping facet: {e}")
                             continue
 
+                    # Charger les mappings alias -> canonical root
+                    cr_result = session.run(
+                        """
+                        MATCH (cr:CanonicalFacetRoot {tenant_id: $tid})
+                        RETURN cr.canonical_root AS canonical, cr.aliases AS aliases
+                        """,
+                        tid=self.tenant_id,
+                    )
+                    for record in cr_result:
+                        canonical = record["canonical"]
+                        for alias in record["aliases"] or []:
+                            self._canonical_root_aliases[alias] = canonical
+
                 logger.info(
-                    f"[OSMOSE:FacetRegistry] Loaded {len(self._cache)} facets from Neo4j"
+                    f"[OSMOSE:FacetRegistry] Loaded {len(self._cache)} facets "
+                    f"+ {len(self._canonical_root_aliases)} canonical root aliases from Neo4j"
                 )
             except Exception as e:
                 logger.error(f"[OSMOSE:FacetRegistry] Failed to load from Neo4j: {e}")
@@ -142,6 +163,24 @@ class FacetRegistry:
             dim_key = candidate.dimension_key
             if not dim_key:
                 continue
+
+            # Anti-drift : si le root propose a ete canonicalise precedemment,
+            # rewrite la dimension_key pour utiliser la racine canonique.
+            # Ex: candidate "data_protection.retention" → "privacy.retention"
+            # si data_protection est alias de privacy.
+            if self._canonical_root_aliases:
+                parts = dim_key.split(".", 1)
+                root = parts[0]
+                if root in self._canonical_root_aliases:
+                    canonical_root = self._canonical_root_aliases[root]
+                    rest = parts[1] if len(parts) > 1 else ""
+                    new_key = f"{canonical_root}.{rest}" if rest else canonical_root
+                    logger.info(
+                        f"[OSMOSE:FacetRegistry] Anti-drift: "
+                        f"{dim_key!r} -> {new_key!r} (root {root!r} canonicalise en {canonical_root!r})"
+                    )
+                    dim_key = new_key
+                    candidate.dimension_key = new_key
 
             if dim_key in self._cache:
                 # Mise à jour : incrémente source_doc_count
@@ -255,6 +294,53 @@ class FacetRegistry:
     def get_near_duplicate_queue(self) -> List[Tuple[str, str, float]]:
         """Retourne les paires quasi-doublons à revoir manuellement."""
         return list(self._near_duplicates)
+
+    def merge_facets(self, target_domain: str, source_domain: str, canonical_name: str = None) -> bool:
+        """
+        Fusionne source_domain dans target_domain.
+
+        - Cumule source_doc_count et keywords
+        - Renomme si canonical_name fourni
+        - Supprime source du cache
+        - Re-check promotion sur target
+        """
+        target = self._cache.get(target_domain)
+        source = self._cache.get(source_domain)
+        if not target or not source:
+            return False
+
+        # Cumuler les compteurs
+        target.source_doc_count += source.source_doc_count
+        # Fusionner les source_doc_ids
+        existing_ids = set(target.source_doc_ids or [])
+        for doc_id in (source.source_doc_ids or []):
+            if doc_id not in existing_ids:
+                target.source_doc_ids.append(doc_id)
+                existing_ids.add(doc_id)
+        # Fusionner les keywords (sans doublons)
+        existing_kw = set(kw.lower() for kw in target.keywords)
+        for kw in source.keywords:
+            if kw.lower() not in existing_kw:
+                target.keywords.append(kw)
+                existing_kw.add(kw.lower())
+        # Renommer si demandé
+        if canonical_name:
+            target.facet_name = canonical_name
+
+        # Re-check promotion
+        if (target.source_doc_count >= self.PROMOTION_THRESHOLD
+                and target.lifecycle == FacetLifecycle.CANDIDATE):
+            target.lifecycle = FacetLifecycle.VALIDATED
+            target.promoted_at = datetime.now(timezone.utc).isoformat()
+
+        # Marquer comme modifié
+        self._modified_keys.add(target_domain)
+
+        # Supprimer source
+        del self._cache[source_domain]
+        self._modified_keys.discard(source_domain)
+
+        return True
 
     def get_facet_by_key(self, dimension_key: str) -> Optional[Facet]:
         """Retourne une facette par sa dimension_key."""

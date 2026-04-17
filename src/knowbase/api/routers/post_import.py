@@ -107,6 +107,21 @@ STEPS = [
         requires_llm=True,
     ),
     StepInfo(
+        id="facet_consolidate",
+        name="Consolidation racines facettes",
+        description="Fusionne les racines sémantiquement équivalentes (privacy + data_protection + gdpr → privacy) via LLM. Crée les CanonicalFacetRoot pour éviter la re-fragmentation lors des futurs imports.",
+        order=2,
+        estimated_duration="2 - 5min",
+        requires_llm=True,
+    ),
+    StepInfo(
+        id="purge_orphan_facets",
+        name="Purge facets orphelines",
+        description="Deprecated les facets candidates sans claim et avec 1 seul document source (bruit d'extraction LLM).",
+        order=2,
+        estimated_duration="< 10s",
+    ),
+    StepInfo(
         id="cluster_cross_doc",
         name="Clustering cross-document",
         description="Regroupe les claims similaires de documents différents en clusters (Jaccard sur tokens + filtres modalité/négation).",
@@ -466,6 +481,10 @@ def _execute_step(step_id: str, tenant_id: str, on_progress=None) -> dict:
     progress = on_progress or noop
     if step_id == "canonicalize":
         return _run_canonicalize(tenant_id, progress)
+    elif step_id == "facet_consolidate":
+        return _run_facet_consolidate(tenant_id, progress)
+    elif step_id == "purge_orphan_facets":
+        return _run_purge_orphan_facets(tenant_id, progress)
     elif step_id == "facets":
         return _run_facets(tenant_id, progress)
     elif step_id == "cluster_cross_doc":
@@ -495,6 +514,15 @@ def _execute_step(step_id: str, tenant_id: str, on_progress=None) -> dict:
 
 
 def _run_canonicalize(tenant_id: str, progress=None) -> dict:
+    """
+    Canonicalisation LLM-validated (remplace l'ancienne MergeArbiter).
+
+    Enchaine :
+    1. canonicalize_entities_cross_doc.py (alias + prefix + stem + LLM validation)
+    2. canonicalize_embedding_clusters.py (embeddings + LLM validation)
+    """
+    import subprocess
+
     _p = progress or (lambda pct, detail="": None)
     from knowbase.common.clients.neo4j_client import get_neo4j_client
     driver = get_neo4j_client().driver
@@ -502,21 +530,41 @@ def _run_canonicalize(tenant_id: str, progress=None) -> dict:
     _p(5, "Comptage des entites canoniques existantes...")
     with driver.session() as session:
         before = session.run(
-            "MATCH (ce:CanonicalEntity) RETURN count(ce) as cnt"
-        ).single()["cnt"]
-        total_entities = session.run(
-            "MATCH (e:Entity {tenant_id: $tid}) RETURN count(e) as cnt",
+            "MATCH (ce:CanonicalEntity {tenant_id: $tid}) RETURN count(ce) as cnt",
             tid=tenant_id,
         ).single()["cnt"]
 
-    _p(10, f"Canonicalisation de {total_entities} entites...")
-    from knowbase.claimfirst.worker_job import _canonicalize_entities_cross_doc
-    result = _canonicalize_entities_cross_doc(driver, tenant_id)
+    _p(15, "Cross-doc canonicalization (alias + prefix + stem + LLM)...")
+    r1 = subprocess.run(
+        ["python", "scripts/canonicalize_entities_cross_doc.py",
+         "--execute", "--tenant", tenant_id],
+        capture_output=True, text=True, timeout=3600, cwd="/app",
+    )
+    if r1.returncode != 0:
+        raise RuntimeError(
+            f"cross_doc canonicalization failed: "
+            f"{r1.stderr[-400:] if r1.stderr else r1.stdout[-400:]}"
+        )
+
+    _p(55, "Embedding clusters (cosine + LLM)...")
+    r2 = subprocess.run(
+        ["python", "scripts/canonicalize_embedding_clusters.py",
+         "--execute", "--tenant", tenant_id,
+         "--threshold", "0.92", "--max-cluster-size", "8"],
+        capture_output=True, text=True, timeout=3600, cwd="/app",
+    )
+    if r2.returncode != 0:
+        # Non-bloquant : si l'embedding cluster echoue, on a deja le cross-doc
+        logger.warning(
+            f"embedding clusters step failed (non-blocking): "
+            f"{r2.stderr[-300:] if r2.stderr else r2.stdout[-300:]}"
+        )
 
     _p(95, "Comptage final...")
     with driver.session() as session:
         after = session.run(
-            "MATCH (ce:CanonicalEntity) RETURN count(ce) as cnt"
+            "MATCH (ce:CanonicalEntity {tenant_id: $tid}) RETURN count(ce) as cnt",
+            tid=tenant_id,
         ).single()["cnt"]
 
     _p(100, f"{after - before} nouveaux canoniques crees")
@@ -524,8 +572,85 @@ def _run_canonicalize(tenant_id: str, progress=None) -> dict:
         "canonical_before": before,
         "canonical_after": after,
         "new_canonicals": after - before,
-        **result,
+        "cross_doc_ok": r1.returncode == 0,
+        "embedding_clusters_ok": r2.returncode == 0,
     }
+
+
+def _run_purge_orphan_facets(tenant_id: str, progress=None) -> dict:
+    """
+    Purge les facets candidates sans claim et sans croissance multi-doc.
+
+    Critere : lifecycle='candidate' ET source_doc_count <= 1 ET 0 claim lie.
+    Ces facets sont du bruit d'extraction LLM (propositions uniques qui n'ont
+    jamais trouve de doc ou claim supplementaire pour valider leur pertinence).
+    Plutot que DELETE, on deprecated pour tracabilite.
+    """
+    _p = progress or (lambda pct, detail="": None)
+    from knowbase.common.clients.neo4j_client import get_neo4j_client
+    driver = get_neo4j_client().driver
+
+    _p(10, "Identification facets orphelines...")
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (f:Facet {tenant_id: $tid})
+            WHERE f.lifecycle = 'candidate'
+              AND coalesce(f.source_doc_count, 0) <= 1
+              AND NOT (:Claim)-[:BELONGS_TO_FACET]->(f)
+            SET f.lifecycle = 'deprecated',
+                f.deprecated_at = datetime(),
+                f.deprecation_reason = 'zero_usage_single_source'
+            RETURN count(*) AS purged
+            """,
+            tid=tenant_id,
+        ).single()
+        purged = result["purged"] or 0
+
+    _p(100, f"{purged} facets orphelines deprecated")
+    return {"orphan_facets_deprecated": purged}
+
+
+def _run_facet_consolidate(tenant_id: str, progress=None) -> dict:
+    """
+    Consolidation des racines de Facets via LLM validation.
+
+    Fusionne les racines semantiquement equivalentes (ex: privacy + data_protection
+    + gdpr → privacy), et cree les CanonicalFacetRoot nodes pour l'anti-drift
+    futur (consulte par FacetRegistry lors des prochains imports).
+    """
+    import subprocess
+
+    _p = progress or (lambda pct, detail="": None)
+    _p(10, "Consolidation racines facets...")
+    result = subprocess.run(
+        ["python", "scripts/consolidate_facet_roots.py",
+         "--execute", "--tenant", tenant_id, "--threshold", "0.90"],
+        capture_output=True, text=True, timeout=1800, cwd="/app",
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"facet consolidation failed: "
+            f"{result.stderr[-400:] if result.stderr else result.stdout[-400:]}"
+        )
+
+    _p(100, "Consolidation terminee")
+    stats = {"facets_renamed": 0, "canonical_roots_created": 0}
+    for line in result.stdout.split("\n"):
+        if "facets renommees" in line:
+            try:
+                # Format : "→ {N} facets renommees"
+                num = int(line.split("→")[1].split("facets")[0].strip())
+                stats["facets_renamed"] = num
+            except (IndexError, ValueError):
+                pass
+        elif "CanonicalFacetRoot nodes" in line:
+            try:
+                num = int(line.split("→")[1].split("CanonicalFacetRoot")[0].strip())
+                stats["canonical_roots_created"] = num
+            except (IndexError, ValueError):
+                pass
+    return stats
 
 
 def _run_facets(tenant_id: str, progress=None) -> dict:

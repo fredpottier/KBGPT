@@ -29,7 +29,9 @@ import numpy as np
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Seuil de similarite cosine pour considerer deux entites comme identiques
+# Seuil de similarite cosine — pairs au-dessus sont candidats au clustering.
+# Garde un seuil bas (0.88) pour couvrir les synonymies lointaines (personal
+# data <> personal information). La validation LLM filtre les faux positifs.
 DEFAULT_THRESHOLD = 0.88
 
 
@@ -181,8 +183,15 @@ def persist_clusters(driver, tenant_id: str, clusters: list[dict]):
     return created, linked
 
 
-def run(tenant_id: str, dry_run: bool = True, threshold: float = DEFAULT_THRESHOLD):
-    """Execute la canonicalisation par embedding clustering."""
+def run(
+    tenant_id: str,
+    dry_run: bool = True,
+    threshold: float = DEFAULT_THRESHOLD,
+    skip_llm: bool = False,
+    llm_batch_size: int = 8,
+    max_cluster_size: int = 10,
+):
+    """Execute la canonicalisation par embedding clustering avec validation LLM."""
     from neo4j import GraphDatabase
 
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
@@ -207,21 +216,25 @@ def run(tenant_id: str, dry_run: bool = True, threshold: float = DEFAULT_THRESHO
     # 3. Clustering
     logger.info(f"[C1.3] Clustering with cosine threshold {threshold}...")
     groups = cluster_by_cosine(embeddings, orphans, threshold)
-    logger.info(f"[C1.3] {len(groups)} clusters formed")
+    logger.info(f"[C1.3] {len(groups)} raw clusters formed")
+
+    # Filtrer les clusters trop gros (signal d'une chaine transitive explosive)
+    clean_groups = [g for g in groups if 2 <= len(g) <= max_cluster_size]
+    if len(clean_groups) < len(groups):
+        logger.info(
+            f"[C1.3] {len(groups) - len(clean_groups)} clusters filtres "
+            f"(taille > {max_cluster_size}, chaine transitive suspecte)"
+        )
 
     # 4. Preparer les merge groups
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
     norms[norms == 0] = 1
     normed = embeddings / norms
 
-    clusters_to_persist = []
-    total_entities = 0
-
-    for indices in groups:
+    clusters_raw = []
+    for indices in clean_groups:
         members = [orphans[i] for i in indices]
         winner = max(members, key=lambda m: m["claim_count"])
-
-        # Calculer les scores entre paires pour mettre a jour SIMILAR_TO
         scored_pairs = []
         for k in range(len(indices)):
             for l in range(k + 1, len(indices)):
@@ -231,19 +244,34 @@ def run(tenant_id: str, dry_run: bool = True, threshold: float = DEFAULT_THRESHO
                     "eid2": orphans[indices[l]]["eid"],
                     "score": round(score, 4),
                 })
-
-        clusters_to_persist.append({
+        clusters_raw.append({
             "winner_name": winner["name"],
             "members": members,
             "scored_pairs": scored_pairs,
             "size": len(members),
         })
-        total_entities += len(members)
 
+    # 5. Validation LLM (sauf --skip-llm)
+    if skip_llm or not clusters_raw:
+        clusters_to_persist = clusters_raw
+        logger.info(
+            f"[C1.3] LLM validation SKIPPED — {len(clusters_raw)} clusters persisted as-is"
+        )
+    else:
+        clusters_to_persist = _llm_validate_clusters(clusters_raw, llm_batch_size)
+        logger.info(
+            f"[C1.3] LLM validation : {len(clusters_to_persist)}/{len(clusters_raw)} "
+            f"clusters approuves"
+        )
+
+    total_entities = sum(c["size"] for c in clusters_to_persist)
     clusters_to_persist.sort(key=lambda c: c["size"], reverse=True)
 
-    # 5. Rapport
-    logger.info(f"\n[C1.3] {len(clusters_to_persist)} clusters, {total_entities} entities to link")
+    # 6. Rapport
+    logger.info(
+        f"\n[C1.3] {len(clusters_to_persist)} clusters approuves, "
+        f"{total_entities} entities to link"
+    )
     for c in clusters_to_persist[:20]:
         names_list = sorted([m["name"] for m in c["members"]])
         logger.info(f"  Cluster ({c['size']}): winner='{c['winner_name']}'")
@@ -255,15 +283,104 @@ def run(tenant_id: str, dry_run: bool = True, threshold: float = DEFAULT_THRESHO
     if len(clusters_to_persist) > 20:
         logger.info(f"  ... +{len(clusters_to_persist) - 20} more clusters")
 
-    # 6. Executer ou dry-run
+    # 7. Executer ou dry-run
     if dry_run:
-        logger.info(f"\n[C1.3] DRY-RUN: {len(clusters_to_persist)} clusters, {total_entities} entities would be linked")
+        logger.info(
+            f"\n[C1.3] DRY-RUN: {len(clusters_to_persist)} clusters, "
+            f"{total_entities} entities would be linked"
+        )
         logger.info("  → Relancer avec --execute pour appliquer.")
     else:
         created, linked = persist_clusters(driver, tenant_id, clusters_to_persist)
-        logger.info(f"\n[C1.3] EXECUTED: {created} new canonicals created, {linked} entities linked")
+        logger.info(
+            f"\n[C1.3] EXECUTED: {created} new canonicals created, {linked} entities linked"
+        )
 
     driver.close()
+
+
+def _llm_validate_clusters(
+    clusters_raw: list[dict], batch_size: int
+) -> list[dict]:
+    """Filtre les clusters via LLMMergeValidator. Applique les decisions."""
+    from knowbase.claimfirst.canonicalization.merge_validator import (
+        LLMMergeValidator,
+        MergeCandidate,
+        MergeMember,
+    )
+
+    candidates = []
+    for idx, c in enumerate(clusters_raw):
+        members_mc = []
+        for m in c["members"]:
+            members_mc.append(
+                MergeMember(
+                    entity_id=m["eid"],
+                    name=m["name"],
+                    claim_count=m.get("claim_count", 0) or 0,
+                    entity_type=m.get("entity_type", "other"),
+                )
+            )
+        candidates.append(
+            MergeCandidate(
+                group_id=idx,
+                members=members_mc,
+                source_method="embedding_cluster",
+            )
+        )
+
+    validator = LLMMergeValidator(batch_size=batch_size)
+    decisions = validator.validate_groups(candidates)
+    dec_by_gid = {d.group_id: d for d in decisions}
+
+    approved: list[dict] = []
+    for idx, c in enumerate(clusters_raw):
+        dec = dec_by_gid.get(idx)
+        if dec is None:
+            continue
+
+        if dec.decision == "merge" and len(dec.approved_entity_ids) >= 2:
+            # Garder tous les membres
+            if dec.canonical:
+                # Override du winner si le LLM propose un nom explicite
+                canonical_member = next(
+                    (m for m in c["members"] if m["name"] == dec.canonical),
+                    None,
+                )
+                if canonical_member is None:
+                    # Le nom LLM n'est pas dans les members — garder un membre
+                    # existant avec le nom LLM comme canonique
+                    c = {**c, "winner_name": dec.canonical}
+                else:
+                    c = {**c, "winner_name": canonical_member["name"]}
+            approved.append(c)
+        elif dec.decision == "partial_merge" and len(dec.approved_entity_ids) >= 2:
+            # Filtrer les members au sous-groupe approuve
+            approved_members = [
+                m for m in c["members"] if m["eid"] in dec.approved_entity_ids
+            ]
+            approved_pairs = [
+                p
+                for p in c.get("scored_pairs", [])
+                if p["eid1"] in dec.approved_entity_ids
+                and p["eid2"] in dec.approved_entity_ids
+            ]
+            if len(approved_members) >= 2:
+                winner = (
+                    dec.canonical
+                    or max(approved_members, key=lambda m: m["claim_count"])["name"]
+                )
+                approved.append(
+                    {
+                        "winner_name": winner,
+                        "members": approved_members,
+                        "scored_pairs": approved_pairs,
+                        "size": len(approved_members),
+                    }
+                )
+        # else: keep_separate → discard
+
+    return approved
 
 
 if __name__ == "__main__":
@@ -273,9 +390,21 @@ if __name__ == "__main__":
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD,
                         help=f"Cosine similarity threshold (default: {DEFAULT_THRESHOLD})")
+    parser.add_argument("--skip-llm", action="store_true",
+                        help="Skip LLM validation (DANGEROUS, tests only)")
+    parser.add_argument("--llm-batch-size", type=int, default=8)
+    parser.add_argument("--max-cluster-size", type=int, default=10,
+                        help="Clusters > N filtres (chaine transitive suspecte)")
     args = parser.parse_args()
 
     if args.execute:
         args.dry_run = False
 
-    run(tenant_id=args.tenant, dry_run=args.dry_run, threshold=args.threshold)
+    run(
+        tenant_id=args.tenant,
+        dry_run=args.dry_run,
+        threshold=args.threshold,
+        skip_llm=args.skip_llm,
+        llm_batch_size=args.llm_batch_size,
+        max_cluster_size=args.max_cluster_size,
+    )

@@ -178,7 +178,11 @@ class FacetMatcher:
             if matched == 1 and matched_multiword == 0:
                 continue
 
-            ratio = matched / len(facet.keywords)
+            # Plafonner le dénominateur à 20 pour ne pas pénaliser les facets
+            # avec beaucoup de keywords (ex: "Compliance" avec 100 keywords
+            # nécessitait 5 matchs au lieu de 1 avec un ratio de 0.05)
+            effective_total = min(len(facet.keywords), 20)
+            ratio = matched / effective_total
             if ratio < min_ratio:
                 continue
 
